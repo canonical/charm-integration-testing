@@ -2,9 +2,12 @@
 # See LICENSE file for licensing details.
 
 
-from charm_integration_testing.juju import CharmDeployment, JujuClient, CharmIntegration
+import yaml
+
+from charm_integration_testing.juju import JujuClient
 
 from .cmd import CmdArg, CmdClient
+from .structures import JujuStatus
 
 
 class JujuCmdClient(JujuClient):
@@ -13,27 +16,56 @@ class JujuCmdClient(JujuClient):
     def __init__(self, cmd_client: CmdClient = None):
         self.cmd_client = cmd_client if cmd_client is not None else CmdClient()
 
-    def call_juju(self, *args: list[CmdArg]):
-        self.cmd_client.call(CmdArg("juju"), *args)
+    def _call_juju(self, *args: list[CmdArg]) -> str:
+        return self.cmd_client.call(CmdArg("juju"), *args)
 
-    def deploy(self, deployment: CharmDeployment):
-        self.call_juju(
-            CmdArg("deploy"),
-            CmdArg(deployment.charm),
-            CmdArg(deployment.application_name),
-            CmdArg(deployment.model, name="model"),
-            CmdArg(deployment.revision, name="revision"),
-            CmdArg(deployment.channel, name="channel"),
-            CmdArg(deployment.base, name="base"),
+    def _status(self) -> JujuStatus:
+        return JujuStatus(
+            **yaml.safe_load(
+                self._call_juju(
+                    CmdArg("status"),
+                    CmdArg("yaml", name="format"),
+                )
+            )
         )
 
-    @staticmethod
-    def get_integration_endpoint(application: str, endpoint: str | None) -> str:
-        return f"{application}:{endpoint}" if endpoint is not None else application
+    def scale_application(self, application: str, num: int):
+        # Get current juju units
+        units = sorted(self._status().applications[application].units.keys())
 
-    def integrate(self, integration: CharmIntegration):
-        self.call_juju(
-            CmdArg("integrate"),
-            CmdArg(self.get_integration_endpoint(integration.application_a, integration.endpoint_a)),
-            CmdArg(self.get_integration_endpoint(integration.application_b, integration.endpoint_b)),
-        )
+        # Add or remove units
+        # juju scale-application does not work with VM charms
+        if len(units) < num:
+            self._call_juju(
+                CmdArg(value="add-unit"),
+                CmdArg(value=application),
+                CmdArg(value=num - len(units), name="num-units"),
+            )
+        elif len(units) > num:
+            self._call_juju(
+                CmdArg(value="remove-unit"),
+                CmdArg(name="no-prompt"),
+                *[CmdArg(value=unit) for unit in units[num:]],
+            )
+
+    def num_units(self, application: str) -> int:
+        return len(self._status().applications[application].units)
+
+    def are_idle(self, *applications: list[str]) -> bool:
+        # Get juju status
+        status = self._status()
+
+        # Check applications
+        for application in applications:
+            # Check applications and units to be idle
+            application_active = status.applications[application].application_status.current == "active"
+            units_active = all(
+                [
+                    unit.workload_status.current == "active" and unit.juju_status.current == "idle"
+                    for unit in status.applications[application].units.values()
+                ]
+            )
+            if not application_active or not units_active:
+                return False
+
+        return True
