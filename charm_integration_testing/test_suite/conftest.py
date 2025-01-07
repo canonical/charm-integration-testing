@@ -55,5 +55,5 @@ def provider_endpoint(request: pytest.FixtureRequest) -> str:
 
 
 @pytest.fixture(autouse=True)
-def assert_idle(juju_client, requirer_application: str, provider_application: str):
-    assert juju_client.are_idle(requirer_application, provider_application)
+def assert_idle(juju_client, model: str):
+    juju_client.wait_idle(model=model)

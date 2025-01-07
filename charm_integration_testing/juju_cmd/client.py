@@ -2,6 +2,8 @@
 # See LICENSE file for licensing details.
 
 
+from datetime import timedelta
+
 import yaml
 
 from charm_integration_testing.juju import JujuClient
@@ -51,21 +53,14 @@ class JujuCmdClient(JujuClient):
     def num_units(self, application: str) -> int:
         return len(self._status().applications[application].units)
 
-    def are_idle(self, *applications: list[str]) -> bool:
-        # Get juju status
-        status = self._status()
-
-        # Check applications
-        for application in applications:
-            # Check applications and units to be idle
-            application_is_active = status.applications[application].application_status.current == "active"
-            units_are_active = all(
-                [
-                    unit.workload_status.current == "active" and unit.juju_status.current == "idle"
-                    for unit in status.applications[application].units.values()
-                ]
-            )
-            if not application_is_active or not units_are_active:
-                return False
-
-        return True
+    def wait_idle(self, model: str = "default", timeout: timedelta = timedelta(minutes=10)) -> bool:
+        self._call_juju(
+            CmdArg(value="wait-for"),
+            CmdArg(value="model"),
+            CmdArg(value=model),
+            CmdArg(
+                name="query",
+                value="forEach(applications, app => app.status == 'active') && forEach(units, unit => unit.workload-status == 'active' && unit.agent-status == 'idle')",
+            ),
+            CmdArg(name="timeout", value=f"{timeout.seconds}s"),
+        )
