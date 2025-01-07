@@ -53,7 +53,7 @@ class JujuCmdClient(JujuClient):
     def num_units(self, application: str) -> int:
         return len(self._status().applications[application].units)
 
-    def wait_idle(self, model: str = "default", timeout: timedelta = timedelta(minutes=10)) -> bool:
+    def wait_idle(self, model: str = "default", timeout: timedelta = timedelta(days=1)) -> bool:
         self._call_juju(
             CmdArg(value="wait-for"),
             CmdArg(value="model"),
@@ -62,5 +62,5 @@ class JujuCmdClient(JujuClient):
                 name="query",
                 value="forEach(applications, app => app.status == 'active') && forEach(units, unit => unit.workload-status == 'active' && unit.agent-status == 'idle')",
             ),
-            CmdArg(name="timeout", value=f"{timeout.seconds}s"),
+            CmdArg(name="timeout", value=f"{timeout.total_seconds()}s"),
         )

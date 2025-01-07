@@ -15,5 +15,5 @@ class JujuClient(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def wait_idle(self, model: str = "default", timeout: timedelta = timedelta(minutes=10)) -> bool:
+    def wait_idle(self, model: str = "default", timeout: timedelta = timedelta(days=1)) -> bool:
         raise NotImplementedError
