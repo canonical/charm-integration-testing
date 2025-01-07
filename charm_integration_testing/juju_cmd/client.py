@@ -17,21 +17,21 @@ class JujuCmdClient(JujuClient):
         self.cmd_client = cmd_client if cmd_client is not None else CmdClient()
 
     def _call_juju(self, *args: list[CmdArg]) -> str:
-        return self.cmd_client.call(CmdArg("juju"), *args)
+        return self.cmd_client.call(CmdArg(value="juju"), *args)
 
     def _status(self) -> JujuStatus:
         return JujuStatus(
             **yaml.safe_load(
                 self._call_juju(
-                    CmdArg("status"),
-                    CmdArg("yaml", name="format"),
+                    CmdArg(value="status"),
+                    CmdArg(value="yaml", name="format"),
                 )
             )
         )
 
     def scale_application(self, application: str, num: int):
         # Get current juju units
-        units = sorted(self._status().applications[application].units.keys())
+        units = sorted(self._status().applications[application].units.keys(), key=lambda unit: unit.split("/", 1)[1])
 
         # Add or remove units
         # juju scale-application does not work with VM charms
@@ -58,14 +58,14 @@ class JujuCmdClient(JujuClient):
         # Check applications
         for application in applications:
             # Check applications and units to be idle
-            application_active = status.applications[application].application_status.current == "active"
-            units_active = all(
+            application_is_active = status.applications[application].application_status.current == "active"
+            units_are_active = all(
                 [
                     unit.workload_status.current == "active" and unit.juju_status.current == "idle"
                     for unit in status.applications[application].units.values()
                 ]
             )
-            if not application_active or not units_active:
+            if not application_is_active or not units_are_active:
                 return False
 
         return True
