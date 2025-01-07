@@ -25,26 +25,15 @@ Requests to this repository. To format, run:
 
 ## Project Structure
 
-...
+### Test Suite ([charm_integration_testing/test_suite](charm_integration_testing/test_suite))
 
-### Workflows ([test_scheduler/workflows](test_scheduler/workflows))
-
-....
+The `test_suite` module contains the list of tests to be run on a Charm integration. The fixtures in
+`conftest.py` provide the client to interact with Juju and the variables for which endpoints to
+test.
 
 ## Testing
 
-### Unit Tests ([tests/unit](tests/unit))
-
-```bash
-./scripts/unit-tests.sh
-```
-
-Unit tests should be added to document and ensure the accuracy of individual pieces of code,
-especially those that are heavy in logic with many possible outcomes. Preference is for
-[Stubs](https://spring.io/blog/2007/01/15/unit-testing-with-stubs-and-mocks) with Dependency
-Injection as opposed to Mocks.
-
-### Integration Tests ([tests/integration](tests/integration))
+...
 
 ## Pull requests
 
