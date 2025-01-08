@@ -1,0 +1,20 @@
+name: Lint
+
+on:
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Install poetry
+        run: pipx install poetry==1.6
+
+      - name: Install dependencies
+        run: poetry install
+
+      - name: Run linter
+        run: ./scripts/lint.sh
