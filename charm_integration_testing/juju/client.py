@@ -7,7 +7,7 @@ from datetime import timedelta
 
 class JujuClient(ABC):
     @abstractmethod
-    def scale_application(self):
+    def scale_application(self, application: str, num: int):
         raise NotImplementedError
 
     @abstractmethod
