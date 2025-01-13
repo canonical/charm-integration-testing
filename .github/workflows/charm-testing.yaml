@@ -54,7 +54,8 @@ jobs:
       shell: bash
       run: |
         date=$(date +"%y-%m-%d-%H-%M-%S")
-        juju bootstrap ps6 --bootstrap-constraints root-disk=5G controller-$date
+        # juju will prefix the namespace with "controller"
+        juju bootstrap ps6 --bootstrap-constraints root-disk=5G $date
         echo "date=$date" >> $GITHUB_OUTPUT
     - name: Create Model
       shell: bash
@@ -64,7 +65,7 @@ jobs:
       shell: bash
       run: |
         juju deploy ${{ steps.testing-bundle.outputs.bundle }}
-        juju wait
+        juju-wait --max_wait 1200
         juju status
     # - name: Execute Tests
     # - name: Collect Logs
@@ -79,4 +80,4 @@ jobs:
       if: ${{ always() }}
       shell: bash
       run: |
-        juju kill-controller controller-${{ steps.controller.outputs.date }} --no-prompt
+        juju kill-controller ${{ steps.controller.outputs.date }} --no-prompt
