@@ -65,7 +65,7 @@ jobs:
         juju deploy ${{ steps.testing-bundle.outputs.bundle }}
         juju wait
         juju status
-    - name: Execute Tests
+    # - name: Execute Tests
     # - name: Collect Logs
     # - name: Upload Logs
     # - name: Report Test Execution End To Test Observer
