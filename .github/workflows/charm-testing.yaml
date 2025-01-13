@@ -48,13 +48,12 @@ jobs:
     - name: Add K8s
       shell: bash
       run: |
-        juju add-k8s ps6
+        KUBECONFIG=.kube/config juju add-k8s ps6
     - name: Bootstrap Controller
       id: controller
       shell: bash
       run: |
         date=$(date +"%y-%m-%d-%H-%M-%S")
-        export KUBECONFIG=.kube/config
         juju bootstrap ps6 --bootstrap-constraints root-disk=5G controller-$date
         echo "date=$date" >> $GITHUB_OUTPUT
     - name: Create Model
