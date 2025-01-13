@@ -59,7 +59,7 @@ jobs:
     - name: Create Model
       shell: bash
       run: |
-        juju create-model model-${{ steps.controller.outputs.controller }}
+        juju add-model model-${{ steps.controller.outputs.date }}
     - name: Deploy Bundle
       shell: bash
       run: |
@@ -71,10 +71,12 @@ jobs:
     # - name: Upload Logs
     # - name: Report Test Execution End To Test Observer
     - name: Teardown Model
+      if: ${{ always() }}
       shell: bash
       run: |
         juju destroy-model model-${{ steps.controller.outputs.date }} --destory-storage --no-prompt
     - name: Teardown Controller
+      if: ${{ always() }}
       shell: bash
       run: |
         juju kill-controller controller-${{ steps.controller.outputs.date }} --no-prompt
