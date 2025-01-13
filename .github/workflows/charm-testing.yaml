@@ -48,7 +48,7 @@ jobs:
     - name: Add K8s
       shell: bash
       run: |
-        KUBECONFIG=.kube/config juju add-k8s ps6
+        KUBECONFIG=.kube/config juju add-k8s ps6 --client
     - name: Bootstrap Controller
       id: controller
       shell: bash
