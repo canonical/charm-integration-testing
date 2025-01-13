@@ -14,10 +14,10 @@ on:
         description: "Integration to test the two charms over"
         required: true
       primary_channel:
-        descrption: "Channel to test the primary charm from"
+        description: "Channel to test the primary charm from"
         required: true
       juju_channel:
-        descrption: "Juju channel to test the charm against"
+        description: "Juju channel to test the charm against"
         required: false
         default: "3/stable"
 jobs:
@@ -34,7 +34,8 @@ jobs:
       id: testing-bundle
       shell: bash
       run: |
-        echo "bundle=$(TODO)" >> $GITHUB_OUTPUT
+        # TODO dynamically find this bundle
+        echo "bundle=charm-integration-testing/static/bundles/postgresql-k8s_certificates_self-signed-certificates_certificates.yaml" >> $GITHUB_OUTPUT
     - name: Setup Kubeconfig
       shell: bash
       run: |
@@ -52,13 +53,13 @@ jobs:
       id: controller
       shell: bash
       run: |
-        name=TODO
-        juju bootstrap ps6 --bootstrap-constraints root-disk=5G $name
-        echo "controller=$name" >> $GITHUB_OUTPUT
+        date=$(date +"%y-%m-%d-%H-%M-%S")
+        juju bootstrap ps6 --bootstrap-constraints root-disk=5G controller-$date
+        echo "date=$date" >> $GITHUB_OUTPUT
     - name: Create Model
       shell: bash
       run: |
-        juju create-model ${{ steps.controller.outputs.controller }}-model
+        juju create-model model-${{ steps.controller.outputs.controller }}
     - name: Deploy Bundle
       shell: bash
       run: |
@@ -72,8 +73,8 @@ jobs:
     - name: Teardown Model
       shell: bash
       run: |
-        juju destroy-model ${{ steps.controller.outputs.controller }}-model --destory-storage --no-prompt
+        juju destroy-model model-${{ steps.controller.outputs.date }} --destory-storage --no-prompt
     - name: Teardown Controller
       shell: bash
       run: |
-        juju kill-controller ${{ steps.controller.outputs.controller }} --no-prompt
+        juju kill-controller controller-${{ steps.controller.outputs.date }} --no-prompt
