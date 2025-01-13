@@ -54,7 +54,7 @@ jobs:
       shell: bash
       run: |
         date=$(date +"%y-%m-%d-%H-%M-%S")
-        juju bootstrap ps6 --bootstrap-constraints root-disk=5G controller-$date
+        KUBECONFIG=.kube/config juju bootstrap ps6 --bootstrap-constraints root-disk=5G controller-$date
         echo "date=$date" >> $GITHUB_OUTPUT
     - name: Create Model
       shell: bash
