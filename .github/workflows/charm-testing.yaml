@@ -1,0 +1,80 @@
+name: Execute test against two charms and their integrations
+run-name: Testing ${{ github.event.inputs.primary }} against ${{ github.event.inputs.other }} over the ${{ github.event.inputs.integration }} integration.
+
+on:
+  workflow_dispatch:
+    inputs:
+      primary:
+        description: "Primary charm name"
+        required: true
+      other:
+        description: "Name of the charm to test primary against"
+        required: true
+      integration:
+        description: "Integration to test the two charms over"
+        required: true
+      primary_channel:
+        description: "Channel to test the primary charm from"
+        required: true
+      juju_channel:
+        description: "Juju channel to test the charm against"
+        required: false
+        default: "3/stable"
+jobs:
+  execute-charm-test:
+    name: Execute integration tests against the charms
+    runs-on:
+      - self-hosted
+      - charm-qa
+    steps:
+    # - name: Report Test Execution Start To Test Observer
+    - name: Clone Repo
+      uses: actions/checkout@v4
+    - name: Get Bundle
+      id: testing-bundle
+      shell: bash
+      run: |
+        # TODO dynamically find this bundle
+        echo "bundle=charm-integration-testing/static/bundles/postgresql-k8s_certificates_self-signed-certificates_certificates.yaml" >> $GITHUB_OUTPUT
+    - name: Setup Kubeconfig
+      shell: bash
+      run: |
+        mkdir -p .kube
+        echo ${{ secrets.STG_SQA_KUBECONFIG }} > .kube/config
+    - name: Install Juju
+      shell: bash
+      run: |
+        sudo snap install juju --channel ${{ github.event.inputs.juju_channel }}
+    - name: Add K8s
+      shell: bash
+      run: |
+        juju add-k8s ps6
+    - name: Bootstrap Controller
+      id: controller
+      shell: bash
+      run: |
+        date=$(date +"%y-%m-%d-%H-%M-%S")
+        juju bootstrap ps6 --bootstrap-constraints root-disk=5G controller-$date
+        echo "date=$date" >> $GITHUB_OUTPUT
+    - name: Create Model
+      shell: bash
+      run: |
+        juju create-model model-${{ steps.controller.outputs.controller }}
+    - name: Deploy Bundle
+      shell: bash
+      run: |
+        juju deploy ${{ steps.testing-bundle.outputs.bundle }}
+        juju wait
+        juju status
+    # - name: Execute Tests
+    # - name: Collect Logs
+    # - name: Upload Logs
+    # - name: Report Test Execution End To Test Observer
+    - name: Teardown Model
+      shell: bash
+      run: |
+        juju destroy-model model-${{ steps.controller.outputs.date }} --destory-storage --no-prompt
+    - name: Teardown Controller
+      shell: bash
+      run: |
+        juju kill-controller controller-${{ steps.controller.outputs.date }} --no-prompt
