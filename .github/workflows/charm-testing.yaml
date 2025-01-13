@@ -40,7 +40,7 @@ jobs:
       shell: bash
       run: |
         mkdir -p .kube
-        echo ${{ secrets.STG_SQA_KUBECONFIG }} > .kube/config
+        echo '${{ secrets.STG_SQA_KUBECONFIG }}' > .kube/config
     - name: Install Juju
       shell: bash
       run: |
