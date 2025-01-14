@@ -2,10 +2,11 @@ applications:
   postgresql:
     charm: postgresql-k8s
     channel: 14/stable
+    trust: true
     scale: 1
   self-signed-certificates:
     charm: self-signed-certificates
     channel: latest/stable
     scale: 1
-integrations:
+relations:
   - ['postgresql:certificates', 'self-signed-certificates:certificates']
