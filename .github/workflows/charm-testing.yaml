@@ -35,7 +35,7 @@ jobs:
       shell: bash
       run: |
         # TODO dynamically find this bundle
-        echo "bundle=charm-integration-testing/static/bundles/postgresql-k8s_certificates_self-signed-certificates_certificates.yaml" >> $GITHUB_OUTPUT
+        echo "bundle=./static/bundles/postgresql-k8s_certificates_self-signed-certificates_certificates.yaml" >> $GITHUB_OUTPUT
     - name: Setup Kubeconfig
       shell: bash
       run: |
@@ -64,7 +64,7 @@ jobs:
     - name: Deploy Bundle
       shell: bash
       run: |
-        juju deploy ./${{ steps.testing-bundle.outputs.bundle }}
+        juju deploy ${{ steps.testing-bundle.outputs.bundle }}
         juju-wait --max_wait 1200
         juju status
     # - name: Execute Tests
