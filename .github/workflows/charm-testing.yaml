@@ -45,6 +45,7 @@ jobs:
       shell: bash
       run: |
         sudo snap install juju --channel ${{ github.event.inputs.juju_channel }}
+        snap install juju-wait
     - name: Add K8s
       shell: bash
       run: |
@@ -65,7 +66,7 @@ jobs:
       shell: bash
       run: |
         juju deploy ${{ steps.testing-bundle.outputs.bundle }}
-        juju-wait --max_wait 1200
+        juju-wait --max_wait 1200 --verbose
         juju status
     # - name: Execute Tests
     # - name: Collect Logs
