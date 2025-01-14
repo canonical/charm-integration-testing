@@ -64,7 +64,7 @@ jobs:
     - name: Deploy Bundle
       shell: bash
       run: |
-        juju deploy ${{ steps.testing-bundle.outputs.bundle }}
+        juju deploy ./${{ steps.testing-bundle.outputs.bundle }}
         juju-wait --max_wait 1200
         juju status
     # - name: Execute Tests
@@ -75,7 +75,7 @@ jobs:
       if: ${{ always() }}
       shell: bash
       run: |
-        juju destroy-model model-${{ steps.controller.outputs.date }} --destory-storage --no-prompt
+        juju destroy-model model-${{ steps.controller.outputs.date }} --destroy-storage --no-prompt
     - name: Teardown Controller
       if: ${{ always() }}
       shell: bash
