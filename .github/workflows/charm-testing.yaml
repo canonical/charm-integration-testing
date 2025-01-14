@@ -45,7 +45,7 @@ jobs:
       shell: bash
       run: |
         sudo snap install juju --channel ${{ github.event.inputs.juju_channel }}
-        snap install juju-wait
+        sudo snap install juju-wait
     - name: Add K8s
       shell: bash
       run: |
