@@ -1,3 +1,4 @@
+bundle: kubernetes
 applications:
   postgresql:
     charm: postgresql-k8s
