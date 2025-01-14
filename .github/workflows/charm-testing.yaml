@@ -75,9 +75,9 @@ jobs:
       if: ${{ always() }}
       shell: bash
       run: |
-        juju destroy-model model-${{ steps.controller.outputs.date }} --destroy-storage --no-prompt
+        timeout 1800 juju destroy-model model-${{ steps.controller.outputs.date }} --destroy-storage --no-prompt
     - name: Teardown Controller
       if: ${{ always() }}
       shell: bash
       run: |
-        juju kill-controller ${{ steps.controller.outputs.date }} --no-prompt
+        timeout 1800 juju kill-controller ${{ steps.controller.outputs.date }} --no-prompt
