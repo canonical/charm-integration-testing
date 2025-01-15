@@ -64,7 +64,7 @@ jobs:
       shell: bash
       run: |
         charm_pairs=("${{ github.event.inputs.charm_under_test }}_${{ github.event.inputs.charm_endpoint }}" "${{ github.event.inputs.neighbor }}_${{ github.event.inputs.neighbor_endpoint }}")
-        sorted_pairs=($(sort <<< "$charm_pairs[@]"))
+        sorted_pairs=($(echo "charm_pairs" | tr ' ' '\n' | sort | tr '\n' ' '))
         echo "bundle=./static/bundles/${sorted_pairs[0]}_${sorted_pairs[1]}.yaml" >> $GITHUB_OUTPUT
     - name: Setup Kubeconfig
       shell: bash
@@ -108,10 +108,9 @@ jobs:
         pipx install poetry=-1.6
         poetry install
         # poetry install package
-        ./scripts/run-test-suite.sh --model model-${{ steps.controller.outputs.date }} \
-        --requirer ${{ github.event.inputs.charm_under_test }}:${{ github.event.inputs.charm_endpoint }} \
-        --provider ${{ github.event.inputs.neighbor }}_${{ github.event.inputs.neighbor_endpoint }} \
-        --junitxml=logs.xml
+        ./scripts/run-test-suite.sh --model model-${{ steps.controller.outputs.date }} --requirer  
+        # TODO: find args for junit
+        # ./scripts/run-test-suite.sh --model {juju_model} --requirer {application}:{endpoint} --provider {application}:{endpoint}
     # - name: Collect Logs
     # - name: Upload Logs
     # - name: Report Test Execution End To Test Observer
