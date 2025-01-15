@@ -114,8 +114,8 @@ jobs:
       shell: bash
       run: |
         ./scripts/run-test-suite.sh --model model-${{ steps.controller.outputs.date }} \
-        --requirer ${{ github.event.inputs.charm_under_test }}_${{ github.event.inputs.charm_endpoint }} \
-        --provider ${{ github.event.inputs.neighbor }}_${{ github.event.inputs.neighbor_endpoint }} \
+        --requirer ${{ github.event.inputs.charm_under_test }} \
+        --provider ${{ github.event.inputs.neighbor }} \
         --junit-xml=out.xml
     # - name: Collect Logs
     # - name: Upload Logs
