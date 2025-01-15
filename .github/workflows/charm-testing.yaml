@@ -101,11 +101,17 @@ jobs:
     - name: Execute Tests
       shell: bash
       run: |
-        # set firewall for pip install
-        # install poetry
+        sudo tee /etc/pip.conf <<EOF
+        [global]
+        proxy= http://squid.internal:3128
+        EOF
+        pipx install poetry=-1.6
+        poetry install
         # poetry install package
-        # TODO: find args for junit
-        # ./scripts/run-test-suite.sh --model {juju_model} --requirer {application}:{endpoint} --provider {application}:{endpoint}
+        ./scripts/run-test-suite.sh --model model-${{ steps.controller.outputs.date }} \
+        --requirer ${{ github.event.inputs.charm_under_test }}:${{ github.event.inputs.charm_endpoint }} \
+        --provider ${{ github.event.inputs.neighbor }}_${{ github.event.inputs.neighbor_endpoint }} \
+        --junitxml=logs.xml
     # - name: Collect Logs
     # - name: Upload Logs
     # - name: Report Test Execution End To Test Observer
