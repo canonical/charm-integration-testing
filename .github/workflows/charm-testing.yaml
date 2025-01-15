@@ -108,7 +108,7 @@ jobs:
         [global]
         proxy= http://squid.internal:3128
         EOF
-        pipx install poetry=-1.6
+        pipx install poetry==1.6
         poetry install
         ./scripts/run-test-suite.sh --model model-${{ steps.controller.outputs.date }} \
         --requirer ${{ github.event.inputs.charm_under_test }}_${{ github.event.inputs.charm_endpoint }} \
