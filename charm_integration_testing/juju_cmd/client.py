@@ -38,11 +38,11 @@ class JujuCmdClient(JujuClient):
         # Add or remove units
         # juju scale-application does not work with VM charms XXX: SQT-431
         self._call_juju(
-                CmdArg(value="scale-application")
-                CmdArg(value=application)
-                CmdArg(name="num-units"),
-                CmdArg(value=num)
-                )
+            CmdArg(value="scale-application"),
+            CmdArg(value=application),
+            CmdArg(name="num-units"),
+            CmdArg(value=num)
+        )
         # if len(units) < num:
         #     self._call_juju(
         #         CmdArg(value="add-unit"),
