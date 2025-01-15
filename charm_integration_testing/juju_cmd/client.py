@@ -40,7 +40,6 @@ class JujuCmdClient(JujuClient):
         self._call_juju(
             CmdArg(value="scale-application"),
             CmdArg(value=application),
-            CmdArg(name="num-units"),
             CmdArg(value=num)
         )
         # if len(units) < num:
