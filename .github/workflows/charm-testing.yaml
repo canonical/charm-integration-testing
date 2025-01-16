@@ -101,7 +101,7 @@ jobs:
       run: |
         juju deploy --trust ./static/bundles/${{ github.event.inputs.charm_under_test }}.yaml
         juju deploy --trust ./static/bundles/${{ github.event.inputs.neighbor }}.yaml
-        juju integrate ${{github.event.inputs.charm_under_test}}:${{ github.events.charm_endpoint }} ${{ github.event.inputs.neighbor }}:${{ github.event.inputs.neighbor_enpoint }}
+        juju integrate ${{github.event.inputs.charm_under_test}}:${{ github.event.inputs.charm_endpoint }} ${{ github.event.inputs.neighbor }}:${{ github.event.inputs.neighbor_endpoint }}
         juju-wait --max_wait 1200 --verbose
         juju status --relations
     - name: Execute Tests
