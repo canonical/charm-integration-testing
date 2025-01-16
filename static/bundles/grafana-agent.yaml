@@ -1,0 +1,27 @@
+bundle: kubernetes
+applications:
+  grafana-agent-k8s:
+    charm: grafana-agent-k8s
+    channel: latest/stable
+    trust: true
+    scale: 1
+  loki-k8s:
+    charm: loki-k8s
+    channel: latest/stable
+    trust: true
+    scale: 1
+  grafana-k8s:
+    charm: grafana-k8s
+    channel: latest/stable
+    trust: true
+    scale: 1
+  prometheus-k8s:
+    charm: grafana-k8s
+    channel: latest/stable
+    trust: true
+    scale: 1
+relations:
+  - [grafana-agent-k8s:grafana-dashboards-provider, grafana-k8s:grafana-dashboard]
+  - [loki-k8s:grafana-dashboard, grafana-k8s:grafana-dashboard]
+  - [loki-k8s:grafana-source, grafana-k8s:grafana-source]
+  - [loki-k8s:logging, grafana-agent-k8s:logging-consumer]
