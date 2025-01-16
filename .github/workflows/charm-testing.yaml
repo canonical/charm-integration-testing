@@ -54,7 +54,7 @@ jobs:
     name: Execute integration tests against the charms
     runs-on:
       - self-hosted
-      - charm_qa_openstack
+      - charm_qa
     steps:
     # - name: Report Test Execution Start To Test Observer
     - name: Clone Repo
