@@ -33,22 +33,23 @@ class JujuCmdClient(JujuClient):
 
     def scale_application(self, application: str, num: int):
         # Get current juju units
-        units = sorted(self._status().applications[application].units.keys(), key=lambda unit: unit.split("/", 1)[1])
+        # units = sorted(self._status().applications[application].units.keys(), key=lambda unit: unit.split("/", 1)[1])
 
         # Add or remove units
-        # juju scale-application does not work with VM charms
-        if len(units) < num:
-            self._call_juju(
-                CmdArg(value="add-unit"),
-                CmdArg(value=application),
-                CmdArg(value=num - len(units), name="num-units"),
-            )
-        elif len(units) > num:
-            self._call_juju(
-                CmdArg(value="remove-unit"),
-                CmdArg(name="no-prompt"),
-                *[CmdArg(value=unit) for unit in units[num:]],
-            )
+        # juju scale-application does not work with VM charms XXX: SQT-431
+        self._call_juju(CmdArg(value="scale-application"), CmdArg(value=application), CmdArg(value=num))
+        # if len(units) < num:
+        #     self._call_juju(
+        #         CmdArg(value="add-unit"),
+        #         CmdArg(value=application),
+        #         CmdArg(value=num - len(units), name="num-units"),
+        #     )
+        # elif len(units) > num:
+        #     self._call_juju(
+        #         CmdArg(value="remove-unit"),
+        #         CmdArg(name="no-prompt"),
+        #         *[CmdArg(value=unit) for unit in units[num:]],
+        #     )
 
     def num_units(self, application: str) -> int:
         return len(self._status().applications[application].units)

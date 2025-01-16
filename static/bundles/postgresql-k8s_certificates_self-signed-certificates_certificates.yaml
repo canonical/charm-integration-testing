@@ -1,6 +1,6 @@
 bundle: kubernetes
 applications:
-  postgresql:
+  postgresql-k8s:
     charm: postgresql-k8s
     channel: 14/stable
     trust: true
@@ -10,4 +10,4 @@ applications:
     channel: latest/stable
     scale: 1
 relations:
-  - ['postgresql:certificates', 'self-signed-certificates:certificates']
+  - ['postgresql-k8s:certificates', 'self-signed-certificates:certificates']

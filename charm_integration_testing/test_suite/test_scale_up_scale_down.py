@@ -11,6 +11,9 @@ from charm_integration_testing.juju import JujuClient
 
 @pytest.mark.timeout(timedelta(minutes=15).total_seconds())
 def test_scale_down_scale_up_charm(juju_client: JujuClient, model: str, requirer_application: str):
+    # Ensure ready
+    juju_client.wait_idle(model=model)
+
     # Get units
     num_units = juju_client.num_units(requirer_application)
 
