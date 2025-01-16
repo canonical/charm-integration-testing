@@ -117,7 +117,7 @@ jobs:
         --requirer ${{ github.event.inputs.charm_under_test }} \
         --provider ${{ github.event.inputs.neighbor }} \
         --junit-xml=out.xml
-    - name: Collect Logs:
+    - name: Collect Logs
       shell: bash
       run: cat out.xml
     # - name: Upload Logs
