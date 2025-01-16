@@ -1,0 +1,6 @@
+bundle: kubernetes
+applications:
+  self-signed-certificates:
+    charm: self-signed-certificates
+    channel: latest/stable
+    scale: 1
