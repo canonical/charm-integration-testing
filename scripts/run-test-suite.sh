@@ -3,4 +3,4 @@
 # See LICENSE file for licensing details.
 
 cd "$(dirname "$0")/.."
-poetry run pytest charm_integration_testing/test_suite "$@"
+poetry run pytest charm_integration_testing/test_suite -s "$@"

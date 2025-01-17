@@ -5,12 +5,12 @@
 import pytest
 
 from charm_integration_testing.juju import JujuClient
-from charm_integration_testing.juju_cmd import JujuCmdClient
+from charm_integration_testing.juju_cmd import JujuCmdBackend
 
 
 @pytest.fixture
 def juju_client() -> JujuClient:
-    return JujuCmdClient()
+    return JujuClient(JujuCmdBackend())
 
 
 def pytest_addoption(parser):

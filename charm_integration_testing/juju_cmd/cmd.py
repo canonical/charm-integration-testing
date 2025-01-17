@@ -2,7 +2,6 @@
 # See LICENSE file for licensing details.
 
 import subprocess
-import sys
 from typing import Optional
 
 from pydantic import field_validator
@@ -35,10 +34,6 @@ class CmdClient:
         # Run the command
         parsed_args = self.parse_args(*args)
         result = subprocess.run(self.parse_args(*args), capture_output=True, text=True)
-
-        # Print the results
-        # print(result.stdout, end="")
-        print(result.stderr, file=sys.stderr, end="")
 
         # Check for error
         if result.returncode != 0:
