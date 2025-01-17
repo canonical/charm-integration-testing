@@ -79,7 +79,7 @@ class JujuCmdClient(JujuClient):
         last_idle = datetime.now()
         initial_idle = last_idle
         idle_count = 0
-        while last_idle < initial_idle + period and idle_count > count:
+        while last_idle < initial_idle + period and idle_count < count:
             self.wait_idle(model, timeout)
             last_idle = datetime.now()
             idle_count += 1
