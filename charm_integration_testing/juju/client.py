@@ -3,6 +3,7 @@
 
 import logging
 from datetime import datetime, timedelta, timezone
+import time
 
 from .backend import JujuBackend, JujuWaitIdleTimeoutError
 
@@ -24,7 +25,7 @@ class JujuClient:
         return self.backend.num_units(application)
 
     # Logging wrapper around wait idle
-    def wait_idle(self, model: str = "default", timeout: timedelta = timedelta(days=1)):
+    def wait_idle(self, model: str = "default", timeout: timedelta = timedelta(days=1), idle_period: timedelta = timedelta(seconds=15)):
         # Start logging
         self.logger.info("Waiting for idle.\n::group::Juju Status:")
 
@@ -32,15 +33,20 @@ class JujuClient:
         try:
             # Loop until timeout
             end_time = datetime.now(timezone.utc) + timeout
+            idle_since = None
             while datetime.now(timezone.utc) < end_time:
                 try:
                     self.backend.wait_idle(model=model, timeout=timedelta(seconds=5))
                 except JujuWaitIdleTimeoutError:
                     # Wait idle did not conclude, try again
-                    pass
+                    idle_since = None
                 else:
-                    # Process is idle
-                    return
+                    # Applications are idle
+                    if idle_since is None:
+                        idle_since = datetime.now(timezone.utc)
+                    elif datetime.now(timezone.utc) - idle_since > idle_period:
+                        return
+                    time.sleep(1)
                 finally:
                     # Always print status
                     self.print_status()
