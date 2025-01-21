@@ -2,8 +2,8 @@
 # See LICENSE file for licensing details.
 
 import logging
-from datetime import datetime, timedelta, timezone
 import time
+from datetime import datetime, timedelta, timezone
 
 from .backend import JujuBackend, JujuWaitIdleTimeoutError
 
@@ -25,7 +25,12 @@ class JujuClient:
         return self.backend.num_units(application)
 
     # Wait for the Juju model to become idle
-    def idle_for_period(self, model: str = "default", timeout: timedelta = timedelta(days=1), idle_period: timedelta = timedelta(seconds=15)):
+    def idle_for_period(
+        self,
+        model: str = "default",
+        timeout: timedelta = timedelta(days=1),
+        idle_period: timedelta = timedelta(seconds=15),
+    ):
         # Start logging
         self.logger.info("Begin waiting for idle.\n::group::Wait for idle group.")
 
@@ -36,7 +41,7 @@ class JujuClient:
             # Always end group log
             self.logger.info("Done wait for idle group.\n::endgroup::")
             self.logger.info("Finished waiting for idle.")
-    
+
     # Ensure the Juju model is idle for the given period
     def _idle_for_period(self, model: str, timeout: timedelta, idle_period: timedelta):
         # Loop until timeout
@@ -65,10 +70,10 @@ class JujuClient:
                 else:
                     # Model is still idle but idle_period not met
                     self.logger.info("Model is still idle.")
-                
+
                 # Wait before checking again
                 time.sleep(1)
-        
+
         raise JujuWaitIdleTimeoutError
 
     def print_status(self):
