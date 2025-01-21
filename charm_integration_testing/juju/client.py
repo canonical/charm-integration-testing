@@ -27,14 +27,15 @@ class JujuClient:
     # Wait for the Juju model to become idle
     def idle_for_period(self, model: str = "default", timeout: timedelta = timedelta(days=1), idle_period: timedelta = timedelta(seconds=15)):
         # Start logging
-        self.logger.info("Waiting for idle.\n::group::Juju Status:")
+        self.logger.info("Begin waiting for idle.\n::group::Wait for idle group.")
 
         # Wait for idle
         try:
             self._idle_for_period(model, timeout, idle_period)
         finally:
             # Always end group log
-            self.logger.info("End waiting for idle.\n::endgroup::")
+            self.logger.info("Done wait for idle group.\n::endgroup::")
+            self.logger.info("Finished waiting for idle.")
     
     # Ensure the Juju model is idle for the given period
     def _idle_for_period(self, model: str, timeout: timedelta, idle_period: timedelta):
@@ -46,22 +47,24 @@ class JujuClient:
                 self.backend.wait_idle(model=model, timeout=timedelta(seconds=1))
             except JujuWaitIdleTimeoutError:
                 # Model not idle, try again
-                idle_since = None
+                if idle_since is not None:
+                    idle_since = None
+                    self.logger.info("Model is no longer idle")
                 self.print_status()
             else:
                 # Model is idle
                 if idle_since is None:
                     # Model is idle for the first time
                     self.print_status()
-                    self.logger.info("Applications are idle, checking for idle period.")
+                    self.logger.info("Model is idle, checking for idle period.")
                     idle_since = datetime.now(timezone.utc)
                 elif datetime.now(timezone.utc) - idle_since > idle_period:
                     # Model is still idle and idle_period is met
-                    self.logger.info("Applications are now idle.")
+                    self.logger.info("Model has been idle for idle period.")
                     return
                 else:
                     # Model is still idle but idle_period not met
-                    self.logger.info("Applications are still idle.")
+                    self.logger.info("Model is still idle.")
                 
                 # Wait before checking again
                 time.sleep(1)
