@@ -2,7 +2,7 @@
 # See LICENSE file for licensing details.
 
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 import yaml
 
@@ -55,8 +55,6 @@ class JujuCmdClient(JujuClient):
         return len(self._status().applications[application].units)
 
     def wait_idle(self, model: str = "default", timeout: timedelta = timedelta(days=1)) -> bool:
-        # run juju wait-for, when exists, set success timer
-        # while the difference between now and the success timer is < 30, run juju wait for
         self._call_juju(
             CmdArg(value="wait-for"),
             CmdArg(value="model"),
@@ -67,23 +65,3 @@ class JujuCmdClient(JujuClient):
             ),
             CmdArg(name="timeout", value=f"{timeout.total_seconds()}s"),
         )
-
-    def idle_for_period(
-        self,
-        model: str = "default",
-        timeout: timedelta = timedelta(days=1),
-        period: timedelta = timedelta(seconds=30),
-        count: int = 3,
-    ) -> bool:
-        self.wait_idle(model, timeout)
-        last_idle = datetime.datetime.now()
-        initial_idle = last_idle
-        idle_count = 0
-        while last_idle < initial_idle + period and idle_count > count:
-            self.wait_idle(model, timeout)
-            last_idle = datetime.now()
-            idle_count += 1
-            if idle_count > count + 1:
-                # we got enough idles but it took longer than the given period, try again
-                initial_idle = datetime.now()
-                idle_count = 0
