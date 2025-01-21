@@ -44,12 +44,12 @@ class JujuClient:
                     return
                 finally:
                     # Always print status
-                    self.print_status("Waiting for idle.")
+                    self.print_status()
         finally:
             # Always end group log
             self.logger.info("End waiting for idle.\n::endgroup::")
 
         raise JujuWaitIdleTimeoutError
 
-    def print_status(self, message: str):
-        self.logger.info(f"{message}\n{self.backend.juju_status_text()}"),
+    def print_status(self):
+        self.logger.info(f"Juju Status:\n{self.backend.juju_status_text()}"),

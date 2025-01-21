@@ -11,7 +11,7 @@ import logging
 
 @pytest.fixture
 def logger() -> logging.Logger:
-    return logging.getLogger(__file__)
+    return logging.getLogger()
 
 
 @pytest.fixture
