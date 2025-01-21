@@ -16,8 +16,8 @@ def test_scale_down_scale_up_charm(juju_client: JujuClient, model: str, requirer
 
     # Remove units
     juju_client.scale_application(requirer_application, 0)
-    juju_client.wait_idle(model=model)
+    juju_client.idle_for_period(model=model)
 
     # Rescale application
     juju_client.scale_application(requirer_application, num_units)
-    juju_client.wait_idle(model=model)
+    juju_client.idle_for_period(model=model)
