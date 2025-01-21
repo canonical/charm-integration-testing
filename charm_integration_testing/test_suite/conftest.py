@@ -7,10 +7,16 @@ import pytest
 from charm_integration_testing.juju import JujuClient
 from charm_integration_testing.juju_cmd import JujuCmdBackend
 
+import logging
 
 @pytest.fixture
-def juju_client() -> JujuClient:
-    return JujuClient(JujuCmdBackend())
+def logger() -> logging.Logger:
+    return logging.getLogger(__file__)
+
+
+@pytest.fixture
+def juju_client(logger: logging.Logger) -> JujuClient:
+    return JujuClient(JujuCmdBackend(), logger)
 
 
 def pytest_addoption(parser):

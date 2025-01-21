@@ -5,45 +5,51 @@ from datetime import datetime, timedelta, timezone
 
 from .backend import JujuBackend, JujuWaitIdleTimeoutError
 
+import logging
+
 
 class JujuClient:
     backend: JujuBackend
+    logger: logging.Logger
 
-    def __init__(self, backend):
+    def __init__(self, backend, logger: logging.Logger):
         self.backend = backend
+        self.logger = logger
 
     def scale_application(self, application: str, num: int):
-        print(f"Scaling application {application} to {num} units.")
+        self.logger.info(f"Scaling application {application} to {num} units.")
         self.backend.scale_application(application, num)
 
     def num_units(self, application: str) -> int:
-        print(f"Getting the number of units for {application}.")
+        self.logger.info(f"Getting the number of units for {application}.")
         return self.backend.num_units(application)
 
+    # Logging wrapper around wait idle
     def wait_idle(self, model: str = "default", timeout: timedelta = timedelta(days=1)):
-        print("Waiting for idle.")
-        print("::group::Juju Status:")
+        # Start logging
+        self.logger.info("Waiting for idle.\n::group::Juju Status:")
 
-        # Loop until timeout
-        end_time = datetime.now(timezone.utc) + timeout
-        while datetime.now(timezone.utc) < end_time:
-            try:
-                self.backend.wait_idle(model=model, timeout=timedelta(seconds=5))
-            except JujuWaitIdleTimeoutError:
-                self.print_status()
-            except Exception as e:
-                print("::endgroup::")
-                raise e
-            else:
-                self.print_status()
-                print("::endgroup::")
-                return
+        # Wait for idle
+        try:
+            # Loop until timeout
+            end_time = datetime.now(timezone.utc) + timeout
+            while datetime.now(timezone.utc) < end_time:
+                try:
+                    self.backend.wait_idle(model=model, timeout=timedelta(seconds=5))
+                except JujuWaitIdleTimeoutError:
+                    # Wait idle did not conclude, try again
+                    pass
+                else:
+                    # Process is idle
+                    return
+                finally:
+                    # Always print status
+                    self.print_status("Waiting for idle.")
+        finally:
+            # Always end group log
+            self.logger.info("End waiting for idle.\n::endgroup::")
 
-        print("::endgroup::")
         raise JujuWaitIdleTimeoutError
 
-    def print_status(self):
-        print(f"{datetime.now(timezone.utc)}")
-        print()
-        print(self.backend.juju_status_text())
-        print("-----------------------------")
+    def print_status(self, message: str):
+        self.logger.info(f"{message}\n{self.backend.juju_status_text()}"),

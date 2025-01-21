@@ -33,5 +33,7 @@ line-length = 120
 [tool.ruff.lint]
 extend-select = ["I"]
 
-[pytest]
+[tool.pytest.ini_options]
 timeout = 600
+log_cli = true
+log_cli_level = "INFO"
