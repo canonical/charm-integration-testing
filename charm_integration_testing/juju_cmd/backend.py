@@ -6,13 +6,13 @@ from datetime import timedelta
 
 import yaml
 
-from charm_integration_testing.juju import JujuClient
+from charm_integration_testing.juju import JujuBackend, JujuWaitIdleTimeoutError
 
-from .cmd import CmdArg, CmdClient
+from .cmd import CmdArg, CmdClient, CmdError
 from .structures import JujuStatus
 
 
-class JujuCmdClient(JujuClient):
+class JujuCmdBackend(JujuBackend):
     cmd_client: CmdClient
 
     def __init__(self, cmd_client: CmdClient = None):
@@ -54,14 +54,26 @@ class JujuCmdClient(JujuClient):
     def num_units(self, application: str) -> int:
         return len(self._status().applications[application].units)
 
-    def wait_idle(self, model: str = "default", timeout: timedelta = timedelta(days=1)) -> bool:
-        self._call_juju(
-            CmdArg(value="wait-for"),
-            CmdArg(value="model"),
-            CmdArg(value=model),
-            CmdArg(
-                name="query",
-                value="forEach(applications, app => app.status == 'active') && forEach(units, unit => unit.workload-status == 'active' && unit.agent-status == 'idle')",
-            ),
-            CmdArg(name="timeout", value=f"{timeout.total_seconds()}s"),
+    def wait_idle(self, model: str = "default", timeout: timedelta = timedelta(days=1)):
+        try:
+            self._call_juju(
+                CmdArg(value="wait-for"),
+                CmdArg(value="model"),
+                CmdArg(value=model),
+                CmdArg(
+                    name="query",
+                    value="forEach(applications, app => app.status == 'active') && forEach(units, unit => unit.workload-status == 'active' && unit.agent-status == 'idle')",
+                ),
+                CmdArg(name="timeout", value=f"{timeout.total_seconds()}s"),
+            )
+        except CmdError as e:
+            if "ERROR timed out waiting for" in e.stderr:
+                raise JujuWaitIdleTimeoutError
+            else:
+                raise e
+
+    def juju_status_text(self) -> str:
+        return self._call_juju(
+            CmdArg(value="status"),
+            CmdArg(name="integrations"),
         )

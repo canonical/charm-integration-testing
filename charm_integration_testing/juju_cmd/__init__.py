@@ -1,6 +1,6 @@
 # Copyright 2024-2025 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-from .client import JujuCmdClient
+from .backend import JujuCmdBackend
 
-__all__ = [JujuCmdClient]
+__all__ = [JujuCmdBackend]

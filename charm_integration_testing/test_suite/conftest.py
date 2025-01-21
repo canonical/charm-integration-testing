@@ -2,15 +2,22 @@
 # See LICENSE file for licensing details.
 
 
+import logging
+
 import pytest
 
 from charm_integration_testing.juju import JujuClient
-from charm_integration_testing.juju_cmd import JujuCmdClient
+from charm_integration_testing.juju_cmd import JujuCmdBackend
 
 
 @pytest.fixture
-def juju_client() -> JujuClient:
-    return JujuCmdClient()
+def logger() -> logging.Logger:
+    return logging.getLogger()
+
+
+@pytest.fixture
+def juju_client(logger: logging.Logger) -> JujuClient:
+    return JujuClient(JujuCmdBackend(), logger)
 
 
 def pytest_addoption(parser):
@@ -56,4 +63,4 @@ def provider_endpoint(request: pytest.FixtureRequest) -> str:
 
 @pytest.fixture(autouse=True)
 def assert_idle(juju_client, model: str):
-    juju_client.wait_idle(model=model)
+    juju_client.idle_for_period(model=model)
