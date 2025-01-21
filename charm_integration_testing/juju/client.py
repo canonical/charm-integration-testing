@@ -32,15 +32,17 @@ class JujuClient:
         idle_period: timedelta = timedelta(seconds=15),
     ):
         # Start logging
-        self.logger.info("Begin waiting for idle.\n::group::Wait for idle group.")
+        self.logger.info("Begin waiting for idle.\n::group::Wait for idle.")
 
         # Wait for idle
         try:
             self._idle_for_period(model, timeout, idle_period)
         finally:
-            # Always end group log
-            self.logger.info("Done wait for idle group.\n::endgroup::")
-            self.logger.info("Finished waiting for idle.")
+            # Always print status at end
+            self.print_status()
+
+            # End the log group
+            self.logger.info("Reached end of waiting for idle.\n::endgroup::")
 
     # Ensure the Juju model is idle for the given period
     def _idle_for_period(self, model: str, timeout: timedelta, idle_period: timedelta):
@@ -55,12 +57,12 @@ class JujuClient:
                 if idle_since is not None:
                     idle_since = None
                     self.logger.info("Model is no longer idle")
-                self.print_status()
+                else:
+                    self.logger.info("Model is not idle")
             else:
                 # Model is idle
                 if idle_since is None:
                     # Model is idle for the first time
-                    self.print_status()
                     self.logger.info("Model is idle, checking for idle period.")
                     idle_since = datetime.now(timezone.utc)
                 elif datetime.now(timezone.utc) - idle_since > idle_period:
@@ -74,6 +76,8 @@ class JujuClient:
                 # Wait before checking again
                 time.sleep(1)
 
+        # Timed out
+        self.logger.error("Model did not reach idle.")
         raise JujuWaitIdleTimeoutError
 
     def print_status(self):
