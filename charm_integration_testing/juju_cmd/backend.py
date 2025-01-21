@@ -75,4 +75,5 @@ class JujuCmdBackend(JujuBackend):
     def juju_status_text(self) -> str:
         return self._call_juju(
             CmdArg(value="status"),
+            CmdArg(name="integrations"),
         )
