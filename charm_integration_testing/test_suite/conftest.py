@@ -2,12 +2,13 @@
 # See LICENSE file for licensing details.
 
 
+import logging
+
 import pytest
 
 from charm_integration_testing.juju import JujuClient
 from charm_integration_testing.juju_cmd import JujuCmdBackend
 
-import logging
 
 @pytest.fixture
 def logger() -> logging.Logger:

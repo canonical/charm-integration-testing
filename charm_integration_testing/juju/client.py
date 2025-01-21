@@ -1,11 +1,10 @@
 # Copyright 2024-2025 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import logging
 from datetime import datetime, timedelta, timezone
 
 from .backend import JujuBackend, JujuWaitIdleTimeoutError
-
-import logging
 
 
 class JujuClient:
@@ -52,4 +51,4 @@ class JujuClient:
         raise JujuWaitIdleTimeoutError
 
     def print_status(self):
-        self.logger.info(f"Juju Status:\n{self.backend.juju_status_text()}"),
+        (self.logger.info(f"Juju Status:\n{self.backend.juju_status_text()}"),)
