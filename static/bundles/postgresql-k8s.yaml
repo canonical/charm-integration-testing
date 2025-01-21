@@ -1,0 +1,7 @@
+bundle: kubernetes
+applications:
+  postgresql-k8s:
+    charm: postgresql-k8s
+    channel: 14/stable
+    trust: true
+    scale: 1
