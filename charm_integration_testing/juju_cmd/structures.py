@@ -32,3 +32,8 @@ class JujuStatus:
         units: dict[str, Unit] = Field(default_factory=dict)
 
     applications: dict[str, Application]
+
+
+@serializeable_dataclass
+class JujuModel:
+    type: str

@@ -9,7 +9,7 @@ import yaml
 from charm_integration_testing.juju import JujuBackend, JujuWaitIdleTimeoutError
 
 from .cmd import CmdArg, CmdClient, CmdError
-from .structures import JujuStatus
+from .structures import JujuModel, JujuStatus
 
 
 class JujuCmdBackend(JujuBackend):
@@ -31,30 +31,55 @@ class JujuCmdBackend(JujuBackend):
             )
         )
 
-    def scale_application(self, application: str, num: int):
-        # Get current juju units
-        # units = sorted(self._status().applications[application].units.keys(), key=lambda unit: unit.split("/", 1)[1])
+    def is_k8s_model(self, model: str) -> bool:
+        return self.show_model(model).type == "kubernetes"
 
-        # Add or remove units
-        # juju scale-application does not work with VM charms XXX: SQT-431
-        self._call_juju(CmdArg(value="scale-application"), CmdArg(value=application), CmdArg(value=num))
-        # if len(units) < num:
-        #     self._call_juju(
-        #         CmdArg(value="add-unit"),
-        #         CmdArg(value=application),
-        #         CmdArg(value=num - len(units), name="num-units"),
-        #     )
-        # elif len(units) > num:
-        #     self._call_juju(
-        #         CmdArg(value="remove-unit"),
-        #         CmdArg(name="no-prompt"),
-        #         *[CmdArg(value=unit) for unit in units[num:]],
-        #     )
+    def show_model(self, model: str) -> JujuModel:
+        return JujuModel(
+            **(
+                yaml.safe_load(
+                    self._call_juju(
+                        CmdArg(value="show-model"),
+                        CmdArg(value=model),
+                    )
+                )[model]
+            )
+        )
+
+    def scale_application(self, model: str, application: str, num: int):
+        # Check if k8s model
+        if self.is_k8s_model(model):
+            # Call scale application
+            self._call_juju(
+                CmdArg(name="model", value=model),
+                CmdArg(value="scale-application"),
+                CmdArg(value=application),
+                CmdArg(value=num),
+            )
+        else:
+            # Get current juju units
+            units = sorted(
+                self._status().applications[application].units.keys(), key=lambda unit: unit.split("/", 1)[1]
+            )
+
+            # Add or remove units
+            if len(units) < num:
+                self._call_juju(
+                    CmdArg(value="add-unit"),
+                    CmdArg(value=application),
+                    CmdArg(value=num - len(units), name="num-units"),
+                )
+            elif len(units) > num:
+                self._call_juju(
+                    CmdArg(value="remove-unit"),
+                    CmdArg(name="no-prompt"),
+                    *[CmdArg(value=unit) for unit in units[num:]],
+                )
 
     def num_units(self, application: str) -> int:
         return len(self._status().applications[application].units)
 
-    def wait_idle(self, model: str = "default", timeout: timedelta = timedelta(days=1)):
+    def wait_idle(self, model: str, timeout: timedelta):
         try:
             self._call_juju(
                 CmdArg(value="wait-for"),

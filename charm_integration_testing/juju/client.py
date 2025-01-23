@@ -16,9 +16,9 @@ class JujuClient:
         self.backend = backend
         self.logger = logger
 
-    def scale_application(self, application: str, num: int):
+    def scale_application(self, application: str, num: int, model: str = "default"):
         self.logger.info(f"Scaling application {application} to {num} units.")
-        self.backend.scale_application(application, num)
+        self.backend.scale_application(model, application, num)
 
     def num_units(self, application: str) -> int:
         self.logger.info(f"Getting the number of units for {application}.")

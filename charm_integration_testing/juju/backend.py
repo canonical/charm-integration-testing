@@ -12,7 +12,7 @@ class JujuWaitIdleTimeoutError(TimeoutError):
 
 class JujuBackend(ABC):
     @abstractmethod
-    def scale_application(self, application: str, num: int):
+    def scale_application(self, model: str, application: str, num: int):
         raise NotImplementedError
 
     @abstractmethod
@@ -20,7 +20,7 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def wait_idle(self, model: str = "default", timeout: timedelta = timedelta(days=1)):
+    def wait_idle(self, model: str, timeout: timedelta):
         raise NotImplementedError
 
     @abstractmethod
