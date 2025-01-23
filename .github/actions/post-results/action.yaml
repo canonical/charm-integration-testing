@@ -1,0 +1,67 @@
+name: Post results
+description: Post results to Test Observer
+
+inputs:
+  test_observer_api:
+    description: "URL for the Test Observer API"
+    required: True
+
+  test_execution_id:
+    description: "ID for the Test Execution"
+    required: True
+
+  junit_xml:
+    description: "Test results JUnit XML file"
+    required: True
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install yq and jq
+      shell: bash
+      run: sudo snap install yq jq
+
+    - id: get-json-body
+      name: Convert JUnit XML to Test Observer JSON
+      shell: bash
+      run: |
+        cat ${{ inputs.junit_xml }} | yq -p=xml -o=json '
+          .testsuites.testsuite |= [] + . | # Ensure testsuite is list
+          .testsuites.testsuite[].testcase |= [] + . # Ensure testcase is list
+        ' | jq -c '
+          [
+            .testsuites.testsuite[] | {testsuite: .} + (.testcase[]) |
+            {
+              "name": ."+@name",
+              "status": (
+                if .error or .failure then "FAILED"
+                elif .skipped then "SKIPPED"
+                else "PASSED"
+                end
+              ),
+              "template_id": "",
+              "category": .testsuite."+@name",
+              "comment": (
+                if .error then .error."+@message"
+                elif .failure then .failure."+@message"
+                elif .skipped then .skipped."+@message"
+                else ""
+                end
+              ),
+              "io_log": (
+                if .error then .error."+content"
+                elif .failure then .failure."+content"
+                elif .skipped then .skipped."+content"
+                else ""
+                end
+              )
+            }
+          ]
+        ' > body.json
+
+    - name: Post results to Test Observer
+      shell: bash
+      run: |
+        curl -f -X POST ${{ inputs.test_observer_api }}/v1/test-executions/${{ inputs.test_execution_id}}/test-results \
+          -H "Content-Type: application/json" \
+          -d @body.json
