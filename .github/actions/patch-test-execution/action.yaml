@@ -1,0 +1,52 @@
+name: Patch test execution
+description: Modify a test execution on Test Observer
+
+inputs:
+  test_observer_api:
+    description: "URL for the Test Observer API"
+    required: True
+
+  test_execution_id:
+    description: "ID for the Test Execution"
+    required: True
+
+  status:
+    description: "Test execution status"
+    required: False
+    type: choice
+    options:
+      - "NOT_STARTED"
+      - "IN_PROGRESS"
+      - "PASSED"
+      - "FAILED"
+      - "NOT_TESTED"
+      - "ENDED_PREMATURELY"
+      - "COMPLETED"
+      - ""
+
+  # logs_link:
+  #   description: "Link to test logs"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install jq
+      shell: bash
+      run: sudo snap install jq
+
+    - id: get-json-body
+      name: Get Test Observer JSON
+      shell: bash
+      run: |
+        jq -nc '
+          {
+            "status": (if "${{ inputs.status }}" != "" then "${{ inputs.status }}" else null end)
+          }
+        ' > body.json
+
+    - name: Send PATCH request to Test Observer
+      shell: bash
+      run: |
+        curl -f -X PATCH ${{ inputs.test_observer_api }}/v1/test-executions/${{ inputs.test_execution_id}} \
+          -H "Content-Type: application/json" \
+          -d @body.json

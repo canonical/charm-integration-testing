@@ -55,10 +55,18 @@ jobs:
     runs-on:
       - self-hosted
       - charm_qa
+    env:
+      test_observer_api: ${{ secrets.TEST_OBSERVER_API }}
     steps:
-    # - name: Report Test Execution Start To Test Observer
     - name: Clone Repo
       uses: actions/checkout@v4
+    - name: Report Test Execution Start To Test Observer
+      if: ${{ env.test_observer_api != '' }}
+      uses: ./.github/actions/patch-test-execution
+      with:
+        test_observer_api: ${{ env.test_observer_api }}
+        test_execution_id: ${{ github.event.inputs.execution_id }}
+        status: "IN_PROGRESS"
     - name: Setup Kubeconfig
       shell: bash
       run: |
@@ -114,8 +122,20 @@ jobs:
     - name: Collect Logs
       shell: bash
       run: cat out.xml
-    # - name: Upload Logs
-    # - name: Report Test Execution End To Test Observer
+    - name: Post results to Test Observer
+      if: ${{ env.test_observer_api != '' }}
+      uses: ./.github/actions/post-results
+      with:
+        test_observer_api: ${{ env.test_observer_api }}
+        test_execution_id: ${{ github.event.inputs.execution_id }}
+        junit_xml: out.xml
+    - name: Mark Test Execution completed on Test Observer
+      if: ${{ env.test_observer_api != '' }}
+      uses: ./.github/actions/patch-test-execution
+      with:
+        test_observer_api: ${{ env.test_observer_api }}
+        test_execution_id: ${{ github.event.inputs.execution_id }}
+        status: "COMPLETED"
     - name: Teardown Model
       if: ${{ always() }}
       shell: bash
