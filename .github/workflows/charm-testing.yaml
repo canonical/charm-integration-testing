@@ -125,6 +125,7 @@ jobs:
       with:
         kubeconf: .kube/config 
         controller: ${{ steps.controller.outputs.date }}
+        proxy: http://squid.internal:3128
     - name: Post results to Test Observer
       if: ${{ env.test_observer_api != '' }}
       uses: ./.github/actions/post-results
