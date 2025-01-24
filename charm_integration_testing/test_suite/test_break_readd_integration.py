@@ -18,7 +18,7 @@ def test_break_readd_integration(
     provider_application: str,
     provider_endpoint: str,
 ):
-    # Remove units
+    # Break relation
     juju_client.remove_integration(
         model=model,
         application_1=requirer_application,
@@ -28,7 +28,7 @@ def test_break_readd_integration(
     )
     juju_client.idle_for_period(model=model)
 
-    # Rescale application
+    # Readd relation
     juju_client.integrate(
         model=model,
         application_1=requirer_application,
