@@ -121,7 +121,7 @@ jobs:
         --junit-xml=out.xml
     - name: Collect Logs
       id: logs
-      uses: canonical/juju-k8s-crashdump/actions/juju-k8s-crashdump/action.yaml@github-ation
+      uses: canonical/juju-k8s-crashdump/actions/juju-k8s-crashdump/action.yaml@github-action
       with:
         kubeconf: .kube/config 
         controller: ${{ steps.controller.outputs.date }}
