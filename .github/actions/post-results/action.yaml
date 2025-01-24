@@ -39,7 +39,7 @@ runs:
                 else "PASSED"
                 end
               ),
-              "template_id": "",
+              "template_id": ."+@classname",
               "category": .testsuite."+@name",
               "comment": (
                 if .error then .error."+@message"
