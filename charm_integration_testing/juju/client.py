@@ -82,3 +82,41 @@ class JujuClient:
 
     def print_status(self, model: str = "default"):
         (self.logger.info(f"Juju Status:\n{self.backend.juju_status_text(model)}"),)
+
+    def _format_endpoint(self, application: str, endpoint: str | None = None) -> str:
+        if endpoint is None:
+            return application
+        else:
+            return f"{application}:{endpoint}"
+
+    def integrate(
+        self,
+        application_1: str,
+        application_2: str,
+        endpoint_1: str | None = None,
+        endpoint_2: str | None = None,
+        model: str = "default",
+    ):
+        # Get targets
+        target_1 = self._format_endpoint(application_1, endpoint_1)
+        target_2 = self._format_endpoint(application_2, endpoint_2)
+
+        # Integrate
+        self.logger.info(f"Integrating {target_1} with {target_2}")
+        self.backend.integrate(model, target_1, target_2)
+
+    def remove_integration(
+        self,
+        application_1: str,
+        application_2: str,
+        endpoint_1: str | None = None,
+        endpoint_2: str | None = None,
+        model: str = "default",
+    ):
+        # Get targets
+        target_1 = self._format_endpoint(application_1, endpoint_1)
+        target_2 = self._format_endpoint(application_2, endpoint_2)
+
+        # Remove integration
+        self.logger.info(f"Removing integration between {target_1} and {target_2}")
+        self.backend.remove_integration(model, target_1, target_2)

@@ -26,3 +26,11 @@ class JujuBackend(ABC):
     @abstractmethod
     def juju_status_text(self, model: str) -> str:
         raise NotImplementedError
+
+    @abstractmethod
+    def integrate(self, model: str, target_1: str, target_2: str):
+        raise NotImplementedError
+
+    @abstractmethod
+    def remove_integration(self, model: str, target_1: str, target_2: str):
+        raise NotImplementedError
