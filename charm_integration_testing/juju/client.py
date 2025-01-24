@@ -83,18 +83,15 @@ class JujuClient:
     def print_status(self, model: str = "default"):
         (self.logger.info(f"Juju Status:\n{self.backend.juju_status_text(model)}"),)
 
-    def _format_endpoint(self, application: str, endpoint: str | None = None) -> str:
-        if endpoint is None:
-            return application
-        else:
-            return f"{application}:{endpoint}"
+    def _format_endpoint(self, application: str, endpoint: str) -> str:
+        return f"{application}:{endpoint}"
 
     def integrate(
         self,
         application_1: str,
         application_2: str,
-        endpoint_1: str | None = None,
-        endpoint_2: str | None = None,
+        endpoint_1: str,
+        endpoint_2: str,
         model: str = "default",
     ):
         # Get targets
@@ -109,8 +106,8 @@ class JujuClient:
         self,
         application_1: str,
         application_2: str,
-        endpoint_1: str | None = None,
-        endpoint_2: str | None = None,
+        endpoint_1: str,
+        endpoint_2: str,
         model: str = "default",
     ):
         # Get targets
