@@ -21,7 +21,7 @@ class CmdArg:
 
 class CmdError(RuntimeError):
     def __init__(self, command: str, return_code: int, stdout: str = "", stderr: str = ""):
-        super().__init__(f"Command '{command}' exited with return code '{return_code}'")
+        super().__init__(f"Command '{command}' exited with return code '{return_code}', stderr: {stderr}")
 
         self.command = command
         self.return_code = return_code

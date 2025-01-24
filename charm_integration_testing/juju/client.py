@@ -16,13 +16,13 @@ class JujuClient:
         self.backend = backend
         self.logger = logger
 
-    def scale_application(self, application: str, num: int):
+    def scale_application(self, application: str, num: int, model: str = "default"):
         self.logger.info(f"Scaling application {application} to {num} units.")
-        self.backend.scale_application(application, num)
+        self.backend.scale_application(model, application, num)
 
-    def num_units(self, application: str) -> int:
+    def num_units(self, application: str, model: str = "default") -> int:
         self.logger.info(f"Getting the number of units for {application}.")
-        return self.backend.num_units(application)
+        return self.backend.num_units(model, application)
 
     # Wait for the Juju model to become idle
     def idle_for_period(
@@ -39,7 +39,7 @@ class JujuClient:
             self._idle_for_period(model, timeout, idle_period)
         finally:
             # Always print status at end
-            self.print_status()
+            self.print_status(model=model)
 
             # End the log group
             self.logger.info("Reached end of waiting for idle.\n::endgroup::")
@@ -80,5 +80,5 @@ class JujuClient:
         self.logger.error("Model did not reach idle.")
         raise JujuWaitIdleTimeoutError
 
-    def print_status(self):
-        (self.logger.info(f"Juju Status:\n{self.backend.juju_status_text()}"),)
+    def print_status(self, model: str = "default"):
+        (self.logger.info(f"Juju Status:\n{self.backend.juju_status_text(model)}"),)
