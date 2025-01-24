@@ -1,9 +1,17 @@
 name: Execute tests against two charms and their integrations
-run-name: Testing ${{ github.event.inputs.charm_under_test }}-${{ github.event.inputs.charm_endpoint }} against ${{ github.event.inputs.neighbor }}-${{ github.event.inputs.neighbor_endpoint }} for the ${{ github.event.inputs.execution_id }} test.
+run-name: Testing ${{ github.event.inputs.charm_under_test }}-${{ github.event.inputs.charm_endpoint }} against ${{ github.event.inputs.neighbor }}-${{ github.event.inputs.neighbor_endpoint }}${{ github.event.inputs.execution_id != '' && ' for the ' + github.event.inputs.execution_id + ' test.' || '.' }}
 
 on:
   workflow_dispatch:
     inputs:
+      environment:
+        description: "Environment to run in."
+        type: choice
+        default: testing
+        options:
+          - testing
+          - staging
+          - production
       arch:
         description: "Architecture of the charms being tested."
         required: false
@@ -19,7 +27,7 @@ on:
         required: true
       execution_id:
         description: "Test Observer execution ID to post results from this test to."
-        required: true
+        required: false
       juju_channel:
         description: "Juju channel to use while testing."
         required: false
@@ -56,12 +64,12 @@ jobs:
       - self-hosted
       - charm_qa
     env:
-      test_observer_api: ${{ secrets.TEST_OBSERVER_API }}
+      test_observer_api: ${{ github.event.inputs.environment == 'production' && secrets.PRODUCTION_TEST_OBSERVER_API || (github.event.inputs.environment == 'staging' && secrets.STAGING_TEST_OBSERVER_API || '') }}
     steps:
     - name: Clone Repo
       uses: actions/checkout@v4
     - name: Report Test Execution Start To Test Observer
-      if: ${{ env.test_observer_api != '' }}
+      if: ${{ always() && env.test_observer_api != '' && github.event.inputs.execution_id != '' }}
       uses: ./.github/actions/patch-test-execution
       with:
         test_observer_api: ${{ env.test_observer_api }}
@@ -123,14 +131,14 @@ jobs:
       shell: bash
       run: cat out.xml
     - name: Post results to Test Observer
-      if: ${{ env.test_observer_api != '' }}
+      if: ${{ env.test_observer_api != '' && github.event.inputs.execution_id != '' }}
       uses: ./.github/actions/post-results
       with:
         test_observer_api: ${{ env.test_observer_api }}
         test_execution_id: ${{ github.event.inputs.execution_id }}
         junit_xml: out.xml
     - name: Mark Test Execution completed on Test Observer
-      if: ${{ env.test_observer_api != '' }}
+      if: ${{ always() && env.test_observer_api != '' && github.event.inputs.execution_id != '' }}
       uses: ./.github/actions/patch-test-execution
       with:
         test_observer_api: ${{ env.test_observer_api }}
