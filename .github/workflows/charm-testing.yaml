@@ -68,7 +68,7 @@ jobs:
       - self-hosted
       - charm_qa
     env:
-      test_observer_api: ${{ github.event.inputs.environment == 'production' && secrets.PRODUCTION_TEST_OBSERVER_API || (github.event.inputs.environment == 'staging' && secrets.STAGING_TEST_OBSERVER_API || '') }}
+      test_observer_api: ${{ github.event.inputs.environment == 'production' && vars.PROD_TEST_OBSERVER_API || (github.event.inputs.environment == 'staging' && vars.STG_TEST_OBSERVER_API || '') }}
     steps:
     - name: Clone Repo
       uses: actions/checkout@v4
