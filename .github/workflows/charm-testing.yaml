@@ -118,17 +118,20 @@ jobs:
         ./scripts/run-test-suite.sh --model model-${{ steps.controller.outputs.date }} \
         --requirer ${{ github.event.inputs.charm_under_test }} \
         --provider ${{ github.event.inputs.neighbor }} \
-        --junit-xml=out.xml
+        --fjunit-xml=out.xml
     - name: Collect Logs
-      shell: bash
-      run: cat out.xml
+      id: logs
+      uses: canonical/juju-k8s-crashdump/actions/juju-k8s-crashdump/action.yaml@github-ation
+      with:
+        kubeconf: .kube/config 
+        controller: ${{ steps.controller.outputs.date }}
     - name: Post results to Test Observer
       if: ${{ env.test_observer_api != '' }}
       uses: ./.github/actions/post-results
       with:
         test_observer_api: ${{ env.test_observer_api }}
         test_execution_id: ${{ github.event.inputs.execution_id }}
-        junit_xml: out.xml
+        junit_xml: ../out.xml
     - name: Mark Test Execution completed on Test Observer
       if: ${{ env.test_observer_api != '' }}
       uses: ./.github/actions/patch-test-execution
