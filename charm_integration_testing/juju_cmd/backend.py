@@ -21,12 +21,13 @@ class JujuCmdBackend(JujuBackend):
     def _call_juju(self, *args: list[CmdArg]) -> str:
         return self.cmd_client.call(CmdArg(value="juju"), *args)
 
-    def _status(self) -> JujuStatus:
+    def _status(self, model: str) -> JujuStatus:
         return JujuStatus(
             **yaml.safe_load(
                 self._call_juju(
                     CmdArg(value="status"),
-                    CmdArg(value="yaml", name="format"),
+                    CmdArg(name="model", value=model),
+                    CmdArg(name="format", value="yaml"),
                 )
             )
         )
@@ -51,33 +52,35 @@ class JujuCmdBackend(JujuBackend):
         if self.is_k8s_model(model):
             # Call scale application
             self._call_juju(
-                CmdArg(name="model", value=model),
                 CmdArg(value="scale-application"),
+                CmdArg(name="model", value=model),
                 CmdArg(value=application),
                 CmdArg(value=num),
             )
         else:
             # Get current juju units
             units = sorted(
-                self._status().applications[application].units.keys(), key=lambda unit: unit.split("/", 1)[1]
+                self._status(model).applications[application].units.keys(), key=lambda unit: unit.split("/", 1)[1]
             )
 
             # Add or remove units
             if len(units) < num:
                 self._call_juju(
                     CmdArg(value="add-unit"),
+                    CmdArg(name="model", value=model),
                     CmdArg(value=application),
                     CmdArg(value=num - len(units), name="num-units"),
                 )
             elif len(units) > num:
                 self._call_juju(
                     CmdArg(value="remove-unit"),
+                    CmdArg(name="model", value=model),
                     CmdArg(name="no-prompt"),
                     *[CmdArg(value=unit) for unit in units[num:]],
                 )
 
-    def num_units(self, application: str) -> int:
-        return len(self._status().applications[application].units)
+    def num_units(self, model: str, application: str) -> int:
+        return len(self._status(model).applications[application].units)
 
     def wait_idle(self, model: str, timeout: timedelta):
         try:
@@ -97,8 +100,9 @@ class JujuCmdBackend(JujuBackend):
             else:
                 raise e
 
-    def juju_status_text(self) -> str:
+    def juju_status_text(self, model: str) -> str:
         return self._call_juju(
             CmdArg(value="status"),
+            CmdArg(name="model", value=model),
             CmdArg(name="integrations"),
         )
