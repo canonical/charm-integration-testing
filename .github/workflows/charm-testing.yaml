@@ -50,13 +50,17 @@ on:
           - 22.04
           - 24.04
         default: 24.04
-      substrate:
-        description: "Substrate to run the tests on."
-        required: false
-        type: choice
-        options:
-          - kubernetes
-        default: kubernetes
+      # TODO: GitHub workflow_dispatch is limited to 10 inputs
+      # But maybe by the time we need this that will have changed!
+      # https://github.com/orgs/community/discussions/8774
+      # If not, maybe pass in JSON and use fromJSON()
+      # substrate:
+      #   description: "Substrate to run the tests on."
+      #   required: false
+      #   type: choice
+      #   options:
+      #     - kubernetes
+      #   default: kubernetes
 jobs:
   execute-charm-test:
     name: Execute integration tests against the charms
