@@ -43,6 +43,7 @@ runs:
             "status": (if "${{ inputs.status }}" != "" then "${{ inputs.status }}" else null end)
           }
         ' > body.json
+        cat body.json
 
     - name: Send PATCH request to Test Observer
       shell: bash

@@ -66,6 +66,7 @@ runs:
             }
           ]
         ' > body.json
+        cat body.json
 
     - name: Post results to Test Observer
       shell: bash
