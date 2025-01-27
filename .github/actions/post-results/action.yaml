@@ -39,8 +39,16 @@ runs:
                 else "PASSED"
                 end
               ),
-              "template_id": ."+@classname",
-              "category": .testsuite."+@name",
+              "template_id": (
+                if ."+@classname" then ."+@classname"
+                else ""
+                end
+              ),
+              "category": (
+                if .testsuite."+@name" then .testsuite."+@name"
+                else ""
+                end
+              )
               "comment": (
                 if .error then .error."+@message"
                 elif .failure then .failure."+@message"
