@@ -70,8 +70,8 @@ jobs:
     - name: Setup Kubeconfig
       shell: bash
       run: |
-        mkdir -p .kube
-        echo '${{ secrets.STG_SQA_KUBECONFIG }}' > .kube/config
+        mkdir -p $HOME/.kube
+        echo '${{ secrets.STG_SQA_KUBECONFIG }}' > $HOME/.kube/config
     - name: Install Juju
       shell: bash
       run: |
@@ -120,8 +120,13 @@ jobs:
         --provider ${{ github.event.inputs.neighbor }}:${{ github.event.inputs.neighbor_endpoint }} \
         --junit-xml=out.xml
     - name: Collect Logs
-      shell: bash
-      run: cat out.xml
+      if: ${{ always() }}
+      id: logs
+      uses: canonical/juju-k8s-crashdump/actions/juju-k8s-crashdump@main
+      with:
+        kubeconf: $HOME/.kube/config
+        controller: ${{ steps.controller.outputs.date }}
+        proxy: http://squid.internal:3128
     - name: Post results to Test Observer
       if: ${{ env.test_observer_api != '' }}
       uses: ./.github/actions/post-results
