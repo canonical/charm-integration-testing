@@ -48,6 +48,7 @@ runs:
     - name: Send PATCH request to Test Observer
       shell: bash
       run: |
-        curl -f -X PATCH ${{ inputs.test_observer_api }}/v1/test-executions/${{ inputs.test_execution_id}} \
+        curl --fail-with-body \
+          -X PATCH ${{ inputs.test_observer_api }}/v1/test-executions/${{ inputs.test_execution_id}} \
           -H "Content-Type: application/json" \
           -d @body.json

@@ -71,6 +71,7 @@ runs:
     - name: Post results to Test Observer
       shell: bash
       run: |
-        curl -f -X POST ${{ inputs.test_observer_api }}/v1/test-executions/${{ inputs.test_execution_id}}/test-results \
+        curl --fail-with-body \
+          -X POST ${{ inputs.test_observer_api }}/v1/test-executions/${{ inputs.test_execution_id}}/test-results \
           -H "Content-Type: application/json" \
           -d @body.json
