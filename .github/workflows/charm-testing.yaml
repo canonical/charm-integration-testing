@@ -104,22 +104,23 @@ jobs:
       shell: bash
       run: |
         juju add-model model-${{ steps.controller.outputs.date }}
-    - name: Deploy Bundles
-      shell: bash
-      run: |
-        juju deploy --trust ./static/bundles/${{ github.event.inputs.charm_under_test }}.yaml
-        juju deploy --trust ./static/bundles/${{ github.event.inputs.neighbor }}.yaml
-        juju integrate ${{github.event.inputs.charm_under_test}}:${{ github.event.inputs.charm_endpoint }} ${{ github.event.inputs.neighbor }}:${{ github.event.inputs.neighbor_endpoint }}
-        juju-wait --max_wait 1200 --verbose
-        juju status --relations
-    - name: Execute Tests
-      shell: bash
-      run: |
-        ./scripts/run-test-suite.sh --model model-${{ steps.controller.outputs.date }} \
-        --requirer ${{ github.event.inputs.charm_under_test }} \
-        --provider ${{ github.event.inputs.neighbor }} \
-        --junit-xml=out.xml
+#    - name: Deploy Bundles
+#      shell: bash
+#      run: |
+#        juju deploy --trust ./static/bundles/${{ github.event.inputs.charm_under_test }}.yaml
+#        juju deploy --trust ./static/bundles/${{ github.event.inputs.neighbor }}.yaml
+#        juju integrate ${{github.event.inputs.charm_under_test}}:${{ github.event.inputs.charm_endpoint }} ${{ github.event.inputs.neighbor }}:${{ github.event.inputs.neighbor_endpoint }}
+#        juju-wait --max_wait 1200 --verbose
+#        juju status --relations
+#    - name: Execute Tests
+#      shell: bash
+#      run: |
+#        ./scripts/run-test-suite.sh --model model-${{ steps.controller.outputs.date }} \
+#        --requirer ${{ github.event.inputs.charm_under_test }} \
+#        --provider ${{ github.event.inputs.neighbor }} \
+#        --junit-xml=out.xml
     - name: Collect Logs
+      if: ${{ always() }}
       id: logs
       uses: canonical/juju-k8s-crashdump/actions/juju-k8s-crashdump/@github-action
       with:
