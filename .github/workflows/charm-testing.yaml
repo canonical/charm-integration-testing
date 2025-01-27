@@ -70,6 +70,18 @@ jobs:
     env:
       test_observer_api: ${{ github.event.inputs.environment == 'production' && vars.PROD_TEST_OBSERVER_API || (github.event.inputs.environment == 'staging' && vars.STG_TEST_OBSERVER_API || '') }}
     steps:
+    - name: Swift?
+      uses: canonical/sqa-cloud-deployment-pipeline/.github/actions/upload-to-swift
+      with:
+        job_uuid: test
+        swift_bucket: bar
+        SWIFT_OS_AUTH_URL: foo.bar
+        SWIFT_AS_USERNAME: foo
+        SWIFT_OS_PASSWORD: secret
+        SWIFT_OS_PROCJECT_NAME: project
+        SWIFT_OS_REGION_NAME: regionone
+        SWIFT_OS_USER_DOMAIN_NAME: yep
+        SWIFT_OS_PROJECT_DONMAIN_NAME: domain
     - name: Clone Repo
       uses: actions/checkout@v4
     - name: Report Test Execution Start To Test Observer
