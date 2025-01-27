@@ -71,7 +71,7 @@ jobs:
       test_observer_api: ${{ github.event.inputs.environment == 'production' && vars.PROD_TEST_OBSERVER_API || (github.event.inputs.environment == 'staging' && vars.STG_TEST_OBSERVER_API || '') }}
     steps:
     - name: Swift?
-      uses: canonical/sqa-cloud-deployment-pipeline/.github/actions/upload-to-swift
+      uses: canonical/sqa-cloud-deployment-pipeline/.github/actions/upload-to-swift@main
       with:
         job_uuid: test
         swift_bucket: bar
