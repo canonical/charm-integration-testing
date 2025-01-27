@@ -39,8 +39,16 @@ runs:
                 else "PASSED"
                 end
               ),
-              "template_id": "",
-              "category": .testsuite."+@name",
+              "template_id": (
+                if ."+@classname" then ."+@classname"
+                else ""
+                end
+              ),
+              "category": (
+                if .testsuite."+@name" then .testsuite."+@name"
+                else ""
+                end
+              )
               "comment": (
                 if .error then .error."+@message"
                 elif .failure then .failure."+@message"
@@ -58,10 +66,12 @@ runs:
             }
           ]
         ' > body.json
+        cat body.json
 
     - name: Post results to Test Observer
       shell: bash
       run: |
-        curl -f -X POST ${{ inputs.test_observer_api }}/v1/test-executions/${{ inputs.test_execution_id}}/test-results \
+        curl --fail-with-body \
+          -X POST ${{ inputs.test_observer_api }}/v1/test-executions/${{ inputs.test_execution_id}}/test-results \
           -H "Content-Type: application/json" \
           -d @body.json
