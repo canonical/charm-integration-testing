@@ -122,7 +122,7 @@ jobs:
     - name: Collect Logs
       if: ${{ always() }}
       id: logs
-      uses: canonical/juju-k8s-crashdump/actions/juju-k8s-crashdump/@github-action
+      uses: canonical/juju-k8s-crashdump/actions/juju-k8s-crashdump@github-action
       with:
         kubeconf: .kube/config 
         controller: ${{ steps.controller.outputs.date }}
