@@ -4,8 +4,6 @@
 
 import pytest
 
-from charm_integration_testing.juju import JujuClient
-
 
 def pytest_addoption(parser):
     parser.addoption(

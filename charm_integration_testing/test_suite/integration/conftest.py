@@ -2,11 +2,11 @@
 # See LICENSE file for licensing details.
 
 
+from datetime import timedelta
+
 import pytest
 
 from charm_integration_testing.juju import JujuClient
-
-from datetime import timedelta
 
 
 def pytest_addoption(parser):
