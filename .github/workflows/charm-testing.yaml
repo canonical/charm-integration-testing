@@ -117,35 +117,46 @@ jobs:
       run: |
         juju add-model model-${{ steps.controller.outputs.date }}
     - name: Deploy Bundles
+      continue-on-error: true
       shell: bash
       run: |
-        juju deploy --trust ./static/bundles/${{ github.event.inputs.charm_under_test }}.yaml
-        juju deploy --trust ./static/bundles/${{ github.event.inputs.neighbor }}.yaml
-        juju integrate ${{github.event.inputs.charm_under_test}}:${{ github.event.inputs.charm_endpoint }} ${{ github.event.inputs.neighbor }}:${{ github.event.inputs.neighbor_endpoint }}
-        juju-wait --max_wait 1200 --verbose
-        juju status --relations
+        ./scripts/test-deploy.sh \
+          --model model-${{ steps.controller.outputs.date }} \
+          --bundles ./static/bundles/${{ github.event.inputs.charm_under_test }}.yaml ./static/bundles/${{ github.event.inputs.neighbor }}.yaml \
+          --integrations "${{ github.event.inputs.charm_under_test }}:${{ github.event.inputs.charm_endpoint }}/${{ github.event.inputs.neighbor }}:${{ github.event.inputs.neighbor_endpoint }}" \
+          --junit-xml=junit-deploy.xml
     - name: Execute Tests
+      continue-on-error: true
       shell: bash
       run: |
-        ./scripts/run-test-suite.sh --model model-${{ steps.controller.outputs.date }} \
-        --requirer ${{github.event.inputs.charm_under_test}}:${{ github.event.inputs.charm_endpoint }} \
-        --provider ${{ github.event.inputs.neighbor }}:${{ github.event.inputs.neighbor_endpoint }} \
-        --junit-xml=out.xml
+        ./scripts/test-integration.sh \
+          --model model-${{ steps.controller.outputs.date }} \
+          --target-application ${{ github.event.inputs.charm_under_test }} \
+          --target-endpoint ${{ github.event.inputs.charm_endpoint }} \
+          --neighbor-application ${{ github.event.inputs.neighbor }} \
+          --neighbor-endpoint ${{ github.event.inputs.neighbor_endpoint }} \
+          --junit-xml=junit-integration.xml
     - name: Collect Logs
       if: ${{ always() }}
       id: logs
-      uses: canonical/juju-k8s-crashdump/actions/juju-k8s-crashdump@main
+      uses: canonical/juju-k8s-crashdump/actions/juju-k8s-crashdump@fix/use-different-working-directory
       with:
         kubeconf: $HOME/.kube/config
         controller: ${{ steps.controller.outputs.date }}
         proxy: http://squid.internal:3128
+    # - name: Teardown charm under test
+    - name: Merge JUnit output
+      shell: bash
+      run: |
+        ./scripts/merge-junit.sh junit-*.xml junit.xml
+        cat junit.xml
     - name: Post results to Test Observer
       if: ${{ env.test_observer_api != '' && github.event.inputs.execution_id != '' }}
       uses: ./.github/actions/post-results
       with:
         test_observer_api: ${{ env.test_observer_api }}
         test_execution_id: ${{ github.event.inputs.execution_id }}
-        junit_xml: out.xml
+        junit_xml: ./junit.xml
     - name: Mark Test Execution completed on Test Observer
       if: ${{ always() && env.test_observer_api != '' && github.event.inputs.execution_id != '' }}
       uses: ./.github/actions/patch-test-execution

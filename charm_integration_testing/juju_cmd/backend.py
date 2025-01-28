@@ -90,7 +90,7 @@ class JujuCmdBackend(JujuBackend):
                 CmdArg(value=model),
                 CmdArg(
                     name="query",
-                    value="forEach(applications, app => app.status == 'active') && forEach(units, unit => unit.workload-status == 'active' && unit.agent-status == 'idle')",
+                    value="len(applications) == 0 || (forEach(applications, app => app.status == 'active') && forEach(units, unit => unit.workload-status == 'active' && unit.agent-status == 'idle'))",
                 ),
                 CmdArg(name="timeout", value=f"{timeout.total_seconds()}s"),
             )
@@ -121,4 +121,12 @@ class JujuCmdBackend(JujuBackend):
             CmdArg(name="model", value=model),
             CmdArg(value=target_1),
             CmdArg(value=target_2),
+        )
+
+    def deploy_bundle_file(self, model: str, bundle: str):
+        self._call_juju(
+            CmdArg(value="deploy"),
+            CmdArg(name="model", value=model),
+            CmdArg(name="trust"),
+            CmdArg(value=f"./{bundle}"),
         )
