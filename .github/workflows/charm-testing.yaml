@@ -139,7 +139,7 @@ jobs:
     - name: Collect Logs
       if: ${{ always() }}
       id: logs
-      uses: canonical/juju-k8s-crashdump/actions/juju-k8s-crashdump@fix/use-different-working-directory
+      uses: canonical/juju-k8s-crashdump/actions/juju-k8s-crashdump@main
       with:
         kubeconf: $HOME/.kube/config
         controller: ${{ steps.controller.outputs.date }}
