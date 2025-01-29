@@ -12,7 +12,7 @@ class JujuClient:
     backend: JujuBackend
     logger: logging.Logger
 
-    def __init__(self, backend, logger: logging.Logger):
+    def __init__(self, backend: JujuBackend, logger: logging.Logger):
         self.backend = backend
         self.logger = logger
 
@@ -117,3 +117,11 @@ class JujuClient:
         # Remove integration
         self.logger.info(f"Removing integration between {target_1} and {target_2}")
         self.backend.remove_integration(model, target_1, target_2)
+
+    def deploy_bundle_file(
+        self,
+        bundle: str,
+        model: str = "default",
+    ):
+        self.logger.info(f"Deploying bundle file: '{bundle}'")
+        self.backend.deploy_bundle_file(model, bundle)

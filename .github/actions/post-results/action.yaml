@@ -19,7 +19,9 @@ runs:
   steps:
     - name: Install yq and jq
       shell: bash
-      run: sudo snap install yq jq
+      run: |
+        sudo snap install jq
+        sudo snap install yq
 
     - id: get-json-body
       name: Convert JUnit XML to Test Observer JSON
@@ -48,7 +50,7 @@ runs:
                 if .testsuite."+@name" then .testsuite."+@name"
                 else ""
                 end
-              )
+              ),
               "comment": (
                 if .error then .error."+@message"
                 elif .failure then .failure."+@message"

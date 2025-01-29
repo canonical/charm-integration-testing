@@ -72,6 +72,17 @@ files = [
 ]
 
 [[package]]
+name = "junitparser"
+version = "3.2.0"
+description = "Manipulates JUnit/xUnit Result XML files"
+optional = false
+python-versions = "*"
+files = [
+    {file = "junitparser-3.2.0-py2.py3-none-any.whl", hash = "sha256:e14fdc0a999edfc15889b637390e8ef6ca09a49532416d3bd562857d42d4b96d"},
+    {file = "junitparser-3.2.0.tar.gz", hash = "sha256:b05e89c27e7b74b3c563a078d6e055d95cf397444f8f689b0ca616ebda0b3c65"},
+]
+
+[[package]]
 name = "markdown-it-py"
 version = "3.0.0"
 description = "Python port of markdown-it. Markdown parsing, done right!"
@@ -517,4 +528,4 @@ files = [
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.10"
-content-hash = "5f3adb3eda66873f489621ac4a1f7e4fc89104b48d75a370380b6df38b10c0b1"
+content-hash = "47db477d387b6bc049bcf0cd29b656eecd665b3538b88259c7f6085bd60e04eb"

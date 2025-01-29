@@ -34,3 +34,7 @@ class JujuBackend(ABC):
     @abstractmethod
     def remove_integration(self, model: str, target_1: str, target_2: str):
         raise NotImplementedError
+
+    @abstractmethod
+    def deploy_bundle_file(self, model: str, bundle: str):
+        raise NotImplementedError
