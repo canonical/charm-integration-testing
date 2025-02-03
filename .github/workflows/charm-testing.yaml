@@ -150,7 +150,7 @@ jobs:
       run: |
         ./scripts/test-teardown.sh \
           --model model-${{ steps.controller.outputs.date }} \
-          --applications ${{ github.event.inputs.charm_under_test }}
+          --applications ${{ github.event.inputs.charm_under_test }} \
           --junit-xml=junit-teardown.xml
     - name: Merge JUnit output
       shell: bash
