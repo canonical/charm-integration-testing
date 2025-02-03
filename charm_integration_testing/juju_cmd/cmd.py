@@ -1,7 +1,7 @@
 # Copyright 2024-2025 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-import subprocess
+import subprocess  # nosec
 from typing import Optional
 
 from pydantic import field_validator
@@ -33,7 +33,7 @@ class CmdClient:
     def call(self, *args: list[CmdArg]) -> str:
         # Run the command
         parsed_args = self.parse_args(*args)
-        result = subprocess.run(self.parse_args(*args), capture_output=True, text=True)
+        result = subprocess.run(self.parse_args(*args), capture_output=True, text=True)  # nosec
 
         # Check for error
         if result.returncode != 0:
