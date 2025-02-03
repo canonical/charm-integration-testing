@@ -144,7 +144,14 @@ jobs:
         kubeconf: $HOME/.kube/config
         controller: ${{ steps.controller.outputs.date }}
         proxy: http://squid.internal:3128
-    # - name: Teardown charm under test
+    - name: Teardown charm under test
+      continue-on-error: true
+      shell: bash
+      run: |
+        ./scripts/test-teardown.sh \
+          --model model-${{ steps.controller.outputs.date }} \
+          --applications ${{ github.event.inputs.charm_under_test }}
+          --junit-xml=junit-teardown.xml
     - name: Merge JUnit output
       shell: bash
       run: |

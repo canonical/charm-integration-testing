@@ -5,7 +5,7 @@ import logging
 import time
 from datetime import datetime, timedelta, timezone
 
-from .backend import JujuBackend, JujuWaitIdleTimeoutError
+from .backend import JujuBackend, JujuWaitTimeoutError
 
 
 class JujuClient:
@@ -52,7 +52,7 @@ class JujuClient:
         while datetime.now(timezone.utc) < start_time + timeout:
             try:
                 self.backend.wait_idle(model=model, timeout=timedelta(seconds=1))
-            except JujuWaitIdleTimeoutError:
+            except JujuWaitTimeoutError:
                 # Model not idle, try again
                 if idle_since is not None:
                     idle_since = None
@@ -78,7 +78,7 @@ class JujuClient:
 
         # Timed out
         self.logger.error("Model did not reach idle.")
-        raise JujuWaitIdleTimeoutError
+        raise JujuWaitTimeoutError
 
     def print_status(self, model: str = "default"):
         (self.logger.info(f"Juju Status:\n{self.backend.juju_status_text(model)}"),)
@@ -125,3 +125,31 @@ class JujuClient:
     ):
         self.logger.info(f"Deploying bundle file: '{bundle}'")
         self.backend.deploy_bundle_file(model, bundle)
+
+    def remove_applications(self, *applications: str, model: str = "default"):
+        self.logger.info(f"Removing applications: {', '.join(applications)}.")
+        self.backend.remove_applications(model, *applications)
+
+    def wait_for_removal(self, *applications: str, model: str = "default", timeout: timedelta = timedelta(days=1)):
+        # Start logging
+        self.logger.info(f"Begin waiting for removal of: {', '.join(applications)}.\n::group::Wait for removal.")
+
+        # Wait for removal
+        try:
+            # Loop until timeout
+            start_time = datetime.now(timezone.utc)
+            while datetime.now(timezone.utc) < start_time + timeout:
+                try:
+                    self.backend.wait_for_removal(model, applications, timedelta(seconds=1))
+                except JujuWaitTimeoutError:
+                    # Applications still exist, try again
+                    self.logger.info("Applications not removed.")
+                else:
+                    self.logger.info("Applications have been removed.")
+                    return
+        finally:
+            # Always print status at end
+            self.print_status(model=model)
+
+            # End the log group
+            self.logger.info("Reached end of waiting for removal.\n::endgroup::")

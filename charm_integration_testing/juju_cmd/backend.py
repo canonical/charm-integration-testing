@@ -6,7 +6,7 @@ from datetime import timedelta
 
 import yaml
 
-from charm_integration_testing.juju import JujuBackend, JujuWaitIdleTimeoutError
+from charm_integration_testing.juju import JujuBackend, JujuWaitTimeoutError
 
 from .cmd import CmdArg, CmdClient, CmdError
 from .structures import JujuModel, JujuStatus
@@ -82,23 +82,27 @@ class JujuCmdBackend(JujuBackend):
     def num_units(self, model: str, application: str) -> int:
         return len(self._status(model).applications[application].units)
 
-    def wait_idle(self, model: str, timeout: timedelta):
+    def _wait_for(self, model: str, query: str, timeout: timedelta):
         try:
             self._call_juju(
                 CmdArg(value="wait-for"),
                 CmdArg(value="model"),
                 CmdArg(value=model),
-                CmdArg(
-                    name="query",
-                    value="len(applications) == 0 || (forEach(applications, app => app.status == 'active') && forEach(units, unit => unit.workload-status == 'active' && unit.agent-status == 'idle'))",
-                ),
+                CmdArg(name="query", value=query),
                 CmdArg(name="timeout", value=f"{timeout.total_seconds()}s"),
             )
         except CmdError as e:
             if "ERROR timed out waiting for" in e.stderr:
-                raise JujuWaitIdleTimeoutError
+                raise JujuWaitTimeoutError
             else:
                 raise e
+
+    def wait_idle(self, model: str, timeout: timedelta):
+        self._wait_for(
+            model,
+            "len(applications) == 0 || (forEach(applications, app => app.status == 'active') && forEach(units, unit => unit.workload-status == 'active' && unit.agent-status == 'idle'))",
+            timeout,
+        )
 
     def juju_status_text(self, model: str) -> str:
         return self._call_juju(
@@ -130,3 +134,16 @@ class JujuCmdBackend(JujuBackend):
             CmdArg(name="trust"),
             CmdArg(value=f"./{bundle}"),
         )
+
+    def remove_applications(self, model: str, *applications: list[str]):
+        self._call_juju(
+            CmdArg(value="remove-application"),
+            CmdArg(name="model", value=model),
+            CmdArg(name="no-prompt"),
+            *[CmdArg(value=application) for application in applications],
+        )
+
+    def wait_for_removal(self, model: str, applications: list[str], timeout: timedelta):
+        # Checking unit.application instead of application.name due to Juju bug: https://github.com/juju/juju/issues/18785
+        name_checks = " && ".join([f"unit.application != '{application}'" for application in applications])
+        self._wait_for(model, f"len(applications) == 0 || forEach(units, unit => {name_checks})", timeout)
