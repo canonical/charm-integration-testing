@@ -129,6 +129,7 @@ jobs:
       continue-on-error: true
       shell: bash
       run: |
+<<<<<<< HEAD
         ./scripts/test-integration.sh \
           --model model-${{ steps.controller.outputs.date }} \
           --target-application ${{ github.event.inputs.charm_under_test }} \
@@ -144,7 +145,6 @@ jobs:
         kubeconf: $HOME/.kube/config
         controller: ${{ steps.controller.outputs.date }}
         proxy: http://squid.internal:3128
-<<<<<<< HEAD
     - name: Teardown charm under test
       continue-on-error: true
       shell: bash
@@ -158,15 +158,28 @@ jobs:
       run: |
         ./scripts/merge-junit.sh junit-*.xml junit.xml
         cat junit.xml
+        ./scripts/run-test-suite.sh --model model-${{ steps.controller.outputs.date }} \
+        --requirer ${{github.event.inputs.charm_under_test}}:${{ github.event.inputs.charm_endpoint }} \
+        --provider ${{ github.event.inputs.neighbor }}:${{ github.event.inputs.neighbor_endpoint }} \
+        --junit-xml=out.xml
     - name: Setup Logs directory
       shell: bash
       run: |
         mkdir -p $HOME/logs
         cp -r ${{ steps.logs.outputs.crashdump_path }} $HOME/logs
+    - name: Collect Logs
+      if: ${{ always() }}
+      id: logs
+      uses: canonical/juju-k8s-crashdump/actions/juju-k8s-crashdump@use-output-path
+      with:
+        kubeconf: $HOME/.kube/config
+        controller: ${{ steps.controller.outputs.date }}
+        output_path: $HOME/logs/juju-logs.tar.gz
+        proxy: http://squid.internal:3128
     - name: Post Logs To Swift
       uses: canonical/sqa-cloud-deployment-pipeline/.github/actions/upload-to-swift@swift-with-path
       with:
-        job_uuid: ${{ github.event.inputs.execution_id }}/${{ github.event.inputs.execution_id }}
+        job_uuid: ${{ github.event.inputs.environment }}/${{ github.event.inputs.execution_id }}
         log_path: $HOME/logs
         swift_bucket: charm-qa
         SWIFT_OS_AUTH_URL: ${{ secrets.SWIFT_OS_AUTH_URL }}
