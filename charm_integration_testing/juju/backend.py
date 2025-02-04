@@ -5,8 +5,8 @@ from abc import ABC, abstractmethod
 from datetime import timedelta
 
 
-class JujuWaitIdleTimeoutError(TimeoutError):
-    def __init__(self, message="Never reached idle state"):
+class JujuWaitTimeoutError(TimeoutError):
+    def __init__(self, message="Timed out while waiting"):
         super().__init__(message)
 
 
@@ -37,4 +37,12 @@ class JujuBackend(ABC):
 
     @abstractmethod
     def deploy_bundle_file(self, model: str, bundle: str):
+        raise NotImplementedError
+
+    @abstractmethod
+    def remove_applications(self, model: str, *applications: str):
+        raise NotImplementedError
+
+    @abstractmethod
+    def wait_for_removal(self, model: str, applications: list[str], timeout: timedelta):
         raise NotImplementedError
