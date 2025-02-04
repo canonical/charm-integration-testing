@@ -166,7 +166,6 @@ jobs:
       shell: bash
       run: |
         mkdir -p $HOME/logs
-        cp -r ${{ steps.logs.outputs.crashdump_path }} $HOME/logs
     - name: Collect Logs
       if: ${{ always() }}
       id: logs
