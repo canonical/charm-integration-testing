@@ -32,3 +32,6 @@ extend-select = ["I"]
 timeout = 600
 log_cli = true
 log_cli_level = "INFO"
+
+[tool.bandit.assert_used]
+skips = ['charm_integration_testing/test_suite/*']
