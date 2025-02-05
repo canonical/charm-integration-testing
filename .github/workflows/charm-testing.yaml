@@ -136,14 +136,6 @@ jobs:
           --neighbor-application ${{ github.event.inputs.neighbor }} \
           --neighbor-endpoint ${{ github.event.inputs.neighbor_endpoint }} \
           --junit-xml=junit-integration.xml
-    - name: Collect Logs
-      if: ${{ always() }}
-      id: logs
-      uses: canonical/juju-k8s-crashdump/actions/juju-k8s-crashdump@main
-      with:
-        kubeconf: $HOME/.kube/config
-        controller: ${{ steps.controller.outputs.date }}
-        proxy: http://squid.internal:3128
     - name: Teardown charm under test
       continue-on-error: true
       shell: bash
@@ -157,6 +149,34 @@ jobs:
       run: |
         ./scripts/merge-junit.sh junit-*.xml junit.xml
         cat junit.xml
+    - name: Setup Logs directory
+      if: ${{ always() }}
+      shell: bash
+      run: |
+        mkdir -p $HOME/logs
+        cp junit.xml $HOME/logs/
+    - name: Collect Logs
+      if: ${{ always() }}
+      uses: canonical/juju-k8s-crashdump/actions/juju-k8s-crashdump@main
+      with:
+        kubeconf: $HOME/.kube/config
+        controller: ${{ steps.controller.outputs.date }}
+        output_path: $HOME/logs/juju-logs.tar.gz
+        proxy: http://squid.internal:3128
+    - name: Post Logs To Swift
+      if: ${{ always() }}
+      uses: canonical/sqa-cloud-deployment-pipeline/.github/actions/upload-to-swift@main
+      with:
+        job_uuid: ${{ github.event.inputs.environment }}/${{ github.event.inputs.execution_id }}
+        log_path: $HOME/logs
+        swift_bucket: charm-qa
+        SWIFT_OS_AUTH_URL: ${{ secrets.SWIFT_OS_AUTH_URL }}
+        SWIFT_OS_USERNAME: ${{ secrets.SWIFT_OS_USERNAME }}
+        SWIFT_OS_PASSWORD: ${{ secrets.SWIFT_OS_PASSWORD }}
+        SWIFT_OS_PROJECT_NAME: ${{ secrets.SWIFT_OS_PROJECT_NAME }}
+        SWIFT_OS_REGION_NAME: ${{ secrets.SWIFT_OS_REGION_NAME }}
+        SWIFT_OS_USER_DOMAIN_NAME: ${{ secrets.SWIFT_OS_USER_DOMAIN_NAME }}
+        SWIFT_OS_PROJECT_DOMAIN_NAME: ${{ secrets.SWIFT_OS_PROJECT_DOMAIN_NAME }}
     - name: Post results to Test Observer
       if: ${{ env.test_observer_api != '' && github.event.inputs.execution_id != '' }}
       uses: ./.github/actions/post-results
