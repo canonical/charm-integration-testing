@@ -129,7 +129,6 @@ jobs:
       continue-on-error: true
       shell: bash
       run: |
-<<<<<<< HEAD
         ./scripts/test-integration.sh \
           --model model-${{ steps.controller.outputs.date }} \
           --target-application ${{ github.event.inputs.charm_under_test }} \
@@ -158,10 +157,6 @@ jobs:
       run: |
         ./scripts/merge-junit.sh junit-*.xml junit.xml
         cat junit.xml
-        ./scripts/run-test-suite.sh --model model-${{ steps.controller.outputs.date }} \
-        --requirer ${{github.event.inputs.charm_under_test}}:${{ github.event.inputs.charm_endpoint }} \
-        --provider ${{ github.event.inputs.neighbor }}:${{ github.event.inputs.neighbor_endpoint }} \
-        --junit-xml=out.xml
     - name: Setup Logs directory
       shell: bash
       run: |
