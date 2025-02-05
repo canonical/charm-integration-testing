@@ -136,14 +136,6 @@ jobs:
           --neighbor-application ${{ github.event.inputs.neighbor }} \
           --neighbor-endpoint ${{ github.event.inputs.neighbor_endpoint }} \
           --junit-xml=junit-integration.xml
-    - name: Collect Logs
-      if: ${{ always() }}
-      id: logs
-      uses: canonical/juju-k8s-crashdump/actions/juju-k8s-crashdump@main
-      with:
-        kubeconf: $HOME/.kube/config
-        controller: ${{ steps.controller.outputs.date }}
-        proxy: http://squid.internal:3128
     - name: Teardown charm under test
       continue-on-error: true
       shell: bash
@@ -158,12 +150,13 @@ jobs:
         ./scripts/merge-junit.sh junit-*.xml junit.xml
         cat junit.xml
     - name: Setup Logs directory
+      if: ${{ always() }}
       shell: bash
       run: |
         mkdir -p $HOME/logs
+        cp junit.xml $HOME/logs/
     - name: Collect Logs
       if: ${{ always() }}
-      id: logs
       uses: canonical/juju-k8s-crashdump/actions/juju-k8s-crashdump@main
       with:
         kubeconf: $HOME/.kube/config
@@ -171,6 +164,7 @@ jobs:
         output_path: $HOME/logs/juju-logs.tar.gz
         proxy: http://squid.internal:3128
     - name: Post Logs To Swift
+      if: ${{ always() }}
       uses: canonical/sqa-cloud-deployment-pipeline/.github/actions/upload-to-swift@main
       with:
         job_uuid: ${{ github.event.inputs.environment }}/${{ github.event.inputs.execution_id }}
