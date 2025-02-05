@@ -4,10 +4,24 @@
 from abc import ABC, abstractmethod
 from datetime import timedelta
 
+from pydantic.dataclasses import dataclass
+
 
 class JujuWaitTimeoutError(TimeoutError):
     def __init__(self, message="Timed out while waiting"):
         super().__init__(message)
+
+
+@dataclass(frozen=True)
+class JujuIntegrationApplication:
+    application: str
+    endpoint: str
+
+
+@dataclass(frozen=True)
+class JujuIntegration:
+    interface: str
+    applications: frozenset[JujuIntegrationApplication]
 
 
 class JujuBackend(ABC):
@@ -17,6 +31,14 @@ class JujuBackend(ABC):
 
     @abstractmethod
     def num_units(self, model: str, application: str) -> int:
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_applications(self, model: str) -> set[str]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_integrations(self, model: str) -> set[JujuIntegration]:
         raise NotImplementedError
 
     @abstractmethod

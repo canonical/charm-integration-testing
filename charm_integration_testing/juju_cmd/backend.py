@@ -5,8 +5,7 @@
 from datetime import timedelta
 
 import yaml
-
-from charm_integration_testing.juju import JujuBackend, JujuWaitTimeoutError
+from juju import JujuBackend, JujuIntegration, JujuIntegrationApplication, JujuWaitTimeoutError
 
 from .cmd import CmdArg, CmdClient, CmdError
 from .structures import JujuModel, JujuStatus
@@ -81,6 +80,32 @@ class JujuCmdBackend(JujuBackend):
 
     def num_units(self, model: str, application: str) -> int:
         return len(self._status(model).applications[application].units)
+
+    def list_applications(self, model: str) -> set[str]:
+        return set(self._status(model).applications.keys())
+
+    def list_integrations(self, model: str) -> set[JujuIntegration]:
+        status = self._status(model)
+        return {
+            JujuIntegration(
+                interface=integration_1.interface,
+                applications=frozenset(
+                    {
+                        JujuIntegrationApplication(application_1, endpoint_1),
+                        JujuIntegrationApplication(application_2, endpoint_2),
+                    }
+                ),
+            )
+            for application_1, application_1_info in status.applications.items()
+            for endpoint_1, integrations_1 in application_1_info.integrations.items()
+            for integration_1 in integrations_1
+            for application_2, application_2_info in status.applications.items()
+            for endpoint_2, integrations_2 in application_2_info.integrations.items()
+            for integration_2 in integrations_2
+            if integration_1.interface == integration_2.interface
+            and application_1 == integration_2.integrated_application
+            and application_2 == integration_1.integrated_application
+        }
 
     def _wait_for(self, model: str, query: str, timeout: timedelta):
         try:
