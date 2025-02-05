@@ -1,32 +1,26 @@
-# Copyright 2023 Canonical Ltd.
-# See LICENSE file for licensing details.
+[project]
+name = "charm-integration-testing-meta"
+version = "0.0.0"
+readme = "README.md"
+requires-python = ">=3.10"
+
 
 [tool.poetry]
-name = "charm-integration-testing"
-version = "0.0.0"
-description = "A collection of Pytest-based tests for Charm Integration Testing, focusing on validating the deployment and interoperability of charms."
-authors = ["Ryan Britton <ryan.britton@canonical.com>"]
-readme = "README.md"
-packages = [
-    { include = "**/*.py", from = "."  }
-]
+package-mode = false
 
 [tool.poetry.dependencies]
-python = "^3.10"
-pytest = "^8.3.4"
-pydantic = "^2.10.4"
-pyyaml = "^6.0.2"
-pytest-timeout = "^2.3.1"
-junitparser = "^3.2.0"
+charm-integration-testing = { path = "./charm_integration_testing" }
+bundle-builder = { path = "./bundle_builder" }
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
 
 [tool.poetry.group.dev.dependencies]
 ruff = "^0.5.5"
 mdformat = "^0.7.17"
 bandit = "^1.7.9"
-
-[build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
 
 [tool.ruff]
 line-length = 120

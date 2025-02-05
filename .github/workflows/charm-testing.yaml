@@ -98,7 +98,7 @@ jobs:
         [global]
         proxy= http://squid.internal:3128
         EOF
-        pipx install poetry==1.6
+        pipx install poetry==2.0
         HTTPS_PROXY="http://squid.internal:3128" poetry install
     - name: Add K8s
       shell: bash
