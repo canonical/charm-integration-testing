@@ -169,14 +169,14 @@ jobs:
     - name: Collect Logs
       if: ${{ always() }}
       id: logs
-      uses: canonical/juju-k8s-crashdump/actions/juju-k8s-crashdump@use-output-path
+      uses: canonical/juju-k8s-crashdump/actions/juju-k8s-crashdump@main
       with:
         kubeconf: $HOME/.kube/config
         controller: ${{ steps.controller.outputs.date }}
         output_path: $HOME/logs/juju-logs.tar.gz
         proxy: http://squid.internal:3128
     - name: Post Logs To Swift
-      uses: canonical/sqa-cloud-deployment-pipeline/.github/actions/upload-to-swift@swift-with-path
+      uses: canonical/sqa-cloud-deployment-pipeline/.github/actions/upload-to-swift@main
       with:
         job_uuid: ${{ github.event.inputs.environment }}/${{ github.event.inputs.execution_id }}
         log_path: $HOME/logs
