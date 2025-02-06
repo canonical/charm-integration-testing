@@ -107,6 +107,7 @@ jobs:
     - name: Add K8s
       shell: bash
       run: |
+        cat "$HOME/.kube/config"
         KUBECONFIG="$HOME/.kube/config" juju add-k8s ps6 --client
     - name: Bootstrap Controller
       id: controller
