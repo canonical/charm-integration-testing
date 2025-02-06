@@ -83,7 +83,11 @@ jobs:
       shell: bash
       run: |
         mkdir -p $HOME/.kube
-        echo '${{ secrets.STG_SQA_KUBECONFIG }}' > $HOME/.kube/config
+        if [ ${{ github.event.inputs.environment }} = "dev" || ${{ github.event.inputs.environment }} = "staging"]; then
+          echo '${{ secrets.PROD_SQA_KUBECONFIG }}' > $HOME/.kube/config
+        else        
+          echo '${{ secrets.STG_SQA_KUBECONFIG }}' > $HOME/.kube/config
+        fi
     - name: Install Juju
       shell: bash
       run: |
