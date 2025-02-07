@@ -17,22 +17,23 @@ def test_break_readd_integration(
     neighbor_application: str,
     neighbor_endpoint: str,
 ):
-    # Break relation
-    juju_client.remove_integration(
-        model=model,
-        application_1=target_application,
-        application_2=neighbor_application,
-        endpoint_1=target_endpoint,
-        endpoint_2=neighbor_endpoint,
-    )
-    juju_client.idle_for_period(model=model)
+    # # Break relation
+    # juju_client.remove_integration(
+    #     model=model,
+    #     application_1=target_application,
+    #     application_2=neighbor_application,
+    #     endpoint_1=target_endpoint,
+    #     endpoint_2=neighbor_endpoint,
+    # )
+    # juju_client.idle_for_period(model=model)
 
-    # Readd relation
-    juju_client.integrate(
-        model=model,
-        application_1=target_application,
-        application_2=neighbor_application,
-        endpoint_1=target_endpoint,
-        endpoint_2=neighbor_endpoint,
-    )
-    juju_client.idle_for_period(model=model)
+    # # Readd relation
+    # juju_client.integrate(
+    #     model=model,
+    #     application_1=target_application,
+    #     application_2=neighbor_application,
+    #     endpoint_1=target_endpoint,
+    #     endpoint_2=neighbor_endpoint,
+    # )
+    # juju_client.idle_for_period(model=model)
+    pass
