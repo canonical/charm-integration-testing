@@ -5,7 +5,7 @@ import logging
 import time
 from datetime import datetime, timedelta, timezone
 
-from .backend import JujuBackend, JujuWaitTimeoutError
+from .backend import JujuBackend, JujuIntegrationApplication, JujuWaitTimeoutError
 
 
 class JujuClient:
@@ -153,3 +153,18 @@ class JujuClient:
 
             # End the log group
             self.logger.info("Reached end of waiting for removal.\n::endgroup::")
+
+    def application_exists(self, application: str, model: str = "default") -> bool:
+        self.logger.info(f"Checking that application exists: {application}.")
+        return application in self.backend.list_applications(model)
+
+    def integration_exists(
+        self, application_1: str, endpoint_1: str, application_2: str, endpoint_2: str, model: str = "default"
+    ) -> bool:
+        self.logger.info(
+            f"Checking that integration exists: {application_1}:{endpoint_1}/{application_2}:{endpoint_2}."
+        )
+        return {
+            JujuIntegrationApplication(application_1, endpoint_1),
+            JujuIntegrationApplication(application_2, endpoint_2),
+        } in {integration.applications for integration in self.backend.list_integrations(model)}
