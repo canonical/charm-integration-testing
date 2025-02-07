@@ -208,3 +208,9 @@ jobs:
       shell: bash
       run: |
         timeout 15m juju kill-controller ${{ steps.controller.outputs.date }} --no-prompt
+    - name: Trigger rerun on Test Observer
+      if: ${{ always() && !cancelled() && env.test_observer_api != '' && github.event.inputs.execution_id != '' }}
+      uses: ./.github/actions/trigger-rerun
+      with:
+        test_observer_api: ${{ env.test_observer_api }}
+        test_execution_id: ${{ github.event.inputs.execution_id }}

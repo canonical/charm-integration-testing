@@ -1,0 +1,37 @@
+name: Trigger a rerun on Test Observer
+description: Posts a rerun request for the Test Execution ID on Test Observer
+
+inputs:
+  test_observer_api:
+    description: "URL for the Test Observer API"
+    required: True
+
+  test_execution_id:
+    description: "ID for the Test Execution to trigger a rerun for"
+    required: True
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install jq
+      shell: bash
+      run: sudo snap install jq
+
+    - id: get-json-body
+      name: Get Test Observer JSON
+      shell: bash
+      run: |
+        jq -nc '
+          {
+            "test_execution_ids": [${{ inputs.test_execution_id }}]
+          }
+        ' > body.json
+        cat body.json
+
+    - name: Send POST request to Test Observer
+      shell: bash
+      run: |
+        curl --fail-with-body \
+          -X POST ${{ inputs.test_observer_api }}/v1/test-executions/reruns \
+          -H "Content-Type: application/json" \
+          -d @body.json
