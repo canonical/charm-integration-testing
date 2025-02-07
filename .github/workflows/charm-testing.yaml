@@ -83,7 +83,11 @@ jobs:
       shell: bash
       run: |
         mkdir -p $HOME/.kube
-        echo '${{ secrets.STG_SQA_KUBECONFIG }}' > $HOME/.kube/config
+        if [ "${{ github.event.inputs.environment }}" = "production" ] || [ "${{ github.event.inputs.environment }}" = "staging" ]; then
+          echo '${{ secrets.PROD_SQA_KUBECONFIG }}' > $HOME/.kube/config
+        else        
+          echo '${{ secrets.STG_SQA_KUBECONFIG }}' > $HOME/.kube/config
+        fi
     - name: Install Juju
       shell: bash
       run: |
@@ -103,7 +107,7 @@ jobs:
     - name: Add K8s
       shell: bash
       run: |
-        KUBECONFIG=.kube/config juju add-k8s ps6 --client
+        KUBECONFIG="$HOME/.kube/config" juju add-k8s ps6 --client
     - name: Bootstrap Controller
       id: controller
       shell: bash
