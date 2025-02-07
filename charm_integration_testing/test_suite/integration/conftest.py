@@ -62,19 +62,24 @@ def assert_idle(juju_client: JujuClient, model: str):
 
 @pytest.fixture(autouse=True)
 def assert_applications_exist(
-    assert_idle: None, juju_client: JujuClient, target_application: str, neighbor_application: str
+    assert_idle: None,
+    juju_client: JujuClient,
+    model: str,
+    target_application: str,
+    neighbor_application: str,
 ):
-    assert juju_client.application_exists(target_application)
-    assert juju_client.application_exists(neighbor_application)
+    assert juju_client.application_exists(target_application, model=model)
+    assert juju_client.application_exists(neighbor_application, model=model)
 
 
 @pytest.fixture(autouse=True)
 def assert_applications_integrated(
-    assert_applications_exist: None,
+    assert_applications_exist: None,    
     juju_client: JujuClient,
+    model: str,
     target_application: str,
     target_endpoint: str,
     neighbor_application: str,
     neighbor_endpoint: str,
 ):
-    assert juju_client.integration_exists(target_application, target_endpoint, neighbor_application, neighbor_endpoint)
+    assert juju_client.integration_exists(target_application, target_endpoint, neighbor_application, neighbor_endpoint, model=model)
