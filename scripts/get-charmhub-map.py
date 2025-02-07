@@ -10,7 +10,7 @@ CHARMHUB_API = "https://api.charmhub.io"
 
 
 def query_http(url: str, params: dict | None = None) -> list | dict:
-    response = requests.get(url, params=params)
+    response = requests.get(url, params=params, timeout=30)
     response.raise_for_status()
     return response.json()
 
