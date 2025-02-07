@@ -74,7 +74,7 @@ def assert_applications_exist(
 
 @pytest.fixture(autouse=True)
 def assert_applications_integrated(
-    assert_applications_exist: None,    
+    assert_applications_exist: None,
     juju_client: JujuClient,
     model: str,
     target_application: str,
@@ -82,4 +82,6 @@ def assert_applications_integrated(
     neighbor_application: str,
     neighbor_endpoint: str,
 ):
-    assert juju_client.integration_exists(target_application, target_endpoint, neighbor_application, neighbor_endpoint, model=model)
+    assert juju_client.integration_exists(
+        target_application, target_endpoint, neighbor_application, neighbor_endpoint, model=model
+    )
