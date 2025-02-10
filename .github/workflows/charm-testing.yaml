@@ -195,11 +195,6 @@ jobs:
         test_observer_api: ${{ env.test_observer_api }}
         test_execution_id: ${{ github.event.inputs.execution_id }}
         status: "COMPLETED"
-    - name: Teardown Model
-      if: ${{ always() }}
-      shell: bash
-      run: |
-        timeout 15m juju destroy-model model-${{ steps.controller.outputs.date }} --destroy-storage --no-prompt
     - name: Teardown Controller
       if: ${{ always() }}
       shell: bash
