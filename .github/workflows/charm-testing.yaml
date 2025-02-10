@@ -153,6 +153,13 @@ jobs:
       run: |
         ./scripts/merge-junit.sh junit-*.xml junit.xml
         cat junit.xml
+    - name: Post results to Test Observer
+      if: ${{ env.test_observer_api != '' && github.event.inputs.execution_id != '' }}
+      uses: ./.github/actions/post-results
+      with:
+        test_observer_api: ${{ env.test_observer_api }}
+        test_execution_id: ${{ github.event.inputs.execution_id }}
+        junit_xml: ./junit.xml
     - name: Setup Logs directory
       if: ${{ always() }}
       shell: bash
@@ -181,13 +188,6 @@ jobs:
         SWIFT_OS_REGION_NAME: ${{ secrets.SWIFT_OS_REGION_NAME }}
         SWIFT_OS_USER_DOMAIN_NAME: ${{ secrets.SWIFT_OS_USER_DOMAIN_NAME }}
         SWIFT_OS_PROJECT_DOMAIN_NAME: ${{ secrets.SWIFT_OS_PROJECT_DOMAIN_NAME }}
-    - name: Post results to Test Observer
-      if: ${{ env.test_observer_api != '' && github.event.inputs.execution_id != '' }}
-      uses: ./.github/actions/post-results
-      with:
-        test_observer_api: ${{ env.test_observer_api }}
-        test_execution_id: ${{ github.event.inputs.execution_id }}
-        junit_xml: ./junit.xml
     - name: Mark Test Execution completed on Test Observer
       if: ${{ always() && env.test_observer_api != '' && github.event.inputs.execution_id != '' }}
       uses: ./.github/actions/patch-test-execution
