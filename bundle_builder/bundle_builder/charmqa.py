@@ -97,13 +97,15 @@ def build_charm_graph(root_charm, max_depth=3, logger=logging.getLogger("bundle_
         for target_charm in target_charms:
             if target_charm.name in visited_nodes:
                 continue
-            logger.info("{}[C] {}".format('\t'*(iterations), target_charm.name))
+            logger.info("{}[C] {}".format("\t" * (iterations), target_charm.name))
             for target_charm_integration in target_charm.non_optional_requires:
                 for interface_provider in find_interface_providers(
                     target_charm_integration["interface"], logger=logger
                 ):
                     logger.info(
-                        "{}[I] {}:{}".format('\t'*(iterations+1), target_charm_integration['interface'], interface_provider.name)
+                        "{}[I] {}:{}".format(
+                            "\t" * (iterations + 1), target_charm_integration["interface"], interface_provider.name
+                        )
                     )
                     graph_output[target_charm].append((target_charm_integration["interface"], interface_provider))
                     if interface_provider.name not in visited_nodes:
