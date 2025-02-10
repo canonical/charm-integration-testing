@@ -84,7 +84,7 @@ class Charm:
     def from_store(
         cls,
         charm_name,
-        charm_channel="latest",
+        charm_channel=None,
         charm_revision=None,
         ubuntu_version=None,
         ubuntu_arch=None,
@@ -99,12 +99,15 @@ class Charm:
         if charm_channel and charm_revision:
             logger.error("Both charm_channel and charm_revision passed to charm initialization. Using charm revision")
             action_object["revision"] = charm_revision
-        elif charm_channel:
-            action_object["channel"] = charm_channel
         elif charm_revision:
             action_object["revision"] = charm_revision
+        elif charm_channel:
+            action_object["channel"] = charm_channel
+        else:
+            action_object["latest"] = "latest"
 
-        if ubuntu_version and ubuntu_arch:
+        # Base shouldn't be included if querying by revision
+        if not charm_revision and ubuntu_version and ubuntu_arch:
             logger.debug("Appending base as ubuntu version and arch were passed.")
             action_object["base"] = {
                 "name": "ubuntu",

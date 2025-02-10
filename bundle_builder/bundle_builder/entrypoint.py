@@ -16,8 +16,8 @@
 import argparse
 import logging
 
-from bundle_builder.charm import Charm
-from bundle_builder.charmqa import (
+from .charm import Charm
+from .charmqa import (
     build_charm_graph,
     dump_selected_bundle_to_file,
     filter_to_shortest_paths,
@@ -50,7 +50,7 @@ def setup_logging(loglevel: str):
 def channel_or_revision(parsed_arg: str, logger=logging.getLogger("bundle_builder")):
     if parsed_arg.isnumeric():
         logger.debug(f"Using charm revision as second argument of input format was numeric. Input: {parsed_arg}")
-        return {"charm_revision": parsed_arg}
+        return {"charm_revision": int(parsed_arg)}
 
     logger.debug(f"Using charm channel as second argument of input format was NOT numeric. Input: {parsed_arg}")
     return {"charm_channel": parsed_arg}

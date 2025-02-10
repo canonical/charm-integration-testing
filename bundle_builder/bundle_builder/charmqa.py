@@ -20,7 +20,7 @@ from pathlib import Path
 import requests
 import yaml
 
-from bundle_builder.charm import Charm, NoCharmMetadataException
+from .charm import Charm, NoCharmMetadataException
 
 
 class BasicFIFO:
@@ -59,8 +59,8 @@ def find_relations(items):
                         if output["interface"] == input["interface"]:
                             matches.append(
                                 [
-                                    f"{item.name}:{output["endpoint_name"]}",
-                                    f"{target_item.name}:{input["endpoint_name"]}",
+                                    f"{item.name}:{output['endpoint_name']}",
+                                    f"{target_item.name}:{input['endpoint_name']}",
                                 ]
                             )
     return matches
@@ -97,13 +97,13 @@ def build_charm_graph(root_charm, max_depth=3, logger=logging.getLogger("bundle_
         for target_charm in target_charms:
             if target_charm.name in visited_nodes:
                 continue
-            logger.info(f"{'\t'*(iterations)}[C] {target_charm.name}")
+            logger.info("{}[C] {}".format('\t'*(iterations), target_charm.name))
             for target_charm_integration in target_charm.non_optional_requires:
                 for interface_provider in find_interface_providers(
                     target_charm_integration["interface"], logger=logger
                 ):
                     logger.info(
-                        f"{'\t'*(iterations+1)}[I] {target_charm_integration['interface']}:{interface_provider.name}"
+                        "{}[I] {}:{}".format('\t'*(iterations+1), target_charm_integration['interface'], interface_provider.name)
                     )
                     graph_output[target_charm].append((target_charm_integration["interface"], interface_provider))
                     if interface_provider.name not in visited_nodes:
