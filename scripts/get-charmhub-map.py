@@ -2,11 +2,12 @@
 # Copyright 2025 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import itertools
+from typing import Dict, Set
+
 import requests
 import yaml
 from pydantic.dataclasses import dataclass
-from typing import Set, Dict, List, Tuple
-import itertools
 
 CHARMHUB_API = "https://api.charmhub.io"
 
@@ -100,10 +101,11 @@ class CharmIntegration:
     provider_endpoint: str | None
     interface: str
 
+
 def find_bundle_pairings(charm_infos: set[CharmInfo]) -> Dict[str, Set[CharmIntegration]]:
     charm_providers: Dict[str, Dict[str, str]] = {}  # interface -> {provider name -> provider endpoint}
     charm_requirers: Dict[str, Dict[str, str]] = {}  # interface -> {requirer name -> requirer endpoint}
-    
+
     # Build mappings of interfaces to charms that provide and require them
     for charm in charm_infos:
         for provided in charm.provides:
@@ -114,16 +116,16 @@ def find_bundle_pairings(charm_infos: set[CharmInfo]) -> Dict[str, Set[CharmInte
             if required.interface not in charm_requirers:
                 charm_requirers[required.interface] = {}
             charm_requirers[required.interface][charm.name] = required.endpoint
-    
+
     # Gather all the required endpoints for each charm and the possible integrations to complete them
-    all_required_integrations: Dict[str, Dict[str, set[CharmIntegration]]] = {} # charm -> {endpoint -> {integration}}
+    all_required_integrations: Dict[str, Dict[str, set[CharmIntegration]]] = {}  # charm -> {endpoint -> {integration}}
     for charm in charm_infos:
-        integrations: Dict[str, Set[CharmIntegration]] = {} # interface -> {integration}
-        
+        integrations: Dict[str, Set[CharmIntegration]] = {}  # interface -> {integration}
+
         for endpoint in charm.requires:
             if endpoint.optional:
                 continue  # Ignore optional requirements
-            
+
             # Find a provider for the required interface
             if endpoint.interface in charm_providers:
                 integrations[endpoint.endpoint] = {
@@ -147,11 +149,11 @@ def find_bundle_pairings(charm_infos: set[CharmInfo]) -> Dict[str, Set[CharmInte
                         interface=endpoint.interface,
                     )
                 }
-        
+
         for endpoint in charm.provides:
             if endpoint.optional:
                 continue  # Ignore optional integrations
-            
+
             # Find a provider for the required interface
             if endpoint.interface in charm_requirers:
                 integrations[endpoint.endpoint] = {
@@ -175,11 +177,11 @@ def find_bundle_pairings(charm_infos: set[CharmInfo]) -> Dict[str, Set[CharmInte
                         interface=endpoint.interface,
                     )
                 }
-        
+
         all_required_integrations[charm.name] = integrations
 
     # Get all possible combinations of charms that can fulfill the non-optional interfaces
-    all_possible_fulfillments: Dict[str, set[frozenset[str]]] = {} # charm -> {{possible set of charms}}
+    all_possible_fulfillments: Dict[str, set[frozenset[str]]] = {}  # charm -> {{possible set of charms}}
     for charm, interfaces in all_required_integrations.items():
         all_possible_fulfillments[charm] = set()
 
@@ -191,50 +193,58 @@ def find_bundle_pairings(charm_infos: set[CharmInfo]) -> Dict[str, Set[CharmInte
                     integration_fulfilling_charms.add(integration.provider)
                 if integration.requirer and integration.requirer != charm:
                     integration_fulfilling_charms.add(integration.requirer)
-            fulfilling_charms.add(frozenset(integration_fulfilling_charms))
+            if len(integration_fulfilling_charms) > 0:
+                fulfilling_charms.add(frozenset(integration_fulfilling_charms))
 
         all_possible_fulfillments[charm] = {frozenset(combo) for combo in itertools.product(*fulfilling_charms)}
 
-    # For the charm, get all the possible combinations of dependencies for it and (recursively) any other charm
-    def get_dependencies(charm: str, existing_charms: set[str]) -> frozenset[frozenset[str]]:
-        # If the charm exists, then we do not need to check it's dependencies
+    # For each charm, traverse the set of possible fulfillments to find the possible sets
+    def get_dependencies(charm: str, existing_charms: set[str]) -> set[str]:
+        # Check if charm already chosen
         if charm in existing_charms:
-            return frozenset()
-        
-        # Now we can assume that the charm exists
-        existing_charms = existing_charms | {charm}
-        all_possible_dependencies: set[frozenset[str]] = {frozenset({charm})} # A list of possible lists that fulfill this charms dependencies
+            return existing_charms
 
-        # For each list of possible dependencies, we must gather recursively each additional dependency
-        for possible_dependencies in all_possible_fulfillments[charm]:
-            # Get the dependencies for each possibly dependent charm
-            for possible_charm in possible_dependencies:
-                for possible_sub_dependencies in get_dependencies(possible_charm, existing_charms):
-                    all_possible_dependencies = {
-                        frozenset(combo)
-                        for combo in itertools.product(possible_sub_dependencies, *all_possible_dependencies)
-                    }
+        # We must add charm
+        existing_charms |= {charm}
 
-        return frozenset(all_possible_dependencies)
+        # Check each possible fulfillment
+        additional_dependencies = []
+        for fulfillment in all_possible_fulfillments[charm]:
+            missing_charms = fulfillment - existing_charms
+            sub_existing = existing_charms | fulfillment
+            additional_dependencies.append(
+                sub_existing
+                | {
+                    dependency
+                    for missing_charm in missing_charms
+                    for dependency in get_dependencies(missing_charm, sub_existing)
+                }
+            )
 
-    # Compute minimal dependencies for each item
-    minimal_dependencies: Dict[str, set[str]] = {} # charm -> required charms
+        # Return smallest additional dependencies
+        if len(additional_dependencies) == 0:
+            return existing_charms
+        else:
+            return existing_charms | min(additional_dependencies, key=lambda dependency_list: len(dependency_list))
+
+    minimal_dependencies: Dict[str, set[str]] = {}  # charm -> required charms
     for charm in all_possible_fulfillments.keys():
-        minimal_dependencies[charm] = min(get_dependencies(charm, set()), key=lambda l: len(l))
+        minimal_dependencies[charm] = get_dependencies(charm, set())
 
     # Fulfill charm integrations
     charm_to_integrations: Dict[str, Set[CharmIntegration]] = {}
-    for charm, deployed_charms in minimal_dependencies.items():
+    for deployed_charms in minimal_dependencies.values():
         all_integrations = set()
-        for endpoint, possible_integrations in all_required_integrations[charm].items():
-            for integration in possible_integrations:
-                if integration.provider in deployed_charms and integration.requirer in deployed_charms:
-                    all_integrations.add(integration)
-                    break
-                elif not integration.provider or not integration.requirer:
-                    all_integrations.add(integration)
-                    break
-        charm_to_integrations[charm] = all_integrations
+        for charm in deployed_charms:
+            for required_integrations in all_required_integrations[charm].values():
+                for integration in required_integrations:
+                    if integration.provider in deployed_charms and integration.requirer in deployed_charms:
+                        all_integrations.add(integration)
+                        break
+                    elif not integration.provider or not integration.requirer:
+                        all_integrations.add(integration)
+                        break
+            charm_to_integrations[charm] = all_integrations
 
     return charm_to_integrations
 
@@ -292,31 +302,60 @@ def analyze_stats(charm_infos: set[CharmInfo], description: str, interfaces_in_c
 
     # Generate bundle pairings
     print("Bundle pairings:")
-    for charm, integrations in sorted([(charm, integrations) for charm, integrations in find_bundle_pairings(charm_infos).items()], key=lambda v: v[0]):
+    bundle_pairings = find_bundle_pairings(charm_infos)
+    bundle_pairings_charms = {}
+    for charm, integrations in sorted(
+        [(charm, integrations) for charm, integrations in bundle_pairings.items()], key=lambda v: v[0]
+    ):
         missing_endpoints = []
         output_integrations = []
+        unique_charms = set()
         for integration in integrations:
             if integration.provider and integration.requirer:
-                output_integrations.append(f"{integration.provider}:{integration.provider_endpoint} <-> {integration.requirer}:{integration.requirer_endpoint}")
+                output_integrations.append(
+                    f"{integration.provider}:{integration.provider_endpoint} <-> {integration.requirer}:{integration.requirer_endpoint}"
+                )
             else:
                 missing_endpoints.append(integration.provider_endpoint or integration.requirer_endpoint)
 
-        print(f"    {charm}:")
+            if integration.provider:
+                unique_charms.add(integration.provider)
+            if integration.requirer:
+                unique_charms.add(integration.requirer)
+
+        print(f"    {charm}: {unique_charms}")
         for output_integration in sorted(output_integrations):
             print(f"        {output_integration}")
         if len(missing_endpoints) > 0:
             print(f"        missing required endpoints: {', '.join(missing_endpoints)}")
 
+        bundle_pairings_charms[charm] = unique_charms
+
+    # Stats on bundle pairings
+    largest_charm, largest_bundle_charms = max(
+        [(charm, charms) for charm, charms in bundle_pairings_charms.items()], key=lambda v: len(v[1])
+    )
+    print(f"Largest bundle: {largest_charm}, {len(largest_bundle_charms)}, {largest_bundle_charms}")
+    smallest_charm, smallest_bundle_charms = min(
+        [(charm, charms) for charm, charms in bundle_pairings_charms.items()], key=lambda v: len(v[1])
+    )
+    print(f"Smallest bundle: {smallest_charm}, {len(smallest_bundle_charms)}, {smallest_bundle_charms}")
+    average_bundle_charms = sum([len(charms) for charms in bundle_pairings_charms.values()]) / len(
+        bundle_pairings_charms
+    )
+    print(f"Average bundle size: {average_bundle_charms}")
+
+
 def analyze_all_stats(charm_infos: set[CharmInfo], filter: str, interfaces_in_catalog: set[str]):
     analyze_stats(charm_infos, f"all charms in {filter}", interfaces_in_catalog)
-    # analyze_stats(
-    #     {info for info in charm_infos if info.has_k8s_api}, f"charms with k8s-api in {filter}", interfaces_in_catalog
-    # )
-    # analyze_stats(
-    #     {info for info in charm_infos if info.has_deployable_on_kubernetes},
-    #     f"charms with deployable_on kubernetes in {filter}",
-    #     interfaces_in_catalog,
-    # )
+    analyze_stats(
+        {info for info in charm_infos if info.has_k8s_api}, f"charms with k8s-api in {filter}", interfaces_in_catalog
+    )
+    analyze_stats(
+        {info for info in charm_infos if info.has_deployable_on_kubernetes},
+        f"charms with deployable_on kubernetes in {filter}",
+        interfaces_in_catalog,
+    )
 
 
 def get_interfaces_in_catalog() -> set[str]:
@@ -331,35 +370,34 @@ def main():
     interfaces_in_catalog = get_interfaces_in_catalog()
 
     # Get all charms
-    # charms_with_risk = get_all_charms()
-    # print(f"Total number of charms: {len({charm_with_risk.name for charm_with_risk in charms_with_risk})}")
+    charms_with_risk = get_all_charms()
+    print(f"Total number of charms: {len({charm_with_risk.name for charm_with_risk in charms_with_risk})}")
 
     # Get all versions
-    # charm_infos = {get_info(charm) for charm in {charm_with_risk.name for charm_with_risk in charms_with_risk}}
-    charm_infos = {get_info(charm) for charm in {"postgresql-k8s", "self-signed-certificates", "mattermost-k8s", "grafana-agent-k8s", "grafana-k8s"}}
+    charm_infos = {get_info(charm) for charm in {charm_with_risk.name for charm_with_risk in charms_with_risk}}
 
     # Analyze
     analyze_all_stats(charm_infos, "all risks", interfaces_in_catalog)
-    # analyze_all_stats(
-    #     {info for info in charm_infos if {CharmWithRisk(name=info.name, risk="stable")} & charms_with_risk},
-    #     "stable",
-    #     interfaces_in_catalog,
-    # )
-    # analyze_all_stats(
-    #     {info for info in charm_infos if {CharmWithRisk(name=info.name, risk="candidate")} & charms_with_risk},
-    #     "candidate",
-    #     interfaces_in_catalog,
-    # )
-    # analyze_all_stats(
-    #     {
-    #         info
-    #         for info in charm_infos
-    #         if {CharmWithRisk(name=info.name, risk="stable"), CharmWithRisk(name=info.name, risk="candidate")}
-    #         & charms_with_risk
-    #     },
-    #     "candidate or stable",
-    #     interfaces_in_catalog,
-    # )
+    analyze_all_stats(
+        {info for info in charm_infos if {CharmWithRisk(name=info.name, risk="stable")} & charms_with_risk},
+        "stable",
+        interfaces_in_catalog,
+    )
+    analyze_all_stats(
+        {info for info in charm_infos if {CharmWithRisk(name=info.name, risk="candidate")} & charms_with_risk},
+        "candidate",
+        interfaces_in_catalog,
+    )
+    analyze_all_stats(
+        {
+            info
+            for info in charm_infos
+            if {CharmWithRisk(name=info.name, risk="stable"), CharmWithRisk(name=info.name, risk="candidate")}
+            & charms_with_risk
+        },
+        "candidate or stable",
+        interfaces_in_catalog,
+    )
 
 
 # Run main when top-level environment
