@@ -256,12 +256,33 @@ def analyze_stats(charm_infos: set[CharmInfo], description: str, interfaces_in_c
     # Analyze integration stats
     all_requires = {integration.interface for info in charm_infos for integration in info.requires}
     all_provides = {integration.interface for info in charm_infos for integration in info.provides}
-    print(f"Total interfaces: {len(all_requires | all_provides)}")
-    print(f"Total interfaces in catalog: {len((all_requires | all_provides) & interfaces_in_catalog)}")
+    all_interfaces = all_requires | all_provides
+    print(f"Total interfaces: {len(all_interfaces)}")
+    print(f"Total interfaces in catalog: {len(all_interfaces & interfaces_in_catalog)}")
     print(f"Total requires: {len(all_requires)}")
     print(f"Total requires in catalog: {len(all_requires & interfaces_in_catalog)}")
     print(f"Total provides: {len(all_provides)}")
     print(f"Total provides in catalog: {len(all_provides & interfaces_in_catalog)}")
+
+    # Get stats on interfaces not in catalog
+    all_interfaces_not_in_catalog = all_interfaces - interfaces_in_catalog
+    print(f"Total interfaces not in catalog: {len(all_interfaces_not_in_catalog)}")
+    print(
+        "Interfaces not in catalog: [{}]".format(
+            ", ".join(['"{}"'.format(interface) for interface in all_interfaces_not_in_catalog])
+        )
+    )
+    charms_with_interfaces_not_in_catalog = {}  # charm -> {interfaces}
+    for info in sorted(charm_infos, key=lambda info: info.name):
+        charm_interfaces_not_in_catalog = {
+            endpoint.interface for endpoint in {*info.requires, *info.provides}
+        } & all_interfaces_not_in_catalog
+        if charm_interfaces_not_in_catalog:
+            charms_with_interfaces_not_in_catalog[info.name] = charm_interfaces_not_in_catalog
+    print(f"Total charms with an interface not in catalog: {len(charms_with_interfaces_not_in_catalog)}")
+    print("All charms an interface not in catalog:")
+    for charm, interfaces in charms_with_interfaces_not_in_catalog.items():
+        print("    {}: [{}]".format(charm, ", ".join(['"{}"'.format(interface) for interface in sorted(interfaces)])))
 
     # Map integrations
     integrations = {
