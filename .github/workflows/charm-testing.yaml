@@ -171,7 +171,7 @@ jobs:
         cp junit.xml $HOME/logs/
     - name: Collect Logs
       if: ${{ always() }}
-      uses: canonical/juju-k8s-crashdump/actions/juju-k8s-crashdump@main
+      uses: canonical/juju-k8s-crashdump/actions/juju-k8s-crashdump@juju-crashdump-improvements
       with:
         kubeconf: $HOME/.kube/config
         controller: ${{ steps.controller.outputs.date }}
