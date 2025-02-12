@@ -267,22 +267,15 @@ def analyze_stats(charm_infos: set[CharmInfo], description: str, interfaces_in_c
     # Get stats on interfaces not in catalog
     all_interfaces_not_in_catalog = all_interfaces - interfaces_in_catalog
     print(f"Total interfaces not in catalog: {len(all_interfaces_not_in_catalog)}")
-    print(
-        "Interfaces not in catalog: [{}]".format(
-            ", ".join(['"{}"'.format(interface) for interface in all_interfaces_not_in_catalog])
-        )
-    )
-    charms_with_interfaces_not_in_catalog = {}  # charm -> {interfaces}
+    interfaces_not_in_catalog_to_charms = {interface: set() for interface in all_interfaces_not_in_catalog}  # interface -> {charm}
     for info in sorted(charm_infos, key=lambda info: info.name):
-        charm_interfaces_not_in_catalog = {
+        for interface in {
             endpoint.interface for endpoint in {*info.requires, *info.provides}
-        } & all_interfaces_not_in_catalog
-        if charm_interfaces_not_in_catalog:
-            charms_with_interfaces_not_in_catalog[info.name] = charm_interfaces_not_in_catalog
-    print(f"Total charms with an interface not in catalog: {len(charms_with_interfaces_not_in_catalog)}")
-    print("All charms an interface not in catalog:")
-    for charm, interfaces in charms_with_interfaces_not_in_catalog.items():
-        print("    {}: [{}]".format(charm, ", ".join(['"{}"'.format(interface) for interface in sorted(interfaces)])))
+        } & all_interfaces_not_in_catalog:
+            interfaces_not_in_catalog_to_charms[interface].add(info.name)
+    print("All interfaces not in catalog:")
+    for interface, charms in interfaces_not_in_catalog_to_charms.items():
+        print("    {}: [{}]".format(interface, ", ".join(['"{}"'.format(charm) for charm in sorted(charms)])))
 
     # Map integrations
     integrations = {
