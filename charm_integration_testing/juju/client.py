@@ -132,7 +132,7 @@ class JujuClient:
 
     def wait_for_removal(self, *applications: str, model: str = "default", timeout: timedelta = timedelta(days=1)):
         # Start logging
-        self.logger.info(f"Begin waiting for removal of: {', '.join(applications)}.\n::group::Wait for removal.")
+        self.logger.info(f"Begin waiting for removal of applications: {', '.join(applications)}.\n::group::Wait for removal.")
 
         # Wait for removal
         try:
@@ -143,9 +143,48 @@ class JujuClient:
                     self.backend.wait_for_removal(model, applications, timedelta(seconds=1))
                 except JujuWaitTimeoutError:
                     # Applications still exist, try again
-                    self.logger.info("Applications not removed.")
+                    self.logger.info("Applications not yet removed.")
                 else:
                     self.logger.info("Applications have been removed.")
+                    return
+        finally:
+            # Always print status at end
+            self.print_status(model=model)
+
+            # End the log group
+            self.logger.info("Reached end of waiting for removal.\n::endgroup::")
+
+    def wait_for_removal_of_integration(
+        self,
+        application_1: str,
+        application_2: str,
+        endpoint_1: str,
+        endpoint_2: str,
+        model: str = "default",
+        timeout: timedelta = timedelta(days=1),
+    ):
+        # Start logging
+        target_1 = self._format_endpoint(application_1, endpoint_1)
+        target_2 = self._format_endpoint(application_2, endpoint_2)
+        self.logger.info(f"Begin waiting for removal of integration: {target_1} <-> {target_2}.\n::group::Wait for removal.")
+
+        # Wait for removal
+        try:
+            # Loop until timeout
+            start_time = datetime.now(timezone.utc)
+            while datetime.now(timezone.utc) < start_time + timeout:
+                try:
+                    self.backend.wait_for_removal_of_integration(
+                        model,
+                        JujuIntegrationApplication(application_1, endpoint_1),
+                        JujuIntegrationApplication(application_2, endpoint_2),
+                        timedelta(seconds=1),
+                    )
+                except JujuWaitTimeoutError:
+                    # Integration still exist, try again
+                    self.logger.info("Integration not yet removed.")
+                else:
+                    self.logger.info("Integration has been removed.")
                     return
         finally:
             # Always print status at end
