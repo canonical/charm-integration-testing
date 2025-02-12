@@ -45,7 +45,7 @@ optional = false
 python-versions = ">=3.10"
 groups = ["main"]
 files = []
-develop = false
+develop = true
 
 [package.dependencies]
 pyyaml = ">=6.0.1"
@@ -75,7 +75,7 @@ optional = false
 python-versions = ">=3.10"
 groups = ["main"]
 files = []
-develop = false
+develop = true
 
 [package.dependencies]
 junitparser = "3.2.0"
@@ -787,4 +787,4 @@ zstd = ["zstandard (>=0.18.0)"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10"
-content-hash = "cba509537c04f981316c5ae7e7ef2107784854c47b931edf154dd2c198ab6e67"
+content-hash = "b051fd840a0a82bd4e2941de028d1955e430a09d037c2df6509b9ff99f9c606b"

@@ -9,8 +9,8 @@ requires-python = ">=3.10"
 package-mode = false
 
 [tool.poetry.dependencies]
-charm-integration-testing = { path = "./charm_integration_testing" }
-bundle-builder = { path = "./bundle_builder" }
+charm-integration-testing = { path = "./charm_integration_testing", develop = true }
+bundle-builder = { path = "./bundle_builder", develop = true }
 
 
 [build-system]
