@@ -259,6 +259,10 @@ def analyze_stats(charm_infos: set[CharmInfo], description: str, interfaces_in_c
     all_interfaces = all_requires | all_provides
     print(f"Total interfaces: {len(all_interfaces)}")
     print(f"Total interfaces in catalog: {len(all_interfaces & interfaces_in_catalog)}")
+
+    # Get interfaces with specs but not in charms
+    print(f"Interfaces with specs but not used by any charms: [{', '.join(interfaces_in_catalog - all_interfaces)}]")
+
     print(f"Total requires: {len(all_requires)}")
     print(f"Total requires in catalog: {len(all_requires & interfaces_in_catalog)}")
     print(f"Total provides: {len(all_provides)}")
