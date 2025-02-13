@@ -271,7 +271,9 @@ def analyze_stats(charm_infos: set[CharmInfo], description: str, interfaces_in_c
     # Get stats on interfaces not in catalog
     all_interfaces_not_in_catalog = all_interfaces - interfaces_in_catalog
     print(f"Total interfaces not in catalog: {len(all_interfaces_not_in_catalog)}")
-    interfaces_not_in_catalog_to_charms = {interface: set() for interface in all_interfaces_not_in_catalog}  # interface -> {charm}
+    interfaces_not_in_catalog_to_charms = {
+        interface: set() for interface in all_interfaces_not_in_catalog
+    }  # interface -> {charm}
     for info in sorted(charm_infos, key=lambda info: info.name):
         for interface in {
             endpoint.interface for endpoint in {*info.requires, *info.provides}
