@@ -62,7 +62,7 @@ runs:
                 if ."system-out" then ."system-out"
                 else ""
                 end
-              ),
+              )
             }
           ]
         ' > body.json
