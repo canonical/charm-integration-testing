@@ -95,8 +95,8 @@ class JujuClient:
         model: str = "default",
     ):
         # Get targets
-        target_1 = self._format_endpoint(application_1, endpoint_1)
-        target_2 = self._format_endpoint(application_2, endpoint_2)
+        target_1 = JujuIntegrationApplication(application_1, endpoint_1)
+        target_2 = JujuIntegrationApplication(application_2, endpoint_2)
 
         # Integrate
         self.logger.info(f"Integrating {target_1} with {target_2}")
@@ -111,8 +111,8 @@ class JujuClient:
         model: str = "default",
     ):
         # Get targets
-        target_1 = self._format_endpoint(application_1, endpoint_1)
-        target_2 = self._format_endpoint(application_2, endpoint_2)
+        target_1 = JujuIntegrationApplication(application_1, endpoint_1)
+        target_2 = JujuIntegrationApplication(application_2, endpoint_2)
 
         # Remove integration
         self.logger.info(f"Removing integration between {target_1} and {target_2}")
