@@ -132,7 +132,9 @@ class JujuClient:
 
     def wait_for_removal(self, *applications: str, model: str = "default", timeout: timedelta = timedelta(days=1)):
         # Start logging
-        self.logger.info(f"Begin waiting for removal of applications: {', '.join(applications)}.\n::group::Wait for removal.")
+        self.logger.info(
+            f"Begin waiting for removal of applications: {', '.join(applications)}.\n::group::Wait for removal."
+        )
 
         # Wait for removal
         try:
@@ -166,7 +168,9 @@ class JujuClient:
         # Start logging
         target_1 = self._format_endpoint(application_1, endpoint_1)
         target_2 = self._format_endpoint(application_2, endpoint_2)
-        self.logger.info(f"Begin waiting for removal of integration: {target_1} <-> {target_2}.\n::group::Wait for removal.")
+        self.logger.info(
+            f"Begin waiting for removal of integration: {target_1} <-> {target_2}.\n::group::Wait for removal."
+        )
 
         # Wait for removal
         try:

@@ -2,10 +2,10 @@
 # See LICENSE file for licensing details.
 
 
-from datetime import timedelta, datetime, timezone
+import time
+from datetime import datetime, timedelta, timezone
 
 import yaml
-import time
 from juju import JujuBackend, JujuIntegration, JujuIntegrationApplication, JujuWaitTimeoutError
 
 from .cmd import CmdArg, CmdClient, CmdError
@@ -174,14 +174,21 @@ class JujuCmdBackend(JujuBackend):
         name_checks = " && ".join([f"unit.application != '{application}'" for application in applications])
         self._wait_for(model, f"len(applications) == 0 || forEach(units, unit => {name_checks})", timeout)
 
-    def wait_for_removal_of_integration(self, model: str, target_1: JujuIntegrationApplication, target_2: JujuIntegrationApplication, timeout: timedelta):
+    def wait_for_removal_of_integration(
+        self, model: str, target_1: JujuIntegrationApplication, target_2: JujuIntegrationApplication, timeout: timedelta
+    ):
         # Juju wait for doesn't support integration, so just check juju status
         end_time = datetime.now(timezone.utc) + timeout
         while end_time > datetime.now(timezone.utc):
             # Check if the integration exists
-            if not any([({target_1, target_2} & integration.applications) for integration in self.list_integrations(model=model)]):
+            if not any(
+                [
+                    ({target_1, target_2} & integration.applications)
+                    for integration in self.list_integrations(model=model)
+                ]
+            ):
                 return
 
             time.sleep(0.05)
-        
+
         raise JujuWaitTimeoutError
