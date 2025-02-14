@@ -202,4 +202,4 @@ jobs:
       if: ${{ always() }}
       shell: bash
       run: |
-        timeout 15m juju kill-controller ${{ steps.controller.outputs.date }} --no-prompt
+        timeout 15m juju kill-controller ${{ steps.controller.outputs.date }} --no-prompt --timeout 0s
