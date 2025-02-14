@@ -81,10 +81,8 @@ class JujuClient:
         raise JujuWaitTimeoutError
 
     def print_status(self, model: str = "default"):
-        (self.logger.info(f"Juju Status:\n{self.backend.juju_status_text(model)}"),)
-
-    def _format_endpoint(self, application: str, endpoint: str) -> str:
-        return f"{application}:{endpoint}"
+        separator = "-" * 80
+        self.logger.info(f"Juju Status:\n{separator}\n{self.backend.juju_status_text(model)}{separator}")
 
     def integrate(
         self,

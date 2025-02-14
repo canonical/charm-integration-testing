@@ -59,12 +59,10 @@ runs:
                 end
               ),
               "io_log": (
-                if .error then .error."+content"
-                elif .failure then .failure."+content"
-                elif .skipped then .skipped."+content"
+                if ."system-out" then ."system-out"
                 else ""
                 end
-              )
+              ),
             }
           ]
         ' > body.json

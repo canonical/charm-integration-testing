@@ -17,6 +17,9 @@ class JujuIntegrationApplication:
     application: str
     endpoint: str
 
+    def __str__(self) -> str:
+        return f"{self.application}:{self.endpoint}"
+
 
 @dataclass(frozen=True)
 class JujuIntegration:

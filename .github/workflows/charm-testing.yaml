@@ -166,9 +166,7 @@ jobs:
     - name: Setup Logs directory
       if: ${{ always() }}
       shell: bash
-      run: |
-        mkdir -p $HOME/logs
-        cp junit.xml $HOME/logs/
+      run: mkdir -p $HOME/logs
     - name: Collect Logs
       if: ${{ always() }}
       uses: canonical/juju-k8s-crashdump/actions/juju-k8s-crashdump@main
@@ -177,8 +175,11 @@ jobs:
         controller: ${{ steps.controller.outputs.date }}
         output_path: $HOME/logs/juju-logs.tar.gz
         proxy: http://squid.internal:3128
+    - name: Add JUnit to logs
+      shell: bash
+      run: cp ./junit.xml $HOME/logs/
     - name: Post Logs To Swift
-      if: ${{ always() }}
+      if: ${{ always() && github.event.inputs.execution_id != '' }}
       uses: canonical/sqa-cloud-deployment-pipeline/.github/actions/upload-to-swift@main
       with:
         job_uuid: ${{ github.event.inputs.environment }}/${{ github.event.inputs.execution_id }}
