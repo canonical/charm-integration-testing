@@ -53,11 +53,13 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def integrate(self, model: str, target_1: str, target_2: str):
+    def integrate(self, model: str, target_1: JujuIntegrationApplication, target_2: JujuIntegrationApplication):
         raise NotImplementedError
 
     @abstractmethod
-    def remove_integration(self, model: str, target_1: str, target_2: str):
+    def remove_integration(
+        self, model: str, target_1: JujuIntegrationApplication, target_2: JujuIntegrationApplication
+    ):
         raise NotImplementedError
 
     @abstractmethod

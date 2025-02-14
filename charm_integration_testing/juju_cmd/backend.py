@@ -140,20 +140,22 @@ class JujuCmdBackend(JujuBackend):
             CmdArg(name="integrations"),
         )
 
-    def integrate(self, model: str, target_1: str, target_2: str):
+    def integrate(self, model: str, target_1: JujuIntegrationApplication, target_2: JujuIntegrationApplication):
         self._call_juju(
             CmdArg(value="integrate"),
             CmdArg(name="model", value=model),
-            CmdArg(value=target_1),
-            CmdArg(value=target_2),
+            CmdArg(value=str(target_1)),
+            CmdArg(value=str(target_2)),
         )
 
-    def remove_integration(self, model: str, target_1: str, target_2: str):
+    def remove_integration(
+        self, model: str, target_1: JujuIntegrationApplication, target_2: JujuIntegrationApplication
+    ):
         self._call_juju(
             CmdArg(value="remove-relation"),
             CmdArg(name="model", value=model),
-            CmdArg(value=target_1),
-            CmdArg(value=target_2),
+            CmdArg(value=str(target_1)),
+            CmdArg(value=str(target_2)),
         )
 
     def deploy_bundle_file(self, model: str, bundle: str):

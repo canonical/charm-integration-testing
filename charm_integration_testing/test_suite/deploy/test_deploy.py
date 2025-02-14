@@ -21,13 +21,20 @@ def test_deploy(
 
     # Create additional integrations
     for integration in integrations:
-        juju_client.integrate(
+        if not juju_client.integration_exists(
             application_1=integration[0][0],
             endpoint_1=integration[0][1],
             application_2=integration[1][0],
             endpoint_2=integration[1][1],
             model=model,
-        )
+        ):
+            juju_client.integrate(
+                application_1=integration[0][0],
+                endpoint_1=integration[0][1],
+                application_2=integration[1][0],
+                endpoint_2=integration[1][1],
+                model=model,
+            )
 
     # Wait until idle
     juju_client.idle_for_period(model=model)
