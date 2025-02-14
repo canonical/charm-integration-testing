@@ -68,7 +68,9 @@ class JujuClient:
         period: timedelta,
     ):
         # Start logging
-        self.logger.info(f"Begin waiting for {period.total_seconds()} second period of {description}.\n::group::Wait for period of {description}.")
+        self.logger.info(
+            f"Begin waiting for {period.total_seconds()} second period of {description}.\n::group::Wait for period of {description}."
+        )
 
         # Wait for period
         try:
@@ -78,7 +80,7 @@ class JujuClient:
             elif timeout == period:
                 self._wait_for_entire_period(function, period)
                 return
-    
+
             # Loop until timeout
             start = datetime.now(timezone.utc)
             while start + timeout > datetime.now(timezone.utc) + period:
