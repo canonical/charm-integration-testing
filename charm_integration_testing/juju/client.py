@@ -36,9 +36,9 @@ class JujuClient:
                 try:
                     function(timedelta(seconds=1))
                 except JujuWaitTimeoutError:
-                    self.logger.info("Still waiting.")
+                    self.logger.info("Wait condition is not met.")
                 else:
-                    self.logger.info("Finished waiting.")
+                    self.logger.info("Wait condition has been met.")
                     return
 
             # Timed out
@@ -46,6 +46,19 @@ class JujuClient:
         finally:
             # End the log group
             self.logger.info("Stopped waiting for, ending log group.\n::endgroup::")
+
+    def _wait_for_entire_period(self, function, period: timedelta):
+        # Loop until timeout
+        start = datetime.now(timezone.utc)
+        while datetime.now(timezone.utc) < start + period:
+            # Check wait condition
+            function(timedelta(seconds=1))
+
+            # Wait condition met
+            self.logger.info("Wait condition still met.")
+
+            # Wait before checking again
+            time.sleep(1)
 
     def _wait_for_period(
         self,
@@ -55,39 +68,37 @@ class JujuClient:
         period: timedelta,
     ):
         # Start logging
-        self.logger.info(f"Begin waiting for period of {description}.\n::group::Wait for period of {description}.")
+        self.logger.info(f"Begin waiting for {period.total_seconds()} second period of {description}.\n::group::Wait for period of {description}.")
 
         # Wait for period
         try:
+            # Check timeout and period
+            if timeout < period:
+                raise JujuWaitTimeoutError
+            elif timeout == period:
+                self._wait_for_entire_period(function, period)
+                return
+    
             # Loop until timeout
             start = datetime.now(timezone.utc)
-            since = None
-            while datetime.now(timezone.utc) < start + timeout:
+            while start + timeout > datetime.now(timezone.utc) + period:
                 try:
                     function(timedelta(seconds=1))
                 except JujuWaitTimeoutError:
-                    # Wait condition not met
-                    if since is not None:
-                        since = None
-                        self.logger.info("Wait condition no longer met")
-                    else:
-                        self.logger.info("Still waiting")
+                    # Still waiting to start period
+                    self.logger.info("Wait condition is not met.")
                 else:
-                    # Wait condition met
-                    if since is None:
-                        # First time wait condition is met
-                        self.logger.info("Wait is condition met.")
-                        since = datetime.now(timezone.utc)
-                    elif datetime.now(timezone.utc) - since > period:
-                        # Wait condition and period have been met
+                    # First time wait condition is met
+                    self.logger.info("Wait condition is met.")
+
+                    # Try to wait for period
+                    try:
+                        self._wait_for_entire_period(function, period)
+                    except JujuWaitTimeoutError:
+                        self.logger.info("Wait condition no longer met.")
+                    else:
                         self.logger.info("Wait condition has been met for period.")
                         return
-                    else:
-                        # Wait condition met but period not met
-                        self.logger.info("Wait condition still met.")
-
-                    # Wait before checking again
-                    time.sleep(1)
 
             # Timed out
             raise JujuWaitTimeoutError
@@ -100,7 +111,7 @@ class JujuClient:
         self,
         model: str = "default",
         timeout: timedelta = timedelta(days=1),
-        idle_period: timedelta = timedelta(seconds=15),
+        idle_period: timedelta = timedelta(seconds=20),
     ):
         self._wait_for_period(
             lambda log_timeout: self.backend.wait_idle(model, log_timeout),
