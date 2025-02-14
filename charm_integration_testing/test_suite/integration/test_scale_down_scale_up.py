@@ -5,8 +5,7 @@
 from datetime import timedelta
 
 import pytest
-
-from charm_integration_testing.juju import JujuClient
+from juju import JujuClient
 
 
 @pytest.mark.timeout(timedelta(minutes=15).total_seconds())

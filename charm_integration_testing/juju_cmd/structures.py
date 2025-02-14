@@ -2,8 +2,7 @@
 # See LICENSE file for licensing details.
 
 from pydantic import Field
-
-from charm_integration_testing.serializeable_dataclass import serializeable_dataclass
+from serializeable_dataclass import serializeable_dataclass
 
 
 @serializeable_dataclass
@@ -27,8 +26,14 @@ class JujuStatus:
             workload_status: WorkloadStatus
             juju_status: JujuStatus
 
+        @serializeable_dataclass
+        class Integration:
+            interface: str
+            integrated_application: str = Field(alias="related-application")
+
         charm: str
         application_status: ApplicationStatus
+        integrations: dict[str, list[Integration]] = Field(default_factory=dict, alias="relations")
         units: dict[str, Unit] = Field(default_factory=dict)
 
     applications: dict[str, Application]

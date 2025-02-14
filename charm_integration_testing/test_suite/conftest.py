@@ -5,9 +5,8 @@
 import logging
 
 import pytest
-
-from charm_integration_testing.juju import JujuClient
-from charm_integration_testing.juju_cmd import JujuCmdBackend
+from juju import JujuClient
+from juju_cmd import JujuCmdBackend
 
 
 @pytest.fixture
