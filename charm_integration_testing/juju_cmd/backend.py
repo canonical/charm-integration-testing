@@ -96,12 +96,15 @@ class JujuCmdBackend(JujuBackend):
                     }
                 ),
             )
+            # Iterate over every integration on every endpoint
             for application_1, application_1_info in status.applications.items()
             for endpoint_1, integrations_1 in application_1_info.integrations.items()
             for integration_1 in integrations_1
+            # Then for each also iterate over every integration on every endpoint again
             for application_2, application_2_info in status.applications.items()
             for endpoint_2, integrations_2 in application_2_info.integrations.items()
             for integration_2 in integrations_2
+            # Then for all check if the integrations complete a pair
             if integration_1.interface == integration_2.interface
             and application_1 == integration_2.integrated_application
             and application_2 == integration_1.integrated_application
