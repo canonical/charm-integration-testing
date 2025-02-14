@@ -49,9 +49,9 @@ on:
         required: false
         type: choice
         options:
-          - 20.04
-          - 22.04
-          - 24.04
+          - "20.04"
+          - "22.04"
+          - "24.04"
         default: 24.04
       # TODO SQT-452: GitHub workflow_dispatch is limited to 10 inputs
       # But maybe by the time we need this that will have changed!
