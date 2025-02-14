@@ -30,8 +30,14 @@ extend-select = ["I"]
 
 [tool.pytest.ini_options]
 timeout = 600
+
 log_cli = true
 log_cli_level = "INFO"
+log_format = "%(levelname)s %(message)s"
+
+junit_logging = "log"
+junit_log_passing_tests = true
+junit_duration_report = "total"
 
 [tool.bandit.assert_used]
 skips = ['charm_integration_testing/test_suite/*']
