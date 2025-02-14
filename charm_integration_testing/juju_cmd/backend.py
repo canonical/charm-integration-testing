@@ -2,7 +2,8 @@
 # See LICENSE file for licensing details.
 
 
-from datetime import timedelta
+import time
+from datetime import datetime, timedelta, timezone
 
 import yaml
 from juju import JujuBackend, JujuIntegration, JujuIntegrationApplication, JujuWaitTimeoutError
@@ -172,6 +173,40 @@ class JujuCmdBackend(JujuBackend):
         )
 
     def wait_for_removal(self, model: str, applications: list[str], timeout: timedelta):
-        # Checking unit.application instead of application.name due to Juju bug: https://github.com/juju/juju/issues/18785
+        # Juju bug causes panic: https://github.com/juju/juju/issues/18785
+        # name_checks = " && ".join([f"application.name != '{application}'" for application in applications])
+        # self._wait_for(model, f"len(applications) == 0 || forEach(applications, application => {name_checks})", timeout)
+
+        # Check status for application until Juju bug is fixed
+        end_time = datetime.now(timezone.utc) + timeout
+        while end_time > datetime.now(timezone.utc):
+            # Check if any of the applications exist
+            if not (set(applications) & self.list_applications(model=model)):
+                return
+
+            time.sleep(0.05)
+
+        raise JujuWaitTimeoutError
+
+    def wait_for_removal_of_integration(
+        self, model: str, target_1: JujuIntegrationApplication, target_2: JujuIntegrationApplication, timeout: timedelta
+    ):
+        # Juju wait-for for doesn't support integration, so just check juju status
+        end_time = datetime.now(timezone.utc) + timeout
+        while end_time > datetime.now(timezone.utc):
+            # Check if the integration exists
+            if not any(
+                [
+                    ({target_1, target_2} & integration.applications)
+                    for integration in self.list_integrations(model=model)
+                ]
+            ):
+                return
+
+            time.sleep(0.05)
+
+        raise JujuWaitTimeoutError
+
+    def wait_for_removal_of_units(self, model: str, applications: list[str], timeout: timedelta):
         name_checks = " && ".join([f"unit.application != '{application}'" for application in applications])
         self._wait_for(model, f"len(applications) == 0 || forEach(units, unit => {name_checks})", timeout)

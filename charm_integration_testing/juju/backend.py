@@ -68,3 +68,17 @@ class JujuBackend(ABC):
     @abstractmethod
     def wait_for_removal(self, model: str, applications: list[str], timeout: timedelta):
         raise NotImplementedError
+
+    @abstractmethod
+    def wait_for_removal_of_integration(
+        self,
+        model: str,
+        endpoint_1: JujuIntegrationApplication,
+        endpoint_2: JujuIntegrationApplication,
+        timeout: timedelta,
+    ):
+        raise NotImplementedError
+
+    @abstractmethod
+    def wait_for_removal_of_units(self, model: str, applications: list[str], timeout: timedelta):
+        raise NotImplementedError
