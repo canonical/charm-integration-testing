@@ -179,6 +179,7 @@ jobs:
       shell: bash
       run: cp ./junit.xml $HOME/logs/
     - name: Dump the Juju Database
+      if: ${{ always() && github.event.inputs.execution_id != '' }}
       shell: bash
       run: |
         JUJU_DEV_FEATURE_FLAGS=developer-mode juju dump-db \
