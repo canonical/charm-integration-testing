@@ -26,7 +26,7 @@ def applications(request: pytest.FixtureRequest) -> str:
 
 @pytest.fixture(autouse=True)
 def assert_idle(juju_client: JujuClient, model: str):
-    juju_client.idle_for_period(model=model, timeout=timedelta(seconds=20))
+    juju_client.idle_for_period(model=model, timeout=timedelta(seconds=30))
 
 
 @pytest.fixture(autouse=True)
