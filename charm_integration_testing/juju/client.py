@@ -113,7 +113,7 @@ class JujuClient:
         self,
         model: str = "default",
         timeout: timedelta = timedelta(days=1),
-        idle_period: timedelta = timedelta(seconds=30),
+        idle_period: timedelta = timedelta(seconds=65),
     ):
         self._wait_for_period(
             lambda log_timeout: self.backend.wait_idle(model, log_timeout),
