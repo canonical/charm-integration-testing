@@ -31,8 +31,9 @@ class JujuStatus:
             interface: str
             integrated_application: str = Field(alias="related-application")
 
-        charm: str
-        application_status: ApplicationStatus
+        status_error: str | None = None
+        charm: str | None = None
+        application_status: ApplicationStatus | None = None
         integrations: dict[str, list[Integration]] = Field(default_factory=dict, alias="relations")
         units: dict[str, Unit] = Field(default_factory=dict)
 
