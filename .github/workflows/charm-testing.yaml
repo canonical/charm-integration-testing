@@ -111,24 +111,28 @@ jobs:
       shell: bash
       run: |
         KUBECONFIG="$HOME/.kube/config" juju add-k8s ps6 --client
-    - name: Bootstrap Controller
-      id: controller
+    - name: Generate Juju Model and Controller Name
+      id: juju_resources
       shell: bash
       run: |
         date=$(date +"%y-%m-%d-%H-%M-%S")
+        echo "model=model-$date" >> $GITHUB_OUTPUT
+        echo "controller=$date" >> $GITHUB_OUTPUT
+    - name: Bootstrap Controller
+      shell: bash
+      run: |
         # juju will prefix the namespace with "controller"
-        juju bootstrap ps6 --bootstrap-constraints root-disk=5G $date
-        echo "date=$date" >> $GITHUB_OUTPUT
+        juju bootstrap ps6 --bootstrap-constraints root-disk=5G ${{ steps.juju_resources.outputs.controller }}
     - name: Create Model
       shell: bash
       run: |
-        juju add-model model-${{ steps.controller.outputs.date }} --config "logging-config=DEBUG"
+        juju add-model ${{ steps.juju_resources.outputs.model }} --config "logging-config=DEBUG"
     - name: Deploy Bundles
       continue-on-error: true
       shell: bash
       run: |
         ./scripts/test-deploy.sh \
-          --model model-${{ steps.controller.outputs.date }} \
+          --model ${{ steps.juju_resources.outputs.model }} \
           --bundles ./static/bundles/${{ github.event.inputs.charm_under_test }}.yaml ./static/bundles/${{ github.event.inputs.neighbor }}.yaml \
           --integrations "${{ github.event.inputs.charm_under_test }}:${{ github.event.inputs.charm_endpoint }}/${{ github.event.inputs.neighbor }}:${{ github.event.inputs.neighbor_endpoint }}" \
           --junit-xml=junit-deploy.xml
@@ -137,7 +141,7 @@ jobs:
       shell: bash
       run: |
         ./scripts/test-integration.sh \
-          --model model-${{ steps.controller.outputs.date }} \
+          --model ${{ steps.juju_resources.outputs.model }} \
           --target-application ${{ github.event.inputs.charm_under_test }} \
           --target-endpoint ${{ github.event.inputs.charm_endpoint }} \
           --neighbor-application ${{ github.event.inputs.neighbor }} \
@@ -148,7 +152,7 @@ jobs:
       shell: bash
       run: |
         ./scripts/test-teardown.sh \
-          --model model-${{ steps.controller.outputs.date }} \
+          --model ${{ steps.juju_resources.outputs.model }} \
           --applications ${{ github.event.inputs.charm_under_test }} \
           --junit-xml=junit-teardown.xml
     - name: Merge JUnit output
@@ -172,7 +176,7 @@ jobs:
       uses: canonical/juju-k8s-crashdump/actions/juju-k8s-crashdump@main
       with:
         kubeconf: $HOME/.kube/config
-        controller: ${{ steps.controller.outputs.date }}
+        controller: ${{ steps.juju_resources.outputs.controller }}
         output_path: $HOME/logs/juju-logs.tar.gz
         proxy: http://squid.internal:3128
     - name: Add JUnit to logs
@@ -203,4 +207,4 @@ jobs:
       if: ${{ always() }}
       shell: bash
       run: |
-        timeout 15m juju kill-controller ${{ steps.controller.outputs.date }} --no-prompt --timeout 0s
+        timeout 15m juju kill-controller ${{ steps.juju_resources.outputs.controller }} --no-prompt --timeout 0s
