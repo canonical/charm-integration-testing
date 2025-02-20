@@ -182,6 +182,13 @@ jobs:
     - name: Add JUnit to logs
       shell: bash
       run: cp ./junit.xml $HOME/logs/
+    - name: Dump the Juju Database
+      if: ${{ always() && github.event.inputs.execution_id != '' }}
+      shell: bash
+      run: |
+        JUJU_DEV_FEATURE_FLAGS=developer-mode juju dump-db \
+          -m ${{ steps.juju_resources.outputs.model }} \
+          -o $HOME/logs/juju-db-dump.yaml
     - name: Post Logs To Swift
       if: ${{ always() && github.event.inputs.execution_id != '' }}
       uses: canonical/sqa-cloud-deployment-pipeline/.github/actions/upload-to-swift@main
