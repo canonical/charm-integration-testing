@@ -50,6 +50,7 @@ class BasicFIFO:
 # Function to find 1-to-1 matches
 def find_relations(items):
     matches = []
+    already_integrated = set()
 
     for item in items:
         for output in item.provides_integrations:
@@ -57,13 +58,42 @@ def find_relations(items):
                 if target_item != item:
                     for input in target_item.requires_integrations:
                         if output["interface"] == input["interface"]:
-                            matches.append(
-                                [
-                                    f"{item.name}:{output['endpoint_name']}",
-                                    f"{target_item.name}:{input['endpoint_name']}",
-                                ]
-                            )
+                            target_side = f"{target_item.name}:{input['endpoint_name']}"
+                            if target_side not in already_integrated:
+                                matches.append(
+                                    [
+                                        f"{item.name}:{output['endpoint_name']}",
+                                        target_side,
+                                    ]
+                                )
+                                already_integrated.add(target_side)
     return matches
+
+
+def target_endpoints_from_endpoint_map(charms: list, right_endpoint: str, left_endpoint: str) -> list[str]:
+    endpoints = []
+    for charm in charms:
+        for source_charm_v in [*charm.requires_integrations, *charm.peer_integrations]:
+            for target_charm in charms:
+                for target_charm_v in [*target_charm.provides_integrations, *target_charm.peer_integrations]:
+                    if (
+                        source_charm_v["endpoint_name"].lower() == left_endpoint.lower()
+                        and target_charm_v["endpoint_name"].lower() == right_endpoint.lower()
+                    ):
+                        endpoints.append(source_charm_v["endpoint_name"])
+    return endpoints
+
+
+def target_endpoints_from_interface(charms: list, interface: str):
+    endpoints = []
+    for charm in charms:
+        for source_charm_v in [*charm.requires_integrations, *charm.peer_integrations]:
+            for target_charm in charms:
+                for target_charm_v in [*target_charm.provides_integrations, *target_charm.peer_integrations]:
+                    if source_charm_v["interface"] == target_charm_v["interface"]:
+                        if source_charm_v["interface"] == interface:
+                            endpoints.append(source_charm_v["endpoint_name"])
+    return endpoints
 
 
 def find_interface_providers(interface_name, logger=logging.getLogger("bundle_builder")):
@@ -103,16 +133,27 @@ def build_charm_graph(root_charm, max_depth=3, logger=logging.getLogger("bundle_
                     target_charm_integration["interface"], logger=logger
                 ):
                     logger.info(
-                        "{}[I] {}:{}".format(
-                            "\t" * (iterations + 1), target_charm_integration["interface"], interface_provider.name
+                        "{}[I] {}:{}:{}".format(
+                            "\t" * (iterations + 1),
+                            target_charm_integration["endpoint_name"],
+                            target_charm_integration["interface"],
+                            interface_provider.name,
                         )
                     )
-                    graph_output[target_charm].append((target_charm_integration["interface"], interface_provider))
+
+                    graph_output[target_charm].append(
+                        (
+                            target_charm_integration["interface"],
+                            interface_provider,
+                            target_charm_integration["endpoint_name"],
+                        )
+                    )
                     if interface_provider.name not in visited_nodes:
                         control_stack.append(interface_provider)
             visited_nodes.add(target_charm.name)
         iterations += 1
 
+    # Graph output is a List[Tuple[interface:str,provider_charm:Charm,endpoint_name:str]]
     return graph_output
 
 
@@ -122,12 +163,12 @@ def find_all_paths(graph, root_node):
 
     Parameters:
         graph (dict): A dictionary representing the graph, where each key is a node,
-                      and its value is a list of tuples (relationship, neighbor).
+                      and its value is a list of tuples (interface, neighbor, endpoint_name).
 
     Returns:
         dict: A dictionary where the keys are the first-level nodes, and the values are
               lists of paths. Each path is represented as a list of tuples
-              [(node, relationship, neighbor), ...].
+              [(node, interface, endpoint_name, neighbor), ...].
     """
 
     def dfs(node, path, paths):
@@ -137,8 +178,8 @@ def find_all_paths(graph, root_node):
             return
 
         # Explore all neighbors recursively
-        for relationship, neighbor in graph[node]:
-            dfs(neighbor, path + [(node, relationship, neighbor)], paths)
+        for interface_name, neighbor, endpoint_name in graph[node]:
+            dfs(neighbor, path + [(node, interface_name, endpoint_name, neighbor)], paths)
 
     paths = []
     dfs(root_node, [], paths)
@@ -154,9 +195,18 @@ def group_paths_by_interface(graph_paths):
     return grouped_paths
 
 
+def group_paths_by_endpoint(graph_paths):
+    grouped_paths = defaultdict(list)
+    for path in graph_paths:
+        first_endpoint = path[0][2]
+        grouped_paths[first_endpoint].append(path)
+    return grouped_paths
+
+
 def collapse_path(expanded_path):
     result = []
-    for source, _, target in expanded_path:
+    # source, interface, endpoint, target
+    for source, _, _, target in expanded_path:
         # Add the source if it's the first element or different from the previous target
         if not result or result[-1] != source:
             result.append(source)
@@ -207,14 +257,59 @@ def filter_to_shortest_paths(target, grouped_paths, support_charms, logger=loggi
     return selected_paths
 
 
-def render_all_generated_bundles(selected_paths, logger=logging.getLogger("bundle_builder")):
+def generate_minimal_deployment_bundle(
+    target_charm: Charm,
+    support_charms: list[Charm],
+    selected_paths: dict[str, list[Charm]],
+    required_edges: list[str],
+    logger=logging.getLogger("bundle_builder"),
+) -> dict[str, set]:
+    required_edges = set(
+        [interface["endpoint_name"] for interface in target_charm.non_optional_requires] + required_edges
+    )
+    selected_edge_paths = [selected_paths.get(edge, []) for edge in required_edges]
+    logger.debug(f"Generating minimal bundles for edges: {required_edges}.")
+    bundle_charms: set[Charm] = set()
+    seen_charms_name = set()
+    final_charm_path: set[Charm] = set()
+
+    for path in selected_edge_paths:
+        bundle_charms.update(path)
+
+    # Clean bundle_charms based off on one sole charm name
+    for charm in bundle_charms:
+        if charm.name not in seen_charms_name:
+            seen_charms_name.add(charm.name)
+            final_charm_path.add(charm)
+        else:
+            if charm in [target_charm, *support_charms]:
+                # Find offending charm
+                offending_charms = set(filter(lambda c: c.name == charm.name, final_charm_path))
+                final_charm_path.difference_update(offending_charms)
+                final_charm_path.add(charm)
+
+    logger.info(f"Minimal charm path result: {final_charm_path}.")
+    return dict(minimal=final_charm_path)
+
+
+def render_all_generated_bundles(selected_paths, deployment_platform: str, logger=logging.getLogger("bundle_builder")):
+    """
+    Currently `deployment_platform` is ignored and hardcoded to K8s, but when VM charms are enabled,
+    the bundle rendering is slightly different. DO NOT REMOVE THIS UNUSED ARG.
+    """
     rendered_bundles = {}
     for interface, selected_path in selected_paths.items():
         relations = find_relations(selected_path)
 
         charms_apps = {}
         for charm in selected_path:
-            charms_apps[charm.name] = {"charm": charm.name, "channel": charm.channel, "scale": 1}
+            charm_object = {"charm": charm.name, "scale": 1}
+            if not charm.channel:
+                charm_object["channel"] = "edge"
+                charm_object["revision"] = charm.revision
+            else:
+                charm_object["channel"] = charm.channel
+            charms_apps[charm.name] = charm_object
 
         bundle = {"bundle": "kubernetes", "applications": {**charms_apps}, "relations": [*relations]}
 
@@ -223,15 +318,15 @@ def render_all_generated_bundles(selected_paths, logger=logging.getLogger("bundl
     return rendered_bundles
 
 
-def dump_selected_bundle_to_file(
-    rendered_bundles: str, selected_interface: str, filename: str, logger=logging.getLogger("bundle_builder")
-):
+def dump_selected_bundle_to_file(rendered_bundles: str, filename: str, logger=logging.getLogger("bundle_builder")):
     path = Path(filename).absolute().resolve()
 
-    with open(path, "w", encoding="utf-8") as f:
-        target_bundle = rendered_bundles.get(selected_interface)
-        target_bundle_yaml = yaml.dump(target_bundle)
-        logger.debug(f"Generated bundle for interface {selected_interface}: ")
+    # dump all the edges that get to this point
+    selected_edges = rendered_bundles.keys()
+    generated_bundles = [rendered_bundles.get(edge) for edge in selected_edges]
+
+    with open(path, "w+", encoding="utf-8") as f:
+        target_bundle_yaml = yaml.safe_dump_all(generated_bundles, default_flow_style=False)
         logger.debug(target_bundle_yaml)
         logger.debug(f"Saving bundle to {path}")
         f.write(target_bundle_yaml)

@@ -107,6 +107,14 @@ jobs:
         EOF
         pipx install poetry==2.0
         HTTPS_PROXY="http://squid.internal:3128" poetry install
+    - name: Generate dynamic bundles
+      shell: bash
+      run: |
+        poetry run bundle-builder --target-charm "${{ github.event.inputs.charm_under_test }}::${{ github.event.inputs.revision }}::${{ github.event.inputs.arch }}::${{ github.event.inputs.series }}" --support-charm "${{ github.event.inputs.neighbor }}::upstream_default::${{ github.event.inputs.arch }}::${{ github.event.inputs.series }}" --endpoint-map "${{ github.event.inputs.charm_endpoint }}::${{ github.event.inputs.neighbor_endpoint }}" --deployment-platform K8S --log-level DEBUG --max-depth 4 --output-file generated-bundle.yaml
+        echo '### Generated Juju Bundle' >> $GITHUB_STEP_SUMMARY
+        echo '```yaml' >> $GITHUB_STEP_SUMMARY
+        cat generated-bundle.yaml >> $GITHUB_STEP_SUMMARY
+        echo '```' >> $GITHUB_STEP_SUMMARY
     - name: Add K8s
       shell: bash
       run: |
@@ -133,8 +141,7 @@ jobs:
       run: |
         ./scripts/test-deploy.sh \
           --model ${{ steps.juju_resources.outputs.model }} \
-          --bundles ./static/bundles/${{ github.event.inputs.charm_under_test }}.yaml ./static/bundles/${{ github.event.inputs.neighbor }}.yaml \
-          --integrations "${{ github.event.inputs.charm_under_test }}:${{ github.event.inputs.charm_endpoint }}/${{ github.event.inputs.neighbor }}:${{ github.event.inputs.neighbor_endpoint }}" \
+          --bundles ./generated-bundle.yaml \
           --junit-xml=junit-deploy.xml
     - name: Execute Tests
       continue-on-error: true

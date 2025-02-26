@@ -22,8 +22,11 @@ from .charmqa import (
     dump_selected_bundle_to_file,
     filter_to_shortest_paths,
     find_all_paths,
-    group_paths_by_interface,
+    generate_minimal_deployment_bundle,
+    group_paths_by_endpoint,
     render_all_generated_bundles,
+    target_endpoints_from_endpoint_map,
+    target_endpoints_from_interface,
 )
 
 
@@ -69,14 +72,27 @@ def main():
         "--support-charm",
         type=str,
         nargs="+",
-        help="In the format of <charmname>::<charm_channel_or_version>::<arch>::<ubuntu_version>",
+        help="In the format of <charmname>::<charm_channel_or_version>::<arch>::<ubuntu_version>. Use `upstream_default` for charm channel to automatically select from upstream data.",
         required=True,
     )
-    parser.add_argument(
+    interface_or_endpoints_group = parser.add_mutually_exclusive_group(required=True)
+    interface_or_endpoints_group.add_argument(
         "--target-interface",
         type=str,
         help="For which interface on the target charm are we generating bundles for.",
-        required=True,
+    )
+
+    interface_or_endpoints_group.add_argument(
+        "--endpoint-map",
+        type=str,
+        help="In the format of <target_endpoint>::<support_endpoint>.",
+    )
+
+    parser.add_argument(
+        "--deployment-platform",
+        choices=["K8S"],
+        default="K8S",
+        help="What platform is the charm going to be deployed on. K8s or VM charm. Only K8s is enabled for now.",
     )
     parser.add_argument(
         "--output-file", type=str, help="Where to save the generated bundle", default="generated_bundle.yaml"
@@ -86,7 +102,7 @@ def main():
 
     LOGGER = setup_logging(args.log_level)
 
-    tcharm_parts = args.target_charm.split("::", maxsplit=4)
+    tcharm_parts = args.target_charm.split("::", maxsplit=3)
 
     target = Charm.from_store(
         charm_name=tcharm_parts[0],
@@ -100,27 +116,53 @@ def main():
 
     for scharm in args.support_charm:
         # format: <charmname>::<charm_channel>::<arch>::<ubuntu_version>
-        scharm_parts = scharm.split("::", maxsplit=4)
-        support_charms.append(
-            Charm.from_store(
+        scharm_parts = scharm.split("::", maxsplit=3)
+        if str(scharm_parts[1]).lower() == "upstream_default":
+            charm = Charm.from_store_default(charm_name=scharm_parts[0], logger=LOGGER)
+        else:
+            charm = Charm.from_store(
                 charm_name=scharm_parts[0],
                 ubuntu_arch=scharm_parts[2],
                 ubuntu_version=scharm_parts[3],
                 logger=LOGGER,
                 **channel_or_revision(parsed_arg=scharm_parts[1], logger=LOGGER),
             )
+
+        support_charms.append(charm)
+
+    # Support both possibilities
+    if not args.target_interface:
+        right_endpoint, left_endpoint = args.endpoint_map.split("::", maxsplit=2)
+        selected_edges = target_endpoints_from_endpoint_map(
+            charms=[target, *support_charms], right_endpoint=right_endpoint, left_endpoint=left_endpoint
+        )
+    else:
+        selected_edges = target_endpoints_from_interface(
+            charms=[target, *support_charms], interface=args.target_interface
         )
 
+    if len(selected_edges) < 1:
+        raise RuntimeError("Edge selection parameters invalid. Check --endpoint-map or --target-interface option.")
+
+    LOGGER.debug(f"Selected edges: {selected_edges}")
     graph = build_charm_graph(target, max_depth=args.max_depth, logger=LOGGER)
     all_paths = find_all_paths(graph=graph, root_node=target)
-    grouped_paths = group_paths_by_interface(all_paths)
+    grouped_paths = group_paths_by_endpoint(all_paths)
     selected_paths = filter_to_shortest_paths(
         target=target, grouped_paths=grouped_paths, support_charms=support_charms, logger=LOGGER
     )
-    rendered_bundles = render_all_generated_bundles(selected_paths=selected_paths, logger=LOGGER)
+    minimal_deployment_paths = generate_minimal_deployment_bundle(
+        target_charm=target,
+        support_charms=support_charms,
+        selected_paths=selected_paths,
+        required_edges=selected_edges,
+        logger=LOGGER,
+    )
+    rendered_bundles = render_all_generated_bundles(
+        selected_paths=minimal_deployment_paths, deployment_platform=args.deployment_platform, logger=LOGGER
+    )
     dump_selected_bundle_to_file(
         rendered_bundles=rendered_bundles,
-        selected_interface=args.target_interface,
         filename=args.output_file,
         logger=LOGGER,
     )
