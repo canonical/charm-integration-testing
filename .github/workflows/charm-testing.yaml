@@ -1,5 +1,5 @@
 name: Execute tests against two charms and their integrations
-run-name: Testing ${{ inputs.charm_under_test }}:${{ inputs.charm_endpoint }} against ${{ inputs.neighbor }}:${{ inputs.neighbor_endpoint }}. (environment=${{ inputs.environment }},test_execution=${{ inputs.execution_id != '' && inputs.execution_id || 'null' }})
+run-name: "Testing ${{ inputs.charm_under_test }}:${{ inputs.charm_endpoint }} against ${{ inputs.neighbor }}:${{ inputs.neighbor_endpoint }}. (environment: ${{ inputs.environment }}${{ inputs.execution_id != '' && ', test_execution: ' || '' }}${{ inputs.execution_id }})"
 
 concurrency:
   group: ${{ (inputs.environment == 'production' || inputs.environment == 'staging') && 'production-k8s' || 'staging-k8s' }}
