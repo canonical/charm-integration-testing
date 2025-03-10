@@ -2,7 +2,7 @@ name: Execute tests against two charms and their integrations
 run-name: Testing ${{ github.event.inputs.charm_under_test }}:${{ github.event.inputs.charm_endpoint }} against ${{ github.event.inputs.neighbor }}:${{ github.event.inputs.neighbor_endpoint }}${{ github.event.inputs.execution_id != '' && ' for the ' || '' }}${{ github.event.inputs.execution_id }}${{ github.event.inputs.execution_id != '' && ' test' || '' }}.
 
 concurrency:
-  group: ${{ (inputs.environment == 'production' || inputs.environment == 'staging') && 'production-k8s' || 'staging-k8s' }}
+  group: ${{ inputs.environment == 'production' && 'production-k8s' || 'staging-k8s' }}
 
 on:
   workflow_dispatch:
