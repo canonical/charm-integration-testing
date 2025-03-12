@@ -119,6 +119,8 @@ jobs:
       shell: bash
       run: |
         cat $HOME/.kube/config
+        sudo snap install kubectl --classic
+        KUBECONFIG="$HOME/.kube/config" kubectl get po -A
         KUBECONFIG="$HOME/.kube/config" juju add-k8s ps6 --client
     - name: Generate Juju Model and Controller Name
       id: juju_resources
