@@ -86,7 +86,7 @@ jobs:
       shell: bash
       run: |
         mkdir -p $HOME/.kube
-        if [ "${{ github.event.inputs.environment }}" = "production" ] || [ "${{ github.event.inputs.environment }}" = "staging" ]; then
+        if [ "${{ github.event.inputs.environment }}" = "production" ]; then
           echo '${{ secrets.PROD_SQA_KUBECONFIG }}' > $HOME/.kube/config
         else        
           echo '${{ secrets.STG_SQA_KUBECONFIG }}' > $HOME/.kube/config
