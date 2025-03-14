@@ -16,6 +16,7 @@
 
 from dataclasses import dataclass
 from functools import cached_property, total_ordering
+
 import yaml
 
 from .charm import ENDPOINT_PROVIDES, ENDPOINT_REQUIRES, Charm, CharmEndpoint
@@ -44,7 +45,7 @@ class ApplicationEndpoint:
 
     def __repr__(self):
         return self.__str__()
-    
+
     def __lt__(self, other):
         if not isinstance(other, ApplicationEndpoint):
             return NotImplemented
@@ -139,20 +140,27 @@ class Bundle:
 
     # Export bundle to yaml string
     def export(self) -> str:
-        return yaml.dump({
-            "applications": {
-                application.name: {
-                    "charm": application.charm.name,
-                    "channel": application.charm.channel,
-                    "revision": application.charm.revision,
-                    "scale": 1,
-                    "trust": True,
-                }
-                for application in self.applications
+        return yaml.dump(
+            {
+                "applications": {
+                    application.name: {
+                        "charm": application.charm.name,
+                        "channel": application.charm.channel,
+                        "revision": application.charm.revision,
+                        "scale": 1,
+                        "trust": True,
+                    }
+                    for application in self.applications
+                },
+                "bundle": self.platform,
+                "relations": [
+                    [
+                        f"{application_endpoint.application}:{application_endpoint.endpoint}"
+                        for application_endpoint in sorted(integration)
+                    ]
+                    for integration in sorted(self.integrations)
+                ],
             },
-            "bundle": self.platform,
-            "relations": [
-                [f"{application_endpoint.application}:{application_endpoint.endpoint}" for application_endpoint in sorted(integration)]
-                for integration in sorted(self.integrations)
-            ]
-        }, default_flow_style=False, sort_keys=True)
+            default_flow_style=False,
+            sort_keys=True,
+        )

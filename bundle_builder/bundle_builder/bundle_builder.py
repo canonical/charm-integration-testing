@@ -51,7 +51,7 @@ class Node:
     @cached_property
     def child_charms(self):
         return frozenset({charm_name for _, charm_name in self.application_endpoint_to_possible_charm})
-    
+
     @cached_property
     def stats(self) -> str:
         return f"{len(self.bundle.applications)} applications ({len(self.bundle.unfulfilled_interfaces)} unfulfilled and {len(self.fulfillable_interfaces)} fulfillable interfaces)"

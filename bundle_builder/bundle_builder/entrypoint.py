@@ -15,13 +15,12 @@
 
 import argparse
 import logging
+from pathlib import Path
 
 from .bundle import Application, ApplicationEndpoint, Bundle, Integration
 from .bundle_builder import BundleBuilder
 from .charm import Charm
 from .charmhub import CharmhubClient
-from pathlib import Path
-import yaml
 
 
 def setup_logging(loglevel: str):
@@ -101,6 +100,7 @@ def platform_from_args(substrate: str) -> str:
     # Lookup substrate to bundle platform
     return {"kubernetes": "kubernetes"}[substrate]
 
+
 # Dump the bundle to file
 def export_bundle_to_file(filename: str, bundle: Bundle, logger: logging.Logger):
     # Get proper file path
@@ -109,7 +109,7 @@ def export_bundle_to_file(filename: str, bundle: Bundle, logger: logging.Logger)
 
     # Write to file
     path.write_text(bundle.export(), encoding="utf-8")
-    logger.info(f"Saved bundle")
+    logger.info("Saved bundle")
 
 
 def main():
@@ -162,7 +162,7 @@ def main():
     # Build the bundle
     built_bundle = BundleBuilder(charmhub_client=charmhub_client, logger=logger).build(base_bundle)
     logger.info(f"Generated bundle: \n{'-'*80}\n{built_bundle.export()}{'-'*80}")
-    
+
     # Export the bundle to file
     if args.output_file:
         export_bundle_to_file(args.output_file, built_bundle, logger)
