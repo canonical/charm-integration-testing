@@ -16,18 +16,12 @@
 import argparse
 import logging
 
+from .bundle import Application, ApplicationEndpoint, Bundle, Integration
+from .bundle_builder import BundleBuilder
 from .charm import Charm
-from .charmqa import (
-    build_charm_graph,
-    dump_selected_bundle_to_file,
-    filter_to_shortest_paths,
-    find_all_paths,
-    generate_minimal_deployment_bundle,
-    group_paths_by_endpoint,
-    render_all_generated_bundles,
-    target_endpoints_from_endpoint_map,
-    target_endpoints_from_interface,
-)
+from .charmhub import CharmhubClient
+from pathlib import Path
+import yaml
 
 
 def setup_logging(loglevel: str):
@@ -50,123 +44,129 @@ def setup_logging(loglevel: str):
     return logger
 
 
-def channel_or_revision(parsed_arg: str, logger=logging.getLogger("bundle_builder")):
-    if parsed_arg.isnumeric():
-        logger.debug(f"Using charm revision as second argument of input format was numeric. Input: {parsed_arg}")
-        return {"charm_revision": int(parsed_arg)}
+# Get charms from args
+def applications_from_args(charmhub_client: CharmhubClient, specs: list[str], arch: str) -> frozenset[Charm]:
+    applications = set()
+    for spec in specs:
+        # Get charm specs
+        name, charm, channel_or_revision, base = spec.split("::", maxsplit=4)
+        channel = None
+        revision = None
+        if channel_or_revision != "default":
+            if channel_or_revision.isnumeric():
+                revision = int(channel_or_revision)
+            else:
+                channel = channel_or_revision
+        base = base if base != "default" else None
 
-    logger.debug(f"Using charm channel as second argument of input format was NOT numeric. Input: {parsed_arg}")
-    return {"charm_channel": parsed_arg}
+        # Get charm from store
+        applications.add(
+            Application(
+                name=name,
+                charm=charmhub_client.charm_from_store(
+                    charm_name=charm,
+                    charm_channel=channel,
+                    charm_revision=revision,
+                    ubuntu_version=base,
+                    ubuntu_arch=arch,
+                ),
+            )
+        )
+    return frozenset(applications)
+
+
+# Get integrations from args
+def integrations_from_args(specs: list[str]) -> frozenset[Integration]:
+    integrations = set()
+    for specs in specs:
+        # Split specs
+        application_1, application_2 = specs.split("::", maxsplit=2)
+        application_1_name, application_1_endpoint = application_1.split(":", maxsplit=1)
+        application_2_name, application_2_endpoint = application_2.split(":", maxsplit=1)
+
+        # Add integration
+        integrations.add(
+            Integration(
+                {
+                    ApplicationEndpoint(application_1_name, application_1_endpoint),
+                    ApplicationEndpoint(application_2_name, application_2_endpoint),
+                }
+            )
+        )
+    return frozenset(integrations)
+
+
+# Get platform from args
+def platform_from_args(substrate: str) -> str:
+    # Lookup substrate to bundle platform
+    return {"kubernetes": "kubernetes"}[substrate]
+
+# Dump the bundle to file
+def export_bundle_to_file(filename: str, bundle: Bundle, logger: logging.Logger):
+    # Get proper file path
+    path = Path(filename).absolute().resolve()
+    logger.info(f"Saving bundle to '{path}'")
+
+    # Write to file
+    path.write_text(bundle.export(), encoding="utf-8")
+    logger.info(f"Saved bundle")
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--max-depth", type=int, default=2, help="How deep to generate the graph.")
     parser.add_argument(
-        "--target-charm",
-        type=str,
-        help="In the format of <charmname>::<charm_channel_or_version>::<arch>::<ubuntu_version>",
-        required=True,
-    )
-    parser.add_argument(
-        "--support-charm",
+        "--charms",
         type=str,
         nargs="+",
-        help="In the format of <charmname>::<charm_channel_or_version>::<arch>::<ubuntu_version>. Use `upstream_default` for charm channel to automatically select from upstream data.",
+        help="Charms to include in the bundle, format <application_name>::<charm>::<channel_or_revision>::<base>. Charm channel or revision, and base may be `default`.",
         required=True,
     )
-    interface_or_endpoints_group = parser.add_mutually_exclusive_group(required=True)
-    interface_or_endpoints_group.add_argument(
-        "--target-interface",
-        type=str,
-        help="For which interface on the target charm are we generating bundles for.",
-    )
-
-    interface_or_endpoints_group.add_argument(
-        "--endpoint-map",
-        type=str,
-        help="In the format of <target_endpoint>::<support_endpoint>.",
-    )
-
     parser.add_argument(
-        "--deployment-platform",
-        choices=["K8S"],
-        default="K8S",
-        help="What platform is the charm going to be deployed on. K8s or VM charm. Only K8s is enabled for now.",
+        "--integrations",
+        type=str,
+        nargs="+",
+        help="Integrations to include in the bundle, format <application_name>:<endpoint>::<application_name>:<endpoint>.",
+        default=[],
     )
     parser.add_argument(
-        "--output-file", type=str, help="Where to save the generated bundle", default="generated_bundle.yaml"
+        "--arch",
+        type=str,
+        help="Architecture to use for the bundle",
+        choices=["amd64"],
+        default="amd64",
     )
+    parser.add_argument(
+        "--substrate",
+        choices=["kubernetes"],
+        default="kubernetes",
+        help="Which substrate is the charm going to be deployed on. Only kubernetes is enabled for now.",
+    )
+    parser.add_argument("--output-file", type=str, help="Where to save the generated bundle")
     parser.add_argument("--log-level", choices=["INFO", "DEBUG", "WARNING", "ERROR", "CRITICAL"], default="WARNING")
     args = parser.parse_args()
 
-    LOGGER = setup_logging(args.log_level)
+    # Get logger
+    logger = setup_logging(args.log_level)
 
-    tcharm_parts = args.target_charm.split("::", maxsplit=3)
+    # Create Charmhub client
+    charmhub_client = CharmhubClient(logger=logger)
 
-    target = Charm.from_store(
-        charm_name=tcharm_parts[0],
-        ubuntu_arch=tcharm_parts[2],
-        ubuntu_version=tcharm_parts[3],
-        logger=LOGGER,
-        **channel_or_revision(parsed_arg=tcharm_parts[1], logger=LOGGER),
+    # Get base bundle from arguments
+    base_bundle = Bundle(
+        applications=applications_from_args(charmhub_client, args.charms, args.arch),
+        integrations=integrations_from_args(args.integrations),
+        platform=platform_from_args(args.substrate),
+        arch=args.arch,
     )
 
-    support_charms = []
-
-    for scharm in args.support_charm:
-        # format: <charmname>::<charm_channel>::<arch>::<ubuntu_version>
-        scharm_parts = scharm.split("::", maxsplit=3)
-        if str(scharm_parts[1]).lower() == "upstream_default":
-            charm = Charm.from_store_default(charm_name=scharm_parts[0], logger=LOGGER)
-        else:
-            charm = Charm.from_store(
-                charm_name=scharm_parts[0],
-                ubuntu_arch=scharm_parts[2],
-                ubuntu_version=scharm_parts[3],
-                logger=LOGGER,
-                **channel_or_revision(parsed_arg=scharm_parts[1], logger=LOGGER),
-            )
-
-        support_charms.append(charm)
-
-    # Support both possibilities
-    if not args.target_interface:
-        right_endpoint, left_endpoint = args.endpoint_map.split("::", maxsplit=2)
-        selected_edges = target_endpoints_from_endpoint_map(
-            charms=[target, *support_charms], right_endpoint=right_endpoint, left_endpoint=left_endpoint
-        )
-    else:
-        selected_edges = target_endpoints_from_interface(
-            charms=[target, *support_charms], interface=args.target_interface
-        )
-
-    if len(selected_edges) < 1:
-        raise RuntimeError("Edge selection parameters invalid. Check --endpoint-map or --target-interface option.")
-
-    LOGGER.debug(f"Selected edges: {selected_edges}")
-    graph = build_charm_graph(target, max_depth=args.max_depth, logger=LOGGER)
-    all_paths = find_all_paths(graph=graph, root_node=target)
-    grouped_paths = group_paths_by_endpoint(all_paths)
-    selected_paths = filter_to_shortest_paths(
-        target=target, grouped_paths=grouped_paths, support_charms=support_charms, logger=LOGGER
-    )
-    minimal_deployment_paths = generate_minimal_deployment_bundle(
-        target_charm=target,
-        support_charms=support_charms,
-        selected_paths=selected_paths,
-        required_edges=selected_edges,
-        logger=LOGGER,
-    )
-    rendered_bundles = render_all_generated_bundles(
-        selected_paths=minimal_deployment_paths, deployment_platform=args.deployment_platform, logger=LOGGER
-    )
-    dump_selected_bundle_to_file(
-        rendered_bundles=rendered_bundles,
-        filename=args.output_file,
-        logger=LOGGER,
-    )
+    # Build the bundle
+    built_bundle = BundleBuilder(charmhub_client=charmhub_client, logger=logger).build(base_bundle)
+    logger.info(f"Generated bundle: \n{built_bundle.export()}")
+    
+    # Export the bundle to file
+    if args.output_file:
+        export_bundle_to_file(args.output_file, built_bundle, logger)
 
 
-if __name__ == "__main":
+if __name__ == "__main__":
     main()
