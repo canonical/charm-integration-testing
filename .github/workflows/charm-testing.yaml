@@ -108,6 +108,7 @@ jobs:
         pipx install poetry==2.0
         HTTPS_PROXY="http://squid.internal:3128" poetry install
     - name: Generate dynamic bundles
+      id: build_bundle
       shell: bash
       run: |
         ./scripts/build-bundle.sh \
@@ -123,6 +124,7 @@ jobs:
         echo '```yaml' >> $GITHUB_STEP_SUMMARY
         cat generated-bundle.yaml >> $GITHUB_STEP_SUMMARY
         echo '```' >> $GITHUB_STEP_SUMMARY
+        echo "bundle=${pwd}/generated-bundle.yaml" >> $GITHUB_OUTPUT
     - name: Add K8s
       shell: bash
       run: |
@@ -149,7 +151,7 @@ jobs:
       run: |
         ./scripts/test-deploy.sh \
           --model ${{ steps.juju_resources.outputs.model }} \
-          --bundles ./generated-bundle.yaml \
+          --bundles ${{ steps.build_bundle.outputs.bundle }} \
           --junit-xml=junit-deploy.xml
     - name: Execute Tests
       continue-on-error: true
