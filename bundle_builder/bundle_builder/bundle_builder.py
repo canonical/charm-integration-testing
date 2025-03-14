@@ -72,13 +72,13 @@ class BundleBuilder:
 
         # This follows a rough uniform cost algorithm
         queued_nodes = [self.new_node(base)]
-        self.logger.info(f"Starting with bundle: {queued_nodes[0].stats}")
-        visited_nodes = set()
         best_node = queued_nodes[0]
+        visited_nodes = {best_node.fingerprint}
+        self.logger.info(f"Starting with bundle: {best_node.stats}")
         while len(queued_nodes) > 0:
             # Get node with the best score
-            queued_nodes.sort(key=lambda node: node.score)
-            node = queued_nodes.pop(0)
+            node = min(queued_nodes, key=lambda node: node.score)
+            queued_nodes.remove(node)
             self.logger.debug(f"Checking bundle: {node.stats}")
 
             # Check if this node is better than the best node
@@ -86,7 +86,7 @@ class BundleBuilder:
                 self.logger.info(f"Found new best bundle: {node.stats}")
                 best_node = node
 
-            # If there are no fulfillable interfaces there is no way further saturate the bundle
+            # If there are no fulfillable interfaces there is no way to further saturate the bundle
             # We could exhaust possibilities to possibly get a smaller bundle, but that comes at the cost of compute
             if len(node.fulfillable_interfaces) == 0:
                 self.logger.info("Bundle has no more fulfillable interfaces, stopping")
@@ -108,7 +108,7 @@ class BundleBuilder:
 
     # Return a new node, including the possible child charms
     def new_node(self, bundle: Bundle) -> Node:
-        # Get interface to possible child charm
+        # Get all possible ways to fulfill unfulfilled application endpoints with charms
         # Note that we explicitly remove the bundle charms as we cannot use a charm in the bundle to fulfill an unfulfillable interface
         # An example is grafana-agent-k8s provides and requires `tracing`, and is the only charm in Charmhub to use `tracing`
         application_endpoint_to_possible_charm = {

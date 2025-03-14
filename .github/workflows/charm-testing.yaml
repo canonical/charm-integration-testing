@@ -116,7 +116,7 @@ jobs:
             "target::${{ inputs.charm_under_test }}::${{ inputs.revision }}::${{ inputs.series }}" \
             "neighbor::${{ inputs.neighbor }}::default::default" \
           --integrations "target:${{ inputs.charm_endpoint }}::neighbor:${{ inputs.neighbor_endpoint }}" \
-          --substrate "kubernetes" \ # ${{ inputs.substrate }} \
+          --substrate "kubernetes" \
           --arch ${{ inputs.arch }} \
           --log-level DEBUG \
           --output-file generated-bundle.yaml

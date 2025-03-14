@@ -146,6 +146,7 @@ class Bundle:
                     "channel": application.charm.channel,
                     "revision": application.charm.revision,
                     "scale": 1,
+                    "trust": True,
                 }
                 for application in self.applications
             },
