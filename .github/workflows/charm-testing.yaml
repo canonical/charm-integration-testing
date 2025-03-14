@@ -159,9 +159,9 @@ jobs:
       run: |
         ./scripts/test-integration.sh \
           --model ${{ steps.juju_resources.outputs.model }} \
-          --target-application ${{ github.event.inputs.charm_under_test }} \
+          --target-application target \
           --target-endpoint ${{ github.event.inputs.charm_endpoint }} \
-          --neighbor-application ${{ github.event.inputs.neighbor }} \
+          --neighbor-application neighbor \
           --neighbor-endpoint ${{ github.event.inputs.neighbor_endpoint }} \
           --junit-xml=junit-integration.xml
     - name: Teardown charm under test
@@ -170,7 +170,7 @@ jobs:
       run: |
         ./scripts/test-teardown.sh \
           --model ${{ steps.juju_resources.outputs.model }} \
-          --applications ${{ github.event.inputs.charm_under_test }} \
+          --applications target \
           --junit-xml=junit-teardown.xml
     - name: Merge JUnit output
       shell: bash
