@@ -67,9 +67,6 @@ class BundleBuilder:
 
     # Build out the bundle, pulling in charms that fulfill non-optional hanging required integrations
     def build(self, base: Bundle) -> Bundle:
-        # Ensure all possible integrations are fulfilled by the bundle
-        base = base.add_missing_integrations()
-
         # This follows a rough uniform cost algorithm
         queued_nodes = [self.new_node(base)]
         best_node = queued_nodes[0]
@@ -108,6 +105,9 @@ class BundleBuilder:
 
     # Return a new node, including the possible child charms
     def new_node(self, bundle: Bundle) -> Node:
+        # Ensure all possible integrations are fulfilled by the bundle
+        bundle = bundle.add_missing_integrations()
+
         # Get all possible ways to fulfill unfulfilled application endpoints with charms
         # Note that we explicitly remove the bundle charms as we cannot use a charm in the bundle to fulfill an unfulfillable interface
         # An example is grafana-agent-k8s provides and requires `tracing`, and is the only charm in Charmhub to use `tracing`
@@ -146,7 +146,7 @@ class BundleBuilder:
                         integrations=node.bundle.integrations,
                         platform=node.bundle.platform,
                         arch=node.bundle.arch,
-                    ).add_missing_integrations()
+                    )
                 )
                 for charm in child_charm
             }
