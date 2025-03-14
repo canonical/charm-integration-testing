@@ -147,6 +147,7 @@ class Bundle:
                         "charm": application.charm.name,
                         "channel": application.charm.channel,
                         "revision": application.charm.revision,
+                        "base": f"ubuntu@{application.charm.ubuntu_version}",
                         "scale": 1,
                         "trust": True,
                     }
