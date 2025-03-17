@@ -108,13 +108,23 @@ jobs:
         pipx install poetry==2.0
         HTTPS_PROXY="http://squid.internal:3128" poetry install
     - name: Generate dynamic bundles
+      id: build_bundle
       shell: bash
       run: |
-        poetry run bundle-builder --target-charm "${{ github.event.inputs.charm_under_test }}::${{ github.event.inputs.revision }}::${{ github.event.inputs.arch }}::${{ github.event.inputs.series }}" --support-charm "${{ github.event.inputs.neighbor }}::upstream_default::${{ github.event.inputs.arch }}::${{ github.event.inputs.series }}" --endpoint-map "${{ github.event.inputs.charm_endpoint }}::${{ github.event.inputs.neighbor_endpoint }}" --deployment-platform K8S --log-level DEBUG --max-depth 4 --output-file generated-bundle.yaml
+        ./scripts/build-bundle.sh \
+          --charms \
+            "target::${{ inputs.charm_under_test }}::${{ inputs.revision }}::${{ inputs.series }}" \
+            "neighbor::${{ inputs.neighbor }}::default::default" \
+          --integrations "target:${{ inputs.charm_endpoint }}::neighbor:${{ inputs.neighbor_endpoint }}" \
+          --substrate "kubernetes" \
+          --arch ${{ inputs.arch }} \
+          --log-level DEBUG \
+          --output-file generated-bundle.yaml
         echo '### Generated Juju Bundle' >> $GITHUB_STEP_SUMMARY
         echo '```yaml' >> $GITHUB_STEP_SUMMARY
         cat generated-bundle.yaml >> $GITHUB_STEP_SUMMARY
         echo '```' >> $GITHUB_STEP_SUMMARY
+        echo "bundle=${pwd}/generated-bundle.yaml" >> $GITHUB_OUTPUT
     - name: Add K8s
       shell: bash
       run: |
@@ -141,7 +151,7 @@ jobs:
       run: |
         ./scripts/test-deploy.sh \
           --model ${{ steps.juju_resources.outputs.model }} \
-          --bundles ./generated-bundle.yaml \
+          --bundles ${{ steps.build_bundle.outputs.bundle }} \
           --junit-xml=junit-deploy.xml
     - name: Execute Tests
       continue-on-error: true
@@ -149,9 +159,9 @@ jobs:
       run: |
         ./scripts/test-integration.sh \
           --model ${{ steps.juju_resources.outputs.model }} \
-          --target-application ${{ github.event.inputs.charm_under_test }} \
+          --target-application target \
           --target-endpoint ${{ github.event.inputs.charm_endpoint }} \
-          --neighbor-application ${{ github.event.inputs.neighbor }} \
+          --neighbor-application neighbor \
           --neighbor-endpoint ${{ github.event.inputs.neighbor_endpoint }} \
           --junit-xml=junit-integration.xml
     - name: Teardown charm under test
@@ -160,7 +170,7 @@ jobs:
       run: |
         ./scripts/test-teardown.sh \
           --model ${{ steps.juju_resources.outputs.model }} \
-          --applications ${{ github.event.inputs.charm_under_test }} \
+          --applications target \
           --junit-xml=junit-teardown.xml
     - name: Merge JUnit output
       shell: bash
