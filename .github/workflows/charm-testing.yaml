@@ -206,6 +206,9 @@ jobs:
         JUJU_DEV_FEATURE_FLAGS=developer-mode juju dump-db \
           -m ${{ steps.juju_resources.outputs.model }} \
           -o $HOME/logs/juju-db-dump.yaml
+    - name: Add generated bundle to logs
+      shell: bash
+      run: cp ${{ steps.build_bundle.outputs.bundle }} $HOME/logs/generated-bundle.yaml
     - name: Post Logs To Swift
       if: ${{ always() && github.event.inputs.execution_id != '' }}
       uses: canonical/sqa-cloud-deployment-pipeline/.github/actions/upload-to-swift@main
