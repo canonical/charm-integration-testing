@@ -20,18 +20,22 @@ runs:
     - id: get-json-body
       name: Get Test Observer JSON
       shell: bash
-      run: |
+      env:
+        test_execution_id: ${{ inputs.test_execution_id }}
+      run: | # zizmor: ignore[template-injection] shell expansion would not work otherwise
         jq -nc '
           {
-            "test_execution_ids": [${{ inputs.test_execution_id }}]
+            "test_execution_ids": [${{env.test_execution_id}}] 
           }
         ' > body.json
         cat body.json
 
     - name: Send POST request to Test Observer
       shell: bash
+      env:
+        test_observer_api: ${{ inputs.test_observer_api }}
       run: |
         curl --fail-with-body \
-          -X POST ${{ inputs.test_observer_api }}/v1/test-executions/reruns \
+          -X POST ${test_observer_api}/v1/test-executions/reruns \
           -H "Content-Type: application/json" \
           -d @body.json
