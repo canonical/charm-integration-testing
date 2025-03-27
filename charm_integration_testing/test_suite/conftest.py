@@ -5,7 +5,8 @@
 import logging
 
 import pytest
-from juju import JujuClient
+from extensions import UnsealVaultJujuExtension, UnsealVaultK8sJujuExtension
+from juju import JujuBackend, JujuClient
 from juju_cmd import JujuCmdBackend
 from pytest import CollectReport, StashKey
 
@@ -16,8 +17,20 @@ def logger() -> logging.Logger:
 
 
 @pytest.fixture
-def juju_client(logger: logging.Logger) -> JujuClient:
-    return JujuClient(JujuCmdBackend(), logger)
+def juju_backend() -> JujuBackend:
+    return JujuCmdBackend()
+
+
+@pytest.fixture
+def juju_client(juju_backend: JujuBackend, logger: logging.Logger) -> JujuClient:
+    return JujuClient(
+        juju_backend,
+        logger,
+        extensions=[
+            UnsealVaultJujuExtension(juju_backend, logger),
+            UnsealVaultK8sJujuExtension(juju_backend, logger),
+        ],
+    )
 
 
 def pytest_addoption(parser):

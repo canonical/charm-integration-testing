@@ -6,10 +6,10 @@ import time
 from datetime import datetime, timedelta, timezone
 
 import yaml
-from juju import JujuBackend, JujuIntegration, JujuIntegrationApplication, JujuWaitTimeoutError
+from juju import JujuBackend, JujuExecOutput, JujuIntegration, JujuIntegrationApplication, JujuWaitTimeoutError
 
 from .cmd import CmdArg, CmdClient, CmdError
-from .structures import JujuModel, JujuStatus
+from .structures import JujuExecTask, JujuModel, JujuSecretInfo, JujuStatus
 
 
 class JujuCmdBackend(JujuBackend):
@@ -21,13 +21,14 @@ class JujuCmdBackend(JujuBackend):
     def _call_juju(self, *args: list[CmdArg]) -> str:
         return self.cmd_client.call(CmdArg(value="juju"), *args)
 
-    def _status(self, model: str) -> JujuStatus:
+    def _status(self, model: str, *selectors: str) -> JujuStatus:
         return JujuStatus(
             **yaml.safe_load(
                 self._call_juju(
                     CmdArg(value="status"),
                     CmdArg(name="model", value=model),
                     CmdArg(name="format", value="yaml"),
+                    *[CmdArg(value=selector) for selector in selectors],
                 )
             )
         )
@@ -111,12 +112,13 @@ class JujuCmdBackend(JujuBackend):
             and application_2 == integration_1.integrated_application
         }
 
-    def _wait_for(self, model: str, query: str, timeout: timedelta):
+    def _wait_for(self, model: str, scope: str, specifier: str, query: str, timeout: timedelta):
         try:
             self._call_juju(
                 CmdArg(value="wait-for"),
-                CmdArg(value="model"),
-                CmdArg(value=model),
+                CmdArg(value=scope),
+                CmdArg(value=specifier),
+                CmdArg(name="model", value=model) if scope != "model" else CmdArg(),
                 CmdArg(name="query", value=query),
                 CmdArg(name="timeout", value=f"{timeout.total_seconds()}s"),
             )
@@ -129,9 +131,68 @@ class JujuCmdBackend(JujuBackend):
     def wait_idle(self, model: str, timeout: timedelta):
         self._wait_for(
             model,
+            "model",
+            model,
             "len(applications) == 0 || (forEach(applications, app => app.status == 'active') && forEach(units, unit => unit.workload-status == 'active' && unit.agent-status == 'idle'))",
             timeout,
         )
+
+    def wait_application_settled(self, model: str, application: str, timeout: timedelta):
+        unit_workload_status_settled = " || ".join(
+            {f"unit.workload-status == '{status}'" for status in {"active", "blocked"}}
+        )
+        unit_agent_status_settled = " || ".join({f"unit.agent-status == '{status}'" for status in {"idle", "failed"}})
+        self._wait_for(
+            model,
+            "application",
+            application,
+            f"len(units) == 0 || forEach(units, unit => ({unit_workload_status_settled}) && ({unit_agent_status_settled}))",
+            timeout,
+        )
+
+    def wait_application_scaled(self, model: str, application: str, timeout: timedelta):
+        # Wait for an application to reach it's desired scale
+        # See https://github.com/juju/juju/blob/add3443726e40faebaba0103289c6660251fa1eb/cmd/juju/status/formatted.go#L239
+
+        end_time = datetime.now(timezone.utc) + timeout
+        while datetime.now(timezone.utc) < end_time:
+            # Get application from juju status
+            application_status = self._status(model).applications[application]
+
+            # Get number of units idle or executing
+            num_units = len(
+                [
+                    unit
+                    for unit in application_status.units.values()
+                    if unit.juju_status.current in {"idle", "executing"}
+                ]
+            )
+
+            # Compare with the target scale of the application
+            if application_status.scale == num_units:
+                return
+
+            time.sleep(0.05)
+
+        raise JujuWaitTimeoutError
+
+    def wait_for_unit_message(self, model: str, unit: str, message: str, timeout: timedelta):
+        # Loop until timeout
+        end_time = datetime.now() + timeout
+        while datetime.now() < end_time:
+            # Find unit in juju status
+            juju_status = self._status(model, unit)
+            application_info = next(iter(juju_status.applications.values()), None)
+            unit_info = next(iter(application_info.units.values()), None) if application_info else None
+
+            # Check the application message
+            if unit_info and message.lower() in unit_info.workload_status.message.lower():
+                return
+
+            # Wait for a bit
+            time.sleep(timedelta(seconds=1).total_seconds())
+
+        raise JujuWaitTimeoutError
 
     def juju_status_text(self, model: str) -> str:
         return self._call_juju(
@@ -177,7 +238,7 @@ class JujuCmdBackend(JujuBackend):
     def wait_for_removal(self, model: str, applications: list[str], timeout: timedelta):
         # Juju bug causes panic: https://github.com/juju/juju/issues/18785
         # name_checks = " && ".join([f"application.name != '{application}'" for application in applications])
-        # self._wait_for(model, f"len(applications) == 0 || forEach(applications, application => {name_checks})", timeout)
+        # self._wait_for(model, "model", model, f"len(applications) == 0 || forEach(applications, application => {name_checks})", timeout)
 
         # Check status for application until Juju bug is fixed
         end_time = datetime.now(timezone.utc) + timeout
@@ -211,4 +272,124 @@ class JujuCmdBackend(JujuBackend):
 
     def wait_for_removal_of_units(self, model: str, applications: list[str], timeout: timedelta):
         name_checks = " && ".join([f"unit.application != '{application}'" for application in applications])
-        self._wait_for(model, f"len(applications) == 0 || forEach(units, unit => {name_checks})", timeout)
+        self._wait_for(
+            model, "model", model, f"len(applications) == 0 || forEach(units, unit => {name_checks})", timeout
+        )
+
+    def application_charm(self, model: str, application: str) -> str:
+        return self._status(model).applications[application].charm
+
+    def application_units(self, model: str, application: str) -> list[str]:
+        return list(self._status(model).applications[application].units.keys())
+
+    def _exec(self, model: str, task: str, unit: str | None = None) -> dict[str, JujuExecOutput]:
+        # Call juju exec
+        try:
+            exec_output = self._call_juju(
+                CmdArg(value="exec"),
+                CmdArg(name="model", value=model),
+                CmdArg(name="unit", value=unit) if unit else CmdArg(),
+                CmdArg(name="format", value="yaml"),
+                CmdArg(value="--"),
+                CmdArg(value=task),
+            )
+        except CmdError as e:
+            if "ERROR the following task failed" in e.stderr:
+                exec_output = e.stdout
+            else:
+                raise e
+
+        # Parse output
+        parsed_output = {unit: JujuExecTask(**result) for unit, result in yaml.safe_load(exec_output).items()}
+
+        # Return expected output
+        return {
+            unit: JujuExecOutput(
+                return_code=task.results.return_code,
+                stdout=task.results.stdout,
+                stderr=task.results.stderr,
+            )
+            for unit, task in parsed_output.items()
+        }
+
+    def exec_unit(self, model: str, unit: str, task: str) -> JujuExecOutput:
+        # Call exec
+        exec_output = self._exec(model, task, unit=unit)
+
+        # Return unit stdout
+        return next(iter(exec_output.values()))
+
+    def add_secret(self, model: str, name: str, values: dict):
+        # Add the secret with juju
+        self._call_juju(
+            CmdArg(value="add-secret"),
+            CmdArg(name="model", value=model),
+            CmdArg(value=name),
+            *[CmdArg(value=f"{key}={value}") for key, value in values.items()],
+        )
+
+    def _all_secrets(self, model) -> dict[str, JujuSecretInfo]:
+        # Get secrets from juju
+        result = self._call_juju(
+            CmdArg(value="list-secrets"),
+            CmdArg(name="model", value=model),
+            CmdArg(name="format", value="yaml"),
+        )
+
+        # Parse response
+        return {id: JujuSecretInfo(**info) for id, info in yaml.safe_load(result).items()}
+
+    def get_secret_id(self, model: str, name: str) -> str:
+        # Find secret with matching name
+        for id, info in self._all_secrets(model).items():
+            if info.name == name:
+                return id
+        raise RuntimeError(f"Secret with name '{name}' not found")
+
+    def read_secret(self, model: str, name: str) -> dict:
+        # Read the secret
+        result = self._call_juju(
+            CmdArg(value="show-secret"),
+            CmdArg(name="model", value=model),
+            CmdArg(value=name),
+            CmdArg(name="reveal"),
+            CmdArg(name="format", value="yaml"),
+        )
+
+        # Parse response
+        return JujuSecretInfo(**next(iter(yaml.safe_load(result).values()))).content
+
+    def grant_secret(self, model: str, name: str, application: str):
+        # Authorize the application
+        self._call_juju(
+            CmdArg(value="grant-secret"),
+            CmdArg(name="model", value=model),
+            CmdArg(value=name),
+            CmdArg(value=application),
+        )
+
+    def run_action(self, model: str, unit: str, action: str, arguments: dict):
+        # Run the action on the unit
+        self._call_juju(
+            CmdArg(value="run"),
+            CmdArg(name="model", value=model),
+            CmdArg(value=unit),
+            CmdArg(value=action),
+            *[CmdArg(value=f"{key}={value}") for key, value in arguments.items()],
+        )
+
+    def remove_secret(self, model: str, name: str):
+        # Remove the secret
+        try:
+            self._call_juju(
+                CmdArg(value="remove-secret"),
+                CmdArg(name="model", value=model),
+                CmdArg(value=name),
+            )
+        except CmdError as e:
+            # Hide secret not found error
+            # The message isn't very descriptive...
+            if "ERROR must specify either URI or label" in e.stderr:
+                return
+            else:
+                raise e
