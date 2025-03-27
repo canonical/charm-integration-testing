@@ -370,14 +370,12 @@ class JujuCmdBackend(JujuBackend):
 
     def run_action(self, model: str, unit: str, action: str, arguments: dict):
         # Run the action on the unit
-        print(
-            self._call_juju(
-                CmdArg(value="run"),
-                CmdArg(name="model", value=model),
-                CmdArg(value=unit),
-                CmdArg(value=action),
-                *[CmdArg(value=f"{key}={value}") for key, value in arguments.items()],
-            )
+        self._call_juju(
+            CmdArg(value="run"),
+            CmdArg(name="model", value=model),
+            CmdArg(value=unit),
+            CmdArg(value=action),
+            *[CmdArg(value=f"{key}={value}") for key, value in arguments.items()],
         )
 
     def remove_secret(self, model: str, name: str):
@@ -389,6 +387,8 @@ class JujuCmdBackend(JujuBackend):
                 CmdArg(value=name),
             )
         except CmdError as e:
+            # Hide secret not found error
+            # The message isn't very descriptive...
             if "ERROR must specify either URI or label" in e.stderr:
                 return
             else:
