@@ -27,6 +27,13 @@ class JujuIntegration:
     applications: frozenset[JujuIntegrationApplication]
 
 
+@dataclass
+class JujuExecOutput:
+    return_code: int
+    stdout: str
+    stderr: str
+
+
 class JujuBackend(ABC):
     @abstractmethod
     def scale_application(self, model: str, application: str, num: int):
@@ -46,6 +53,18 @@ class JujuBackend(ABC):
 
     @abstractmethod
     def wait_idle(self, model: str, timeout: timedelta):
+        raise NotImplementedError
+
+    @abstractmethod
+    def wait_application_settled(self, model: str, application: str, timeout: timedelta):
+        raise NotImplementedError
+
+    @abstractmethod
+    def wait_application_scaled(self, model: str, application: str, timeout: timedelta):
+        raise NotImplementedError
+
+    @abstractmethod
+    def wait_for_unit_message(self, model: str, unit: str, message: str, timeout: timedelta):
         raise NotImplementedError
 
     @abstractmethod
@@ -86,4 +105,40 @@ class JujuBackend(ABC):
 
     @abstractmethod
     def wait_for_removal_of_units(self, model: str, applications: list[str], timeout: timedelta):
+        raise NotImplementedError
+
+    @abstractmethod
+    def application_charm(self, model: str, application: str) -> str:
+        raise NotImplementedError
+
+    @abstractmethod
+    def application_units(self, model: str, application: str) -> list[str]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def exec_unit(self, model: str, unit: str, task: str) -> JujuExecOutput:
+        raise NotImplementedError
+
+    @abstractmethod
+    def add_secret(self, model: str, name: str, values: dict):
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_secret_id(self, model: str, name: str) -> str:
+        raise NotImplementedError
+
+    @abstractmethod
+    def read_secret(self, model: str, name: str) -> dict:
+        raise NotImplementedError
+
+    @abstractmethod
+    def grant_secret(self, model: str, name: str, application: str):
+        raise NotImplementedError
+
+    @abstractmethod
+    def run_action(self, model: str, unit: str, action: str, arguments: dict):
+        raise NotImplementedError
+
+    @abstractmethod
+    def remove_secret(self, model: str, name: str):
         raise NotImplementedError

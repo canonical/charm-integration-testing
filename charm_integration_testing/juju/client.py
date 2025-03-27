@@ -6,19 +6,26 @@ import time
 from datetime import datetime, timedelta, timezone
 
 from .backend import JujuBackend, JujuIntegrationApplication, JujuWaitTimeoutError
+from .extension import JujuExtension
 
 
 class JujuClient:
     backend: JujuBackend
     logger: logging.Logger
+    extensions: list[JujuExtension]
 
-    def __init__(self, backend: JujuBackend, logger: logging.Logger):
+    def __init__(self, backend: JujuBackend, logger: logging.Logger, extensions: list[JujuExtension] | None = None):
         self.backend = backend
         self.logger = logger
+        self.extensions = extensions or []
 
     def scale_application(self, application: str, num: int, model: str = "default"):
         self.logger.info(f"Scaling application {application} to {num} units.")
         self.backend.scale_application(model, application, num)
+
+        # Call extensions
+        for extension in self.extensions:
+            extension.post_scale(model)
 
     def num_units(self, application: str, model: str = "default") -> int:
         self.logger.info(f"Getting the number of units for {application}.")
@@ -165,6 +172,10 @@ class JujuClient:
     ):
         self.logger.info(f"Deploying bundle file: '{bundle}'")
         self.backend.deploy_bundle_file(model, bundle)
+
+        # Call extensions
+        for extension in self.extensions:
+            extension.post_deploy(model)
 
     def remove_applications(self, *applications: str, model: str = "default"):
         self.logger.info(f"Removing applications: {', '.join(applications)}.")

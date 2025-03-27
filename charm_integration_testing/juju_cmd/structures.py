@@ -12,12 +12,14 @@ class JujuStatus:
         @serializeable_dataclass
         class ApplicationStatus:
             current: str
+            message: str = ""
 
         @serializeable_dataclass
         class Unit:
             @serializeable_dataclass
             class WorkloadStatus:
                 current: str
+                message: str = ""
 
             @serializeable_dataclass
             class JujuStatus:
@@ -36,6 +38,7 @@ class JujuStatus:
         application_status: ApplicationStatus | None = None
         integrations: dict[str, list[Integration]] = Field(default_factory=dict, alias="relations")
         units: dict[str, Unit] = Field(default_factory=dict)
+        scale: int = 0
 
     applications: dict[str, Application]
 
@@ -43,3 +46,20 @@ class JujuStatus:
 @serializeable_dataclass
 class JujuModel:
     type: str
+
+
+@serializeable_dataclass
+class JujuExecTask:
+    @serializeable_dataclass
+    class Results:
+        return_code: int
+        stdout: str = ""
+        stderr: str = ""
+
+    results: Results
+
+
+@serializeable_dataclass
+class JujuSecretInfo:
+    name: str | None = None
+    content: dict | None = None
