@@ -224,7 +224,7 @@ class JujuCmdBackend(JujuBackend):
             CmdArg(value="deploy"),
             CmdArg(name="model", value=model),
             CmdArg(name="trust"),
-            CmdArg(value=f"./{bundle}"),
+            CmdArg(value=bundle),
         )
 
     def remove_applications(self, model: str, *applications: list[str]):
