@@ -124,7 +124,7 @@ jobs:
         echo '```yaml' >> $GITHUB_STEP_SUMMARY
         cat generated-bundle.yaml >> $GITHUB_STEP_SUMMARY
         echo '```' >> $GITHUB_STEP_SUMMARY
-        echo "bundle=${pwd}/generated-bundle.yaml" >> $GITHUB_OUTPUT
+        echo "bundle=$(pwd)/generated-bundle.yaml" >> $GITHUB_OUTPUT
     - name: Add K8s
       shell: bash
       run: |
