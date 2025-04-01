@@ -187,36 +187,40 @@ jobs:
         test_execution_id: ${{ github.event.inputs.execution_id }}
         junit_xml: ./junit.xml
     - name: Setup Logs directory
+      id: logs_directory
       if: ${{ always() }}
       shell: bash
-      run: mkdir -p $HOME/logs
+      run: |
+        mkdir -p $HOME/logs
+        echo "full_path=$HOME/logs" >> $GITHUB_OUTPUT
     - name: Collect Logs
       if: ${{ always() }}
       uses: canonical/juju-k8s-crashdump/actions/juju-k8s-crashdump@main
       with:
         kubeconf: $HOME/.kube/config
         controller: ${{ steps.juju_resources.outputs.controller }}
-        output_path: $HOME/logs/juju-logs.tar.gz
+        output_path: ${{ steps.logs_directory.outputs.full_path }}/juju-logs.tar.gz
         proxy: http://squid.internal:3128
     - name: Add JUnit to logs
       shell: bash
-      run: cp ./junit.xml $HOME/logs/
+      run: cp ./junit.xml ${{ steps.logs_directory.outputs.full_path }}/
     - name: Dump the Juju Database
       if: ${{ always() && github.event.inputs.execution_id != '' }}
       shell: bash
       run: |
         JUJU_DEV_FEATURE_FLAGS=developer-mode juju dump-db \
           -m ${{ steps.juju_resources.outputs.model }} \
-          -o $HOME/logs/juju-db-dump.yaml
+          -o ${{ steps.logs_directory.outputs.full_path }}/juju-db-dump.yaml
     - name: Add generated bundle to logs
       shell: bash
-      run: cp ${{ steps.build_bundle.outputs.bundle }} $HOME/logs/generated-bundle.yaml
+      run: cp ${{ steps.build_bundle.outputs.bundle }} ${{ steps.logs_directory.outputs.full_path }}/generated-bundle.yaml
+          -o ${{ steps.logs_directory.outputs.full_path }}/juju-db-dump.yaml
     - name: Post Logs To Swift
       if: ${{ always() && github.event.inputs.execution_id != '' }}
       uses: canonical/sqa-cloud-deployment-pipeline/.github/actions/upload-to-swift@main
       with:
         job_uuid: ${{ github.event.inputs.environment }}/${{ github.event.inputs.execution_id }}
-        log_path: $HOME/logs
+        log_path: ${{ steps.logs_directory.outputs.full_path }}
         swift_bucket: charm-qa
         SWIFT_OS_AUTH_URL: ${{ secrets.SWIFT_OS_AUTH_URL }}
         SWIFT_OS_USERNAME: ${{ secrets.SWIFT_OS_USERNAME }}
