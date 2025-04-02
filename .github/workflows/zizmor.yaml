@@ -43,4 +43,4 @@ jobs:
           version: '1.5.1'
       - name: Scan all workflows
         run: |
-          zizmor --pedantic $(ls .github/workflows/*.{yaml,yml}) $(ls .github/actions/*/action.{yaml,yml})
+          zizmor --pedantic .github
