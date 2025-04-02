@@ -4,6 +4,10 @@ run-name: "Testing ${{ inputs.charm_under_test }}:${{ inputs.charm_endpoint }} a
 concurrency:
   group: ${{ inputs.environment == 'production' && 'production-k8s' || 'staging-k8s' }}
 
+
+permissions: 
+  contents: read # only needed for private repos
+
 on:
   workflow_dispatch:
     inputs:
@@ -74,7 +78,10 @@ jobs:
       test_observer_api: ${{ github.event.inputs.environment == 'production' && vars.PROD_TEST_OBSERVER_API || (github.event.inputs.environment == 'staging' && vars.STG_TEST_OBSERVER_API || '') }}
     steps:
     - name: Clone Repo
-      uses: actions/checkout@v4
+      uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      with:
+          persist-credentials: false
+
     - name: Report Test Execution Start To Test Observer
       if: ${{ always() && env.test_observer_api != '' && github.event.inputs.execution_id != '' }}
       uses: ./.github/actions/patch-test-execution
@@ -85,9 +92,11 @@ jobs:
     - name: Setup Kubeconfig
       id: kubeconfig
       shell: bash
+      env:
+        environment: ${{ github.event.inputs.environment }}
       run: |
         mkdir -p $HOME/.kube
-        if [ "${{ github.event.inputs.environment }}" = "production" ]; then
+        if [ "${environment}" = "production" ]; then
           echo '${{ secrets.PROD_SQA_KUBECONFIG }}' > $HOME/.kube/config
         else        
           echo '${{ secrets.STG_SQA_KUBECONFIG }}' > $HOME/.kube/config
@@ -95,8 +104,10 @@ jobs:
         echo "full_path=$HOME/.kube/config" >> $GITHUB_OUTPUT
     - name: Install Juju
       shell: bash
+      env:
+        juju_channel: ${{ github.event.inputs.juju_channel }}
       run: |
-        sudo snap install juju --channel ${{ github.event.inputs.juju_channel }}
+        sudo snap install juju --channel ${juju_channel}
         sudo snap install juju-wait --classic
     - name: Install Repository
       shell: bash
@@ -112,14 +123,22 @@ jobs:
     - name: Generate dynamic bundles
       id: build_bundle
       shell: bash
+      env:
+        charm_under_test: ${{ inputs.charm_under_test }}
+        revision: ${{ inputs.revision }}
+        series: ${{ inputs.series }}
+        neighbor: ${{ inputs.neighbor }}
+        charm_endpoint: ${{ inputs.charm_endpoint }}
+        neighbor_endpoint: ${{ inputs.neighbor_endpoint }}
+        arch: ${{ inputs.arch }}
       run: |
         ./scripts/build-bundle.sh \
           --charms \
-            "target::${{ inputs.charm_under_test }}::${{ inputs.revision }}::${{ inputs.series }}" \
-            "neighbor::${{ inputs.neighbor }}::default::default" \
-          --integrations "target:${{ inputs.charm_endpoint }}::neighbor:${{ inputs.neighbor_endpoint }}" \
+            "target::${charm_under_test}::${revision}::${series}" \
+            "neighbor::${neighbor}::default::default" \
+          --integrations "target:${charm_endpoint}::neighbor:${neighbor_endpoint}" \
           --substrate "kubernetes" \
-          --arch ${{ inputs.arch }} \
+          --arch ${arch} \
           --log-level DEBUG \
           --output-file generated-bundle.yaml
         echo '### Generated Juju Bundle' >> $GITHUB_STEP_SUMMARY
@@ -129,8 +148,9 @@ jobs:
         echo "bundle=$(pwd)/generated-bundle.yaml" >> $GITHUB_OUTPUT
     - name: Add K8s
       shell: bash
-      run: |
-        KUBECONFIG="${{ steps.kubeconfig.outputs.full_path }}" juju add-k8s ps6 --client
+      env:
+        KUBECONFIG_PATH: ${{ steps.kubeconfig.outputs.full_path }}
+      run: KUBECONFIG="$KUBECONFIG_PATH" juju add-k8s ps6 --client
     - name: Generate Juju Model and Controller Name
       id: juju_resources
       shell: bash
@@ -140,40 +160,54 @@ jobs:
         echo "controller=$date" >> $GITHUB_OUTPUT
     - name: Bootstrap Controller
       shell: bash
+      env:
+        controller: ${{ steps.juju_resources.outputs.controller }}
       run: |
         # juju will prefix the namespace with "controller"
-        juju bootstrap ps6 --bootstrap-constraints root-disk=5G ${{ steps.juju_resources.outputs.controller }}
+        juju bootstrap ps6 --bootstrap-constraints root-disk=5G ${controller}
     - name: Create Model
       shell: bash
+      env:
+        model: ${{ steps.juju_resources.outputs.model }}
       run: |
-        juju add-model ${{ steps.juju_resources.outputs.model }} \
+        juju add-model ${model} \
           --config "logging-config=DEBUG" \
           --config="update-status-hook-interval=30s"
     - name: Deploy Bundles
       continue-on-error: true
       shell: bash
+      env:
+        model: ${{ steps.juju_resources.outputs.model }}
+        bundle: ${{ steps.build_bundle.outputs.bundle }}
       run: |
         ./scripts/test-deploy.sh \
-          --model ${{ steps.juju_resources.outputs.model }} \
-          --bundles ${{ steps.build_bundle.outputs.bundle }} \
+          --model ${model} \
+          --bundles ${bundle} \
           --junit-xml=junit-deploy.xml
     - name: Execute Tests
       continue-on-error: true
       shell: bash
+      env:
+        model: ${{ steps.juju_resources.outputs.model }}
+        charm_endpoint: ${{ github.event.inputs.charm_endpoint }}
+        neighbor_endpoint: ${{ github.event.inputs.neighbor_endpoint }}
+
       run: |
         ./scripts/test-integration.sh \
-          --model ${{ steps.juju_resources.outputs.model }} \
+          --model ${model} \
           --target-application target \
-          --target-endpoint ${{ github.event.inputs.charm_endpoint }} \
+          --target-endpoint ${charm_endpoint} \
           --neighbor-application neighbor \
-          --neighbor-endpoint ${{ github.event.inputs.neighbor_endpoint }} \
+          --neighbor-endpoint ${neighbor_endpoint} \
           --junit-xml=junit-integration.xml
     - name: Teardown charm under test
       continue-on-error: true
       shell: bash
+      env:
+        model: ${{ steps.juju_resources.outputs.model }}
       run: |
         ./scripts/test-teardown.sh \
-          --model ${{ steps.juju_resources.outputs.model }} \
+          --model ${model} \
           --applications target \
           --junit-xml=junit-teardown.xml
     - name: Merge JUnit output
@@ -197,7 +231,7 @@ jobs:
         echo "full_path=$HOME/logs" >> $GITHUB_OUTPUT
     - name: Collect Logs
       if: ${{ always() }}
-      uses: canonical/juju-k8s-crashdump/actions/juju-k8s-crashdump@main
+      uses: canonical/juju-k8s-crashdump/actions/juju-k8s-crashdump@94185972636553a627fb483928c6be0fd1ddeaac
       with:
         kubeconf: ${{ steps.kubeconfig.outputs.full_path }}
         controller: ${{ steps.juju_resources.outputs.controller }}
@@ -205,20 +239,28 @@ jobs:
         proxy: http://squid.internal:3128
     - name: Add JUnit to logs
       shell: bash
-      run: cp ./junit.xml ${{ steps.logs_directory.outputs.full_path }}/
+      env:
+        full_path: ${{ steps.logs_directory.outputs.full_path }}
+      run: cp ./junit.xml ${full_path}/
     - name: Dump the Juju Database
       if: ${{ always() && github.event.inputs.execution_id != '' }}
       shell: bash
+      env:
+        model: ${{ steps.juju_resources.outputs.model }}
+        full_path: ${{ steps.logs_directory.outputs.full_path }}
       run: |
         JUJU_DEV_FEATURE_FLAGS=developer-mode juju dump-db \
-          -m ${{ steps.juju_resources.outputs.model }} \
-          -o ${{ steps.logs_directory.outputs.full_path }}/juju-db-dump.yaml
+          -m ${model} \
+          -o ${full_path}/juju-db-dump.yaml
     - name: Add generated bundle to logs
       shell: bash
-      run: cp ${{ steps.build_bundle.outputs.bundle }} ${{ steps.logs_directory.outputs.full_path }}/generated-bundle.yaml
+      env:
+        bundle: ${{ steps.build_bundle.outputs.bundle }}
+        full_path: ${{ steps.logs_directory.outputs.full_path }}
+      run: cp ${bundle} ${full_path}/generated-bundle.yaml
     - name: Post Logs To Swift
       if: ${{ always() && github.event.inputs.execution_id != '' }}
-      uses: canonical/sqa-cloud-deployment-pipeline/.github/actions/upload-to-swift@main
+      uses: canonical/sqa-cloud-deployment-pipeline/.github/actions/upload-to-swift@7ba2b263b20ee81e4aa4dc1033e12763adc324c1
       with:
         job_uuid: ${{ github.event.inputs.environment }}/${{ github.event.inputs.execution_id }}
         log_path: ${{ steps.logs_directory.outputs.full_path }}
@@ -240,5 +282,7 @@ jobs:
     - name: Teardown Controller
       if: ${{ always() }}
       shell: bash
+      env:
+        controller: ${{ steps.juju_resources.outputs.controller }}
       run: |
-        timeout 15m juju kill-controller ${{ steps.juju_resources.outputs.controller }} --no-prompt --timeout 0s
+        timeout 15m juju kill-controller ${controller} --no-prompt --timeout 0s

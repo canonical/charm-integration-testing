@@ -2,13 +2,17 @@ name: Lint
 
 on:
   pull_request:
+permissions: 
+  contents: read # only needed for private repos
 
 jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
 
       - name: Install poetry
         run: pipx install poetry==2.0.1

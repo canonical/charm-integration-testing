@@ -13,16 +13,16 @@ inputs:
   status:
     description: "Test execution status"
     required: False
-    type: choice
-    options:
-      - "NOT_STARTED"
-      - "IN_PROGRESS"
-      - "PASSED"
-      - "FAILED"
-      - "NOT_TESTED"
-      - "ENDED_PREMATURELY"
-      - "COMPLETED"
-      - ""
+    # type: choice
+    # options:
+    #   - "NOT_STARTED"
+    #   - "IN_PROGRESS"
+    #   - "PASSED"
+    #   - "FAILED"
+    #   - "NOT_TESTED"
+    #   - "ENDED_PREMATURELY"
+    #   - "COMPLETED"
+    #   - ""
 
   # logs_link:
   #   description: "Link to test logs"
@@ -37,7 +37,9 @@ runs:
     - id: get-json-body
       name: Get Test Observer JSON
       shell: bash
-      run: |
+      env:
+        status: ${{ inputs.status }}
+      run: | # zizmor: ignore[template-injection] shell expansion would not work otherwise
         jq -nc '
           {
             "status": (if "${{ inputs.status }}" != "" then "${{ inputs.status }}" else null end)
@@ -47,8 +49,11 @@ runs:
 
     - name: Send PATCH request to Test Observer
       shell: bash
-      run: |
+      env:
+        test_observer_api: ${{ inputs.test_observer_api }}
+        test_execution_id: ${{ inputs.test_execution_id }}
+      run: | # zizmor: ignore[template-injection] shell expansion would not work otherwise
         curl --fail-with-body \
-          -X PATCH ${{ inputs.test_observer_api }}/v1/test-executions/${{ inputs.test_execution_id}} \
+          -X PATCH ${{ inputs.test_observer_api }}/v1/test-executions/${{ inputs.test_execution_id }} \
           -H "Content-Type: application/json" \
           -d @body.json
