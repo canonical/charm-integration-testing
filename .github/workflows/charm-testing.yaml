@@ -216,7 +216,6 @@ jobs:
     - name: Add generated bundle to logs
       shell: bash
       run: cp ${{ steps.build_bundle.outputs.bundle }} ${{ steps.logs_directory.outputs.full_path }}/generated-bundle.yaml
-          -o ${{ steps.logs_directory.outputs.full_path }}/juju-db-dump.yaml
     - name: Post Logs To Swift
       if: ${{ always() && github.event.inputs.execution_id != '' }}
       uses: canonical/sqa-cloud-deployment-pipeline/.github/actions/upload-to-swift@main
