@@ -142,7 +142,9 @@ def main():
         help="Which substrate is the charm going to be deployed on. Only kubernetes is enabled for now.",
     )
     parser.add_argument("--output-file", type=str, help="Where to save the generated bundle")
-    parser.add_argument("--log-level", choices=["INFO", "DEBUG", "WARNING", "ERROR", "CRITICAL"], default="WARNING")
+    parser.add_argument(
+        "--log-level", type=str.upper, choices=["INFO", "DEBUG", "WARNING", "ERROR", "CRITICAL"], default="INFO"
+    )
     args = parser.parse_args()
 
     # Get logger
