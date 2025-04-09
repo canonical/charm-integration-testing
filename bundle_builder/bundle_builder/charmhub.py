@@ -14,11 +14,12 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import logging
-from dataclasses import dataclass
 from functools import cache
 
 import requests
 import yaml
+from pydantic import Field, field_validator
+from pydantic.dataclasses import dataclass
 
 from .charm import ENDPOINT_PEERS, ENDPOINT_PROVIDES, ENDPOINT_REQUIRES, Charm, CharmEndpoint
 
@@ -42,18 +43,78 @@ class CharmReleaseNotFoundException(Exception):
 
 
 @dataclass(frozen=True)
-class RefreshAction:
-    @dataclass(frozen=True)
-    class Base:
-        name: str = "ubuntu"
-        version: str | None = None
-        arch: str | None = None
+class CharmhubBase:
+    architecture: str
+    channel: str
+    name: str = Field(default="ubuntu")
 
+
+@dataclass(frozen=True)
+class RefreshAction:
     charm_name: str
     charm_revision: int | None = None
     charm_channel: str | None = None
-    base: Base | None = None
+    base: CharmhubBase | None = None
     always_include_base: bool = False
+
+
+@dataclass(frozen=True)
+class CharmMetadata:
+    @dataclass(frozen=True)
+    class Endpoint:
+        interface: str
+        optional: bool = False
+
+    peers: dict[str, Endpoint] = Field(default_factory=dict)
+    requires: dict[str, Endpoint] = Field(default_factory=dict)
+    provides: dict[str, Endpoint] = Field(default_factory=dict)
+
+    def all_charm_endpoints(self) -> frozenset[CharmEndpoint]:
+        return frozenset(
+            {
+                CharmEndpoint(
+                    type=endpoint_type,
+                    name=endpoint_name,
+                    interface=endpoint.interface,
+                    optional=endpoint.optional,
+                )
+                for endpoint_type, endpoint_map in (
+                    (ENDPOINT_PEERS, self.peers),
+                    (ENDPOINT_REQUIRES, self.requires),
+                    (ENDPOINT_PROVIDES, self.provides),
+                )
+                for endpoint_name, endpoint in endpoint_map.items()
+            }
+        )
+
+
+@dataclass(frozen=True)
+class RefreshResponse:
+    @dataclass(frozen=True)
+    class Charm:
+        bases: list[CharmhubBase] | None = None
+        revision: int | None = None
+        metadata: CharmMetadata | None = Field(default=None, alias="metadata-yaml")
+
+        @field_validator("metadata", mode="before")
+        @classmethod
+        def parse_yaml(cls, metadata_yaml):
+            return CharmMetadata(**yaml.safe_load(metadata_yaml))
+
+    @dataclass(frozen=True)
+    class Error:
+        @dataclass(frozen=True)
+        class Extra:
+            default_bases: list[CharmhubBase] = Field(default_factory=list, alias="default-bases")
+
+        message: str
+        code: str
+        extra: Extra | None = None
+
+    name: str
+    charm: Charm | None = None
+    effective_channel: str | None = Field(default=None, alias="effective-channel")
+    error: Error | None = None
 
 
 CHARM_INFO_ENDPOINT = "https://api.charmhub.io/v2/charms/info/{charm_name}"
@@ -130,9 +191,9 @@ class CharmhubClient:
         charm_name: str,
         ubuntu_arch: str,
         charm_revision: int,
-        ubuntu_version: str = None,
+        ubuntu_version: str | None = None,
     ) -> Charm:
-        # Call refresh with revision and null base
+        # Get refresh info for revision
         refresh_info = self._call_refresh(
             RefreshAction(
                 charm_name=charm_name,
@@ -140,10 +201,39 @@ class CharmhubClient:
                 always_include_base=True,
             )
         )
+        if refresh_info.error is not None:
+            raise CharmReleaseNotFoundException(
+                f"Failed to find charm {charm_name} for revision {charm_revision}: {refresh_info.error.message}"
+            )
 
-        # Find channel from info endpoint
-        # Because bundles always requires channel and /refresh does not provide it when queried by revision :/
-        charm_channel = self._channel_from_revision(charm_name, charm_revision)
+        # Find suitable ubuntu version for revision
+        if not ubuntu_version:
+            # Return first ubuntu version with matching base
+            for base in refresh_info.charm.bases:
+                if base.name == "ubuntu" and base.architecture == ubuntu_arch:
+                    ubuntu_version = base.channel
+                    break
+            else:
+                # No valid ubuntu version found
+                raise CharmReleaseNotFoundException(
+                    f"Charm {charm_name} revision {charm_revision} does not appear to support arch {ubuntu_arch}"
+                )
+
+        # Find suitable channel (must support base)
+        default_refresh_info = self._call_refresh(
+            RefreshAction(
+                charm_name=charm_name,
+                base=CharmhubBase(
+                    channel=ubuntu_version,
+                    architecture=ubuntu_arch,
+                ),
+            )
+        )
+        if default_refresh_info.error is not None:
+            raise CharmReleaseNotFoundException(
+                f"Failed to find default release for charm {charm_name} with ubuntu version {ubuntu_version}: {default_refresh_info.error.message}"
+            )
+        charm_channel = default_refresh_info.effective_channel
 
         # Return Charm from refresh info
         return Charm(
@@ -152,7 +242,7 @@ class CharmhubClient:
             revision=charm_revision,
             ubuntu_version=ubuntu_version,
             ubuntu_arch=ubuntu_arch,
-            endpoints=self._endpoints_from_refresh_info(refresh_info),
+            endpoints=refresh_info.charm.metadata.all_charm_endpoints(),
         )
 
     def _charm_from_store_by_channel(
@@ -160,39 +250,43 @@ class CharmhubClient:
         charm_name: str,
         ubuntu_arch: str,
         charm_channel: str,
-        ubuntu_version: str = None,
+        ubuntu_version: str | None = None,
     ):
         # Get default ubuntu version if not given
         if not ubuntu_version:
-            ubuntu_version = self._default_ubuntu_version(charm_name, ubuntu_arch)
+            ubuntu_version = self._default_ubuntu_version(charm_name, ubuntu_arch, charm_channel=charm_channel)
 
         # Call refresh with channel and base
         refresh_info = self._call_refresh(
             RefreshAction(
                 charm_name=charm_name,
                 charm_channel=charm_channel,
-                base=RefreshAction.Base(
-                    version=ubuntu_version,
-                    arch=ubuntu_arch,
+                base=CharmhubBase(
+                    channel=ubuntu_version,
+                    architecture=ubuntu_arch,
                 ),
             )
         )
+        if refresh_info.error is not None:
+            raise CharmReleaseNotFoundException(
+                f"Failed to find release for charm {charm_name} in channel {charm_channel} with ubuntu version {ubuntu_version}: {refresh_info.error.message}"
+            )
 
         # Return Charm
         return Charm(
             name=charm_name,
             channel=charm_channel,
-            revision=refresh_info.get("charm", {}).get("revision"),
+            revision=refresh_info.charm.revision,
             ubuntu_version=ubuntu_version,
             ubuntu_arch=ubuntu_arch,
-            endpoints=self._endpoints_from_refresh_info(refresh_info),
+            endpoints=refresh_info.charm.metadata.all_charm_endpoints(),
         )
 
     def _charm_from_store_default(
         self,
         charm_name: str,
         ubuntu_arch: str,
-        ubuntu_version: str = None,
+        ubuntu_version: str | None = None,
     ):
         # Get default ubuntu version if not given
         if not ubuntu_version:
@@ -202,68 +296,52 @@ class CharmhubClient:
         refresh_info = self._call_refresh(
             RefreshAction(
                 charm_name=charm_name,
-                base=RefreshAction.Base(
-                    version=ubuntu_version,
-                    arch=ubuntu_arch,
+                base=CharmhubBase(
+                    channel=ubuntu_version,
+                    architecture=ubuntu_arch,
                 ),
             )
         )
+        if refresh_info.error is not None:
+            raise CharmReleaseNotFoundException(
+                f"Failed to find default release for charm {charm_name} with ubuntu version {ubuntu_version}: {refresh_info.error.message}"
+            )
 
         # Return Charm
         return Charm(
             name=charm_name,
-            channel=refresh_info.get("effective-channel"),
-            revision=refresh_info.get("charm", {}).get("revision"),
+            channel=refresh_info.effective_channel,
+            revision=refresh_info.charm.revision,
             ubuntu_version=ubuntu_version,
             ubuntu_arch=ubuntu_arch,
-            endpoints=self._endpoints_from_refresh_info(refresh_info),
+            endpoints=refresh_info.charm.metadata.all_charm_endpoints(),
         )
 
-    def _default_ubuntu_version(self, charm_name: str, ubuntu_arch: str) -> str:
+    def _default_ubuntu_version(self, charm_name: str, ubuntu_arch: str, charm_channel: str | None = None) -> str:
         # Juju passes "NA" to get the secret "default-bases" error field
-        default_bases = (
-            self._call_refresh(
-                RefreshAction(
-                    charm_name=charm_name,
-                    base=RefreshAction.Base(
-                        name="NA",
-                        version="NA",
-                        arch=ubuntu_arch,
-                    ),
-                )
+        refresh_info = self._call_refresh(
+            RefreshAction(
+                charm_name=charm_name,
+                charm_channel=charm_channel,
+                base=CharmhubBase(
+                    name="NA",
+                    channel="NA",
+                    architecture=ubuntu_arch,
+                ),
             )
-            .get("error", {})
-            .get("extra", {})
-            .get("default-bases", [])
         )
+        if refresh_info.error.code != "invalid-charm-base":
+            raise CharmReleaseNotFoundException(f"Failed to find default bases for charm {charm_name}")
+
+        # Get default bases field
+        default_bases = refresh_info.error.extra.default_bases
 
         # Ensure a base was found
         if len(default_bases) == 0:
-            raise CharmReleaseNotFoundException(
-                f"No default bases found for {charm_name} in architecture {ubuntu_arch}"
-            )
+            raise CharmReleaseNotFoundException(f"No default bases found for {charm_name} in arch {ubuntu_arch}")
 
         # Pick the first base (like Juju)
-        return default_bases[0].get("channel", None)
-
-    def _channel_from_revision(self, charm_name: str, charm_revision: int):
-        # Call info endpoint
-        charm_info = self._call_info(charm_name)
-
-        # Search for revision
-        for release in charm_info.get("channel-map", []):
-            # Check revision
-            if release.get("revision", {}).get("revision", {}) != charm_revision:
-                continue
-
-            # Return channel if found
-            channel = release.get("channel", {}).get("name", None)
-            if channel is not None:
-                return channel
-
-        # Raise not found
-        # A channel is required to deploy a charm with Juju, even when pinned to a revision
-        raise CharmReleaseNotFoundException(f"Revision {charm_revision} of {charm_name} not found in any channel")
+        return default_bases[0].channel
 
     @cache
     def _call_store_json(self, provides: str | None = None) -> dict:
@@ -280,7 +358,7 @@ class CharmhubClient:
         return response.json()
 
     @cache
-    def _call_refresh(self, action: RefreshAction) -> dict:
+    def _call_refresh(self, action: RefreshAction) -> RefreshResponse:
         self.logger.debug(f"Calling refresh for charm {action.charm_name}")
 
         # Formulate request
@@ -294,22 +372,22 @@ class CharmhubClient:
         if action.base is not None:
             action_dict["base"] = {
                 "name": action.base.name,
-                "channel": action.base.version,
-                "architecture": action.base.arch,
+                "channel": action.base.channel,
+                "architecture": action.base.architecture,
             }
         elif action.always_include_base:
             action_dict["base"] = None
         request_body = {
             "context": [],
             "actions": [{"action": "install", "instance-key": "1", **action_dict}],
-            "fields": ["metadata-yaml", "effective-channel", "revision"],
+            "fields": ["bases", "metadata-yaml", "revision"],
         }
 
         # Execute request
         response = self.requests.post(url=request_url, json=request_body, headers=request_headers, timeout=180)
         response.raise_for_status()
         response_json = response.json()
-        return next(iter(response_json.get("results", {})), {})
+        return RefreshResponse(**next(iter(response_json.get("results"))))
 
     @cache
     def _call_info(self, charm_name: str) -> dict:
@@ -324,29 +402,3 @@ class CharmhubClient:
         response = self.requests.get(url=request_url, params=request_params, headers=request_headers, timeout=180)
         response.raise_for_status()
         return response.json()
-
-    def _metadata_from_refresh_info(self, refresh_info: dict) -> dict:
-        try:
-            return yaml.safe_load(refresh_info["charm"]["metadata-yaml"])
-        except KeyError:
-            raise NoCharmMetadataException(
-                f"[ERROR] Charm {refresh_info.get('name')} does not expose a metadata-yaml key. Notify this error to SQA!"
-            )
-
-    def _endpoints_from_refresh_info(self, refresh_info: dict) -> frozenset[CharmEndpoint]:
-        # Get metadata
-        metadata = self._metadata_from_refresh_info(refresh_info)
-
-        # Return endpoints
-        return frozenset(
-            {
-                CharmEndpoint(
-                    type=endpoint_type,
-                    name=endpoint_name,
-                    interface=endpoint.get("interface"),
-                    optional=endpoint.get("optional", False),
-                )
-                for endpoint_type in {ENDPOINT_PEERS, ENDPOINT_REQUIRES, ENDPOINT_PROVIDES}
-                for endpoint_name, endpoint in metadata.get(endpoint_type, {}).items()
-            }
-        )
