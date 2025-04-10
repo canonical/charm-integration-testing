@@ -108,22 +108,22 @@ jobs:
           echo "### Job inputs" >> $GITHUB_STEP_SUMMARY
           echo "| Input | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|---|---|" >> $GITHUB_STEP_SUMMARY
-          echo "| `environment` | `${environment}` |" >> $GITHUB_STEP_SUMMARY
-          echo "| `arch` | `${arch}` |" >> $GITHUB_STEP_SUMMARY
-          echo "| `charm_under_test` | `${charm_under_test}` |" >> $GITHUB_STEP_SUMMARY
-          echo "| `charm_endpoint` | `${charm_endpoint}` |" >> $GITHUB_STEP_SUMMARY
-          echo "| `execution_id` | `${execution_id}` |" >> $GITHUB_STEP_SUMMARY
-          echo "| `juju_channel` | `${juju_channel}` |" >> $GITHUB_STEP_SUMMARY
-          echo "| `neighbor` | `${neighbor}` |" >> $GITHUB_STEP_SUMMARY
-          echo "| `neighbor_endpoint` | `${neighbor_endpoint}` |" >> $GITHUB_STEP_SUMMARY
-          echo "| `revision` | `${revision}` |" >> $GITHUB_STEP_SUMMARY
-          echo "| `series` | `${series}` |" >> $GITHUB_STEP_SUMMARY
+          echo "| \`environment\` | \`${environment}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| \`arch\` | \`${arch}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| \`charm_under_test\` | \`${charm_under_test}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| \`charm_endpoint\` | \`${charm_endpoint}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| \`execution_id\` | \`${execution_id}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| \`juju_channel\` | \`${juju_channel}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| \`neighbor\` | \`${neighbor}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| \`neighbor_endpoint\` | \`${neighbor_endpoint}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| \`revision\` | \`${revision}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| \`series\` | \`${series}\` |" >> $GITHUB_STEP_SUMMARY
 
           echo "### Job variables" >> $GITHUB_STEP_SUMMARY
           echo "| Variable | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|---|---|" >> $GITHUB_STEP_SUMMARY
-          echo "| Juju model | `${model}` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Juju controller | `${controller}` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Juju model | \`${model}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Juju controller | \`${controller}\` |" >> $GITHUB_STEP_SUMMARY
 
       - name: Report Test Execution Start To Test Observer
         if: ${{ always() && env.test_observer_api != '' && github.event.inputs.execution_id != '' }}
