@@ -74,7 +74,7 @@ jobs:
       - self-hosted
       - charm_qa
     env:
-      test_observer_api: ${{ github.event.inputs.environment == 'production' && vars.PROD_TEST_OBSERVER_API || (github.event.inputs.environment == 'staging' && vars.STG_TEST_OBSERVER_API || '') }}
+      test_observer_api: ${{ inputs.environment == 'production' && vars.PROD_TEST_OBSERVER_API || (inputs.environment == 'staging' && vars.STG_TEST_OBSERVER_API || '') }}
     steps:
       - name: Clone Repo
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -126,18 +126,18 @@ jobs:
           echo "| Juju controller | \`${controller}\` |" >> $GITHUB_STEP_SUMMARY
 
       - name: Report Test Execution Start To Test Observer
-        if: ${{ always() && env.test_observer_api != '' && github.event.inputs.execution_id != '' }}
+        if: ${{ always() && env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/patch-test-execution
         with:
           test_observer_api: ${{ env.test_observer_api }}
-          test_execution_id: ${{ github.event.inputs.execution_id }}
+          test_execution_id: ${{ inputs.execution_id }}
           status: "IN_PROGRESS"
 
       - name: Setup Kubeconfig
         id: kubeconfig
         shell: bash
         env:
-          environment: ${{ github.event.inputs.environment }}
+          environment: ${{ inputs.environment }}
         run: |
           mkdir -p $HOME/.kube
           if [ "${environment}" = "production" ]; then
@@ -150,7 +150,7 @@ jobs:
       - name: Install Juju
         shell: bash
         env:
-          juju_channel: ${{ github.event.inputs.juju_channel }}
+          juju_channel: ${{ inputs.juju_channel }}
         run: sudo snap install juju --channel "${juju_channel}"
 
       - name: Install Repository
@@ -236,8 +236,8 @@ jobs:
         shell: bash
         env:
           model: ${{ steps.juju_resources.outputs.model }}
-          charm_endpoint: ${{ github.event.inputs.charm_endpoint }}
-          neighbor_endpoint: ${{ github.event.inputs.neighbor_endpoint }}
+          charm_endpoint: ${{ inputs.charm_endpoint }}
+          neighbor_endpoint: ${{ inputs.neighbor_endpoint }}
         run: |
           ./scripts/test-integration.sh \
             --model "${model}" \
@@ -278,11 +278,11 @@ jobs:
           cat junit.xml
 
       - name: Post results to Test Observer
-        if: ${{ env.test_observer_api != '' && github.event.inputs.execution_id != '' }}
+        if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/post-results
         with:
           test_observer_api: ${{ env.test_observer_api }}
-          test_execution_id: ${{ github.event.inputs.execution_id }}
+          test_execution_id: ${{ inputs.execution_id }}
           junit_xml: ${{ steps.junit_results.outputs.junit_xml }}
 
       - name: Call Juju K8s Crashdump
@@ -310,10 +310,10 @@ jobs:
           echo "directory_path=$(realpath "logs")" >> $GITHUB_OUTPUT
 
       - name: Post Logs To Swift
-        if: ${{ always() && github.event.inputs.execution_id != '' }}
+        if: ${{ always() && inputs.execution_id != '' }}
         uses: canonical/sqa-cloud-deployment-pipeline/.github/actions/upload-to-swift@7ba2b263b20ee81e4aa4dc1033e12763adc324c1
         with:
-          job_uuid: ${{ github.event.inputs.environment }}/${{ github.event.inputs.execution_id }}
+          job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
           log_path: ${{ steps.collect_logs.outputs.directory_path }}
           swift_bucket: charm-qa
           SWIFT_OS_AUTH_URL: ${{ secrets.SWIFT_OS_AUTH_URL }}
@@ -325,11 +325,11 @@ jobs:
           SWIFT_OS_PROJECT_DOMAIN_NAME: ${{ secrets.SWIFT_OS_PROJECT_DOMAIN_NAME }}
 
       - name: Mark Test Execution completed on Test Observer
-        if: ${{ always() && env.test_observer_api != '' && github.event.inputs.execution_id != '' }}
+        if: ${{ always() && env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/patch-test-execution
         with:
           test_observer_api: ${{ env.test_observer_api }}
-          test_execution_id: ${{ github.event.inputs.execution_id }}
+          test_execution_id: ${{ inputs.execution_id }}
           status: "COMPLETED"
 
       - name: Teardown Controller
@@ -340,8 +340,8 @@ jobs:
         run: timeout 15m juju kill-controller "${controller}" --no-prompt --timeout 0s
 
       - name: Trigger rerun on Test Observer if failure
-        if: ${{ failure() && env.test_observer_api != '' && github.event.inputs.execution_id != '' }}
+        if: ${{ failure() && env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/trigger-rerun
         with:
           test_observer_api: ${{ env.test_observer_api }}
-          test_execution_id: ${{ github.event.inputs.execution_id }}
+          test_execution_id: ${{ inputs.execution_id }}
