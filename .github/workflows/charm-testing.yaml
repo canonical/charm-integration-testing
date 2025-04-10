@@ -304,9 +304,9 @@ jobs:
           generated_bundle: ${{ steps.steps.build_bundle.outputs.bundle }}
         run: |
           mkdir -p "logs"
-          cp -n "${crashdump}" "logs/juju-logs.tar.gz"
-          cp -n "${junit_xml}" "logs/junit.xml"
-          cp -n "${generated_bundle}" "logs/generated-bundle.yaml"
+          [ -f "${crashdump}" ] && cp "${crashdump}" "logs/juju-logs.tar.gz"
+          [ -f "${junit_xml}" ] && cp "${junit_xml}" "logs/junit.xml"
+          [ -f "${generated_bundle}" ] && cp "${generated_bundle}" "logs/generated-bundle.yaml"
           echo "directory_path=$(realpath "logs")" >> $GITHUB_OUTPUT
 
       - name: Post Logs To Swift
