@@ -285,43 +285,36 @@ jobs:
           test_execution_id: ${{ github.event.inputs.execution_id }}
           junit_xml: ${{ steps.junit_results.outputs.junit_xml }}
 
-      - name: Setup Logs directory
-        id: logs_directory
-        if: ${{ always() }}
-        shell: bash
-        run: |
-          mkdir -p logs
-          echo "full_path=$(realpath logs)" >> $GITHUB_OUTPUT
-
       - name: Call Juju K8s Crashdump
+        id: juju_k8s_crashdump
         if: ${{ always() }}
-        uses: canonical/juju-k8s-crashdump/actions/juju-k8s-crashdump@94185972636553a627fb483928c6be0fd1ddeaac
+        uses: canonical/juju-k8s-crashdump/actions/juju-k8s-crashdump@a92833d7408318d00c6eff2152833888c82874cb
         with:
           kubeconf: ${{ steps.kubeconfig.outputs.full_path }}
           controller: ${{ steps.juju_resources.outputs.controller }}
-          output_path: ${{ steps.logs_directory.outputs.full_path }}/juju-logs.tar.gz
           proxy: http://squid.internal:3128
 
-      - name: Add JUnit to logs
+      - name: Collect logs
+        id: collect_logs
+        if: ${{ always() }}
         shell: bash
         env:
+          crashdump: ${{ steps.juju_k8s_crashdump.outputs.crashdump_path }}
           junit_xml: ${{ steps.junit_results.outputs.junit_xml }}
-          logs_path: ${{ steps.logs_directory.outputs.full_path }}
-        run: cp "${junit_xml}" "${logs_path}/"
-
-      - name: Add generated bundle to logs
-        shell: bash
-        env:
-          bundle: ${{ steps.build_bundle.outputs.bundle }}
-          logs_path: ${{ steps.logs_directory.outputs.full_path }}
-        run: cp "${bundle}" "${logs_path}/generated-bundle.yaml"
+          generated_bundle: ${{ steps.steps.build_bundle.outputs.bundle }}
+        run: |
+          mkdir -p "logs"
+          cp -n "${crashdump}" "logs/juju-logs.tar.gz"
+          cp -n "${junit_xml}" "logs/junit.xml"
+          cp -n "${generated_bundle}" "logs/generated-bundle.yaml"
+          echo "directory_path=$(realpath "logs")" >> $GITHUB_OUTPUT
 
       - name: Post Logs To Swift
         if: ${{ always() && github.event.inputs.execution_id != '' }}
         uses: canonical/sqa-cloud-deployment-pipeline/.github/actions/upload-to-swift@7ba2b263b20ee81e4aa4dc1033e12763adc324c1
         with:
           job_uuid: ${{ github.event.inputs.environment }}/${{ github.event.inputs.execution_id }}
-          log_path: ${{ steps.logs_directory.outputs.full_path }}
+          log_path: ${{ steps.collect_logs.outputs.directory_path }}
           swift_bucket: charm-qa
           SWIFT_OS_AUTH_URL: ${{ secrets.SWIFT_OS_AUTH_URL }}
           SWIFT_OS_USERNAME: ${{ secrets.SWIFT_OS_USERNAME }}
