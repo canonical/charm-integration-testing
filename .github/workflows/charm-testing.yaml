@@ -338,3 +338,10 @@ jobs:
         env:
           controller: ${{ steps.juju_resources.outputs.controller }}
         run: timeout 15m juju kill-controller "${controller}" --no-prompt --timeout 0s
+
+      - name: Trigger rerun on Test Observer if failure
+        if: ${{ failure() && env.test_observer_api != '' && github.event.inputs.execution_id != '' }}
+        uses: ./.github/actions/trigger-rerun
+        with:
+          test_observer_api: ${{ env.test_observer_api }}
+          test_execution_id: ${{ github.event.inputs.execution_id }}
