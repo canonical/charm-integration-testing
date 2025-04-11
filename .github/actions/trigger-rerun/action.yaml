@@ -23,7 +23,7 @@ runs:
       env:
         test_execution_id: ${{ inputs.test_execution_id }}
       run: |
-        jq -nc --arg test_execution_id "${test_execution_id}" '
+        jq --null-input --compact-output --arg test_execution_id "${test_execution_id}" '
           {
             "test_execution_ids": [$test_execution_id] 
           }

@@ -40,7 +40,7 @@ runs:
       env:
         status: ${{ inputs.status }}
       run: |
-        jq -nc --arg status "${status}" '
+        jq --null-input --compact-output --arg status "${status}" '
           {
             "status": (if $status != "" then $status else null end)
           }
