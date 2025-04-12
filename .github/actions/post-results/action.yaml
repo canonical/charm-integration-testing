@@ -14,7 +14,6 @@ inputs:
     description: "Test results JUnit XML file"
     required: True
 
-
 runs:
   using: "composite"
   steps:
@@ -30,10 +29,10 @@ runs:
       env:
         junit_xml: ${{ inputs.junit_xml }}
       run: |
-        cat ${junit_xml} | yq -p=xml -o=json '
+        cat "${junit_xml}" | yq -p=xml -o=json '
           .testsuites.testsuite |= [] + . | # Ensure testsuite is list
           .testsuites.testsuite[].testcase |= [] + . # Ensure testcase is list
-        ' | jq -c '
+        ' | jq --compact-output '
           [
             .testsuites.testsuite[] | {testsuite: .} + (.testcase[]) |
             {
@@ -78,6 +77,6 @@ runs:
         test_execution_id: ${{ inputs.test_execution_id}}
       run: |
         curl --fail-with-body \
-          -X POST ${test_observer_api}/v1/test-executions/${test_execution_id}/test-results \
+          -X POST "${test_observer_api}/v1/test-executions/${test_execution_id}/test-results" \
           -H "Content-Type: application/json" \
           -d @body.json

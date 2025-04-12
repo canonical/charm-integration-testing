@@ -39,10 +39,10 @@ runs:
       shell: bash
       env:
         status: ${{ inputs.status }}
-      run: | # zizmor: ignore[template-injection] shell expansion would not work otherwise
-        jq -nc '
+      run: |
+        jq --null-input --compact-output --arg status "${status}" '
           {
-            "status": (if "${{ inputs.status }}" != "" then "${{ inputs.status }}" else null end)
+            "status": (if $status != "" then $status else null end)
           }
         ' > body.json
         cat body.json
@@ -52,8 +52,8 @@ runs:
       env:
         test_observer_api: ${{ inputs.test_observer_api }}
         test_execution_id: ${{ inputs.test_execution_id }}
-      run: | # zizmor: ignore[template-injection] shell expansion would not work otherwise
+      run: |
         curl --fail-with-body \
-          -X PATCH ${{ inputs.test_observer_api }}/v1/test-executions/${{ inputs.test_execution_id }} \
+          -X PATCH "${test_observer_api}/v1/test-executions/${test_execution_id}" \
           -H "Content-Type: application/json" \
           -d @body.json

@@ -22,10 +22,10 @@ runs:
       shell: bash
       env:
         test_execution_id: ${{ inputs.test_execution_id }}
-      run: | # zizmor: ignore[template-injection] shell expansion would not work otherwise
-        jq -nc '
+      run: |
+        jq --null-input --compact-output --arg test_execution_id "${test_execution_id}" '
           {
-            "test_execution_ids": [${{env.test_execution_id}}] 
+            "test_execution_ids": [$test_execution_id] 
           }
         ' > body.json
         cat body.json
@@ -36,6 +36,6 @@ runs:
         test_observer_api: ${{ inputs.test_observer_api }}
       run: |
         curl --fail-with-body \
-          -X POST ${test_observer_api}/v1/test-executions/reruns \
+          -X POST "${test_observer_api}/v1/test-executions/reruns" \
           -H "Content-Type: application/json" \
           -d @body.json
