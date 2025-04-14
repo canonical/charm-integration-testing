@@ -288,7 +288,7 @@ jobs:
       - name: Call Juju K8s Crashdump
         id: juju_k8s_crashdump
         if: ${{ always() }}
-        uses: canonical/juju-k8s-crashdump/actions/juju-k8s-crashdump@d50eb35963fc0978df654fe76c95bd748461f971
+        uses: canonical/juju-k8s-crashdump/actions/juju-k8s-crashdump@191a359ad67025b08aa56791fc0d8109ec92e21b
         with:
           kubeconf: ${{ steps.kubeconfig.outputs.full_path }}
           controller: ${{ steps.juju_resources.outputs.controller }}
