@@ -224,11 +224,11 @@ jobs:
           model: ${{ steps.juju_resources.outputs.model }}
           bundle: ${{ steps.build_bundle.outputs.bundle }}
         run: |
+          echo "junit_xml=$(realpath junit-deploy.xml)" >> $GITHUB_OUTPUT
           ./scripts/test-deploy.sh \
             --model "${model}" \
             --bundles "${bundle}" \
             --junit-xml=junit-deploy.xml
-          echo "junit_xml=$(realpath junit-deploy.xml)" >> $GITHUB_OUTPUT
 
       - name: Execute Tests
         id: test_integration
@@ -239,6 +239,7 @@ jobs:
           charm_endpoint: ${{ inputs.charm_endpoint }}
           neighbor_endpoint: ${{ inputs.neighbor_endpoint }}
         run: |
+          echo "junit_xml=$(realpath junit-integration.xml)" >> $GITHUB_OUTPUT
           ./scripts/test-integration.sh \
             --model "${model}" \
             --target-application "target" \
@@ -246,7 +247,6 @@ jobs:
             --neighbor-application "neighbor" \
             --neighbor-endpoint "${neighbor_endpoint}" \
             --junit-xml=junit-integration.xml
-          echo "junit_xml=$(realpath junit-integration.xml)" >> $GITHUB_OUTPUT
 
       - name: Teardown charm under test
         id: test_teardown
@@ -255,11 +255,11 @@ jobs:
         env:
           model: ${{ steps.juju_resources.outputs.model }}
         run: |
+          echo "junit_xml=$(realpath junit-teardown.xml)" >> $GITHUB_OUTPUT
           ./scripts/test-teardown.sh \
             --model "${model}" \
             --applications "target" \
             --junit-xml=junit-teardown.xml
-          echo "junit_xml=$(realpath junit-teardown.xml)" >> $GITHUB_OUTPUT
 
       - name: Merge JUnit output
         id: junit_results
@@ -288,7 +288,7 @@ jobs:
       - name: Call Juju K8s Crashdump
         id: juju_k8s_crashdump
         if: ${{ always() }}
-        uses: canonical/juju-k8s-crashdump/actions/juju-k8s-crashdump@a92833d7408318d00c6eff2152833888c82874cb
+        uses: canonical/juju-k8s-crashdump/actions/juju-k8s-crashdump@191a359ad67025b08aa56791fc0d8109ec92e21b
         with:
           kubeconf: ${{ steps.kubeconfig.outputs.full_path }}
           controller: ${{ steps.juju_resources.outputs.controller }}
