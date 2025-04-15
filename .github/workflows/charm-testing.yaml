@@ -308,7 +308,7 @@ jobs:
 
       - name: Post Logs To Swift
         if: ${{ always() && inputs.execution_id != '' }}
-        uses: canonical/sqa-cloud-deployment-pipeline/.github/actions/upload-to-swift@7ba2b263b20ee81e4aa4dc1033e12763adc324c1
+        uses: canonical/sqa-cloud-deployment-pipeline/.github/actions/upload-to-swift@173b1936e2c96e317b0f1167509b068b2020e233
         with:
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
           log_path: ${{ steps.collect_logs.outputs.directory_path }}
