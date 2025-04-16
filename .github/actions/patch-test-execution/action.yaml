@@ -13,6 +13,7 @@ inputs:
   status:
     description: "Test execution status"
     required: False
+    default: "null"
     # type: choice
     # options:
     #   - "NOT_STARTED"
@@ -27,6 +28,11 @@ inputs:
   # logs_link:
   #   description: "Link to test logs"
 
+  ci_link:
+    description: "Link to CI"
+    required: False
+    default: "null"
+
 runs:
   using: "composite"
   steps:
@@ -39,11 +45,16 @@ runs:
       shell: bash
       env:
         status: ${{ inputs.status }}
+        ci_link: ${{ inputs.ci_link }}
       run: |
-        jq --null-input --compact-output --arg status "${status}" '
+        jq --null-input --compact-output \
+          --arg status "${status}" \
+          --arg ci_link "${ci_link}" \
+        '
           {
-            "status": (if $status != "" then $status else null end)
-          }
+            "status": (if $status != "null" then $status else null end),
+            "ci_link": (if $ci_link != "null" then $ci_link else null end)
+          } | with_entries(select(.value != null))
         ' > body.json
         cat body.json
 

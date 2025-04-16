@@ -1,6 +1,10 @@
 name: Execute tests against two charms and their integrations
 run-name: "Testing ${{ inputs.charm_under_test }}:${{ inputs.charm_endpoint }} against ${{ inputs.neighbor }}:${{ inputs.neighbor_endpoint }}. (environment: ${{ inputs.environment }}${{ inputs.execution_id != '' && ', test execution: ' || '' }}${{ inputs.execution_id }})"
 
+concurrency:
+  group: ${{ github.workflow }}-${{ inputs.environment }}-${{ inputs.execution_id || github.run_id }}
+  cancel-in-progress: true
+
 permissions:
   contents: read # only needed for private repos
 
@@ -129,6 +133,7 @@ jobs:
           test_observer_api: ${{ env.test_observer_api }}
           test_execution_id: ${{ inputs.execution_id }}
           status: "IN_PROGRESS"
+          ci_link: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
       - name: Setup Kubeconfig
         id: kubeconfig
@@ -298,7 +303,7 @@ jobs:
         env:
           crashdump: ${{ steps.juju_k8s_crashdump.outputs.crashdump_path }}
           junit_xml: ${{ steps.junit_results.outputs.junit_xml }}
-          generated_bundle: ${{ steps.steps.build_bundle.outputs.bundle }}
+          generated_bundle: ${{ steps.build_bundle.outputs.bundle }}
         run: |
           mkdir -p "logs"
           [ -f "${crashdump}" ] && cp "${crashdump}" "logs/juju-logs.tar.gz"
