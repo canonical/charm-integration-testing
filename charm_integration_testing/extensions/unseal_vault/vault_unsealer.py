@@ -2,6 +2,7 @@
 # See LICENSE file for licensing details.
 
 import logging
+import time
 from dataclasses import asdict
 from datetime import timedelta
 
@@ -122,8 +123,17 @@ class VaultUnsealer:
         # Get the secret id
         secret_id = self.juju.get_secret_id(model, self.vault_one_time_token_secret_name(application))
 
-        # Authorize the charm
-        self.juju.run_action(model, f"{application}/leader", "authorize-charm", {"secret-id": secret_id})
+        # Authorize the charm (multiple attempts since the secret granting may have propagation delay)
+        exception: Exception
+        for _ in range(3):
+            time.sleep(3)
+            try:
+                self.juju.run_action(model, f"{application}/leader", "authorize-charm", {"secret-id": secret_id})
+                break
+            except Exception as e:
+                exception = e
+        else:
+            raise exception
 
         # Remove the one time secret
         self.juju.remove_secret(model, self.vault_one_time_token_secret_name(application))
