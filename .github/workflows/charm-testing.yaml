@@ -303,7 +303,7 @@ jobs:
         env:
           crashdump: ${{ steps.juju_k8s_crashdump.outputs.crashdump_path }}
           junit_xml: ${{ steps.junit_results.outputs.junit_xml }}
-          generated_bundle: ${{ steps.steps.build_bundle.outputs.bundle }}
+          generated_bundle: ${{ steps.build_bundle.outputs.bundle }}
         run: |
           mkdir -p "logs"
           [ -f "${crashdump}" ] && cp "${crashdump}" "logs/juju-logs.tar.gz"
