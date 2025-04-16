@@ -30,9 +30,9 @@ class Node:
     @cached_property
     def score(self):
         return (
-            len(self.fulfillable_interfaces),
-            len(self.bundle.unfulfilled_interfaces),
             len(self.bundle.applications),
+            len(self.bundle.unfulfilled_interfaces),
+            len(self.fulfillable_interfaces),
         )
 
     @cached_property
