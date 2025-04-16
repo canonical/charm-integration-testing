@@ -133,6 +133,7 @@ jobs:
           test_observer_api: ${{ env.test_observer_api }}
           test_execution_id: ${{ inputs.execution_id }}
           status: "IN_PROGRESS"
+          ci_link: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
       - name: Setup Kubeconfig
         id: kubeconfig
