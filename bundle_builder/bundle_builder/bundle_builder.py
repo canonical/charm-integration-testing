@@ -28,19 +28,19 @@ class Node:
     application_endpoint_to_possible_charm: frozenset[tuple[ApplicationEndpoint, str]]
 
     @cached_property
-    def score(self):
-        return (
-            len(self.bundle.applications),
-            len(self.bundle.unfulfilled_interfaces),
-            len(self.fulfillable_interfaces),
-        )
+    def score(self) -> float:
+        # Somewhat arbitrary weights
+        # 0.6/0.4 split means adding 6 applications is equal to 4 unfulfilled interfaces
+        # Basically adding one application shouldn't increase unfulfilled interfaces,
+        # and lean towards smaller bundles
+        return 0.6 * len(self.bundle.applications) + 0.4 * len(self.bundle.unfulfilled_interfaces)
 
     @cached_property
-    def fingerprint(self):
+    def fingerprint(self) -> frozenset[str]:
         return self.bundle.charms
 
     @cached_property
-    def fulfillable_interfaces(self):
+    def fulfillable_interfaces(self) -> frozenset[str]:
         return frozenset(
             {
                 self.bundle.application_endpoints[application_endpoint].interface
@@ -49,7 +49,7 @@ class Node:
         )
 
     @cached_property
-    def child_charms(self):
+    def child_charms(self) -> frozenset[str]:
         return frozenset({charm_name for _, charm_name in self.application_endpoint_to_possible_charm})
 
     @cached_property
@@ -78,13 +78,8 @@ class BundleBuilder:
             queued_nodes.remove(node)
             self.logger.debug(f"Checking bundle: {node.stats}")
 
-            # Check if this node is better than the best node
-            if node.score < best_node.score:
-                self.logger.info(f"Found new best bundle: {node.stats}")
-                best_node = node
-
-            # If there are no fulfillable interfaces there is no way to further saturate the bundle
-            # We could exhaust possibilities to possibly get a smaller bundle, but that comes at the cost of compute
+            # If there are no fulfillable interfaces quit now
+            # We could exhaustively search the graph but that comes at the cost of compute
             if len(node.fulfillable_interfaces) == 0:
                 self.logger.info("Bundle has no more fulfillable interfaces, stopping")
                 best_node = node
