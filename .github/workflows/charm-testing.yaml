@@ -85,10 +85,12 @@ jobs:
       - name: Generate Juju Model and Controller Name
         id: juju_resources
         shell: bash
+        env:
+          run_id: ${{ github.run_id }}
         run: |
-          date=$(date +"%y-%m-%d-%H-%M-%S")
-          echo "model=model-$date" >> $GITHUB_OUTPUT
-          echo "controller=$date" >> $GITHUB_OUTPUT
+          name="${run_id}-$(date +'%y%m%d%H%M%S')"
+          echo "model=model-$name" >> $GITHUB_OUTPUT
+          echo "controller=$name" >> $GITHUB_OUTPUT
 
       - name: Log job information
         shell: bash
