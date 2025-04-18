@@ -24,9 +24,9 @@ runs:
     run: |
       mkdir -p $HOME/.kube
       if [ "${{ inputs.environment }}" = "production" ]; then
-        echo $k8s-prod > $HOME/.kube/config
+        echo ${k8sprod} > $HOME/.kube/config
       else        
-        echo $k8s-stg > $HOME/.kube/config
+        echo ${k8sstg} > $HOME/.kube/config
       fi
       cat $HOME/.kube/config
   - name: Add K8s
