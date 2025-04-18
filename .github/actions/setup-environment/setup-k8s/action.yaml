@@ -28,7 +28,7 @@ runs:
       else        
         echo "${k8s-stg}" > $HOME/.kube/config
       fi
-      echo $HOME/.kube/config
+      cat $HOME/.kube/config
   - name: Add K8s
     shell: bash
     id: cloud
