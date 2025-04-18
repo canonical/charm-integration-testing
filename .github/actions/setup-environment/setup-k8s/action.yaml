@@ -51,6 +51,6 @@ runs:
   - name: Create Model
     shell: bash
     run: |
-      juju add-model ${{ intputs.model }} \
+      juju add-model ${{ inputs.model }} \
         --config "logging-config=DEBUG" \
         --config="update-status-hook-interval=30s"
