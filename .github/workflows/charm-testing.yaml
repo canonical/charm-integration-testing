@@ -188,7 +188,6 @@ jobs:
             --integrations "target:${charm_endpoint}::neighbor:${neighbor_endpoint}" \
             --substrate "kubernetes" \
             --arch "${arch}" \
-            --log-level DEBUG \
             --output-file generated-bundle.yaml
           echo "bundle=$(realpath generated-bundle.yaml)" >> $GITHUB_OUTPUT
 
