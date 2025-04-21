@@ -14,6 +14,7 @@ inputs:
 
 outputs:
   cloud-name:
+    discription: "Name of the cloud created and bootstrapped to"
     value:  ${{ steps.cloud.outputs.cloud }}
 
 runs:
@@ -46,10 +47,12 @@ runs:
     run: echo "constraints=root-disk=5G" >> $GITHUB_OUTPUT
 
   - name: Bootstrap Controller
+    env:
+      controller: ${{ inputs.controller }}
     shell: bash
     run: |
       # juju will prefix the namespace with "controller"
-      juju bootstrap {{ steps.cloud-setup.outputs.cloud-name }} --bootstrap-constraints root-disk=5G {{ inputs.controller }}
+      juju bootstrap {{ steps.cloud-setup.outputs.cloud-name }} --bootstrap-constraints root-disk=5G ${controller}
 
   - name: Create Model
     env:
