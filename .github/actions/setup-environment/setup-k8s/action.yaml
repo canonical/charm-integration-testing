@@ -41,10 +41,10 @@ runs:
       KUBECONFIG="$HOME/.kube/config" juju add-k8s $CLOUD --client
       echo "cloud=$CLOUD" >> $GITHUB_OUTPUT
 
-  - name: Set Constraints
+  - name: Set extra-options
     shell: bash
-    id: constraints
-    run: echo "constraints=root-disk=5G" >> $GITHUB_OUTPUT
+    id: extra-options
+    run: echo "extra-options=--bootstrap-constraints root-disk=5G" >> $GITHUB_OUTPUT
 
   - name: Bootstrap Controller
     env:
@@ -52,8 +52,7 @@ runs:
     shell: bash
     run: |
       # juju will prefix the namespace with "controller"
-      juju bootstrap {{ steps.cloud-setup.outputs.cloud-name }} --bootstrap-constraints root-disk=5G ${controller}
-
+      juju bootstrap {{ steps.cloud-setup.outputs.cloud-name }} {{ steps.extra-options.outputs.cloud-name }} ${controller}
   - name: Create Model
     env:
       model: ${{ inputs.model }}
