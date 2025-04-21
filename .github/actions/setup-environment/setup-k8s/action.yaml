@@ -20,19 +20,23 @@ runs:
   using: "composite"
   steps:
   - name: Setup Kubeconfig
+    env: 
+      environment: ${{ inputs.environment }}
     shell: bash
     run: |
       mkdir -p $HOME/.kube
-      if [ "${{ inputs.environment }}" = "production" ]; then
+      if [ "${environment}" = "production" ]; then
         echo "${k8sprod}" > $HOME/.kube/config
       else        
         echo "${k8sstg}" > $HOME/.kube/config
       fi
   - name: Add K8s
+    env: 
+      environment: ${{ inputs.environment }}
     shell: bash
     id: cloud
     run: |
-      export CLOUD="k8s-${{ inputs.environment }}"
+      export CLOUD="k8s-${environment}"
       KUBECONFIG="$HOME/.kube/config" juju add-k8s $CLOUD --client
       echo "cloud=$CLOUD" >> $GITHUB_OUTPUT
 
@@ -48,8 +52,10 @@ runs:
       juju bootstrap {{ steps.cloud-setup.outputs.cloud-name }} --bootstrap-constraints root-disk=5G {{ inputs.controller }}
 
   - name: Create Model
+    env:
+      model: ${{ inputs.model }}
     shell: bash
     run: |
-      juju add-model ${{ inputs.model }} \
+      juju add-model ${model} \
         --config "logging-config=DEBUG" \
         --config="update-status-hook-interval=30s"
