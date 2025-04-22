@@ -48,11 +48,13 @@ runs:
 
   - name: Bootstrap Controller
     env:
+      cloud: ${{ steps.cloud.outputs.cloud }}
       controller: ${{ inputs.controller }}
+      extraoptions: ${{ steps.extra-options.outputs.extra-options }}
     shell: bash
     run: |
       # juju will prefix the namespace with "controller"
-      juju bootstrap ${{ steps.cloud.outputs.cloud }} ${{ steps.extra-options.outputs.extra-options }} ${controller}
+      juju bootstrap ${cloud} ${extraoptions} ${controller}
   - name: Create Model
     env:
       model: ${{ inputs.model }}
