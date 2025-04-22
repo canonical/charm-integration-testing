@@ -1,4 +1,4 @@
-name: Setup Kuberentes
+name: Setup Kubernetes
 description: Setup A kubernetes environment for charm qa
 
 inputs:
