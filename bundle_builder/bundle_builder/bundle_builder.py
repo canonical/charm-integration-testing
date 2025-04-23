@@ -83,7 +83,7 @@ class BundleBuilder:
         while len(queued_nodes) > 0:
             # Rebalance node scores
             num_visited_nodes = len(known_nodes) - len(queued_nodes)
-            if num_visited_nodes % 1000 == 0:
+            if num_visited_nodes % self.rebalance_interval == 0:
                 balance = max((self.max_nodes_visited - num_visited_nodes) / self.max_nodes_visited, 0)
                 queued_nodes = [dataclasses.replace(node, balance=balance) for node in queued_nodes]
                 heapq.heapify(queued_nodes)
