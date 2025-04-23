@@ -1,4 +1,4 @@
-name: Bundle builder sanity check
+name: Test Bundle Builder
 
 on:
   pull_request:
@@ -6,7 +6,7 @@ permissions:
   contents: read # only needed for private repos
 
 jobs:
-  run-bundle-builder:
+  test-bundle-builder:
     runs-on: ubuntu-latest
     strategy:
       matrix:
