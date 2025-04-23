@@ -174,6 +174,17 @@ jobs:
           controller: ${{ steps.juju_resources.outputs.controller }}
           model: ${{ steps.juju_resources.outputs.model }}
 
+      - name: Setup O7k Cloud
+        if: ${{ inputs.substrate == 'openstack'}}
+        uses: ./.github/actions/setup-environment/setup-openstack
+        env:
+          o7kprod: ${{ secrets.PROD_SQA_NOVARC }}
+          o7kstg: ${{ secrets.STG_SQA_NOVARC }}
+        with:
+          environment: ${{ inputs.environment }}
+          controller:  ${{ steps.juju_resources.outputs.controller }}
+          model: ${{ steps.juju_resources.outputs.model }}
+
       - name: Install Repository
         shell: bash
         run: |
@@ -349,6 +360,21 @@ jobs:
           kubeconf: ${{ steps.kubeconfig.outputs.full_path }}
           controller: ${{ steps.juju_resources.outputs.controller }}
           proxy: http://squid.internal:3128
+
+      - name: Call Juju Crashdump
+        env:
+          controller:  ${{ steps.juju_resources.outputs.controller }}
+          model: ${{ steps.juju_resources.outputs.model }}
+        if: ${{ always() && inputs.substrate == 'openstack'}}
+        shell: bash
+        run: |
+          model-crashdump=logs/${model}-logs.tar.gz
+          controller-crashdump=logs/controller-logs.tar.gz
+          sudo snap install juju-crashdump
+          juju-crashdump --model ${controller}:${model} --timeout 300 --small -f 100000000 --compression gz --unit-dump-location /home/ubuntu/juju-crashdump ${model-crashdump} --as-root || True
+          juju-crashdump --model ${controller}:controller --timeout 300 --small -f 100000000 --compression gz --unit-dump-locatoin /home/ubuntu/juju-crashdumo ${controller-crashdump} --as-root || True
+          echo "model_crashdump=logs/${model}-logs.tar.gz" >> model-crashdump
+          echo "controller_crashdump=logs/controller-logs.tar.gz" >> controller-crashdump
 
       - name: Collect logs
         id: collect_logs

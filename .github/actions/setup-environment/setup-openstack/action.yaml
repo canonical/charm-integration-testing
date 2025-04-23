@@ -27,14 +27,14 @@ runs:
     run: |
       mkdir -p $HOME/openstack
       if [ "${environment}" = "production" ]; then
-        echo "${k8sprod}" > $HME/openstack/novarc
+        echo "${o7kprod}" > $HME/openstack/novarc
       else        
-        echo "${k8sstg}" > $HOME/openstack/novarc
+        echo "${o7kstg}" > $HOME/openstack/novarc
       fi
   - name: Setup Image Metadata
     shell: bash
     run: |
-      snap install openstack
+      sudo snap install openstack
       source $HOME/openstack/novarc
       openstack image list -f json | jq -r '.[] | select((.Name | test("focal|jammy|noble")) and .Status == "active") | .ID' | while read -r id; do
         juju metadata generate-image -a amd64 -i ${id} -r ${OS_REGION_NAME} -u ${OS_AUTH_URL} -d /home/ubuntu/openstack
