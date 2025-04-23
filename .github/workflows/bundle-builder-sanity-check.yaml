@@ -1,0 +1,44 @@
+name: Bundle builder sanity check
+
+on:
+  pull_request:
+permissions: 
+  contents: read # only needed for private repos
+
+jobs:
+  run-bundle-builder:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - target: grafana-agent-k8s
+            target_endpoint: grafana-dashboards-provider
+            neighbor: grafana-k8s
+            neighbor_endpoint: grafana-dashboard
+            substrate: kubernetes
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
+      - name: Install poetry
+        run: pipx install poetry==2.0.1
+
+      - name: Install dependencies
+        run: poetry install
+
+      - name: Run bundle builder
+        env:
+          target: ${{ matrix.target }}
+          target_endpoint: ${{ matrix.target_endpoint }}
+          neighbor: ${{ matrix.neighbor }}
+          neighbor_endpoint: ${{ matrix.neighbor_endpoint }}
+          substrate: ${{ matrix.substrate }}
+        run: |
+          ./scripts/build-bundle.sh \
+            --charms \
+              "target::${target}::default::default" \
+              "neighbor::${neighbor}::default::default" \
+            --integrations "target:${target_endpoint}::neighbor:${neighbor_endpoint}" \
+            --substrate "${substrate}"
