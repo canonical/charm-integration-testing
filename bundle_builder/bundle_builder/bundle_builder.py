@@ -66,7 +66,7 @@ class Node:
 class BundleBuilder:
     charmhub_client: CharmhubClient
     logger: logging.Logger
-    max_nodes_visited: int = 20000
+    max_nodes_visited: int = 100000
     rebalance_interval: int = 1000
 
     def __init__(self, charmhub_client: CharmhubClient, logger=logging.getLogger(__name__)):
