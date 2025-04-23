@@ -14,6 +14,8 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
+import dataclasses
+import heapq
 import logging
 from dataclasses import dataclass
 from functools import cached_property
@@ -26,14 +28,15 @@ from .charmhub import CharmhubClient
 class Node:
     bundle: Bundle
     application_endpoint_to_possible_charm: frozenset[tuple[ApplicationEndpoint, str]]
+    balance: float
 
     @cached_property
     def score(self) -> float:
-        # Somewhat arbitrary weights
-        # 0.6/0.4 split means adding 6 applications is equal to 4 unfulfilled interfaces
-        # Basically adding one application shouldn't increase unfulfilled interfaces,
-        # and lean towards smaller bundles
-        return 0.6 * len(self.bundle.applications) + 0.4 * len(self.bundle.unfulfilled_interfaces)
+        # balance changes the weight prioritizing number of applications over unfulfilled interfaces
+        # it is expected to be between 0 and 1, where 1 prioritizes the smallest bundle
+        return self.balance * len(self.bundle.applications) + (1.0 - self.balance) * len(
+            self.bundle.unfulfilled_interfaces
+        )
 
     @cached_property
     def fingerprint(self) -> frozenset[str]:
@@ -56,10 +59,15 @@ class Node:
     def stats(self) -> str:
         return f"{len(self.bundle.applications)} applications ({len(self.bundle.unfulfilled_interfaces)} unfulfilled and {len(self.fulfillable_interfaces)} fulfillable interfaces)"
 
+    def __lt__(self, other):
+        return self.score < other.score
+
 
 class BundleBuilder:
     charmhub_client: CharmhubClient
     logger: logging.Logger
+    max_nodes_visited: int = 20000
+    rebalance_interval: int = 1000
 
     def __init__(self, charmhub_client: CharmhubClient, logger=logging.getLogger(__name__)):
         self.charmhub_client = charmhub_client
@@ -70,13 +78,21 @@ class BundleBuilder:
         # This follows a rough uniform cost algorithm
         queued_nodes = [self.new_node(base)]
         best_node = queued_nodes[0]
-        visited_nodes = {best_node.fingerprint}
+        known_nodes = {best_node.fingerprint}
         self.logger.info(f"Starting with bundle: {best_node.stats}")
         while len(queued_nodes) > 0:
-            # Get node with the best score
-            node = min(queued_nodes, key=lambda node: node.score)
-            queued_nodes.remove(node)
-            self.logger.debug(f"Checking bundle: {node.stats}")
+            # Rebalance node scores
+            num_visited_nodes = len(known_nodes) - len(queued_nodes)
+            if num_visited_nodes % 1000 == 0:
+                balance = max((self.max_nodes_visited - num_visited_nodes) / self.max_nodes_visited, 0)
+                queued_nodes = [dataclasses.replace(node, balance=balance) for node in queued_nodes]
+                heapq.heapify(queued_nodes)
+
+            # Get node with with the best score from the sorted queue
+            node = heapq.heappop(queued_nodes)
+            self.logger.debug(
+                f"Checking bundle: {node.stats}, visited nodes: {num_visited_nodes}, queued nodes: {len(queued_nodes)}"
+            )
 
             # If there are no fulfillable interfaces quit now
             # We could exhaustively search the graph but that comes at the cost of compute
@@ -85,11 +101,11 @@ class BundleBuilder:
                 best_node = node
                 break
 
-            # Add this node's children to the back of the queue, as long as not visited
+            # Add this node's children to the sorted queue
             for child_node in self.child_nodes(node):
-                if child_node.fingerprint not in visited_nodes:
-                    visited_nodes.add(child_node.fingerprint)
-                    queued_nodes.append(child_node)
+                if child_node.fingerprint not in known_nodes:
+                    known_nodes.add(child_node.fingerprint)
+                    heapq.heappush(queued_nodes, child_node)
 
         # Note unresolved endpoints
         for application_endpoint in best_node.bundle.unfulfilled_endpoints:
@@ -99,7 +115,7 @@ class BundleBuilder:
         return best_node.bundle
 
     # Return a new node, including the possible child charms
-    def new_node(self, bundle: Bundle) -> Node:
+    def new_node(self, bundle: Bundle, balance: float = 1.0) -> Node:
         # Ensure all possible integrations are fulfilled by the bundle
         bundle = bundle.add_missing_integrations()
 
@@ -121,6 +137,7 @@ class BundleBuilder:
         return Node(
             bundle=bundle,
             application_endpoint_to_possible_charm=frozenset(application_endpoint_to_possible_charm),
+            balance=balance,
         )
 
     # Each child node is the addition of an application to the bundle that fulfills a
@@ -136,12 +153,13 @@ class BundleBuilder:
         return frozenset(
             {
                 self.new_node(
-                    Bundle(
+                    bundle=Bundle(
                         applications=frozenset(node.bundle.applications | {Application(name=charm.name, charm=charm)}),
                         integrations=node.bundle.integrations,
                         platform=node.bundle.platform,
                         arch=node.bundle.arch,
-                    )
+                    ),
+                    balance=node.balance,
                 )
                 for charm in child_charm
             }
