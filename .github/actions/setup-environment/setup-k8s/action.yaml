@@ -1,0 +1,65 @@
+name: Setup Kubernetes
+description: Setup A kubernetes environment for charm qa
+
+inputs:
+  environment:
+    description: "Environment to setup the k8s for"
+    required: True
+  controller:
+    description: "Name of the controller to create"
+    required: True
+  model:
+    description: "Name of the model to create"
+    required: True
+
+outputs:
+  cloud-name:
+    description: "Name of the cloud created and bootstrapped to"
+    value:  ${{ steps.cloud.outputs.cloud }}
+
+runs:
+  using: "composite"
+  steps:
+  - name: Setup Kubeconfig
+    env: 
+      environment: ${{ inputs.environment }}
+    shell: bash
+    run: |
+      mkdir -p $HOME/.kube
+      if [ "${environment}" = "production" ]; then
+        echo "${k8sprod}" > $HOME/.kube/config
+      else        
+        echo "${k8sstg}" > $HOME/.kube/config
+      fi
+  - name: Add K8s
+    env: 
+      environment: ${{ inputs.environment }}
+    shell: bash
+    id: cloud
+    run: |
+      export CLOUD="k8s-${environment}"
+      KUBECONFIG="$HOME/.kube/config" juju add-k8s $CLOUD --client
+      echo "cloud=$CLOUD" >> $GITHUB_OUTPUT
+
+  - name: Set extra-options
+    shell: bash
+    id: extra-options
+    run: echo "extra-options=--bootstrap-constraints root-disk=5G" >> $GITHUB_OUTPUT
+
+  - name: Bootstrap Controller
+    env:
+      cloud: ${{ steps.cloud.outputs.cloud }}
+      controller: ${{ inputs.controller }}
+      extraoptions: ${{ steps.extra-options.outputs.extra-options }}
+    shell: bash
+    run: |
+      # juju will prefix the namespace with "controller"
+      juju bootstrap ${cloud} ${extraoptions} ${controller}
+  - name: Create Model
+    env:
+      model: ${{ inputs.model }}
+    shell: bash
+    run: |
+      juju add-model ${model} \
+        --config "logging-config=DEBUG" \
+        --config="update-status-hook-interval=30s"
