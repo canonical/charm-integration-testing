@@ -20,6 +20,8 @@ import requests
 import yaml
 from pydantic import Field, field_validator
 from pydantic.dataclasses import dataclass
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 from .charm import ENDPOINT_PEERS, ENDPOINT_PROVIDES, ENDPOINT_REQUIRES, Charm, CharmEndpoint
 
@@ -123,12 +125,22 @@ CHARM_STORE_JSON_ENDPOINT = "https://charmhub.io/store.json"
 
 
 class CharmhubClient:
-    requests: any
+    session: requests.Session
     logger: logging.Logger
 
     def __init__(self, logger=logging.getLogger(__name__)):
-        self.requests = requests
         self.logger = logger
+
+        # Setup requests session with retries
+        retry_strategy = Retry(
+            total=10,
+            status_forcelist=[429, 500, 502, 503, 504],
+            backoff_factor=0.5,
+        )
+        adapter = HTTPAdapter(max_retries=retry_strategy)
+        self.session = requests.Session()
+        self.session.mount("https://", adapter)
+        self.session.mount("http://", adapter)
 
     @cache
     def charm_from_store(
@@ -353,7 +365,7 @@ class CharmhubClient:
         request_params = {"size": 300, "type": "charm", **({"provides": provides if provides is not None else {}})}
 
         # Execute request
-        response = self.requests.get(url=request_url, params=request_params, headers=request_headers, timeout=180)
+        response = self.session.get(url=request_url, params=request_params, headers=request_headers, timeout=180)
         response.raise_for_status()
         return response.json()
 
@@ -384,7 +396,7 @@ class CharmhubClient:
         }
 
         # Execute request
-        response = self.requests.post(url=request_url, json=request_body, headers=request_headers, timeout=180)
+        response = self.session.post(url=request_url, json=request_body, headers=request_headers, timeout=180)
         response.raise_for_status()
         response_json = response.json()
         return RefreshResponse(**next(iter(response_json.get("results"))))
@@ -399,6 +411,6 @@ class CharmhubClient:
         request_params = {"fields": ",".join(["channel-map"])}
 
         # Execute request
-        response = self.requests.get(url=request_url, params=request_params, headers=request_headers, timeout=180)
+        response = self.session.get(url=request_url, params=request_params, headers=request_headers, timeout=180)
         response.raise_for_status()
         return response.json()
