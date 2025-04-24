@@ -77,6 +77,7 @@ runs:
         test_execution_id: ${{ inputs.test_execution_id}}
       run: |
         curl --fail-with-body \
+          --retry 10 \
           -X POST "${test_observer_api}/v1/test-executions/${test_execution_id}/test-results" \
           -H "Content-Type: application/json" \
           -d @body.json
