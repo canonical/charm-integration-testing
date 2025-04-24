@@ -36,6 +36,8 @@ runs:
         test_observer_api: ${{ inputs.test_observer_api }}
       run: |
         curl --fail-with-body \
+          --retry 10 \
+          --retry-all-errors \
           -X POST "${test_observer_api}/v1/test-executions/reruns" \
           -H "Content-Type: application/json" \
           -d @body.json

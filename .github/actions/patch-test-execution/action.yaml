@@ -65,6 +65,8 @@ runs:
         test_execution_id: ${{ inputs.test_execution_id }}
       run: |
         curl --fail-with-body \
+          --retry 10 \
+          --retry-all-errors \
           -X PATCH "${test_observer_api}/v1/test-executions/${test_execution_id}" \
           -H "Content-Type: application/json" \
           -d @body.json
