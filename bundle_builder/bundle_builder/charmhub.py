@@ -336,7 +336,7 @@ class CharmhubClient:
 
         # Pick the first base (like Juju)
         return default_bases[0].channel
-    
+
     def _all_charm_endpoints(self, refresh_info: RefreshResponse):
         metadata = refresh_info.charm.metadata
 
@@ -351,7 +351,7 @@ class CharmhubClient:
                 ),
             )
             edge_metadata = edge_refresh_info.charm.metadata
-    
+
         # Map endpoints
         endpoints = set()
         for endpoint_type, endpoint_map, edge_endpoint_map in (
@@ -368,12 +368,14 @@ class CharmhubClient:
                     optional = edge_endpoint_map[endpoint_name].optional
 
                 # Add endpoint
-                endpoints.add(CharmEndpoint(
-                    type=endpoint_type,
-                    name=endpoint_name,
-                    interface=endpoint.interface,
-                    optional=optional,
-                ))
+                endpoints.add(
+                    CharmEndpoint(
+                        type=endpoint_type,
+                        name=endpoint_name,
+                        interface=endpoint.interface,
+                        optional=optional,
+                    )
+                )
 
         return frozenset(endpoints)
 
