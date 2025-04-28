@@ -16,6 +16,11 @@ jobs:
             neighbor: grafana-k8s
             neighbor_endpoint: grafana-dashboard
             substrate: kubernetes
+          - target: istio-gateway
+            target_endpoint: istio-pilot
+            neighbor: kfp-ui
+            neighbor_endpoint: kfp-ui
+            substrate: kubernetes
     steps:
       - name: Checkout repo
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
