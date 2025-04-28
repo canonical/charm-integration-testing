@@ -34,9 +34,7 @@ class Node:
     def score(self) -> float:
         # balance changes the weight prioritizing number of applications over unfulfilled interfaces
         # it is expected to be between 0 and 1, where 1 prioritizes the smallest bundle
-        return self.balance * len(self.bundle.applications) + (1.0 - self.balance) * len(
-            self.bundle.unfulfilled_interfaces
-        )
+        return self.balance * len(self.bundle.applications) + (1.0 - self.balance) * len(self.fulfillable_interfaces)
 
     @cached_property
     def fingerprint(self) -> frozenset[str]:
@@ -66,7 +64,7 @@ class Node:
 class BundleBuilder:
     charmhub_client: CharmhubClient
     logger: logging.Logger
-    max_nodes_visited: int = 100000
+    max_nodes_visited: int = 50000
     rebalance_interval: int = 1000
 
     def __init__(self, charmhub_client: CharmhubClient, logger=logging.getLogger(__name__)):
