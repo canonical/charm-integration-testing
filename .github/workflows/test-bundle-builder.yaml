@@ -51,4 +51,10 @@ jobs:
               "target::${target}::default::default" \
               "neighbor::${neighbor}::default::default" \
             --integrations "target:${target_endpoint}::neighbor:${neighbor_endpoint}" \
-            --substrate "${substrate}"
+            --substrate "${substrate}" \
+            --output-file generated-bundle.yaml
+
+          echo '### Generated Juju Bundle' >> $GITHUB_STEP_SUMMARY
+          echo '```yaml' >> $GITHUB_STEP_SUMMARY
+          cat generated-bundle.yaml >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
