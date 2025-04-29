@@ -60,4 +60,4 @@ jobs:
               select(.metadata.name | test("^(controller|model)-[0-9]+-[0-9]+$")) |
               select((now - (.metadata.creationTimestamp | fromdateiso8601)) > 3600) |
               .metadata.name
-          ' | xargs -r kubectl delete namespace
+          ' | xargs --no-run-if-empty kubectl delete namespace --timeout=30m
