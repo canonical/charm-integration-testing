@@ -1,0 +1,20 @@
+name: Clean up K8s environments on a schedule
+run-name: "Cleaning up K8s environments on schedule"
+
+permissions:
+  contents: read # only needed for private repos
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+jobs:
+  cleanup-k8s-schedule:
+    strategy:
+      matrix:
+        environment: [production, staging]
+    uses: ./.github/workflows/cleanup-k8s.yaml
+    with:
+      environment: ${{ matrix.environment }}
+    secrets:
+      PROD_SQA_KUBECONFIG: ${{ secrets.PROD_SQA_KUBECONFIG }}
+      STG_SQA_KUBECONFIG: ${{ secrets.STG_SQA_KUBECONFIG }}
