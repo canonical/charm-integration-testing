@@ -16,6 +16,16 @@ jobs:
             neighbor: grafana-k8s
             neighbor_endpoint: grafana-dashboard
             substrate: kubernetes
+          - target: istio-gateway
+            target_endpoint: istio-pilot
+            neighbor: kfp-ui
+            neighbor_endpoint: kfp-ui
+            substrate: kubernetes
+          - target: istio-gateway
+            target_endpoint: metrics-endpoint
+            neighbor: prometheus-k8s
+            neighbor_endpoint: metrics-endpoint
+            substrate: kubernetes
     steps:
       - name: Checkout repo
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -41,4 +51,10 @@ jobs:
               "target::${target}::default::default" \
               "neighbor::${neighbor}::default::default" \
             --integrations "target:${target_endpoint}::neighbor:${neighbor_endpoint}" \
-            --substrate "${substrate}"
+            --substrate "${substrate}" \
+            --output-file generated-bundle.yaml
+
+          echo '### Generated Juju Bundle' >> $GITHUB_STEP_SUMMARY
+          echo '```yaml' >> $GITHUB_STEP_SUMMARY
+          cat generated-bundle.yaml >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
