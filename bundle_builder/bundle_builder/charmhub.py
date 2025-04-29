@@ -65,29 +65,11 @@ class CharmMetadata:
     @dataclass(frozen=True)
     class Endpoint:
         interface: str
-        optional: bool = False
+        optional: bool | None = None
 
     peers: dict[str, Endpoint] = Field(default_factory=dict)
     requires: dict[str, Endpoint] = Field(default_factory=dict)
     provides: dict[str, Endpoint] = Field(default_factory=dict)
-
-    def all_charm_endpoints(self) -> frozenset[CharmEndpoint]:
-        return frozenset(
-            {
-                CharmEndpoint(
-                    type=endpoint_type,
-                    name=endpoint_name,
-                    interface=endpoint.interface,
-                    optional=endpoint.optional,
-                )
-                for endpoint_type, endpoint_map in (
-                    (ENDPOINT_PEERS, self.peers),
-                    (ENDPOINT_REQUIRES, self.requires),
-                    (ENDPOINT_PROVIDES, self.provides),
-                )
-                for endpoint_name, endpoint in endpoint_map.items()
-            }
-        )
 
 
 @dataclass(frozen=True)
@@ -254,7 +236,7 @@ class CharmhubClient:
             revision=charm_revision,
             ubuntu_version=ubuntu_version,
             ubuntu_arch=ubuntu_arch,
-            endpoints=refresh_info.charm.metadata.all_charm_endpoints(),
+            endpoints=self._all_charm_endpoints(refresh_info),
         )
 
     def _charm_from_store_by_channel(
@@ -291,7 +273,7 @@ class CharmhubClient:
             revision=refresh_info.charm.revision,
             ubuntu_version=ubuntu_version,
             ubuntu_arch=ubuntu_arch,
-            endpoints=refresh_info.charm.metadata.all_charm_endpoints(),
+            endpoints=self._all_charm_endpoints(refresh_info),
         )
 
     def _charm_from_store_default(
@@ -326,7 +308,7 @@ class CharmhubClient:
             revision=refresh_info.charm.revision,
             ubuntu_version=ubuntu_version,
             ubuntu_arch=ubuntu_arch,
-            endpoints=refresh_info.charm.metadata.all_charm_endpoints(),
+            endpoints=self._all_charm_endpoints(refresh_info),
         )
 
     def _default_ubuntu_version(self, charm_name: str, ubuntu_arch: str, charm_channel: str | None = None) -> str:
@@ -354,6 +336,48 @@ class CharmhubClient:
 
         # Pick the first base (like Juju)
         return default_bases[0].channel
+
+    def _all_charm_endpoints(self, refresh_info: RefreshResponse):
+        metadata = refresh_info.charm.metadata
+
+        # Get edge refresh info if any required endpoints don't have optional flag
+        edge_metadata = CharmMetadata()
+        if any(endpoint.optional is None for endpoint in metadata.requires.values()):
+            edge_refresh_info = self._call_refresh(
+                RefreshAction(
+                    charm_name=refresh_info.name,
+                    charm_channel="edge",
+                    base=next(iter(refresh_info.charm.bases)),
+                ),
+            )
+            edge_metadata = edge_refresh_info.charm.metadata
+
+        # Map endpoints
+        endpoints = set()
+        for endpoint_type, endpoint_map, edge_endpoint_map in (
+            (ENDPOINT_PEERS, metadata.peers, edge_metadata.peers),
+            (ENDPOINT_REQUIRES, metadata.requires, edge_metadata.requires),
+            (ENDPOINT_PROVIDES, metadata.provides, edge_metadata.provides),
+        ):
+            for endpoint_name, endpoint in endpoint_map.items():
+                # Determine endpoint optionality
+                optional = False
+                if endpoint.optional is not None:
+                    optional = endpoint.optional
+                elif endpoint_name in edge_endpoint_map and edge_endpoint_map[endpoint_name].optional is not None:
+                    optional = edge_endpoint_map[endpoint_name].optional
+
+                # Add endpoint
+                endpoints.add(
+                    CharmEndpoint(
+                        type=endpoint_type,
+                        name=endpoint_name,
+                        interface=endpoint.interface,
+                        optional=optional,
+                    )
+                )
+
+        return frozenset(endpoints)
 
     @cache
     def _call_store_json(self, provides: str | None = None) -> dict:
