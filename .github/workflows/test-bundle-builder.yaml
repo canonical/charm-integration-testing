@@ -2,7 +2,7 @@ name: Test Bundle Builder
 
 on:
   pull_request:
-permissions: 
+permissions:
   contents: read # only needed for private repos
 
 jobs:
@@ -16,16 +16,32 @@ jobs:
             neighbor: grafana-k8s
             neighbor_endpoint: grafana-dashboard
             substrate: kubernetes
+            revision: default
+            series: default
+
           - target: istio-gateway
             target_endpoint: istio-pilot
             neighbor: kfp-ui
             neighbor_endpoint: kfp-ui
             substrate: kubernetes
+            revision: default
+            series: default
+
           - target: istio-gateway
             target_endpoint: metrics-endpoint
             neighbor: prometheus-k8s
             neighbor_endpoint: metrics-endpoint
             substrate: kubernetes
+            revision: default
+            series: default
+
+          - target: vault-k8s
+            target_endpoint: vault-pki
+            neighbor: grafana-k8s
+            neighbor_endpoint: certificates
+            substrate: kubernetes
+            revision: 354
+            series: 24.04
     steps:
       - name: Checkout repo
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -45,10 +61,12 @@ jobs:
           neighbor: ${{ matrix.neighbor }}
           neighbor_endpoint: ${{ matrix.neighbor_endpoint }}
           substrate: ${{ matrix.substrate }}
+          revision: ${{ matrix.revision }}
+          series: ${{ matrix.series }}
         run: |
           ./scripts/build-bundle.sh \
             --charms \
-              "target::${target}::default::default" \
+              "target::${target}::${revision}::${series}" \
               "neighbor::${neighbor}::default::default" \
             --integrations "target:${target_endpoint}::neighbor:${neighbor_endpoint}" \
             --substrate "${substrate}" \
