@@ -89,7 +89,13 @@ class RefreshResponse:
     class Error:
         @dataclass(frozen=True)
         class Extra:
+            @dataclass(frozen=True)
+            class Release:
+                base: CharmhubBase
+                channel: str
+
             default_bases: list[CharmhubBase] = Field(default_factory=list, alias="default-bases")
+            releases: list[Release] = Field(default_factory=list)
 
         message: str
         code: str
@@ -214,20 +220,13 @@ class CharmhubClient:
                 )
 
         # Find suitable channel (must support base)
-        default_refresh_info = self._call_refresh(
-            RefreshAction(
-                charm_name=charm_name,
-                base=CharmhubBase(
-                    channel=ubuntu_version,
-                    architecture=ubuntu_arch,
-                ),
-            )
+        charm_channel = self._suitable_charm_channel(
+            charm_name,
+            CharmhubBase(
+                channel=ubuntu_version,
+                architecture=ubuntu_arch,
+            ),
         )
-        if default_refresh_info.error is not None:
-            raise CharmReleaseNotFoundException(
-                f"Failed to find default release for charm {charm_name} with ubuntu version {ubuntu_version}: {default_refresh_info.error.message}"
-            )
-        charm_channel = default_refresh_info.effective_channel
 
         # Return Charm from refresh info
         return Charm(
@@ -337,6 +336,23 @@ class CharmhubClient:
         # Pick the first base (like Juju)
         return default_bases[0].channel
 
+    def _suitable_charm_channel(self, charm_name: str, base: CharmhubBase) -> str:
+        # Get refresh info for base
+        refresh_info = self._call_refresh(RefreshAction(charm_name=charm_name, base=base))
+        if refresh_info.error is None:
+            return refresh_info.effective_channel
+
+        # Check extra releases for base
+        if refresh_info.error.code == "revision-not-found":
+            for release in refresh_info.error.extra.releases:
+                if release.base == base:
+                    return release.channel
+
+        # No suitable channel found
+        raise CharmReleaseNotFoundException(
+            f"Failed to find default release for charm {charm_name}: {refresh_info.error.message}"
+        )
+
     def _all_charm_endpoints(self, refresh_info: RefreshResponse):
         metadata = refresh_info.charm.metadata
 
@@ -350,7 +366,8 @@ class CharmhubClient:
                     base=next(iter(refresh_info.charm.bases)),
                 ),
             )
-            edge_metadata = edge_refresh_info.charm.metadata
+            if edge_refresh_info.error is None:
+                edge_metadata = edge_refresh_info.charm.metadata
 
         # Map endpoints
         endpoints = set()
