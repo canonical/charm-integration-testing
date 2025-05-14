@@ -60,7 +60,7 @@ jobs:
             .kind + "/" + .metadata.name
           ' >> resources_to_remove.txt
 
-      - name: Find all webhook configurations for namespaces that do not exist
+      - name: Find all webhook configurations older than an hour
         shell: bash
         run: |
           kubectl get validatingwebhookconfigurations,mutatingwebhookconfigurations --output json | jq --raw-output '
