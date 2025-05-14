@@ -50,14 +50,26 @@ jobs:
           esac
           echo "KUBECONFIG=$(realpath kubeconfig)" >> $GITHUB_ENV
 
-      - name: Remove all model and controller namespaces older than an hour
+      - name: Find all model and controller namespaces older than an hour
         shell: bash
-        env:
-          environment: ${{ inputs.environment }}
         run: |
           kubectl get namespaces --output json | jq --raw-output '
-              .items[] | 
-              select(.metadata.name | test("^(controller|model)-[0-9]+-[0-9]+$")) |
-              select((now - (.metadata.creationTimestamp | fromdateiso8601)) > 3600) |
-              .metadata.name
-          ' | xargs --no-run-if-empty kubectl delete namespace --timeout=30m
+            .items[] |
+            select(.metadata.name | test("^(controller|model)-[0-9]+-[0-9]+$")) |
+            select((now - (.metadata.creationTimestamp | fromdateiso8601)) > 3600) |
+            .kind + "/" + .metadata.name
+          ' >> resources_to_remove.txt
+
+      - name: Find all webhook configurations for namespaces that do not exist
+        shell: bash
+        run: |
+          kubectl get validatingwebhookconfigurations,mutatingwebhookconfigurations --output json | jq --raw-output '
+            .items[] |
+            select((now - (.metadata.creationTimestamp | fromdateiso8601)) > 3600) |
+            .kind + "/" + .metadata.name
+          ' >> resources_to_remove.txt
+
+      - name: Remove all resources
+        shell: bash
+        run: |
+          cat resources_to_remove.txt | xargs --no-run-if-empty kubectl delete --timeout=30m
