@@ -20,7 +20,8 @@ import logging
 from dataclasses import dataclass
 from functools import cached_property
 
-from .bundle import Application, ApplicationEndpoint, Bundle
+from .bundle import Application, ApplicationEndpoint, Bundle, Integration
+from .charm import ENDPOINT_PROVIDES, ENDPOINT_REQUIRES
 from .charmhub import CharmhubClient
 
 
@@ -112,24 +113,86 @@ class BundleBuilder:
         # Return best node
         return best_node.bundle
 
+    def add_missing_integrations(self, bundle: Bundle) -> Bundle:
+        # Start over whenever a new integration is added
+        while True:
+            start_over = False
+
+            # Check all unfulfilled endpoints to see if they are fulfillable
+            for unfulfilled_application_endpoint in bundle.unfulfilled_endpoints:
+                unfulfilled_charm_endpoint = bundle.application_endpoints[unfulfilled_application_endpoint]
+
+                # Check all potential application endpoints to see if they can fulfill the unfulfilled endpoint
+                for possible_application_endpoint, possible_charm_endpoint in bundle.application_endpoints.items():
+                    # Will not integrate with self
+                    if possible_application_endpoint.application == unfulfilled_application_endpoint.application:
+                        continue
+                    # Will not integrate different interfaces
+                    if possible_charm_endpoint.interface != unfulfilled_charm_endpoint.interface:
+                        continue
+                    # Will not integrate wrong endpoint types
+                    if not (
+                        (
+                            possible_charm_endpoint.type == ENDPOINT_REQUIRES
+                            and unfulfilled_charm_endpoint.type == ENDPOINT_PROVIDES
+                        )
+                        or (
+                            possible_charm_endpoint.type == ENDPOINT_PROVIDES
+                            and unfulfilled_charm_endpoint.type == ENDPOINT_REQUIRES
+                        )
+                    ):
+                        continue
+
+                    # Integration is good, add and start again
+                    bundle = Bundle(
+                        applications=bundle.applications,
+                        integrations=frozenset(
+                            bundle.integrations
+                            | {Integration({unfulfilled_application_endpoint, possible_application_endpoint})}
+                        ),
+                        platform=bundle.platform,
+                        arch=bundle.arch,
+                    )
+
+                    # Start over with new bundle
+                    start_over = True
+                    break
+
+                # Start again
+                if start_over:
+                    break
+            else:
+                # No more integrations can be fulfilled
+                return bundle
+
     # Return a new node, including the possible child charms
     def new_node(self, bundle: Bundle, balance: float = 1.0) -> Node:
         # Ensure all possible integrations are fulfilled by the bundle
-        bundle = bundle.add_missing_integrations()
+        bundle = self.add_missing_integrations(bundle)
 
-        # Get all possible ways to fulfill unfulfilled application endpoints with charms
-        # Note that we explicitly remove the bundle charms as we cannot use a charm in the bundle to fulfill an unfulfillable interface
-        # An example is grafana-agent-k8s provides and requires `tracing`, and is the only charm in Charmhub to use `tracing`
-        application_endpoint_to_possible_charm = {
-            (application_endpoint, charm_name)
-            for application_endpoint in bundle.unfulfilled_endpoints
-            for charm_name in (
-                self.charmhub_client.find_charms(
-                    provides=bundle.application_endpoints[application_endpoint].interface, platform=bundle.platform
+        # Get all possible fulfillments for unfulfilled endpoints
+        application_endpoint_to_possible_charm = set()
+        for application_endpoint in bundle.unfulfilled_endpoints:
+            # Get the charm endpoint
+            charm_endpoint = bundle.application_endpoints[application_endpoint]
+
+            # Find fulfilling charms
+            fulfilling_charms = set()
+            if charm_endpoint.type == ENDPOINT_REQUIRES:
+                fulfilling_charms = self.charmhub_client.find_charms(
+                    provides=charm_endpoint.interface, platform=bundle.platform
                 )
-                - bundle.charms
-            )
-        }
+            if charm_endpoint.type == ENDPOINT_PROVIDES:
+                fulfilling_charms = self.charmhub_client.find_charms(
+                    requires=charm_endpoint.interface, platform=bundle.platform
+                )
+
+            # Explicitly remove the bundle charms as we cannot use a charm in the bundle to fulfill an unfulfillable interface
+            # An example is grafana-agent-k8s provides and requires `tracing`, and is the only charm in Charmhub to use `tracing`
+            fulfilling_charms -= bundle.charms
+
+            # Save mappings
+            application_endpoint_to_possible_charm |= {(application_endpoint, charm) for charm in fulfilling_charms}
 
         # Return node
         return Node(

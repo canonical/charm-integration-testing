@@ -19,7 +19,7 @@ from functools import cached_property, total_ordering
 
 import yaml
 
-from .charm import ENDPOINT_PROVIDES, ENDPOINT_REQUIRES, Charm, CharmEndpoint
+from .charm import Charm, CharmEndpoint
 
 
 @dataclass(frozen=True)
@@ -79,12 +79,14 @@ class Bundle:
         # Collect all fulfilled application endpoints
         fulfilled_endpoints = {endpoint for integration in self.integrations for endpoint in integration}
 
-        # Collect all non-optional requires application endpoints
+        # Collect all non-optional application endpoints
         non_optional_endpoints = {
             ApplicationEndpoint(application=application.name, endpoint=endpoint.name)
             for application in self.applications
             for endpoint in application.charm.endpoints
-            if not endpoint.optional and endpoint.type == ENDPOINT_REQUIRES
+            if not endpoint.optionality.is_optional(
+                {endpoint.endpoint for endpoint in fulfilled_endpoints if endpoint.application == application.name}
+            )
         }
 
         # Return the difference
@@ -97,45 +99,6 @@ class Bundle:
                 self.application_endpoints[application_endpoint].interface
                 for application_endpoint in self.unfulfilled_endpoints
             }
-        )
-
-    def add_missing_integrations(self) -> "Bundle":
-        # Check if any applications provide an endpoint that fulfills all unfulfilled integrations
-        new_integrations = set()
-        for unfulfilled_application_endpoint in self.unfulfilled_endpoints:
-            unfulfilled_charm_endpoint = self.application_endpoints[unfulfilled_application_endpoint]
-
-            # Check all potential application endpoints
-            for possible_application_endpoint, possible_charm_endpoint in self.application_endpoints.items():
-                # Will not integrate with self
-                if possible_application_endpoint.application == unfulfilled_application_endpoint.application:
-                    continue
-                # Will not integrate different interfaces
-                if possible_charm_endpoint.interface != unfulfilled_charm_endpoint.interface:
-                    continue
-                # Will not integrate wrong endpoint types
-                if not (
-                    (
-                        possible_charm_endpoint.type == ENDPOINT_REQUIRES
-                        and unfulfilled_charm_endpoint.type == ENDPOINT_PROVIDES
-                    )
-                    or (
-                        possible_charm_endpoint.type == ENDPOINT_PROVIDES
-                        and unfulfilled_charm_endpoint.type == ENDPOINT_REQUIRES
-                    )
-                ):
-                    continue
-
-                # Integration is good, add it
-                new_integrations.add(Integration({unfulfilled_application_endpoint, possible_application_endpoint}))
-                break
-
-        # Return the bundle with the new integrations
-        return self.__class__(
-            applications=self.applications,
-            integrations=frozenset(self.integrations | new_integrations),
-            platform=self.platform,
-            arch=self.arch,
         )
 
     # Export bundle to yaml string
