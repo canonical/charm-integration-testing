@@ -17,6 +17,7 @@ from .bundle import Application, ApplicationEndpoint, Bundle, Integration
 from .bundle_builder import BundleBuilder, Node
 from .charm import ENDPOINT_PEERS, ENDPOINT_PROVIDES, ENDPOINT_REQUIRES, Charm, CharmEndpoint
 from .charmhub import CharmhubClient
+from .overrides import OverridesClient
 
 __all__ = [
     Application,
@@ -31,4 +32,5 @@ __all__ = [
     ENDPOINT_REQUIRES,
     Integration,
     Node,
+    OverridesClient,
 ]
