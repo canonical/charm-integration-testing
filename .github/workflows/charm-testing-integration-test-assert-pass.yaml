@@ -1,0 +1,124 @@
+name: Run Charm Tests and Assert Passed
+
+permissions:
+  contents: read # only needed for private repos
+
+on:
+  workflow_call:
+    inputs:
+      target_charm:
+        type: string
+        required: true
+      target_endpoint:
+        type: string
+        required: true
+      target_revision:
+        type: string
+        required: true
+      target_base:
+        type: string
+        required: true
+      neighbor_charm:
+        type: string
+        required: true
+      neighbor_endpoint:
+        type: string
+        required: true
+    secrets:
+      PROD_SQA_KUBECONFIG:
+        required: true
+      STG_SQA_KUBECONFIG:
+        required: true
+      SWIFT_OS_AUTH_URL:
+        required: true
+      SWIFT_OS_USERNAME:
+        required: true
+      SWIFT_OS_PASSWORD:
+        required: true
+      SWIFT_OS_PROJECT_NAME:
+        required: true
+      SWIFT_OS_REGION_NAME:
+        required: true
+      SWIFT_OS_USER_DOMAIN_NAME:
+        required: true
+      SWIFT_OS_PROJECT_DOMAIN_NAME:
+        required: true
+
+jobs:
+  create-test-execution:
+    runs-on:
+      - self-hosted
+      - charm_qa
+    outputs:
+      test_execution_id: ${{ steps.create-test-execution.outputs.test_execution_id }}
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
+      - name: Create Test Execution
+        id: create-test-execution
+        uses: ./.github/actions/test-observer/create-test-execution
+        with:
+          test_observer_api: ${{ vars.STG_TEST_OBSERVER_API }}
+          charm: ${{ inputs.target_charm }}
+          revision: ${{ inputs.target_revision }}
+          arch: "charm-testing-integration-test-assert-pass-arch"
+          environment: "charm-testing-integration-test-assert-pass-environment"
+          test_plan: "charm-testing-integration-test-assert-pass-test_plan"
+          track: "charm-testing-integration-test-assert-pass-track"
+          risk: "stable"
+          status: "NOT_STARTED"
+
+  run-charm-tests:
+    needs: create-test-execution
+    uses: ./.github/workflows/run-charm-tests.yaml
+    with:
+      environment: "staging"
+      arch: "amd64"
+      charm_under_test: ${{ inputs.target_charm }}
+      charm_endpoint: ${{ inputs.target_endpoint }}
+      execution_id: ${{ needs.create-test-execution.outputs.test_execution_id }}
+      juju_channel: "3/stable"
+      neighbor: ${{ inputs.neighbor_charm }}
+      neighbor_endpoint: ${{ inputs.neighbor_endpoint }}
+      revision: ${{ inputs.target_revision }}
+      series: ${{ inputs.target_base }}
+      substrate: "kubernetes"
+    secrets:
+      PROD_SQA_KUBECONFIG: ${{ secrets.PROD_SQA_KUBECONFIG }}
+      STG_SQA_KUBECONFIG: ${{ secrets.STG_SQA_KUBECONFIG }}
+      SWIFT_OS_AUTH_URL: ${{ secrets.SWIFT_OS_AUTH_URL }}
+      SWIFT_OS_USERNAME: ${{ secrets.SWIFT_OS_USERNAME }}
+      SWIFT_OS_PASSWORD: ${{ secrets.SWIFT_OS_PASSWORD }}
+      SWIFT_OS_PROJECT_NAME: ${{ secrets.SWIFT_OS_PROJECT_NAME }}
+      SWIFT_OS_REGION_NAME: ${{ secrets.SWIFT_OS_REGION_NAME }}
+      SWIFT_OS_USER_DOMAIN_NAME: ${{ secrets.SWIFT_OS_USER_DOMAIN_NAME }}
+      SWIFT_OS_PROJECT_DOMAIN_NAME: ${{ secrets.SWIFT_OS_PROJECT_DOMAIN_NAME }}
+
+  assert-pass:
+    needs: [create-test-execution, run-charm-tests]
+    runs-on:
+      - self-hosted
+      - charm_qa
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
+      - name: Get Test Execution Status
+        id: get-test-execution-status
+        uses: ./.github/actions/test-observer/get-test-execution-status
+        with:
+          test_observer_api: ${{ vars.STG_TEST_OBSERVER_API }}
+          test_execution_id: ${{ needs.create-test-execution.outputs.test_execution_id }}
+
+      - name: Ensure Test Execution Passed
+        shell: bash
+        env:
+          test_execution_status: ${{ steps.get-test-execution-status.outputs.test_execution_status }}
+        run: |
+          echo "Test Execution Status is '${test_execution_status}'"
+          [[ "${test_execution_status}" != "PASSED" ]] && exit 1

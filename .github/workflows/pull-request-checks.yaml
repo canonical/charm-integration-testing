@@ -3,6 +3,10 @@ name: Pull Request Checks
 on:
   pull_request:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read # only needed for private repos
 
@@ -40,3 +44,16 @@ jobs:
 
       - name: Run Bundle Builder Integration Tests
         run: ./scripts/bundle-builder-integration-tests.sh
+
+  charm-testing-integration-tests:
+    uses: ./.github/workflows/charm-testing-integration-tests.yaml
+    secrets:
+      PROD_SQA_KUBECONFIG: ${{ secrets.PROD_SQA_KUBECONFIG }}
+      STG_SQA_KUBECONFIG: ${{ secrets.STG_SQA_KUBECONFIG }}
+      SWIFT_OS_AUTH_URL: ${{ secrets.SWIFT_OS_AUTH_URL }}
+      SWIFT_OS_USERNAME: ${{ secrets.SWIFT_OS_USERNAME }}
+      SWIFT_OS_PASSWORD: ${{ secrets.SWIFT_OS_PASSWORD }}
+      SWIFT_OS_PROJECT_NAME: ${{ secrets.SWIFT_OS_PROJECT_NAME }}
+      SWIFT_OS_REGION_NAME: ${{ secrets.SWIFT_OS_REGION_NAME }}
+      SWIFT_OS_USER_DOMAIN_NAME: ${{ secrets.SWIFT_OS_USER_DOMAIN_NAME }}
+      SWIFT_OS_PROJECT_DOMAIN_NAME: ${{ secrets.SWIFT_OS_PROJECT_DOMAIN_NAME }}
