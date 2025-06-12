@@ -20,7 +20,7 @@ from bundle_builder import Application, ApplicationEndpoint, Bundle, BundleBuild
 def test_correctness_independent(
     charmhub_client: CharmhubClient, sample_independent_charm: str, sample_arch: str, sample_platform: str
 ):
-    # GIVEN a base bundle with an independent charm
+    # GIVEN a base bundle with a dependent charm
     base_bundle = Bundle(
         applications=frozenset(
             {
@@ -78,8 +78,8 @@ def test_correctness_dependent(
     assert minimal_bundle.integrations == {
         Integration(
             {
-                ApplicationEndpoint(application="kratos", endpoint="pg-database"),
-                ApplicationEndpoint(application="postgresql-k8s", endpoint="database"),
+                ApplicationEndpoint(application=sample_dependent_charm, endpoint=sample_dependent_charm_endpoint),
+                ApplicationEndpoint(application=sample_independent_charm, endpoint=sample_independent_charm_endpoint),
             }
         )
     }
