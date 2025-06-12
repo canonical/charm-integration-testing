@@ -120,5 +120,9 @@ jobs:
         env:
           test_execution_status: ${{ steps.get-test-execution-status.outputs.test_execution_status }}
         run: |
-          echo "Test Execution Status is '${test_execution_status}'"
-          [[ "${test_execution_status}" != "PASSED" ]] && exit 1
+          echo "Test Execution Status is '$test_execution_status'"
+          if [[ "$test_execution_status" != "PASSED" ]]
+          then
+            echo "Failing workflow since tests did not pass"
+            exit 1
+          fi
