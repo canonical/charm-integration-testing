@@ -49,6 +49,7 @@ develop = true
 
 [package.dependencies]
 pydantic = ">=2.11.3,<3.0.0"
+pytest-timeout = ">=2.3.1"
 pyyaml = ">=6.0.1"
 requests = "*"
 
