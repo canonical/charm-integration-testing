@@ -20,7 +20,10 @@ jobs:
 
       - name: Install dependencies
         run: poetry install
-
+        
+      - name: run markdownlint-cli2
+        uses: DavidAnson/markdownlint-cli2-action@v9
+        
       - name: Run linter
         run: ./scripts/lint.sh
 
@@ -37,6 +40,9 @@ jobs:
 
       - name: Install dependencies
         run: poetry install
-
+        
+      - name: run markdownlint-cli2
+        uses: DavidAnson/markdownlint-cli2-action@v9
+        
       - name: Run Bundle Builder Integration Tests
         run: ./scripts/bundle-builder-integration-tests.sh
