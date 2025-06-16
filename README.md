@@ -21,3 +21,13 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for more information about development be
 ```bash
 ./scripts/run-test-suite.sh --model {juju_model} --requirer {application}:{endpoint} --provider {application}:{endpoint}
 ```
+
+## Documentation
+
+Run the documentation locally from the `docs` directory:
+
+```bash
+make run
+```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for more information about the documentation setup.

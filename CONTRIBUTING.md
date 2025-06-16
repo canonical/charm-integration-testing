@@ -23,6 +23,11 @@ Requests to this repository. To format, run:
 
 ...
 
+## Documentation
+The documentation is a sphinx project under the `docs` repository. It is based on the [documentation starter pack](https://canonical-starter-pack.readthedocs-hosted.com/latest/). Refer to that for information on documentation settings.
+
+For adding, editing and removing pages, use the `how-to`, `reference` and `tutorial` directories and `rst` files inside them.
+
 ## Project Structure
 
 ### Test Suite ([charm_integration_testing/test_suite](charm_integration_testing/test_suite))
