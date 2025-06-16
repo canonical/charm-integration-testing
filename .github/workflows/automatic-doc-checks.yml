@@ -11,6 +11,8 @@ on:
   workflow_dispatch:
     # Manual trigger
 
+permissions:
+  contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
