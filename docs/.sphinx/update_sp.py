@@ -41,9 +41,7 @@ def main():
             local_version = f.read().strip()
     except FileNotFoundError:
         print("WARNING\nWARNING\nWARNING")
-        print(
-            "You need to update to at least version 1.0.0 of the starter pack to start using the update function."
-        )
+        print("You need to update to at least version 1.0.0 of the starter pack to start using the update function.")
         print("You may experience issues using this functionality.")
         logging.debug("No local version found. Setting version to None")
         local_version = "None"
@@ -108,9 +106,7 @@ def main():
             logging.debug("Checking requirements")
 
             local_reqs = set(file.read().splitlines()) - {""}
-            requirements = set(
-                query_api(GITHUB_RAW_BASE + "/docs/requirements.txt").text.splitlines()
-            )
+            requirements = set(query_api(GITHUB_RAW_BASE + "/docs/requirements.txt").text.splitlines())
 
             new_requirements = requirements - local_reqs
 
@@ -121,16 +117,12 @@ def main():
                 logging.debug(f"{req} already exists in local requirements.txt")
 
             if new_requirements != set():
-                print(
-                    "You may need to add the following pacakges to your requirements.txt file:"
-                )
+                print("You may need to add the following pacakges to your requirements.txt file:")
                 for r in new_requirements:
                     print(f"{r}\n")
     except FileNotFoundError:
         print("requirements.txt not found")
-        print(
-            "The updated starter pack has moved requirements.txt out of the '.sphinx' dir"
-        )
+        print("The updated starter pack has moved requirements.txt out of the '.sphinx' dir")
         print("requirements.txt not checked, please update your requirements manually")
 
 
@@ -146,9 +138,7 @@ def update_static_files():
             index = files.index(item["name"])
             if item["sha"] != get_git_revision_hash(paths[index]):
                 logging.debug(f"Local {item['name']} is different to remote")
-                download_file(
-                    item["download_url"], os.path.join(SPHINX_UPDATE_DIR, item["name"])
-                )
+                download_file(item["download_url"], os.path.join(SPHINX_UPDATE_DIR, item["name"]))
                 if item["name"] == "update_sp.py":
                     # Indicate update script needs to be updated and re-run
                     print("WARNING")
@@ -161,21 +151,15 @@ def update_static_files():
         # Checks nested files '.sphinx/**/**.*' for changed SHA (single level of depth)
         elif item["type"] == "dir":
             logging.debug(item["name"] + " is a directory")
-            for nested_item in query_api(
-                f"{GITHUB_API_SPHINX_DIR}/{item['name']}"
-            ).json():
+            for nested_item in query_api(f"{GITHUB_API_SPHINX_DIR}/{item['name']}").json():
                 logging.debug(f"Checking {nested_item['name']}")
                 if nested_item["name"] in files:
                     index = files.index(nested_item["name"])
                     if nested_item["sha"] != get_git_revision_hash(paths[index]):
-                        logging.debug(
-                            f"Local {nested_item['name']} is different to remote"
-                        )
+                        logging.debug(f"Local {nested_item['name']} is different to remote")
                         download_file(
                             nested_item["download_url"],
-                            os.path.join(
-                                SPHINX_UPDATE_DIR, item["name"], nested_item["name"]
-                            ),
+                            os.path.join(SPHINX_UPDATE_DIR, item["name"], nested_item["name"]),
                         )
                 # Downloads NEW nested files
                 else:
@@ -184,17 +168,13 @@ def update_static_files():
                         new_file_list.append(nested_item["name"])
                         download_file(
                             nested_item["download_url"],
-                            os.path.join(
-                                SPHINX_UPDATE_DIR, item["name"], nested_item["name"]
-                            ),
+                            os.path.join(SPHINX_UPDATE_DIR, item["name"], nested_item["name"]),
                         )
         # Downloads NEW files in '.sphinx' starter pack static root
         else:
             if item["type"] == "file":
                 logging.debug(f"No local version found of {item['name']}")
-                download_file(
-                    item["download_url"], os.path.join(SPHINX_UPDATE_DIR, item["name"])
-                )
+                download_file(item["download_url"], os.path.join(SPHINX_UPDATE_DIR, item["name"]))
                 if item["name"] != "version":
                     new_file_list.append(item["name"])
     # Writes return value for parent function
