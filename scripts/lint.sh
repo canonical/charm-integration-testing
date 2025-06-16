@@ -7,4 +7,4 @@ set -e
 poetry run ruff check
 poetry run ruff format --check
 poetry run bandit --configfile pyproject.toml --quiet --recursive charm_integration_testing bundle_builder scripts
-poetry run mdformat --check --wrap 100 .
+markdownlint-cli2 --config docs/.sphinx/.markdownlint.json "#docs/_build" "*.md"

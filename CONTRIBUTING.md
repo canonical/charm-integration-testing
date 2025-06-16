@@ -70,7 +70,7 @@ through to its conclusion.
 The following sections describe the criteria upon which maintainers will base their determination
 among "Approve", "Request Changes", and "Comment".
 
-#### Reviewer will approve the pull request when...
+#### Reviewer will approve the pull request when
 
 1. They have read and understood the pull request description and changes being proposed.
 1. The requirements laid out [in the PR template](.github/pull_request_template.md) are met. In
@@ -104,7 +104,7 @@ changes and resulting merge to the contributor. Approval with comments is done b
 - Reviewer points out issues unrelated to what the PR is trying to accomplish (i.e. the problem
   existed before).
 
-#### Reviewer will "request changes" to your PR when...
+#### Reviewer will "request changes" to your PR when
 
 1. the pull request description is unclear, or it is clear that the changes do not meet the
    requirements [in the PR template](.github/pull_request_template.md).
@@ -121,7 +121,7 @@ changes and resulting merge to the contributor. Approval with comments is done b
 - if the reviewer believes to not be doing a good job reviewing it without it being split, they
   should "request changes" and in their comment request for it to be split.
 
-#### Reviewer will "comment" if...
+#### Reviewer will "comment" if
 
 They are not confident in making a call, delegating explicitly in a comment to a reviewer who they
 believe _can_ make a call, as quickly and as early as possible in the process.
