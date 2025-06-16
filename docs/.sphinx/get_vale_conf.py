@@ -1,12 +1,12 @@
 #! /usr/bin/env python
 
+import argparse
+import logging
 import os
 import shutil
 import subprocess
-import tempfile
 import sys
-import logging
-import argparse
+import tempfile
 
 # Configure logging
 logging.basicConfig(
