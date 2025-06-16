@@ -1,7 +1,7 @@
-Charm Integration Testing
+Charm integration testing
 ==========================
 
-The Charm Integration Testing documentation helps you set up, run and debug tests and charms.
+The charm integration testing documentation helps you set up, run and debug tests and charms.
 
 .. toctree::
    :hidden:
