@@ -1,9 +1,7 @@
-Documentation starter pack
+Charm Integration Testing
 ==========================
 
-The documentation starter pack helps you to quickly set up, build, and publish documentation with Sphinx.
-
-It contains common styling and configuration through the `Canonical Sphinx`_ extension, supports both |RST| and Markdown, and includes automatic documentation checks.
+The Charm Integration Testing documentation helps you set up, run and debug tests and charms.
 
 .. toctree::
    :hidden:
@@ -22,7 +20,7 @@ In this documentation
       :link: /tutorial/index
       :link-type: doc
 
-      **Get started** - use Sphinx and Read the Docs to host and test your documentation.
+      **Get started** - run local tests.
 
    .. grid-item-card:: How-to guides
       :link: /how-to/index
@@ -36,4 +34,4 @@ In this documentation
       :link: /reference/index
       :link-type: doc
 
-      **Technical information** - understand the automatic checks and Sphinx capabilities.
+      **Technical information** - understand the structure of automatic tests.
