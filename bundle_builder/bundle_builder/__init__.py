@@ -13,30 +13,22 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-[project]
-name = "bundle-builder"
-version = "0.1.0"
-description = "Framework to generate Juju compatible bundles from charmhub."
-authors = [
-    {name = "SQA Team",email = "solutionsqa@canonical.com"}
+from .bundle import Application, ApplicationEndpoint, Bundle, Integration
+from .bundle_builder import BundleBuilder, Node
+from .charm import ENDPOINT_PEERS, ENDPOINT_PROVIDES, ENDPOINT_REQUIRES, Charm, CharmEndpoint
+from .charmhub import CharmhubClient
+
+__all__ = [
+    Application,
+    ApplicationEndpoint,
+    Bundle,
+    BundleBuilder,
+    Charm,
+    CharmEndpoint,
+    CharmhubClient,
+    ENDPOINT_PEERS,
+    ENDPOINT_PROVIDES,
+    ENDPOINT_REQUIRES,
+    Integration,
+    Node,
 ]
-
-requires-python = ">=3.10"
-dependencies = [
-    "pyyaml>=6.0.1",
-    "requests",
-    "pydantic (>=2.11.3,<3.0.0)",
-    "pytest-timeout>=2.3.1",
-]
-
-[tool.poetry]
-packages = [
-    { include = "bundle_builder" },
-]
-
-[build-system]
-requires = ["poetry-core>=2.0.0,<3.0.0"]
-build-backend = "poetry.core.masonry.api"
-
-[project.scripts]
-bundle-builder = "bundle_builder.entrypoint:main"
