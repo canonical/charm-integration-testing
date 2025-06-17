@@ -11,8 +11,7 @@ on:
   workflow_dispatch:
     # Manual trigger
 
-permissions:
-  contents: read
+permissions: {}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -20,6 +19,8 @@ concurrency:
 
 jobs:
   documentation-checks:
+    permissions:
+      contents: read
     uses: canonical/documentation-workflows/.github/workflows/documentation-checks.yaml@main
     with:
       working-directory: "docs"
