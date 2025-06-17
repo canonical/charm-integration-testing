@@ -1,7 +1,7 @@
 # Overview
 
-A collection of Pytest-based tests for Charm Integration Testing, focusing on validating the
-deployment and interoperability of charms.
+A collection of Pytest-based tests for Charm Integration Testing, focusing on
+validating the deployment and interoperability of charms.
 
 ## Getting Started
 
@@ -14,7 +14,8 @@ poetry install
 
 ## Development
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for more information about development best practices.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for more information about development
+best practices.
 
 ## Usage
 
@@ -30,4 +31,5 @@ Run the documentation locally from the `docs` directory:
 make run
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for more information about the documentation setup.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for more information about the
+documentation setup.
