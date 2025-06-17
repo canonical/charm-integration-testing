@@ -22,9 +22,14 @@ jobs:
       - name: Install dependencies
         run: poetry install
         
-      - name: run markdownlint-cli2
-        uses: DavidAnson/markdownlint-cli2-action@992badcdf24e3b8eb7e87ff9287fe931bcb00c6e
-        
+      - name: Setup NPM
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with: 
+          node-version: 18
+
+      - name: Install markdownlint-cli2
+        run: npm install markdownlint-cli2 --global
+
       - name: Run linter
         run: ./scripts/lint.sh
 
@@ -43,17 +48,6 @@ jobs:
 
       - name: Install dependencies
         run: poetry install
-
-      - name: Setup NPM
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        with: 
-          node-version: 18
-
-      - name: Install markdownlint-cli2
-        run: npm install markdownlint-cli2 --global
-        
-      - name: run markdownlint-cli2
-        uses: DavidAnson/markdownlint-cli2-action@992badcdf24e3b8eb7e87ff9287fe931bcb00c6e
         
       - name: Run Bundle Builder Integration Tests
         run: ./scripts/bundle-builder-integration-tests.sh
