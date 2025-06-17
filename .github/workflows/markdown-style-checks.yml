@@ -12,16 +12,18 @@ on:
     paths:
     - 'docs/**'   # Only run on changes to the docs directory
 
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
   markdown-lint:
+    permissions:
+      contents: read
     runs-on: ubuntu-22.04
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
       with:
         fetch-depth: 0
+        persist-credentials: false
     - uses: DavidAnson/markdownlint-cli2-action@v16
       with:
         config: "docs/.sphinx/.markdownlint.json"

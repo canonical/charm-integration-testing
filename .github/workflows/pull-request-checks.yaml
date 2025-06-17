@@ -3,11 +3,12 @@ name: Pull Request Checks
 on:
   pull_request:
 
-permissions:
-  contents: read # only needed for private repos
+permissions: {}
 
 jobs:
   lint:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repo
@@ -28,6 +29,8 @@ jobs:
         run: ./scripts/lint.sh
 
   bundle-builder-integration-tests:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repo
