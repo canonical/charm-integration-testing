@@ -23,7 +23,7 @@ jobs:
         run: poetry install
         
       - name: run markdownlint-cli2
-        uses: DavidAnson/markdownlint-cli2-action@1d349044b9624661f5a0a7e13e0ca9801752022a
+        uses: DavidAnson/markdownlint-cli2-action@992badcdf24e3b8eb7e87ff9287fe931bcb00c6e
         
       - name: Run linter
         run: ./scripts/lint.sh
@@ -45,7 +45,7 @@ jobs:
         run: poetry install
         
       - name: run markdownlint-cli2
-        uses: DavidAnson/markdownlint-cli2-action@1d349044b9624661f5a0a7e13e0ca9801752022a
+        uses: DavidAnson/markdownlint-cli2-action@992badcdf24e3b8eb7e87ff9287fe931bcb00c6e
         
       - name: Run Bundle Builder Integration Tests
         run: ./scripts/bundle-builder-integration-tests.sh
