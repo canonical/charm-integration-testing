@@ -5,4 +5,4 @@
 cd "$(dirname "$0")/.."
 poetry run ruff check --fix
 poetry run ruff format
-poetry run mdformat --wrap 100 .
+markdownlint-cli2 --fix --config docs/.sphinx/.markdownlint.json "#docs/_build" "*.md"

@@ -3,11 +3,12 @@ name: Pull Request Checks
 on:
   pull_request:
 
-permissions:
-  contents: read # only needed for private repos
+permissions: {}
 
 jobs:
   lint:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repo
@@ -20,11 +21,21 @@ jobs:
 
       - name: Install dependencies
         run: poetry install
+        
+      - name: Setup NPM
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with: 
+          node-version: 18
+
+      - name: Install markdownlint-cli2
+        run: npm install markdownlint-cli2 --global
 
       - name: Run linter
         run: ./scripts/lint.sh
 
   bundle-builder-integration-tests:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repo
@@ -37,6 +48,6 @@ jobs:
 
       - name: Install dependencies
         run: poetry install
-
+        
       - name: Run Bundle Builder Integration Tests
         run: ./scripts/bundle-builder-integration-tests.sh
