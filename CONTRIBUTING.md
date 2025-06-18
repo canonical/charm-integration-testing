@@ -32,7 +32,9 @@ on the
 Refer to that for information on documentation settings.
 
 For adding, editing and removing pages, use the `how-to`, `reference` and
-`tutorial` directories and `rst` files inside them.
+`tutorial` directories and `rst` files inside them. For reference on RST
+syntax, refer to
+[the documentation starter pack cheatsheet](https://github.com/canonical/sphinx-docs-starter-pack/blob/main/docs/reference/doc-cheat-sheet.rst).
 
 ## Project Structure
 
