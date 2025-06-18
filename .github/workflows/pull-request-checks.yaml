@@ -3,12 +3,11 @@ name: Pull Request Checks
 on:
   pull_request:
 
-permissions: {}
+permissions:
+  contents: read
 
 jobs:
   lint:
-    permissions:
-      contents: read
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repo
@@ -51,8 +50,6 @@ jobs:
         run: ./scripts/bundle-builder-unit-tests.sh
 
   bundle-builder-integration-tests:
-    permissions:
-      contents: read
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repo
