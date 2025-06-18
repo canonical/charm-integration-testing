@@ -3,12 +3,15 @@ name: Pull Request Checks
 on:
   pull_request:
 
-permissions: {}
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
   lint:
-    permissions:
-      contents: read
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repo
@@ -34,8 +37,6 @@ jobs:
         run: ./scripts/lint.sh
 
   bundle-builder-integration-tests:
-    permissions:
-      contents: read
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repo
@@ -51,3 +52,9 @@ jobs:
         
       - name: Run Bundle Builder Integration Tests
         run: ./scripts/bundle-builder-integration-tests.sh
+
+  charm-testing-integration-tests:
+    uses: ./.github/workflows/charm-testing-integration-tests.yaml
+    permissions:
+      contents: read
+      actions: write

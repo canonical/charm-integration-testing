@@ -1,0 +1,102 @@
+name: Create Test Execution
+description: Create a Test Execution on Test Observer
+
+inputs:
+  test_observer_api:
+    description: "URL for the Test Observer API"
+    required: True
+  charm:
+    description: "Charm name"
+    required: True
+  revision:
+    description: "Charm revision"
+    required: True
+  arch:
+    description: "Charm architecture"
+    required: True
+  environment: 
+    description: "Test environment"
+    required: True
+  test_plan:
+    description: "Test execution plan"
+    required: True
+  track:
+    description: "Charm track"
+    required: True
+  risk:
+    description: "Charm risk"
+    required: True
+  status:
+    description: "Initial test execution status"
+    default: "NOT_STARTED"
+
+outputs:
+  test_execution_id: 
+    description: "Created Test Execution ID"
+    value: ${{ steps.read-response.outputs.test_execution_id }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install jq
+      shell: bash
+      run: sudo snap install jq
+
+    - name: Get Test Observer JSON
+      shell: bash
+      env:
+        charm: ${{ inputs. charm }}
+        revision: ${{ inputs.revision }}
+        arch: ${{ inputs.arch }}
+        environment: ${{ inputs.environment }}
+        test_plan: ${{ inputs.test_plan }}
+        track: ${{ inputs.track }}
+        risk: ${{ inputs.risk }}
+        status: ${{ inputs.status }}
+      run: |
+        jq --null-input --compact-output \
+          --arg charm "${charm}" \
+          --arg revision "${revision}" \
+          --arg arch "${arch}" \
+          --arg environment "${environment}" \
+          --arg test_plan "${test_plan}" \
+          --arg status "${status}" \
+          --arg charm "${charm}" \
+          --arg revision "${revision}" \
+          --arg track "${track}" \
+          --arg risk "${risk}" \
+        '
+          {
+            "name": $charm,
+            "version": $revision,
+            "arch": $arch,
+            "environment": $environment,
+            "test_plan": $test_plan,
+            "initial_status": $status,
+            "family": "charm",
+            "revision": ($revision | tonumber),
+            "track": $track,
+            "execution_stage": $risk
+
+          }
+        ' > body.json
+        cat body.json | jq
+
+    - name: Send request to Test Observer
+      shell: bash
+      env:
+        test_observer_api: ${{ inputs.test_observer_api }}
+      run: |
+        curl --fail-with-body \
+          --retry 10 \
+          -X PUT "${test_observer_api}/v1/test-executions/start-test" \
+          -H "Content-Type: application/json" \
+          -d @body.json \
+          -o response.json
+        cat response.json | jq
+
+    - name: Read response
+      id: read-response
+      shell: bash
+      run: |
+        echo "test_execution_id=$(cat response.json | jq --raw-output '.id')" >> "$GITHUB_OUTPUT"
