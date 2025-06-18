@@ -21,6 +21,7 @@ from .bundle import Application, ApplicationEndpoint, Bundle, Integration
 from .bundle_builder import BundleBuilder
 from .charm import Charm
 from .charmhub import CharmhubClient
+from .overrides import OverridesClient
 
 
 def setup_logging(loglevel: str):
@@ -143,6 +144,9 @@ def main():
     )
     parser.add_argument("--output-file", type=str, help="Where to save the generated bundle")
     parser.add_argument(
+        "--charm-metadata-overrides", type=Path, help="Path to folder containing charm metadata overrides", default=None
+    )
+    parser.add_argument(
         "--log-level", type=str.upper, choices=["INFO", "DEBUG", "WARNING", "ERROR", "CRITICAL"], default="INFO"
     )
     args = parser.parse_args()
@@ -150,8 +154,13 @@ def main():
     # Get logger
     logger = setup_logging(args.log_level)
 
+    # Create override client
+    if args.charm_metadata_overrides is not None and not args.charm_metadata_overrides.is_dir():
+        parser.error(f"The charm metadata overrides path '{args.charm_metadata_overrides}' is not a valid directory.")
+    overrides_client = OverridesClient(args.charm_metadata_overrides)
+
     # Create Charmhub client
-    charmhub_client = CharmhubClient(logger=logger)
+    charmhub_client = CharmhubClient(logger=logger, overrides_client=overrides_client)
 
     # Get base bundle from arguments
     base_bundle = Bundle(

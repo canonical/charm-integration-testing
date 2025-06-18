@@ -1,0 +1,7 @@
+requires:
+  database-legacy:
+    optional_if:
+      - endpoint_integrated: database
+  database:
+    optional_if:
+      - endpoint_integrated: database-legacy

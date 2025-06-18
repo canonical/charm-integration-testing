@@ -23,7 +23,8 @@ from pydantic.dataclasses import dataclass
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-from .charm import ENDPOINT_PEERS, ENDPOINT_PROVIDES, ENDPOINT_REQUIRES, Charm, CharmEndpoint
+from .charm import ENDPOINT_PEERS, ENDPOINT_PROVIDES, ENDPOINT_REQUIRES, Charm, CharmEndpoint, CharmEndpointOptionality
+from .overrides import CharmMetadataOverride, OverridesClient
 
 
 class UnparsableCharmException(Exception):
@@ -110,14 +111,17 @@ class RefreshResponse:
 CHARM_INFO_ENDPOINT = "https://api.charmhub.io/v2/charms/info/{charm_name}"
 CHARM_REFRESH_ENDPOINT = "https://api.charmhub.io/v2/charms/refresh"
 CHARM_STORE_JSON_ENDPOINT = "https://charmhub.io/store.json"
+CHARM_FIND_ENDPOINT = "https://api.charmhub.io/v2/charms/find"
 
 
 class CharmhubClient:
     session: requests.Session
     logger: logging.Logger
+    overrides_client: OverridesClient | None
 
-    def __init__(self, logger=logging.getLogger(__name__)):
+    def __init__(self, logger=logging.getLogger(__name__), overrides_client: OverridesClient | None = None):
         self.logger = logger
+        self.overrides_client = overrides_client
 
         # Setup requests session with retries
         retry_strategy = Retry(
@@ -172,15 +176,17 @@ class CharmhubClient:
             )
 
     @cache
-    def find_charms(self, provides: str | None = None, platform: str | None = None) -> frozenset[str]:
-        # Get store JSON
-        response = self._call_store_json(provides=provides)
+    def find_charms(
+        self, provides: str | None = None, requires: str | None = None, platform: str | None = None
+    ) -> frozenset[str]:
+        # Call find API
+        response = self._call_find(provides=provides, requires=requires)
 
         # Parse response
         charms = {
-            package.get("package", {}).get("name", None)
-            for package in response.get("packages", [])
-            if platform in package.get("package", {}).get("platforms", [])
+            charm.get("name", None)
+            for charm in response.get("results", [])
+            if platform is None or platform in charm.get("result", {}).get("deployable-on", [])
         }
 
         # Return charms
@@ -369,20 +375,33 @@ class CharmhubClient:
             if edge_refresh_info.error is None:
                 edge_metadata = edge_refresh_info.charm.metadata
 
+        # Get endpoint optionality overrides
+        metadata_overrides = CharmMetadataOverride()
+        if self.overrides_client:
+            metadata_overrides = self.overrides_client.get_charm_overrides(refresh_info.name)
+
         # Map endpoints
         endpoints = set()
-        for endpoint_type, endpoint_map, edge_endpoint_map in (
-            (ENDPOINT_PEERS, metadata.peers, edge_metadata.peers),
-            (ENDPOINT_REQUIRES, metadata.requires, edge_metadata.requires),
-            (ENDPOINT_PROVIDES, metadata.provides, edge_metadata.provides),
+        for endpoint_type, endpoint_map, edge_endpoint_map, metadata_overrides_map in (
+            (ENDPOINT_PEERS, metadata.peers, edge_metadata.peers, metadata_overrides.peers),
+            (ENDPOINT_REQUIRES, metadata.requires, edge_metadata.requires, metadata_overrides.requires),
+            (ENDPOINT_PROVIDES, metadata.provides, edge_metadata.provides, metadata_overrides.provides),
         ):
             for endpoint_name, endpoint in endpoint_map.items():
                 # Determine endpoint optionality
-                optional = False
-                if endpoint.optional is not None:
-                    optional = endpoint.optional
+                if (
+                    endpoint_name in metadata_overrides_map
+                    and metadata_overrides_map[endpoint_name].optionality is not None
+                ):
+                    optionality = metadata_overrides_map[endpoint_name].optionality
+                elif endpoint.optional is not None:
+                    optionality = CharmEndpointOptionality.from_bool(endpoint.optional)
                 elif endpoint_name in edge_endpoint_map and edge_endpoint_map[endpoint_name].optional is not None:
-                    optional = edge_endpoint_map[endpoint_name].optional
+                    optionality = CharmEndpointOptionality.from_bool(edge_endpoint_map[endpoint_name].optional)
+                elif endpoint_type == ENDPOINT_REQUIRES:
+                    optionality = CharmEndpointOptionality.from_bool(False)
+                else:
+                    optionality = CharmEndpointOptionality.from_bool(True)
 
                 # Add endpoint
                 endpoints.add(
@@ -390,7 +409,7 @@ class CharmhubClient:
                         type=endpoint_type,
                         name=endpoint_name,
                         interface=endpoint.interface,
-                        optional=optional,
+                        optionality=optionality,
                     )
                 )
 
@@ -411,8 +430,41 @@ class CharmhubClient:
         return response.json()
 
     @cache
+    def _call_find(self, provides: str | None = None, requires: str | None = None) -> dict:
+        self.logger.debug(f"Calling find with provides {provides} and requires {requires}")
+
+        # Formulate request
+        request_url = CHARM_FIND_ENDPOINT
+        request_headers = {"Content-Type": "application/json"}
+        request_params = {
+            "q": "",
+            "type": "charm",
+            "fields": "result.deployable-on",
+            **({"provides": provides if provides is not None else {}}),
+            **({"requires": requires if requires is not None else {}}),
+        }
+
+        # Execute request
+        response = self.session.get(url=request_url, params=request_params, headers=request_headers, timeout=180)
+        response.raise_for_status()
+        return response.json()
+
+    @cache
     def _call_refresh(self, action: RefreshAction) -> RefreshResponse:
-        self.logger.debug(f"Calling refresh for charm {action.charm_name}")
+        print_properties = ", ".join(
+            sorted(
+                f"{key}: {value}"
+                for key, value in {
+                    "revision": action.charm_revision,
+                    "channel": action.charm_channel,
+                    "base": f"{action.base.name}:{action.base.channel} {action.base.architecture}"
+                    if action.base
+                    else None,
+                }.items()
+                if value is not None
+            )
+        )
+        self.logger.debug(f"Calling refresh for charm {action.charm_name} ({print_properties})")
 
         # Formulate request
         request_url = CHARM_REFRESH_ENDPOINT

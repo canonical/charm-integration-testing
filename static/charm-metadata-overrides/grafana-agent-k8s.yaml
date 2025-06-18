@@ -1,0 +1,55 @@
+# Logic sourced from https://github.com/canonical/grafana-agent-k8s-operator/blob/6705b4483c0498ab6913e79d340388ca165e5524/src/charm.py#L42
+provides:
+  grafana-dashboards-provider:
+    optional_if:
+      - any_of:
+          - none_of:
+              - endpoint_integrated: grafana-dashboards-consumer
+          - all_of:
+              - endpoint_integrated: grafana-dashboards-consumer
+              - endpoint_integrated: grafana-cloud-config
+requires:
+  send-remote-write:
+    optional_if:
+      - any_of:
+          - none_of:
+              - endpoint_integrated: metrics-endpoint
+          - all_of:
+              - endpoint_integrated: metrics-endpoint
+              - endpoint_integrated: grafana-cloud-config
+  tracing:
+    optional_if:
+      - any_of:
+          - none_of:
+              - endpoint_integrated: tracing
+          - all_of:
+              - endpoint_integrated: tracing
+              - endpoint_integrated: grafana-cloud-config
+  logging-consumer:
+    optional_if:
+      - any_of:
+          - none_of:
+              - endpoint_integrated: logging-provider
+          - all_of:
+              - endpoint_integrated: logging-provider
+              - endpoint_integrated: grafana-cloud-config
+  grafana-cloud-config:
+    optional_if:
+      - none_of:
+          - any_of:
+              - all_of:
+                  - endpoint_integrated: metrics-endpoint
+                  - none_of:
+                      - endpoint_integrated: send-remote-write
+              - all_of:
+                  - endpoint_integrated: logging-provider
+                  - none_of:
+                      - endpoint_integrated: logging-consumer
+              - all_of:
+                  - endpoint_integrated: tracing-provider
+                  - none_of:
+                      - endpoint_integrated: tracing
+              - all_of:
+                  - endpoint_integrated: grafana-dashboards-consumer
+                  - none_of:
+                      - endpoint_integrated: grafana-dashboards-provider
