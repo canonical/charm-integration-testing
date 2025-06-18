@@ -16,123 +16,32 @@
 import logging
 from functools import cache
 
-import requests
-import yaml
-from pydantic import Field, field_validator
-from pydantic.dataclasses import dataclass
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
-
 from .charm import ENDPOINT_PEERS, ENDPOINT_PROVIDES, ENDPOINT_REQUIRES, Charm, CharmEndpoint, CharmEndpointOptionality
+from .charmhub_http import (
+    CharmhubBase,
+    CharmhubHttpClient,
+    CharmMetadata,
+    CharmReleaseNotFoundException,
+    RefreshAction,
+    RefreshResponse,
+)
 from .overrides import CharmMetadataOverride, OverridesClient
 
 
-class UnparsableCharmException(Exception):
-    """Raised when the charm cannot be parsed."""
-
-    pass
-
-
-class NoCharmMetadataException(UnparsableCharmException):
-    """Raised when there is no metadata-yaml exposed by the charmhub for this charm."""
-
-    pass
-
-
-class CharmReleaseNotFoundException(Exception):
-    """Raised when the release for a charm cannot be deduced."""
-
-    pass
-
-
-@dataclass(frozen=True)
-class CharmhubBase:
-    architecture: str
-    channel: str
-    name: str = Field(default="ubuntu")
-
-
-@dataclass(frozen=True)
-class RefreshAction:
-    charm_name: str
-    charm_revision: int | None = None
-    charm_channel: str | None = None
-    base: CharmhubBase | None = None
-    always_include_base: bool = False
-
-
-@dataclass(frozen=True)
-class CharmMetadata:
-    @dataclass(frozen=True)
-    class Endpoint:
-        interface: str
-        optional: bool | None = None
-
-    peers: dict[str, Endpoint] = Field(default_factory=dict)
-    requires: dict[str, Endpoint] = Field(default_factory=dict)
-    provides: dict[str, Endpoint] = Field(default_factory=dict)
-
-
-@dataclass(frozen=True)
-class RefreshResponse:
-    @dataclass(frozen=True)
-    class Charm:
-        bases: list[CharmhubBase] | None = None
-        revision: int | None = None
-        metadata: CharmMetadata | None = Field(default=None, alias="metadata-yaml")
-
-        @field_validator("metadata", mode="before")
-        @classmethod
-        def parse_yaml(cls, metadata_yaml):
-            return CharmMetadata(**yaml.safe_load(metadata_yaml))
-
-    @dataclass(frozen=True)
-    class Error:
-        @dataclass(frozen=True)
-        class Extra:
-            @dataclass(frozen=True)
-            class Release:
-                base: CharmhubBase
-                channel: str
-
-            default_bases: list[CharmhubBase] = Field(default_factory=list, alias="default-bases")
-            releases: list[Release] = Field(default_factory=list)
-
-        message: str
-        code: str
-        extra: Extra | None = None
-
-    name: str
-    charm: Charm | None = None
-    effective_channel: str | None = Field(default=None, alias="effective-channel")
-    error: Error | None = None
-
-
-CHARM_INFO_ENDPOINT = "https://api.charmhub.io/v2/charms/info/{charm_name}"
-CHARM_REFRESH_ENDPOINT = "https://api.charmhub.io/v2/charms/refresh"
-CHARM_STORE_JSON_ENDPOINT = "https://charmhub.io/store.json"
-CHARM_FIND_ENDPOINT = "https://api.charmhub.io/v2/charms/find"
-
-
 class CharmhubClient:
-    session: requests.Session
+    http_client: CharmhubHttpClient
     logger: logging.Logger
     overrides_client: OverridesClient | None
 
-    def __init__(self, logger=logging.getLogger(__name__), overrides_client: OverridesClient | None = None):
+    def __init__(
+        self,
+        http_client: CharmhubHttpClient | None = None,
+        logger=logging.getLogger(__name__),
+        overrides_client: OverridesClient | None = None,
+    ):
+        self.http_client = http_client or CharmhubHttpClient(logger=logger)
         self.logger = logger
         self.overrides_client = overrides_client
-
-        # Setup requests session with retries
-        retry_strategy = Retry(
-            total=10,
-            status_forcelist=[429, 500, 502, 503, 504],
-            backoff_factor=0.5,
-        )
-        adapter = HTTPAdapter(max_retries=retry_strategy)
-        self.session = requests.Session()
-        self.session.mount("https://", adapter)
-        self.session.mount("http://", adapter)
 
     @cache
     def charm_from_store(
@@ -180,17 +89,12 @@ class CharmhubClient:
         self, provides: str | None = None, requires: str | None = None, platform: str | None = None
     ) -> frozenset[str]:
         # Call find API
-        response = self._call_find(provides=provides, requires=requires)
-
-        # Parse response
-        charms = {
-            charm.get("name", None)
-            for charm in response.get("results", [])
-            if platform is None or platform in charm.get("result", {}).get("deployable-on", [])
-        }
+        response = self.http_client.find(provides=provides, requires=requires)
 
         # Return charms
-        return frozenset({charm for charm in charms if charm is not None})
+        return frozenset(
+            {charm.name for charm in response if platform is None or platform in charm.result.deployable_on}
+        )
 
     def _charm_from_store_by_revision(
         self,
@@ -200,7 +104,7 @@ class CharmhubClient:
         ubuntu_version: str | None = None,
     ) -> Charm:
         # Get refresh info for revision
-        refresh_info = self._call_refresh(
+        refresh_info = self.http_client.refresh(
             RefreshAction(
                 charm_name=charm_name,
                 charm_revision=charm_revision,
@@ -256,7 +160,7 @@ class CharmhubClient:
             ubuntu_version = self._default_ubuntu_version(charm_name, ubuntu_arch, charm_channel=charm_channel)
 
         # Call refresh with channel and base
-        refresh_info = self._call_refresh(
+        refresh_info = self.http_client.refresh(
             RefreshAction(
                 charm_name=charm_name,
                 charm_channel=charm_channel,
@@ -292,7 +196,7 @@ class CharmhubClient:
             ubuntu_version = self._default_ubuntu_version(charm_name, ubuntu_arch)
 
         # Call refresh with base
-        refresh_info = self._call_refresh(
+        refresh_info = self.http_client.refresh(
             RefreshAction(
                 charm_name=charm_name,
                 base=CharmhubBase(
@@ -318,7 +222,7 @@ class CharmhubClient:
 
     def _default_ubuntu_version(self, charm_name: str, ubuntu_arch: str, charm_channel: str | None = None) -> str:
         # Juju passes "NA" to get the secret "default-bases" error field
-        refresh_info = self._call_refresh(
+        refresh_info = self.http_client.refresh(
             RefreshAction(
                 charm_name=charm_name,
                 charm_channel=charm_channel,
@@ -344,7 +248,7 @@ class CharmhubClient:
 
     def _suitable_charm_channel(self, charm_name: str, base: CharmhubBase) -> str:
         # Get refresh info for base
-        refresh_info = self._call_refresh(RefreshAction(charm_name=charm_name, base=base))
+        refresh_info = self.http_client.refresh(RefreshAction(charm_name=charm_name, base=base))
         if refresh_info.error is None:
             return refresh_info.effective_channel
 
@@ -365,7 +269,7 @@ class CharmhubClient:
         # Get edge refresh info if any required endpoints don't have optional flag
         edge_metadata = CharmMetadata()
         if any(endpoint.optional is None for endpoint in metadata.requires.values()):
-            edge_refresh_info = self._call_refresh(
+            edge_refresh_info = self.http_client.refresh(
                 RefreshAction(
                     charm_name=refresh_info.name,
                     charm_channel="edge",
@@ -414,96 +318,3 @@ class CharmhubClient:
                 )
 
         return frozenset(endpoints)
-
-    @cache
-    def _call_store_json(self, provides: str | None = None) -> dict:
-        self.logger.debug(f"Calling store json with provides {provides}")
-
-        # Formulate request
-        request_url = CHARM_STORE_JSON_ENDPOINT
-        request_headers = {"Content-Type": "application/json"}
-        request_params = {"size": 300, "type": "charm", **({"provides": provides if provides is not None else {}})}
-
-        # Execute request
-        response = self.session.get(url=request_url, params=request_params, headers=request_headers, timeout=180)
-        response.raise_for_status()
-        return response.json()
-
-    @cache
-    def _call_find(self, provides: str | None = None, requires: str | None = None) -> dict:
-        self.logger.debug(f"Calling find with provides {provides} and requires {requires}")
-
-        # Formulate request
-        request_url = CHARM_FIND_ENDPOINT
-        request_headers = {"Content-Type": "application/json"}
-        request_params = {
-            "q": "",
-            "type": "charm",
-            "fields": "result.deployable-on",
-            **({"provides": provides if provides is not None else {}}),
-            **({"requires": requires if requires is not None else {}}),
-        }
-
-        # Execute request
-        response = self.session.get(url=request_url, params=request_params, headers=request_headers, timeout=180)
-        response.raise_for_status()
-        return response.json()
-
-    @cache
-    def _call_refresh(self, action: RefreshAction) -> RefreshResponse:
-        print_properties = ", ".join(
-            sorted(
-                f"{key}: {value}"
-                for key, value in {
-                    "revision": action.charm_revision,
-                    "channel": action.charm_channel,
-                    "base": f"{action.base.name}:{action.base.channel} {action.base.architecture}"
-                    if action.base
-                    else None,
-                }.items()
-                if value is not None
-            )
-        )
-        self.logger.debug(f"Calling refresh for charm {action.charm_name} ({print_properties})")
-
-        # Formulate request
-        request_url = CHARM_REFRESH_ENDPOINT
-        request_headers = {"Content-Type": "application/json"}
-        action_dict = {"name": action.charm_name}
-        if action.charm_revision is not None:
-            action_dict["revision"] = action.charm_revision
-        if action.charm_channel is not None:
-            action_dict["channel"] = action.charm_channel
-        if action.base is not None:
-            action_dict["base"] = {
-                "name": action.base.name,
-                "channel": action.base.channel,
-                "architecture": action.base.architecture,
-            }
-        elif action.always_include_base:
-            action_dict["base"] = None
-        request_body = {
-            "context": [],
-            "actions": [{"action": "install", "instance-key": "1", **action_dict}],
-            "fields": ["bases", "metadata-yaml", "revision"],
-        }
-
-        # Execute request
-        response = self.session.post(url=request_url, json=request_body, headers=request_headers, timeout=180)
-        response.raise_for_status()
-        response_json = response.json()
-        return RefreshResponse(**next(iter(response_json.get("results"))))
-
-    @cache
-    def _call_info(self, charm_name: str) -> dict:
-        self.logger.debug(f"Getting info for charm {charm_name}")
-
-        # Formulate request
-        request_url = CHARM_INFO_ENDPOINT.format(charm_name=charm_name)
-        request_headers = {"Content-Type": "application/json"}
-        request_params = {"fields": ",".join(["channel-map"])}
-
-        # Execute request
-        response = self.session.get(url=request_url, params=request_params, headers=request_headers, timeout=180)
-        response.raise_for_status()
-        return response.json()

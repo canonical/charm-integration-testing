@@ -24,6 +24,23 @@ jobs:
       - name: Run linter
         run: ./scripts/lint.sh
 
+  bundle-builder-unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
+      - name: Install poetry
+        run: pipx install poetry==2.0.1
+
+      - name: Install dependencies
+        run: poetry install
+
+      - name: Run Bundle Builder Unit Tests
+        run: ./scripts/bundle-builder-unit-tests.sh
+
   bundle-builder-integration-tests:
     runs-on: ubuntu-latest
     steps:
