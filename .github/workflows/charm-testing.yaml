@@ -306,7 +306,7 @@ jobs:
         uses: ./.github/actions/post-links
         with:
           test_observer_api: ${{ env.test_observer_api }}
-          test_execution_id: ${{ inputs.execution_id }}
+          test_execution_id: ${{ steps.collect_logs.outputs.job_uuid }}
 
       - name: Mark Test Execution completed on Test Observer
         if: ${{ always() && env.test_observer_api != '' && inputs.execution_id != '' }}
