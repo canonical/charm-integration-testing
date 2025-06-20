@@ -20,14 +20,14 @@ runs:
       shell: bash
       env:
         test_observer_api: ${{ inputs.test_observer_api }}
-        test_execution_id: ${{ inputs.test_execution_id }}
+        job_uuid: ${{ inputs.job_uuid }}
       run: |
-        echo '[{ "label": "Logs", "url": "https://charm.logs.test-observer.canonical.com/production/${test_execution_id}/index.html" }]' > links.json
+        echo '[{ "label": "Logs", "url": "https://charm.logs.test-observer.canonical.com/production/${job_uuid}/index.html" }]' > links.json
 
         jq -c '.[]' links.json | while read link; do
           curl --fail-with-body \
             --retry 10 \
-            -X POST "${test_observer_api}/v1/test-executions/${test_execution_id}/links" \
+            -X POST "${test_observer_api}/v1/test-executions/${job_uuid}/links" \
             -H "Content-Type: application/json" \
             -d "${link}"
         done
