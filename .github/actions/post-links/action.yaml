@@ -1,0 +1,33 @@
+name: Post relevant links
+description: Post relevant links to Test Observer
+
+inputs:
+  test_observer_api:
+    description: "URL for the Test Observer API"
+    required: true
+  test_execution_id:
+    description: "Test Execution ID"
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install jq
+      shell: bash
+      run: sudo apt-get update && sudo apt-get install -y jq
+
+    - name: Post relevant link to Test Observer
+      shell: bash
+      env:
+        test_observer_api: ${{ inputs.test_observer_api }}
+        job_uuid: ${{ inputs.job_uuid }}
+      run: |
+        echo '[{ "label": "Logs", "url": "https://charm.logs.test-observer.canonical.com/production/${job_uuid}/index.html" }]' > links.json
+
+        jq -c '.[]' links.json | while read link; do
+          curl --fail-with-body \
+            --retry 10 \
+            -X POST "${test_observer_api}/v1/test-executions/${job_uuid}/links" \
+            -H "Content-Type: application/json" \
+            -d "${link}"
+        done

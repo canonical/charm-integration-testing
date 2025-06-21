@@ -301,6 +301,13 @@ jobs:
           SWIFT_OS_USER_DOMAIN_NAME: ${{ secrets.SWIFT_OS_USER_DOMAIN_NAME }}
           SWIFT_OS_PROJECT_DOMAIN_NAME: ${{ secrets.SWIFT_OS_PROJECT_DOMAIN_NAME }}
 
+      - name: Post links to Test Observer
+        if: ${{ always() && env.test_observer_api != '' && inputs.execution_id != '' }}
+        uses: ./.github/actions/post-links
+        with:
+          test_observer_api: ${{ env.test_observer_api }}
+          job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
+
       - name: Mark Test Execution completed on Test Observer
         if: ${{ always() && env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/patch-test-execution
