@@ -8,6 +8,9 @@ inputs:
   test_execution_id:
     description: "Test Execution ID"
     required: true
+  job_uuid:
+    description: "Job UUID"
+    required: true
 
 runs:
   using: "composite"
@@ -22,12 +25,12 @@ runs:
         test_observer_api: ${{ inputs.test_observer_api }}
         job_uuid: ${{ inputs.job_uuid }}
       run: |
-        echo '[{ "label": "Logs", "url": "https://charm.logs.test-observer.canonical.com/production/${job_uuid}/index.html" }]' > links.json
+        echo '[{ "label": "Logs", "url": "https://charm.logs.test-observer.canonical.com/${job_uuid}/index.html" }]' > links.json
 
         jq -c '.[]' links.json | while read link; do
           curl --fail-with-body \
             --retry 10 \
-            -X POST "${test_observer_api}/v1/test-executions/${job_uuid}/links" \
+            -X POST "${test_observer_api}/v1/test-executions/${test_execution_id}/links" \
             -H "Content-Type: application/json" \
             -d "${link}"
         done
