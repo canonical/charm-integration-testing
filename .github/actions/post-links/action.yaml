@@ -23,6 +23,7 @@ runs:
       shell: bash
       env:
         test_observer_api: ${{ inputs.test_observer_api }}
+        test_execution_id: ${{ inputs.test_execution_id }}
         job_uuid: ${{ inputs.job_uuid }}
       run: |
         echo '[{ "label": "Logs", "url": "https://charm.logs.test-observer.canonical.com/${job_uuid}/index.html" }]' > links.json
