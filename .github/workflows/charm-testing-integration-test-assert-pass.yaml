@@ -41,7 +41,7 @@ jobs:
 
       - name: Create Test Execution
         id: create-test-execution
-        uses: ./.github/actions/create-test-execution
+        uses: ./.github/actions/test-observer/create-test-execution
         with:
           test_observer_api: ${{ vars.STG_TEST_OBSERVER_API }}
           charm: ${{ inputs.target_charm }}
@@ -75,7 +75,7 @@ jobs:
 
       - name: Get Test Execution Status
         id: get-test-execution-status
-        uses: ./.github/actions/get-test-execution-status
+        uses: ./.github/actions/test-observer/get-test-execution-status
         with:
           test_observer_api: ${{ vars.STG_TEST_OBSERVER_API }}
           test_execution_id: ${{ steps.create-test-execution.outputs.test_execution_id }}

@@ -38,10 +38,6 @@ outputs:
 runs:
   using: "composite"
   steps:
-    - name: Install jq
-      shell: bash
-      run: sudo snap install jq
-
     - name: Get Test Observer JSON
       shell: bash
       env:

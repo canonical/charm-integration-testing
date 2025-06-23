@@ -17,11 +17,9 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - name: Install yq and jq
+    - name: Install yq
       shell: bash
-      run: |
-        sudo snap install jq
-        sudo snap install yq
+      run: sudo snap install yq
 
     - id: get-json-body
       name: Convert JUnit XML to Test Observer JSON
