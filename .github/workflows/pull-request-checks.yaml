@@ -3,6 +3,10 @@ name: Pull Request Checks
 on:
   pull_request:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -65,3 +69,9 @@ jobs:
         
       - name: Run Bundle Builder Integration Tests
         run: ./scripts/bundle-builder-integration-tests.sh
+
+  charm-testing-integration-tests:
+    uses: ./.github/workflows/charm-testing-integration-tests.yaml
+    permissions:
+      contents: read
+      actions: write
