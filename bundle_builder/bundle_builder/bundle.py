@@ -15,7 +15,7 @@
 
 
 from dataclasses import dataclass
-from functools import cached_property, total_ordering
+from functools import cached_property
 
 import yaml
 
@@ -34,8 +34,7 @@ class Application:
             return f"{self.name}({self.charm.name})"
 
 
-@total_ordering
-@dataclass(frozen=True)
+@dataclass(frozen=True, order=True)
 class ApplicationEndpoint:
     application: str
     endpoint: str
@@ -45,11 +44,6 @@ class ApplicationEndpoint:
 
     def __repr__(self):
         return self.__str__()
-
-    def __lt__(self, other):
-        if not isinstance(other, ApplicationEndpoint):
-            return NotImplemented
-        return str(self) < str(other)
 
 
 Integration = frozenset[ApplicationEndpoint]
