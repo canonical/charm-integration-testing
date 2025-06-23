@@ -1,0 +1,79 @@
+name: "Dispatch and Wait for Workflow"
+description: "Dispatch a GitHub Actions workflow and wait for it to complete"
+
+inputs:
+  workflow:
+    description: "Workflow filename to dispatch (e.g. callee.yml)"
+    required: true
+  ref:
+    description: "Branch or tag to run the workflow on"
+    required: true
+  title:
+    description: "Expected workflow title (to discover the workflow on)"
+    required: true
+  inputs:
+    description: "JSON object of workflow inputs"
+    required: false
+    default: "{}"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Authenticate with GitHub CLI
+      shell: bash
+      run: |
+        echo "${{ github.token }}" | gh auth login --with-token
+
+    - name: Parse inputs and run workflow
+      id: trigger
+      shell: bash
+      env:
+        workflow: ${{ inputs.workflow }}
+        ref: ${{ inputs.ref }}
+        title: ${{ inputs.title }}
+        inputs: ${{ inputs.inputs }}
+      run: |
+        echo "Preparing to trigger workflow $workflow on ref $ref"
+
+        # Convert JSON inputs to workflow input format
+        input_args=$(echo "$inputs" | jq -r '[to_entries[] | "-f \(.key)=\(.value)"] | join(" ")')
+
+        # Trigger workflow
+        gh workflow run "$workflow" --ref "$ref" $input_args
+
+        # Give GitHub time to register the run
+        sleep 10
+
+        # Get the run ID
+        run_id=$(gh run list \
+          --workflow="$workflow" \
+          --json databaseId,name \
+          --jq ".[] | select(.name == \"$title\") | .databaseId")
+
+        # Check run was found
+        if [[ -z "$run_id" ]]
+        then
+          echo "Failed to find a workflow run matching name: $title"
+          exit 1
+        fi
+
+        # Save run id
+        echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+
+    - name: Wait for completion
+      shell: bash
+      env:
+        run_id: ${{ steps.trigger.outputs.run_id }}
+      run: |
+        echo "Waiting for workflow run $run_id to complete..."
+        while true
+        do
+          status=$(gh run view "$run_id" --json status --jq '.status')
+
+          echo "Status: $status"
+          if [[ "$status" == "completed" ]]
+          then
+            break
+          fi
+          sleep 10
+        done

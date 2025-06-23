@@ -1,0 +1,45 @@
+name: Get Test Execution Status
+description: Get the status for Test Execution on Test Observer
+
+inputs:
+  test_observer_api:
+    description: "URL for the Test Observer API"
+    required: True
+
+  test_execution_id:
+    description: "ID for the Test Execution"
+    required: True
+
+outputs:
+  test_execution_status: 
+    description: "Test Execution Status"
+    value: ${{ steps.read-response.outputs.test_execution_status }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install jq
+      shell: bash
+      run: sudo snap install jq
+
+    - name: Send request to Test Observer
+      shell: bash
+      env:
+        test_observer_api: ${{ inputs.test_observer_api }}
+        test_execution_id: ${{ inputs.test_execution_id }}
+      # There isn't a way with the TO API to just fetch a test execution's information with an id
+      # But submitting an empty PATCH request works
+      run: |
+        curl --fail-with-body \
+          --retry 10 \
+          -X PATCH "${test_observer_api}/v1/test-executions/${test_execution_id}" \
+          -H "Content-Type: application/json" \
+          -d "{}" \
+          -o response.json
+        cat response.json | jq
+
+    - name: Read response
+      id: read-response
+      shell: bash
+      run: |
+        echo "test_execution_status=$(cat response.json | jq --raw-output '.status')" >> "$GITHUB_OUTPUT"

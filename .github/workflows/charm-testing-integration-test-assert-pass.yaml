@@ -1,0 +1,93 @@
+name: Run Charm Tests and Assert Passed
+
+permissions:
+  contents: read
+
+on:
+  workflow_call:
+    inputs:
+      target_charm:
+        type: string
+        required: true
+      target_endpoint:
+        type: string
+        required: true
+      target_revision:
+        type: string
+        required: true
+      target_base:
+        type: string
+        required: true
+      neighbor_charm:
+        type: string
+        required: true
+      neighbor_endpoint:
+        type: string
+        required: true
+
+jobs:
+  run-charm-tests-and-assert-pass:
+    runs-on:
+      - self-hosted
+      - charm_qa
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
+      - name: Create Test Execution
+        id: create-test-execution
+        uses: ./.github/actions/create-test-execution
+        with:
+          test_observer_api: ${{ vars.STG_TEST_OBSERVER_API }}
+          charm: ${{ inputs.target_charm }}
+          revision: ${{ inputs.target_revision }}
+          arch: "charm-testing-integration-test-assert-pass-arch"
+          environment: "charm-testing-integration-test-assert-pass-environment"
+          test_plan: "charm-testing-integration-test-assert-pass-test_plan"
+          track: "charm-testing-integration-test-assert-pass-track"
+          risk: "stable"
+          status: "NOT_STARTED"
+
+      - name: Trigger Charm Tests
+        uses: ./.github/actions/workflow-dispatch
+        with:
+          workflow: "charm-testing.yaml"
+          ref: ${{ github.base_ref || github.ref_name }}
+          title: "Testing ${{ inputs.target_charm }}:${{ inputs.target_endpoint }} against ${{ inputs.neighbor_charm }}:${{ inputs.neighbor_endpoint }}. (environment: staging, test execution: ${{ steps.create-test-execution.outputs.test_execution_id }})"
+          inputs: |
+            {
+              "environment": "staging",
+              "charm_under_test": "${{ inputs.target_charm }}",
+              "charm_endpoint": "${{ inputs.target_endpoint }}",
+              "execution_id": "${{ steps.create-test-execution.outputs.test_execution_id }}",
+              "juju_channel": "3/stable",
+              "neighbor": "${{ inputs.neighbor_charm }}",
+              "neighbor_endpoint": "${{ inputs.neighbor_endpoint }}",
+              "revision": "${{ inputs.target_revision }}",
+              "series": "${{ inputs.target_base }}",
+              "substrate": "kubernetes"
+            }
+
+      - name: Get Test Execution Status
+        id: get-test-execution-status
+        uses: ./.github/actions/get-test-execution-status
+        with:
+          test_observer_api: ${{ vars.STG_TEST_OBSERVER_API }}
+          test_execution_id: ${{ steps.create-test-execution.outputs.test_execution_id }}
+
+      - name: Ensure Test Execution Passed
+        shell: bash
+        env:
+          test_execution_status: ${{ steps.get-test-execution-status.outputs.test_execution_status }}
+        run: |
+          echo "Test Execution Status is '$test_execution_status'"
+          if [[ "$test_execution_status" != "PASSED" ]]
+          then
+            echo "Failing workflow since tests did not pass"
+            exit 1
+          fi
