@@ -40,7 +40,7 @@ runs:
         jq -c '.[]' event.json | while read event; do
           curl --fail-with-body \
             --retry 10 \
-            -X PUT "${test_observer_api}/v1/test-executions/${job_uuid}/status_update" \
+            -X POST "${test_observer_api}/v1/test-executions/${job_uuid}/status_update" \
             -H "Content-Type: application/json" \
             -d "{ \"events\": [ $event ] }"
         done
