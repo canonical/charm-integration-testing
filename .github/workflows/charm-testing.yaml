@@ -138,7 +138,7 @@ jobs:
           ci_link: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
       
       - name: Post 'job_start' event
-        if: ${{ always() && env.test_observer_api != '' && inputs.execution_id != '' }}
+        if: ${{ !cancelled() && env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/post-events
         with:
           test_observer_api: ${{ env.test_observer_api }}
@@ -203,7 +203,7 @@ jobs:
           echo '```' >> $GITHUB_STEP_SUMMARY
     
       - name: Post 'bundle_deploy_start' event
-        if: ${{ always() && env.test_observer_api != '' && inputs.execution_id != '' }}
+        if: ${{ !cancelled() && env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/post-events
         with:
           test_observer_api: ${{ env.test_observer_api }}
@@ -226,7 +226,7 @@ jobs:
             --junit-xml=junit-deploy.xml
 
       - name: Post 'bundle_deploy_end' event
-        if: ${{ always() && env.test_observer_api != '' && inputs.execution_id != '' }}
+        if: ${{ !cancelled() && env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/post-events
         with:
           test_observer_api: ${{ env.test_observer_api }}
@@ -235,7 +235,7 @@ jobs:
           detail: "Deployment of bundle finished."
 
       - name: Post 'test_start' event
-        if: ${{ always() && env.test_observer_api != '' && inputs.execution_id != '' }}
+        if: ${{ !cancelled() && env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/post-events
         with:
           test_observer_api: ${{ env.test_observer_api }}
@@ -262,7 +262,7 @@ jobs:
             --junit-xml=junit-integration.xml
 
       - name: Post 'test_end' event
-        if: ${{ always() && env.test_observer_api != '' && inputs.execution_id != '' }}
+        if: ${{ !cancelled() && env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/post-events
         with:
           test_observer_api: ${{ env.test_observer_api }}
@@ -271,7 +271,7 @@ jobs:
           detail: "Test execution ended."
 
       - name: Post 'teardown_start' event
-        if: ${{ always() && env.test_observer_api != '' && inputs.execution_id != '' }}
+        if: ${{ !cancelled() && env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/post-events
         with:
           test_observer_api: ${{ env.test_observer_api }}
@@ -309,7 +309,7 @@ jobs:
           cat junit.xml
 
       - name: Post 'teardown_end' event
-        if: ${{ always() && env.test_observer_api != '' && inputs.execution_id != '' }}
+        if: ${{ !cancelled() && env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/post-events
         with:
           test_observer_api: ${{ env.test_observer_api }}
@@ -350,7 +350,7 @@ jobs:
           echo "directory_path=$(realpath "logs")" >> $GITHUB_OUTPUT
 
       - name: Post 'log_collection_finished' event
-        if: ${{ always() && env.test_observer_api != '' && inputs.execution_id != '' }}
+        if: ${{ !cancelled() && env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/post-events
         with:
           test_observer_api: ${{ env.test_observer_api }}
@@ -359,7 +359,7 @@ jobs:
           detail: "Log collection has completed."
 
       - name: Post 'job_end' event
-        if: ${{ always() && env.test_observer_api != '' && inputs.execution_id != '' }}
+        if: ${{ !cancelled() && env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/post-events
         with:
           test_observer_api: ${{ env.test_observer_api }}
@@ -368,7 +368,7 @@ jobs:
           detail: "Charm integration test job completed."
 
       - name: Post Logs To Swift
-        if: ${{ always() && inputs.execution_id != '' }}
+        if: ${{ !cancelled() && inputs.execution_id != '' }}
         uses: canonical/sqa-cloud-deployment-pipeline/.github/actions/upload-to-swift@173b1936e2c96e317b0f1167509b068b2020e233
         with:
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
