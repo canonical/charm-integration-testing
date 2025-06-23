@@ -136,6 +136,15 @@ jobs:
           test_execution_id: ${{ inputs.execution_id }}
           status: "IN_PROGRESS"
           ci_link: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+      
+      - name: Post 'job_start' event
+        if: ${{ always() && env.test_observer_api != '' && inputs.execution_id != '' }}
+        uses: ./.github/actions/post-events
+        with:
+          test_observer_api: ${{ env.test_observer_api }}
+          job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
+          event_name: "job_start"
+          detail: "Charm integration test job started."
 
       - name: Install Juju
         shell: bash
@@ -192,6 +201,15 @@ jobs:
           echo '```yaml' >> $GITHUB_STEP_SUMMARY
           cat generated-bundle.yaml >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
+    
+      - name: Post 'bundle_deploy_start' event
+        if: ${{ always() && env.test_observer_api != '' && inputs.execution_id != '' }}
+        uses: ./.github/actions/post-events
+        with:
+          test_observer_api: ${{ env.test_observer_api }}
+          job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
+          event_name: "bundle_deploy_start"
+          detail: "Deployment of bundle started."
 
       - name: Deploy Bundles
         id: test_deploy
@@ -206,6 +224,24 @@ jobs:
             --model "${model}" \
             --bundles "${bundle}" \
             --junit-xml=junit-deploy.xml
+
+      - name: Post 'bundle_deploy_end' event
+        if: ${{ always() && env.test_observer_api != '' && inputs.execution_id != '' }}
+        uses: ./.github/actions/post-events
+        with:
+          test_observer_api: ${{ env.test_observer_api }}
+          job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
+          event_name: "bundle_deploy_end"
+          detail: "Deployment of bundle finished."
+
+      - name: Post 'test_start' event
+        if: ${{ always() && env.test_observer_api != '' && inputs.execution_id != '' }}
+        uses: ./.github/actions/post-events
+        with:
+          test_observer_api: ${{ env.test_observer_api }}
+          job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
+          event_name: "test_start"
+          detail: "Test execution started."
 
       - name: Execute Tests
         id: test_integration
@@ -224,6 +260,24 @@ jobs:
             --neighbor-application "neighbor" \
             --neighbor-endpoint "${neighbor_endpoint}" \
             --junit-xml=junit-integration.xml
+
+      - name: Post 'test_end' event
+        if: ${{ always() && env.test_observer_api != '' && inputs.execution_id != '' }}
+        uses: ./.github/actions/post-events
+        with:
+          test_observer_api: ${{ env.test_observer_api }}
+          job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
+          event_name: "test_end"
+          detail: "Test execution ended."
+
+      - name: Post 'teardown_start' event
+        if: ${{ always() && env.test_observer_api != '' && inputs.execution_id != '' }}
+        uses: ./.github/actions/post-events
+        with:
+          test_observer_api: ${{ env.test_observer_api }}
+          job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
+          event_name: "teardown_start"
+          detail: "Teardown phase started."
 
       - name: Teardown charm under test
         id: test_teardown
@@ -253,6 +307,15 @@ jobs:
             junit.xml
           echo "junit_xml=$(realpath junit.xml)" >> $GITHUB_OUTPUT
           cat junit.xml
+
+      - name: Post 'teardown_end' event
+        if: ${{ always() && env.test_observer_api != '' && inputs.execution_id != '' }}
+        uses: ./.github/actions/post-events
+        with:
+          test_observer_api: ${{ env.test_observer_api }}
+          job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
+          event_name: "teardown_end"
+          detail: "Teardown phase finished."
 
       - name: Post results to Test Observer
         if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
@@ -285,6 +348,24 @@ jobs:
           [ -f "${junit_xml}" ] && cp "${junit_xml}" "logs/junit.xml"
           [ -f "${generated_bundle}" ] && cp "${generated_bundle}" "logs/generated-bundle.yaml"
           echo "directory_path=$(realpath "logs")" >> $GITHUB_OUTPUT
+
+      - name: Post 'log_collection_finished' event
+        if: ${{ always() && env.test_observer_api != '' && inputs.execution_id != '' }}
+        uses: ./.github/actions/post-events
+        with:
+          test_observer_api: ${{ env.test_observer_api }}
+          job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
+          event_name: "log_collection_finished"
+          detail: "Log collection has completed."
+
+      - name: Post 'job_end' event
+        if: ${{ always() && env.test_observer_api != '' && inputs.execution_id != '' }}
+        uses: ./.github/actions/post-events
+        with:
+          test_observer_api: ${{ env.test_observer_api }}
+          job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
+          event_name: "job_end"
+          detail: "Charm integration test job completed."
 
       - name: Post Logs To Swift
         if: ${{ always() && inputs.execution_id != '' }}

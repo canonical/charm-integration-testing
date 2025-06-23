@@ -33,7 +33,7 @@ runs:
         event_name: ${{ inputs.event_name }}
         detail: ${{ inputs.detail }}
       run: |
-        TIMESTAMP=$(date --iso-8601=seconds)
+        TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
         echo "[{ \"event_name\": \"${event_name}\", \"timestamp\": \"${TIMESTAMP}\", \"detail\": \"${detail}\" }]" > event.json
 
