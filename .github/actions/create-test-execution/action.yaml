@@ -45,7 +45,7 @@ runs:
     - name: Get Test Observer JSON
       shell: bash
       env:
-        charm: ${{ inputs. charm }}
+        charm: ${{ inputs.charm }}
         revision: ${{ inputs.revision }}
         arch: ${{ inputs.arch }}
         environment: ${{ inputs.environment }}
@@ -61,8 +61,6 @@ runs:
           --arg environment "${environment}" \
           --arg test_plan "${test_plan}" \
           --arg status "${status}" \
-          --arg charm "${charm}" \
-          --arg revision "${revision}" \
           --arg track "${track}" \
           --arg risk "${risk}" \
         '
