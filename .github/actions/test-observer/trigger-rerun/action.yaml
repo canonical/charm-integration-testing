@@ -13,10 +13,6 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - name: Install jq
-      shell: bash
-      run: sudo snap install jq
-
     - id: get-json-body
       name: Get Test Observer JSON
       shell: bash
