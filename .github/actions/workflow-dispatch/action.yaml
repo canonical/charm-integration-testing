@@ -16,6 +16,14 @@ inputs:
     required: false
     default: "{}"
 
+outputs:
+  run_id:
+    description: GitHub Workflow Run ID
+    value: ${{ steps.trigger.outputs.run_id }}
+  conclusion:
+    description: GitHub Workflow Run Conclusion
+    value: ${{ steps.completion.outputs.conclusion }}
+
 runs:
   using: "composite"
   steps:
@@ -61,6 +69,7 @@ runs:
         echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
 
     - name: Wait for completion
+      id: completion
       shell: bash
       env:
         run_id: ${{ steps.trigger.outputs.run_id }}
@@ -77,3 +86,5 @@ runs:
           fi
           sleep 10
         done
+        
+        echo "conclusion=$(gh run view $run_id --json conclusion --jq '.conclusion')" >> "$GITHUB_OUTPUT"
