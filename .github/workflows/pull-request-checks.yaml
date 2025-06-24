@@ -70,6 +70,23 @@ jobs:
       - name: Run Bundle Builder Integration Tests
         run: ./scripts/bundle-builder-integration-tests.sh
 
+  charm-integration-testing-unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
+      - name: Install poetry
+        run: pipx install poetry==2.0.1
+
+      - name: Install dependencies
+        run: poetry install
+
+      - name: Run Charm Integration Testing Unit Tests
+        run: ./scripts/charm-integration-testing-unit-tests.sh
+
   charm-testing-integration-tests:
     uses: ./.github/workflows/charm-testing-integration-tests.yaml
     permissions:
