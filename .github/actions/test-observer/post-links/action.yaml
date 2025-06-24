@@ -15,19 +15,32 @@ inputs:
 runs:
   using: "composite"
   steps:
+    - id: get-json-body
+      name: Get Test Observer JSON
+      shell: bash
+      env:
+        job_uuid: ${{ inputs.job_uuid }}
+      run: |
+        jq --null-input --compact-output \
+          --arg job_uuid "${job_uuid}" \
+        '
+          [
+            {
+              "label": "Logs",
+              "url": "https://charm.logs.test-observer.canonical.com/\($job_uuid)/index.html"
+            }
+          ]
+        ' > body.json
+        cat body.json
+
     - name: Post relevant link to Test Observer
       shell: bash
       env:
         test_observer_api: ${{ inputs.test_observer_api }}
         test_execution_id: ${{ inputs.test_execution_id }}
-        job_uuid: ${{ inputs.job_uuid }}
       run: |
-        echo '[{ "label": "Logs", "url": "https://charm.logs.test-observer.canonical.com/${job_uuid}/index.html" }]' > links.json
-
-        jq -c '.[]' links.json | while read link; do
-          curl --fail-with-body \
-            --retry 10 \
-            -X POST "${test_observer_api}/v1/test-executions/${test_execution_id}/links" \
-            -H "Content-Type: application/json" \
-            -d "${link}"
-        done
+        curl --fail-with-body \
+          --retry 10 \
+          -X POST "${test_observer_api}/v1/test-executions/${test_execution_id}/links" \
+          -H "Content-Type: application/json" \
+          -d @body.json
