@@ -24,12 +24,10 @@ runs:
         jq --null-input --compact-output \
           --arg job_uuid "${job_uuid}" \
         '
-          [
-            {
-              "label": "Logs",
-              "url": "https://charm.logs.test-observer.canonical.com/\($job_uuid)/index.html"
-            }
-          ]
+          {
+            "label": "Logs",
+            "url": "https://charm.logs.test-observer.canonical.com/\($job_uuid)/index.html"
+          }
         ' > body.json
         cat body.json
 
