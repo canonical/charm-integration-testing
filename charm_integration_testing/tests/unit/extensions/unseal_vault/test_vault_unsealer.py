@@ -63,7 +63,7 @@ class VaultStub:
     sealed_units: dict[str, bool] = field(default_factory=dict)
     inits: list[str] = field(default_factory=list)
     unseals: list[str] = field(default_factory=list)
-    tokens: VaultTokenSecret = VaultTokenSecret(root_token="root", unseal_key="key")
+    tokens: VaultTokenSecret = field(default_factory=lambda: VaultTokenSecret(root_token="root", unseal_key="key"))
 
     def status(self, model, unit):
         return type(
