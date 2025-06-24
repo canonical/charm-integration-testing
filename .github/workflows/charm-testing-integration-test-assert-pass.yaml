@@ -54,6 +54,7 @@ jobs:
           status: "NOT_STARTED"
 
       - name: Trigger Charm Tests
+        id: trigger-charm-tests
         uses: ./.github/actions/workflow-dispatch
         with:
           workflow: "charm-testing.yaml"
@@ -72,6 +73,18 @@ jobs:
               "series": "${{ inputs.target_base }}",
               "substrate": "kubernetes"
             }
+
+      - name: Ensure Charm Tests Workflow Success
+        shell: bash
+        env:
+          workflow_conclusion: ${{ steps.trigger-charm-tests.outputs.conclusion }}
+        run: |
+          echo "GitHub Workflow Conclusion is '$workflow_conclusion'"
+          if [[ "$workflow_conclusion" != "success" ]]
+          then
+            echo "Failing workflow since charm tests workflow failed"
+            exit 1
+          fi
 
       - name: Get Test Execution Status
         id: get-test-execution-status
