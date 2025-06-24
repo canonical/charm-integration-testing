@@ -322,39 +322,15 @@ class JujuCmdBackend(JujuBackend):
         # Return unit stdout
         return next(iter(exec_output.values()))
 
-    def add_secret(self, model: str, name: str, values: dict):
-        # Add the secret with juju
-        self._call_juju(
-            CmdArg(value="add-secret"),
-            CmdArg(name="model", value=model),
-            CmdArg(value=name),
-            *[CmdArg(value=f"{key}={value}") for key, value in values.items()],
-        )
+    def add_secret(self, model: str, name: str, values: dict[str, str]) -> str:
+        raise NotImplementedError
 
-    def _all_secrets(self, model) -> dict[str, JujuSecretInfo]:
-        # Get secrets from juju
-        result = self._call_juju(
-            CmdArg(value="list-secrets"),
-            CmdArg(name="model", value=model),
-            CmdArg(name="format", value="yaml"),
-        )
-
-        # Parse response
-        return {id: JujuSecretInfo(**info) for id, info in yaml.safe_load(result).items()}
-
-    def get_secret_id(self, model: str, name: str) -> str:
-        # Find secret with matching name
-        for id, info in self._all_secrets(model).items():
-            if info.name == name:
-                return id
-        raise RuntimeError(f"Secret with name '{name}' not found")
-
-    def read_secret(self, model: str, name: str) -> dict:
+    def read_secret(self, model: str, name_or_id: str) -> dict[str, str]:
         # Read the secret
         result = self._call_juju(
             CmdArg(value="show-secret"),
             CmdArg(name="model", value=model),
-            CmdArg(value=name),
+            CmdArg(value=name_or_id),
             CmdArg(name="reveal"),
             CmdArg(name="format", value="yaml"),
         )
@@ -362,12 +338,12 @@ class JujuCmdBackend(JujuBackend):
         # Parse response
         return JujuSecretInfo(**next(iter(yaml.safe_load(result).values()))).content
 
-    def grant_secret(self, model: str, name: str, application: str):
+    def grant_secret(self, model: str, name_or_id: str, application: str):
         # Authorize the application
         self._call_juju(
             CmdArg(value="grant-secret"),
             CmdArg(name="model", value=model),
-            CmdArg(value=name),
+            CmdArg(value=name_or_id),
             CmdArg(value=application),
         )
 
@@ -381,18 +357,5 @@ class JujuCmdBackend(JujuBackend):
             *[CmdArg(value=f"{key}={value}") for key, value in arguments.items()],
         )
 
-    def remove_secret(self, model: str, name: str):
-        # Remove the secret
-        try:
-            self._call_juju(
-                CmdArg(value="remove-secret"),
-                CmdArg(name="model", value=model),
-                CmdArg(value=name),
-            )
-        except CmdError as e:
-            # Hide secret not found error
-            # The message isn't very descriptive...
-            if "ERROR must specify either URI or label" in e.stderr:
-                return
-            else:
-                raise e
+    def remove_secret(self, model: str, name_or_id: str):
+        raise NotImplementedError

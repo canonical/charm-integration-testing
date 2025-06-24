@@ -115,13 +115,12 @@ class VaultUnsealer:
         self.logger.info(f"Authorizing vault charm '{self.charm.name}' application '{application}'")
 
         # Create the one time secret
-        self.juju.add_secret(model, self.vault_one_time_token_secret_name(application), {"token": tokens.root_token})
+        secret_id = self.juju.add_secret(
+            model, self.vault_one_time_token_secret_name(application), {"token": tokens.root_token}
+        )
 
         # Grant the charm access to the one time secret
         self.juju.grant_secret(model, self.vault_one_time_token_secret_name(application), application)
-
-        # Get the secret id
-        secret_id = self.juju.get_secret_id(model, self.vault_one_time_token_secret_name(application))
 
         # Authorize the charm (multiple attempts since the secret granting may have propagation delay)
         exception: Exception
@@ -139,9 +138,6 @@ class VaultUnsealer:
         self.juju.remove_secret(model, self.vault_one_time_token_secret_name(application))
 
     def save_vault_tokens(self, model: str, application: str, tokens: VaultTokenSecret):
-        # Remove any existing secret
-        self.juju.remove_secret(model, self.vault_tokens_secret_name(application))
-
         # Add the vault tokens
         self.juju.add_secret(
             model,
