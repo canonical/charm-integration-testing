@@ -3,4 +3,4 @@
 
 from .backend import JubilantBackend
 
-__all__ = [JubilantBackend]
+__all__ = ["JubilantBackend"]

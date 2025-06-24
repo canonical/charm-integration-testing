@@ -3,4 +3,4 @@
 
 from .unseal_vault import UnsealVaultJujuExtension, UnsealVaultK8sJujuExtension
 
-__all__ = [UnsealVaultJujuExtension, UnsealVaultK8sJujuExtension]
+__all__ = ["UnsealVaultJujuExtension", "UnsealVaultK8sJujuExtension"]
