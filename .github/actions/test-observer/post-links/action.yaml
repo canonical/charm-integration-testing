@@ -22,7 +22,7 @@ runs:
         test_execution_id: ${{ inputs.test_execution_id }}
         job_uuid: ${{ inputs.job_uuid }}
       run: |
-        echo '[{ "label": "Logs", "url": "https://charm.logs.test-observer.canonical.com/${job_uuid}/index.html" }]' > links.json
+        echo "[{ \"label\": \"Logs\", \"url\": \"https://charm.logs.test-observer.canonical.com/${job_uuid}/index.html\" }]" > links.json
 
         jq -c '.[]' links.json | while read link; do
           curl --fail-with-body \
