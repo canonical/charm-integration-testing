@@ -3,4 +3,4 @@
 
 from .extensions import UnsealVaultJujuExtension, UnsealVaultK8sJujuExtension
 
-__all__ = [UnsealVaultJujuExtension, UnsealVaultK8sJujuExtension]
+__all__ = ["UnsealVaultJujuExtension", "UnsealVaultK8sJujuExtension"]

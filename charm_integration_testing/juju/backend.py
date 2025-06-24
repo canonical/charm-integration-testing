@@ -52,19 +52,19 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def wait_idle(self, model: str, timeout: timedelta):
+    def wait_idle(self, model: str, timeout: timedelta | None, period: timedelta | None):
         raise NotImplementedError
 
     @abstractmethod
-    def wait_application_settled(self, model: str, application: str, timeout: timedelta):
+    def wait_application_settled(self, model: str, application: str, timeout: timedelta | None):
         raise NotImplementedError
 
     @abstractmethod
-    def wait_application_scaled(self, model: str, application: str, timeout: timedelta):
+    def wait_application_scaled(self, model: str, application: str, timeout: timedelta | None):
         raise NotImplementedError
 
     @abstractmethod
-    def wait_for_unit_message(self, model: str, unit: str, message: str, timeout: timedelta):
+    def wait_for_unit_message(self, model: str, unit: str, message: str, timeout: timedelta | None):
         raise NotImplementedError
 
     @abstractmethod
@@ -90,7 +90,7 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def wait_for_removal(self, model: str, applications: list[str], timeout: timedelta):
+    def wait_for_removal(self, model: str, applications: list[str], timeout: timedelta | None):
         raise NotImplementedError
 
     @abstractmethod
@@ -99,12 +99,12 @@ class JujuBackend(ABC):
         model: str,
         endpoint_1: JujuIntegrationApplication,
         endpoint_2: JujuIntegrationApplication,
-        timeout: timedelta,
+        timeout: timedelta | None,
     ):
         raise NotImplementedError
 
     @abstractmethod
-    def wait_for_removal_of_units(self, model: str, applications: list[str], timeout: timedelta):
+    def wait_for_removal_of_units(self, model: str, applications: list[str], timeout: timedelta | None):
         raise NotImplementedError
 
     @abstractmethod

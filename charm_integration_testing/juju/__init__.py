@@ -6,11 +6,11 @@ from .client import JujuClient
 from .extension import JujuExtension
 
 __all__ = [
-    JujuClient,
-    JujuBackend,
-    JujuWaitTimeoutError,
-    JujuIntegration,
-    JujuIntegrationApplication,
-    JujuExtension,
-    JujuExecOutput,
+    "JujuClient",
+    "JujuBackend",
+    "JujuWaitTimeoutError",
+    "JujuIntegration",
+    "JujuIntegrationApplication",
+    "JujuExtension",
+    "JujuExecOutput",
 ]

@@ -2,8 +2,6 @@
 # See LICENSE file for licensing details.
 
 
-from datetime import timedelta
-
 import pytest
 from juju import JujuClient
 
@@ -53,11 +51,6 @@ def neighbor_application(request: pytest.FixtureRequest) -> str:
 @pytest.fixture
 def neighbor_endpoint(request: pytest.FixtureRequest) -> str:
     return request.config.getoption("--neighbor-endpoint")
-
-
-@pytest.fixture(autouse=True)
-def assert_idle(juju_client: JujuClient, model: str):
-    juju_client.idle_for_period(model=model, timeout=timedelta(seconds=15), idle_period=timedelta(seconds=15))
 
 
 @pytest.fixture(autouse=True)

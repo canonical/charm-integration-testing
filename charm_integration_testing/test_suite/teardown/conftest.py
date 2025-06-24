@@ -2,8 +2,6 @@
 # See LICENSE file for licensing details.
 
 
-from datetime import timedelta
-
 import pytest
 from juju import JujuClient
 
@@ -22,11 +20,6 @@ def pytest_addoption(parser):
 @pytest.fixture
 def applications(request: pytest.FixtureRequest) -> str:
     return request.config.getoption("--applications")
-
-
-@pytest.fixture(autouse=True)
-def assert_idle(juju_client: JujuClient, model: str):
-    juju_client.idle_for_period(model=model, timeout=timedelta(seconds=15), idle_period=timedelta(seconds=15))
 
 
 @pytest.fixture(autouse=True)

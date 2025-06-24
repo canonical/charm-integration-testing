@@ -2,10 +2,9 @@
 # See LICENSE file for licensing details.
 
 import logging
-import time
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 
-from .backend import JujuBackend, JujuIntegrationApplication, JujuWaitTimeoutError
+from .backend import JujuBackend, JujuIntegrationApplication
 from .extension import JujuExtension
 
 
@@ -31,103 +30,22 @@ class JujuClient:
         self.logger.info(f"Getting the number of units for {application}.")
         return self.backend.num_units(model, application)
 
-    def _wait_for(self, function, description: str, timeout: timedelta):
-        # Start logging
-        self.logger.info(f"Begin waiting for {description}.\n::group::Wait for {description}.")
-
-        # Wait for
-        try:
-            # Loop until timeout
-            start_time = datetime.now(timezone.utc)
-            while datetime.now(timezone.utc) < start_time + timeout:
-                try:
-                    function(timedelta(seconds=1))
-                except JujuWaitTimeoutError:
-                    self.logger.info("Wait condition is not met.")
-                else:
-                    self.logger.info("Wait condition has been met.")
-                    return
-
-            # Timed out
-            raise JujuWaitTimeoutError
-        finally:
-            # End the log group
-            self.logger.info("Stopped waiting for, ending log group.\n::endgroup::")
-
-    def _wait_for_entire_period(self, function, period: timedelta):
-        # Loop until timeout
-        start = datetime.now(timezone.utc)
-        while datetime.now(timezone.utc) < start + period:
-            # Check wait condition
-            function(timedelta(seconds=1))
-
-            # Wait condition met
-            self.logger.info("Wait condition still met.")
-
-            # Wait before checking again
-            time.sleep(1)
-
-    def _wait_for_period(
-        self,
-        function,
-        description: str,
-        timeout: timedelta,
-        period: timedelta,
-    ):
-        # Start logging
-        self.logger.info(
-            f"Begin waiting for {period.total_seconds()} second period of {description}.\n::group::Wait for period of {description}."
-        )
-
-        # Wait for period
-        try:
-            # Check timeout and period
-            if timeout < period:
-                raise JujuWaitTimeoutError
-            elif timeout == period:
-                self._wait_for_entire_period(function, period)
-                return
-
-            # Loop until timeout
-            start = datetime.now(timezone.utc)
-            while start + timeout > datetime.now(timezone.utc) + period:
-                try:
-                    function(timedelta(seconds=1))
-                except JujuWaitTimeoutError:
-                    # Still waiting to start period
-                    self.logger.info("Wait condition is not met.")
-                else:
-                    # First time wait condition is met
-                    self.logger.info("Wait condition is met.")
-
-                    # Try to wait for period
-                    try:
-                        self._wait_for_entire_period(function, period)
-                    except JujuWaitTimeoutError:
-                        self.logger.info("Wait condition no longer met.")
-                    else:
-                        self.logger.info("Wait condition has been met for period.")
-                        return
-
-            # Timed out
-            raise JujuWaitTimeoutError
-        finally:
-            # End the log group
-            self.logger.info("Stopped waiting for period, ending log group.\n::endgroup::")
+    @staticmethod
+    def _waiting_timeout_log(timeout: timedelta | None) -> str:
+        if timeout is not None:
+            return f"Waiting {timeout}"
+        else:
+            return "Waiting"
 
     # Wait for the Juju model to become idle
     def idle_for_period(
         self,
         model: str = "default",
-        timeout: timedelta = timedelta(days=1),
+        timeout: timedelta | None = None,
         idle_period: timedelta = timedelta(seconds=65),
     ):
-        self._wait_for_period(
-            lambda log_timeout: self.backend.wait_idle(model, log_timeout),
-            "model to be idle",
-            timeout=timeout,
-            period=idle_period,
-        )
+        self.logger.info(f"{self._waiting_timeout_log(timeout)} to be idle.")
+        self.backend.wait_idle(model=model, timeout=timeout, period=idle_period)
 
     def print_status(self, model: str = "default"):
         separator = "-" * 80
@@ -146,7 +64,7 @@ class JujuClient:
         target_2 = JujuIntegrationApplication(application_2, endpoint_2)
 
         # Integrate
-        self.logger.info(f"Integrating {target_1} with {target_2}")
+        self.logger.info(f"Integrating {target_1} with {target_2}.")
         self.backend.integrate(model, target_1, target_2)
 
     def remove_integration(
@@ -162,7 +80,7 @@ class JujuClient:
         target_2 = JujuIntegrationApplication(application_2, endpoint_2)
 
         # Remove integration
-        self.logger.info(f"Removing integration between {target_1} and {target_2}")
+        self.logger.info(f"Removing integration between {target_1} and {target_2}.")
         self.backend.remove_integration(model, target_1, target_2)
 
     def deploy_bundle_file(
@@ -181,12 +99,11 @@ class JujuClient:
         self.logger.info(f"Removing applications: {', '.join(applications)}.")
         self.backend.remove_applications(model, *applications)
 
-    def wait_for_removal(self, *applications: str, model: str = "default", timeout: timedelta = timedelta(days=1)):
-        self._wait_for(
-            lambda log_timeout: self.backend.wait_for_removal(model, applications, log_timeout),
-            f"removal of applications: {', '.join(applications)}",
-            timeout,
+    def wait_for_removal(self, *applications: str, model: str = "default", timeout: timedelta | None = None):
+        self.logger.info(
+            f"{self._waiting_timeout_log(timeout)} for removal of application(s) {', '.join(applications)}."
         )
+        self.backend.wait_for_removal(model, applications, timeout)
 
     def wait_for_removal_of_integration(
         self,
@@ -195,24 +112,20 @@ class JujuClient:
         endpoint_1: str,
         endpoint_2: str,
         model: str = "default",
-        timeout: timedelta = timedelta(days=1),
+        timeout: timedelta | None = None,
     ):
         target_1 = JujuIntegrationApplication(application_1, endpoint_1)
         target_2 = JujuIntegrationApplication(application_2, endpoint_2)
-        self._wait_for(
-            lambda log_timeout: self.backend.wait_for_removal_of_integration(model, target_1, target_2, log_timeout),
-            f"removal of integration: {target_1} <-> {target_2}",
-            timeout,
+        self.logger.info(
+            f"{self._waiting_timeout_log(timeout)} for removal of integration between {target_1} and {target_2}."
         )
+        self.backend.wait_for_removal_of_integration(model, target_1, target_2, timeout)
 
-    def wait_for_removal_of_units(
-        self, *applications: str, model: str = "default", timeout: timedelta = timedelta(days=1)
-    ):
-        self._wait_for(
-            lambda log_timeout: self.backend.wait_for_removal_of_units(model, applications, log_timeout),
-            f"removal of all units of applications: {', '.join(applications)}",
-            timeout,
+    def wait_for_removal_of_units(self, *applications: str, model: str = "default", timeout: timedelta | None = None):
+        self.logger.info(
+            f"{self._waiting_timeout_log(timeout)} for removal of all units of application(s) {', '.join(applications)}."
         )
+        self.backend.wait_for_removal_of_units(model, applications, timeout)
 
     def application_exists(self, application: str, model: str = "default") -> bool:
         self.logger.info(f"Checking that application exists: {application}.")

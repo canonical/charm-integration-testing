@@ -3,22 +3,29 @@
 
 
 import logging
+from datetime import timedelta
 
 import pytest
 from extensions import UnsealVaultJujuExtension, UnsealVaultK8sJujuExtension
 from juju import JujuBackend, JujuClient
-from juju_cmd import JujuCmdBackend
+from juju_jubilant import JubilantBackend
 from pytest import CollectReport, StashKey
 
 
 @pytest.fixture
 def logger() -> logging.Logger:
+    jubilant_logger = logging.getLogger("jubilant")
+    jubilant_logger.setLevel(logging.WARNING)
+
+    jubilant_logger_wait = logging.getLogger("jubilant.wait")
+    jubilant_logger_wait.setLevel(logging.WARNING)
+
     return logging.getLogger()
 
 
 @pytest.fixture
 def juju_backend() -> JujuBackend:
-    return JujuCmdBackend()
+    return JubilantBackend()
 
 
 @pytest.fixture
@@ -78,3 +85,8 @@ def print_setup_and_teardown_info(
 
     # Log ending state
     juju_client.print_status(model=model)
+
+
+@pytest.fixture(autouse=True)
+def assert_idle(juju_client: JujuClient, model: str):
+    juju_client.idle_for_period(model=model, timeout=timedelta(seconds=30), idle_period=timedelta(seconds=5))

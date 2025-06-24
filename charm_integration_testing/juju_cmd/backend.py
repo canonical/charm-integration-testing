@@ -112,7 +112,7 @@ class JujuCmdBackend(JujuBackend):
             and application_2 == integration_1.integrated_application
         }
 
-    def _wait_for(self, model: str, scope: str, specifier: str, query: str, timeout: timedelta):
+    def _wait_for(self, model: str, scope: str, specifier: str, query: str, timeout: timedelta | None):
         try:
             self._call_juju(
                 CmdArg(value="wait-for"),
@@ -120,7 +120,7 @@ class JujuCmdBackend(JujuBackend):
                 CmdArg(value=specifier),
                 CmdArg(name="model", value=model) if scope != "model" else CmdArg(),
                 CmdArg(name="query", value=query),
-                CmdArg(name="timeout", value=f"{timeout.total_seconds()}s"),
+                *([CmdArg(name="timeout", value=f"{timeout.total_seconds()}s")] if timeout is not None else []),
             )
         except CmdError as e:
             if "ERROR timed out waiting for" in e.stderr:
@@ -128,7 +128,7 @@ class JujuCmdBackend(JujuBackend):
             else:
                 raise e
 
-    def wait_idle(self, model: str, timeout: timedelta):
+    def wait_idle(self, model: str, timeout: timedelta | None):
         self._wait_for(
             model,
             "model",
@@ -137,7 +137,7 @@ class JujuCmdBackend(JujuBackend):
             timeout,
         )
 
-    def wait_application_settled(self, model: str, application: str, timeout: timedelta):
+    def wait_application_settled(self, model: str, application: str, timeout: timedelta | None):
         unit_workload_status_settled = " || ".join(
             {f"unit.workload-status == '{status}'" for status in {"active", "blocked"}}
         )
@@ -150,12 +150,11 @@ class JujuCmdBackend(JujuBackend):
             timeout,
         )
 
-    def wait_application_scaled(self, model: str, application: str, timeout: timedelta):
+    def wait_application_scaled(self, model: str, application: str, timeout: timedelta | None):
         # Wait for an application to reach it's desired scale
         # See https://github.com/juju/juju/blob/add3443726e40faebaba0103289c6660251fa1eb/cmd/juju/status/formatted.go#L239
-
-        end_time = datetime.now(timezone.utc) + timeout
-        while datetime.now(timezone.utc) < end_time:
+        start_time = datetime.now(timezone.utc)
+        while timeout is None or datetime.now(timezone.utc) < start_time + timeout:
             # Get application from juju status
             application_status = self._status(model).applications[application]
 
@@ -176,10 +175,10 @@ class JujuCmdBackend(JujuBackend):
 
         raise JujuWaitTimeoutError
 
-    def wait_for_unit_message(self, model: str, unit: str, message: str, timeout: timedelta):
+    def wait_for_unit_message(self, model: str, unit: str, message: str, timeout: timedelta | None):
         # Loop until timeout
-        end_time = datetime.now() + timeout
-        while datetime.now() < end_time:
+        start_time = datetime.now(timezone.utc)
+        while timeout is None or datetime.now(timezone.utc) < start_time + timeout:
             # Find unit in juju status
             juju_status = self._status(model, unit)
             application_info = next(iter(juju_status.applications.values()), None)
@@ -235,14 +234,14 @@ class JujuCmdBackend(JujuBackend):
             *[CmdArg(value=application) for application in applications],
         )
 
-    def wait_for_removal(self, model: str, applications: list[str], timeout: timedelta):
+    def wait_for_removal(self, model: str, applications: list[str], timeout: timedelta | None):
         # Juju bug causes panic: https://github.com/juju/juju/issues/18785
         # name_checks = " && ".join([f"application.name != '{application}'" for application in applications])
         # self._wait_for(model, "model", model, f"len(applications) == 0 || forEach(applications, application => {name_checks})", timeout)
 
         # Check status for application until Juju bug is fixed
-        end_time = datetime.now(timezone.utc) + timeout
-        while end_time > datetime.now(timezone.utc):
+        start_time = datetime.now(timezone.utc)
+        while timeout is None or datetime.now(timezone.utc) < start_time + timeout:
             # Check if any of the applications exist
             if not (set(applications) & self.list_applications(model=model)):
                 return
@@ -252,11 +251,15 @@ class JujuCmdBackend(JujuBackend):
         raise JujuWaitTimeoutError
 
     def wait_for_removal_of_integration(
-        self, model: str, target_1: JujuIntegrationApplication, target_2: JujuIntegrationApplication, timeout: timedelta
+        self,
+        model: str,
+        target_1: JujuIntegrationApplication,
+        target_2: JujuIntegrationApplication,
+        timeout: timedelta | None,
     ):
         # Juju wait-for for doesn't support integration, so just check juju status
-        end_time = datetime.now(timezone.utc) + timeout
-        while end_time > datetime.now(timezone.utc):
+        start_time = datetime.now(timezone.utc)
+        while timeout is None or datetime.now(timezone.utc) < start_time + timeout:
             # Check if the integration exists
             if not any(
                 [
@@ -270,7 +273,7 @@ class JujuCmdBackend(JujuBackend):
 
         raise JujuWaitTimeoutError
 
-    def wait_for_removal_of_units(self, model: str, applications: list[str], timeout: timedelta):
+    def wait_for_removal_of_units(self, model: str, applications: list[str], timeout: timedelta | None):
         name_checks = " && ".join([f"unit.application != '{application}'" for application in applications])
         self._wait_for(
             model, "model", model, f"len(applications) == 0 || forEach(units, unit => {name_checks})", timeout

@@ -3,4 +3,4 @@
 
 from .backend import JujuCmdBackend
 
-__all__ = [JujuCmdBackend]
+__all__ = ["JujuCmdBackend"]
