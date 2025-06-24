@@ -202,14 +202,14 @@ jobs:
           cat generated-bundle.yaml >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
     
-      - name: Post 'bundle_deploy_start' event
+      - name: Post 'test_integration_start' event
         if: ${{ !cancelled() && env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/post-events
         with:
           test_observer_api: ${{ env.test_observer_api }}
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
-          event_name: "bundle_deploy_start"
-          detail: "Deployment of bundle started."
+          event_name: "test_integration_start"
+          detail: "Test integration started."
 
       - name: Deploy Bundles
         id: test_deploy
@@ -358,17 +358,8 @@ jobs:
           event_name: "log_collection_finished"
           detail: "Log collection has completed."
 
-      - name: Post 'job_end' event
-        if: ${{ !cancelled() && env.test_observer_api != '' && inputs.execution_id != '' }}
-        uses: ./.github/actions/post-events
-        with:
-          test_observer_api: ${{ env.test_observer_api }}
-          job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
-          event_name: "job_end"
-          detail: "Charm integration test job completed."
-
       - name: Post Logs To Swift
-        if: ${{ !cancelled() && inputs.execution_id != '' }}
+        if: ${{ always() && inputs.execution_id != '' }}
         uses: canonical/sqa-cloud-deployment-pipeline/.github/actions/upload-to-swift@173b1936e2c96e317b0f1167509b068b2020e233
         with:
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
@@ -397,6 +388,15 @@ jobs:
           test_observer_api: ${{ env.test_observer_api }}
           test_execution_id: ${{ inputs.execution_id }}
           status: "COMPLETED"
+    
+      - name: Post 'job_end' event
+        if: ${{ !cancelled() && env.test_observer_api != '' && inputs.execution_id != '' }}
+        uses: ./.github/actions/post-events
+        with:
+          test_observer_api: ${{ env.test_observer_api }}
+          job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
+          event_name: "job_end"
+          detail: "Charm integration test job completed."
 
       - name: Trigger rerun on Test Observer if failure
         if: ${{ failure() && env.test_observer_api != '' && inputs.execution_id != '' }}
