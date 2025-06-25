@@ -265,15 +265,15 @@ jobs:
             --neighbor-endpoint "${neighbor_endpoint}" \
             --junit-xml=junit-integration.xml
 
-      - name: Post 'test_end' event
+      - name: Post 'test_integration_end' event
         if: ${{ !cancelled() && env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-events
         with:
           test_observer_api: ${{ env.test_observer_api }}
           test_execution_id: ${{ inputs.execution_id }}
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
-          event_name: "test_end"
-          detail: "Test execution ended."
+          event_name: "test_integration_end"
+          detail: "Test integration ended."
 
       - name: Post 'test_teardown_start' event
         if: ${{ !cancelled() && env.test_observer_api != '' && inputs.execution_id != '' }}
@@ -314,15 +314,15 @@ jobs:
           echo "junit_xml=$(realpath junit.xml)" >> $GITHUB_OUTPUT
           cat junit.xml
 
-      - name: Post 'teardown_end' event
+      - name: Post 'test_teardown_end' event
         if: ${{ !cancelled() && env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-events
         with:
           test_observer_api: ${{ env.test_observer_api }}
           test_execution_id: ${{ inputs.execution_id }}
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
-          event_name: "teardown_end"
-          detail: "Teardown phase finished."
+          event_name: "test_teardown_end"
+          detail: "Test teardown phase finished."
 
       - name: Post results to Test Observer
         if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
