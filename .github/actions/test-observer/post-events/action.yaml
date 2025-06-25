@@ -1,0 +1,46 @@
+name: "Post events to Test Observer"
+description: "Post a timestamped event to the Test Observer API for the given job UUID."
+
+inputs:
+  test_observer_api:
+    description: "Base URL of the Test Observer API"
+    required: true
+
+  test_execution_id:
+    description: "The unique identifier for the test execution (e.g., test execution id)."
+    required: true
+
+  job_uuid:
+    description: "The unique job identifier (e.g., env/test_execution_id) used in Test Observer."
+    required: true
+
+  event_name:
+    description: "The event name to be posted (e.g., job_start, test_end)."
+    required: true
+
+  detail:
+    description: "The context of the event."
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: Post event to Test Observer
+      shell: bash
+      env:
+        test_observer_api: ${{ inputs.test_observer_api }}
+        test_execution_id: ${{ inputs.test_execution_id }}
+        event_name: ${{ inputs.event_name }}
+        detail: ${{ inputs.detail }}
+      run: |
+        TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+        echo "[{ \"event_name\": \"${event_name}\", \"timestamp\": \"${TIMESTAMP}\", \"detail\": \"${detail}\" }]" > event.json
+
+        jq -c '.[]' event.json | while read event; do
+          curl --fail-with-body \
+            --retry 10 \
+            -X POST "${test_observer_api}/v1/test-executions/${test_execution_id}/status_update" \
+            -H "Content-Type: application/json" \
+            -d "{ \"events\": [ $event ] }"
+        done
