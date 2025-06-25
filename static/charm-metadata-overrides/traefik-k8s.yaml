@@ -1,0 +1,16 @@
+# Traefik optional flags have been added: https://github.com/canonical/traefik-k8s-operator/pull/474
+# But there has been no release
+# And appears in limbo due to being handed off to IS
+requires:
+  certificates:
+    optional: true
+  experimental-forward-auth:
+    optional: true
+  logging:
+    optional: true
+  charm-tracing:
+    optional: true
+  workload-tracing:
+    optional: true
+  receive-ca-cert:
+    optional: true
