@@ -129,7 +129,7 @@ jobs:
           echo "| Juju controller | \`${controller}\` |" >> $GITHUB_STEP_SUMMARY
 
       - name: Report Test Execution Start To Test Observer
-        if: ${{ always() && env.test_observer_api != '' && inputs.execution_id != '' }}
+        if: ${{ !cancelled() && env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/patch-test-execution
         with:
           test_observer_api: ${{ env.test_observer_api }}
@@ -204,7 +204,7 @@ jobs:
           echo '```' >> $GITHUB_STEP_SUMMARY
     
       - name: Post 'test_deploy_start' event
-        if: ${{ !cancelled() && env.test_observer_api != '' && inputs.execution_id != '' }}
+        if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-events
         with:
           test_observer_api: ${{ env.test_observer_api }}
@@ -228,7 +228,7 @@ jobs:
             --junit-xml=junit-deploy.xml
 
       - name: Post 'test_deploy_end' event
-        if: ${{ !cancelled() && env.test_observer_api != '' && inputs.execution_id != '' }}
+        if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-events
         with:
           test_observer_api: ${{ env.test_observer_api }}
@@ -266,7 +266,7 @@ jobs:
             --junit-xml=junit-integration.xml
 
       - name: Post 'test_integration_end' event
-        if: ${{ !cancelled() && env.test_observer_api != '' && inputs.execution_id != '' }}
+        if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-events
         with:
           test_observer_api: ${{ env.test_observer_api }}
@@ -276,7 +276,7 @@ jobs:
           detail: "Test integration ended."
 
       - name: Post 'test_teardown_start' event
-        if: ${{ !cancelled() && env.test_observer_api != '' && inputs.execution_id != '' }}
+        if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-events
         with:
           test_observer_api: ${{ env.test_observer_api }}
@@ -298,6 +298,16 @@ jobs:
             --applications "target" \
             --junit-xml=junit-teardown.xml
 
+      - name: Post 'test_teardown_end' event
+        if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
+        uses: ./.github/actions/test-observer/post-events
+        with:
+          test_observer_api: ${{ env.test_observer_api }}
+          test_execution_id: ${{ inputs.execution_id }}
+          job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
+          event_name: "test_teardown_end"
+          detail: "Test teardown phase finished."
+
       - name: Merge JUnit output
         id: junit_results
         shell: bash
@@ -314,16 +324,6 @@ jobs:
           echo "junit_xml=$(realpath junit.xml)" >> $GITHUB_OUTPUT
           cat junit.xml
 
-      - name: Post 'test_teardown_end' event
-        if: ${{ !cancelled() && env.test_observer_api != '' && inputs.execution_id != '' }}
-        uses: ./.github/actions/test-observer/post-events
-        with:
-          test_observer_api: ${{ env.test_observer_api }}
-          test_execution_id: ${{ inputs.execution_id }}
-          job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
-          event_name: "test_teardown_end"
-          detail: "Test teardown phase finished."
-
       - name: Post results to Test Observer
         if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-results
@@ -334,7 +334,7 @@ jobs:
 
       - name: Call Juju K8s Crashdump
         id: juju_k8s_crashdump
-        if: ${{ always() && inputs.substrate == 'kubernetes'}}
+        if: ${{ !cancelled() && inputs.substrate == 'kubernetes'}}
         uses: canonical/juju-k8s-crashdump/actions/juju-k8s-crashdump@191a359ad67025b08aa56791fc0d8109ec92e21b
         with:
           kubeconf: ${{ steps.kubeconfig.outputs.full_path }}
@@ -343,7 +343,7 @@ jobs:
 
       - name: Collect logs
         id: collect_logs
-        if: ${{ always() }}
+        if: ${{ !cancelled() }}
         shell: bash
         env:
           crashdump: ${{ steps.juju_k8s_crashdump.outputs.crashdump_path }}
@@ -356,18 +356,8 @@ jobs:
           [ -f "${generated_bundle}" ] && cp "${generated_bundle}" "logs/generated-bundle.yaml"
           echo "directory_path=$(realpath "logs")" >> $GITHUB_OUTPUT
 
-      - name: Post 'log_collection_finished' event
-        if: ${{ !cancelled() && env.test_observer_api != '' && inputs.execution_id != '' }}
-        uses: ./.github/actions/test-observer/post-events
-        with:
-          test_observer_api: ${{ env.test_observer_api }}
-          test_execution_id: ${{ inputs.execution_id }}
-          job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
-          event_name: "log_collection_finished"
-          detail: "Log collection has completed."
-
       - name: Post Logs To Swift
-        if: ${{ always() && inputs.execution_id != '' }}
+        if: ${{ !cancelled() && inputs.execution_id != '' }}
         uses: canonical/sqa-cloud-deployment-pipeline/.github/actions/upload-to-swift@173b1936e2c96e317b0f1167509b068b2020e233
         with:
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
@@ -381,21 +371,23 @@ jobs:
           SWIFT_OS_USER_DOMAIN_NAME: ${{ secrets.SWIFT_OS_USER_DOMAIN_NAME }}
           SWIFT_OS_PROJECT_DOMAIN_NAME: ${{ secrets.SWIFT_OS_PROJECT_DOMAIN_NAME }}
 
+      - name: Post 'log_collection_finished' event
+        if: ${{ !cancelled() && env.test_observer_api != '' && inputs.execution_id != '' }}
+        uses: ./.github/actions/test-observer/post-events
+        with:
+          test_observer_api: ${{ env.test_observer_api }}
+          test_execution_id: ${{ inputs.execution_id }}
+          job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
+          event_name: "log_collection_finished"
+          detail: "Log collection has completed."
+
       - name: Post links to Test Observer
-        if: ${{ always() && env.test_observer_api != '' && inputs.execution_id != '' }}
+        if: ${{ !cancelled() && env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-links
         with:
           test_observer_api: ${{ env.test_observer_api }}
           test_execution_id: ${{ inputs.execution_id }}
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
-
-      - name: Mark Test Execution completed on Test Observer
-        if: ${{ always() && env.test_observer_api != '' && inputs.execution_id != '' }}
-        uses: ./.github/actions/test-observer/patch-test-execution
-        with:
-          test_observer_api: ${{ env.test_observer_api }}
-          test_execution_id: ${{ inputs.execution_id }}
-          status: "COMPLETED"
     
       - name: Post 'job_end' event
         if: ${{ !cancelled() && env.test_observer_api != '' && inputs.execution_id != '' }}
@@ -406,6 +398,14 @@ jobs:
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
           event_name: "job_end"
           detail: "Charm integration test job completed."
+
+      - name: Mark Test Execution completed on Test Observer
+        if: ${{ always() && env.test_observer_api != '' && inputs.execution_id != '' }}
+        uses: ./.github/actions/test-observer/patch-test-execution
+        with:
+          test_observer_api: ${{ env.test_observer_api }}
+          test_execution_id: ${{ inputs.execution_id }}
+          status: "COMPLETED"
 
       - name: Trigger rerun on Test Observer if failure
         if: ${{ failure() && env.test_observer_api != '' && inputs.execution_id != '' }}
