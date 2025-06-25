@@ -139,7 +139,7 @@ jobs:
       
       - name: Post 'job_start' event
         if: ${{ !cancelled() && env.test_observer_api != '' && inputs.execution_id != '' }}
-        uses: ./.github/actions/post-events
+        uses: ./.github/actions/test-observer/post-events
         with:
           test_observer_api: ${{ env.test_observer_api }}
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
@@ -202,14 +202,14 @@ jobs:
           cat generated-bundle.yaml >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
     
-      - name: Post 'test_integration_start' event
+      - name: Post 'test_deploy_start' event
         if: ${{ !cancelled() && env.test_observer_api != '' && inputs.execution_id != '' }}
-        uses: ./.github/actions/post-events
+        uses: ./.github/actions/test-observer/post-events
         with:
           test_observer_api: ${{ env.test_observer_api }}
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
-          event_name: "test_integration_start"
-          detail: "Test integration started."
+          event_name: "test_deploy_start"
+          detail: "Test deployment started."
 
       - name: Deploy Bundles
         id: test_deploy
@@ -225,23 +225,23 @@ jobs:
             --bundles "${bundle}" \
             --junit-xml=junit-deploy.xml
 
-      - name: Post 'bundle_deploy_end' event
+      - name: Post 'test_deploy_end' event
         if: ${{ !cancelled() && env.test_observer_api != '' && inputs.execution_id != '' }}
-        uses: ./.github/actions/post-events
+        uses: ./.github/actions/test-observer/post-events
         with:
           test_observer_api: ${{ env.test_observer_api }}
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
-          event_name: "bundle_deploy_end"
-          detail: "Deployment of bundle finished."
+          event_name: "test_deploy_end"
+          detail: "Test deployment finished."
 
-      - name: Post 'test_start' event
+      - name: Post 'test_integration_start' event
         if: ${{ !cancelled() && env.test_observer_api != '' && inputs.execution_id != '' }}
-        uses: ./.github/actions/post-events
+        uses: ./.github/actions/test-observer/post-events
         with:
           test_observer_api: ${{ env.test_observer_api }}
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
-          event_name: "test_start"
-          detail: "Test execution started."
+          event_name: "test_integration_start"
+          detail: "Test integration started."
 
       - name: Execute Tests
         id: test_integration
@@ -263,21 +263,21 @@ jobs:
 
       - name: Post 'test_end' event
         if: ${{ !cancelled() && env.test_observer_api != '' && inputs.execution_id != '' }}
-        uses: ./.github/actions/post-events
+        uses: ./.github/actions/test-observer/post-events
         with:
           test_observer_api: ${{ env.test_observer_api }}
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
           event_name: "test_end"
           detail: "Test execution ended."
 
-      - name: Post 'teardown_start' event
+      - name: Post 'test_teardown_start' event
         if: ${{ !cancelled() && env.test_observer_api != '' && inputs.execution_id != '' }}
-        uses: ./.github/actions/post-events
+        uses: ./.github/actions/test-observer/post-events
         with:
           test_observer_api: ${{ env.test_observer_api }}
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
-          event_name: "teardown_start"
-          detail: "Teardown phase started."
+          event_name: "test_teardown_start"
+          detail: "Test teardown phase started."
 
       - name: Teardown charm under test
         id: test_teardown
@@ -310,7 +310,7 @@ jobs:
 
       - name: Post 'teardown_end' event
         if: ${{ !cancelled() && env.test_observer_api != '' && inputs.execution_id != '' }}
-        uses: ./.github/actions/post-events
+        uses: ./.github/actions/test-observer/post-events
         with:
           test_observer_api: ${{ env.test_observer_api }}
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
@@ -351,7 +351,7 @@ jobs:
 
       - name: Post 'log_collection_finished' event
         if: ${{ !cancelled() && env.test_observer_api != '' && inputs.execution_id != '' }}
-        uses: ./.github/actions/post-events
+        uses: ./.github/actions/test-observer/post-events
         with:
           test_observer_api: ${{ env.test_observer_api }}
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
@@ -391,7 +391,7 @@ jobs:
     
       - name: Post 'job_end' event
         if: ${{ !cancelled() && env.test_observer_api != '' && inputs.execution_id != '' }}
-        uses: ./.github/actions/post-events
+        uses: ./.github/actions/test-observer/post-events
         with:
           test_observer_api: ${{ env.test_observer_api }}
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}

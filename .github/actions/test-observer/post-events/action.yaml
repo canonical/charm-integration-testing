@@ -21,10 +21,6 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - name: Install jq
-      shell: bash
-      run: sudo apt-get update && sudo apt-get install -y jq
-
     - name: Post event to Test Observer
       shell: bash
       env:
