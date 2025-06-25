@@ -25,7 +25,7 @@ runs:
       shell: bash
       env:
         test_observer_api: ${{ inputs.test_observer_api }}
-        job_uuid: ${{ inputs.job_uuid }}
+        test_execution_id: ${{ inputs.test_execution_id }}
         event_name: ${{ inputs.event_name }}
         detail: ${{ inputs.detail }}
       run: |
@@ -36,7 +36,7 @@ runs:
         jq -c '.[]' event.json | while read event; do
           curl --fail-with-body \
             --retry 10 \
-            -X POST "${test_observer_api}/v1/test-executions/${job_uuid}/status_update" \
+            -X POST "${test_observer_api}/v1/test-executions/${test_execution_id}/status_update" \
             -H "Content-Type: application/json" \
             -d "{ \"events\": [ $event ] }"
         done
