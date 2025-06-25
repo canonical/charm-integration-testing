@@ -129,7 +129,7 @@ jobs:
           echo "| Juju controller | \`${controller}\` |" >> $GITHUB_STEP_SUMMARY
 
       - name: Report Test Execution Start To Test Observer
-        if: ${{ !cancelled && env.test_observer_api != '' && inputs.execution_id != '' }}
+        if: ${{ !cancelled() && env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/patch-test-execution
         with:
           test_observer_api: ${{ env.test_observer_api }}
@@ -334,7 +334,7 @@ jobs:
 
       - name: Call Juju K8s Crashdump
         id: juju_k8s_crashdump
-        if: ${{ !cancelled && inputs.substrate == 'kubernetes'}}
+        if: ${{ !cancelled() && inputs.substrate == 'kubernetes'}}
         uses: canonical/juju-k8s-crashdump/actions/juju-k8s-crashdump@191a359ad67025b08aa56791fc0d8109ec92e21b
         with:
           kubeconf: ${{ steps.kubeconfig.outputs.full_path }}
@@ -343,7 +343,7 @@ jobs:
 
       - name: Collect logs
         id: collect_logs
-        if: ${{ !cancelled }}
+        if: ${{ !cancelled() }}
         shell: bash
         env:
           crashdump: ${{ steps.juju_k8s_crashdump.outputs.crashdump_path }}
@@ -357,7 +357,7 @@ jobs:
           echo "directory_path=$(realpath "logs")" >> $GITHUB_OUTPUT
 
       - name: Post Logs To Swift
-        if: ${{ !cancelled && inputs.execution_id != '' }}
+        if: ${{ !cancelled() && inputs.execution_id != '' }}
         uses: canonical/sqa-cloud-deployment-pipeline/.github/actions/upload-to-swift@173b1936e2c96e317b0f1167509b068b2020e233
         with:
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
@@ -382,7 +382,7 @@ jobs:
           detail: "Log collection has completed."
 
       - name: Post links to Test Observer
-        if: ${{ !cancelled && env.test_observer_api != '' && inputs.execution_id != '' }}
+        if: ${{ !cancelled() && env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-links
         with:
           test_observer_api: ${{ env.test_observer_api }}
