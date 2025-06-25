@@ -21,9 +21,9 @@ requires:
     optional_if:
       - any_of:
           - none_of:
-              - endpoint_integrated: tracing
+              - endpoint_integrated: tracing-provider
           - all_of:
-              - endpoint_integrated: tracing
+              - endpoint_integrated: tracing-provider
               - endpoint_integrated: grafana-cloud-config
   logging-consumer:
     optional_if:
