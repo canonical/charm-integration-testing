@@ -142,6 +142,7 @@ jobs:
         uses: ./.github/actions/test-observer/post-events
         with:
           test_observer_api: ${{ env.test_observer_api }}
+          test_execution_id: ${{ inputs.execution_id }}
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
           event_name: "job_start"
           detail: "Charm integration test job started."
@@ -207,6 +208,7 @@ jobs:
         uses: ./.github/actions/test-observer/post-events
         with:
           test_observer_api: ${{ env.test_observer_api }}
+          test_execution_id: ${{ inputs.execution_id }}
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
           event_name: "test_deploy_start"
           detail: "Test deployment started."
@@ -230,6 +232,7 @@ jobs:
         uses: ./.github/actions/test-observer/post-events
         with:
           test_observer_api: ${{ env.test_observer_api }}
+          test_execution_id: ${{ inputs.execution_id }}
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
           event_name: "test_deploy_end"
           detail: "Test deployment finished."
@@ -239,6 +242,7 @@ jobs:
         uses: ./.github/actions/test-observer/post-events
         with:
           test_observer_api: ${{ env.test_observer_api }}
+          test_execution_id: ${{ inputs.execution_id }}
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
           event_name: "test_integration_start"
           detail: "Test integration started."
@@ -266,6 +270,7 @@ jobs:
         uses: ./.github/actions/test-observer/post-events
         with:
           test_observer_api: ${{ env.test_observer_api }}
+          test_execution_id: ${{ inputs.execution_id }}
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
           event_name: "test_end"
           detail: "Test execution ended."
@@ -275,6 +280,7 @@ jobs:
         uses: ./.github/actions/test-observer/post-events
         with:
           test_observer_api: ${{ env.test_observer_api }}
+          test_execution_id: ${{ inputs.execution_id }}
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
           event_name: "test_teardown_start"
           detail: "Test teardown phase started."
@@ -313,6 +319,7 @@ jobs:
         uses: ./.github/actions/test-observer/post-events
         with:
           test_observer_api: ${{ env.test_observer_api }}
+          test_execution_id: ${{ inputs.execution_id }}
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
           event_name: "teardown_end"
           detail: "Teardown phase finished."
@@ -354,6 +361,7 @@ jobs:
         uses: ./.github/actions/test-observer/post-events
         with:
           test_observer_api: ${{ env.test_observer_api }}
+          test_execution_id: ${{ inputs.execution_id }}
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
           event_name: "log_collection_finished"
           detail: "Log collection has completed."
@@ -394,6 +402,7 @@ jobs:
         uses: ./.github/actions/test-observer/post-events
         with:
           test_observer_api: ${{ env.test_observer_api }}
+          test_execution_id: ${{ inputs.execution_id }}
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
           event_name: "job_end"
           detail: "Charm integration test job completed."
