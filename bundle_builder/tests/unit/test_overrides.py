@@ -35,7 +35,12 @@ class TestCharmEndpointOverride:
 
         test_cases = [
             Params(
-                label="all_of",
+                label="optional_set",
+                override=CharmEndpointOverride(optional=True),
+                optionality=CharmEndpointOptionality.from_bool(True),
+            ),
+            Params(
+                label="optional_if_set",
                 override=CharmEndpointOverride(
                     optional_if=[
                         CharmEndpointOptionality.from_bool(True),
@@ -51,7 +56,7 @@ class TestCharmEndpointOverride:
             ),
             Params(
                 label="not_set",
-                override=CharmEndpointOverride(optional_if=None),
+                override=CharmEndpointOverride(),
                 optionality=None,
             ),
         ]
