@@ -302,10 +302,8 @@ class CharmhubClient:
                     optionality = CharmEndpointOptionality.from_bool(endpoint.optional)
                 elif endpoint_name in edge_endpoint_map and edge_endpoint_map[endpoint_name].optional is not None:
                     optionality = CharmEndpointOptionality.from_bool(edge_endpoint_map[endpoint_name].optional)
-                elif endpoint_type == ENDPOINT_REQUIRES:
-                    optionality = CharmEndpointOptionality.from_bool(False)
                 else:
-                    optionality = CharmEndpointOptionality.from_bool(True)
+                    optionality = CharmEndpointOptionality.from_bool(False)
 
                 # Add endpoint
                 endpoints.add(
