@@ -25,11 +25,16 @@ from .charm import CharmEndpointOptionality
 
 @dataclass
 class CharmEndpointOverride:
+    optional: bool | None = None
     optional_if: list[CharmEndpointOptionality] | None = None
 
     @property
     def optionality(self) -> CharmEndpointOptionality | None:
-        return CharmEndpointOptionality(all_of=self.optional_if) if self.optional_if is not None else None
+        if self.optional is not None:
+            return CharmEndpointOptionality.from_bool(self.optional)
+        if self.optional_if is not None:
+            return CharmEndpointOptionality(all_of=self.optional_if)
+        return None
 
 
 @dataclass
