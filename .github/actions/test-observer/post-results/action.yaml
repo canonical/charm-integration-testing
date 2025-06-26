@@ -29,7 +29,8 @@ runs:
       run: |
         cat "${junit_xml}" | yq -p=xml -o=json '
           .testsuites.testsuite |= [] + . | # Ensure testsuite is list
-          .testsuites.testsuite[].testcase |= [] + . # Ensure testcase is list
+          .testsuites.testsuite[].testcase |= [] + . | # Ensure testcase is list
+          .testsuites.testsuite[].testcase[].system-out |= [] + . # Ensure system-out is list
         ' | jq --compact-output '
           [
             .testsuites.testsuite[] | {testsuite: .} + (.testcase[]) |
@@ -59,7 +60,7 @@ runs:
                 end
               ),
               "io_log": (
-                if ."system-out" then ."system-out"
+                if ."system-out" then (."system-out" | join("\n"))
                 else ""
                 end
               )
