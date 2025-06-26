@@ -1,0 +1,10 @@
+# Remove after: https://github.com/canonical/hydra-operator/pull/358
+provides:
+  hydra-endpoint-info:
+    optional: true
+  oauth:
+    optional: true
+  metrics-endpoint:
+    optional: true
+  grafana-dashboard:
+    optional: true

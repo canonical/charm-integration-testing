@@ -1,0 +1,21 @@
+# Remove after: https://github.com/canonical/mongodb-k8s-operator/pull/408
+provides:
+  database:
+    optional: true
+  obsolete:
+    optional: true
+  metrics-endpoint:
+    optional: true
+  grafana-dashboard:
+    optional: true
+  config-server:
+    optional: true
+  cluster:
+    optional: true
+requires:
+  certificates:
+    optional: true
+  s3-credentials:
+    optional: true
+  sharding:
+    optional: true

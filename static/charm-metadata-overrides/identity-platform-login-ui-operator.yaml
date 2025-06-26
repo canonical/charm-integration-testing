@@ -1,0 +1,8 @@
+# Remove after: https://github.com/canonical/identity-platform-login-ui-operator/pull/282
+provides:
+  ui-endpoint-info:
+    optional: true
+  metrics-endpoint:
+    optional: true
+  grafana-dashboard:
+    optional: true

@@ -1,0 +1,10 @@
+# Remove after: https://github.com/canonical/kafka-k8s-operator/pull/189
+provides:
+  kafka-client:
+    optional: true
+  metrics-endpoint:
+    optional: true
+  grafana-dashboard:
+    optional: true
+  peer-cluster-orchestrator:
+    optional: true
