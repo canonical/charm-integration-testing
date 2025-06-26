@@ -88,7 +88,7 @@ def print_setup_and_teardown_info(
 
 
 @pytest.fixture(autouse=True)
-def assert_idle(juju_client: JujuClient, model: str):
+def assert_idle(juju_client: JujuClient, model: str, print_setup_and_teardown_info: None):
     try:
         juju_client.idle_for_period(model=model, timeout=timedelta(seconds=30), idle_period=timedelta(seconds=5))
     except JujuWaitTimeoutError:
