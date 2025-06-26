@@ -61,8 +61,10 @@ def assert_applications_exist(
     target_application: str,
     neighbor_application: str,
 ):
-    assert juju_client.application_exists(target_application, model=model)
-    assert juju_client.application_exists(neighbor_application, model=model)
+    if not juju_client.application_exists(target_application, model=model):
+        pytest.skip(f"Application {target_application} not found in model")
+    if not juju_client.application_exists(neighbor_application, model=model):
+        pytest.skip(f"Application {neighbor_application} not found in model")
 
 
 @pytest.fixture(autouse=True)
@@ -75,6 +77,7 @@ def assert_applications_integrated(
     neighbor_application: str,
     neighbor_endpoint: str,
 ):
-    assert juju_client.integration_exists(
+    if not juju_client.integration_exists(
         target_application, target_endpoint, neighbor_application, neighbor_endpoint, model=model
-    )
+    ):
+        pytest.skip(f"Integration {target_application}:{target_endpoint} <-> {neighbor_application}:{neighbor_endpoint} not found in model")

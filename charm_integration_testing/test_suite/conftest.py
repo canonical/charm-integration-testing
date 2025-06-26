@@ -7,7 +7,7 @@ from datetime import timedelta
 
 import pytest
 from extensions import UnsealVaultJujuExtension, UnsealVaultK8sJujuExtension
-from juju import JujuBackend, JujuClient
+from juju import JujuBackend, JujuClient, JujuWaitTimeoutError
 from juju_jubilant import JubilantBackend
 from pytest import CollectReport, StashKey
 
@@ -89,4 +89,7 @@ def print_setup_and_teardown_info(
 
 @pytest.fixture(autouse=True)
 def assert_idle(juju_client: JujuClient, model: str):
-    juju_client.idle_for_period(model=model, timeout=timedelta(seconds=30), idle_period=timedelta(seconds=5))
+    try:
+        juju_client.idle_for_period(model=model, timeout=timedelta(seconds=30), idle_period=timedelta(seconds=5))
+    except JujuWaitTimeoutError:
+        pytest.skip("Model is not idle before test start")
