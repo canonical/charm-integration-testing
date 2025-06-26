@@ -19,8 +19,10 @@ from pathlib import Path
 
 import yaml
 
+from bundle_builder import OverridesClient
 
-def test_cli_write_output(tmp_path: Path, sample_independent_charm: str):
+
+def test_cli_write_output(tmp_path: Path, sample_independent_charm: str, overrides_client: OverridesClient):
     # GIVEN an output file
     output_bundle = tmp_path / "output_bundle.yaml"
     # AND the bundle doesn't exist
@@ -32,6 +34,8 @@ def test_cli_write_output(tmp_path: Path, sample_independent_charm: str):
             "bundle-builder",
             "--charms",
             f"{sample_independent_charm}::{sample_independent_charm}::default::default",
+            "--charm-metadata-overrides",
+            overrides_client.charm_metadata_overrides.resolve().absolute(),
             "--output-file",
             output_bundle.absolute(),
         ],
