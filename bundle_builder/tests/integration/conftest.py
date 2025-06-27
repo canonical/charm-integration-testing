@@ -13,14 +13,22 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+from pathlib import Path
+
 import pytest
 
-from bundle_builder import CharmhubClient
+from bundle_builder import CharmhubClient, OverridesClient
 
 
 @pytest.fixture
-def charmhub_client() -> CharmhubClient:
-    return CharmhubClient()
+def overrides_client() -> OverridesClient:
+    static_charm_metadata_overrides = Path(__file__).parent / "../../../static/charm-metadata-overrides"
+    return OverridesClient(charm_metadata_overrides=static_charm_metadata_overrides)
+
+
+@pytest.fixture
+def charmhub_client(overrides_client: OverridesClient) -> CharmhubClient:
+    return CharmhubClient(overrides_client=overrides_client)
 
 
 # Sample charm with only optional endpoints

@@ -1,5 +1,17 @@
-# Ingress is optional in vault
-# PR to fix: https://github.com/canonical/vault-k8s-operator/pull/657
+# PR to fix: https://github.com/canonical/vault-k8s-operator/pull/659
+provides:
+  vault-autounseal-provides:
+    optional: true
+  vault-kv:
+    optional: true
+  vault-pki:
+    optional: true
+  metrics-endpoint:
+    optional: true
+  send-ca-cert:
+    optional: true
+  grafana-dashboard:
+    optional: true
 requires:
   ingress:
     optional: true

@@ -1,0 +1,14 @@
+# Remove after: https://github.com/canonical/mysql-k8s-operator/pull/626
+provides:
+  database:
+    optional: true
+  mysql:
+    optional: true
+  mysql-root:
+    optional: true
+  metrics-endpoint:
+    optional: true
+  grafana-dashboard:
+    optional: true
+  replication-offer:
+    optional: true

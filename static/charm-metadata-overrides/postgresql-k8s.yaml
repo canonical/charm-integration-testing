@@ -1,0 +1,14 @@
+# Remove after: https://github.com/canonical/postgresql-k8s-operator/pull/1018
+provides:
+  replication-offer:
+    optional: true
+  database:
+    optional: true
+  db:
+    optional: true
+  db-admin:
+    optional: true
+  metrics-endpoint:
+    optional: true
+  grafana-dashboard:
+    optional: true
