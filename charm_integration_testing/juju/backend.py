@@ -120,25 +120,21 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def add_secret(self, model: str, name: str, values: dict):
-        raise NotImplementedError
-
-    @abstractmethod
-    def get_secret_id(self, model: str, name: str) -> str:
-        raise NotImplementedError
-
-    @abstractmethod
-    def read_secret(self, model: str, name: str) -> dict:
-        raise NotImplementedError
-
-    @abstractmethod
-    def grant_secret(self, model: str, name: str, application: str):
-        raise NotImplementedError
-
-    @abstractmethod
     def run_action(self, model: str, unit: str, action: str, arguments: dict):
         raise NotImplementedError
 
     @abstractmethod
-    def remove_secret(self, model: str, name: str):
+    def add_secret(self, model: str, name: str, values: dict[str, str]) -> str:
+        raise NotImplementedError
+
+    @abstractmethod
+    def read_secret(self, model: str, name_or_id: str) -> dict[str, str]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def grant_secret(self, model: str, name_or_id: str, application: str):
+        raise NotImplementedError
+
+    @abstractmethod
+    def remove_secret(self, model: str, name_or_id: str):
         raise NotImplementedError
