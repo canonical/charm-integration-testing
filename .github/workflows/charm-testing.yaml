@@ -151,7 +151,17 @@ jobs:
         shell: bash
         env:
           juju_channel: ${{ inputs.juju_channel }}
-        run: sudo snap install juju --channel "${juju_channel}"
+        run: |
+          for ((attempt = 1; ; attempt++)); do
+            if sudo snap install juju --channel "${juju_channel}"; then
+              break
+            elif [ "$attempt" -lt 3 ]; then
+              echo "Failed, retrying..."
+              sleep 5
+            else
+              exit 1
+            fi
+          done
 
       - name: Setup K8s Cloud
         if: ${{ inputs.substrate == 'kubernetes'}}
