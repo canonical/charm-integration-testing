@@ -29,6 +29,8 @@ def assert_applications_exist(
     model: str,
     applications: list[str],
 ):
+    _ = assert_idle # enforce fixture execution order
+
     for application in applications:
         if not juju_client.application_exists(application, model=model):
             pytest.skip(f"Application {application} not found in model")
