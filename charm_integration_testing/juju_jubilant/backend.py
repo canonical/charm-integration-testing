@@ -56,8 +56,8 @@ class JubilantBackend(JujuCmdBackend):
             "--format=yaml",
         )
 
-        # Parse the result
-        return next(iter(yaml.safe_load(result).values())).get("content", {})
+        # Extract and return secrets content from the first and only secret in the Juju result
+        return next(iter(yaml.safe_load(result).values()))["content"]
 
     def grant_secret(self, model: str, name_or_id: str, application: str):
         # Call grant secret
