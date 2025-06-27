@@ -271,7 +271,7 @@ class CharmhubClient:
 
         # Get edge refresh info if any required endpoints don't have optional flag
         edge_metadata = CharmMetadata()
-        if any(endpoint.optional is None for endpoint in metadata.requires.values()):
+        if any(endpoint.optional is None for endpoint in set(metadata.requires.values()) | set(metadata.provides.values())):
             edge_refresh_info = self.http_client.refresh(
                 RefreshAction(
                     charm_name=refresh_info.name,
