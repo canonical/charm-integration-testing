@@ -61,7 +61,7 @@ def assert_applications_exist(
     target_application: str,
     neighbor_application: str,
 ):
-    _ = assert_idle # enforce fixture execution order
+    _ = assert_idle  # Enforce fixture execution order
 
     if not juju_client.application_exists(target_application, model=model):
         pytest.skip(f"Application {target_application} not found in model")
@@ -79,7 +79,7 @@ def assert_applications_integrated(
     neighbor_application: str,
     neighbor_endpoint: str,
 ):
-    _ = assert_applications_exist # enforce fixture execution order
+    _ = assert_applications_exist  # Enforce fixture execution order
 
     if not juju_client.integration_exists(
         target_application, target_endpoint, neighbor_application, neighbor_endpoint, model=model
