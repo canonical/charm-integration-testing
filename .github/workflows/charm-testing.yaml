@@ -357,6 +357,7 @@ jobs:
           echo "directory_path=$(realpath "logs")" >> $GITHUB_OUTPUT
 
       - name: Post Logs To Swift
+        id: post_logs_to_swift
         if: ${{ !cancelled() && inputs.execution_id != '' }}
         uses: canonical/sqa-cloud-deployment-pipeline/.github/actions/upload-to-swift@173b1936e2c96e317b0f1167509b068b2020e233
         with:
@@ -372,7 +373,7 @@ jobs:
           SWIFT_OS_PROJECT_DOMAIN_NAME: ${{ secrets.SWIFT_OS_PROJECT_DOMAIN_NAME }}
 
       - name: Post 'log_collection_finished' event
-        if: ${{ !cancelled() && env.test_observer_api != '' && inputs.execution_id != '' }}
+        if: ${{ !cancelled() && steps.post_logs_to_swift.outcome == 'success' && env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-events
         with:
           test_observer_api: ${{ env.test_observer_api }}
@@ -382,7 +383,7 @@ jobs:
           detail: "Log collection has completed."
 
       - name: Post links to Test Observer
-        if: ${{ !cancelled() && env.test_observer_api != '' && inputs.execution_id != '' }}
+        if: ${{ !cancelled() && steps.post_logs_to_swift.outcome == 'success' && env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-links
         with:
           test_observer_api: ${{ env.test_observer_api }}
