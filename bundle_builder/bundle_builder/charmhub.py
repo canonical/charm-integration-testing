@@ -258,7 +258,7 @@ class CharmhubClient:
             releases = {release for release in refresh_info.error.extra.releases if release.base == base}
             # Pick a release if exists
             if len(releases) > 1:
-                # Prefer a release with a track
+                # Prefer a release with a track because default track can be inconsistent
                 return sorted(releases, key=lambda release: "/" not in release.channel)[0].channel
 
         # No suitable channel found
@@ -269,7 +269,7 @@ class CharmhubClient:
     def _all_charm_endpoints(self, refresh_info: RefreshResponse):
         metadata = refresh_info.charm.metadata
 
-        # Get edge refresh info if any required endpoints don't have optional flag
+        # Get edge refresh info if any requires or provides endpoints don't have optional flag
         edge_metadata = CharmMetadata()
         if any(
             endpoint.optional is None for endpoint in set(metadata.requires.values()) | set(metadata.provides.values())
