@@ -254,9 +254,12 @@ class CharmhubClient:
 
         # Check extra releases for base
         if refresh_info.error.code == "revision-not-found":
-            for release in refresh_info.error.extra.releases:
-                if release.base == base:
-                    return release.channel
+            # Gather releases matching the base
+            releases = {release for release in refresh_info.error.extra.releases if release.base == base}
+            # Pick a release if exists
+            if len(releases) > 1:
+                # Prefer a release with a track
+                return sorted(releases, key=lambda release: "/" not in release.channel)[0].channel
 
         # No suitable channel found
         raise CharmReleaseNotFoundException(
