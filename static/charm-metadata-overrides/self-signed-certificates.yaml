@@ -1,3 +1,4 @@
+# Remove after: https://github.com/canonical/self-signed-certificates-operator/pull/359
 provides:
   certificates:
     optional: true
