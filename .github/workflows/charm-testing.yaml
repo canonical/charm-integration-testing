@@ -238,7 +238,7 @@ jobs:
           detail: "Test deployment finished."
 
       - name: Post 'test_integration_start' event
-        if: ${{ !cancelled() && env.test_observer_api != '' && inputs.execution_id != '' }}
+        if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-events
         with:
           test_observer_api: ${{ env.test_observer_api }}
