@@ -27,10 +27,13 @@ runs:
       env:
         junit_xml: ${{ inputs.junit_xml }}
       run: |
+        # XML to JSON conversion is not 1-to-1
+        # So sometimes things are wrapped in lists, sometimes they're not
+        # Explicitly wrap these things in list
         cat "${junit_xml}" | yq -p=xml -o=json '
-          .testsuites.testsuite |= [] + . | # Ensure testsuite is list
-          .testsuites.testsuite[].testcase |= [] + . | # Ensure testcase is list
-          .testsuites.testsuite[].testcase[].system-out |= [] + . # Ensure system-out is list
+          .testsuites.testsuite |= [] + . |
+          .testsuites.testsuite[].testcase |= [] + . |
+          .testsuites.testsuite[].testcase[].system-out |= [] + .
         ' | jq --compact-output '
           [
             .testsuites.testsuite[] | {testsuite: .} + (.testcase[]) |
