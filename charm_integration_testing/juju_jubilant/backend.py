@@ -29,7 +29,7 @@ class JubilantBackend(JujuCmdBackend):
         try:
             self.client.model(model).wait(
                 jubilant.all_active,
-                error=jubilant.any_error,
+                error=None,
                 timeout=timeout.total_seconds() if timeout else None,
                 successes=int(period.total_seconds()) if period else 1,
                 delay=1,

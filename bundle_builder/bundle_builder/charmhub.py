@@ -254,9 +254,12 @@ class CharmhubClient:
 
         # Check extra releases for base
         if refresh_info.error.code == "revision-not-found":
-            for release in refresh_info.error.extra.releases:
-                if release.base == base:
-                    return release.channel
+            # Gather releases matching the base
+            releases = {release for release in refresh_info.error.extra.releases if release.base == base}
+            # Pick a release if exists
+            if len(releases) > 1:
+                # Prefer a release with a track because default track can be inconsistent
+                return sorted(releases, key=lambda release: "/" not in release.channel)[0].channel
 
         # No suitable channel found
         raise CharmReleaseNotFoundException(
@@ -266,9 +269,11 @@ class CharmhubClient:
     def _all_charm_endpoints(self, refresh_info: RefreshResponse):
         metadata = refresh_info.charm.metadata
 
-        # Get edge refresh info if any required endpoints don't have optional flag
+        # Get edge refresh info if any requires or provides endpoints don't have optional flag
         edge_metadata = CharmMetadata()
-        if any(endpoint.optional is None for endpoint in metadata.requires.values()):
+        if any(
+            endpoint.optional is None for endpoint in set(metadata.requires.values()) | set(metadata.provides.values())
+        ):
             edge_refresh_info = self.http_client.refresh(
                 RefreshAction(
                     charm_name=refresh_info.name,

@@ -1,5 +1,0 @@
-provides:
-  certificates:
-    optional: true
-  send-ca-cert:
-    optional: true
