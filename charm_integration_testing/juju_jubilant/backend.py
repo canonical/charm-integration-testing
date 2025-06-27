@@ -56,7 +56,8 @@ class JubilantBackend(JujuCmdBackend):
             "--format=yaml",
         )
 
-        # Extract and return secrets content from the first and only secret in the Juju result
+        # There will only ever be one secret in the Juju result, and it is keyed by ID
+        # We have `name_or_id`, but don't know which it might be, so we instead just get the first value
         return next(iter(yaml.safe_load(result).values()))["content"]
 
     def grant_secret(self, model: str, name_or_id: str, application: str):
