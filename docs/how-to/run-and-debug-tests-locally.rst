@@ -27,8 +27,8 @@ For following along the how-to, you need some information (in the form of enviro
 
 Code in this text also references the ``model_name`` environment variable, which is supposed to hold the juju model name.
 
-Setting up Juju and k8s
-------------------------------
+Set up Juju and k8s
+-------------------
 Juju and k8s will be needed to run the tests on.
 
 To install Juju, run:
@@ -51,8 +51,8 @@ Next, bootstrap ``k8s`` and configure ``kubectl``:
    sudo k8s bootstrap --address=127.0.0.1
    sudo k8s config > ~/.kube/config
 
-Setting up the k8s cloud
-~~~~~~~~~~~~~~~~~~~~~~~~ 
+Set up the k8s cloud
+~~~~~~~~~~~~~~~~~~~~
 
 It is also needed to setup the k8s cloud in juju. Do this with the following commands:
 
@@ -66,8 +66,8 @@ It is also needed to setup the k8s cloud in juju. Do this with the following com
 
 Note that ``K8S_CLOUD_NAME`` and ``K8S-CONTROLLER`` are arbitrary string values. You may change them according to your needs.
 
-Installing the repository dependencies
---------------------------------------
+Install the repository dependencies
+-----------------------------------
 
 Next, install the Python dependencies to run the repository code:
 
