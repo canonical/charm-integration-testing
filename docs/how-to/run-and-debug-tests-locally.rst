@@ -144,7 +144,7 @@ Run the following command to run the tests:
     --neighbor-endpoint "${neighbor_endpoint}"
 
 Tear charm under test down
--------------------------
+--------------------------
 Finally, execute the test teardown:
 
 .. code:: bash
