@@ -11,11 +11,11 @@ Information you will need
 For following along the how-to, you need some information (in the form of environment variables) specific to your use case. We will show some example values now, but along the how-to they are referenced as shell variables.
 
 ``charm_under_test``:
-  The name of the primary charm under test on `Charmhub <charmhub.io>`_. For example, ``grafana-k8s``.
+  The name of the primary charm under test on `Charmhub <https://charmhub.io/>`_. For example, ``grafana-k8s``.
 ``charm_endpoint``:
   Endpoint of the charm being tested. For example, ``grafana-dashboard``.
 ``neighbor``:
-  The name on `Charmhub <charmhub.io>`_ of the charm to test the primary charm against. For example, ``loki-k8s``.
+  The name on `Charmhub <https://charmhub.io/>`_ of the charm to test the primary charm against. For example, ``loki-k8s``.
 ``neighbor_endpoint``:
   Endpoint for the neighbor charm being tested. For example, ``grafana-dashboard``.
 ``revision``:
