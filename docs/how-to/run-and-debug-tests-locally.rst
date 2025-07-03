@@ -2,7 +2,7 @@
 
 Run and debug tests locally
 ===========================
-In this how-to we will go through how to locally execute and debug charm tests. Specifically, we will have a specific charm and endpoint under test, and test them against a neighbor charm and endpoint.
+In this how-to, we will go through how to locally execute and debug charm tests. Specifically, we will test one endpoint from one charm, which is the primary charm being tested and is called the target charm, with one endpoint from one other charm, which we call the neighbor charm.
 
 Note that the steps below are the same used for executing charm tests in the charm integration testing project.
 
