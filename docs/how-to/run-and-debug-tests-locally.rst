@@ -8,22 +8,30 @@ Note that the steps below are the same used for executing charm tests in the cha
 
 Information you will need
 -------------------------
-For following along the how-to, you need some information (in the form of environment variables) specific to your use case. We will show some example values now, but along the how-to they are referenced as shell variables.
+This guide will reference variables that need to contain values specific to your use case. For convenience, they are treated as environment variables, so that you can simply copy and paste the commands as they are written (without any edits or substitutions), as long as you set the environment variables yourself beforehand. However, you may also substitute values directly into the commands if you prefer not to set environment variables.
 
-``charm_under_test``:
+``TARGET_CHARM``:
   The name of the primary charm under test on `Charmhub <https://charmhub.io/>`_. For example, ``grafana-k8s``.
-``charm_endpoint``:
+``TARGET_ENDPOINT``:
   Endpoint of the charm being tested. For example, ``grafana-dashboard``.
-``neighbor``:
+``NEIGHBOR_CHARM``:
   The name on `Charmhub <https://charmhub.io/>`_ of the charm to test the primary charm against. For example, ``loki-k8s``.
-``neighbor_endpoint``:
+``NEIGHBOR_ENDPOINT``:
   Endpoint for the neighbor charm being tested. For example, ``grafana-dashboard``.
-``revision``:
+``REVISION``:
   Revision number of the charm under test. For our example, ``143``.
-``series``:
+``SERIES``:
   Series to run the charm tests under. This is one of ``20.04``, ``22.04`` and ``24.04``.
-``substrate``:
+``SUBSTRATE``:
   Substrate to run the tests on. The only possible value at the moment is ``kubernetes``.
+``K8S_CLOUD_NAME``:
+  The name to use for the Kubernetes cloud that Juju will use for its controller and model. For example, ``k8s-cloud``.
+``K8S_CONTROLLER_NAME``:
+  The name to use for the Juju controller that is bootstrapped to the Kubernetes cloud and which will control the Juju model used in the testing. For example, ``k8s-controller``.
+``MODEL_NAME``:
+  The name to use for the Juju model that is created and used in the testing. For example, ``charm-testing``.
+``OUTPUT_FILE``:
+  A filename to use for for the charm bundle output produced by the ``build-bundle.sh`` script. For example, ``generated-bundle.yaml``.
 
 Code in this text also references the ``model_name`` environment variable, which is supposed to hold the juju model name.
 
@@ -58,13 +66,11 @@ It is also needed to setup the k8s cloud in juju. Do this with the following com
 
 .. code:: bash
 
-   juju add-k8s K8S_CLOUD_NAME --client
-   juju bootstrap k8s K8S-CONTROLLER --bootstrap-constraints root-disk=5G
-   juju add-model $model_name \
+   juju add-k8s ${K8S_CLOUD_NAME} --client
+   juju bootstrap k8s ${K8S-CONTROLLER} --bootstrap-constraints root-disk=5G
+   juju add-model ${MODEL_NAME} \
     --config "logging-config=DEBUG" \
     --config="update-status-hook-interval=30s"
-
-Note that ``K8S_CLOUD_NAME`` and ``K8S-CONTROLLER`` are arbitrary string values. You may change them according to your needs.
 
 Install the repository dependencies
 -----------------------------------
@@ -81,22 +87,22 @@ Next, install the Python dependencies to run the repository code:
 Generate dynamic bundles
 ------------------------
 
-To run the tests, we will generate a dynamic bundle that includes our charm under testing, the neighbor charm, and their respective endpoints. Do this with the following command:
+To run the tests, we will generate a dynamic bundle that includes our test charm, the neighbor charm, and their respective endpoints. Do this with the following command, with the appropriate values substituted:
 
 .. code:: bash
 
    ./scripts/build-bundle.sh \
     --charms \
-      "target::${charm_under_test}::${revision}::${series}" \
-      "neighbor::${neighbor}::default::default" \
-    --integrations "target:${charm_endpoint}::neighbor:${neighbor_endpoint}" \
-    --substrate "${substrate}" \
+      "target::${TARGET_CHARM}::${REVISION}::${SERIES}" \
+      "neighbor::${NEIGHBOR_CHARM}::default::default" \
+    --integrations "target:${TARGET_ENDPOINT}::neighbor:${NEIGHBOR_ENDPOINT}" \
+    --substrate "${SUBSTRATE}" \
     --charm-metadata-overrides ./static/charm-metadata-overrides/ \
     --output-file generated-bundle.yaml
 
-Again, note that you may change the value of ``output-file`` according to your needs.
+Note that you may change the value of ``output-file`` according to your needs.
 
-Next, you may verify the contents of the generated file ``generated-bundle.yaml``. They will look something like the following:
+The contents of the output file will look something like the following:
 
 .. code:: yaml
 
@@ -127,8 +133,8 @@ The first step is deploying the bundle. Do this with the following command:
 .. code:: bash
 
    ./scripts/test-deploy.sh \
-     --model "${model_name}" \
-     --bundles "path/to/generated-bundle.yaml"
+     --model "${MODEL_NAME}" \
+     --bundles "${OUTPUT_FILE}"
 
 Execute tests
 -------------
@@ -137,11 +143,11 @@ Run the following command to run the tests:
 .. code:: bash
 
   ./scripts/test-integration.sh \
-    --model "${model_name}" \
+    --model "${MODEL_NAME}" \
     --target-application "target" \
-    --target-endpoint "${charm_endpoint}" \
+    --target-endpoint "${TARGET_ENDPOINT}" \
     --neighbor-application "neighbor" \
-    --neighbor-endpoint "${neighbor_endpoint}"
+    --neighbor-endpoint "${NEIGHBOR_ENDPOINT}"
 
 Tear charm under test down
 --------------------------
@@ -150,5 +156,5 @@ Finally, execute the test teardown:
 .. code:: bash
 
    ./scripts/test-teardown.sh \
-     --model "${model_name}" \
+     --model "${MODEL_NAME}" \
      --applications "target"
