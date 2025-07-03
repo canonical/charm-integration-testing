@@ -29,7 +29,7 @@ Code in this text also references the ``model_name`` environment variable, which
 
 Set up Juju and k8s
 -------------------
-Juju and k8s will be needed to run the tests on.
+Juju and k8s will be needed to run the tests.
 
 To install Juju, run:
 
