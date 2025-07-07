@@ -33,8 +33,6 @@ This guide will reference variables that need to contain values specific to your
 ``OUTPUT_FILE``:
   A filename to use for for the charm bundle output produced by the ``build-bundle.sh`` script. For example, ``generated-bundle.yaml``.
 
-Code in this text also references the ``model_name`` environment variable, which is supposed to hold the juju model name.
-
 Set up Juju and k8s
 -------------------
 Juju and k8s will be needed to run the tests.
@@ -87,7 +85,7 @@ Next, install the Python dependencies to run the repository code:
 Generate dynamic bundles
 ------------------------
 
-To run the tests, we will generate a dynamic bundle that includes our test charm, the neighbor charm, and their respective endpoints. Do this with the following command, with the appropriate values substituted:
+To run the tests, we will generate a dynamic bundle that includes our test charm, the neighbor charm, and their respective endpoints. Do this with the following command:
 
 .. code:: bash
 
@@ -98,9 +96,7 @@ To run the tests, we will generate a dynamic bundle that includes our test charm
     --integrations "target:${TARGET_ENDPOINT}::neighbor:${NEIGHBOR_ENDPOINT}" \
     --substrate "${SUBSTRATE}" \
     --charm-metadata-overrides ./static/charm-metadata-overrides/ \
-    --output-file generated-bundle.yaml
-
-Note that you may change the value of ``output-file`` according to your needs.
+    --output-file "${OUTPUT_FILE}"
 
 The contents of the output file will look something like the following:
 
