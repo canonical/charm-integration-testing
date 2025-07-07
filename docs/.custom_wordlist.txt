@@ -45,3 +45,5 @@ wordlist
 xetex
 xindy
 xml
+neighbor
+teardown
