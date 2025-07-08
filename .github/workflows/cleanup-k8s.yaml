@@ -34,7 +34,17 @@ jobs:
     steps:
       - name: Install kubectl
         shell: bash
-        run: sudo snap install kubectl --classic
+        run: |
+          for ((attempt = 1; ; attempt++)); do
+            if sudo snap install kubectl --classic; then
+              break
+            elif [ "$attempt" -lt 3 ]; then
+              echo "Failed, retrying..."
+              sleep 5
+            else
+              exit 1
+            fi
+          done
 
       - name: Setup kube config
         shell: bash

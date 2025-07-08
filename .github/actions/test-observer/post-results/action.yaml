@@ -19,7 +19,17 @@ runs:
   steps:
     - name: Install yq
       shell: bash
-      run: sudo snap install yq
+      run: |
+        for ((attempt = 1; ; attempt++)); do
+          if sudo snap install yq; then
+            break
+          elif [ "$attempt" -lt 3 ]; then
+            echo "Failed, retrying..."
+            sleep 5
+          else
+            exit 1
+          fi
+        done
 
     - id: get-json-body
       name: Convert JUnit XML to Test Observer JSON

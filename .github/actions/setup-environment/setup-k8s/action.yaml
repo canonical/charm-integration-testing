@@ -38,7 +38,16 @@ runs:
     id: cloud
     run: |
       export CLOUD="k8s-${environment}"
-      KUBECONFIG="$HOME/.kube/config" juju add-k8s $CLOUD --client
+      for ((attempt = 1; ; attempt++)); do
+        if KUBECONFIG="$HOME/.kube/config" juju add-k8s $CLOUD --client; then
+          break
+        elif [ "$attempt" -lt 3 ]; then
+          echo "Failed, retrying..."
+          sleep 5
+        else
+          exit 1
+        fi
+      done
       echo "cloud=$CLOUD" >> $GITHUB_OUTPUT
 
   - name: Set extra-options
@@ -53,13 +62,33 @@ runs:
       extraoptions: ${{ steps.extra-options.outputs.extra-options }}
     shell: bash
     run: |
-      # juju will prefix the namespace with "controller"
-      juju bootstrap ${cloud} ${extraoptions} ${controller}
+      for ((attempt = 1; ; attempt++)); do
+        # Juju will prefix the namespace with "controller"
+        if juju bootstrap ${cloud} ${extraoptions} ${controller}; then
+          break
+        elif [ "$attempt" -lt 3 ]; then
+          echo "Failed, retrying..."
+          sleep 5
+        else
+          exit 1
+        fi
+      done
+
   - name: Create Model
     env:
       model: ${{ inputs.model }}
     shell: bash
     run: |
-      juju add-model ${model} \
-        --config "logging-config=DEBUG" \
-        --config="update-status-hook-interval=30s"
+      for ((attempt = 1; ; attempt++))
+      do
+        if juju add-model ${model} \
+            --config "logging-config=DEBUG" \
+            --config="update-status-hook-interval=30s"; then
+          break
+        elif [ "$attempt" -lt 3 ]; then
+          echo "Failed, retrying..."
+          sleep 5
+        else
+          exit 1
+        fi
+      done
