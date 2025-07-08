@@ -56,7 +56,11 @@ class TestCharmhubClient:
                 label="successful_refresh",
                 charm="my-charm",
                 base=matching_base,
-                refresh_info=RefreshResponse(**{"name": "my-charm", "effective-channel": "stable", "error": None}),
+                refresh_info=RefreshResponse(
+                    name="my-charm", 
+                    effective_channel="stable",
+                    error=None,
+                ),
                 channel="stable",
             ),
             Params(

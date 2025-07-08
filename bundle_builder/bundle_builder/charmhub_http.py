@@ -70,7 +70,7 @@ class CharmMetadata:
     provides: dict[str, Endpoint] = Field(default_factory=dict)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, config=dict(validate_by_name=True))
 class RefreshResponse:
     @dataclass(frozen=True)
     class Charm:
