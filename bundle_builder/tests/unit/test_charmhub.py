@@ -57,7 +57,7 @@ class TestCharmhubClient:
                 charm="my-charm",
                 base=matching_base,
                 refresh_info=RefreshResponse(
-                    name="my-charm", 
+                    name="my-charm",
                     effective_channel="stable",
                     error=None,
                 ),
