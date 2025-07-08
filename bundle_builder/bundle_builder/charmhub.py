@@ -257,7 +257,7 @@ class CharmhubClient:
             # Gather releases matching the base
             releases = {release for release in refresh_info.error.extra.releases if release.base == base}
             # Pick a release if exists
-            if len(releases) > 1:
+            if len(releases) > 0:
                 # Prefer a release with a track because default track can be inconsistent
                 return sorted(releases, key=lambda release: "/" not in release.channel)[0].channel
 
