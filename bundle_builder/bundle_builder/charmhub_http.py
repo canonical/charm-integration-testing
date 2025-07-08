@@ -85,7 +85,7 @@ class RefreshResponse:
 
     @dataclass(frozen=True)
     class Error:
-        @dataclass(frozen=True)
+        @dataclass(frozen=True, config=dict(validate_by_name=True))
         class Extra:
             @dataclass(frozen=True)
             class Release:
