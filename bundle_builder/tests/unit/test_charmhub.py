@@ -27,15 +27,13 @@ from bundle_builder.charmhub_http import (
 
 @dataclass
 class CharmhubHttpClientStub:
-    refresh_charm: str | None = None
-    refresh_base: CharmhubBase | None = None
-    refresh_info: RefreshResponse | None = None
+    refresh_charm: str
+    refresh_base: CharmhubBase
+    refresh_info: RefreshResponse
 
     def refresh(self, action: RefreshAction) -> RefreshResponse:
-        if self.refresh_charm is not None:
-            assert action.charm_name == self.refresh_charm
-        if self.refresh_base is not None:
-            assert action.base == self.refresh_base
+        assert action.charm_name == self.refresh_charm
+        assert action.base == self.refresh_base
         return self.refresh_info
 
 
@@ -135,7 +133,7 @@ class TestCharmhubClient:
         def test(self, params: Params):
             # GIVEN
             http_client = CharmhubHttpClientStub(
-                refresh_name=params.charm,
+                refresh_charm=params.charm,
                 refresh_base=params.base,
                 refresh_info=params.refresh_info,
             )
