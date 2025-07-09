@@ -195,6 +195,15 @@ class CharmhubClient:
         if not ubuntu_version:
             ubuntu_version = self._default_ubuntu_version(charm_name, ubuntu_arch)
 
+        # Get suitable channel
+        channel = self._suitable_charm_channel(
+            charm_name,
+            CharmhubBase(
+                channel=ubuntu_version,
+                architecture=ubuntu_arch,
+            ),
+        )
+
         # Call refresh with base
         refresh_info = self.http_client.refresh(
             RefreshAction(
@@ -203,6 +212,7 @@ class CharmhubClient:
                     channel=ubuntu_version,
                     architecture=ubuntu_arch,
                 ),
+                charm_channel=channel,
             )
         )
         if refresh_info.error is not None:
@@ -213,7 +223,7 @@ class CharmhubClient:
         # Return Charm
         return Charm(
             name=charm_name,
-            channel=refresh_info.effective_channel,
+            channel=channel,
             revision=refresh_info.charm.revision,
             ubuntu_version=ubuntu_version,
             ubuntu_arch=ubuntu_arch,
@@ -233,18 +243,21 @@ class CharmhubClient:
                 ),
             )
         )
-        if refresh_info.error.code != "invalid-charm-base":
+
+        # Check the error code to get the bases
+        if refresh_info.error.code == "invalid-charm-base":
+            bases = refresh_info.error.extra.default_bases
+        elif refresh_info.error.code == "revision-not-found":
+            bases = [release.base for release in refresh_info.error.extra.releases]
+        else:
             raise CharmReleaseNotFoundException(f"Failed to find default bases for charm {charm_name}")
 
-        # Get default bases field
-        default_bases = refresh_info.error.extra.default_bases
-
         # Ensure a base was found
-        if len(default_bases) == 0:
+        if len(bases) == 0:
             raise CharmReleaseNotFoundException(f"No default bases found for {charm_name} in arch {ubuntu_arch}")
 
         # Pick the first base (like Juju)
-        return default_bases[0].channel
+        return bases[0].channel
 
     def _suitable_charm_channel(self, charm_name: str, base: CharmhubBase) -> str:
         # Get refresh info for base
