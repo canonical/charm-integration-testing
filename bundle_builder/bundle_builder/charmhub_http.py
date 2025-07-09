@@ -107,7 +107,7 @@ class RefreshResponse:
 
 @dataclass(frozen=True)
 class FindResponse:
-    @dataclass(frozen=True)
+    @dataclass(frozen=True, config=dict(validate_by_name=True))
     class Result:
         deployable_on: frozenset[str] = Field(default_factory=frozenset, alias="deployable-on")
 

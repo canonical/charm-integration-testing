@@ -44,14 +44,21 @@ class CharmMetadataOverride:
     provides: dict[str, CharmEndpointOverride] = Field(default_factory=dict)
 
 
+@dataclass
+class CharmPlatformOverride:
+    platforms: set[str] = Field(default_factory=set)
+
+
 class OverridesClient:
     charm_metadata_overrides: Path | None = None
+    charm_platform_overrides: Path | None = None
 
-    def __init__(self, charm_metadata_overrides: Path | None = None):
+    def __init__(self, charm_metadata_overrides: Path | None = None, charm_platform_overrides: Path | None = None):
         self.charm_metadata_overrides = charm_metadata_overrides
+        self.charm_platform_overrides = charm_platform_overrides
 
     @cache
-    def get_charm_overrides(self, charm: str) -> CharmMetadataOverride:
+    def get_charm_metadata_overrides(self, charm: str) -> CharmMetadataOverride:
         # Return empty if no charm metadata overrides folder given
         if self.charm_metadata_overrides is None:
             return CharmMetadataOverride()
@@ -64,3 +71,18 @@ class OverridesClient:
         # Read override file
         with override_file.open("r", encoding="utf-8") as file:
             return CharmMetadataOverride(**yaml.safe_load(file))
+
+    @cache
+    def get_charm_platform_overrides(self, charm: str) -> set[str]:
+        # Return empty if no charm platform overrides folder given
+        if self.charm_platform_overrides is None:
+            return set()
+
+        # Get override file
+        override_file = self.charm_platform_overrides / f"{charm}.yaml"
+        if not override_file.exists():
+            return set()
+
+        # Read override file
+        with override_file.open("r", encoding="utf-8") as file:
+            return CharmPlatformOverride(**yaml.safe_load(file)).platforms

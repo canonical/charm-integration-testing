@@ -61,6 +61,7 @@ class TestAddArgsToParser:
         "--substrate": "kubernetes",
         "--output-file": "bundle.yaml",
         "--charm-metadata-overrides": "some/folder/directory",
+        "--charm-platform-overrides": "some/folder/directory",
         "--log-level": "DEBUG",
     }
 

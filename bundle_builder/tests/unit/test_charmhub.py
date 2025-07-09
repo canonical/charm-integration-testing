@@ -15,18 +15,20 @@
 
 
 import pytest
+from pydantic import Field
 from pydantic.dataclasses import dataclass
 
 from bundle_builder.charmhub import CharmhubClient, CharmReleaseNotFoundException
 from bundle_builder.charmhub_http import (
     CharmhubBase,
+    FindResponse,
     RefreshAction,
     RefreshResponse,
 )
 
 
 @dataclass
-class CharmhubHttpClientStub:
+class CharmhubHttpRefreshStub:
     refresh_charm: str
     refresh_base: CharmhubBase
     refresh_info: RefreshResponse
@@ -35,6 +37,22 @@ class CharmhubHttpClientStub:
         assert action.charm_name == self.refresh_charm
         assert action.base == self.refresh_base
         return self.refresh_info
+
+
+@dataclass
+class CharmhubHttpFindStub:
+    find_response: list[FindResponse]
+
+    def find(self, provides: str | None = None, requires: str | None = None) -> list[FindResponse]:
+        return self.find_response
+
+
+@dataclass
+class OverridesStub:
+    charm_platform_overrides: dict[str, set[str]]
+
+    def get_charm_platform_overrides(self, charm: str) -> set[str]:
+        return self.charm_platform_overrides.get(charm, set())
 
 
 matching_base = CharmhubBase(name="ubuntu", architecture="amd64", channel="20.04")
@@ -123,7 +141,7 @@ class TestCharmhubClient:
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
         def test(self, params: Params):
             # GIVEN
-            http_client = CharmhubHttpClientStub(
+            http_client = CharmhubHttpRefreshStub(
                 refresh_charm=params.charm,
                 refresh_base=CharmhubBase(name="NA", architecture=params.arch, channel="NA"),
                 refresh_info=params.refresh_info,
@@ -243,7 +261,7 @@ class TestCharmhubClient:
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
         def test(self, params: Params):
             # GIVEN
-            http_client = CharmhubHttpClientStub(
+            http_client = CharmhubHttpRefreshStub(
                 refresh_charm=params.charm,
                 refresh_base=params.base,
                 refresh_info=params.refresh_info,
@@ -265,3 +283,96 @@ class TestCharmhubClient:
             else:
                 assert not raised_charm_release_not_found
                 assert channel == params.channel
+
+    class TestFindCharms:
+        @dataclass
+        class Params:
+            label: str
+            provides: str | None = None
+            requires: str | None = None
+            platform: str | None = None
+            charms: list[FindResponse] = Field(default_factory=list)
+            overrides: dict[str, set[str]] = Field(default_factory=dict)
+            expected: set[str] = Field(default_factory=set)
+
+        test_cases = [
+            Params(
+                label="no_filtering",
+                provides=None,
+                requires=None,
+                platform=None,
+                charms=[
+                    FindResponse("charm-a", result=FindResponse.Result(deployable_on=frozenset({"kubernetes"}))),
+                    FindResponse(
+                        "charm-b", result=FindResponse.Result(deployable_on=frozenset({"kubernetes", "machine"}))
+                    ),
+                ],
+                overrides={},
+                expected={"charm-a", "charm-b"},
+            ),
+            Params(
+                label="platform_match_store_only",
+                provides=None,
+                requires=None,
+                platform="machine",
+                charms=[
+                    FindResponse("charm-a", result=FindResponse.Result(deployable_on=frozenset({"kubernetes"}))),
+                    FindResponse(
+                        "charm-b", result=FindResponse.Result(deployable_on=frozenset({"kubernetes", "machine"}))
+                    ),
+                ],
+                overrides={},
+                expected={"charm-b"},
+            ),
+            Params(
+                label="platform_match_override_only",
+                provides=None,
+                requires=None,
+                platform="machine",
+                charms=[
+                    FindResponse("charm-a", result=FindResponse.Result(deployable_on=frozenset({"kubernetes"}))),
+                    FindResponse("charm-b", result=FindResponse.Result(deployable_on=frozenset({"kubernetes"}))),
+                ],
+                overrides={
+                    "charm-a": {"machine"},
+                },
+                expected={"charm-a"},
+            ),
+            Params(
+                label="platform_match_store_or_override",
+                platform="machine",
+                charms=[
+                    FindResponse("charm-a", result=FindResponse.Result(deployable_on=frozenset({"machine"}))),
+                    FindResponse("charm-b", result=FindResponse.Result(deployable_on=frozenset({"kubernetes"}))),
+                ],
+                overrides={
+                    "charm-b": {"machine"},
+                },
+                expected={"charm-a", "charm-b"},
+            ),
+            Params(
+                label="no_matches_with_platform",
+                platform="kubernetes",
+                charms=[
+                    FindResponse("charm-a", result=FindResponse.Result(deployable_on=frozenset({"machine"}))),
+                ],
+                overrides={},
+                expected=set(),
+            ),
+        ]
+
+        @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
+        def test(self, params: Params):
+            # GIVEN
+            http_client = CharmhubHttpFindStub(find_response=params.charms)
+            overrides_client = OverridesStub(charm_platform_overrides=params.overrides)
+
+            # WHEN
+            result = CharmhubClient(http_client=http_client, overrides_client=overrides_client).find_charms(
+                provides=params.provides,
+                requires=params.requires,
+                platform=params.platform,
+            )
+
+            # THEN
+            assert result == frozenset(params.expected)

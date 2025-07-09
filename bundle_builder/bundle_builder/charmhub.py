@@ -91,10 +91,36 @@ class CharmhubClient:
         # Call find API
         response = self.http_client.find(provides=provides, requires=requires)
 
+        # Collect charms
+        charms = {charm.name for charm in response}
+
+        # Filter by platform
+        if platform is not None:
+            # Get charms mapped to store platforms
+            charm_to_store_platforms = {
+                charm_name: {
+                    platform
+                    for charm in response
+                    if charm.name == charm_name
+                    for platform in charm.result.deployable_on
+                }
+                for charm_name in charms
+            }
+
+            # Get charms mapped to override platforms
+            charm_to_override_platforms = {
+                charm: self.overrides_client.get_charm_platform_overrides(charm) for charm in charms
+            }
+
+            # Pick only charms matching the platform
+            charms = {
+                charm
+                for charm in charms
+                if platform in charm_to_store_platforms[charm] | charm_to_override_platforms[charm]
+            }
+
         # Return charms
-        return frozenset(
-            {charm.name for charm in response if platform is None or platform in charm.result.deployable_on}
-        )
+        return frozenset(charms)
 
     def _charm_from_store_by_revision(
         self,
@@ -307,7 +333,7 @@ class CharmhubClient:
         # Get endpoint optionality overrides
         metadata_overrides = CharmMetadataOverride()
         if self.overrides_client:
-            metadata_overrides = self.overrides_client.get_charm_overrides(refresh_info.name)
+            metadata_overrides = self.overrides_client.get_charm_metadata_overrides(refresh_info.name)
 
         # Map endpoints
         endpoints = set()

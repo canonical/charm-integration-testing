@@ -74,7 +74,7 @@ class TestCharmEndpointOverride:
 
 
 class TestOverridesClient:
-    class TestGetCharmOverrides:
+    class TestGetCharmMetadataOverrides:
         @dataclass
         class Params:
             label: str
@@ -125,7 +125,51 @@ class TestOverridesClient:
                     yaml.dump(override, f)
 
             # WHEN the override for the charm is fetched
-            override = overrides_client.get_charm_overrides(params.charm)
+            override = overrides_client.get_charm_metadata_overrides(params.charm)
+
+            # THEN matches expected
+            assert override == params.expected_override
+
+    class TestGetCharmPlatformOverrides:
+        @dataclass
+        class Params:
+            label: str
+            charm: str = "postgresql-k8s"
+            overrides: dict = field(default_factory=dict)
+            expected_override: set[str] = field(default_factory=set)
+            overrides_directory: bool = True
+
+        test_cases = [
+            Params(
+                label="overrides_directory_not_given",
+                overrides_directory=False,
+            ),
+            Params(label="override_for_charm_not_found", charm="postgresql-k8s", overrides={}),
+            Params(
+                label="override_is_provided",
+                charm="postgresql-k8s",
+                overrides={
+                    "postgresql-k8s": {
+                        "platforms": ["kubernetes", "machine"],
+                    },
+                },
+                expected_override={"kubernetes", "machine"},
+            ),
+        ]
+
+        @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
+        def test(self, params: Params, tmp_path: Path):
+            # GIVEN the override client
+            overrides_client = OverridesClient(
+                charm_platform_overrides=tmp_path if params.overrides_directory else None
+            )
+            # AND the provided overrides are written to files
+            for charm, override in params.overrides.items():
+                with (tmp_path / f"{charm}.yaml").open("w") as f:
+                    yaml.dump(override, f)
+
+            # WHEN the override for the charm is fetched
+            override = overrides_client.get_charm_platform_overrides(params.charm)
 
             # THEN matches expected
             assert override == params.expected_override

@@ -73,6 +73,9 @@ def add_args_to_parser(parser: argparse.ArgumentParser):
         "--charm-metadata-overrides", type=Path, help="Path to folder containing charm metadata overrides", default=None
     )
     parser.add_argument(
+        "--charm-platform-overrides", type=Path, help="Path to folder containing charm platform overrides", default=None
+    )
+    parser.add_argument(
         "--log-level", type=str.upper, choices=["INFO", "DEBUG", "WARNING", "ERROR", "CRITICAL"], default="INFO"
     )
 
@@ -169,7 +172,12 @@ def main():
     # Create override client
     if args.charm_metadata_overrides is not None and not args.charm_metadata_overrides.is_dir():
         parser.error(f"The charm metadata overrides path '{args.charm_metadata_overrides}' is not a valid directory.")
-    overrides_client = OverridesClient(args.charm_metadata_overrides)
+    if args.charm_platform_overrides is not None and not args.charm_platform_overrides.is_dir():
+        parser.error(f"The charm platform overrides path '{args.charm_platform_overrides}' is not a valid directory.")
+    overrides_client = OverridesClient(
+        charm_metadata_overrides=args.charm_metadata_overrides,
+        charm_platform_overrides=args.charm_platform_overrides,
+    )
 
     # Create Charmhub client
     charmhub_client = CharmhubClient(logger=logger, overrides_client=overrides_client)
