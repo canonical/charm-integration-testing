@@ -92,7 +92,7 @@ class TestCharmhubClient:
                         message="Missing revision",
                         extra=RefreshResponse.Error.Extra(
                             releases=[
-                                RefreshResponse.Error.Extra.Release(channel="stable", base=matching_base),
+                                RefreshResponse.Error.Extra.Release(channel="edge", base=matching_base),
                                 RefreshResponse.Error.Extra.Release(channel="latest/edge", base=matching_base),
                             ]
                         ),
