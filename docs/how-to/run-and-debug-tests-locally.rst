@@ -97,6 +97,7 @@ To run the tests, we will generate a dynamic bundle that includes our test charm
     --substrate "${SUBSTRATE}" \
     --charm-metadata-overrides ./static/charm-metadata-overrides/ \
     --charm-platform-overrides ./static/charm-platform-overrides/ \
+    --charm-listing-overrides ./static/charm-listing-overrides.yaml \
     --output-file "${OUTPUT_FILE}"
 
 The contents of the output file will look something like the following:
