@@ -96,6 +96,7 @@ To run the tests, we will generate a dynamic bundle that includes our test charm
     --integrations "target:${TARGET_ENDPOINT}::neighbor:${NEIGHBOR_ENDPOINT}" \
     --substrate "${SUBSTRATE}" \
     --charm-metadata-overrides ./static/charm-metadata-overrides/ \
+    --charm-platform-overrides ./static/charm-platform-overrides/ \
     --output-file "${OUTPUT_FILE}"
 
 The contents of the output file will look something like the following:
