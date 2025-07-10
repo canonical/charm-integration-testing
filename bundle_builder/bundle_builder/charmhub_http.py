@@ -76,7 +76,7 @@ class RefreshResponse:
     class Charm:
         bases: list[CharmhubBase] | None = None
         revision: int | None = None
-        metadata: CharmMetadata | None = Field(default=None, alias="metadata-yaml")
+        metadata: CharmMetadata = Field(default_factory=CharmMetadata, alias="metadata-yaml")
 
         @field_validator("metadata", mode="before")
         @classmethod
@@ -121,7 +121,7 @@ class InfoResponse:
     class DefaultRelease:
         @dataclass(frozen=True, config=dict(validate_by_name=True))
         class Revision:
-            metadata: CharmMetadata | None = Field(default=None, alias="metadata-yaml")
+            metadata: CharmMetadata = Field(default_factory=CharmMetadata, alias="metadata-yaml")
 
             @field_validator("metadata", mode="before")
             @classmethod

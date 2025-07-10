@@ -15,6 +15,7 @@
 
 
 import pytest
+import yaml
 from pydantic import Field
 from pydantic.dataclasses import dataclass
 
@@ -22,6 +23,7 @@ from bundle_builder.charmhub import CharmhubClient, CharmReleaseNotFoundExceptio
 from bundle_builder.charmhub_http import (
     CharmhubBase,
     FindResponse,
+    InfoResponse,
     RefreshAction,
     RefreshResponse,
 )
@@ -41,18 +43,28 @@ class CharmhubHttpRefreshStub:
 
 @dataclass
 class CharmhubHttpFindStub:
-    find_response: list[FindResponse]
+    find_response: list[FindResponse] = Field(default_factory=list)
 
     def find(self, provides: str | None = None, requires: str | None = None) -> list[FindResponse]:
         return self.find_response
 
+    info_response: dict[str, InfoResponse] = Field(default_factory=dict)
+
+    def info(self, charm: str) -> InfoResponse:
+        return self.info_response[charm]
+
 
 @dataclass
 class OverridesStub:
-    charm_platform_overrides: dict[str, set[str]]
+    charm_platform_overrides: dict[str, set[str]] = Field(default_factory=dict)
 
     def get_charm_platform_overrides(self, charm: str) -> set[str]:
         return self.charm_platform_overrides.get(charm, set())
+
+    charm_listing_overrides: set[str] = Field(default_factory=set)
+
+    def get_charm_listing_overrides(self) -> set[str]:
+        return self.charm_listing_overrides
 
 
 matching_base = CharmhubBase(name="ubuntu", architecture="amd64", channel="20.04")
@@ -291,88 +303,217 @@ class TestCharmhubClient:
             provides: str | None = None
             requires: str | None = None
             platform: str | None = None
-            charms: list[FindResponse] = Field(default_factory=list)
-            overrides: dict[str, set[str]] = Field(default_factory=dict)
+            find_response: list[FindResponse] = Field(default_factory=list)
+            info_response: dict[str, InfoResponse] = Field(default_factory=dict)
+            platform_overrides: dict[str, set[str]] = Field(default_factory=dict)
+            listing_overrides: set[str] = Field(default_factory=set)
             expected: set[str] = Field(default_factory=set)
 
         test_cases = [
             Params(
-                label="no_filtering",
-                provides=None,
-                requires=None,
-                platform=None,
-                charms=[
+                label="success",
+                find_response=[
                     FindResponse("charm-a", result=FindResponse.Result(deployable_on=frozenset({"kubernetes"}))),
                     FindResponse(
                         "charm-b", result=FindResponse.Result(deployable_on=frozenset({"kubernetes", "machine"}))
                     ),
                 ],
-                overrides={},
                 expected={"charm-a", "charm-b"},
             ),
             Params(
-                label="platform_match_store_only",
-                provides=None,
-                requires=None,
-                platform="machine",
-                charms=[
-                    FindResponse("charm-a", result=FindResponse.Result(deployable_on=frozenset({"kubernetes"}))),
-                    FindResponse(
-                        "charm-b", result=FindResponse.Result(deployable_on=frozenset({"kubernetes", "machine"}))
-                    ),
-                ],
-                overrides={},
-                expected={"charm-b"},
-            ),
-            Params(
-                label="platform_match_override_only",
-                provides=None,
-                requires=None,
-                platform="machine",
-                charms=[
-                    FindResponse("charm-a", result=FindResponse.Result(deployable_on=frozenset({"kubernetes"}))),
-                    FindResponse("charm-b", result=FindResponse.Result(deployable_on=frozenset({"kubernetes"}))),
-                ],
-                overrides={
-                    "charm-a": {"machine"},
+                label="listing_override",
+                find_response=[],
+                listing_overrides={"charm-a"},
+                info_response={
+                    "charm-a": InfoResponse(result=InfoResponse.Result(deployable_on=frozenset({"kubernetes"})))
                 },
                 expected={"charm-a"},
             ),
             Params(
-                label="platform_match_store_or_override",
+                label="filter_platform",
                 platform="machine",
-                charms=[
-                    FindResponse("charm-a", result=FindResponse.Result(deployable_on=frozenset({"machine"}))),
-                    FindResponse("charm-b", result=FindResponse.Result(deployable_on=frozenset({"kubernetes"}))),
+                find_response=[
+                    FindResponse("charm-a", result=FindResponse.Result(deployable_on=frozenset({"kubernetes"}))),
+                    FindResponse(
+                        "charm-b", result=FindResponse.Result(deployable_on=frozenset({"kubernetes", "machine"}))
+                    ),
                 ],
-                overrides={
-                    "charm-b": {"machine"},
-                },
-                expected={"charm-a", "charm-b"},
+                expected={"charm-b"},
             ),
             Params(
-                label="no_matches_with_platform",
-                platform="kubernetes",
-                charms=[
-                    FindResponse("charm-a", result=FindResponse.Result(deployable_on=frozenset({"machine"}))),
+                label="platform_override",
+                platform="machine",
+                find_response=[
+                    FindResponse("charm-a", result=FindResponse.Result(deployable_on=frozenset({"kubernetes"}))),
                 ],
-                overrides={},
-                expected=set(),
+                platform_overrides={"charm-a": {"machine"}},
+                expected={"charm-a"},
             ),
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
         def test(self, params: Params):
             # GIVEN
-            http_client = CharmhubHttpFindStub(find_response=params.charms)
-            overrides_client = OverridesStub(charm_platform_overrides=params.overrides)
+            http_client = CharmhubHttpFindStub(find_response=params.find_response, info_response=params.info_response)
+            overrides_client = OverridesStub(
+                charm_platform_overrides=params.platform_overrides, charm_listing_overrides=params.listing_overrides
+            )
 
             # WHEN
-            result = CharmhubClient(http_client=http_client, overrides_client=overrides_client).find_charms(
+            actual = CharmhubClient(
+                http_client=http_client,
+                overrides_client=overrides_client,
+            ).find_charms(
                 provides=params.provides,
                 requires=params.requires,
                 platform=params.platform,
             )
 
             # THEN
-            assert result == frozenset(params.expected)
+            assert actual == params.expected
+
+    class TestFindCharmsGetListingOverrides:
+        @dataclass
+        class Params:
+            label: str
+            provides: str | None = None
+            requires: str | None = None
+            listing_overrides: set[str] = Field(default_factory=set)
+            info_response: dict[str, InfoResponse] = Field(default_factory=dict)
+            expected: set[FindResponse] = Field(default_factory=set)
+
+        test_cases = [
+            Params(
+                label="no_overrides",
+                expected=set(),
+            ),
+            Params(
+                label="with_overrides",
+                listing_overrides={"charm-a"},
+                info_response={
+                    "charm-a": InfoResponse(result=InfoResponse.Result(deployable_on=frozenset({"kubernetes"})))
+                },
+                expected={
+                    FindResponse("charm-a", result=FindResponse.Result(deployable_on=frozenset({"kubernetes"}))),
+                },
+            ),
+            Params(
+                label="filter_provides",
+                provides="interface-a",
+                listing_overrides={"charm-a", "charm-b"},
+                info_response={
+                    "charm-a": InfoResponse(
+                        default_release=InfoResponse.DefaultRelease(
+                            revision=InfoResponse.DefaultRelease.Revision(
+                                metadata=yaml.dump(
+                                    {
+                                        "provides": {
+                                            "endpoint-a": {
+                                                "interface": "interface-a",
+                                            }
+                                        }
+                                    }
+                                ),
+                            )
+                        ),
+                        result=InfoResponse.Result(deployable_on=frozenset({"kubernetes"})),
+                    ),
+                    "charm-b": InfoResponse(
+                        result=InfoResponse.Result(deployable_on=frozenset({"kubernetes"})),
+                    ),
+                },
+                expected={
+                    FindResponse("charm-a", result=FindResponse.Result(deployable_on=frozenset({"kubernetes"}))),
+                },
+            ),
+            Params(
+                label="filter_requires",
+                requires="interface-a",
+                listing_overrides={"charm-a", "charm-b"},
+                info_response={
+                    "charm-a": InfoResponse(
+                        default_release=InfoResponse.DefaultRelease(
+                            revision=InfoResponse.DefaultRelease.Revision(
+                                metadata=yaml.dump(
+                                    {
+                                        "requires": {
+                                            "endpoint-a": {
+                                                "interface": "interface-a",
+                                            }
+                                        }
+                                    }
+                                ),
+                            )
+                        ),
+                        result=InfoResponse.Result(deployable_on=frozenset({"kubernetes"})),
+                    ),
+                    "charm-b": InfoResponse(
+                        result=InfoResponse.Result(deployable_on=frozenset({"kubernetes"})),
+                    ),
+                },
+                expected={
+                    FindResponse("charm-a", result=FindResponse.Result(deployable_on=frozenset({"kubernetes"}))),
+                },
+            ),
+        ]
+
+        @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
+        def test(self, params: Params):
+            # GIVEN
+            http_client = CharmhubHttpFindStub(info_response=params.info_response)
+            overrides_client = OverridesStub(charm_listing_overrides=params.listing_overrides)
+
+            # WHEN
+            actual = CharmhubClient(
+                http_client=http_client,
+                overrides_client=overrides_client,
+            )._find_charms_get_listing_overrides(
+                provides=params.provides,
+                requires=params.requires,
+            )
+
+            # THEN
+            assert actual == params.expected
+
+    class TestFindCharmsAddPlatformOverrides:
+        @dataclass
+        class Params:
+            label: str
+            given: set[FindResponse] = Field(default_factory=set)
+            platform_overrides: dict[str, set[str]] = Field(default_factory=dict)
+            expected: set[FindResponse] = Field(default_factory=set)
+
+        test_cases = [
+            Params(
+                label="no_overrides",
+                given={
+                    FindResponse("charm-a", result=FindResponse.Result(deployable_on=frozenset({"kubernetes"}))),
+                },
+                expected={
+                    FindResponse("charm-a", result=FindResponse.Result(deployable_on=frozenset({"kubernetes"}))),
+                },
+            ),
+            Params(
+                label="apply_overrides",
+                given={
+                    FindResponse("charm-a", result=FindResponse.Result(deployable_on=frozenset({"kubernetes"}))),
+                },
+                platform_overrides={"charm-a": {"machine"}},
+                expected={
+                    FindResponse(
+                        "charm-a", result=FindResponse.Result(deployable_on=frozenset({"kubernetes", "machine"}))
+                    ),
+                },
+            ),
+        ]
+
+        @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
+        def test(self, params: Params):
+            # GIVEN
+            overrides_client = OverridesStub(charm_platform_overrides=params.platform_overrides)
+
+            # WHEN
+            actual = CharmhubClient(overrides_client=overrides_client)._find_charms_add_platform_overrides(params.given)
+
+            # THEN
+            assert actual == params.expected

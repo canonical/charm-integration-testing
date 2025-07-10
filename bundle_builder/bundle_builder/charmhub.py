@@ -13,6 +13,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import dataclasses
 import logging
 from functools import cache
 
@@ -90,44 +91,26 @@ class CharmhubClient:
         self, provides: str | None = None, requires: str | None = None, platform: str | None = None
     ) -> frozenset[str]:
         # Call find API
-        response = self._find_charms(provides=provides, requires=requires)
+        response = set(self.http_client.find(provides=provides, requires=requires))
 
-        # Collect charms
-        charms = {charm.name for charm in response}
+        # Add charms from listing overrides
+        response |= self._find_charms_get_listing_overrides(provides=provides, requires=requires)
 
-        # Filter by platform
+        # Add platform overrides
+        response = self._find_charms_add_platform_overrides(response)
+
+        # Filter response by platform
         if platform is not None:
-            # Get charms mapped to store platforms
-            charm_to_store_platforms = {
-                charm_name: {
-                    platform
-                    for charm in response
-                    if charm.name == charm_name
-                    for platform in charm.result.deployable_on
-                }
-                for charm_name in charms
-            }
-
-            # Get charms mapped to override platforms
-            charm_to_override_platforms = {
-                charm: self.overrides_client.get_charm_platform_overrides(charm) for charm in charms
-            }
-
-            # Pick only charms matching the platform
-            charms = {
-                charm
-                for charm in charms
-                if platform in charm_to_store_platforms[charm] | charm_to_override_platforms[charm]
-            }
+            response = {charm for charm in response if platform in charm.result.deployable_on}
 
         # Return charms
-        return frozenset(charms)
+        return frozenset({charm.name for charm in response})
 
-    def _find_charms(self, provides: str | None = None, requires: str | None = None) -> list[FindResponse]:
-        # Call find API
-        response = self.http_client.find(provides=provides, requires=requires)
-
-        # Check listing overridden charms
+    def _find_charms_get_listing_overrides(
+        self, provides: str | None = None, requires: str | None = None
+    ) -> set[FindResponse]:
+        # Get charm info for each listing overridden charm
+        charms: set[FindResponse] = set()
         for charm in self.overrides_client.get_charm_listing_overrides():
             # Get charm info
             charm_info = self.http_client.info(charm)
@@ -143,14 +126,28 @@ class CharmhubClient:
                 continue
 
             # Add find response
-            response.append(
+            charms.add(
                 FindResponse(
                     name=charm,
                     result=FindResponse.Result(deployable_on=charm_info.result.deployable_on),
                 )
             )
 
-        return response
+        return charms
+
+    def _find_charms_add_platform_overrides(self, response: set[FindResponse]) -> set[FindResponse]:
+        return {
+            dataclasses.replace(
+                charm,
+                result=dataclasses.replace(
+                    charm.result,
+                    deployable_on=frozenset(
+                        charm.result.deployable_on | self.overrides_client.get_charm_platform_overrides(charm.name)
+                    ),
+                ),
+            )
+            for charm in response
+        }
 
     def _charm_from_store_by_revision(
         self,

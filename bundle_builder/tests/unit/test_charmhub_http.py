@@ -22,11 +22,13 @@ from pydantic.dataclasses import dataclass
 
 from bundle_builder.charmhub_http import (
     CHARM_FIND_ENDPOINT,
+    CHARM_INFO_ENDPOINT,
     CHARM_REFRESH_ENDPOINT,
     CharmhubBase,
     CharmhubHttpClient,
     CharmMetadata,
     FindResponse,
+    InfoResponse,
     RefreshAction,
     RefreshResponse,
 )
@@ -137,6 +139,32 @@ def sample_refresh_json() -> dict:
 
 def sample_refresh_response() -> RefreshResponse:
     return RefreshResponse(**sample_refresh_json()["results"][0])
+
+
+def sample_info_json() -> dict:
+    return {
+        "default-release": {
+            "revision": {
+                "metadata-yaml": yaml.dump(
+                    {
+                        "requires": {
+                            "pg-database": {
+                                "interface": "db",
+                                "optional": "false",
+                            },
+                        },
+                    }
+                ),
+            },
+        },
+        "result": {
+            "deployable-on": ["kubernetes"],
+        },
+    }
+
+
+def sample_info_response() -> InfoResponse:
+    return InfoResponse(**sample_info_json())
 
 
 class TestRefreshResponse:
@@ -356,6 +384,58 @@ class TestCharmhubHttpClient:
             # WHEN refresh is called
             try:
                 response = CharmhubHttpClient(session=params.session).refresh(action)
+            except CustomError:
+                # THEN an exception was expected to be raised
+                assert params.raise_exception
+            else:
+                # OR the response matches
+                assert response == params.response
+
+    class TestInfo:
+        @dataclass
+        class Params:
+            label: str
+            charm: str
+            response: InfoResponse | None = None
+            raise_exception: bool = False
+            session: SessionStub = field(default_factory=SessionStub)
+
+        test_cases = [
+            Params(
+                label="fail",
+                charm="kratos",
+                raise_exception=True,
+                session=SessionStub(get_result=ResponseStub(raise_for_status_error=True)),
+            ),
+            Params(
+                label="success",
+                charm="kratos",
+                session=SessionStub(
+                    get_url=CHARM_INFO_ENDPOINT.format(charm="kratos"),
+                    get_params={
+                        "fields": ",".join(
+                            [
+                                "result.deployable-on",
+                                "default-release.revision.metadata-yaml",
+                            ]
+                        ),
+                    },
+                    get_headers={"Content-Type": "application/json"},
+                    get_timeout=180,
+                    get_result=ResponseStub(json_result=sample_info_json()),
+                ),
+                response=sample_info_response(),
+            ),
+        ]
+
+        @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
+        def test(self, params: Params):
+            # GIVEN the charm name
+            charm = params.charm
+
+            # WHEN info is called
+            try:
+                response = CharmhubHttpClient(session=params.session).info(charm)
             except CustomError:
                 # THEN an exception was expected to be raised
                 assert params.raise_exception
