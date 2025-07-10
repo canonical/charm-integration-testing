@@ -22,6 +22,7 @@ from .charmhub_http import (
     CharmhubHttpClient,
     CharmMetadata,
     CharmReleaseNotFoundException,
+    FindResponse,
     RefreshAction,
     RefreshResponse,
 )
@@ -89,7 +90,7 @@ class CharmhubClient:
         self, provides: str | None = None, requires: str | None = None, platform: str | None = None
     ) -> frozenset[str]:
         # Call find API
-        response = self.http_client.find(provides=provides, requires=requires)
+        response = self._find_charms(provides=provides, requires=requires)
 
         # Collect charms
         charms = {charm.name for charm in response}
@@ -121,6 +122,35 @@ class CharmhubClient:
 
         # Return charms
         return frozenset(charms)
+
+    def _find_charms(self, provides: str | None = None, requires: str | None = None) -> list[FindResponse]:
+        # Call find API
+        response = self.http_client.find(provides=provides, requires=requires)
+
+        # Check listing overridden charms
+        for charm in self.overrides_client.get_charm_listing_overrides():
+            # Get charm info
+            charm_info = self.http_client.info(charm)
+
+            # Filter results
+            if provides is not None and provides not in {
+                endpoint.interface for endpoint in charm_info.default_release.revision.metadata.provides.values()
+            }:
+                continue
+            if requires is not None and requires not in {
+                endpoint.interface for endpoint in charm_info.default_release.revision.metadata.requires.values()
+            }:
+                continue
+
+            # Add find response
+            response.append(
+                FindResponse(
+                    name=charm,
+                    result=FindResponse.Result(deployable_on=charm_info.result.deployable_on),
+                )
+            )
+
+        return response
 
     def _charm_from_store_by_revision(
         self,

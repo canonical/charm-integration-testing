@@ -115,8 +115,32 @@ class FindResponse:
     result: Result
 
 
+@dataclass(frozen=True, config=dict(validate_by_name=True))
+class InfoResponse:
+    @dataclass(frozen=True)
+    class DefaultRelease:
+        @dataclass(frozen=True, config=dict(validate_by_name=True))
+        class Revision:
+            metadata: CharmMetadata | None = Field(default=None, alias="metadata-yaml")
+
+            @field_validator("metadata", mode="before")
+            @classmethod
+            def parse_yaml(cls, metadata_yaml):
+                return CharmMetadata(**yaml.safe_load(metadata_yaml))
+
+        revision: Revision = Field(default_factory=Revision)
+
+    @dataclass(frozen=True, config=dict(validate_by_name=True))
+    class Result:
+        deployable_on: frozenset[str] = Field(default_factory=frozenset, alias="deployable-on")
+
+    default_release: DefaultRelease = Field(default_factory=DefaultRelease, alias="default-release")
+    result: Result = Field(default_factory=Result)
+
+
 CHARM_REFRESH_ENDPOINT = "https://api.charmhub.io/v2/charms/refresh"
 CHARM_FIND_ENDPOINT = "https://api.charmhub.io/v2/charms/find"
+CHARM_INFO_ENDPOINT = "https://api.charmhub.io/v2/charms/info/{charm}"
 
 
 class CharmhubHttpClient:
@@ -202,3 +226,25 @@ class CharmhubHttpClient:
         response.raise_for_status()
         response_json = response.json()
         return RefreshResponse(**next(iter(response_json.get("results"))))
+
+    @cache
+    def info(self, charm: str) -> InfoResponse:
+        self.logger.debug(f"Calling info for charm {charm}")
+
+        # Formulate request
+        request_url = CHARM_INFO_ENDPOINT.format(charm=charm)
+        request_headers = {"Content-Type": "application/json"}
+        request_params = {
+            "fields": ",".join(
+                [
+                    "result.deployable-on",
+                    "default-release.revision.metadata-yaml",
+                ]
+            ),
+        }
+
+        # Execute request
+        response = self.session.get(url=request_url, params=request_params, headers=request_headers, timeout=180)
+        response.raise_for_status()
+        response_json = response.json()
+        return InfoResponse(**response_json)
