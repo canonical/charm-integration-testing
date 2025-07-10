@@ -30,15 +30,34 @@ from bundle_builder.charmhub_http import (
 
 
 @dataclass
-class CharmhubHttpRefreshStub:
-    refresh_charm: str
-    refresh_base: CharmhubBase
-    refresh_info: RefreshResponse
+class CharmhubHttpStub:
+    refresh_response: dict[RefreshAction, RefreshResponse] = Field(default_factory=dict)
 
     def refresh(self, action: RefreshAction) -> RefreshResponse:
-        assert action.charm_name == self.refresh_charm
-        assert action.base == self.refresh_base
-        return self.refresh_info
+        return self.refresh_response[action]
+
+    find_response: list[FindResponse] = Field(default_factory=list)
+
+    def find(self, provides: str | None = None, requires: str | None = None) -> list[FindResponse]:
+        return self.find_response
+
+    info_response: dict[str, InfoResponse] = Field(default_factory=dict)
+
+    def info(self, charm: str) -> InfoResponse:
+        return self.info_response[charm]
+
+
+@dataclass
+class OverridesStub:
+    charm_platform_overrides: dict[str, set[str]] = Field(default_factory=dict)
+
+    def get_charm_platform_overrides(self, charm: str) -> set[str]:
+        return self.charm_platform_overrides.get(charm, set())
+
+    charm_listing_overrides: set[str] = Field(default_factory=set)
+
+    def get_charm_listing_overrides(self) -> set[str]:
+        return self.charm_listing_overrides
 
 
 @dataclass
@@ -153,10 +172,14 @@ class TestCharmhubClient:
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
         def test(self, params: Params):
             # GIVEN
-            http_client = CharmhubHttpRefreshStub(
-                refresh_charm=params.charm,
-                refresh_base=CharmhubBase(name="NA", architecture=params.arch, channel="NA"),
-                refresh_info=params.refresh_info,
+            http_client = CharmhubHttpStub(
+                refresh_response={
+                    RefreshAction(
+                        charm_name=params.charm,
+                        charm_channel=params.channel,
+                        base=CharmhubBase(name="NA", architecture=params.arch, channel="NA"),
+                    ): params.refresh_info,
+                },
             )
 
             # WHEN
@@ -178,14 +201,14 @@ class TestCharmhubClient:
                 assert not raised
                 assert version == params.expected_version
 
-    class TestSuitableCharmChannel:
+    class TestDefaultRefreshInfo:
         @dataclass
         class Params:
             label: str
             charm: str
             base: CharmhubBase
-            refresh_info: RefreshResponse
-            channel: str | None = None
+            refresh_info: dict[RefreshAction, RefreshResponse] = Field(default_factory=dict)
+            expected_refresh_info: RefreshResponse | None = None
             raise_exception: bool = False
 
         test_cases = [
@@ -193,79 +216,134 @@ class TestCharmhubClient:
                 label="successful_refresh",
                 charm="my-charm",
                 base=matching_base,
-                refresh_info=RefreshResponse(
+                refresh_info={
+                    RefreshAction(
+                        charm_name="my-charm",
+                        base=matching_base,
+                    ): RefreshResponse(
+                        name="my-charm",
+                        effective_channel="stable",
+                    ),
+                },
+                expected_refresh_info=RefreshResponse(
                     name="my-charm",
                     effective_channel="stable",
-                    error=None,
                 ),
-                channel="stable",
             ),
             Params(
-                label="channel_from_matching_release",
+                label="refresh_error",
                 charm="my-charm",
                 base=matching_base,
-                refresh_info=RefreshResponse(
-                    name="my-charm",
-                    error=RefreshResponse.Error(
-                        code="revision-not-found",
-                        message="Missing revision",
-                        extra=RefreshResponse.Error.Extra(
-                            releases=[
-                                RefreshResponse.Error.Extra.Release(channel="stable", base=matching_base),
-                            ]
-                        ),
+                refresh_info={
+                    RefreshAction(
+                        charm_name="my-charm",
+                        base=matching_base,
+                    ): RefreshResponse(
+                        name="my-charm",
+                        error=RefreshResponse.Error(message="Error Message", code="error-code"),
                     ),
-                ),
-                channel="stable",
-            ),
-            Params(
-                label="channel_from_matching_release_prefer_track",
-                charm="my-charm",
-                base=matching_base,
-                refresh_info=RefreshResponse(
-                    name="my-charm",
-                    error=RefreshResponse.Error(
-                        code="revision-not-found",
-                        message="Missing revision",
-                        extra=RefreshResponse.Error.Extra(
-                            releases=[
-                                RefreshResponse.Error.Extra.Release(channel="edge", base=matching_base),
-                                RefreshResponse.Error.Extra.Release(channel="latest/edge", base=matching_base),
-                            ]
-                        ),
-                    ),
-                ),
-                channel="latest/edge",
-            ),
-            Params(
-                label="no_matching_release_for_channel",
-                charm="my-charm",
-                base=matching_base,
-                refresh_info=RefreshResponse(
-                    name="my-charm",
-                    error=RefreshResponse.Error(
-                        code="revision-not-found",
-                        message="Missing revision",
-                        extra=RefreshResponse.Error.Extra(
-                            releases=[
-                                RefreshResponse.Error.Extra.Release(channel="stable", base=other_base),
-                            ]
-                        ),
-                    ),
-                ),
+                },
                 raise_exception=True,
             ),
             Params(
-                label="refresh_info_error",
+                label="from_matching_release",
                 charm="my-charm",
                 base=matching_base,
-                refresh_info=RefreshResponse(
-                    name="my-charm",
-                    error=RefreshResponse.Error(
-                        code="unknown-error",
-                        message="Missing revision",
+                refresh_info={
+                    RefreshAction(
+                        charm_name="my-charm",
+                        base=matching_base,
+                    ): RefreshResponse(
+                        name="my-charm",
+                        error=RefreshResponse.Error(
+                            code="revision-not-found",
+                            message="Missing revision",
+                            extra=RefreshResponse.Error.Extra(
+                                releases=[
+                                    RefreshResponse.Error.Extra.Release(channel="stable", base=matching_base),
+                                    RefreshResponse.Error.Extra.Release(channel="edge", base=matching_base),
+                                ]
+                            ),
+                        ),
                     ),
+                    RefreshAction(
+                        charm_name="my-charm",
+                        base=matching_base,
+                        channel="stable",
+                    ): RefreshResponse(
+                        name="my-charm",
+                        effective_channel="stable",
+                    ),
+                },
+                expected_refresh_info=RefreshResponse(
+                    name="my-charm",
+                    effective_channel="stable",
                 ),
+            ),
+            Params(
+                label="prefer_track_from_matching_release",
+                charm="my-charm",
+                base=matching_base,
+                refresh_info={
+                    RefreshAction(
+                        charm_name="my-charm",
+                        base=matching_base,
+                    ): RefreshResponse(
+                        name="my-charm",
+                        error=RefreshResponse.Error(
+                            code="revision-not-found",
+                            message="Missing revision",
+                            extra=RefreshResponse.Error.Extra(
+                                releases=[
+                                    RefreshResponse.Error.Extra.Release(channel="edge", base=matching_base),
+                                    RefreshResponse.Error.Extra.Release(channel="latest/edge", base=matching_base),
+                                ]
+                            ),
+                        ),
+                    ),
+                    RefreshAction(
+                        charm_name="my-charm",
+                        base=matching_base,
+                        charm_channel="latest/edge",
+                    ): RefreshResponse(
+                        name="my-charm",
+                        effective_channel="latest/edge",
+                    ),
+                },
+                expected_refresh_info=RefreshResponse(
+                    name="my-charm",
+                    effective_channel="latest/edge",
+                ),
+            ),
+            Params(
+                label="matching_release_error",
+                charm="my-charm",
+                base=matching_base,
+                refresh_info={
+                    RefreshAction(
+                        charm_name="my-charm",
+                        base=matching_base,
+                    ): RefreshResponse(
+                        name="my-charm",
+                        error=RefreshResponse.Error(
+                            code="revision-not-found",
+                            message="Missing revision",
+                            extra=RefreshResponse.Error.Extra(
+                                releases=[
+                                    RefreshResponse.Error.Extra.Release(channel="edge", base=matching_base),
+                                ]
+                            ),
+                        ),
+                    ),
+                    RefreshAction(
+                        charm_name="my-charm",
+                        base=matching_base,
+                        charm_channel="edge",
+                    ): RefreshResponse(
+                        name="my-charm",
+                        error=RefreshResponse.Error(message="Error Message", code="error-code"),
+                    ),
+                },
                 raise_exception=True,
             ),
         ]
@@ -273,15 +351,11 @@ class TestCharmhubClient:
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
         def test(self, params: Params):
             # GIVEN
-            http_client = CharmhubHttpRefreshStub(
-                refresh_charm=params.charm,
-                refresh_base=params.base,
-                refresh_info=params.refresh_info,
-            )
+            http_client = CharmhubHttpStub(refresh_response=params.refresh_info)
 
             # WHEN
             try:
-                channel = CharmhubClient(http_client=http_client)._suitable_charm_channel(
+                actual_refresh_info = CharmhubClient(http_client=http_client)._default_refresh_info(
                     params.charm, base=params.base
                 )
             except CharmReleaseNotFoundException:
@@ -294,7 +368,7 @@ class TestCharmhubClient:
                 assert raised_charm_release_not_found
             else:
                 assert not raised_charm_release_not_found
-                assert channel == params.channel
+                assert actual_refresh_info == params.expected_refresh_info
 
     class TestFindCharms:
         @dataclass
@@ -354,7 +428,7 @@ class TestCharmhubClient:
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
         def test(self, params: Params):
             # GIVEN
-            http_client = CharmhubHttpFindStub(find_response=params.find_response, info_response=params.info_response)
+            http_client = CharmhubHttpStub(find_response=params.find_response, info_response=params.info_response)
             overrides_client = OverridesStub(
                 charm_platform_overrides=params.platform_overrides, charm_listing_overrides=params.listing_overrides
             )
@@ -460,7 +534,7 @@ class TestCharmhubClient:
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
         def test(self, params: Params):
             # GIVEN
-            http_client = CharmhubHttpFindStub(info_response=params.info_response)
+            http_client = CharmhubHttpStub(info_response=params.info_response)
             overrides_client = OverridesStub(charm_listing_overrides=params.listing_overrides)
 
             # WHEN
