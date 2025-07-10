@@ -206,6 +206,7 @@ jobs:
             --substrate "${substrate}" \
             --charm-metadata-overrides ./static/charm-metadata-overrides/ \
             --charm-platform-overrides ./static/charm-platform-overrides/ \
+            --charm-listing-overrides ./static/charm-listing-overrides.yaml \
             --output-file generated-bundle.yaml
           echo "bundle=$(realpath generated-bundle.yaml)" >> $GITHUB_OUTPUT
 

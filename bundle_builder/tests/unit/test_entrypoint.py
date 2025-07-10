@@ -62,6 +62,7 @@ class TestAddArgsToParser:
         "--output-file": "bundle.yaml",
         "--charm-metadata-overrides": "some/folder/directory",
         "--charm-platform-overrides": "some/folder/directory",
+        "--charm-listing-overrides": "some/folder/directory/file.yaml",
         "--log-level": "DEBUG",
     }
 
