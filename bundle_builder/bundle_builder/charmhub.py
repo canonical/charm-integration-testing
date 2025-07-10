@@ -183,7 +183,7 @@ class CharmhubClient:
                 )
 
         # Find suitable channel (must support base)
-        charm_channel = self._suitable_charm_channel(
+        default_refresh_info = self._default_refresh_info(
             charm_name,
             CharmhubBase(
                 channel=ubuntu_version,
@@ -194,7 +194,7 @@ class CharmhubClient:
         # Return Charm from refresh info
         return Charm(
             name=charm_name,
-            channel=charm_channel,
+            channel=default_refresh_info.effective_channel,
             revision=charm_revision,
             ubuntu_version=ubuntu_version,
             ubuntu_arch=ubuntu_arch,
@@ -244,12 +244,12 @@ class CharmhubClient:
         ubuntu_arch: str,
         ubuntu_version: str | None = None,
     ):
-        # Get default ubuntu version if not given
+        # Get default ubuntu version if not provided
         if not ubuntu_version:
             ubuntu_version = self._default_ubuntu_version(charm_name, ubuntu_arch)
 
-        # Get suitable channel
-        channel = self._suitable_charm_channel(
+        # Get default refresh info
+        refresh_info = self._default_refresh_info(
             charm_name,
             CharmhubBase(
                 channel=ubuntu_version,
@@ -257,26 +257,10 @@ class CharmhubClient:
             ),
         )
 
-        # Call refresh with base
-        refresh_info = self.http_client.refresh(
-            RefreshAction(
-                charm_name=charm_name,
-                base=CharmhubBase(
-                    channel=ubuntu_version,
-                    architecture=ubuntu_arch,
-                ),
-                charm_channel=channel,
-            )
-        )
-        if refresh_info.error is not None:
-            raise CharmReleaseNotFoundException(
-                f"Failed to find default release for charm {charm_name} with ubuntu version {ubuntu_version}: {refresh_info.error.message}"
-            )
-
         # Return Charm
         return Charm(
             name=charm_name,
-            channel=channel,
+            channel=refresh_info.effective_channel,
             revision=refresh_info.charm.revision,
             ubuntu_version=ubuntu_version,
             ubuntu_arch=ubuntu_arch,
@@ -312,32 +296,33 @@ class CharmhubClient:
         # Pick the first base (like Juju)
         return bases[0].channel
 
-    def _suitable_charm_channel(self, charm_name: str, base: CharmhubBase) -> str:
+    def _default_refresh_info(self, charm_name: str, base: CharmhubBase) -> RefreshResponse:
         # Get refresh info for base
         refresh_info = self.http_client.refresh(RefreshAction(charm_name=charm_name, base=base))
         if refresh_info.error is None:
-            return refresh_info.effective_channel
+            return refresh_info
 
-        # Check extra releases for base
-        if refresh_info.error.code == "revision-not-found":
+        # If error check extra releases for base
+        if refresh_info.error and refresh_info.error.code == "revision-not-found":
             # Gather channels with matching base
-            channels = list(
-                sorted({release.channel for release in refresh_info.error.extra.releases if release.base == base})
+            channels = [release.channel for release in refresh_info.error.extra.releases if release.base == base]
+
+            # Prefer channels with track, move to front
+            channels = sorted(channels, key=lambda channel: "/" not in channel)
+
+            # If a channel is found, fetch the refresh info for it
+            if len(channels) > 0:
+                refresh_info = self.http_client.refresh(
+                    RefreshAction(charm_name=charm_name, base=base, charm_channel=channels[0])
+                )
+
+        # Check refresh info for error
+        if refresh_info.error:
+            raise CharmReleaseNotFoundException(
+                f"Failed to find default release for charm {charm_name} with base {base}: {refresh_info.error.message}"
             )
 
-            # Prefer a channel with a track because default track can be inconsistent
-            channels_with_track = [channel for channel in channels if "/" in channel]
-            if len(channels_with_track) > 0:
-                return channels_with_track[0]
-
-            # Otherwise pick any channel if exists
-            if len(channels) > 0:
-                return channels[0]
-
-        # No suitable channel found
-        raise CharmReleaseNotFoundException(
-            f"Failed to find default release for charm {charm_name}: {refresh_info.error.message}"
-        )
+        return refresh_info
 
     def _all_charm_endpoints(self, refresh_info: RefreshResponse):
         metadata = refresh_info.charm.metadata
