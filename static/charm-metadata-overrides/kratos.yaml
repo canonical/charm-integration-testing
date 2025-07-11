@@ -1,8 +1,0 @@
-# Remove after: https://github.com/canonical/kratos-operator/pull/451
-provides:
-  kratos-info:
-    optional: true
-  metrics-endpoint:
-    optional: true
-  grafana-dashboard:
-    optional: true
