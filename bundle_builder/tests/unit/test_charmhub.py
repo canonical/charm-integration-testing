@@ -60,32 +60,6 @@ class OverridesStub:
         return self.charm_listing_overrides
 
 
-@dataclass
-class CharmhubHttpFindStub:
-    find_response: list[FindResponse] = Field(default_factory=list)
-
-    def find(self, provides: str | None = None, requires: str | None = None) -> list[FindResponse]:
-        return self.find_response
-
-    info_response: dict[str, InfoResponse] = Field(default_factory=dict)
-
-    def info(self, charm: str) -> InfoResponse:
-        return self.info_response[charm]
-
-
-@dataclass
-class OverridesStub:
-    charm_platform_overrides: dict[str, set[str]] = Field(default_factory=dict)
-
-    def get_charm_platform_overrides(self, charm: str) -> set[str]:
-        return self.charm_platform_overrides.get(charm, set())
-
-    charm_listing_overrides: set[str] = Field(default_factory=set)
-
-    def get_charm_listing_overrides(self) -> set[str]:
-        return self.charm_listing_overrides
-
-
 matching_base = CharmhubBase(name="ubuntu", architecture="amd64", channel="20.04")
 other_base = CharmhubBase(name="ubuntu", architecture="amd64", channel="22.04")
 
