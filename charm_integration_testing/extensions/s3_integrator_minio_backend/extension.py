@@ -126,7 +126,7 @@ class S3IntegratorMinIOBackendExtension(JujuExtension, ABC):
         # Return file
         return self.minio_client_file
 
-    def create_minio_bucket(self: str, model: str, s3_integrator_application: str):
+    def create_minio_bucket(self, model: str, s3_integrator_application: str):
         self.logger.info(
             f"Creating the MinIO bucket '{MINIO_BUCKET}' in '{self.minio_application(s3_integrator_application)}'"
         )
