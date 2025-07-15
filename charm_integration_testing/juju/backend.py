@@ -138,3 +138,23 @@ class JujuBackend(ABC):
     @abstractmethod
     def remove_secret(self, model: str, name_or_id: str):
         raise NotImplementedError
+
+    @abstractmethod
+    def deploy_application(self, model: str, charm: str, application: str | None = None):
+        raise NotImplementedError
+
+    @abstractmethod
+    def configure_application(self, model: str, application: str, values: dict[str, str]):
+        raise NotImplementedError
+
+    @abstractmethod
+    def scp(self, model: str, source: str, destination: str):
+        raise NotImplementedError
+
+    @abstractmethod
+    def ssh(self, model: str, application: str, command: str):
+        raise NotImplementedError
+
+    @abstractmethod
+    def unit_ip(self, model: str, unit: str) -> str:
+        raise NotImplementedError
