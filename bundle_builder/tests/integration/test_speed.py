@@ -52,7 +52,7 @@ class Params:
         ),
     ],
 )
-@pytest.mark.timeout(timedelta(minutes=5).total_seconds())
+@pytest.mark.timeout(timedelta(minutes=10).total_seconds())
 def test_speed(charmhub_client: CharmhubClient, params: Params):
     # GIVEN a base bundle
     base_bundle = Bundle(

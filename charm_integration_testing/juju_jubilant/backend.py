@@ -74,3 +74,35 @@ class JubilantBackend(JujuCmdBackend):
             "remove-secret",
             name_or_id,
         )
+
+    def deploy_application(self, model: str, charm: str, application: str | None = None):
+        self.client.model(model).deploy(
+            charm=charm,
+            app=application,
+        )
+
+    def configure_application(self, model: str, application: str, values: dict[str, str]):
+        self.client.model(model).config(
+            app=application,
+            values=values,
+        )
+
+    def scp(self, model: str, source: str, destination: str):
+        self.client.model(model).scp(
+            source=source,
+            destination=destination,
+        )
+
+    def ssh(self, model: str, application: str, command: str):
+        self.client.model(model).ssh(
+            target=application,
+            command=command,
+        )
+
+    def unit_ip(self, model: str, unit: str) -> str:
+        application, unit_id = unit.split("/")
+        for possible_unit, unit_status in self.client.model(model).status().apps[application].units.items():
+            _, possible_unit_id = possible_unit.split("/")
+            if possible_unit_id == unit_id or (unit_id == "leader" and unit_status.leader):
+                return unit_status.address
+        raise KeyError(f"Unit '{unit}' not found")

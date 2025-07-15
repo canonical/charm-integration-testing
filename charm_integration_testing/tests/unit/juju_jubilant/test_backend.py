@@ -161,3 +161,151 @@ class TestJubilantBackend:
 
             # THEN
             assert ("remove-secret", "my-secret") in client.client.executions
+
+    class TestDeployApplication:
+        @dataclass
+        class DeployStub:
+            charm: str | None = None
+            app: str | None = None
+
+            def deploy(self, charm: str, app: str | None = None):
+                self.charm = charm
+                self.app = app
+
+        def test(self):
+            # GIVEN
+            stub = self.DeployStub()
+            client = JubilantClientStub(client=stub)
+
+            # WHEN
+            JubilantBackend(client).deploy_application("test-model", charm="my-charm", application="my-app")
+
+            # THEN
+            assert stub.charm == "my-charm"
+            assert stub.app == "my-app"
+
+    class TestConfigureApplication:
+        @dataclass
+        class ConfigStub:
+            app: str | None = None
+            values: dict[str, str] = field(default_factory=dict)
+
+            def config(self, app: str, values: dict[str, str]):
+                self.app = app
+                self.values = values
+
+        def test(self):
+            # GIVEN
+            stub = self.ConfigStub()
+            client = JubilantClientStub(client=stub)
+
+            # WHEN
+            JubilantBackend(client).configure_application("test-model", "my-app", {"k": "v"})
+
+            # THEN
+            assert stub.app == "my-app"
+            assert stub.values == {"k": "v"}
+
+    class TestScp:
+        @dataclass
+        class ScpStub:
+            source: str = ""
+            destination: str = ""
+
+            def scp(self, source: str, destination: str):
+                self.source = source
+                self.destination = destination
+
+        def test(self):
+            # GIVEN
+            stub = self.ScpStub()
+            client = JubilantClientStub(client=stub)
+
+            # WHEN
+            JubilantBackend(client).scp("test-model", source="a", destination="b")
+
+            # THEN
+            assert stub.source == "a"
+            assert stub.destination == "b"
+
+    class TestSsh:
+        @dataclass
+        class SshStub:
+            target: str = ""
+            command: str = ""
+
+            def ssh(self, target: str, command: str):
+                self.target = target
+                self.command = command
+
+        def test(self):
+            # GIVEN
+            stub = self.SshStub()
+            client = JubilantClientStub(client=stub)
+
+            # WHEN
+            JubilantBackend(client).ssh("test-model", application="my-app", command="ls -l")
+
+            # THEN
+            assert stub.target == "my-app"
+            assert stub.command == "ls -l"
+
+    class TestUnitIp:
+        class Unit:
+            def __init__(self, address, leader=False):
+                self.address = address
+                self.leader = leader
+
+        class AppStatus:
+            def __init__(self, units):
+                self.units = units
+
+        class ModelStatus:
+            def __init__(self):
+                self.apps = {
+                    "my-app": TestJubilantBackend.TestUnitIp.AppStatus(
+                        {
+                            "my-app/0": TestJubilantBackend.TestUnitIp.Unit("10.0.0.1"),
+                            "my-app/1": TestJubilantBackend.TestUnitIp.Unit("10.0.0.2", leader=True),
+                        }
+                    )
+                }
+
+        class StatusStub:
+            def status(self):
+                return TestJubilantBackend.TestUnitIp.ModelStatus()
+
+        def test_by_unit_id(self):
+            # GIVEN
+            stub = self.StatusStub()
+            client = JubilantClientStub(client=stub)
+
+            # WHEN
+            ip = JubilantBackend(client).unit_ip("test-model", "my-app/0")
+
+            # THEN
+            assert ip == "10.0.0.1"
+
+        def test_by_leader(self):
+            # GIVEN
+            stub = self.StatusStub()
+            client = JubilantClientStub(client=stub)
+
+            # WHEN
+            ip = JubilantBackend(client).unit_ip("test-model", "my-app/leader")
+
+            # THEN
+            assert ip == "10.0.0.2"
+
+        def test_not_found(self):
+            # GIVEN
+            stub = self.StatusStub()
+            client = JubilantClientStub(client=stub)
+
+            # WHEN / THEN
+            try:
+                JubilantBackend(client).unit_ip("test-model", "my-app/99")
+            except KeyError as e:
+                assert "my-app/99" in str(e)
+            else:
+                assert False, "Expected KeyError"

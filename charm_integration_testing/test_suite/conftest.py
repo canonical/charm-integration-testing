@@ -6,7 +6,7 @@ import logging
 from datetime import timedelta
 
 import pytest
-from extensions import UnsealVaultJujuExtension, UnsealVaultK8sJujuExtension
+from extensions import S3IntegratorMinIOBackendExtension, UnsealVaultJujuExtension, UnsealVaultK8sJujuExtension
 from juju import JujuBackend, JujuClient, JujuWaitTimeoutError
 from juju_jubilant import JubilantBackend
 from pytest import CollectReport, StashKey
@@ -36,6 +36,7 @@ def juju_client(juju_backend: JujuBackend, logger: logging.Logger) -> JujuClient
         extensions=[
             UnsealVaultJujuExtension(juju_backend, logger),
             UnsealVaultK8sJujuExtension(juju_backend, logger),
+            S3IntegratorMinIOBackendExtension(juju_backend, logger),
         ],
     )
 
