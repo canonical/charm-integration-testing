@@ -11,8 +11,8 @@ from juju import JujuBackend, JujuExtension
 MINIO_CHARM = "minio"
 S3_INTEGRATOR_CHARM = "s3-integrator"
 MINIO_APPLICATION_NAME = "{s3_integrator_application}-minio"
-MINIO_ACCESS_KEY = "minio-access-key-for-testing"
-MINIO_SECRET_KEY = "minio-secret-key-for-testing"
+MINIO_ACCESS_KEY = "minio-access-key-for-testing"  # nosec B105
+MINIO_SECRET_KEY = "minio-secret-key-for-testing"  # nosec B105
 MINIO_BUCKET = "minio-bucket-for-testing"
 MINIO_ADDRESS = "http://{unit_ip}:9000"
 MINIO_CLIENT_DOWNLOAD = "https://dl.min.io/client/mc/release/linux-amd64/mc"
@@ -118,8 +118,10 @@ class S3IntegratorMinIOBackendExtension(JujuExtension, ABC):
         # Only download if not downloaded
         if self.minio_client_file is None:
             self.logger.info("Downloading minio client")
-            # Juju cannot access temporary directory, so must download locally
-            self.minio_client_file, _ = urllib.request.urlretrieve(MINIO_CLIENT_DOWNLOAD, "mc")
+            # As a snap Juju cannot access /tmp, so just download into the current folder
+            # Also security warning "Allowing use of file:/ or custom schemes is often unexpected."
+            # does not apply to hardcoded URL
+            self.minio_client_file, _ = urllib.request.urlretrieve(MINIO_CLIENT_DOWNLOAD, "mc")  # nosec B310
 
         # Return file
         return self.minio_client_file
