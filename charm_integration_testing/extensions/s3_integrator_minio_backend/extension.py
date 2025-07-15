@@ -40,9 +40,9 @@ class S3IntegratorMinIOBackendExtension(JujuExtension, ABC):
     def deploy_minio_s3_backend(self, model: str, s3_integrator_application: str):
         # Follows guide: https://discourse.charmhub.io/t/cos-lite-docs-set-up-minio-for-s3-testing/15211
 
-        # Deploy minio
+        # Deploy MinIO
         self.logger.info(
-            f"Deploying minio application '{self.minio_application(s3_integrator_application)}' for s3 integrator '{s3_integrator_application}'"
+            f"Deploying MinIO application '{self.minio_application(s3_integrator_application)}' for s3 integrator '{s3_integrator_application}'"
         )
         self.juju.deploy_application(model, MINIO_CHARM, application=self.minio_application(s3_integrator_application))
 
@@ -67,10 +67,10 @@ class S3IntegratorMinIOBackendExtension(JujuExtension, ABC):
             self.logger.info(f"Waiting for application '{application}' units to be settled")
             self.juju.wait_application_settled(model, application, timedelta(minutes=10))
 
-        # Setup minio client
+        # Setup MinIO client
         self.setup_minio_client(model, s3_integrator_application)
 
-        # Create minio bucket
+        # Create MinIO bucket
         self.create_minio_bucket(model, s3_integrator_application)
 
         # Authenticate s3 integrator with the bucket
@@ -86,23 +86,23 @@ class S3IntegratorMinIOBackendExtension(JujuExtension, ABC):
         return MINIO_ADDRESS.format(unit_ip=self.juju.unit_ip(model, self.minio_unit(s3_integrator_application)))
 
     def setup_minio_client(self, model: str, s3_integrator_application: str):
-        # Download the minio client
+        # Download the MinIO client
         minio_client_file = self.download_minio_client()
 
         # Copy client to the pod
-        self.logger.info(f"Copying the minio client to '{self.minio_application(s3_integrator_application)}'")
+        self.logger.info(f"Copying the MinIO client to '{self.minio_application(s3_integrator_application)}'")
         self.juju.scp(model, minio_client_file, f"{self.minio_unit(s3_integrator_application)}:{MINIO_CLIENT_PATH}")
 
         # Make client executable
-        self.logger.info(f"Mark minio client in '{self.minio_application(s3_integrator_application)}' as executable")
+        self.logger.info(f"Mark MinIO client in '{self.minio_application(s3_integrator_application)}' as executable")
         self.juju.ssh(
             model,
             self.minio_unit(s3_integrator_application),
             MINIO_CLIENT_MAKE_EXECUTABLE.format(client_path=MINIO_CLIENT_PATH),
         )
 
-        # Authenticate client with minio
-        self.logger.info(f"Authenticating minio client in '{self.minio_application(s3_integrator_application)}'")
+        # Authenticate client with MinIO
+        self.logger.info(f"Authenticating MinIO client in '{self.minio_application(s3_integrator_application)}'")
         self.juju.ssh(
             model,
             self.minio_unit(s3_integrator_application),
@@ -117,7 +117,7 @@ class S3IntegratorMinIOBackendExtension(JujuExtension, ABC):
     def download_minio_client(self) -> str:
         # Only download if not downloaded
         if self.minio_client_file is None:
-            self.logger.info("Downloading minio client")
+            self.logger.info("Downloading MinIO client")
             # As a snap Juju cannot access /tmp, so just download into the current folder
             # Also security warning "Allowing use of file:/ or custom schemes is often unexpected."
             # does not apply to hardcoded URL
@@ -128,7 +128,7 @@ class S3IntegratorMinIOBackendExtension(JujuExtension, ABC):
 
     def create_minio_bucket(self: str, model: str, s3_integrator_application: str):
         self.logger.info(
-            f"Creating the minio bucket '{MINIO_BUCKET}' in '{self.minio_application(s3_integrator_application)}'"
+            f"Creating the MinIO bucket '{MINIO_BUCKET}' in '{self.minio_application(s3_integrator_application)}'"
         )
         self.juju.ssh(
             model,
@@ -144,7 +144,7 @@ class S3IntegratorMinIOBackendExtension(JujuExtension, ABC):
             f"Configuring s3 integrator '{s3_integrator_application}' to use '{self.minio_application(s3_integrator_application)}'"
         )
 
-        # Sync minio credentials to s3 integrator
+        # Sync MinIO credentials to s3 integrator
         self.juju.run_action(
             model,
             f"{s3_integrator_application}/leader",
@@ -155,7 +155,7 @@ class S3IntegratorMinIOBackendExtension(JujuExtension, ABC):
             },
         )
 
-        # Point s3 integrator at minio bucket
+        # Point s3 integrator at MinIO bucket
         self.juju.configure_application(
             model,
             s3_integrator_application,
