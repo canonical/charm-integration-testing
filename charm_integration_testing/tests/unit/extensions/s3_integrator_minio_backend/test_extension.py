@@ -5,16 +5,11 @@ import logging
 from dataclasses import dataclass, field
 
 import pytest
-
 from extensions.s3_integrator_minio_backend.extension import (
-    S3IntegratorMinIOBackendExtension,
     MINIO_ACCESS_KEY,
-    MINIO_SECRET_KEY,
     MINIO_BUCKET,
-    MINIO_CLIENT_PATH,
-    MINIO_CLIENT_MAKE_EXECUTABLE,
-    MINIO_CLIENT_AUTHENTICATE,
-    MINIO_CLIENT_MAKE_BUCKET,
+    MINIO_SECRET_KEY,
+    S3IntegratorMinIOBackendExtension,
 )
 
 
@@ -101,30 +96,41 @@ class TestS3IntegratorMinIOBackendExtension:
             # THEN minio is deployed, configured, waited on, authenticated, and connected
             assert ("test-model", "minio", "s3-app-minio") in juju.deployed
 
-            assert ("test-model", "s3-app-minio", {
-                "access-key": MINIO_ACCESS_KEY,
-                "secret-key": MINIO_SECRET_KEY,
-            }) in juju.configured
+            assert (
+                "test-model",
+                "s3-app-minio",
+                {
+                    "access-key": MINIO_ACCESS_KEY,
+                    "secret-key": MINIO_SECRET_KEY,
+                },
+            ) in juju.configured
 
             assert ("test-model", "s3-app", "0:10:00") in juju.waited_scaled
             assert ("test-model", "s3-app-minio", "0:10:00") in juju.waited_scaled
 
-            assert juju.scp_calls == [
-                ("test-model", "mc", "s3-app-minio/leader:/usr/local/bin/mc")
-            ]
+            assert juju.scp_calls == [("test-model", "mc", "s3-app-minio/leader:/usr/local/bin/mc")]
 
             assert any("/usr/local/bin/mc alias set local" in cmd for _, _, cmd in juju.ssh_calls)
             assert any("/usr/local/bin/mc mb" in cmd for _, _, cmd in juju.ssh_calls)
 
-            assert ("test-model", "s3-app/leader", "sync-s3-credentials", {
-                "access-key": MINIO_ACCESS_KEY,
-                "secret-key": MINIO_SECRET_KEY,
-            }) in juju.actions
+            assert (
+                "test-model",
+                "s3-app/leader",
+                "sync-s3-credentials",
+                {
+                    "access-key": MINIO_ACCESS_KEY,
+                    "secret-key": MINIO_SECRET_KEY,
+                },
+            ) in juju.actions
 
-            assert ("test-model", "s3-app", {
-                "endpoint": "http://10.0.0.1:9000",
-                "bucket": MINIO_BUCKET,
-            }) in juju.configured
+            assert (
+                "test-model",
+                "s3-app",
+                {
+                    "endpoint": "http://10.0.0.1:9000",
+                    "bucket": MINIO_BUCKET,
+                },
+            ) in juju.configured
 
     class TestDownloadMinioClient:
         def test_downloads_only_once(self, extension):
