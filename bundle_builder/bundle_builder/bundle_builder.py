@@ -18,8 +18,9 @@ import dataclasses
 import heapq
 import logging
 import random
-from dataclasses import dataclass
 from functools import cached_property
+
+from pydantic.dataclasses import dataclass
 
 from .bundle import Application, ApplicationEndpoint, Bundle, Integration
 from .charm import ENDPOINT_PROVIDES, ENDPOINT_REQUIRES
@@ -218,7 +219,13 @@ class BundleBuilder:
                     bundle=Bundle(
                         applications=frozenset(
                             node.bundle.applications
-                            | {Application(name=charm.name, charm=charm, config=random.choice(charm.test_configs))}
+                            | {
+                                Application(
+                                    name=charm.name,
+                                    charm=charm,
+                                    config=random.choice(charm.test_configs) if charm.test_configs else (),
+                                )
+                            }
                         ),
                         integrations=node.bundle.integrations,
                         platform=node.bundle.platform,

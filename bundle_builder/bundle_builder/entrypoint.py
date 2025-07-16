@@ -119,7 +119,7 @@ def applications_from_args(
             Application(
                 name=name,
                 charm=charm,
-                config=random.choice(charm.test_configs),
+                config=random.choice(charm.test_configs) if charm.test_configs else (),
             )
         )
     return frozenset(applications)

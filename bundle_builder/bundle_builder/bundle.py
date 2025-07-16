@@ -14,10 +14,11 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
-from dataclasses import dataclass
 from functools import cached_property
 
 import yaml
+from pydantic import Field
+from pydantic.dataclasses import dataclass
 
 from .charm import Charm, CharmEndpoint
 
@@ -26,7 +27,7 @@ from .charm import Charm, CharmEndpoint
 class Application:
     name: str
     charm: Charm
-    config: tuple[tuple[str, str | int], ...]
+    config: tuple[tuple[str, str | int], ...] = Field(default_factory=tuple)
 
     def __repr__(self):
         if self.name == self.charm.name:

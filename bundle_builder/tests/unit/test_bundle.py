@@ -94,6 +94,7 @@ def sample_bundle_postgresql_k8s_kratos() -> Bundle:
                 Application(
                     name="target",
                     charm=sample_charm_postgresql_k8s(),
+                    config=(("config-option", "config-value"),),
                 ),
                 Application(
                     name="neighbor",
@@ -305,6 +306,7 @@ class TestBundle:
                     "base": "ubuntu@24.04",
                     "channel": "edge",
                     "charm": "kratos",
+                    "options": {},
                     "revision": 123,
                     "scale": 1,
                     "trust": True,
@@ -313,6 +315,7 @@ class TestBundle:
                     "base": "ubuntu@22.04",
                     "channel": "stable",
                     "charm": "postgresql-k8s",
+                    "options": {"config-option": "config-value"},
                     "revision": 1,
                     "scale": 1,
                     "trust": True,

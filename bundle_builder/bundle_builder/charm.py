@@ -14,6 +14,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
+from pydantic import Field
 from pydantic.dataclasses import dataclass
 
 ENDPOINT_PEERS = "peers"
@@ -75,7 +76,7 @@ class Charm:
     ubuntu_version: str
     ubuntu_arch: str
     endpoints: frozenset[CharmEndpoint]
-    test_configs: tuple[tuple[tuple[str, str | int], ...], ...]
+    test_configs: tuple[tuple[tuple[str, str | int], ...], ...] = Field(default_factory=tuple)
 
     def __repr__(self):
         return self.name
