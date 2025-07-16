@@ -33,7 +33,7 @@ from .overrides import CharmMetadataOverride, OverridesClient
 class CharmhubClient:
     http_client: CharmhubHttpClient
     logger: logging.Logger
-    overrides_client: OverridesClient | None
+    overrides_client: OverridesClient
 
     def __init__(
         self,
@@ -43,7 +43,7 @@ class CharmhubClient:
     ):
         self.http_client = http_client or CharmhubHttpClient(logger=logger)
         self.logger = logger
-        self.overrides_client = overrides_client
+        self.overrides_client = overrides_client or OverridesClient()
 
     @cache
     def charm_from_store(
@@ -199,6 +199,7 @@ class CharmhubClient:
             ubuntu_version=ubuntu_version,
             ubuntu_arch=ubuntu_arch,
             endpoints=self._all_charm_endpoints(refresh_info),
+            test_configs=self._charm_test_configs(charm_name),
         )
 
     def _charm_from_store_by_channel(
@@ -236,6 +237,7 @@ class CharmhubClient:
             ubuntu_version=ubuntu_version,
             ubuntu_arch=ubuntu_arch,
             endpoints=self._all_charm_endpoints(refresh_info),
+            test_configs=self._charm_test_configs(charm_name),
         )
 
     def _charm_from_store_default(
@@ -265,6 +267,7 @@ class CharmhubClient:
             ubuntu_version=ubuntu_version,
             ubuntu_arch=ubuntu_arch,
             endpoints=self._all_charm_endpoints(refresh_info),
+            test_configs=self._charm_test_configs(charm_name),
         )
 
     def _default_ubuntu_version(self, charm_name: str, ubuntu_arch: str, charm_channel: str | None = None) -> str:
@@ -381,3 +384,14 @@ class CharmhubClient:
                 )
 
         return frozenset(endpoints)
+
+    def _charm_test_configs(self, charm: str) -> tuple[tuple[tuple[str, str | int], ...], ...]:
+        # Get test configs from overrides client
+        test_configs = self.overrides_client.get_charm_test_configs(charm)
+
+        # Add an empty config if empty
+        if len(test_configs) == 0:
+            test_configs = [{}]
+
+        # Return configs as hashable tuples
+        return (((key, value) for key, value in config.items()) for config in test_configs)

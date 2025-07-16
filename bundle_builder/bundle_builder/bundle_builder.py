@@ -17,6 +17,7 @@
 import dataclasses
 import heapq
 import logging
+import random
 from dataclasses import dataclass
 from functools import cached_property
 
@@ -205,7 +206,7 @@ class BundleBuilder:
     # missing non-optional required endpoint
     def child_nodes(self, node: Node) -> frozenset[Node]:
         # Get the default release for all the child charms
-        child_charm = {
+        child_charms = {
             self.charmhub_client.charm_from_store(charm_name=charm_name, ubuntu_arch=node.bundle.arch)
             for charm_name in node.child_charms
         }
@@ -215,13 +216,16 @@ class BundleBuilder:
             {
                 self.new_node(
                     bundle=Bundle(
-                        applications=frozenset(node.bundle.applications | {Application(name=charm.name, charm=charm)}),
+                        applications=frozenset(
+                            node.bundle.applications
+                            | {Application(name=charm.name, charm=charm, config=random.choice(charm.test_configs))}
+                        ),
                         integrations=node.bundle.integrations,
                         platform=node.bundle.platform,
                         arch=node.bundle.arch,
                     ),
                     balance=node.balance,
                 )
-                for charm in child_charm
+                for charm in child_charms
             }
         )

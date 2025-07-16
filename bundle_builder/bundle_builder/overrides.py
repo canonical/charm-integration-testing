@@ -54,62 +54,57 @@ class CharmListingOverrides:
     unlisted_charms: set[str] = Field(default_factory=set)
 
 
+@dataclass
+class CharmTestConfigs:
+    configs: list[dict[str, str | int]] = Field(default_factory=list)
+
+
 class OverridesClient:
     charm_metadata_overrides: Path | None = None
     charm_platform_overrides: Path | None = None
     charm_listing_overrides: Path | None = None
+    charm_test_configs: Path | None = None
 
     def __init__(
         self,
         charm_metadata_overrides: Path | None = None,
         charm_platform_overrides: Path | None = None,
         charm_listing_overrides: Path | None = None,
+        charm_test_configs: Path | None = None,
     ):
         self.charm_metadata_overrides = charm_metadata_overrides
         self.charm_platform_overrides = charm_platform_overrides
         self.charm_listing_overrides = charm_listing_overrides
+        self.charm_test_configs = charm_test_configs
+
+    @cache
+    def _read_yaml_file(self, path: Path | None, file: str | None) -> dict:
+        # Return empty if no path given
+        if path is None:
+            return {}
+
+        # Get file
+        if file is not None:
+            path /= file
+        if not path.exists():
+            return {}
+
+        # Read file
+        with path.open("r", encoding="utf-8") as file:
+            return yaml.safe_load(file)
 
     @cache
     def get_charm_metadata_overrides(self, charm: str) -> CharmMetadataOverride:
-        # Return empty if no charm metadata overrides folder given
-        if self.charm_metadata_overrides is None:
-            return CharmMetadataOverride()
-
-        # Get override file
-        override_file = self.charm_metadata_overrides / f"{charm}.yaml"
-        if not override_file.exists():
-            return CharmMetadataOverride()
-
-        # Read override file
-        with override_file.open("r", encoding="utf-8") as file:
-            return CharmMetadataOverride(**yaml.safe_load(file))
+        return CharmMetadataOverride(**self._read_yaml_file(self.charm_metadata_overrides, f"{charm}.yaml"))
 
     @cache
     def get_charm_platform_overrides(self, charm: str) -> set[str]:
-        # Return empty if no charm platform overrides folder given
-        if self.charm_platform_overrides is None:
-            return set()
-
-        # Get override file
-        override_file = self.charm_platform_overrides / f"{charm}.yaml"
-        if not override_file.exists():
-            return set()
-
-        # Read override file
-        with override_file.open("r", encoding="utf-8") as file:
-            return CharmPlatformOverride(**yaml.safe_load(file)).platforms
+        return CharmPlatformOverride(**self._read_yaml_file(self.charm_platform_overrides, f"{charm}.yaml")).platforms
 
     @cache
     def get_charm_listing_overrides(self) -> set[str]:
-        # Return empty if no charm listing overrides folder given
-        if self.charm_listing_overrides is None:
-            return set()
+        return CharmListingOverrides(**self._read_yaml_file(self.charm_listing_overrides, None)).unlisted_charms
 
-        # Get override file
-        override_file = self.charm_listing_overrides
-        if not override_file.exists():
-            return set()
-
-        # Read override file
-        with override_file.open("r", encoding="utf-8") as file:
-            return CharmListingOverrides(**yaml.safe_load(file)).unlisted_charms
+    @cache
+    def get_charm_test_configs(self, charm: str) -> list[dict]:
+        return CharmTestConfigs(**self._read_yaml_file(self.charm_test_configs, f"{charm}.yaml")).configs

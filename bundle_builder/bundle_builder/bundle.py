@@ -26,6 +26,7 @@ from .charm import Charm, CharmEndpoint
 class Application:
     name: str
     charm: Charm
+    config: tuple[tuple[str, str | int], ...]
 
     def __repr__(self):
         if self.name == self.charm.name:
@@ -107,6 +108,7 @@ class Bundle:
                         "base": f"ubuntu@{application.charm.ubuntu_version}",
                         "scale": 1,
                         "trust": True,
+                        "options": {key: value for key, value in application.config},
                     }
                     for application in self.applications
                 },

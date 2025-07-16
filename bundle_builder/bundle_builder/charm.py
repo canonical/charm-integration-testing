@@ -75,6 +75,7 @@ class Charm:
     ubuntu_version: str
     ubuntu_arch: str
     endpoints: frozenset[CharmEndpoint]
+    test_configs: tuple[tuple[tuple[str, str | int], ...], ...]
 
     def __repr__(self):
         return self.name
