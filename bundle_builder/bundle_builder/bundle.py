@@ -20,14 +20,14 @@ import yaml
 from pydantic import Field
 from pydantic.dataclasses import dataclass
 
-from .charm import Charm, CharmEndpoint
+from .charm import Charm, CharmConfig, CharmEndpoint
 
 
 @dataclass(frozen=True)
 class Application:
     name: str
     charm: Charm
-    config: tuple[tuple[str, str | int], ...] = Field(default_factory=tuple)
+    config: CharmConfig = Field(default_factory=tuple)
 
     def __repr__(self):
         if self.name == self.charm.name:

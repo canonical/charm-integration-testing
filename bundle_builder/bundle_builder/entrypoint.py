@@ -15,7 +15,6 @@
 
 import argparse
 import logging
-import random
 from pathlib import Path
 
 from .bundle import Application, ApplicationEndpoint, Bundle, Integration
@@ -119,7 +118,7 @@ def applications_from_args(
             Application(
                 name=name,
                 charm=charm,
-                config=random.choice(charm.test_configs) if charm.test_configs else (),
+                config=BundleBuilder.get_random_test_config(charm),
             )
         )
     return frozenset(applications)

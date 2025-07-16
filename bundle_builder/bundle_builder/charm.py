@@ -68,6 +68,9 @@ class CharmEndpoint:
     optionality: CharmEndpointOptionality
 
 
+CharmConfig = tuple[tuple[str, str | int], ...]
+
+
 @dataclass(frozen=True)
 class Charm:
     name: str
@@ -76,7 +79,7 @@ class Charm:
     ubuntu_version: str
     ubuntu_arch: str
     endpoints: frozenset[CharmEndpoint]
-    test_configs: tuple[tuple[tuple[str, str | int], ...], ...] = Field(default_factory=tuple)
+    test_configs: tuple[CharmConfig, ...] = Field(default_factory=tuple)
 
     def __repr__(self):
         return self.name

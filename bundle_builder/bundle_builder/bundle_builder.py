@@ -23,7 +23,7 @@ from functools import cached_property
 from pydantic.dataclasses import dataclass
 
 from .bundle import Application, ApplicationEndpoint, Bundle, Integration
-from .charm import ENDPOINT_PROVIDES, ENDPOINT_REQUIRES
+from .charm import ENDPOINT_PROVIDES, ENDPOINT_REQUIRES, CharmConfig
 from .charmhub import CharmhubClient
 
 
@@ -223,7 +223,7 @@ class BundleBuilder:
                                 Application(
                                     name=charm.name,
                                     charm=charm,
-                                    config=random.choice(charm.test_configs) if charm.test_configs else (),
+                                    config=self.get_random_test_config(charm),
                                 )
                             }
                         ),
@@ -236,3 +236,10 @@ class BundleBuilder:
                 for charm in child_charms
             }
         )
+
+    @staticmethod
+    def get_random_test_config(charm) -> CharmConfig:
+        if len(charm.test_configs) > 0:
+            return CharmConfig()
+
+        return random.choice(charm.test_configs)  # nosec B311

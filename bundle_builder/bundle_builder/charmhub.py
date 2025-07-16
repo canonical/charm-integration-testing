@@ -17,7 +17,15 @@ import dataclasses
 import logging
 from functools import cache
 
-from .charm import ENDPOINT_PEERS, ENDPOINT_PROVIDES, ENDPOINT_REQUIRES, Charm, CharmEndpoint, CharmEndpointOptionality
+from .charm import (
+    ENDPOINT_PEERS,
+    ENDPOINT_PROVIDES,
+    ENDPOINT_REQUIRES,
+    Charm,
+    CharmConfig,
+    CharmEndpoint,
+    CharmEndpointOptionality,
+)
 from .charmhub_http import (
     CharmhubBase,
     CharmhubHttpClient,
@@ -385,7 +393,7 @@ class CharmhubClient:
 
         return frozenset(endpoints)
 
-    def _charm_test_configs(self, charm: str) -> tuple[tuple[tuple[str, str | int], ...], ...]:
+    def _charm_test_configs(self, charm: str) -> tuple[CharmConfig, ...]:
         # Get test configs from overrides client
         test_configs = self.overrides_client.get_charm_test_configs(charm)
 
