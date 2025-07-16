@@ -239,7 +239,7 @@ class BundleBuilder:
 
     @staticmethod
     def get_random_test_config(charm) -> CharmConfig:
-        if len(charm.test_configs) > 0:
+        if len(charm.test_configs) == 0:
             return CharmConfig()
 
         return random.choice(charm.test_configs)  # nosec B311
