@@ -15,14 +15,14 @@
 
 
 import dataclasses
-from dataclasses import field
 
 import pytest
+from pydantic import Field
 from pydantic.dataclasses import dataclass
 
 from bundle_builder.bundle import Application, ApplicationEndpoint, Bundle, Integration
 from bundle_builder.bundle_builder import BundleBuilder, Node
-from bundle_builder.charm import ENDPOINT_PROVIDES, ENDPOINT_REQUIRES, CharmEndpointOptionality
+from bundle_builder.charm import ENDPOINT_PROVIDES, ENDPOINT_REQUIRES, Charm, CharmConfig, CharmEndpointOptionality
 
 from .test_bundle import sample_bundle_postgresql_k8s_kratos
 from .test_charm import (
@@ -231,7 +231,7 @@ class TestBundleBuilder:
             label: str
             base_bundle: Bundle
             expected_bundle: Bundle
-            charmhub_client: CharmhubClientStub = field(default_factory=CharmhubClientStub)
+            charmhub_client: CharmhubClientStub = Field(default_factory=CharmhubClientStub)
 
         test_cases = [
             Params(
@@ -353,7 +353,7 @@ class TestBundleBuilder:
             label: str
             bundle: Bundle
             possible_integrations: list[frozenset[Integration]]
-            charmhub_client: CharmhubClientStub = field(default_factory=CharmhubClientStub)
+            charmhub_client: CharmhubClientStub = Field(default_factory=CharmhubClientStub)
 
         test_cases = [
             Params(
@@ -558,7 +558,7 @@ class TestBundleBuilder:
             expected_integrations: frozenset[Integration]
             expected_application_endpoint_to_possible_charm: frozenset[tuple[ApplicationEndpoint, str]]
             expected_balance: float = 1.0
-            charmhub_client: CharmhubClientStub = field(default_factory=CharmhubClientStub)
+            charmhub_client: CharmhubClientStub = Field(default_factory=CharmhubClientStub)
             balance: float | None = None
 
         test_cases = [
@@ -659,7 +659,7 @@ class TestBundleBuilder:
             label: str
             node: Node
             children: frozenset[Node]
-            charmhub_client: CharmhubClientStub = field(default_factory=CharmhubClientStub)
+            charmhub_client: CharmhubClientStub = Field(default_factory=CharmhubClientStub)
 
         test_cases = [
             Params(
@@ -684,3 +684,40 @@ class TestBundleBuilder:
 
             # THEN matches expected children
             assert children == params.children
+
+    class TestRandomTestConfig:
+        @dataclass
+        class Params:
+            label: str
+            charm: Charm
+            expected: CharmConfig
+
+        test_cases = [
+            Params(
+                label="no_test_configs",
+                charm=dataclasses.replace(
+                    sample_charm_postgresql_k8s(),
+                    test_configs=(),
+                ),
+                expected=CharmConfig(),
+            ),
+            Params(
+                label="one_test_config",
+                charm=dataclasses.replace(
+                    sample_charm_postgresql_k8s(),
+                    test_configs=((("key", "value-1"),),),
+                ),
+                expected=(("key", "value-1"),),
+            ),
+        ]
+
+        @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
+        def test(self, params: Params):
+            # GIVEN the charm
+            charm = params.charm
+
+            # WHEN a random config is requested
+            config = BundleBuilder.random_test_config(charm)
+
+            # THEN matches expected config
+            assert config == params.expected

@@ -14,10 +14,9 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
-from dataclasses import field
-
 import pytest
 import yaml
+from pydantic import Field
 from pydantic.dataclasses import dataclass
 
 from bundle_builder.charmhub_http import (
@@ -197,9 +196,9 @@ class TestCharmhubHttpClient:
             label: str
             provides: str | None = None
             requires: str | None = None
-            result: list[FindResponse] = field(default_factory=list)
+            result: list[FindResponse] = Field(default_factory=list)
             raise_exception: bool = False
-            session: SessionStub = field(default_factory=SessionStub)
+            session: SessionStub = Field(default_factory=SessionStub)
 
         test_cases = [
             Params(
@@ -263,7 +262,7 @@ class TestCharmhubHttpClient:
             action: RefreshAction
             response: RefreshResponse | None = None
             raise_exception: bool = False
-            session: SessionStub = field(default_factory=SessionStub)
+            session: SessionStub = Field(default_factory=SessionStub)
 
         test_cases = [
             Params(
@@ -398,7 +397,7 @@ class TestCharmhubHttpClient:
             charm: str
             response: InfoResponse | None = None
             raise_exception: bool = False
-            session: SessionStub = field(default_factory=SessionStub)
+            session: SessionStub = Field(default_factory=SessionStub)
 
         test_cases = [
             Params(

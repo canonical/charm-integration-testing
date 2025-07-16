@@ -118,7 +118,7 @@ def applications_from_args(
             Application(
                 name=name,
                 charm=charm,
-                config=BundleBuilder.get_random_test_config(charm),
+                config=BundleBuilder.random_test_config(charm),
             )
         )
     return frozenset(applications)

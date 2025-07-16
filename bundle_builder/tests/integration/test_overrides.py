@@ -61,15 +61,12 @@ def test_overrides_metadata_make_optional(
         application_endpoint for integration in minimal_bundle.integrations for application_endpoint in integration
     }
 
+
 def test_charm_config(tmp_path: Path, sample_independent_charm: str):
     # GIVEN a charm test config
     with (tmp_path / f"{sample_independent_charm}.yaml").open("w") as f:
         yaml.dump(
-            {
-                "configs": [
-                    {"config-option": "config-value"}
-                ]
-            },
+            {"configs": [{"config-option": "config-value"}]},
             f,
         )
     # AND a charmhub client with an overrides client pointed to it

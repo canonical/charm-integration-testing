@@ -223,7 +223,7 @@ class BundleBuilder:
                                 Application(
                                     name=charm.name,
                                     charm=charm,
-                                    config=self.get_random_test_config(charm),
+                                    config=self.random_test_config(charm),
                                 )
                             }
                         ),
@@ -238,8 +238,11 @@ class BundleBuilder:
         )
 
     @staticmethod
-    def get_random_test_config(charm) -> CharmConfig:
+    def random_test_config(charm) -> CharmConfig:
+        # If there are not test configs defined return empty
         if len(charm.test_configs) == 0:
             return CharmConfig()
 
+        # Pick a random config
+        # This function is not secure in cryptography, but should be fine to use here
         return random.choice(charm.test_configs)  # nosec B311

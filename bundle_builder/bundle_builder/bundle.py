@@ -27,7 +27,7 @@ from .charm import Charm, CharmConfig, CharmEndpoint
 class Application:
     name: str
     charm: Charm
-    config: CharmConfig = Field(default_factory=tuple)
+    config: CharmConfig = Field(default_factory=CharmConfig)
 
     def __repr__(self):
         if self.name == self.charm.name:
