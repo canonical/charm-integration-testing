@@ -1,0 +1,11 @@
+# Remove after: https://github.com/canonical/content-cache-k8s-operator/pull/106
+provides:
+  metrics-endpoint:
+    optional: true
+  grafana-dashboard:
+    optional: true
+requires:
+  logging:
+    optional: true
+  nginx-route:
+    optional: true
