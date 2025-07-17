@@ -14,18 +14,20 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
-from dataclasses import dataclass
 from functools import cached_property
 
 import yaml
+from pydantic import Field
+from pydantic.dataclasses import dataclass
 
-from .charm import Charm, CharmEndpoint
+from .charm import Charm, CharmConfig, CharmEndpoint
 
 
 @dataclass(frozen=True)
 class Application:
     name: str
     charm: Charm
+    config: CharmConfig = Field(default_factory=CharmConfig)
 
     def __repr__(self):
         if self.name == self.charm.name:
@@ -107,6 +109,7 @@ class Bundle:
                         "base": f"ubuntu@{application.charm.ubuntu_version}",
                         "scale": 1,
                         "trust": True,
+                        "options": {key: value for key, value in application.config},
                     }
                     for application in self.applications
                 },

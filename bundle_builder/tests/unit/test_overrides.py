@@ -14,11 +14,11 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
-from dataclasses import field
 from pathlib import Path
 
 import pytest
 import yaml
+from pydantic import Field
 from pydantic.dataclasses import dataclass
 
 from bundle_builder.charm import CharmEndpointOptionality
@@ -79,15 +79,12 @@ class TestOverridesClient:
         class Params:
             label: str
             charm: str = "postgresql-k8s"
-            overrides: dict = field(default_factory=dict)
-            expected_override: CharmMetadataOverride = field(default_factory=CharmMetadataOverride)
+            overrides: dict = Field(default_factory=dict)
+            expected_override: CharmMetadataOverride = Field(default_factory=CharmMetadataOverride)
             overrides_directory: bool = True
 
         test_cases = [
-            Params(
-                label="overrides_directory_not_given",
-                overrides_directory=False,
-            ),
+            Params(label="overrides_directory_not_given", overrides_directory=False),
             Params(label="override_for_charm_not_found", charm="postgresql-k8s", overrides={}),
             Params(
                 label="override_is_provided",
@@ -115,19 +112,20 @@ class TestOverridesClient:
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
         def test(self, params: Params, tmp_path: Path):
-            # GIVEN the override client
+            # GIVEN
+            if params.overrides_directory:
+                for charm, override in params.overrides.items():
+                    with (tmp_path / f"{charm}.yaml").open("w") as file:
+                        yaml.dump(override, file)
+            # AND
             overrides_client = OverridesClient(
                 charm_metadata_overrides=tmp_path if params.overrides_directory else None
             )
-            # AND the provided overrides are written to files
-            for charm, override in params.overrides.items():
-                with (tmp_path / f"{charm}.yaml").open("w") as file:
-                    yaml.dump(override, file)
 
-            # WHEN the override for the charm is fetched
+            # WHEN
             override = overrides_client.get_charm_metadata_overrides(params.charm)
 
-            # THEN matches expected
+            # THEN
             assert override == params.expected_override
 
     class TestGetCharmPlatformOverrides:
@@ -135,23 +133,17 @@ class TestOverridesClient:
         class Params:
             label: str
             charm: str = "postgresql-k8s"
-            overrides: dict = field(default_factory=dict)
-            expected_override: set[str] = field(default_factory=set)
+            overrides: dict = Field(default_factory=dict)
+            expected_override: set[str] = Field(default_factory=set)
             overrides_directory: bool = True
 
         test_cases = [
-            Params(
-                label="overrides_directory_not_given",
-                overrides_directory=False,
-            ),
-            Params(label="override_for_charm_not_found", charm="postgresql-k8s", overrides={}),
+            Params(label="overrides_directory_not_given", overrides_directory=False),
+            Params(label="override_for_charm_not_found", overrides={}),
             Params(
                 label="override_is_provided",
-                charm="postgresql-k8s",
                 overrides={
-                    "postgresql-k8s": {
-                        "platforms": ["kubernetes", "machine"],
-                    },
+                    "postgresql-k8s": {"platforms": ["kubernetes", "machine"]},
                 },
                 expected_override={"kubernetes", "machine"},
             ),
@@ -159,62 +151,98 @@ class TestOverridesClient:
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
         def test(self, params: Params, tmp_path: Path):
-            # GIVEN the override client
+            # GIVEN
+            if params.overrides_directory:
+                for charm, override in params.overrides.items():
+                    with (tmp_path / f"{charm}.yaml").open("w") as file:
+                        yaml.dump(override, file)
+            # AND
             overrides_client = OverridesClient(
                 charm_platform_overrides=tmp_path if params.overrides_directory else None
             )
-            # AND the provided overrides are written to files
-            for charm, override in params.overrides.items():
-                with (tmp_path / f"{charm}.yaml").open("w") as file:
-                    yaml.dump(override, file)
 
-            # WHEN the override for the charm is fetched
-            override = overrides_client.get_charm_platform_overrides(params.charm)
+            # WHEN
+            actual = overrides_client.get_charm_platform_overrides(params.charm)
 
-            # THEN matches expected
-            assert override == params.expected_override
+            # THEN
+            assert actual == params.expected_override
 
     class TestGetCharmListingOverrides:
         @dataclass
         class Params:
             label: str
-            overrides: dict = field(default_factory=dict)
-            expected_overrides: set[str] = field(default_factory=set)
+            overrides: dict = Field(default_factory=dict)
+            expected_overrides: set[str] = Field(default_factory=set)
             supply_file: bool = True
 
         test_cases = [
-            Params(
-                label="overrides_file_not_given",
-                supply_file=False,
-            ),
-            Params(
-                label="overrides_are_empty",
-                overrides={
-                    "unlisted_charms": [],
-                },
-                expected_overrides=set(),
-            ),
+            Params(label="overrides_file_not_given", supply_file=False),
+            Params(label="overrides_are_empty", overrides={"unlisted_charms": []}, expected_overrides=set()),
             Params(
                 label="overrides_are_provided",
-                overrides={
-                    "unlisted_charms": ["charm-a", "charm-b"],
-                },
+                overrides={"unlisted_charms": ["charm-a", "charm-b"]},
                 expected_overrides={"charm-a", "charm-b"},
             ),
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
         def test(self, params: Params, tmp_path: Path):
-            # GIVEN an override file
-            overrides_file = tmp_path / "charm_listing_overrides.yaml"
-            # AND the provided overrides are written to the file
-            with overrides_file.open("w") as file:
-                yaml.dump(params.overrides, file)
-            # AND the override client is or is not provided with that file
-            overrides_client = OverridesClient(charm_listing_overrides=overrides_file if params.supply_file else None)
+            # GIVEN
+            override_file = tmp_path / "listing.yaml"
+            # AND
+            if params.supply_file:
+                with override_file.open("w") as file:
+                    yaml.dump(params.overrides, file)
+            # AND
+            overrides_client = OverridesClient(charm_listing_overrides=override_file if params.supply_file else None)
 
-            # WHEN the overrides are fetched
-            actual_overrides = overrides_client.get_charm_listing_overrides()
+            # WHEN
+            actual = overrides_client.get_charm_listing_overrides()
 
-            # THEN matches expected
-            assert actual_overrides == params.expected_overrides
+            # THEN
+            assert actual == params.expected_overrides
+
+    class TestGetCharmTestConfigs:
+        @dataclass
+        class Params:
+            label: str
+            charm: str = "charm-a"
+            overrides: dict = Field(default_factory=dict)
+            expected: list[dict] = Field(default_factory=list)
+            overrides_directory: bool = True
+
+        test_cases = [
+            Params(label="overrides_directory_not_given", overrides_directory=False, expected=[]),
+            Params(label="override_for_charm_not_found", overrides={}, expected=[]),
+            Params(
+                label="override_is_provided",
+                overrides={
+                    "charm-a": {
+                        "configs": [
+                            {"a": 1, "b": "x"},
+                            {"c": 2},
+                        ]
+                    }
+                },
+                expected=[
+                    {"a": 1, "b": "x"},
+                    {"c": 2},
+                ],
+            ),
+        ]
+
+        @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
+        def test(self, params: Params, tmp_path: Path):
+            # GIVEN
+            if params.overrides_directory:
+                for charm, override in params.overrides.items():
+                    with (tmp_path / f"{charm}.yaml").open("w") as file:
+                        yaml.dump(override, file)
+            # AND
+            overrides_client = OverridesClient(charm_test_configs=tmp_path if params.overrides_directory else None)
+
+            # WHEN
+            actual = overrides_client.get_charm_test_configs(params.charm)
+
+            # THEN
+            assert actual == params.expected

@@ -60,3 +60,38 @@ def test_overrides_metadata_make_optional(
     assert ApplicationEndpoint(application=sample_dependent_charm, endpoint=sample_dependent_charm_endpoint) not in {
         application_endpoint for integration in minimal_bundle.integrations for application_endpoint in integration
     }
+
+
+def test_charm_config(tmp_path: Path, sample_independent_charm: str):
+    # GIVEN a charm test config
+    with (tmp_path / f"{sample_independent_charm}.yaml").open("w") as f:
+        yaml.dump(
+            {"configs": [{"config-option": "config-value"}]},
+            f,
+        )
+    # AND a charmhub client with an overrides client pointed to it
+    charmhub_client = CharmhubClient(overrides_client=OverridesClient(charm_test_configs=tmp_path))
+
+    # WHEN a bundle is built with that charm
+    minimal_bundle = BundleBuilder(charmhub_client).build(
+        Bundle(
+            applications=frozenset(
+                {
+                    Application(
+                        name=sample_independent_charm,
+                        charm=charmhub_client.charm_from_store(sample_independent_charm, "amd64"),
+                    )
+                }
+            ),
+            integrations=frozenset(),
+            platform="kubernetes",
+            arch="amd64",
+        )
+    )
+
+    # THEN the config option exists in the file bundle
+    assert all(
+        (("config-option", "config-value"),) == application.config
+        for application in minimal_bundle.applications
+        if application.charm == sample_independent_charm
+    )

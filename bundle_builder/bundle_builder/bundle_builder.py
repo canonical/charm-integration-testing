@@ -17,11 +17,13 @@
 import dataclasses
 import heapq
 import logging
-from dataclasses import dataclass
+import random
 from functools import cached_property
 
+from pydantic.dataclasses import dataclass
+
 from .bundle import Application, ApplicationEndpoint, Bundle, Integration
-from .charm import ENDPOINT_PROVIDES, ENDPOINT_REQUIRES
+from .charm import ENDPOINT_PROVIDES, ENDPOINT_REQUIRES, CharmConfig
 from .charmhub import CharmhubClient
 
 
@@ -205,7 +207,7 @@ class BundleBuilder:
     # missing non-optional required endpoint
     def child_nodes(self, node: Node) -> frozenset[Node]:
         # Get the default release for all the child charms
-        child_charm = {
+        child_charms = {
             self.charmhub_client.charm_from_store(charm_name=charm_name, ubuntu_arch=node.bundle.arch)
             for charm_name in node.child_charms
         }
@@ -215,13 +217,32 @@ class BundleBuilder:
             {
                 self.new_node(
                     bundle=Bundle(
-                        applications=frozenset(node.bundle.applications | {Application(name=charm.name, charm=charm)}),
+                        applications=frozenset(
+                            node.bundle.applications
+                            | {
+                                Application(
+                                    name=charm.name,
+                                    charm=charm,
+                                    config=self.random_test_config(charm),
+                                )
+                            }
+                        ),
                         integrations=node.bundle.integrations,
                         platform=node.bundle.platform,
                         arch=node.bundle.arch,
                     ),
                     balance=node.balance,
                 )
-                for charm in child_charm
+                for charm in child_charms
             }
         )
+
+    @staticmethod
+    def random_test_config(charm) -> CharmConfig:
+        # If there are not test configs defined return empty
+        if len(charm.test_configs) == 0:
+            return CharmConfig()
+
+        # Pick a random config
+        # This function is not secure in cryptography, but should be fine to use here
+        return random.choice(charm.test_configs)  # nosec B311

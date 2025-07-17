@@ -19,6 +19,7 @@ import yaml
 from pydantic import Field
 from pydantic.dataclasses import dataclass
 
+from bundle_builder.charm import CharmConfig
 from bundle_builder.charmhub import CharmhubClient, CharmReleaseNotFoundException
 from bundle_builder.charmhub_http import (
     CharmhubBase,
@@ -58,6 +59,11 @@ class OverridesStub:
 
     def get_charm_listing_overrides(self) -> set[str]:
         return self.charm_listing_overrides
+
+    charm_test_configs: dict[str, list[dict]] = Field(default_factory=dict)
+
+    def get_charm_test_configs(self, charm: str) -> list[dict]:
+        return self.charm_test_configs[charm]
 
 
 matching_base = CharmhubBase(name="ubuntu", architecture="amd64", channel="20.04")
@@ -565,3 +571,44 @@ class TestCharmhubClient:
 
             # THEN
             assert actual == params.expected
+
+    class TestCharmTestConfigs:
+        @dataclass
+        class Params:
+            label: str
+            charm: str
+            charm_test_configs: dict[str, list[dict]]
+            expected: tuple[CharmConfig, ...]
+
+        test_cases = [
+            Params(
+                label="no_configs",
+                charm="charm-a",
+                charm_test_configs={"charm-a": []},
+                expected=((),),
+            ),
+            Params(
+                label="single_config",
+                charm="charm-a",
+                charm_test_configs={"charm-a": [{"key1": "val1", "key2": 2}]},
+                expected=((("key1", "val1"), ("key2", 2)),),
+            ),
+            Params(
+                label="multiple_configs",
+                charm="charm-b",
+                charm_test_configs={"charm-b": [{"a": "x"}, {"b": "y"}]},
+                expected=((("a", "x"),), (("b", "y"),)),
+            ),
+        ]
+
+        @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
+        def test(self, params: Params):
+            # GIVEN
+            overrides_client = OverridesStub(charm_test_configs=params.charm_test_configs)
+            client = CharmhubClient(overrides_client=overrides_client)
+
+            # WHEN
+            actual = client._charm_test_configs(params.charm)
+
+            # THEN
+            assert tuple(map(tuple, actual)) == params.expected

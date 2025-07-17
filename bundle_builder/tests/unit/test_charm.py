@@ -14,9 +14,8 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
-from dataclasses import field
-
 import pytest
+from pydantic import Field
 from pydantic.dataclasses import dataclass
 
 from bundle_builder.charm import ENDPOINT_PROVIDES, ENDPOINT_REQUIRES, Charm, CharmEndpoint, CharmEndpointOptionality
@@ -241,7 +240,7 @@ class TestCharmEndpointOptionality:
         class Params:
             label: str
             value: bool
-            endpoints: set[str] = field(default_factory=set)
+            endpoints: set[str] = Field(default_factory=set)
 
         test_cases = [
             Params(label="true_without_endpoints", value=True),

@@ -78,6 +78,7 @@ def add_args_to_parser(parser: argparse.ArgumentParser):
     parser.add_argument(
         "--charm-listing-overrides", type=Path, help="Path to file containing charm listing overrides", default=None
     )
+    parser.add_argument("--charm-test-configs", type=Path, help="Path to folder containing charm configs", default=None)
     parser.add_argument(
         "--log-level", type=str.upper, choices=["INFO", "DEBUG", "WARNING", "ERROR", "CRITICAL"], default="INFO"
     )
@@ -104,16 +105,20 @@ def applications_from_args(
         base = base if base != "default" else None
 
         # Get charm from store
+        charm = charmhub_client.charm_from_store(
+            charm_name=charm,
+            charm_channel=channel,
+            charm_revision=revision,
+            ubuntu_version=base,
+            ubuntu_arch=arch,
+        )
+
+        # Add application
         applications.add(
             Application(
                 name=name,
-                charm=charmhub_client.charm_from_store(
-                    charm_name=charm,
-                    charm_channel=channel,
-                    charm_revision=revision,
-                    ubuntu_version=base,
-                    ubuntu_arch=arch,
-                ),
+                charm=charm,
+                config=BundleBuilder.random_test_config(charm),
             )
         )
     return frozenset(applications)
@@ -179,10 +184,13 @@ def main():
         parser.error(f"The charm platform overrides path '{args.charm_platform_overrides}' is not a valid directory.")
     if args.charm_listing_overrides is not None and not args.charm_listing_overrides.is_file():
         parser.error(f"The charm listing overrides file '{args.charm_listing_overrides}' is not a valid file.")
+    if args.charm_test_configs is not None and not args.charm_test_configs.is_dir():
+        parser.error(f"The charm test configs path '{args.charm_test_configs}' is not a valid directory.")
     overrides_client = OverridesClient(
         charm_metadata_overrides=args.charm_metadata_overrides,
         charm_platform_overrides=args.charm_platform_overrides,
         charm_listing_overrides=args.charm_listing_overrides,
+        charm_test_configs=args.charm_test_configs,
     )
 
     # Create Charmhub client
