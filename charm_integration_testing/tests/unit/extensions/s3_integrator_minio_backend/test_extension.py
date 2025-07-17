@@ -135,18 +135,18 @@ class TestS3IntegratorMinIOBackendExtension:
                 },
             ) in juju.configured
 
-    class TestDownloadMinioClient:
+    class TestGetMinioClientFile:
         def test_downloads_only_once(self, extension):
             # GIVEN no client downloaded
             extension.minio_client_file = None
 
-            # WHEN download is called
+            # WHEN called
             path = extension.get_minio_client_file()
 
             # THEN it is cached
             assert path == extension.minio_client_file
 
-            # WHEN download is called again
+            # WHEN called again
             path2 = extension.get_minio_client_file()
 
             # THEN it reuses the file

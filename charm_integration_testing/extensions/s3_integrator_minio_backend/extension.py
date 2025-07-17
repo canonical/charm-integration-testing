@@ -88,7 +88,7 @@ class S3IntegratorMinIOBackendExtension(JujuExtension, ABC):
         return MINIO_ADDRESS.format(unit_ip=self.juju.unit_ip(model, self.minio_unit(s3_integrator_application)))
 
     def setup_minio_client(self, model: str, s3_integrator_application: str):
-        # Download the MinIO client
+        # Get the MinIO client file path
         minio_client_file = self.get_minio_client_file()
 
         # Copy client to the pod

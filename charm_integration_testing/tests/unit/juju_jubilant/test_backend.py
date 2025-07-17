@@ -309,3 +309,118 @@ class TestJubilantBackend:
                 assert "my-app/99" in str(e)
             else:
                 assert False, "Expected KeyError"
+
+    class TestAllStatusesAreIn:
+        class StatusStub:
+            def __init__(self, app_status, unit_status):
+                self.apps = {
+                    "my-app": type(
+                        "AppStatus",
+                        (),
+                        {
+                            "app_status": type(
+                                "Status",
+                                (),
+                                {"current": app_status},
+                            )(),
+                            "units": {
+                                "my-app/0": type(
+                                    "UnitStatus",
+                                    (),
+                                    {
+                                        "workload_status": type(
+                                            "Status",
+                                            (),
+                                            {"current": unit_status},
+                                        )()
+                                    },
+                                )()
+                            },
+                        },
+                    )()
+                }
+
+            def get_units(self, application):
+                return self.apps[application].units
+
+        def test_all_statuses_are_in(self):
+            # GIVEN a status where all statuses are "active"
+            status = self.StatusStub(app_status="active", unit_status="active")
+
+            # WHEN checking if all statuses are in {"active"}
+            result = JubilantBackend._all_statuses_are_in(
+                {"active"},
+                status,
+                "my-app",
+            )
+
+            # THEN the result is True
+            assert result
+
+        def test_not_all_statuses_are_in(self):
+            # GIVEN a status where the unit status is "waiting"
+            status = self.StatusStub(app_status="active", unit_status="waiting")
+
+            # WHEN checking if all statuses are in {"active"}
+            result = JubilantBackend._all_statuses_are_in(
+                {"active"},
+                status,
+                "my-app",
+            )
+
+            # THEN the result is False
+            assert not result
+
+        def test_application_not_found(self):
+            # GIVEN a status
+            status = self.StatusStub(app_status="active", unit_status="active")
+
+            # WHEN checking if all statuses are in {"active"} for an application that doesn't exist
+            result = JubilantBackend._all_statuses_are_in(
+                {"active"},
+                status,
+                "not-my-app",
+            )
+
+            # THEN the result is False
+            assert not result
+
+    class TestWaitApplicationSettled:
+        @dataclass
+        class WaitStub:
+            raise_exception: bool = False
+
+            def wait(self, ready, timeout, delay):
+                self.ready = ready
+                self.timeout = timeout
+                self.delay = delay
+
+                if self.raise_exception:
+                    raise TimeoutError
+
+        def test_application_settled(self):
+            # GIVEN
+            stub = self.WaitStub()
+            client = JubilantClientStub(client=stub)
+
+            # WHEN
+            JubilantBackend(client).wait_application_settled("test-model", "my-app", timeout=timedelta(seconds=10))
+
+            # THEN the timeout and delay are set correctly
+            assert stub.timeout == 10
+            assert stub.delay == 1
+
+        def test_timeout(self):
+            # GIVEN
+            stub = self.WaitStub(raise_exception=True)
+            client = JubilantClientStub(client=stub)
+
+            # WHEN
+            try:
+                JubilantBackend(client).wait_application_settled("test-model", "my-app", timeout=timedelta(seconds=10))
+            except TimeoutError:
+                # THEN
+                pass
+            else:
+                # AND
+                assert False
