@@ -37,6 +37,28 @@ class JubilantBackend(JujuCmdBackend):
         except TimeoutError:
             raise JujuWaitTimeoutError
 
+    @staticmethod
+    def _all_statuses_are_in(expected: set[str], status: jubilant.Status, application: str) -> bool:
+        application_info = status.apps.get(application)
+        if application_info is None:
+            return False
+        if application_info.app_status.current not in expected:
+            return False
+        for unit_info in status.get_units(application).values():
+            if unit_info.workload_status.current not in expected:
+                return False
+        return True
+
+    def wait_application_settled(self, model: str, application: str, timeout: timedelta | None):
+        try:
+            self.client.model(model).wait(
+                lambda status: self._all_statuses_are_in({"blocked", "active"}, status, application),
+                timeout=timeout.total_seconds() if timeout else None,
+                delay=1,
+            )
+        except TimeoutError:
+            raise JujuWaitTimeoutError
+
     def add_secret(self, model: str, name: str, values: dict[str, str]) -> str:
         return (
             self.client.model(model)

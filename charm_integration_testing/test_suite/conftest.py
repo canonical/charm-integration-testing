@@ -4,6 +4,7 @@
 
 import logging
 from datetime import timedelta
+from pathlib import Path
 
 import pytest
 from extensions import S3IntegratorMinIOBackendExtension, UnsealVaultJujuExtension, UnsealVaultK8sJujuExtension
@@ -29,25 +30,36 @@ def juju_backend() -> JujuBackend:
 
 
 @pytest.fixture
-def juju_client(juju_backend: JujuBackend, logger: logging.Logger) -> JujuClient:
+def juju_client(juju_backend: JujuBackend, logger: logging.Logger, minio_client_file: Path | None) -> JujuClient:
     return JujuClient(
         juju_backend,
         logger,
         extensions=[
             UnsealVaultJujuExtension(juju_backend, logger),
             UnsealVaultK8sJujuExtension(juju_backend, logger),
-            S3IntegratorMinIOBackendExtension(juju_backend, logger),
+            S3IntegratorMinIOBackendExtension(juju_backend, logger, minio_client_file),
         ],
     )
 
 
 def pytest_addoption(parser):
     parser.addoption("--model", type=str, required=True, help="Juju model to test in")
+    parser.addoption(
+        "--minio-client-file",
+        type=Path,
+        help="MinIO client file used to create a bucket (for s3-integrator)",
+        default=None,
+    )
 
 
 @pytest.fixture
 def model(request: pytest.FixtureRequest) -> str:
     return request.config.getoption("--model")
+
+
+@pytest.fixture
+def minio_client_file(request: pytest.FixtureRequest) -> Path | None:
+    return request.config.getoption("--minio-client-file")
 
 
 failure_message = StashKey[CollectReport]()
