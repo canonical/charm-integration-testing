@@ -49,9 +49,9 @@ class CharmhubClient:
         logger=logging.getLogger(__name__),
         overrides_client: OverridesClient | None = None,
     ):
-        self.http_client = http_client or CharmhubHttpClient(logger=logger)
+        self.http_client = http_client if http_client is not None else CharmhubHttpClient(logger=logger)
         self.logger = logger
-        self.overrides_client = overrides_client or OverridesClient()
+        self.overrides_client = overrides_client if overrides_client is not None else OverridesClient()
 
     @cache
     def charm_from_store(
