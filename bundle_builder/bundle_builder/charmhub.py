@@ -402,4 +402,4 @@ class CharmhubClient:
             test_configs = [{}]
 
         # Return configs as hashable tuples
-        return (((key, value) for key, value in config.items()) for config in test_configs)
+        return tuple(tuple((key, value) for key, value in config.items()) for config in test_configs)
