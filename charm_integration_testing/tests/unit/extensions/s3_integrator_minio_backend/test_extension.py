@@ -3,6 +3,7 @@
 
 import logging
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import pytest
 from extensions.s3_integrator_minio_backend.extension import (
@@ -88,7 +89,7 @@ class TestS3IntegratorMinIOBackendExtension:
     class TestDeployMinIO:
         def test_deploy_flow_sets_up_everything(self, extension, juju):
             # GIVEN a ready extension with the client downloaded
-            extension.minio_client_file = "mc"
+            extension.minio_client_file = Path("mc")
 
             # WHEN deploy_minio_s3_backend is called
             extension.deploy_minio_s3_backend("test-model", "s3-app")
@@ -108,7 +109,9 @@ class TestS3IntegratorMinIOBackendExtension:
             assert ("test-model", "s3-app", "0:10:00") in juju.waited_scaled
             assert ("test-model", "s3-app-minio", "0:10:00") in juju.waited_scaled
 
-            assert juju.scp_calls == [("test-model", "mc", "s3-app-minio/leader:/usr/local/bin/mc")]
+            assert juju.scp_calls == [
+                ("test-model", str(Path("mc").resolve()), "s3-app-minio/leader:/usr/local/bin/mc")
+            ]
 
             assert any("/usr/local/bin/mc alias set local" in cmd for _, _, cmd in juju.ssh_calls)
             assert any("/usr/local/bin/mc mb" in cmd for _, _, cmd in juju.ssh_calls)
@@ -132,19 +135,19 @@ class TestS3IntegratorMinIOBackendExtension:
                 },
             ) in juju.configured
 
-    class TestDownloadMinioClient:
+    class TestGetMinioClientFile:
         def test_downloads_only_once(self, extension):
             # GIVEN no client downloaded
             extension.minio_client_file = None
 
-            # WHEN download is called
-            path = extension.download_minio_client()
+            # WHEN called
+            path = extension.get_minio_client_file()
 
             # THEN it is cached
             assert path == extension.minio_client_file
 
-            # WHEN download is called again
-            path2 = extension.download_minio_client()
+            # WHEN called again
+            path2 = extension.get_minio_client_file()
 
             # THEN it reuses the file
             assert path == path2

@@ -5,6 +5,7 @@ import logging
 import urllib.request
 from abc import ABC
 from datetime import timedelta
+from pathlib import Path
 
 from juju import JujuBackend, JujuExtension
 
@@ -25,11 +26,12 @@ MINIO_CLIENT_MAKE_BUCKET = "{client_path} mb local/{bucket}"
 class S3IntegratorMinIOBackendExtension(JujuExtension, ABC):
     juju: JujuBackend
     logger: logging.Logger
-    minio_client_file: str | None = None
+    minio_client_file: Path | None = None
 
-    def __init__(self, juju: JujuBackend, logger: logging.Logger):
+    def __init__(self, juju: JujuBackend, logger: logging.Logger, minio_client_file: Path | None = None):
         self.juju = juju
         self.logger = logger
+        self.minio_client_file = minio_client_file
 
     def post_deploy(self, model: str):
         # Look for s3 integrator charms
@@ -86,12 +88,14 @@ class S3IntegratorMinIOBackendExtension(JujuExtension, ABC):
         return MINIO_ADDRESS.format(unit_ip=self.juju.unit_ip(model, self.minio_unit(s3_integrator_application)))
 
     def setup_minio_client(self, model: str, s3_integrator_application: str):
-        # Download the MinIO client
-        minio_client_file = self.download_minio_client()
+        # Get the MinIO client file path
+        minio_client_file = self.get_minio_client_file()
 
         # Copy client to the pod
         self.logger.info(f"Copying the MinIO client to '{self.minio_application(s3_integrator_application)}'")
-        self.juju.scp(model, minio_client_file, f"{self.minio_unit(s3_integrator_application)}:{MINIO_CLIENT_PATH}")
+        self.juju.scp(
+            model, str(minio_client_file.resolve()), f"{self.minio_unit(s3_integrator_application)}:{MINIO_CLIENT_PATH}"
+        )
 
         # Make client executable
         self.logger.info(f"Mark MinIO client in '{self.minio_application(s3_integrator_application)}' as executable")
@@ -114,14 +118,15 @@ class S3IntegratorMinIOBackendExtension(JujuExtension, ABC):
             ),
         )
 
-    def download_minio_client(self) -> str:
+    def get_minio_client_file(self) -> Path:
         # Only download if not downloaded
         if self.minio_client_file is None:
             self.logger.info("Downloading MinIO client")
             # As a snap Juju cannot access /tmp, so just download into the current folder
             # Also security warning "Allowing use of file:/ or custom schemes is often unexpected."
             # does not apply to hardcoded URL
-            self.minio_client_file, _ = urllib.request.urlretrieve(MINIO_CLIENT_DOWNLOAD, "mc")  # nosec B310
+            file_path, _ = urllib.request.urlretrieve(MINIO_CLIENT_DOWNLOAD, "mc")  # nosec B310
+            self.minio_client_file = Path(file_path)
 
         # Return file
         return self.minio_client_file
