@@ -154,10 +154,11 @@ class CharmhubHttpClient:
         retry_strategy = Retry(
             total=10,
             status_forcelist=[429, 500, 502, 503, 504],
+            allowed_methods=Retry.DEFAULT_ALLOWED_METHODS | {"GET", "POST"},
             backoff_factor=0.5,
         )
         adapter = HTTPAdapter(max_retries=retry_strategy)
-        self.session = session or requests.Session()
+        self.session = session if session is not None else requests.Session()
         self.session.mount("https://", adapter)
         self.session.mount("http://", adapter)
 
