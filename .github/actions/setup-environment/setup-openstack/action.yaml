@@ -59,17 +59,17 @@ runs:
         credentials:
           ${CLOUD}:
             default-region: ${OS_REGION_NAME}
-              ${OS_PROJECT_NAME}:
-                auth-type: userpass
-                domain-name: ''
-                password: ${OS_PASSWORD}
-                project-domain-name: ${OS_PROJECT_DOMAIN_NAME}
-                tenant-name: ${OS_PROJECT_NAME}
-                user-domain-name: ${OS_USER_DOMAIN_NAME}
-                username: ${OS_USERNAME}
+            ${OS_PROJECT_NAME}:
+              auth-type: userpass
+              domain-name: ''
+              password: ${OS_PASSWORD}
+              project-domain-name: ${OS_PROJECT_DOMAIN_NAME}
+              tenant-name: ${OS_PROJECT_NAME}
+              user-domain-name: ${OS_USER_DOMAIN_NAME}
+              username: ${OS_USERNAME}
         EOF
 
-
+        cat $HOME/openstack/openstack-credentials.yaml
         juju add-cloud $CLOUD $HOME/openstack/openstack-cloud.yaml --client
         juju add-credential $CLOUD -f $HOME/openstack/openstack-credentials.yaml --client
         echo "cloud=${CLOUD}" >> $GITHUB_OUTPUT
