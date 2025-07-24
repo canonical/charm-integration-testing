@@ -115,7 +115,7 @@ def test_missing_type_hint_fallbacks_to_any():
 
 def test_decorator_usage_forms():
     # WHEN a class using @immutable_dataclass() with parentheses
-    @immutable_dataclass(frozen=True)
+    @immutable_dataclass(order=True)
     class A:
         x: int
 
@@ -139,3 +139,23 @@ def test_decorator_usage_forms():
     # THEN the computed field should also work
     b = B(y=5)
     assert b.square == 25
+
+
+def test_cannot_overwrite_frozen():
+    # WHEN class attempts to overwrite frozen
+    # THEN raise exception
+    with pytest.raises(TypeError):
+
+        @immutable_dataclass(frozen=True)
+        class A:
+            pass
+
+
+def test_cannot_overwrite_slots():
+    # WHEN class attempts to overwrite slots
+    # THEN raise exception
+    with pytest.raises(TypeError):
+
+        @immutable_dataclass(slots=False)
+        class A:
+            pass

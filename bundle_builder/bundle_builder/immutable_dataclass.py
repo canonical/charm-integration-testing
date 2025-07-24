@@ -65,7 +65,7 @@ def immutable_dataclass(_cls=None, **dataclass_kwargs):
         cls.__post_init__ = __post_init__
 
         # Apply dataclass with requested options
-        return dataclass(**{"frozen": True, "slots": True, **dataclass_kwargs})(cls)
+        return dataclass(frozen=True, slots=True, **dataclass_kwargs)(cls)
 
     # Handle both @decorator and @decorator()
     if _cls is not None and isinstance(_cls, type):
