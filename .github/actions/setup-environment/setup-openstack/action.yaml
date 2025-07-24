@@ -71,7 +71,7 @@ runs:
 
 
         juju add-cloud $CLOUD $HOME/openstack/openstack-cloud.yaml --client
-        juju add-credential $CLOUD -f $home/openstack/openstack-credentials.yaml --client
+        juju add-credential $CLOUD -f $HOME/openstack/openstack-credentials.yaml --client
         echo "cloud=${CLOUD}" >> $GITHUB_OUTPUT
 
     - name: Set extra-options
