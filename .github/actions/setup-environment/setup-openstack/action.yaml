@@ -41,7 +41,7 @@ runs:
         done
     - name: Add Openstack
       shell: bash
-      id: cloud
+      id: cloud-setup
       run: |
         source $HOME/openstack/novarc
         CLOUD="ps5-machine"
@@ -69,10 +69,9 @@ runs:
               username: ${OS_USERNAME}
         EOF
 
-        cat $HOME/openstack/openstack-credentials.yaml
         juju add-cloud $CLOUD $HOME/openstack/openstack-cloud.yaml --client
         juju add-credential $CLOUD -f $HOME/openstack/openstack-credentials.yaml --client
-        echo "cloud=${CLOUD}" >> $GITHUB_OUTPUT
+        echo "cloud-name=${CLOUD}" >> $GITHUB_OUTPUT
 
     - name: Set extra-options
       shell: bash
@@ -85,7 +84,7 @@ runs:
       shell: bash
       run: |
         # juju will prefix the namespace with "controller"
-        juju bootstrap {{ steps.cloud-setup.outputs.cloud-name }} {{ steps.extra-options.outputs.extra-options }} ${controller}
+        juju bootstrap ${{ steps.cloud-setup.outputs.cloud-name }} ${{ steps.extra-options.outputs.extra-options }} ${controller}
 
     - name: Create Model
       env:
