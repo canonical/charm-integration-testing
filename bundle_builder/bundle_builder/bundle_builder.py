@@ -18,32 +18,20 @@ import dataclasses
 import heapq
 import logging
 import random
-from functools import cached_property
-
-from pydantic.dataclasses import dataclass
 
 from .bundle import Application, ApplicationEndpoint, Bundle, Integration
 from .charm import ENDPOINT_PROVIDES, ENDPOINT_REQUIRES, CharmConfig
 from .charmhub import CharmhubClient
+from .immutable_dataclass import computed_property, immutable_dataclass
 
 
-@dataclass(frozen=True)
+@immutable_dataclass
 class Node:
     bundle: Bundle
     application_endpoint_to_possible_charm: frozenset[tuple[ApplicationEndpoint, str]]
     balance: float
 
-    @cached_property
-    def score(self) -> float:
-        # balance changes the weight prioritizing number of applications over unfulfilled interfaces
-        # it is expected to be between 0 and 1, where 1 prioritizes the smallest bundle
-        return self.balance * len(self.bundle.applications) + (1.0 - self.balance) * len(self.fulfillable_interfaces)
-
-    @cached_property
-    def fingerprint(self) -> frozenset[str]:
-        return self.bundle.charms
-
-    @cached_property
+    @computed_property
     def fulfillable_interfaces(self) -> frozenset[str]:
         return frozenset(
             {
@@ -52,11 +40,21 @@ class Node:
             }
         )
 
-    @cached_property
+    @computed_property
+    def score(self) -> float:
+        # balance changes the weight prioritizing number of applications over unfulfilled interfaces
+        # it is expected to be between 0 and 1, where 1 prioritizes the smallest bundle
+        return self.balance * len(self.bundle.applications) + (1.0 - self.balance) * len(self.fulfillable_interfaces)
+
+    @computed_property
+    def fingerprint(self) -> frozenset[str]:
+        return self.bundle.charms
+
+    @computed_property
     def child_charms(self) -> frozenset[str]:
         return frozenset({charm_name for _, charm_name in self.application_endpoint_to_possible_charm})
 
-    @cached_property
+    @computed_property
     def stats(self) -> str:
         return f"{len(self.bundle.applications)} applications ({len(self.bundle.unfulfilled_interfaces)} unfulfilled and {len(self.fulfillable_interfaces)} fulfillable interfaces)"
 

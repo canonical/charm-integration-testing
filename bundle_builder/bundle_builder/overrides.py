@@ -18,12 +18,12 @@ from pathlib import Path
 
 import yaml
 from pydantic import Field
-from pydantic.dataclasses import dataclass
 
 from .charm import CharmEndpointOptionality
+from .immutable_dataclass import immutable_dataclass
 
 
-@dataclass
+@immutable_dataclass
 class CharmEndpointOverride:
     optional: bool | None = None
     optional_if: list[CharmEndpointOptionality] | None = None
@@ -37,24 +37,24 @@ class CharmEndpointOverride:
         return None
 
 
-@dataclass
+@immutable_dataclass
 class CharmMetadataOverride:
     peers: dict[str, CharmEndpointOverride] = Field(default_factory=dict)
     requires: dict[str, CharmEndpointOverride] = Field(default_factory=dict)
     provides: dict[str, CharmEndpointOverride] = Field(default_factory=dict)
 
 
-@dataclass
+@immutable_dataclass
 class CharmPlatformOverride:
     platforms: set[str] = Field(default_factory=set)
 
 
-@dataclass
+@immutable_dataclass
 class CharmListingOverrides:
     unlisted_charms: set[str] = Field(default_factory=set)
 
 
-@dataclass
+@immutable_dataclass
 class CharmTestConfigs:
     configs: list[dict[str, str | int]] = Field(default_factory=list)
 

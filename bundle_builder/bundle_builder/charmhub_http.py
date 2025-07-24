@@ -19,9 +19,10 @@ from functools import cache
 import requests
 import yaml
 from pydantic import Field, field_validator
-from pydantic.dataclasses import dataclass
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+
+from .immutable_dataclass import immutable_dataclass
 
 
 class UnparsableCharmException(Exception):
@@ -42,14 +43,14 @@ class CharmReleaseNotFoundException(Exception):
     pass
 
 
-@dataclass(frozen=True)
+@immutable_dataclass
 class CharmhubBase:
     architecture: str
     channel: str
     name: str = Field(default="ubuntu")
 
 
-@dataclass(frozen=True)
+@immutable_dataclass
 class RefreshAction:
     charm_name: str
     charm_revision: int | None = None
@@ -58,9 +59,9 @@ class RefreshAction:
     always_include_base: bool = False
 
 
-@dataclass(frozen=True)
+@immutable_dataclass
 class CharmMetadata:
-    @dataclass(frozen=True)
+    @immutable_dataclass
     class Endpoint:
         interface: str
         optional: bool | None = None
@@ -70,9 +71,9 @@ class CharmMetadata:
     provides: dict[str, Endpoint] = Field(default_factory=dict)
 
 
-@dataclass(frozen=True, config=dict(validate_by_name=True))
+@immutable_dataclass(config=dict(validate_by_name=True))
 class RefreshResponse:
-    @dataclass(frozen=True)
+    @immutable_dataclass
     class Charm:
         bases: list[CharmhubBase] | None = None
         revision: int | None = None
@@ -83,11 +84,11 @@ class RefreshResponse:
         def parse_yaml(cls, metadata_yaml):
             return CharmMetadata(**yaml.safe_load(metadata_yaml))
 
-    @dataclass(frozen=True)
+    @immutable_dataclass
     class Error:
-        @dataclass(frozen=True, config=dict(validate_by_name=True))
+        @immutable_dataclass(config=dict(validate_by_name=True))
         class Extra:
-            @dataclass(frozen=True)
+            @immutable_dataclass
             class Release:
                 base: CharmhubBase
                 channel: str
@@ -105,9 +106,9 @@ class RefreshResponse:
     error: Error | None = None
 
 
-@dataclass(frozen=True)
+@immutable_dataclass
 class FindResponse:
-    @dataclass(frozen=True, config=dict(validate_by_name=True))
+    @immutable_dataclass(config=dict(validate_by_name=True))
     class Result:
         deployable_on: frozenset[str] = Field(default_factory=frozenset, alias="deployable-on")
 
@@ -115,11 +116,11 @@ class FindResponse:
     result: Result
 
 
-@dataclass(frozen=True, config=dict(validate_by_name=True))
+@immutable_dataclass(config=dict(validate_by_name=True))
 class InfoResponse:
-    @dataclass(frozen=True)
+    @immutable_dataclass
     class DefaultRelease:
-        @dataclass(frozen=True, config=dict(validate_by_name=True))
+        @immutable_dataclass(config=dict(validate_by_name=True))
         class Revision:
             metadata: CharmMetadata = Field(default_factory=CharmMetadata, alias="metadata-yaml")
 
@@ -130,7 +131,7 @@ class InfoResponse:
 
         revision: Revision = Field(default_factory=Revision)
 
-    @dataclass(frozen=True, config=dict(validate_by_name=True))
+    @immutable_dataclass(config=dict(validate_by_name=True))
     class Result:
         deployable_on: frozenset[str] = Field(default_factory=frozenset, alias="deployable-on")
 
