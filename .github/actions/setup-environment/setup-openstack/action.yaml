@@ -69,7 +69,6 @@ runs:
               username: ${OS_USERNAME}
         EOF
 
-        cat $HOME/openstack/openstack-credentials.yaml
         juju add-cloud $CLOUD $HOME/openstack/openstack-cloud.yaml --client
         juju add-credential $CLOUD -f $HOME/openstack/openstack-credentials.yaml --client
         echo "cloud-name=${CLOUD}" >> $GITHUB_OUTPUT
