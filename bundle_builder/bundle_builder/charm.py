@@ -15,14 +15,15 @@
 
 
 from pydantic import Field
-from pydantic.dataclasses import dataclass
+
+from .immutable_dataclass import immutable_dataclass
 
 ENDPOINT_PEERS = "peers"
 ENDPOINT_REQUIRES = "requires"
 ENDPOINT_PROVIDES = "provides"
 
 
-@dataclass(frozen=True)
+@immutable_dataclass
 class CharmEndpointOptionality:
     all_of: frozenset["CharmEndpointOptionality"] | None = None
     any_of: frozenset["CharmEndpointOptionality"] | None = None
@@ -60,7 +61,7 @@ class CharmEndpointOptionality:
             return cls(any_of=frozenset())
 
 
-@dataclass(frozen=True)
+@immutable_dataclass
 class CharmEndpoint:
     type: str
     name: str
@@ -71,7 +72,7 @@ class CharmEndpoint:
 CharmConfig = tuple[tuple[str, str | int], ...]
 
 
-@dataclass(frozen=True)
+@immutable_dataclass
 class Charm:
     name: str
     channel: str

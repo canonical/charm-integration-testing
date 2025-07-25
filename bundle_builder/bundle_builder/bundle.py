@@ -14,16 +14,14 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
-from functools import cached_property
-
 import yaml
 from pydantic import Field
-from pydantic.dataclasses import dataclass
 
 from .charm import Charm, CharmConfig, CharmEndpoint
+from .immutable_dataclass import computed_property, immutable_dataclass
 
 
-@dataclass(frozen=True)
+@immutable_dataclass
 class Application:
     name: str
     charm: Charm
@@ -36,7 +34,7 @@ class Application:
             return f"{self.name}({self.charm.name})"
 
 
-@dataclass(frozen=True, order=True)
+@immutable_dataclass(order=True)
 class ApplicationEndpoint:
     application: str
     endpoint: str
@@ -51,14 +49,14 @@ class ApplicationEndpoint:
 Integration = frozenset[ApplicationEndpoint]
 
 
-@dataclass(frozen=True)
+@immutable_dataclass
 class Bundle:
     applications: frozenset[Application]
     integrations: frozenset[Integration]
     platform: str
     arch: str
 
-    @cached_property
+    @computed_property
     def application_endpoints(self) -> dict[ApplicationEndpoint, CharmEndpoint]:
         return {
             ApplicationEndpoint(application=application.name, endpoint=endpoint.name): endpoint
@@ -66,11 +64,11 @@ class Bundle:
             for endpoint in application.charm.endpoints
         }
 
-    @cached_property
+    @computed_property
     def charms(self) -> frozenset[str]:
         return frozenset({application.charm.name for application in self.applications})
 
-    @cached_property
+    @computed_property
     def unfulfilled_endpoints(self) -> frozenset[ApplicationEndpoint]:
         # Collect all fulfilled application endpoints
         fulfilled_endpoints = {endpoint for integration in self.integrations for endpoint in integration}
@@ -88,7 +86,7 @@ class Bundle:
         # Return the difference
         return frozenset(non_optional_endpoints - fulfilled_endpoints)
 
-    @cached_property
+    @computed_property
     def unfulfilled_interfaces(self) -> frozenset[str]:
         return frozenset(
             {
