@@ -162,6 +162,8 @@ jobs:
               exit 1
             fi
           done
+          # Ensure the juju home directory exists
+          mkdir -p $HOME/.local/share/juju
 
       - name: Setup K8s Cloud
         if: ${{ inputs.substrate == 'kubernetes'}}
