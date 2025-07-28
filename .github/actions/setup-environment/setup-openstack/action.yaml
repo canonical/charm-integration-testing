@@ -44,7 +44,7 @@ runs:
       id: cloud-setup
       run: |
         source $HOME/openstack/novarc
-        CLOUD="ps5-machine"
+        CLOUD="openstack-machine-env"
         cat >> $HOME/openstack/openstack-cloud.yaml << EOF
         clouds:
           ${CLOUD}:
