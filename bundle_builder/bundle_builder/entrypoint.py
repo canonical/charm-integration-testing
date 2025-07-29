@@ -205,7 +205,7 @@ def main():
     )
 
     # Build the bundle
-    built_bundle = BundleBuilder(charmhub_client=charmhub_client, logger=logger).build(base_bundle)
+    built_bundle, _ = BundleBuilder(charmhub_client=charmhub_client, logger=logger).build(base_bundle)
     logger.info(f"Generated bundle: \n{'-' * 80}\n{built_bundle.export()}{'-' * 80}")
 
     # Export the bundle to file

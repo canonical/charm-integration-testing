@@ -44,7 +44,7 @@ def immutable_dataclass(_cls=None, **dataclass_kwargs):
             computed_properties[name] = val
 
             # Add field to ensure slot is created
-            annotations[name] = get_type_hints(cls).get(name, Any)
+            annotations[name] = get_type_hints(cls, localns={cls.__name__: cls}).get(name, Any)
             setattr(cls, name, field(init=False, repr=False, hash=False, compare=False))
 
         cls.__annotations__ = annotations

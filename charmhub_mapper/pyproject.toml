@@ -1,0 +1,38 @@
+# Copyright 2025 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+[project]
+name = "charmhub-mapper"
+version = "0.1.0"
+description = "Framework to map all the minimal bundles from Charmhub."
+authors = [
+    {name = "SQA Team",email = "solutionsqa@canonical.com"}
+]
+
+requires-python = ">=3.10"
+
+[tool.poetry]
+packages = [
+    { include = "charmhub_mapper" },
+    { include = "analyzers" },
+]
+
+[tool.poetry.dependencies]
+bundle-builder = { path = "../bundle_builder", develop = true }
+networkx = "^3.4.2"
+matplotlib = "^3.10.1"
+scipy = "^1.15.2"
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[project.scripts]
+charmhub-mapper = "charmhub_mapper.entrypoint:main"
+test-observer-mapper = "test_observer_mapper.test_observer_mapper:main"
+charmhub-mapper-generated_bundle_fetcher = "generated_bundle_fetcher.generated_bundle_fetcher:main"
+charmhub-mapper-top-level-interfaces = "analyzers.top_level_interfaces:main"
+charmhub-mapper-bundle-visualizer = "analyzers.bundle_visualizer:main"
+charmhub-mapper-bundle-tree-visualizer = "analyzers.bundle_tree_visualizer:main"
+charmhub-mapper-dependency-graph = "analyzers.dependency_graph:main"
+charmhub-mapper-pass-rate = "analyzers.pass_rate:main"

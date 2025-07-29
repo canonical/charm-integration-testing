@@ -18,6 +18,7 @@ import dataclasses
 import heapq
 import logging
 import random
+from functools import cache
 
 from .bundle import Application, ApplicationEndpoint, Bundle, Integration
 from .charm import ENDPOINT_PROVIDES, ENDPOINT_REQUIRES, CharmConfig
@@ -30,6 +31,7 @@ class Node:
     bundle: Bundle
     application_endpoint_to_possible_charm: frozenset[tuple[ApplicationEndpoint, str]]
     balance: float
+    parent: "Node | None"
 
     @computed_property
     def fulfillable_interfaces(self) -> frozenset[str]:
@@ -65,33 +67,43 @@ class Node:
 class BundleBuilder:
     charmhub_client: CharmhubClient
     logger: logging.Logger
-    max_nodes_visited: int = 50000
-    rebalance_interval: int = 1000
+    max_nodes_visited: int
+    rebalance_interval: int
 
-    def __init__(self, charmhub_client: CharmhubClient, logger=logging.getLogger(__name__)):
+    def __init__(
+        self,
+        charmhub_client: CharmhubClient,
+        logger: logging.Logger = logging.getLogger(__name__),
+        max_nodes_visited: int = 50000,
+        rebalance_interval: int = 1000,
+    ):
         self.charmhub_client = charmhub_client
         self.logger = logger
+        self.max_nodes_visited = max_nodes_visited
+        self.rebalance_interval = rebalance_interval
 
     # Build out the bundle, pulling in charms that fulfill non-optional hanging required integrations
-    def build(self, base: Bundle) -> Bundle:
+    @cache
+    def build(self, base: Bundle) -> tuple[Bundle, list[Node]]:
         # This follows a rough uniform cost algorithm
         queued_nodes = [self.new_node(base)]
         best_node = queued_nodes[0]
         known_nodes = {best_node.fingerprint}
+        visited_nodes = []
         self.logger.info(f"Starting with bundle: {best_node.stats}")
         while len(queued_nodes) > 0:
             # Rebalance node scores
-            num_visited_nodes = len(known_nodes) - len(queued_nodes)
-            if num_visited_nodes % self.rebalance_interval == 0:
-                balance = max((self.max_nodes_visited - num_visited_nodes) / self.max_nodes_visited, 0)
+            if len(visited_nodes) % self.rebalance_interval == 0:
+                balance = max((self.max_nodes_visited - len(visited_nodes)) / self.max_nodes_visited, 0)
                 queued_nodes = [dataclasses.replace(node, balance=balance) for node in queued_nodes]
                 heapq.heapify(queued_nodes)
 
             # Get node with with the best score from the sorted queue
             node = heapq.heappop(queued_nodes)
             self.logger.debug(
-                f"Checking bundle: {node.stats}, visited nodes: {num_visited_nodes}, queued nodes: {len(queued_nodes)}"
+                f"Checking bundle: {node.stats}, visited nodes: {len(visited_nodes)}, queued nodes: {len(queued_nodes)}"
             )
+            visited_nodes.append(node)
 
             # If there are no fulfillable interfaces quit now
             # We could exhaustively search the graph but that comes at the cost of compute
@@ -110,8 +122,8 @@ class BundleBuilder:
         for application_endpoint in best_node.bundle.unfulfilled_endpoints:
             self.logger.warning(f"Cannot resolve application endpoint: {application_endpoint}")
 
-        # Return best node
-        return best_node.bundle
+        # Return best bundle
+        return best_node.bundle, visited_nodes
 
     def add_missing_integrations(self, bundle: Bundle) -> Bundle:
         # Start over whenever a new integration is added
@@ -166,7 +178,7 @@ class BundleBuilder:
                 return bundle
 
     # Return a new node, including the possible child charms
-    def new_node(self, bundle: Bundle, balance: float = 1.0) -> Node:
+    def new_node(self, bundle: Bundle, balance: float = 1.0, parent: Node | None = None) -> Node:
         # Ensure all possible integrations are fulfilled by the bundle
         bundle = self.add_missing_integrations(bundle)
 
@@ -199,6 +211,7 @@ class BundleBuilder:
             bundle=bundle,
             application_endpoint_to_possible_charm=frozenset(application_endpoint_to_possible_charm),
             balance=balance,
+            parent=parent,
         )
 
     # Each child node is the addition of an application to the bundle that fulfills a
@@ -230,6 +243,7 @@ class BundleBuilder:
                         arch=node.bundle.arch,
                     ),
                     balance=node.balance,
+                    parent=node,
                 )
                 for charm in child_charms
             }
