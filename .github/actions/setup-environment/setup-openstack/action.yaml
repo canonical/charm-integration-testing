@@ -36,7 +36,7 @@ runs:
       run: |
         sudo snap install openstack
         source $HOME/openstack/novarc
-        openstack image list -f json | jq -r '.[] | select((.Name | test("focal|jammy|noble")) and .Status == "active") | .ID' | while read -r id; do
+        openstack image list -f json | jq -r '.[] | select((.Name | test("focal|jammy|noble") and test("amd64") ) and .Status == "active") | .ID' | while read -r id; do
           juju metadata generate-image -a amd64 -i ${id} -r ${OS_REGION_NAME} -u ${OS_AUTH_URL} -d /home/ubuntu/openstack
         done
     - name: Add Openstack
