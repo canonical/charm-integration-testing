@@ -380,13 +380,13 @@ jobs:
         if: ${{ always() && inputs.substrate == 'openstack'}}
         shell: bash
         run: |
-          model-crashdump=logs/${model}-logs.tar.gz
-          controller-crashdump=logs/controller-logs.tar.gz
-          sudo snap install juju-crashdump
-          juju-crashdump --model ${controller}:${model} --timeout 300 --small -f 100000000 --compression gz --unit-dump-location /home/ubuntu/juju-crashdump ${model-crashdump} --as-root || True
-          juju-crashdump --model ${controller}:controller --timeout 300 --small -f 100000000 --compression gz --unit-dump-locatoin /home/ubuntu/juju-crashdumo ${controller-crashdump} --as-root || True
-          echo "model_crashdump=logs/${model}-logs.tar.gz" >> model-crashdump
-          echo "controller_crashdump=logs/controller-logs.tar.gz" >> controller-crashdump
+          MODEL_CRASHDUMP=model-logs.tar.gz
+          CONTROLLER_CRASHDUMP=controller-logs.tar.gz
+          sudo snap install juju-crashdump --classic
+          juju-crashdump --model ${controller}:${model} --timeout 300 --small -f 100000000 --compression gz --unit-dump-location ${MODEL_CRASHDUMP} --as-root || True
+          juju-crashdump --model ${controller}:controller --timeout 300 --small -f 100000000 --compression gz --unit-dump-location ${CONTROLLER_CRASHDUMP} --as-root || True
+          echo "OS_MODEL_CRASHDUMP=${MODEL_CRASHDUMP}" >> $GITHUB_OUTPUT
+          echo "OS_CONTROLLER_CRASHDUMP=${CONTROLLER_CRASHDUMP}" >> $GITHUB_OUTPUT
 
       - name: Collect logs
         id: collect_logs
