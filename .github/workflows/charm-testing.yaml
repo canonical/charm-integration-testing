@@ -375,8 +375,8 @@ jobs:
           sudo snap install juju-crashdump --classic
           juju-crashdump --model ${controller}:${model} --timeout 300 --small -f 100000000 --compression gz --unit-dump-location ${MODEL_CRASHDUMP} --as-root || True
           juju-crashdump --model ${controller}:controller --timeout 300 --small -f 100000000 --compression gz --unit-dump-location ${CONTROLLER_CRASHDUMP} --as-root || True
-          echo "OS_MODEL_CRASHDUMP=${MODEL_CRASHDUMP}" >> $GITHUB_OUTPUT
-          echo "OS_CONTROLLER_CRASHDUMP=${CONTROLLER_CRASHDUMP}" >> $GITHUB_OUTPUT
+          echo "OS_MODEL_CRASHDUMP=$(realpath ${MODEL_CRASHDUMP})" >> $GITHUB_OUTPUT
+          echo "OS_CONTROLLER_CRASHDUMP=$(realpath ${CONTROLLER_CRASHDUMP})" >> $GITHUB_OUTPUT
 
       - name: Collect logs
         id: collect_logs
