@@ -66,7 +66,7 @@ def add_args_to_parser(parser: argparse.ArgumentParser):
         "--substrate",
         choices=["kubernetes", "openstack"],
         default="kubernetes",
-        help="Which substrate is the charm going to be deployed on. Only kubernetes is enabled for now.",
+        help="Which substrate is the charm going to be deployed on.",
     )
     parser.add_argument("--output-file", type=str, help="Where to save the generated bundle.")
     parser.add_argument(

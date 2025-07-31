@@ -363,19 +363,20 @@ jobs:
           proxy: http://squid.internal:3128
 
       - name: Call Juju Crashdump
+        id: juju_crashdump
         env:
           controller: ${{ steps.juju_resources.outputs.controller }}
           model: ${{ steps.juju_resources.outputs.model }}
         if: ${{ always() && inputs.substrate == 'openstack'}}
         shell: bash
         run: |
-          model-crashdump=logs/${model}-logs.tar.gz
-          controller-crashdump=logs/controller-logs.tar.gz
-          sudo snap install juju-crashdump
-          juju-crashdump --model ${controller}:${model} --timeout 300 --small -f 100000000 --compression gz --unit-dump-location /home/ubuntu/juju-crashdump ${model-crashdump} --as-root || True
-          juju-crashdump --model ${controller}:controller --timeout 300 --small -f 100000000 --compression gz --unit-dump-locatoin /home/ubuntu/juju-crashdumo ${controller-crashdump} --as-root || True
-          echo "model_crashdump=logs/${model}-logs.tar.gz" >> model-crashdump
-          echo "controller_crashdump=logs/controller-logs.tar.gz" >> controller-crashdump
+          MODEL_CRASHDUMP=model-logs.tar.gz
+          CONTROLLER_CRASHDUMP=controller-logs.tar.gz
+          sudo snap install juju-crashdump --classic
+          juju-crashdump --model ${controller}:${model} --timeout 300 --small -f 100000000 --compression gz --unit-dump-location ${MODEL_CRASHDUMP} --as-root || True
+          juju-crashdump --model ${controller}:controller --timeout 300 --small -f 100000000 --compression gz --unit-dump-location ${CONTROLLER_CRASHDUMP} --as-root || True
+          echo "OS_MODEL_CRASHDUMP=${MODEL_CRASHDUMP}" >> $GITHUB_OUTPUT
+          echo "OS_CONTROLLER_CRASHDUMP=${CONTROLLER_CRASHDUMP}" >> $GITHUB_OUTPUT
 
       - name: Collect logs
         id: collect_logs
@@ -385,11 +386,15 @@ jobs:
           crashdump: ${{ steps.juju_k8s_crashdump.outputs.crashdump_path }}
           junit_xml: ${{ steps.junit_results.outputs.junit_xml }}
           generated_bundle: ${{ steps.build_bundle.outputs.bundle }}
+          openstack_model_crashdump: ${{ steps.juju_crashdump.outputs.OS_MODEL_CRASHDUMP }}
+          openstack_controller_crashdump: ${{ steps.juju_crashdump.outputs.OS_CONTROLLER_CRASHDUMP }}
         run: |
           mkdir -p "logs"
           [ -f "${crashdump}" ] && cp "${crashdump}" "logs/juju-logs.tar.gz"
           [ -f "${junit_xml}" ] && cp "${junit_xml}" "logs/junit.xml"
           [ -f "${generated_bundle}" ] && cp "${generated_bundle}" "logs/generated-bundle.yaml"
+          [ -f "${openstack_model_crashdump}" ] && cp "${openstack_model_crashdump}" "logs/model-logs.tar.gz"
+          [ -f "${openstack_controller_crashdump}" ] && cp "${openstack_controller_crashdump}" "logs/controller-logs.tar.gz"
           echo "directory_path=$(realpath "logs")" >> $GITHUB_OUTPUT
 
       - name: Post Logs To Swift
