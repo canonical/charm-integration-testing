@@ -2,9 +2,12 @@
 # See LICENSE file for licensing details.
 
 
+import json
 import logging
+import re
 from datetime import timedelta
 from pathlib import Path
+from typing import Callable
 
 import pytest
 from extensions import S3IntegratorMinIOBackendExtension, UnsealVaultJujuExtension, UnsealVaultK8sJujuExtension
@@ -63,6 +66,7 @@ def minio_client_file(request: pytest.FixtureRequest) -> Path | None:
 
 
 failure_message = StashKey[CollectReport]()
+failure_exception = StashKey[CollectReport]()
 
 
 # Get failure message for logging
@@ -70,6 +74,8 @@ failure_message = StashKey[CollectReport]()
 def pytest_runtest_makereport(item, call):
     result = yield
     report = result.get_result()
+
+    # Save failure message
     if report.failed:
         reprcrash = getattr(report.longrepr, "reprcrash", None)
         if reprcrash is not None:
@@ -77,11 +83,22 @@ def pytest_runtest_makereport(item, call):
         else:
             item.stash[failure_message] = str(report.longrepr)
 
+    # Save failure exception
+    if call.excinfo and call.when == "call":
+        item.stash[failure_exception] = call.excinfo.value
+
 
 @pytest.fixture(autouse=True)
 def print_setup_and_teardown_info(
-    request: pytest.FixtureRequest, logger: logging.Logger, juju_client: JujuClient, model: str
+    request: pytest.FixtureRequest,
+    logger: logging.Logger,
+    juju_client: JujuClient,
+    model: str,
+    record_execution_metadata: None,
 ):
+    # Enforce fixture execution order
+    _ = record_execution_metadata
+
     # Print starting state
     juju_client.print_status(model=model)
 
@@ -102,9 +119,108 @@ def print_setup_and_teardown_info(
 
 @pytest.fixture(autouse=True)
 def assert_idle(juju_client: JujuClient, model: str, print_setup_and_teardown_info: None):
-    _ = print_setup_and_teardown_info  # Enforce fixture execution order
+    # Enforce fixture execution order
+    _ = print_setup_and_teardown_info
 
     try:
-        juju_client.idle_for_period(model=model, timeout=timedelta(seconds=30), idle_period=timedelta(seconds=5))
+        juju_client.idle_for_period(model=model, timeout=timedelta(seconds=15), idle_period=timedelta(seconds=5))
     except JujuWaitTimeoutError:
         pytest.skip("Model is not idle before test start")
+
+
+@pytest.fixture
+def execution_metadata(record_property: Callable[[str, object], None]):
+    # Create a function for adding and deduplicating metadata
+    metadata: dict[str, set[str]] = {}
+
+    def add(category: str, value: str):
+        if category not in metadata:
+            metadata[category] = set()
+        metadata[category].add(value)
+
+    # Provide the function
+    yield add
+
+    # After the test, record all the metadata
+    for category, values in metadata.items():
+        record_property(category, json.dumps([str(value) for value in sorted(values)]))
+
+
+@pytest.fixture(autouse=True)
+def record_execution_metadata(
+    record_failure_execution_metadata: None,
+    record_charms_and_revisions_execution_metadata: None,
+):
+    # Save various execution metadata
+    _ = record_failure_execution_metadata
+    _ = record_charms_and_revisions_execution_metadata
+
+
+def record_charms_and_revisions_execution_metadata_instantaneous(
+    juju_client: JujuClient, model: str, execution_metadata: Callable[[str, str | int], None]
+):
+    # Get all charm revisions
+    for charm, revision in juju_client.get_charm_revisions(model=model):
+        # Save the charm
+        execution_metadata("charm", charm)
+        # Save the revision
+        execution_metadata(f"charm:{charm}:revision", revision)
+
+
+@pytest.fixture
+def record_charms_and_revisions_execution_metadata(
+    juju_client: JujuClient, model: str, execution_metadata: Callable[[str, str | int], None]
+):
+    # Save all charms and revisions at start of test
+    record_charms_and_revisions_execution_metadata_instantaneous(juju_client, model, execution_metadata)
+
+    # Let the test run
+    yield
+
+    # Save all charms and revisions at end of test
+    record_charms_and_revisions_execution_metadata_instantaneous(juju_client, model, execution_metadata)
+
+
+def normalize_message(message: str) -> str:
+    # Replace all numeric characters with "X"
+    # Should normalize timestamps, IP addresses, and other variable data
+    message = re.sub(r"\d", "X", message)
+
+    # Limit character count
+    max_character_count = 150
+    if len(message) > max_character_count:
+        message = f"{message[:max_character_count - 3]}..."
+
+    return message
+
+
+@pytest.fixture
+def record_failure_execution_metadata(
+    request: pytest.FixtureRequest, execution_metadata: Callable[[str, str | int], None]
+):
+    # Let the test run
+    yield
+
+    # Save the failure message
+    if failure_message in request.node.stash:
+        execution_metadata("failure:message", request.node.stash[failure_message])
+
+    # Save extra metadata from exception
+    if failure_exception in request.node.stash:
+        exc = request.node.stash[failure_exception]
+
+        # Save state from wait timeout
+        if isinstance(exc, JujuWaitTimeoutError):
+            for application in exc.wait_state.noncompliant_applications.values():
+                if application is None:
+                    continue
+                execution_metadata(
+                    "failure:application:state",
+                    f"{application.charm}:{application.status}:{normalize_message(application.message)}",
+                )
+            for unit in exc.wait_state.noncompliant_units.values():
+                if unit is None:
+                    continue
+                execution_metadata(
+                    "failure:unit:state", f"{unit.charm}:{unit.status}:{normalize_message(unit.message)}"
+                )

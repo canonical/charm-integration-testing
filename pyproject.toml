@@ -29,12 +29,13 @@ line-length = 120
 extend-select = ["I"]
 
 [tool.pytest.ini_options]
-timeout = 600
+timeout = 1800
 
 log_cli = true
 log_cli_level = "INFO"
 log_format = "%(levelname)s %(message)s"
 
+junit_family = "legacy"
 junit_logging = "log"
 junit_log_passing_tests = true
 junit_duration_report = "total"

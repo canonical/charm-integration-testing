@@ -1,0 +1,69 @@
+name: Post results
+description: Post results to Test Observer
+
+inputs:
+  test_observer_api:
+    description: "URL for the Test Observer API"
+    required: True
+
+  test_execution_id:
+    description: "ID for the Test Execution"
+    required: True
+
+  junit_xml:
+    description: "Test results JUnit XML file"
+    required: True
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install yq
+      shell: bash
+      run: |
+        for ((attempt = 1; ; attempt++)); do
+          if sudo snap install yq; then
+            break
+          elif [ "$attempt" -lt 3 ]; then
+            echo "Failed, retrying..."
+            sleep 5
+          else
+            exit 1
+          fi
+        done
+
+    - id: get-json-body
+      name: Convert JUnit XML to Test Observer JSON
+      shell: bash
+      env:
+        junit_xml: ${{ inputs.junit_xml }}
+      run: |
+        # XML to JSON conversion is not 1-to-1
+        # So sometimes things are wrapped in lists, sometimes they're not
+        # Explicitly wrap these things in list
+        cat "${junit_xml}" | yq -p=xml -o=json '
+          .testsuites.testsuite |= [] + . |
+          .testsuites.testsuite[].testcase |= [] + . |
+          .testsuites.testsuite[].testcase[].properties.property |= [] + .
+        ' | jq --compact-output '
+          {
+            "execution_metadata": (
+              [
+                .testsuites.testsuite[].testcase[].properties.property[] |
+                {("charm_qa:" + ."+@name"): (."+@value" | fromjson)}
+              ] | add
+            )
+          }
+        ' > body.json
+        cat body.json
+
+    - name: Post execution metadata to Test Observer
+      shell: bash
+      env:
+        test_observer_api: ${{ inputs.test_observer_api }}
+        test_execution_id: ${{ inputs.test_execution_id}}
+      run: |
+        curl --fail-with-body \
+          --retry 10 \
+          -X PATCH "${test_observer_api}/v1/test-executions/${test_execution_id}" \
+          -H "Content-Type: application/json" \
+          -d @body.json

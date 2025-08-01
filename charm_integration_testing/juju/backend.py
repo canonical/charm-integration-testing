@@ -2,14 +2,56 @@
 # See LICENSE file for licensing details.
 
 from abc import ABC, abstractmethod
+from dataclasses import field
 from datetime import timedelta
 
 from pydantic.dataclasses import dataclass
 
 
+@dataclass(frozen=True)
+class JujuApplicationState:
+    charm: str
+    revision: int
+    status: str
+    message: str
+
+
+@dataclass(frozen=True)
+class JujuUnitState(JujuApplicationState):
+    pass
+
+
+@dataclass(frozen=True)
+class JujuWaitState:
+    message: str = "waiting"
+    noncompliant_applications: dict[str, JujuApplicationState | None] = field(default_factory=dict)
+    noncompliant_units: dict[str, JujuUnitState | None] = field(default_factory=dict)
+
+
 class JujuWaitTimeoutError(TimeoutError):
-    def __init__(self, message="Timed out while waiting"):
-        super().__init__(message)
+    wait_state: JujuWaitState
+
+    def __init__(
+        self,
+        wait_state: JujuWaitState | None = None,
+    ):
+        self.wait_state = wait_state if wait_state is not None else JujuWaitState()
+
+    def __str__(self) -> str:
+        message = f"Timed out while {self.wait_state.message}"
+        addendums = []
+        if len(self.wait_state.noncompliant_applications) > 0:
+            applications = [f"'{v}'" for v in sorted(self.wait_state.noncompliant_applications)]
+            addendums.append(f"applications: [{', '.join(applications)}]")
+        if len(self.wait_state.noncompliant_units) > 0:
+            units = [f"'{v}'" for v in sorted(self.wait_state.noncompliant_units)]
+            addendums.append(f"units: [{', '.join(units)}]")
+        if len(addendums) > 0:
+            message = f"{message} ({', '.join(sorted(addendums))})"
+        return message
+
+    def __repr__(self) -> str:
+        return str(self)
 
 
 @dataclass(frozen=True)
@@ -157,4 +199,8 @@ class JujuBackend(ABC):
 
     @abstractmethod
     def unit_ip(self, model: str, unit: str) -> str:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_charm_revisions(self, model: str) -> set[tuple[str, int]]:
         raise NotImplementedError

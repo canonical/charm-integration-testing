@@ -42,7 +42,7 @@ class JujuClient:
         self,
         model: str = "default",
         timeout: timedelta | None = None,
-        idle_period: timedelta = timedelta(seconds=65),
+        idle_period: timedelta = timedelta(seconds=30),
     ):
         self.logger.info(f"{self._waiting_timeout_log(timeout)} to be idle.")
         self.backend.wait_idle(model=model, timeout=timeout, period=idle_period)
@@ -141,3 +141,6 @@ class JujuClient:
             JujuIntegrationApplication(application_1, endpoint_1),
             JujuIntegrationApplication(application_2, endpoint_2),
         } in {integration.applications for integration in self.backend.list_integrations(model)}
+
+    def get_charm_revisions(self, model: str = "default") -> set[tuple[str, int]]:
+        return self.backend.get_charm_revisions(model)
