@@ -86,9 +86,9 @@ jobs:
             exit 1
           fi
 
-      - name: Get Test Execution Status
-        id: get-test-execution-status
-        uses: ./.github/actions/test-observer/get-test-execution-status
+      - name: Get Test Execution
+        id: get-test-execution
+        uses: ./.github/actions/test-observer/get-test-execution
         with:
           test_observer_api: ${{ vars.STG_TEST_OBSERVER_API }}
           test_execution_id: ${{ steps.create-test-execution.outputs.test_execution_id }}
@@ -96,11 +96,24 @@ jobs:
       - name: Ensure Test Execution Passed
         shell: bash
         env:
-          test_execution_status: ${{ steps.get-test-execution-status.outputs.test_execution_status }}
+          test_execution_status: ${{ steps.get-test-execution.outputs.test_execution_status }}
         run: |
           echo "Test Execution Status is '$test_execution_status'"
           if [[ "$test_execution_status" != "PASSED" ]]
           then
             echo "Failing workflow since tests did not pass"
+            exit 1
+          fi
+
+      - name: Ensure Test Execution Metadata Posted
+        shell: bash
+        env:
+          test_execution_metadata: ${{ steps.get-test-execution.outputs.test_execution_metadata }}
+        run: |
+          echo "Test Execution Metadata is:"
+          echo "$test_execution_metadata" | jq
+          if ! echo "$test_execution_metadata" | jq --exit-status 'has("charm_qa:charm")' > /dev/null
+          then
+            echo "Failing workflow since execution metadata does not contain expected category 'charm_qa:charm'"
             exit 1
           fi
