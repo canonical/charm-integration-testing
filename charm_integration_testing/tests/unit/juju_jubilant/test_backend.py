@@ -5,8 +5,7 @@ from dataclasses import field
 from datetime import timedelta
 
 import yaml
-from jubilant import SecretURI
-from juju import JujuWaitTimeoutError
+from jubilant import SecretURI, statustypes
 from juju_jubilant.backend import JubilantBackend, JubilantClient
 from pydantic.dataclasses import dataclass
 
@@ -43,51 +42,21 @@ class TestJubilantClient:
         assert model.model == "my-model"
 
 
+@dataclass
+class WaitStub:
+    raise_exception: bool = False
+
+    def wait(self, ready, timeout, delay, **kwargs):
+        self.ready = ready
+        self.timeout = timeout
+        self.delay = delay
+        self.kwargs = kwargs
+
+        if self.raise_exception:
+            raise TimeoutError
+
+
 class TestJubilantBackend:
-    class TestWaitIdle:
-        @dataclass
-        class WaitStub:
-            raise_exception: bool = False
-            timeout: float | None = None
-            successes: int | None = None
-
-            def wait(self, ready, error, timeout, successes, delay):
-                self.timeout = timeout
-                self.successes = successes
-                if self.raise_exception:
-                    raise TimeoutError
-
-        def test_success(self):
-            # GIVEN a 20 second timeout
-            timeout = timedelta(seconds=20)
-            # AND a 5 second period
-            period = timedelta(seconds=5)
-            # AND a jubilant client
-            client = JubilantClientStub(client=self.WaitStub())
-
-            # WHEN the backend is called with the args
-            JubilantBackend(client).wait_idle("model", timeout=timeout, period=period)
-
-            # THEN the timeout was provided
-            assert client.client.timeout == 20
-            # AND the period was rounded to the number of seconds
-            assert client.client.successes == 5
-
-        def test_timeout(self):
-            # GIVEN a jubilant client that will timeout when waiting
-            client = JubilantClientStub(client=self.WaitStub(raise_exception=True))
-
-            # WHEN the backend is called
-            try:
-                JubilantBackend(client).wait_idle("model", timeout=None, period=None)
-            except JujuWaitTimeoutError:
-                raised = True
-            else:
-                raised = False
-
-            # THEN the timeout was raised
-            assert raised
-
     class TestAddSecret:
         @dataclass
         class AddSecretStub:
@@ -310,97 +279,38 @@ class TestJubilantBackend:
             else:
                 assert False, "Expected KeyError"
 
-    class TestAllStatusesAreIn:
-        class StatusStub:
-            def __init__(self, app_status, unit_status):
-                self.apps = {
-                    "my-app": type(
-                        "AppStatus",
-                        (),
-                        {
-                            "app_status": type(
-                                "Status",
-                                (),
-                                {"current": app_status},
-                            )(),
-                            "units": {
-                                "my-app/0": type(
-                                    "UnitStatus",
-                                    (),
-                                    {
-                                        "workload_status": type(
-                                            "Status",
-                                            (),
-                                            {"current": unit_status},
-                                        )()
-                                    },
-                                )()
-                            },
-                        },
-                    )()
-                }
+    class TestWaitIdle:
+        def test_wait_idle(self):
+            # GIVEN
+            stub = WaitStub()
+            client = JubilantClientStub(client=stub)
 
-            def get_units(self, application):
-                return self.apps[application].units
+            # WHEN
+            JubilantBackend(client).wait_idle("test-model", timedelta(seconds=10), timedelta(seconds=5))
 
-        def test_all_statuses_are_in(self):
-            # GIVEN a status where all statuses are "active"
-            status = self.StatusStub(app_status="active", unit_status="active")
+            # THEN the timeout and delay are set correctly
+            assert stub.timeout == 10
+            assert stub.delay == 1
 
-            # WHEN checking if all statuses are in {"active"}
-            result = JubilantBackend._all_statuses_are_in(
-                {"active"},
-                status,
-                "my-app",
-            )
+        def test_timeout(self):
+            # GIVEN
+            stub = WaitStub(raise_exception=True)
+            client = JubilantClientStub(client=stub)
 
-            # THEN the result is True
-            assert result
-
-        def test_not_all_statuses_are_in(self):
-            # GIVEN a status where the unit status is "waiting"
-            status = self.StatusStub(app_status="active", unit_status="waiting")
-
-            # WHEN checking if all statuses are in {"active"}
-            result = JubilantBackend._all_statuses_are_in(
-                {"active"},
-                status,
-                "my-app",
-            )
-
-            # THEN the result is False
-            assert not result
-
-        def test_application_not_found(self):
-            # GIVEN a status
-            status = self.StatusStub(app_status="active", unit_status="active")
-
-            # WHEN checking if all statuses are in {"active"} for an application that doesn't exist
-            result = JubilantBackend._all_statuses_are_in(
-                {"active"},
-                status,
-                "not-my-app",
-            )
-
-            # THEN the result is False
-            assert not result
+            # WHEN
+            try:
+                JubilantBackend(client).wait_idle("test-model", timedelta(seconds=10), timedelta(seconds=5))
+            except TimeoutError:
+                # THEN
+                pass
+            else:
+                # AND
+                assert False
 
     class TestWaitApplicationSettled:
-        @dataclass
-        class WaitStub:
-            raise_exception: bool = False
-
-            def wait(self, ready, timeout, delay):
-                self.ready = ready
-                self.timeout = timeout
-                self.delay = delay
-
-                if self.raise_exception:
-                    raise TimeoutError
-
         def test_application_settled(self):
             # GIVEN
-            stub = self.WaitStub()
+            stub = WaitStub()
             client = JubilantClientStub(client=stub)
 
             # WHEN
@@ -412,7 +322,7 @@ class TestJubilantBackend:
 
         def test_timeout(self):
             # GIVEN
-            stub = self.WaitStub(raise_exception=True)
+            stub = WaitStub(raise_exception=True)
             client = JubilantClientStub(client=stub)
 
             # WHEN
@@ -424,3 +334,201 @@ class TestJubilantBackend:
             else:
                 # AND
                 assert False
+
+    class TestWaitApplicationScaled:
+        def test_application_scaled(self):
+            # GIVEN
+            stub = WaitStub()
+            client = JubilantClientStub(client=stub)
+
+            # WHEN
+            JubilantBackend(client).wait_application_scaled("test-model", "my-app", timeout=timedelta(seconds=10))
+
+            # THEN the timeout and delay are set correctly
+            assert stub.timeout == 10
+            assert stub.delay == 1
+
+        def test_timeout(self):
+            # GIVEN
+            stub = WaitStub(raise_exception=True)
+            client = JubilantClientStub(client=stub)
+
+            # WHEN
+            try:
+                JubilantBackend(client).wait_application_scaled("test-model", "my-app", timeout=timedelta(seconds=10))
+            except TimeoutError:
+                # THEN
+                pass
+            else:
+                # AND
+                assert False
+
+    class TestWaitForUnitMessage:
+        def test_unit_message(self):
+            # GIVEN
+            stub = WaitStub()
+            client = JubilantClientStub(client=stub)
+
+            # WHEN
+            JubilantBackend(client).wait_for_unit_message(
+                "test-model", "my-unit", "my-message", timeout=timedelta(seconds=10)
+            )
+
+            # THEN the timeout and delay are set correctly
+            assert stub.timeout == 10
+            assert stub.delay == 1
+
+        def test_timeout(self):
+            # GIVEN
+            stub = WaitStub(raise_exception=True)
+            client = JubilantClientStub(client=stub)
+
+            # WHEN
+            try:
+                JubilantBackend(client).wait_for_unit_message(
+                    "test-model", "my-unit", "my-message", timeout=timedelta(seconds=10)
+                )
+            except TimeoutError:
+                # THEN
+                pass
+            else:
+                # AND
+                assert False
+
+    class TestWaitForRemoval:
+        def test_removal(self):
+            # GIVEN
+            stub = WaitStub()
+            client = JubilantClientStub(client=stub)
+
+            # WHEN
+            JubilantBackend(client).wait_for_removal("test-model", ["my-app"], timeout=timedelta(seconds=10))
+
+            # THEN the timeout and delay are set correctly
+            assert stub.timeout == 10
+            assert stub.delay == 1
+
+        def test_timeout(self):
+            # GIVEN
+            stub = WaitStub(raise_exception=True)
+            client = JubilantClientStub(client=stub)
+
+            # WHEN
+            try:
+                JubilantBackend(client).wait_for_removal("test-model", ["my-app"], timeout=timedelta(seconds=10))
+            except TimeoutError:
+                # THEN
+                pass
+            else:
+                # AND
+                assert False
+
+    class TestWaitForRemovalOfIntegration:
+        def test_removal_of_integration(self):
+            # GIVEN
+            stub = WaitStub()
+            client = JubilantClientStub(client=stub)
+
+            # WHEN
+            from juju import JujuIntegrationApplication
+
+            endpoint_1 = JujuIntegrationApplication("app1", "endpoint1")
+            endpoint_2 = JujuIntegrationApplication("app2", "endpoint2")
+            JubilantBackend(client).wait_for_removal_of_integration(
+                "test-model", endpoint_1, endpoint_2, timeout=timedelta(seconds=10)
+            )
+
+            # THEN the timeout and delay are set correctly
+            assert stub.timeout == 10
+            assert stub.delay == 1
+
+        def test_timeout(self):
+            # GIVEN
+            stub = WaitStub(raise_exception=True)
+            client = JubilantClientStub(client=stub)
+
+            # WHEN
+            from juju import JujuIntegrationApplication
+
+            endpoint_1 = JujuIntegrationApplication("app1", "endpoint1")
+            endpoint_2 = JujuIntegrationApplication("app2", "endpoint2")
+            try:
+                JubilantBackend(client).wait_for_removal_of_integration(
+                    "test-model", endpoint_1, endpoint_2, timeout=timedelta(seconds=10)
+                )
+            except TimeoutError:
+                # THEN
+                pass
+            else:
+                # AND
+                assert False
+
+    class TestWaitForRemovalOfUnits:
+        def test_removal_of_units(self):
+            # GIVEN
+            stub = WaitStub()
+            client = JubilantClientStub(client=stub)
+
+            # WHEN
+            JubilantBackend(client).wait_for_removal_of_units("test-model", ["my-app"], timeout=timedelta(seconds=10))
+
+            # THEN the timeout and delay are set correctly
+            assert stub.timeout == 10
+            assert stub.delay == 1
+
+        def test_timeout(self):
+            # GIVEN
+            stub = WaitStub(raise_exception=True)
+            client = JubilantClientStub(client=stub)
+
+            # WHEN
+            try:
+                JubilantBackend(client).wait_for_removal_of_units(
+                    "test-model", ["my-app"], timeout=timedelta(seconds=10)
+                )
+            except TimeoutError:
+                # THEN
+                pass
+            else:
+                # AND
+                assert False
+
+    class TestGetCharmRevisions:
+        class StatusStub:
+            def __init__(self, charm, charm_rev):
+                self.apps = {
+                    "my-app": statustypes.AppStatus(
+                        charm=charm,
+                        charm_origin="charmhub",
+                        charm_name=charm,
+                        charm_rev=charm_rev,
+                        exposed=True,
+                    )
+                }
+
+        class ModelStatus:
+            def __init__(self, charm, charm_rev):
+                self.apps = TestJubilantBackend.TestGetCharmRevisions.StatusStub(charm, charm_rev).apps
+
+        class StatusStubClient:
+            def status(self):
+                return TestJubilantBackend.TestGetCharmRevisions.ModelStatus("my-charm", 1)
+
+        class ModelStub:
+            client: "TestJubilantBackend.TestGetCharmRevisions.StatusStubClient"
+
+            def __init__(self, client):
+                self.client = client
+
+            def status(self):
+                return self.client.status()
+
+        def test_get_charm_revisions(self):
+            # GIVEN
+            client = JubilantClientStub(client=self.ModelStub(client=self.StatusStubClient()))
+
+            # WHEN
+            charm_revisions = JubilantBackend(client).get_charm_revisions("test-model")
+
+            # THEN
+            assert charm_revisions == {("my-charm", 1)}

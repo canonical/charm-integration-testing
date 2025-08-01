@@ -71,8 +71,8 @@ def get_integrations(status: jubilant.Status) -> set[JujuIntegration]:
         for integration_2 in integrations_2
         # Then for all check if the integrations complete a pair
         if integration_1.interface == integration_2.interface
-        and application_1 == integration_2.integrated_application
-        and application_2 == integration_1.integrated_application
+        and application_1 == integration_2.related_app
+        and application_2 == integration_1.related_app
     }
 
 
