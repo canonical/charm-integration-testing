@@ -4,11 +4,9 @@
 
 from datetime import timedelta
 
-import pytest
 from juju import JujuClient
 
 
-@pytest.mark.timeout(timedelta(minutes=15).total_seconds())
 def test_break_readd_integration(
     juju_client: JujuClient,
     model: str,
@@ -33,6 +31,7 @@ def test_break_readd_integration(
         application_2=neighbor_application,
         endpoint_1=target_endpoint,
         endpoint_2=neighbor_endpoint,
+        timeout=timedelta(minutes=10),
     )
 
     # Readd integration
@@ -45,4 +44,4 @@ def test_break_readd_integration(
     )
 
     # Wait to become idle
-    juju_client.idle_for_period(model=model)
+    juju_client.idle_for_period(model=model, timeout=timedelta(minutes=15))
