@@ -1,5 +1,5 @@
-name: Get Test Execution Status
-description: Get the status for Test Execution on Test Observer
+name: Get Test Execution
+description: Get various bits of metadata about a Test Execution on Test Observer
 
 inputs:
   test_observer_api:
@@ -14,6 +14,9 @@ outputs:
   test_execution_status: 
     description: "Test Execution Status"
     value: ${{ steps.read-response.outputs.test_execution_status }}
+  test_execution_metadata:
+    description: "Test Execution Metadata"
+    value: ${{ steps.read-response.outputs.test_execution_metadata }}
 
 runs:
   using: "composite"
@@ -39,3 +42,4 @@ runs:
       shell: bash
       run: |
         echo "test_execution_status=$(cat response.json | jq --raw-output '.status')" >> "$GITHUB_OUTPUT"
+        echo "test_execution_metadata=$(cat response.json | jq --compact-output '.execution_metadata')" >> "$GITHUB_OUTPUT"
