@@ -128,3 +128,6 @@ class JubilantBackend(JujuCmdBackend):
             if possible_unit_id == unit_id or (unit_id == "leader" and unit_status.leader):
                 return unit_status.address
         raise KeyError(f"Unit '{unit}' not found")
+
+    def get_charm_revisions(self, model: str) -> set[tuple[str, int]]:
+        return {(app_info.charm, app_info.charm_rev) for app_info in self.client.model(model).status().apps.values()}

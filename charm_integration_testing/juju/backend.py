@@ -158,3 +158,7 @@ class JujuBackend(ABC):
     @abstractmethod
     def unit_ip(self, model: str, unit: str) -> str:
         raise NotImplementedError
+
+    @abstractmethod
+    def get_charm_revisions(self, model: str) -> set[tuple[str, int]]:
+        raise NotImplementedError
