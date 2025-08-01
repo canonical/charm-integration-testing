@@ -69,7 +69,7 @@ runs:
                 end
               ),
               "comment": (
-                .error + .failure + .skipped | .[]."+@message"
+                .error + .failure + .skipped | [.[]."+@message"] | join(", ")
               ),
               "io_log": (
                 if ."system-out" then (."system-out" | join("\n"))
