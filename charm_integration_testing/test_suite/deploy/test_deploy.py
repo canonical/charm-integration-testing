@@ -4,11 +4,9 @@
 
 from datetime import timedelta
 
-import pytest
 from juju import JujuClient
 
 
-@pytest.mark.timeout(timedelta(minutes=15).total_seconds())
 def test_deploy(
     juju_client: JujuClient,
     model: str,
@@ -37,4 +35,4 @@ def test_deploy(
             )
 
     # Wait until idle
-    juju_client.idle_for_period(model=model)
+    juju_client.idle_for_period(model=model, timeout=timedelta(minutes=15))
