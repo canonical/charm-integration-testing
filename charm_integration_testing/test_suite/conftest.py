@@ -215,12 +215,13 @@ def record_failure_execution_metadata(
                 if application is None:
                     continue
                 execution_metadata(
-                    "failure:application:state",
-                    f"{application.charm}:{application.status}:{normalize_message(application.message)}",
+                    f"failure:charm:{application.charm}:status",
+                    f"application:{application.status}:{normalize_message(application.message)}",
                 )
             for unit in exc.wait_state.noncompliant_units.values():
                 if unit is None:
                     continue
                 execution_metadata(
-                    "failure:unit:state", f"{unit.charm}:{unit.status}:{normalize_message(unit.message)}"
+                    f"failure:charm:{unit.charm}:status",
+                    f"unit:{unit.status}:{normalize_message(unit.message)}",
                 )
