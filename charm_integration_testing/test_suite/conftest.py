@@ -182,9 +182,9 @@ def record_charms_and_revisions_execution_metadata(
 
 
 def normalize_message(message: str) -> str:
-    # Replace all numeric characters with "X"
+    # Replace all numeric sequences with "XXX"
     # Should normalize timestamps, IP addresses, and other variable data
-    message = re.sub(r"\d", "X", message)
+    message = re.sub(r"\d+", "XXX", message)
 
     # Limit character count
     max_character_count = 150
