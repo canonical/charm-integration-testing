@@ -1,16 +1,28 @@
 # Copyright 2024-2025 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-from .backend import JujuBackend, JujuExecOutput, JujuIntegration, JujuIntegrationApplication, JujuWaitTimeoutError
+from .backend import (
+    JujuApplicationState,
+    JujuBackend,
+    JujuExecOutput,
+    JujuIntegration,
+    JujuIntegrationApplication,
+    JujuUnitState,
+    JujuWaitState,
+    JujuWaitTimeoutError,
+)
 from .client import JujuClient
 from .extension import JujuExtension
 
 __all__ = [
-    "JujuClient",
+    "JujuApplicationState",
     "JujuBackend",
-    "JujuWaitTimeoutError",
+    "JujuClient",
+    "JujuExecOutput",
+    "JujuExtension",
     "JujuIntegration",
     "JujuIntegrationApplication",
-    "JujuExtension",
-    "JujuExecOutput",
+    "JujuUnitState",
+    "JujuWaitState",
+    "JujuWaitTimeoutError",
 ]

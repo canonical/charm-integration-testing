@@ -1,0 +1,398 @@
+# Copyright 2025 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+
+import jubilant
+import pytest
+from juju import JujuIntegrationApplication, JujuWaitState
+from juju_jubilant.wait import (
+    WaitMonitor,
+    all_statuses_are_in,
+    applications_are_removed,
+    applications_are_scaled,
+    applications_have_no_units,
+    get_application_state,
+    get_integrations,
+    get_unit_info,
+    get_unit_state,
+    integrations_are_removed,
+    units_have_message,
+)
+
+
+@pytest.fixture
+def sample_minimal_status() -> jubilant.Status:
+    return jubilant.Status(
+        model=jubilant.statustypes.ModelStatus(
+            name="mdl",
+            type="typ",
+            controller="ctl",
+            cloud="aws",
+            version="3.0.0",
+        ),
+        machines={},
+        apps={},
+    )
+
+
+@pytest.fixture
+def sample_database_webapp_status() -> jubilant.Status:
+    return jubilant.Status._from_dict(
+        {
+            "model": {
+                "name": "tt",
+                "type": "caas",
+                "controller": "microk8s-localhost",
+                "cloud": "microk8s",
+                "region": "localhost",
+                "version": "3.6.1",
+                "model-status": {"current": "available", "since": "24 Feb 2025 12:02:57+13:00"},
+                "sla": "unsupported",
+            },
+            "machines": {},
+            "applications": {
+                "database": {
+                    "charm": "local:database-0",
+                    "base": {"name": "ubuntu", "channel": "22.04"},
+                    "charm-origin": "local",
+                    "charm-name": "database",
+                    "charm-rev": 0,
+                    "scale": 1,
+                    "provider-id": "fa764a56-2b71-4f7e-a6eb-b265f13adc4c",
+                    "address": "10.152.183.228",
+                    "exposed": False,
+                    "application-status": {
+                        "current": "active",
+                        "message": "relation-created: added new secret",
+                        "since": "24 Feb 2025 16:59:43+13:00",
+                    },
+                    "relations": {
+                        "db": [
+                            {"related-application": "webapp", "interface": "dbi", "scope": "global"},
+                            {"related-application": "dummy", "interface": "xyz", "scope": "foobar"},
+                        ]
+                    },
+                    "units": {
+                        "database/0": {
+                            "workload-status": {
+                                "current": "active",
+                                "message": "relation-created: added new secret",
+                                "since": "24 Feb 2025 16:59:43+13:00",
+                            },
+                            "juju-status": {
+                                "current": "idle",
+                                "since": "24 Feb 2025 16:59:44+13:00",
+                                "version": "3.6.1",
+                            },
+                            "leader": True,
+                            "address": "10.1.164.190",
+                            "provider-id": "database-0",
+                            "open-ports": ["8080/tcp"],
+                        }
+                    },
+                    "endpoint-bindings": {"": "alpha", "db": "alpha"},
+                },
+                "webapp": {
+                    "charm": "local:webapp-0",
+                    "base": {"name": "ubuntu", "channel": "22.04"},
+                    "charm-origin": "local",
+                    "charm-name": "webapp",
+                    "charm-rev": 0,
+                    "scale": 1,
+                    "provider-id": "5c49f9f9-09b3-4212-8a36-dfc081ee80b3",
+                    "address": "10.152.183.254",
+                    "exposed": False,
+                    "application-status": {
+                        "current": "active",
+                        "message": "relation-changed: would update web app's db secret",
+                        "since": "24 Feb 2025 16:59:43+13:00",
+                    },
+                    "relations": {"db": [{"related-application": "database", "interface": "dbi", "scope": "global"}]},
+                    "units": {
+                        "webapp/0": {
+                            "workload-status": {
+                                "current": "active",
+                                "message": "relation-changed: would update web app's db secret",
+                                "since": "24 Feb 2025 16:59:43+13:00",
+                            },
+                            "juju-status": {
+                                "current": "idle",
+                                "since": "24 Feb 2025 16:59:44+13:00",
+                                "version": "3.6.1",
+                            },
+                            "leader": True,
+                            "address": "10.1.164.179",
+                            "provider-id": "webapp-0",
+                        }
+                    },
+                    "endpoint-bindings": {"": "alpha", "db": "alpha"},
+                },
+            },
+            "storage": {},
+            "controller": {"timestamp": "17:00:33+13:00"},
+        }
+    )
+
+
+class TestWaitMonitor:
+    def test_ready(self, sample_minimal_status: jubilant.Status):
+        # GIVEN
+        def ready_func(status):
+            return True, JujuWaitState(message="ready")
+
+        wait_monitor = WaitMonitor(ready=ready_func, error=None)
+
+        # WHEN
+        result = wait_monitor.ready(sample_minimal_status)
+
+        # THEN
+        assert result is True
+        assert wait_monitor.last_noncompliant_wait_state == JujuWaitState()
+
+    def test_ready_not_compliant(self, sample_minimal_status: jubilant.Status):
+        # GIVEN
+        def ready_func(status):
+            return False, JujuWaitState(message="not ready")
+
+        wait_monitor = WaitMonitor(ready=ready_func, error=None)
+
+        # WHEN
+        result = wait_monitor.ready(sample_minimal_status)
+
+        # THEN
+        assert result is False
+        assert wait_monitor.last_noncompliant_wait_state == JujuWaitState(message="not ready")
+
+    def test_error(self, sample_minimal_status: jubilant.Status):
+        # GIVEN
+        def ready_func(status):
+            return True, JujuWaitState(message="ready")
+
+        def error_func(status):
+            return True, JujuWaitState(message="error")
+
+        wait_monitor = WaitMonitor(ready=ready_func, error=error_func)
+
+        # WHEN
+        result = wait_monitor.error(sample_minimal_status)
+
+        # THEN
+        assert result is True
+        assert wait_monitor.last_noncompliant_wait_state == JujuWaitState(message="error")
+
+    def test_error_not_compliant(self, sample_minimal_status: jubilant.Status):
+        # GIVEN
+        def ready_func(status):
+            return True, JujuWaitState(message="ready")
+
+        def error_func(status):
+            return False, JujuWaitState(message="not error")
+
+        wait_monitor = WaitMonitor(ready=ready_func, error=error_func)
+
+        # WHEN
+        result = wait_monitor.error(sample_minimal_status)
+
+        # THEN
+        assert result is False
+        assert wait_monitor.last_noncompliant_wait_state == JujuWaitState()
+
+    def test_error_not_compliant_true(self, sample_minimal_status: jubilant.Status):
+        # GIVEN
+        def ready_func(status):
+            return True, JujuWaitState(message="ready")
+
+        def error_func(status):
+            return True, JujuWaitState(message="not error")
+
+        wait_monitor = WaitMonitor(ready=ready_func, error=error_func)
+
+        # WHEN
+        result = wait_monitor.error(sample_minimal_status)
+
+        # THEN
+        assert result is True
+        assert wait_monitor.last_noncompliant_wait_state == JujuWaitState(message="not error")
+
+    def test_error_none(self, sample_minimal_status: jubilant.Status):
+        # GIVEN
+        def ready_func(status):
+            return True, JujuWaitState(message="ready")
+
+        wait_monitor = WaitMonitor(ready=ready_func, error=None)
+
+        # WHEN
+        result = wait_monitor.error(sample_minimal_status)
+
+        # THEN
+        assert result is False
+        assert wait_monitor.last_noncompliant_wait_state == JujuWaitState()
+
+
+class TestWaitConditions:
+    def test_get_unit_info_leader(self, sample_database_webapp_status: jubilant.Status):
+        # GIVEN / WHEN
+        result = get_unit_info(sample_database_webapp_status, "database/leader")
+
+        # THEN
+        assert result is not None
+        assert result.leader is True
+
+    def test_get_unit_info_by_name(self, sample_database_webapp_status: jubilant.Status):
+        # GIVEN / WHEN
+        result = get_unit_info(sample_database_webapp_status, "webapp/0")
+
+        # THEN
+        assert result is not None
+        assert result.workload_status.current == "active"
+
+    def test_get_unit_info_invalid(self, sample_minimal_status: jubilant.Status):
+        # GIVEN / WHEN
+        result = get_unit_info(sample_minimal_status, "fake/0")
+
+        # THEN
+        assert result is None
+
+    def test_get_integrations(self, sample_database_webapp_status: jubilant.Status):
+        # GIVEN / WHEN
+        result = get_integrations(sample_database_webapp_status)
+
+        # THEN
+        assert len(result) == 1
+        integration = next(iter(result))
+        assert integration.interface == "dbi"
+
+    def test_get_application_state(self, sample_database_webapp_status: jubilant.Status):
+        # GIVEN / WHEN
+        result = get_application_state(sample_database_webapp_status, "database")
+
+        # THEN
+        assert result.status == "active"
+
+    def test_get_unit_state(self, sample_database_webapp_status: jubilant.Status):
+        # GIVEN / WHEN
+        result = get_unit_state(sample_database_webapp_status, "webapp/0")
+
+        # THEN
+        assert result.status == "active"
+        assert "web app" in result.message
+
+    def test_all_statuses_are_in_compliant(self, sample_database_webapp_status: jubilant.Status):
+        # GIVEN / WHEN
+        result, wait = all_statuses_are_in({"active"}, sample_database_webapp_status)
+
+        # THEN
+        assert result is True
+        assert wait.noncompliant_applications == {}
+        assert wait.noncompliant_units == {}
+
+    def test_all_statuses_are_in_application_not_in_status(self, sample_database_webapp_status: jubilant.Status):
+        # GIVEN / WHEN
+        result, wait = all_statuses_are_in({"active"}, sample_database_webapp_status, "missing")
+
+        # THEN
+        assert result is False
+        assert "missing" in wait.noncompliant_applications
+
+    def test_all_statuses_are_in_noncompliant(self, sample_database_webapp_status: jubilant.Status):
+        # GIVEN / WHEN
+        result, wait = all_statuses_are_in({"waiting"}, sample_database_webapp_status)
+
+        # THEN
+        assert result is False
+        assert "webapp" in wait.noncompliant_applications
+
+    def test_applications_are_scaled_compliant(self, sample_database_webapp_status: jubilant.Status):
+        # GIVEN / WHEN
+        result, wait = applications_are_scaled(sample_database_webapp_status)
+
+        # THEN
+        assert result is True
+        assert wait.noncompliant_applications == {}
+        assert wait.noncompliant_units == {}
+
+    def test_applications_are_scaled_application_not_in_status(self, sample_database_webapp_status: jubilant.Status):
+        # GIVEN / WHEN
+        result, wait = applications_are_scaled(sample_database_webapp_status, "missing")
+
+        # THEN
+        assert result is False
+        assert "missing" in wait.noncompliant_applications
+
+    def test_units_have_message_match(self, sample_database_webapp_status: jubilant.Status):
+        # GIVEN / WHEN
+        result, wait = units_have_message("secret", sample_database_webapp_status, "database/0")
+
+        # THEN
+        assert result is True
+        assert wait.noncompliant_units == {}
+
+    def test_units_have_message_no_match(self, sample_database_webapp_status: jubilant.Status):
+        # GIVEN / WHEN
+        result, wait = units_have_message("missing", sample_database_webapp_status, "database/0")
+
+        # THEN
+        assert result is False
+        assert "database/0" in wait.noncompliant_units
+
+    def test_applications_are_removed_none_removed(self, sample_database_webapp_status: jubilant.Status):
+        # GIVEN / WHEN
+        result, wait = applications_are_removed(sample_database_webapp_status, "database")
+
+        # THEN
+        assert result is False
+        assert "database" in wait.noncompliant_applications
+
+    def test_applications_are_removed_all_removed(self, sample_minimal_status: jubilant.Status):
+        # GIVEN / WHEN
+        result, wait = applications_are_removed(sample_minimal_status, "database")
+
+        # THEN
+        assert result is True
+        assert wait.noncompliant_applications == {}
+
+    def test_integrations_are_removed_not_removed(self, sample_database_webapp_status: jubilant.Status):
+        # GIVEN
+        integration = (
+            JujuIntegrationApplication("database", "db"),
+            JujuIntegrationApplication("webapp", "db"),
+        )
+
+        # WHEN
+        result, wait = integrations_are_removed(sample_database_webapp_status, integration)
+
+        # THEN
+        assert result is False
+        assert "database" in wait.noncompliant_applications
+
+    def test_integrations_are_removed_all_removed(self, sample_minimal_status: jubilant.Status):
+        # GIVEN
+        integration = (
+            JujuIntegrationApplication("webapp", "db"),
+            JujuIntegrationApplication("database", "db"),
+        )
+
+        # WHEN
+        result, wait = integrations_are_removed(sample_minimal_status, integration)
+
+        # THEN
+        assert result is True
+        assert wait.noncompliant_applications == {}
+
+    def test_applications_have_no_units_false(self, sample_database_webapp_status: jubilant.Status):
+        # GIVEN / WHEN
+        result, wait = applications_have_no_units(sample_database_webapp_status)
+
+        # THEN
+        assert result is False
+        assert "database" in wait.noncompliant_applications
+        assert "database/0" in wait.noncompliant_units
+
+    def test_applications_have_no_units_true(self, sample_minimal_status: jubilant.Status):
+        # GIVEN / WHEN
+        result, wait = applications_have_no_units(sample_minimal_status)
+
+        # THEN
+        assert result is True
+        assert wait.noncompliant_applications == {}
+        assert wait.noncompliant_units == {}

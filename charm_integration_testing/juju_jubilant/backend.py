@@ -3,19 +3,23 @@
 
 
 from datetime import timedelta
+from typing import Callable
 
 import jubilant
 import yaml
-from juju import JujuWaitTimeoutError
+from juju import JujuIntegrationApplication, JujuWaitState, JujuWaitTimeoutError
 from juju_cmd import JujuCmdBackend
 
-
-class JubilantClient:
-    def model(self, model: str) -> jubilant.Juju:
-        return jubilant.Juju(
-            model=model,
-            wait_timeout=timedelta(days=1).total_seconds(),
-        )
+from .client import JubilantClient
+from .wait import (
+    WaitMonitor,
+    all_statuses_are_in,
+    applications_are_removed,
+    applications_are_scaled,
+    applications_have_no_units,
+    integrations_are_removed,
+    units_have_message,
+)
 
 
 class JubilantBackend(JujuCmdBackend):
@@ -25,39 +29,62 @@ class JubilantBackend(JujuCmdBackend):
         super().__init__()
         self.client = client or JubilantClient()
 
-    def wait_idle(self, model: str, timeout: timedelta | None, period: timedelta | None):
+    def wait(
+        self,
+        model: str,
+        ready: Callable[[jubilant.Status], tuple[bool, JujuWaitState]],
+        error: Callable[[jubilant.Status], tuple[bool, JujuWaitState]] | None = None,
+        timeout: timedelta | None = None,
+        period: timedelta | None = None,
+        delay: int = 1,
+        **kwargs,
+    ):
+        wait_monitor = WaitMonitor(ready=ready, error=error)
         try:
-            self.client.model(model).wait(
-                jubilant.all_active,
-                error=None,
+            return self.client.model(model).wait(
+                ready=wait_monitor.ready,
+                error=wait_monitor.error,
                 timeout=timeout.total_seconds() if timeout else None,
                 successes=int(period.total_seconds()) if period else 1,
-                delay=1,
+                delay=delay,
+                **kwargs,
             )
         except TimeoutError:
-            raise JujuWaitTimeoutError
+            raise JujuWaitTimeoutError(wait_state=wait_monitor.last_noncompliant_wait_state)
 
-    @staticmethod
-    def _all_statuses_are_in(expected: set[str], status: jubilant.Status, application: str) -> bool:
-        application_info = status.apps.get(application)
-        if application_info is None:
-            return False
-        if application_info.app_status.current not in expected:
-            return False
-        for unit_info in status.get_units(application).values():
-            if unit_info.workload_status.current not in expected:
-                return False
-        return True
+    def wait_idle(self, model: str, timeout: timedelta | None, period: timedelta | None):
+        self.wait(
+            model,
+            lambda status: all_statuses_are_in({"active"}, status),
+            timeout=timeout,
+            period=period,
+        )
 
     def wait_application_settled(self, model: str, application: str, timeout: timedelta | None):
-        try:
-            self.client.model(model).wait(
-                lambda status: self._all_statuses_are_in({"blocked", "active"}, status, application),
-                timeout=timeout.total_seconds() if timeout else None,
-                delay=1,
-            )
-        except TimeoutError:
-            raise JujuWaitTimeoutError
+        self.wait(
+            model, lambda status: all_statuses_are_in({"blocked", "active"}, status, application), timeout=timeout
+        )
+
+    def wait_application_scaled(self, model: str, application: str, timeout: timedelta | None):
+        self.wait(model, lambda status: applications_are_scaled(status, application), timeout=timeout)
+
+    def wait_for_unit_message(self, model: str, unit: str, message: str, timeout: timedelta | None):
+        self.wait(model, lambda status: units_have_message(message, status, unit), timeout=timeout)
+
+    def wait_for_removal(self, model: str, applications: list[str], timeout: timedelta | None):
+        self.wait(model, lambda status: applications_are_removed(status, *applications), timeout=timeout)
+
+    def wait_for_removal_of_integration(
+        self,
+        model: str,
+        endpoint_1: JujuIntegrationApplication,
+        endpoint_2: JujuIntegrationApplication,
+        timeout: timedelta | None,
+    ):
+        self.wait(model, lambda status: integrations_are_removed(status, (endpoint_1, endpoint_2)), timeout=timeout)
+
+    def wait_for_removal_of_units(self, model: str, applications: list[str], timeout: timedelta | None):
+        self.wait(model, lambda status: applications_have_no_units(status, *applications), timeout=timeout)
 
     def add_secret(self, model: str, name: str, values: dict[str, str]) -> str:
         return (
