@@ -4,6 +4,7 @@
 
 import json
 import logging
+import re
 from datetime import timedelta
 from pathlib import Path
 from typing import Callable
@@ -65,6 +66,7 @@ def minio_client_file(request: pytest.FixtureRequest) -> Path | None:
 
 
 failure_message = StashKey[CollectReport]()
+failure_exception = StashKey[CollectReport]()
 
 
 # Get failure message for logging
@@ -72,12 +74,18 @@ failure_message = StashKey[CollectReport]()
 def pytest_runtest_makereport(item, call):
     result = yield
     report = result.get_result()
+
+    # Save failure message
     if report.failed:
         reprcrash = getattr(report.longrepr, "reprcrash", None)
         if reprcrash is not None:
             item.stash[failure_message] = reprcrash.message
         else:
             item.stash[failure_message] = str(report.longrepr)
+
+    # Save failure exception
+    if call.excinfo and call.when == "call":
+        item.stash[failure_exception] = call.excinfo.value
 
 
 @pytest.fixture(autouse=True)
@@ -144,9 +152,11 @@ def execution_metadata(record_property: Callable[[str, object], None]):
 
 @pytest.fixture(autouse=True)
 def record_execution_metadata(
+    record_failure_execution_metadata: None,
     record_charms_and_revisions_execution_metadata: None,
 ):
     # Save various execution metadata
+    _ = record_failure_execution_metadata
     _ = record_charms_and_revisions_execution_metadata
 
 
@@ -173,3 +183,49 @@ def record_charms_and_revisions_execution_metadata(
 
     # Save all charms and revisions at end of test
     record_charms_and_revisions_execution_metadata_instantaneous(juju_client, model, execution_metadata)
+
+
+def normalize_message(message: str) -> str:
+    # Replace all numeric sequences with "XXX"
+    # Should normalize timestamps, IP addresses, and other variable data
+    message = re.sub(r"\d+", "XXX", message)
+
+    # Limit character count
+    max_character_count = 150
+    if len(message) > max_character_count:
+        message = f"{message[:max_character_count - 3]}..."
+
+    return message
+
+
+@pytest.fixture
+def record_failure_execution_metadata(
+    request: pytest.FixtureRequest, execution_metadata: Callable[[str, str | int], None]
+):
+    # Let the test run
+    yield
+
+    # Save the failure message
+    if failure_message in request.node.stash:
+        execution_metadata("failure:message", request.node.stash[failure_message])
+
+    # Save extra metadata from exception
+    if failure_exception in request.node.stash:
+        exc = request.node.stash[failure_exception]
+
+        # Save state from wait timeout
+        if isinstance(exc, JujuWaitTimeoutError):
+            for application in exc.wait_state.noncompliant_applications.values():
+                if application is None:
+                    continue
+                execution_metadata(
+                    f"failure:charm:{application.charm}:status",
+                    f"application:{application.status}:{normalize_message(application.message)}",
+                )
+            for unit in exc.wait_state.noncompliant_units.values():
+                if unit is None:
+                    continue
+                execution_metadata(
+                    f"failure:charm:{unit.charm}:status",
+                    f"unit:{unit.status}:{normalize_message(unit.message)}",
+                )
