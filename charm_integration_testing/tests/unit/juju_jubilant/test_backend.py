@@ -4,8 +4,8 @@
 from dataclasses import field
 from datetime import timedelta
 
+import jubilant
 import yaml
-from jubilant import SecretURI
 from juju import JujuWaitTimeoutError
 from juju_jubilant.backend import JubilantBackend, JubilantClient
 from pydantic.dataclasses import dataclass
@@ -96,7 +96,7 @@ class TestJubilantBackend:
 
             def add_secret(self, name: str, content: dict[str, str]):
                 self.secrets[name] = content
-                return SecretURI(self.secret_uri)
+                return jubilant.SecretURI(self.secret_uri)
 
         def test(self):
             # GIVEN
@@ -424,3 +424,43 @@ class TestJubilantBackend:
             else:
                 # AND
                 assert False
+
+    class TestGetCharmRevisions:
+        class StatusStub:
+            def __init__(self, charm, charm_rev):
+                self.apps = {
+                    "my-app": jubilant.statustypes.AppStatus(
+                        charm=charm,
+                        charm_origin="charmhub",
+                        charm_name=charm,
+                        charm_rev=charm_rev,
+                        exposed=True,
+                    )
+                }
+
+        class ModelStatus:
+            def __init__(self, charm, charm_rev):
+                self.apps = TestJubilantBackend.TestGetCharmRevisions.StatusStub(charm, charm_rev).apps
+
+        class StatusStubClient:
+            def status(self):
+                return TestJubilantBackend.TestGetCharmRevisions.ModelStatus("my-charm", 1)
+
+        class ModelStub:
+            client: "TestJubilantBackend.TestGetCharmRevisions.StatusStubClient"
+
+            def __init__(self, client):
+                self.client = client
+
+            def status(self):
+                return self.client.status()
+
+        def test_get_charm_revisions(self):
+            # GIVEN
+            client = JubilantClientStub(client=self.ModelStub(client=self.StatusStubClient()))
+
+            # WHEN
+            charm_revisions = JubilantBackend(client).get_charm_revisions("test-model")
+
+            # THEN
+            assert charm_revisions == {("my-charm", 1)}

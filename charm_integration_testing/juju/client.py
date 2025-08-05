@@ -141,3 +141,6 @@ class JujuClient:
             JujuIntegrationApplication(application_1, endpoint_1),
             JujuIntegrationApplication(application_2, endpoint_2),
         } in {integration.applications for integration in self.backend.list_integrations(model)}
+
+    def get_charm_revisions(self, model: str = "default") -> set[tuple[str, int]]:
+        return self.backend.get_charm_revisions(model)
