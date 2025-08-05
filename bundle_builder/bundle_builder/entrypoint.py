@@ -64,9 +64,9 @@ def add_args_to_parser(parser: argparse.ArgumentParser):
     )
     parser.add_argument(
         "--substrate",
-        choices=["kubernetes"],
+        choices=["kubernetes", "openstack"],
         default="kubernetes",
-        help="Which substrate is the charm going to be deployed on. Only kubernetes is enabled for now.",
+        help="Which substrate is the charm going to be deployed on.",
     )
     parser.add_argument("--output-file", type=str, help="Where to save the generated bundle.")
     parser.add_argument(
@@ -152,7 +152,7 @@ def integrations_from_args(parser: argparse.ArgumentParser, specs: list[str]) ->
 def platform_from_args(parser: argparse.ArgumentParser, substrate: str) -> str:
     # Lookup substrate to bundle platform
     try:
-        return {"kubernetes": "kubernetes"}[substrate]
+        return {"kubernetes": "kubernetes", "openstack": "machine"}[substrate]
     except KeyError:
         parser.error(f"Unknown substrate: '{substrate}'")
 
