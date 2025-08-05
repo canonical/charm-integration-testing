@@ -67,6 +67,7 @@ on:
         type: choice
         options:
           - kubernetes
+          - openstack
         default: kubernetes
 jobs:
   execute-charm-test:
@@ -136,7 +137,7 @@ jobs:
           test_execution_id: ${{ inputs.execution_id }}
           status: "IN_PROGRESS"
           ci_link: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-      
+
       - name: Post 'job_start' event
         if: ${{ !cancelled() && env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-events
@@ -171,6 +172,17 @@ jobs:
         env:
           k8sprod: ${{ secrets.PROD_SQA_KUBECONFIG }}
           k8sstg: ${{ secrets.STG_SQA_KUBECONFIG }}
+        with:
+          environment: ${{ inputs.environment }}
+          controller: ${{ steps.juju_resources.outputs.controller }}
+          model: ${{ steps.juju_resources.outputs.model }}
+
+      - name: Setup O7k Cloud
+        if: ${{ inputs.substrate == 'openstack'}}
+        uses: ./.github/actions/setup-environment/setup-openstack
+        env:
+          o7kprod: ${{ secrets.PROD_SQA_NOVARC }}
+          o7kstg: ${{ secrets.STG_SQA_NOVARC }}
         with:
           environment: ${{ inputs.environment }}
           controller: ${{ steps.juju_resources.outputs.controller }}
@@ -213,7 +225,7 @@ jobs:
           echo '```yaml' >> $GITHUB_STEP_SUMMARY
           cat generated-bundle.yaml >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-    
+
       - name: Post 'test_deploy_start' event
         if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-events
@@ -360,6 +372,22 @@ jobs:
           controller: ${{ steps.juju_resources.outputs.controller }}
           proxy: http://squid.internal:3128
 
+      - name: Call Juju Crashdump
+        id: juju_crashdump
+        env:
+          controller: ${{ steps.juju_resources.outputs.controller }}
+          model: ${{ steps.juju_resources.outputs.model }}
+        if: ${{ always() && inputs.substrate == 'openstack'}}
+        shell: bash
+        run: |
+          MODEL_CRASHDUMP=model-logs.tar.gz
+          CONTROLLER_CRASHDUMP=controller-logs.tar.gz
+          sudo snap install juju-crashdump --classic
+          juju-crashdump --model ${controller}:${model} --timeout 300 --small -f 100000000 --compression gz --unit-dump-location ${MODEL_CRASHDUMP} --as-root || True
+          juju-crashdump --model ${controller}:controller --timeout 300 --small -f 100000000 --compression gz --unit-dump-location ${CONTROLLER_CRASHDUMP} --as-root || True
+          echo "OS_MODEL_CRASHDUMP=$(realpath ${MODEL_CRASHDUMP})" >> $GITHUB_OUTPUT
+          echo "OS_CONTROLLER_CRASHDUMP=$(realpath ${CONTROLLER_CRASHDUMP})" >> $GITHUB_OUTPUT
+
       - name: Collect logs
         id: collect_logs
         if: ${{ !cancelled() }}
@@ -368,11 +396,15 @@ jobs:
           crashdump: ${{ steps.juju_k8s_crashdump.outputs.crashdump_path }}
           junit_xml: ${{ steps.junit_results.outputs.junit_xml }}
           generated_bundle: ${{ steps.build_bundle.outputs.bundle }}
+          openstack_model_crashdump: ${{ steps.juju_crashdump.outputs.OS_MODEL_CRASHDUMP }}
+          openstack_controller_crashdump: ${{ steps.juju_crashdump.outputs.OS_CONTROLLER_CRASHDUMP }}
         run: |
           mkdir -p "logs"
           [ -f "${crashdump}" ] && cp "${crashdump}" "logs/juju-logs.tar.gz"
           [ -f "${junit_xml}" ] && cp "${junit_xml}" "logs/junit.xml"
           [ -f "${generated_bundle}" ] && cp "${generated_bundle}" "logs/generated-bundle.yaml"
+          [ -f "${openstack_model_crashdump}" ] && cp "${openstack_model_crashdump}" "logs/model-logs.tar.gz"
+          [ -f "${openstack_controller_crashdump}" ] && cp "${openstack_controller_crashdump}" "logs/controller-logs.tar.gz"
           echo "directory_path=$(realpath "logs")" >> $GITHUB_OUTPUT
 
       - name: Post Logs To Swift
@@ -408,7 +440,7 @@ jobs:
           test_observer_api: ${{ env.test_observer_api }}
           test_execution_id: ${{ inputs.execution_id }}
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
-    
+
       - name: Post 'job_end' event
         if: ${{ !cancelled() && env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-events

@@ -2,13 +2,16 @@
 # See LICENSE file for licensing details.
 
 
-from typing import Callable
+from typing import Callable, Iterator
 
 import jubilant
 from juju import JujuApplicationState, JujuIntegration, JujuIntegrationApplication, JujuUnitState, JujuWaitState
 
 
 class WaitMonitor:
+    # There are cases where charms have errors, then go active idle, then go to error again.
+    # If the test times out when the charm is active idle, it's hard to tell what the error was.
+    # This works by saving the last state where the wait condition wasn't met.
     last_noncompliant_wait_state: JujuWaitState
 
     call_ready: Callable[[jubilant.Status], tuple[bool, JujuWaitState]]
@@ -50,6 +53,13 @@ def get_unit_info(status: jubilant.Status, unit: str) -> jubilant.statustypes.Un
     return None
 
 
+def generate_endpoint_integrations(status: jubilant.Status) -> Iterator[tuple[str, str, str]]:
+    for application, application_info in status.apps.items():
+        for endpoint, integrations in application_info.relations.items():
+            for integration in integrations:
+                yield (application, endpoint, integration)
+
+
 def get_integrations(status: jubilant.Status) -> set[JujuIntegration]:
     return {
         JujuIntegration(
@@ -62,13 +72,9 @@ def get_integrations(status: jubilant.Status) -> set[JujuIntegration]:
             ),
         )
         # Iterate over every integration on every endpoint
-        for application_1, application_1_info in status.apps.items()
-        for endpoint_1, integrations_1 in application_1_info.relations.items()
-        for integration_1 in integrations_1
+        for application_1, endpoint_1, integration_1 in generate_endpoint_integrations(status)
         # Then for each also iterate over every integration on every endpoint again
-        for application_2, application_2_info in status.apps.items()
-        for endpoint_2, integrations_2 in application_2_info.relations.items()
-        for integration_2 in integrations_2
+        for application_2, endpoint_2, integration_2 in generate_endpoint_integrations(status)
         # Then for all check if the integrations complete a pair
         if integration_1.interface == integration_2.interface
         and application_1 == integration_2.related_app
@@ -115,8 +121,8 @@ def all_statuses_are_in(expected: set[str], status: jubilant.Status, *applicatio
             if unit_info.workload_status.current not in expected:
                 noncompliant_units[unit] = get_unit_state(status, unit)
 
-    compliance = (len(noncompliant_applications) == 0) and (len(noncompliant_units) == 0)
-    return compliance, JujuWaitState(
+    is_compliant = (len(noncompliant_applications) == 0) and (len(noncompliant_units) == 0)
+    return is_compliant, JujuWaitState(
         message=f"waiting for application to reach [{', '.join(sorted(expected))}]",
         noncompliant_applications=noncompliant_applications,
         noncompliant_units=noncompliant_units,
@@ -150,8 +156,8 @@ def applications_are_scaled(status: jubilant.Status, *applications: str) -> tupl
         if application_info.scale != len(valid_units):
             noncompliant_applications[application] = get_application_state(status, application)
 
-    compliance = (len(noncompliant_applications) == 0) and (len(noncompliant_units) == 0)
-    return compliance, JujuWaitState(
+    is_compliant = (len(noncompliant_applications) == 0) and (len(noncompliant_units) == 0)
+    return is_compliant, JujuWaitState(
         message="waiting for application to scale",
         noncompliant_applications=noncompliant_applications,
         noncompliant_units=noncompliant_units,
@@ -227,8 +233,8 @@ def applications_have_no_units(status: jubilant.Status, *applications: str) -> t
             for unit in units:
                 noncompliant_units[unit] = get_unit_state(status, unit)
 
-    compliance = (len(noncompliant_applications) == 0) and (len(noncompliant_units) == 0)
-    return compliance, JujuWaitState(
+    is_compliant = (len(noncompliant_applications) == 0) and (len(noncompliant_units) == 0)
+    return is_compliant, JujuWaitState(
         message="waiting for unit removal",
         noncompliant_applications=noncompliant_applications,
         noncompliant_units=noncompliant_units,

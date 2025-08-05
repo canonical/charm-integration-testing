@@ -143,6 +143,10 @@ def execution_metadata(record_property: Callable[[str, object], None]):
 
     # After the test, record all the metadata
     for category, values in metadata.items():
+        # JUnit properties are key value, where one key can only be mapped to one value
+        # Execution metadata is category value, where one category can be mapped to multiple values
+        # So just store the values as a list in the single key
+        # and use JSON to ensure characters are escaped properly
         record_property(category, json.dumps([str(value) for value in sorted(values)]))
 
 
@@ -182,9 +186,9 @@ def record_charms_and_revisions_execution_metadata(
 
 
 def normalize_message(message: str) -> str:
-    # Replace all numeric characters with "X"
+    # Replace all numeric sequences with "XXX"
     # Should normalize timestamps, IP addresses, and other variable data
-    message = re.sub(r"\d", "X", message)
+    message = re.sub(r"\d+", "XXX", message)
 
     # Limit character count
     max_character_count = 150
@@ -215,12 +219,13 @@ def record_failure_execution_metadata(
                 if application is None:
                     continue
                 execution_metadata(
-                    "failure:application:state",
-                    f"{application.charm}:{application.status}:{normalize_message(application.message)}",
+                    f"failure:charm:{application.charm}:status",
+                    f"application:{application.status}:{normalize_message(application.message)}",
                 )
             for unit in exc.wait_state.noncompliant_units.values():
                 if unit is None:
                     continue
                 execution_metadata(
-                    "failure:unit:state", f"{unit.charm}:{unit.status}:{normalize_message(unit.message)}"
+                    f"failure:charm:{unit.charm}:status",
+                    f"unit:{unit.status}:{normalize_message(unit.message)}",
                 )
