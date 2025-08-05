@@ -121,8 +121,8 @@ def all_statuses_are_in(expected: set[str], status: jubilant.Status, *applicatio
             if unit_info.workload_status.current not in expected:
                 noncompliant_units[unit] = get_unit_state(status, unit)
 
-    compliance = (len(noncompliant_applications) == 0) and (len(noncompliant_units) == 0)
-    return compliance, JujuWaitState(
+    is_compliant = (len(noncompliant_applications) == 0) and (len(noncompliant_units) == 0)
+    return is_compliant, JujuWaitState(
         message=f"waiting for application to reach [{', '.join(sorted(expected))}]",
         noncompliant_applications=noncompliant_applications,
         noncompliant_units=noncompliant_units,
@@ -156,8 +156,8 @@ def applications_are_scaled(status: jubilant.Status, *applications: str) -> tupl
         if application_info.scale != len(valid_units):
             noncompliant_applications[application] = get_application_state(status, application)
 
-    compliance = (len(noncompliant_applications) == 0) and (len(noncompliant_units) == 0)
-    return compliance, JujuWaitState(
+    is_compliant = (len(noncompliant_applications) == 0) and (len(noncompliant_units) == 0)
+    return is_compliant, JujuWaitState(
         message="waiting for application to scale",
         noncompliant_applications=noncompliant_applications,
         noncompliant_units=noncompliant_units,
@@ -233,8 +233,8 @@ def applications_have_no_units(status: jubilant.Status, *applications: str) -> t
             for unit in units:
                 noncompliant_units[unit] = get_unit_state(status, unit)
 
-    compliance = (len(noncompliant_applications) == 0) and (len(noncompliant_units) == 0)
-    return compliance, JujuWaitState(
+    is_compliant = (len(noncompliant_applications) == 0) and (len(noncompliant_units) == 0)
+    return is_compliant, JujuWaitState(
         message="waiting for unit removal",
         noncompliant_applications=noncompliant_applications,
         noncompliant_units=noncompliant_units,
