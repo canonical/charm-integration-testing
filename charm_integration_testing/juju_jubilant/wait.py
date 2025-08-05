@@ -9,6 +9,9 @@ from juju import JujuApplicationState, JujuIntegration, JujuIntegrationApplicati
 
 
 class WaitMonitor:
+    # There are cases where charms have errors, then go active idle, then go to error again.
+    # If the test times out when the charm is active idle, it's hard to tell what the error was.
+    # This works by saving the last state where the wait condition wasn't met.
     last_noncompliant_wait_state: JujuWaitState
 
     call_ready: Callable[[jubilant.Status], tuple[bool, JujuWaitState]]
