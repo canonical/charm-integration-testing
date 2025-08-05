@@ -1,5 +1,5 @@
 name: Get Test Execution
-description: Get various bits of metadata about a Test Execution on Test Observer
+description: Get information about a Test Execution on Test Observer
 
 inputs:
   test_observer_api:
