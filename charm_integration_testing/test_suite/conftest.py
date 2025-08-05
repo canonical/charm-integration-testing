@@ -135,6 +135,10 @@ def execution_metadata(record_property: Callable[[str, object], None]):
 
     # After the test, record all the metadata
     for category, values in metadata.items():
+        # JUnit properties are key value, where one key can only be mapped to one value
+        # Execution metadata is category value, where one category can be mapped to multiple values
+        # So just store the values as a list in the single key
+        # and use JSON to ensure characters are escaped properly
         record_property(category, json.dumps([str(value) for value in sorted(values)]))
 
 
