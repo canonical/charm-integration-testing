@@ -355,6 +355,14 @@ jobs:
           test_execution_id: ${{ inputs.execution_id }}
           junit_xml: ${{ steps.junit_results.outputs.junit_xml }}
 
+      - name: Post execution metadata to Test Observer
+        if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
+        uses: ./.github/actions/test-observer/post-execution-metadata
+        with:
+          test_observer_api: ${{ env.test_observer_api }}
+          test_execution_id: ${{ inputs.execution_id }}
+          junit_xml: ${{ steps.junit_results.outputs.junit_xml }}
+
       - name: Call Juju K8s Crashdump
         id: juju_k8s_crashdump
         if: ${{ !cancelled() && inputs.substrate == 'kubernetes'}}
