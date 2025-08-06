@@ -207,7 +207,7 @@ def record_failure_execution_metadata(
 
     # Save the failure message
     if failure_message in request.node.stash:
-        execution_metadata("failure:message", request.node.stash[failure_message])
+        execution_metadata("failure:message", normalize_message(request.node.stash[failure_message]))
 
     # Save extra metadata from exception
     if failure_exception in request.node.stash:
