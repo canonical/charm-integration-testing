@@ -107,6 +107,21 @@ class CharmhubClient:
         # Add platform overrides
         response = self._find_charms_add_platform_overrides(response)
 
+        # If response[n].charm.result.deployable_on is empty, then it is deployable on machine environments by default.
+        modified: set[FindResponse] = set()
+        for charm in response:
+            if isinstance(charm.result.deployable_on, frozenset) and len(charm.result.deployable_on) == 0:
+                # Create new instance instead of mutating existing object
+                updated_result = dataclasses.replace(
+                    charm.result,
+                    deployable_on=frozenset(["machine"])
+                )
+                updated_charm = dataclasses.replace(charm, result=updated_result)
+                modified.add(updated_charm)
+            else:
+                modified.add(charm)
+        response = modified
+
         # Filter response by platform
         if platform is not None:
             response = {charm for charm in response if platform in charm.result.deployable_on}
