@@ -35,6 +35,13 @@ def get_args():
         default=[],
         help="Exclude test executions that deployed these charms from the statistics",
     )
+    parser.add_argument(
+        "--only-risks",
+        nargs="*",
+        type=str,
+        default=None,
+        help="Risks of charms to calculate the pass rate for",
+    )
     args = parser.parse_args()
     if len(args.exclude_containing_charms) > 0 and not args.generated_bundles:
         parser.error(f"Please supply path to directory containing generated bundles.")
@@ -69,6 +76,8 @@ def main():
         reader = csv.DictReader(f)
         for row in reader:
             if row["Artefact.family"] != "charm":
+                continue
+            if args.only_risks and row["Artefact.stage"] not in args.only_risks:
                 continue
 
             total += 1
