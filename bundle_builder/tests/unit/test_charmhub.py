@@ -403,6 +403,23 @@ class TestCharmhubClient:
                 platform_overrides={"charm-a": {"machine"}},
                 expected={"charm-a"},
             ),
+            Params(
+                label="empty_deployable_on_defaults_to_machine",
+                find_response=[
+                    FindResponse("charm-a", result=FindResponse.Result(deployable_on=frozenset())),
+                    FindResponse("charm-b", result=FindResponse.Result(deployable_on=frozenset({"kubernetes"}))),
+                ],
+                expected={"charm-a", "charm-b"},
+            ),
+            Params(
+                label="empty_deployable_on_filtered_by_platform",
+                platform="machine",
+                find_response=[
+                    FindResponse("charm-a", result=FindResponse.Result(deployable_on=frozenset())),
+                    FindResponse("charm-b", result=FindResponse.Result(deployable_on=frozenset({"kubernetes"}))),
+                ],
+                expected={"charm-a"},
+            ),
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
@@ -568,6 +585,65 @@ class TestCharmhubClient:
 
             # WHEN
             actual = CharmhubClient(overrides_client=overrides_client)._find_charms_add_platform_overrides(params.given)
+
+            # THEN
+            assert actual == params.expected
+
+    class TestFindCharmsAddDeployableOnOverrides:
+        @dataclass
+        class Params:
+            label: str
+            given: set[FindResponse] = Field(default_factory=set)
+            expected: set[FindResponse] = Field(default_factory=set)
+
+        test_cases = [
+            Params(
+                label="empty_deployable_on_defaults_to_machine",
+                given={
+                    FindResponse("charm-a", result=FindResponse.Result(deployable_on=frozenset())),
+                },
+                expected={
+                    FindResponse("charm-a", result=FindResponse.Result(deployable_on=frozenset({"machine"}))),
+                },
+            ),
+            Params(
+                label="existing_deployable_on_preserved",
+                given={
+                    FindResponse("charm-a", result=FindResponse.Result(deployable_on=frozenset({"kubernetes"}))),
+                },
+                expected={
+                    FindResponse("charm-a", result=FindResponse.Result(deployable_on=frozenset({"kubernetes"}))),
+                },
+            ),
+            Params(
+                label="mixed_empty_and_existing_deployable_on",
+                given={
+                    FindResponse("charm-a", result=FindResponse.Result(deployable_on=frozenset())),
+                    FindResponse(
+                        "charm-b", result=FindResponse.Result(deployable_on=frozenset({"kubernetes", "machine"}))
+                    ),
+                },
+                expected={
+                    FindResponse("charm-a", result=FindResponse.Result(deployable_on=frozenset({"machine"}))),
+                    FindResponse(
+                        "charm-b", result=FindResponse.Result(deployable_on=frozenset({"kubernetes", "machine"}))
+                    ),
+                },
+            ),
+            Params(
+                label="empty_response_set",
+                given=set(),
+                expected=set(),
+            ),
+        ]
+
+        @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
+        def test(self, params: Params):
+            # GIVEN
+            client = CharmhubClient()
+
+            # WHEN
+            actual = client._find_charms_add_deployable_on_overrides(params.given)
 
             # THEN
             assert actual == params.expected
