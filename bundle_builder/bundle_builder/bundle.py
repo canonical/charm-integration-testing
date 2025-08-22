@@ -97,6 +97,13 @@ class Bundle:
 
     # Export bundle to yaml string
     def export(self) -> str:
+        # Validate platform is supported
+        if self.platform not in ["kubernetes", "machine"]:
+            raise ValueError(f"Unsupported platform: {self.platform}")
+
+        # Determine the correct scale/unit key based on platform
+        scale_key = "scale" if self.platform == "kubernetes" else "num_units"
+
         return yaml.dump(
             {
                 "applications": {
@@ -105,7 +112,7 @@ class Bundle:
                         "channel": application.charm.channel,
                         "revision": application.charm.revision,
                         "base": f"ubuntu@{application.charm.ubuntu_version}",
-                        "scale": 1,
+                        scale_key: 1,
                         "trust": True,
                         "options": {key: value for key, value in application.config},
                     }

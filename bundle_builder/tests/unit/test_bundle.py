@@ -324,3 +324,92 @@ class TestBundle:
             "bundle": "kubernetes",
             "relations": [["neighbor:pg-database", "target:database"]],
         }
+
+    class TestBundleExportPlatforms:
+        @dataclass
+        class Params:
+            label: str
+            platform: str
+            expected_scale_key: str
+            should_raise_error: bool = False
+
+        test_cases = [
+            Params(
+                label="kubernetes_platform_uses_scale",
+                platform="kubernetes",
+                expected_scale_key="scale",
+            ),
+            Params(
+                label="machine_platform_uses_num_units",
+                platform="machine",
+                expected_scale_key="num_units",
+            ),
+            Params(
+                label="unsupported_platform_raises_error",
+                platform="invalid-platform",
+                expected_scale_key="",
+                should_raise_error=True,
+            ),
+        ]
+
+        @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
+        def test_platform_specific_export(self, params: Params):
+            # GIVEN a bundle with specific platform
+            bundle = dataclasses.replace(
+                sample_bundle_postgresql_k8s_kratos(),
+                platform=params.platform,
+            )
+
+            if params.should_raise_error:
+                # WHEN bundle export is called on unsupported platform
+                # THEN ValueError is raised
+                with pytest.raises(ValueError, match=f"Unsupported platform: {params.platform}"):
+                    bundle.export()
+            else:
+                # WHEN bundle is exported
+                bundle_yaml = bundle.export()
+                parsed_yaml = yaml.safe_load(bundle_yaml)
+
+                # THEN the correct scale/unit key is used
+                for app_name in parsed_yaml["applications"]:
+                    assert params.expected_scale_key in parsed_yaml["applications"][app_name]
+                    assert parsed_yaml["applications"][app_name][params.expected_scale_key] == 1
+
+                # AND the platform is correctly set
+                assert parsed_yaml["bundle"] == params.platform
+
+        def test_platform_yaml_structure_consistency(self):
+            # GIVEN bundles with different platforms
+            kubernetes_bundle = dataclasses.replace(
+                sample_bundle_postgresql_k8s_kratos(),
+                platform="kubernetes",
+            )
+            machine_bundle = dataclasses.replace(
+                sample_bundle_postgresql_k8s_kratos(),
+                platform="machine",
+            )
+
+            # WHEN both bundles are exported
+            k8s_yaml = yaml.safe_load(kubernetes_bundle.export())
+            machine_yaml = yaml.safe_load(machine_bundle.export())
+
+            # THEN structure is identical except for scale/unit key and bundle platform
+            assert k8s_yaml["bundle"] == "kubernetes"
+            assert machine_yaml["bundle"] == "machine"
+
+            # AND applications have the same structure except for scale/unit key
+            k8s_apps = k8s_yaml["applications"]
+            machine_apps = machine_yaml["applications"]
+
+            assert set(k8s_apps.keys()) == set(machine_apps.keys())
+
+            for app_name in k8s_apps.keys():
+                k8s_app = k8s_apps[app_name].copy()
+                machine_app = machine_apps[app_name].copy()
+
+                # Remove scale/unit keys for comparison
+                k8s_scale = k8s_app.pop("scale")
+                machine_units = machine_app.pop("num_units")
+
+                assert k8s_scale == machine_units == 1
+                assert k8s_app == machine_app
