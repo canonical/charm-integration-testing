@@ -100,10 +100,10 @@ class Bundle:
         # Validate platform is supported
         if self.platform not in ["kubernetes", "machine"]:
             raise ValueError(f"Unsupported platform: {self.platform}")
-        
+
         # Determine the correct scale/unit key based on platform
         scale_key = "scale" if self.platform == "kubernetes" else "num_units"
-        
+
         return yaml.dump(
             {
                 "applications": {
