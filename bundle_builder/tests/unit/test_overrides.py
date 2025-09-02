@@ -246,3 +246,50 @@ class TestOverridesClient:
 
             # THEN
             assert actual == params.expected
+
+
+class TestCharmEndpointOverrideValidation:
+    def test_valid_limit_override(self):
+        # GIVEN valid limit values
+        override1 = CharmEndpointOverride(limit=1)
+        override2 = CharmEndpointOverride(limit=0)
+        override3 = CharmEndpointOverride(limit=None)
+
+        # THEN no exceptions are raised
+        assert override1.limit == 1
+        assert override2.limit == 0
+        assert override3.limit is None
+
+    def test_invalid_limit_override(self):
+        # WHEN creating override with negative limit
+        # THEN ValueError is raised
+        with pytest.raises(ValueError, match="Endpoint limit must be non-negative"):
+            CharmEndpointOverride(limit=-1)
+
+    def test_valid_inject_charm_override(self):
+        # GIVEN valid inject_charm values for realistic postgresql-k8s -> pgbouncer-k8s scenario
+        override1 = CharmEndpointOverride(inject_charm="pgbouncer-k8s")  # pgbouncer as connection pooler
+        override2 = CharmEndpointOverride(inject_charm=None)
+        override3 = CharmEndpointOverride(limit=1, inject_charm="pgbouncer-k8s")  # postgresql with limit=1 injects pgbouncer
+
+        # THEN no exceptions are raised
+        assert override1.inject_charm == "pgbouncer-k8s"
+        assert override2.inject_charm is None
+        assert override3.inject_charm == "pgbouncer-k8s"
+
+    def test_invalid_inject_charm_override(self):
+        # WHEN creating override with empty inject_charm
+        # THEN ValueError is raised
+        with pytest.raises(ValueError, match="inject_charm cannot be empty"):
+            CharmEndpointOverride(inject_charm="")
+        
+        with pytest.raises(ValueError, match="inject_charm cannot be empty"):
+            CharmEndpointOverride(inject_charm="   ")
+
+    def test_inject_charm_with_limit_from_charmhub(self):
+        # GIVEN inject_charm without explicit limit (should use CharmHub limit for postgresql-k8s)
+        override = CharmEndpointOverride(inject_charm="pgbouncer-k8s")
+
+        # THEN no exception is raised (limit will come from CharmHub)
+        assert override.inject_charm == "pgbouncer-k8s"
+        assert override.limit is None

@@ -20,7 +20,7 @@ import logging
 import random
 
 from .bundle import Application, ApplicationEndpoint, Bundle, Integration
-from .charm import ENDPOINT_PROVIDES, ENDPOINT_REQUIRES, CharmConfig
+from .charm import ENDPOINT_PEERS, ENDPOINT_PROVIDES, ENDPOINT_REQUIRES, CharmConfig
 from .charmhub import CharmhubClient
 from .immutable_dataclass import computed_property, immutable_dataclass
 
@@ -143,6 +143,27 @@ class BundleBuilder:
                     ):
                         continue
 
+                    # Check limit constraints - skip if either endpoint would exceed its limit
+                    connection_counts = bundle.endpoint_connection_counts
+                    unfulfilled_current_connections = connection_counts.get(unfulfilled_application_endpoint, 0)
+                    possible_current_connections = connection_counts.get(possible_application_endpoint, 0)
+                    
+                    if (unfulfilled_charm_endpoint.limit is not None and 
+                        unfulfilled_current_connections >= unfulfilled_charm_endpoint.limit):
+                        self.logger.debug(
+                            f"Skipping integration: {unfulfilled_application_endpoint} has reached limit "
+                            f"({unfulfilled_current_connections}/{unfulfilled_charm_endpoint.limit})"
+                        )
+                        continue
+                    
+                    if (possible_charm_endpoint.limit is not None and 
+                        possible_current_connections >= possible_charm_endpoint.limit):
+                        self.logger.debug(
+                            f"Skipping integration: {possible_application_endpoint} has reached limit "
+                            f"({possible_current_connections}/{possible_charm_endpoint.limit})"
+                        )
+                        continue
+
                     # Integration is good, add and start again
                     bundle = Bundle(
                         applications=bundle.applications,
@@ -194,6 +215,9 @@ class BundleBuilder:
             # Save mappings
             application_endpoint_to_possible_charm |= {(application_endpoint, charm) for charm in fulfilling_charms}
 
+        # Handle special injection cases for endpoints that have reached their limits
+        application_endpoint_to_possible_charm |= self._get_injected_charm_fulfillments(bundle)
+
         # Return node
         return Node(
             bundle=bundle,
@@ -244,3 +268,58 @@ class BundleBuilder:
         # Pick a random config
         # This function is not secure in cryptography, but should be fine to use here
         return random.choice(charm.test_configs)  # nosec B311
+
+    def _get_injected_charm_fulfillments(self, bundle: Bundle) -> set[tuple[ApplicationEndpoint, str]]:
+        """
+        Find injected charm fulfillments for endpoints that have reached their limits.
+        
+        When an endpoint has reached its connection limit but has an inject_charm override,
+        this method identifies which unfulfilled endpoints could be satisfied by injecting
+        the specified charm.
+        
+        Returns:
+            Set of (unfulfilled_endpoint, injected_charm_name) tuples
+        """
+        injected_fulfillments = set()
+        connection_counts = bundle.endpoint_connection_counts
+        
+        for application_endpoint, charm_endpoint in bundle.application_endpoints.items():
+            # Check if endpoint has reached its limit
+            if (charm_endpoint.limit is not None and 
+                connection_counts.get(application_endpoint, 0) >= charm_endpoint.limit):
+                
+                # Get charm metadata overrides to check for inject_charm
+                application = next(app for app in bundle.applications if app.name == application_endpoint.application)
+                metadata_overrides = self.charmhub_client.overrides_client.get_charm_metadata_overrides(application.charm.name)
+                
+                # Get the appropriate overrides map based on endpoint type
+                overrides_map = {}
+                if charm_endpoint.type == ENDPOINT_PEERS:
+                    overrides_map = metadata_overrides.peers
+                elif charm_endpoint.type == ENDPOINT_REQUIRES:
+                    overrides_map = metadata_overrides.requires
+                elif charm_endpoint.type == ENDPOINT_PROVIDES:
+                    overrides_map = metadata_overrides.provides
+                
+                # Check if this endpoint has an inject_charm override
+                if (application_endpoint.endpoint in overrides_map and 
+                    overrides_map[application_endpoint.endpoint].inject_charm is not None):
+                    
+                    inject_charm_name = overrides_map[application_endpoint.endpoint].inject_charm
+                    self.logger.debug(
+                        f"Found inject_charm override for {application_endpoint}: {inject_charm_name} "
+                        f"(limit reached: {connection_counts.get(application_endpoint, 0)}/{charm_endpoint.limit})"
+                    )
+                    
+                    # Find unfulfilled endpoints that could be fulfilled by the injected charm
+                    for unfulfilled_endpoint in bundle.unfulfilled_endpoints:
+                        unfulfilled_charm_endpoint = bundle.application_endpoints[unfulfilled_endpoint]
+                        
+                        # Injected charm is assumed to be compatible with the same interface
+                        if unfulfilled_charm_endpoint.interface == charm_endpoint.interface:
+                            self.logger.debug(
+                                f"Adding injected charm {inject_charm_name} as possible fulfillment for {unfulfilled_endpoint}"
+                            )
+                            injected_fulfillments.add((unfulfilled_endpoint, inject_charm_name))
+        
+        return injected_fulfillments

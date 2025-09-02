@@ -27,6 +27,7 @@ from .test_charm import (
     sample_charm_endpoint_postgresql_k8s_database,
     sample_charm_kratos,
     sample_charm_postgresql_k8s,
+    sample_charm_self_signed_certificates,
 )
 
 
@@ -413,3 +414,112 @@ class TestBundle:
 
                 assert k8s_scale == machine_units == 1
                 assert k8s_app == machine_app
+
+
+class TestBundleEndpointConnectionCounts:
+    def test_no_connections(self):
+        # GIVEN a bundle with no integrations
+        bundle = Bundle(
+            applications=frozenset({
+                Application(name="postgresql-k8s", charm=sample_charm_postgresql_k8s()),
+                Application(name="kratos", charm=sample_charm_kratos()),
+            }),
+            integrations=frozenset(),
+            platform="kubernetes",
+            arch="amd64",
+        )
+
+        # WHEN connection counts are computed
+        counts = bundle.endpoint_connection_counts
+
+        # THEN all endpoints have zero connections
+        assert counts == {}
+
+    def test_single_integration(self):
+        # GIVEN a bundle with one integration
+        bundle = sample_bundle_postgresql_k8s_kratos()
+
+        # WHEN connection counts are computed
+        counts = bundle.endpoint_connection_counts
+
+        # THEN both endpoints have count=1
+        expected_counts = {
+            ApplicationEndpoint(application="target", endpoint="database"): 1,
+            ApplicationEndpoint(application="neighbor", endpoint="pg-database"): 1,
+        }
+        assert counts == expected_counts
+
+    def test_multiple_integrations_same_endpoint(self):
+        # GIVEN a bundle with multiple integrations involving same endpoint
+        postgresql_app = Application(name="postgresql-k8s", charm=sample_charm_postgresql_k8s())
+        kratos1_app = Application(name="kratos1", charm=sample_charm_kratos())
+        kratos2_app = Application(name="kratos2", charm=sample_charm_kratos())
+
+        bundle = Bundle(
+            applications=frozenset({postgresql_app, kratos1_app, kratos2_app}),
+            integrations=frozenset({
+                Integration({
+                    ApplicationEndpoint(application="postgresql-k8s", endpoint="database"),
+                    ApplicationEndpoint(application="kratos1", endpoint="pg-database"),
+                }),
+                Integration({
+                    ApplicationEndpoint(application="postgresql-k8s", endpoint="database"),
+                    ApplicationEndpoint(application="kratos2", endpoint="pg-database"),
+                }),
+            }),
+            platform="kubernetes",
+            arch="amd64",
+        )
+
+        # WHEN connection counts are computed
+        counts = bundle.endpoint_connection_counts
+
+        # THEN postgresql-k8s:database has count=2, others have count=1
+        expected_counts = {
+            ApplicationEndpoint(application="postgresql-k8s", endpoint="database"): 2,
+            ApplicationEndpoint(application="kratos1", endpoint="pg-database"): 1,
+            ApplicationEndpoint(application="kratos2", endpoint="pg-database"): 1,
+        }
+        assert counts == expected_counts
+
+    def test_complex_multiple_integrations(self):
+        # GIVEN a bundle with mixed integration patterns
+        postgresql_app = Application(name="postgresql-k8s", charm=sample_charm_postgresql_k8s())
+        kratos1_app = Application(name="kratos1", charm=sample_charm_kratos())
+        kratos2_app = Application(name="kratos2", charm=sample_charm_kratos())
+        self_signed_app = Application(name="self-signed-certificates", charm=sample_charm_self_signed_certificates())
+
+        bundle = Bundle(
+            applications=frozenset({postgresql_app, kratos1_app, kratos2_app, self_signed_app}),
+            integrations=frozenset({
+                # Database connections: postgresql <-> both kratos instances
+                Integration({
+                    ApplicationEndpoint(application="postgresql-k8s", endpoint="database"),
+                    ApplicationEndpoint(application="kratos1", endpoint="pg-database"),
+                }),
+                Integration({
+                    ApplicationEndpoint(application="postgresql-k8s", endpoint="database"),
+                    ApplicationEndpoint(application="kratos2", endpoint="pg-database"),
+                }),
+                # Certificates: self-signed <-> postgresql
+                Integration({
+                    ApplicationEndpoint(application="self-signed-certificates", endpoint="certificates"),
+                    ApplicationEndpoint(application="postgresql-k8s", endpoint="certificates"),
+                }),
+            }),
+            platform="kubernetes",
+            arch="amd64",
+        )
+
+        # WHEN connection counts are computed
+        counts = bundle.endpoint_connection_counts
+
+        # THEN postgresql database endpoint has count=2, others have count=1
+        expected_counts = {
+            ApplicationEndpoint(application="postgresql-k8s", endpoint="database"): 2,
+            ApplicationEndpoint(application="postgresql-k8s", endpoint="certificates"): 1,
+            ApplicationEndpoint(application="kratos1", endpoint="pg-database"): 1,
+            ApplicationEndpoint(application="kratos2", endpoint="pg-database"): 1,
+            ApplicationEndpoint(application="self-signed-certificates", endpoint="certificates"): 1,
+        }
+        assert counts == expected_counts

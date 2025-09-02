@@ -30,12 +30,28 @@ from .test_charm import (
     sample_charm_endpoint_postgresql_k8s_database,
     sample_charm_kratos,
     sample_charm_postgresql_k8s,
+    sample_charm_postgresql_k8s_with_database_limit,
     sample_charm_self_signed_certificates,
 )
 
 
 @dataclass
+class OverridesClientStub:
+    def get_charm_metadata_overrides(self, charm_name: str):
+        from bundle_builder.overrides import CharmEndpointOverride, CharmMetadataOverride
+        if charm_name == "postgresql-k8s":
+            return CharmMetadataOverride(
+                provides={
+                    "database": CharmEndpointOverride(inject_charm="pgbouncer-k8s"),
+                }
+            )
+        return CharmMetadataOverride()
+
+
+@dataclass
 class CharmhubClientStub:
+    overrides_client: OverridesClientStub = Field(default_factory=OverridesClientStub)
+
     def find_charms(
         self, provides: str | None = None, requires: str | None = None, platform: str | None = None
     ) -> frozenset[str]:
@@ -549,6 +565,255 @@ class TestBundleBuilder:
 
             # THEN integrations match expected
             assert new_bundle.integrations in params.possible_integrations
+
+    class TestAddMissingIntegrationsWithLimits:
+        @dataclass
+        class Params:
+            label: str
+            bundle: Bundle
+            expected_integrations: frozenset[Integration]
+            charmhub_client: CharmhubClientStub = Field(default_factory=CharmhubClientStub)
+
+        test_cases = [
+            Params(
+                label="limit_blocks_integration",
+                bundle=Bundle(
+                    applications=frozenset({
+                        # PostgreSQL with limit=1 and already has one connection
+                        Application(name="postgresql-k8s", charm=sample_charm_postgresql_k8s_with_database_limit(1)),
+                        Application(name="kratos1", charm=sample_charm_kratos()),
+                        Application(name="kratos2", charm=sample_charm_kratos()),
+                    }),
+                    integrations=frozenset({
+                        # Already one integration using up the limit
+                        Integration({
+                            ApplicationEndpoint(application="postgresql-k8s", endpoint="database"),
+                            ApplicationEndpoint(application="kratos1", endpoint="pg-database"),
+                        }),
+                    }),
+                    platform="kubernetes",
+                    arch="amd64",
+                ),
+                # Should not add the second integration due to limit
+                expected_integrations=frozenset({
+                    Integration({
+                        ApplicationEndpoint(application="postgresql-k8s", endpoint="database"),
+                        ApplicationEndpoint(application="kratos1", endpoint="pg-database"),
+                    }),
+                }),
+            ),
+            Params(
+                label="limit_allows_integration",
+                bundle=Bundle(
+                    applications=frozenset({
+                        # PostgreSQL with limit=2 and has one connection
+                        Application(name="postgresql-k8s", charm=sample_charm_postgresql_k8s_with_database_limit(2)),
+                        Application(name="kratos1", charm=sample_charm_kratos()),
+                        Application(name="kratos2", charm=sample_charm_kratos()),
+                    }),
+                    integrations=frozenset({
+                        # One integration, still room for one more
+                        Integration({
+                            ApplicationEndpoint(application="postgresql-k8s", endpoint="database"),
+                            ApplicationEndpoint(application="kratos1", endpoint="pg-database"),
+                        }),
+                    }),
+                    platform="kubernetes",
+                    arch="amd64",
+                ),
+                # Should add the second integration (within limit)
+                expected_integrations=frozenset({
+                    Integration({
+                        ApplicationEndpoint(application="postgresql-k8s", endpoint="database"),
+                        ApplicationEndpoint(application="kratos1", endpoint="pg-database"),
+                    }),
+                    Integration({
+                        ApplicationEndpoint(application="postgresql-k8s", endpoint="database"),
+                        ApplicationEndpoint(application="kratos2", endpoint="pg-database"),
+                    }),
+                }),
+            ),
+            Params(
+                label="both_endpoints_check_limits",
+                bundle=Bundle(
+                    applications=frozenset({
+                        # Both charms have endpoints with limit=1
+                        Application(name="postgresql1", charm=sample_charm_postgresql_k8s_with_database_limit(1)),
+                        Application(name="postgresql2", charm=sample_charm_postgresql_k8s_with_database_limit(1)),
+                        Application(name="kratos", charm=sample_charm_kratos()),
+                    }),
+                    integrations=frozenset({
+                        # kratos already connected to postgresql1
+                        Integration({
+                            ApplicationEndpoint(application="postgresql1", endpoint="database"),
+                            ApplicationEndpoint(application="kratos", endpoint="pg-database"),
+                        }),
+                    }),
+                    platform="kubernetes",
+                    arch="amd64",
+                ),
+                # Should not integrate with postgresql2 because kratos:pg-database would exceed its limit
+                # (assuming kratos also has limit=1, which it doesn't in our test data, but postgresql2 database would still be blocked)
+                expected_integrations=frozenset({
+                    Integration({
+                        ApplicationEndpoint(application="postgresql1", endpoint="database"),
+                        ApplicationEndpoint(application="kratos", endpoint="pg-database"),
+                    }),
+                }),
+            ),
+        ]
+
+        @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
+        def test(self, params: Params):
+            # GIVEN the bundle with limits
+            bundle = params.bundle
+
+            # WHEN missing integrations are added
+            new_bundle = BundleBuilder(charmhub_client=params.charmhub_client).add_missing_integrations(bundle)
+
+            # THEN integrations respect limits
+            assert new_bundle.integrations == params.expected_integrations
+
+    class TestGetInjectedCharmFulfillments:
+        def test_no_injection_needed(self):
+            # GIVEN a bundle with no endpoints at limits
+            bundle = Bundle(
+                applications=frozenset({
+                    Application(name="postgresql-k8s", charm=sample_charm_postgresql_k8s_with_database_limit(2)),
+                    Application(name="kratos", charm=sample_charm_kratos()),
+                }),
+                integrations=frozenset({
+                    Integration({
+                        ApplicationEndpoint(application="postgresql-k8s", endpoint="database"),
+                        ApplicationEndpoint(application="kratos", endpoint="pg-database"),
+                    }),
+                }),
+                platform="kubernetes",
+                arch="amd64",
+            )
+
+            # WHEN getting injected charm fulfillments
+            builder = BundleBuilder(charmhub_client=CharmhubClientStub())
+            injections = builder._get_injected_charm_fulfillments(bundle)
+
+            # THEN no injections are returned
+            assert injections == set()
+
+        def test_no_inject_charm_override(self):
+            # GIVEN a bundle with endpoint at limit but no inject_charm override
+            bundle = Bundle(
+                applications=frozenset({
+                    Application(name="postgresql-k8s", charm=sample_charm_postgresql_k8s_with_database_limit(1)),
+                    Application(name="kratos", charm=sample_charm_kratos()),
+                }),
+                integrations=frozenset({
+                    # PostgreSQL at its limit of 1 connection
+                    Integration({
+                        ApplicationEndpoint(application="postgresql-k8s", endpoint="database"),
+                        ApplicationEndpoint(application="kratos", endpoint="pg-database"),
+                    }),
+                }),
+                platform="kubernetes",
+                arch="amd64",
+            )
+
+            # WHEN getting injected charm fulfillments
+            builder = BundleBuilder(charmhub_client=CharmhubClientStub())
+            injections = builder._get_injected_charm_fulfillments(bundle)
+
+            # THEN no injections are returned (no override configured)
+            assert injections == set()
+
+        def test_limit_reached_with_injection(self):
+            # GIVEN a bundle with PostgreSQL at limit=1 and an unfulfilled endpoint needing database
+            postgresql_app = Application(name="postgresql-k8s", charm=sample_charm_postgresql_k8s_with_database_limit(1))
+            kratos1_app = Application(name="kratos1", charm=sample_charm_kratos())
+            kratos2_app = Application(name="kratos2", charm=sample_charm_kratos())
+            
+            bundle = Bundle(
+                applications=frozenset({postgresql_app, kratos1_app, kratos2_app}),
+                integrations=frozenset({
+                    # PostgreSQL at its limit of 1 connection
+                    Integration({
+                        ApplicationEndpoint(application="postgresql-k8s", endpoint="database"),
+                        ApplicationEndpoint(application="kratos1", endpoint="pg-database"),
+                    }),
+                }),
+                platform="kubernetes",
+                arch="amd64",
+            )
+
+            # WHEN getting injected charm fulfillments
+            builder = BundleBuilder(charmhub_client=CharmhubClientStub())
+            injections = builder._get_injected_charm_fulfillments(bundle)
+
+            # THEN pgbouncer-k8s is returned as injection for the unfulfilled endpoint
+            expected_injections = {
+                (ApplicationEndpoint(application="kratos2", endpoint="pg-database"), "pgbouncer-k8s")
+            }
+            assert injections == expected_injections
+
+        def test_multiple_endpoints_at_limit(self):
+            # GIVEN a bundle with multiple endpoints at their limits
+            postgresql1_app = Application(name="postgresql1", charm=sample_charm_postgresql_k8s_with_database_limit(1))
+            postgresql2_app = Application(name="postgresql2", charm=sample_charm_postgresql_k8s_with_database_limit(1))
+            kratos1_app = Application(name="kratos1", charm=sample_charm_kratos())
+            kratos2_app = Application(name="kratos2", charm=sample_charm_kratos())
+            kratos3_app = Application(name="kratos3", charm=sample_charm_kratos())
+            
+            bundle = Bundle(
+                applications=frozenset({postgresql1_app, postgresql2_app, kratos1_app, kratos2_app, kratos3_app}),
+                integrations=frozenset({
+                    # Both PostgreSQL instances at their limits
+                    Integration({
+                        ApplicationEndpoint(application="postgresql1", endpoint="database"),
+                        ApplicationEndpoint(application="kratos1", endpoint="pg-database"),
+                    }),
+                    Integration({
+                        ApplicationEndpoint(application="postgresql2", endpoint="database"),
+                        ApplicationEndpoint(application="kratos2", endpoint="pg-database"),
+                    }),
+                }),
+                platform="kubernetes",
+                arch="amd64",
+            )
+
+            # WHEN getting injected charm fulfillments
+            builder = BundleBuilder(charmhub_client=CharmhubClientStub())
+            injections = builder._get_injected_charm_fulfillments(bundle)
+
+            # THEN pgbouncer-k8s is returned for the unfulfilled endpoint from both limited PostgreSQL instances
+            expected_injections = {
+                (ApplicationEndpoint(application="kratos3", endpoint="pg-database"), "pgbouncer-k8s"),
+            }
+            assert injections == expected_injections
+
+        def test_interface_matching(self):
+            # GIVEN a bundle where limited endpoint interface doesn't match unfulfilled endpoint
+            postgresql_app = Application(name="postgresql-k8s", charm=sample_charm_postgresql_k8s_with_database_limit(1))
+            kratos1_app = Application(name="kratos1", charm=sample_charm_kratos())
+            # Create a charm needing certificates (different interface)
+            self_signed_app = Application(name="self-signed-certificates", charm=sample_charm_self_signed_certificates())
+            
+            bundle = Bundle(
+                applications=frozenset({postgresql_app, kratos1_app, self_signed_app}),
+                integrations=frozenset({
+                    # PostgreSQL at its limit
+                    Integration({
+                        ApplicationEndpoint(application="postgresql-k8s", endpoint="database"),
+                        ApplicationEndpoint(application="kratos1", endpoint="pg-database"),
+                    }),
+                }),
+                platform="kubernetes",
+                arch="amd64",
+            )
+
+            # WHEN getting injected charm fulfillments
+            builder = BundleBuilder(charmhub_client=CharmhubClientStub())
+            injections = builder._get_injected_charm_fulfillments(bundle)
+
+            # THEN no injections because interfaces don't match (database vs certificates)
+            assert injections == set()
 
     class TestNewNode:
         @dataclass

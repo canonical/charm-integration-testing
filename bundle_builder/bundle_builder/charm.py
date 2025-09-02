@@ -67,6 +67,7 @@ class CharmEndpoint:
     name: str
     interface: str
     optionality: CharmEndpointOptionality
+    limit: int | None = None
 
 
 CharmConfig = tuple[tuple[str, str | int], ...]

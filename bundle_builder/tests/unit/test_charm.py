@@ -39,6 +39,16 @@ def sample_charm_endpoint_postgresql_k8s_database() -> CharmEndpoint:
     )
 
 
+def sample_charm_endpoint_with_limit() -> CharmEndpoint:
+    return CharmEndpoint(
+        type=ENDPOINT_PROVIDES,
+        name="database",
+        interface="db",
+        optionality=CharmEndpointOptionality.from_bool(True),
+        limit=2,
+    )
+
+
 def sample_charm_postgresql_k8s() -> Charm:
     return Charm(
         name="postgresql-k8s",
@@ -98,6 +108,29 @@ def sample_charm_self_signed_certificates() -> Charm:
         endpoints=frozenset(
             {
                 sample_charm_endpoint_self_signed_certificates_certificates(),
+            }
+        ),
+    )
+
+
+def sample_charm_postgresql_k8s_with_database_limit(limit: int) -> Charm:
+    """PostgreSQL charm with database endpoint having specified limit."""
+    return Charm(
+        name="postgresql-k8s",
+        channel="stable",
+        revision=1,
+        ubuntu_version="22.04",
+        ubuntu_arch="amd64",
+        endpoints=frozenset(
+            {
+                CharmEndpoint(
+                    type=ENDPOINT_PROVIDES,
+                    name="database",
+                    interface="db",
+                    optionality=CharmEndpointOptionality.from_bool(True),
+                    limit=limit,
+                ),
+                sample_charm_endpoint_postgresql_k8s_certificates(),
             }
         ),
     )
@@ -259,6 +292,24 @@ class TestCharmEndpointOptionality:
 
             # THEN matches expected
             assert is_optional == params.value
+
+
+class TestCharmEndpoint:
+    def test_endpoint_with_limit(self):
+        # GIVEN a charm endpoint with limit
+        endpoint = sample_charm_endpoint_with_limit()
+
+        # THEN limit is set correctly
+        assert endpoint.limit == 2
+        assert endpoint.name == "database"
+        assert endpoint.interface == "db"
+
+    def test_endpoint_without_limit(self):
+        # GIVEN a charm endpoint without limit
+        endpoint = sample_charm_endpoint_postgresql_k8s_database()
+
+        # THEN limit is None
+        assert endpoint.limit is None
 
 
 class TestCharm:

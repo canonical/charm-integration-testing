@@ -27,6 +27,19 @@ from .immutable_dataclass import immutable_dataclass
 class CharmEndpointOverride:
     optional: bool | None = None
     optional_if: list[CharmEndpointOptionality] | None = None
+    limit: int | None = None
+    inject_charm: str | None = None
+
+    def __post_init__(self):
+        # Validate limit value if specified
+        if self.limit is not None and self.limit < 0:
+            raise ValueError(f"Endpoint limit must be non-negative, got: {self.limit}")
+        
+        # Validate inject_charm is a non-empty string if specified
+        if self.inject_charm is not None and not isinstance(self.inject_charm, str):
+            raise ValueError("inject_charm must be a string")
+        if self.inject_charm is not None and not self.inject_charm.strip():
+            raise ValueError("inject_charm cannot be empty")
 
     @property
     def optionality(self) -> CharmEndpointOptionality | None:

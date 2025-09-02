@@ -95,6 +95,14 @@ class Bundle:
             }
         )
 
+    @computed_property
+    def endpoint_connection_counts(self) -> dict[ApplicationEndpoint, int]:
+        counts = {}
+        for integration in self.integrations:
+            for endpoint in integration:
+                counts[endpoint] = counts.get(endpoint, 0) + 1
+        return counts
+
     # Export bundle to yaml string
     def export(self) -> str:
         # Validate platform is supported
