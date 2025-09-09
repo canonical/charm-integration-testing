@@ -48,7 +48,7 @@ class Node:
 
     @computed_property
     def fingerprint(self) -> frozenset[str]:
-        return self.bundle.charms
+        return frozenset({app.name for app in self.bundle.applications})
 
     @computed_property
     def child_charms(self) -> frozenset[str]:
@@ -67,6 +67,7 @@ class BundleBuilder:
     logger: logging.Logger
     max_nodes_visited: int = 50000
     rebalance_interval: int = 1000
+    max_same_charm_instances: int = 3  # Limit instances of the same charm to prevent cycles
 
     def __init__(self, charmhub_client: CharmhubClient, logger=logging.getLogger(__name__)):
         self.charmhub_client = charmhub_client
@@ -191,7 +192,10 @@ class BundleBuilder:
 
         return True
 
-
+    def _would_exceed_charm_instance_limit(self, bundle: Bundle, charm_name: str) -> bool:
+        """Check if adding another instance of a charm would exceed the limit."""
+        existing_count = len(bundle.get_application_names_for_charm(charm_name))
+        return existing_count >= self.max_same_charm_instances
 
     # Return a new node, including the possible child charms
     def new_node(self, bundle: Bundle, balance: float = 1.0) -> Node:
@@ -215,12 +219,13 @@ class BundleBuilder:
                     requires=charm_endpoint.interface, platform=bundle.platform
                 )
 
-            # Explicitly remove the bundle charms as we cannot use a charm in the bundle to fulfill an unfulfillable interface
-            # An example is grafana-agent-k8s provides and requires `tracing`, and is the only charm in Charmhub to use `tracing`
-            fulfilling_charms -= bundle.charms
+            # Filter out charms that would exceed instance limit to prevent cycles
+            filtered_charms = {
+                charm for charm in fulfilling_charms if not self._would_exceed_charm_instance_limit(bundle, charm)
+            }
 
             # Save mappings
-            application_endpoint_to_possible_charm |= {(application_endpoint, charm) for charm in fulfilling_charms}
+            application_endpoint_to_possible_charm |= {(application_endpoint, charm) for charm in filtered_charms}
 
         # Return node
         return Node(
@@ -247,7 +252,7 @@ class BundleBuilder:
                             node.bundle.applications
                             | {
                                 Application(
-                                    name=charm.name,
+                                    name=node.bundle.generate_unique_application_name(charm.name),
                                     charm=charm,
                                     config=self.random_test_config(charm),
                                 )

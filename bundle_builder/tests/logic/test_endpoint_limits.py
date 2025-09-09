@@ -24,11 +24,9 @@ from bundle_builder.charm import (
     CharmEndpointOptionality,
 )
 from bundle_builder.charmhub import CharmhubClient
-from bundle_builder.overrides import CharmEndpointOverride, CharmMetadataOverride, OverridesClient
 
 
 class TestEndpointLimits:
-
     class TestBundleBuilderLimitValidation:
         def test_can_add_integration_respects_limits(self):
             # GIVEN a charm with limited endpoint
@@ -542,3 +540,255 @@ class TestEndpointLimits:
 
             # THEN it should be blocked (app1's endpoint reached limit)
             assert can_add is False
+
+    class TestMultipleCharmInstances:
+        """Test scenarios where multiple instances of the same charm are needed."""
+
+        def test_multiple_postgresql_instances_for_dependencies(self):
+            """Test the exact scenario from PR feedback where indico needs postgresql and a dependency that also needs postgresql."""
+            from unittest.mock import MagicMock
+
+            # GIVEN postgresql-k8s with limit=1 (can only connect to one app)
+            postgresql_charm = Charm(
+                name="postgresql-k8s",
+                channel="stable",
+                revision=1,
+                ubuntu_version="22.04",
+                ubuntu_arch="amd64",
+                endpoints=frozenset(
+                    {
+                        CharmEndpoint(
+                            type=ENDPOINT_PROVIDES,
+                            name="database",
+                            interface="postgresql",
+                            optionality=CharmEndpointOptionality.from_bool(False),
+                            limit=1,  # This is the key limitation
+                        )
+                    }
+                ),
+            )
+
+            # AND indico that needs database and juju-info connection
+            indico_charm = Charm(
+                name="indico",
+                channel="stable",
+                revision=1,
+                ubuntu_version="22.04",
+                ubuntu_arch="amd64",
+                endpoints=frozenset(
+                    {
+                        CharmEndpoint(
+                            type=ENDPOINT_REQUIRES,
+                            name="database",
+                            interface="postgresql",
+                            optionality=CharmEndpointOptionality.from_bool(False),
+                            limit=1,
+                        ),
+                        CharmEndpoint(
+                            type=ENDPOINT_REQUIRES,
+                            name="juju-info",
+                            interface="juju-info",
+                            optionality=CharmEndpointOptionality.from_bool(False),
+                            limit=1,
+                        ),
+                    }
+                ),
+            )
+
+            # AND some-dependency-k8s that provides juju-info but also needs its own database
+            dependency_charm = Charm(
+                name="some-dependency-k8s",
+                channel="stable",
+                revision=1,
+                ubuntu_version="22.04",
+                ubuntu_arch="amd64",
+                endpoints=frozenset(
+                    {
+                        CharmEndpoint(
+                            type=ENDPOINT_PROVIDES,
+                            name="juju-info",
+                            interface="juju-info",
+                            optionality=CharmEndpointOptionality.from_bool(False),
+                            limit=1,
+                        ),
+                        CharmEndpoint(
+                            type=ENDPOINT_REQUIRES,
+                            name="database",
+                            interface="postgresql",
+                            optionality=CharmEndpointOptionality.from_bool(False),
+                            limit=1,
+                        ),
+                    }
+                ),
+            )
+
+            # AND a base bundle with postgresql connected to indico
+            base_bundle = Bundle(
+                applications=frozenset(
+                    {
+                        Application(name="postgresql-k8s", charm=postgresql_charm),
+                        Application(name="indico", charm=indico_charm),
+                    }
+                ),
+                integrations=frozenset(
+                    {
+                        Integration(
+                            {
+                                ApplicationEndpoint(application="postgresql-k8s", endpoint="database"),
+                                ApplicationEndpoint(application="indico", endpoint="database"),
+                            }
+                        ),
+                    }
+                ),
+                platform="kubernetes",
+                arch="amd64",
+            )
+
+            # AND a mock charmhub client
+            mock_client = MagicMock(spec=CharmhubClient)
+
+            def mock_find_charms(**kwargs):
+                if kwargs.get("provides") == "juju-info":
+                    return {"some-dependency-k8s"}
+                elif kwargs.get("provides") == "postgresql":
+                    return {"postgresql-k8s"}
+                return set()
+
+            def mock_charm_from_store(charm_name, **kwargs):
+                if charm_name == "postgresql-k8s":
+                    return postgresql_charm
+                elif charm_name == "some-dependency-k8s":
+                    return dependency_charm
+                return None
+
+            mock_client.find_charms.side_effect = mock_find_charms
+            mock_client.charm_from_store.side_effect = mock_charm_from_store
+
+            # WHEN building the bundle
+            builder = BundleBuilder(mock_client)
+            result = builder.build(base_bundle)
+
+            # THEN it should have the original apps plus dependency and second postgresql
+            app_names = {app.name for app in result.applications}
+
+            assert "postgresql-k8s" in app_names
+            assert "indico" in app_names
+            assert "some-dependency-k8s" in app_names
+            assert "postgresql-k8s-2" in app_names  # The second instance!
+
+            # We should have at least 4 applications
+            assert len(result.applications) >= 4
+
+            # AND the integrations should be set up correctly
+            integration_pairs = [{str(ep) for ep in integration} for integration in result.integrations]
+
+            # Original postgresql connected to indico
+            assert {"postgresql-k8s:database", "indico:database"} in integration_pairs
+
+            # Dependency connected to indico via juju-info
+            assert {"some-dependency-k8s:juju-info", "indico:juju-info"} in integration_pairs
+
+            # Check that some-dependency-k8s has a database connection to SOME postgresql instance
+            # (could be postgresql-k8s-2, postgresql-k8s-3, etc due to non-deterministic graph exploration)
+            dependency_has_db = any(
+                "some-dependency-k8s:database" in str(pair)
+                and any(ep.startswith("postgresql-k8s") and ep.endswith(":database") for ep in pair)
+                for pair in integration_pairs
+            )
+            assert (
+                dependency_has_db
+            ), f"some-dependency-k8s should be connected to a postgresql instance. Integrations: {integration_pairs}"
+
+            # Verify we have multiple postgresql instances (original + at least one more)
+            postgresql_apps = [app for app in result.applications if app.charm.name == "postgresql-k8s"]
+            assert len(postgresql_apps) >= 2, f"Should have at least 2 postgresql instances, got {len(postgresql_apps)}"
+
+        def test_prevents_infinite_charm_chain(self):
+            """Test that self-referential charms don't create infinite chains."""
+            from unittest.mock import MagicMock
+
+            # GIVEN a charm that both provides and requires the same interface (like grafana-agent-k8s)
+            self_ref_charm = Charm(
+                name="grafana-agent-k8s",
+                channel="stable",
+                revision=1,
+                ubuntu_version="22.04",
+                ubuntu_arch="amd64",
+                endpoints=frozenset(
+                    {
+                        CharmEndpoint(
+                            type=ENDPOINT_PROVIDES,
+                            name="tracing-provider",
+                            interface="tracing",
+                            optionality=CharmEndpointOptionality.from_bool(False),
+                            limit=None,
+                        ),
+                        CharmEndpoint(
+                            type=ENDPOINT_REQUIRES,
+                            name="tracing-consumer",
+                            interface="tracing",
+                            optionality=CharmEndpointOptionality.from_bool(False),
+                            limit=None,
+                        ),
+                    }
+                ),
+            )
+
+            # AND an app that needs tracing
+            app_charm = Charm(
+                name="mattermost-k8s",
+                channel="stable",
+                revision=1,
+                ubuntu_version="22.04",
+                ubuntu_arch="amd64",
+                endpoints=frozenset(
+                    {
+                        CharmEndpoint(
+                            type=ENDPOINT_REQUIRES,
+                            name="tracing",
+                            interface="tracing",
+                            optionality=CharmEndpointOptionality.from_bool(False),
+                            limit=None,
+                        ),
+                    }
+                ),
+            )
+
+            # AND a base bundle
+            base_bundle = Bundle(
+                applications=frozenset(
+                    {
+                        Application(name="mattermost-k8s", charm=app_charm),
+                        Application(name="grafana-agent-k8s", charm=self_ref_charm),
+                    }
+                ),
+                integrations=frozenset(
+                    {
+                        Integration(
+                            {
+                                ApplicationEndpoint(application="grafana-agent-k8s", endpoint="tracing-provider"),
+                                ApplicationEndpoint(application="mattermost-k8s", endpoint="tracing"),
+                            }
+                        ),
+                    }
+                ),
+                platform="kubernetes",
+                arch="amd64",
+            )
+
+            # AND a mock client that only returns grafana-agent for tracing
+            mock_client = MagicMock(spec=CharmhubClient)
+            mock_client.find_charms.return_value = {"grafana-agent-k8s"}
+            mock_client.charm_from_store.return_value = self_ref_charm
+
+            # WHEN building with a limit on same-charm instances
+            builder = BundleBuilder(mock_client)
+            builder.max_same_charm_instances = 3
+            result = builder.build(base_bundle)
+
+            # THEN it should not exceed the limit
+            grafana_apps = [app for app in result.applications if app.charm.name == "grafana-agent-k8s"]
+            assert len(grafana_apps) <= builder.max_same_charm_instances
+
+            # AND it should stop adding new instances when limit is reached
+            assert len(grafana_apps) < 10  # Definitely not infinite!

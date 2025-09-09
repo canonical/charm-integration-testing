@@ -408,7 +408,6 @@ class CharmhubClient:
                 else:
                     limit = None
 
-
                 # Add endpoint
                 endpoints.add(
                     CharmEndpoint(

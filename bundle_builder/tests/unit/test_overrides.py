@@ -98,7 +98,6 @@ class TestCharmEndpointOverride:
             assert limit == params.expected_limit
 
 
-
 class TestOverridesClient:
     class TestGetCharmMetadataOverrides:
         @dataclass

@@ -24,7 +24,6 @@ from bundle_builder.charmhub import CharmhubClient
 from bundle_builder.charmhub_http import CharmhubBase
 from bundle_builder.overrides import CharmEndpointOverride, CharmMetadataOverride, OverridesClient
 
-
 from .test_charm import (
     sample_charm_endpoint_kratos_pg_database,
     sample_charm_endpoint_postgresql_k8s_certificates,
@@ -82,6 +81,7 @@ class TestLimitParsing:
         # THEN limit is None
         assert override.limit is None
 
+
 class TestLimitApplication:
     def test_charmhub_client_applies_limit_overrides(self):
         # Mock overrides client that returns limit overrides
@@ -97,18 +97,22 @@ class TestLimitApplication:
                 class MockResponse:
                     def __init__(self):
                         # Mock error for default base lookup (when base is "NA")
-                        if hasattr(action, 'base') and action.base.name == "NA":
+                        if hasattr(action, "base") and action.base.name == "NA":
+
                             class MockError:
                                 def __init__(self):
                                     self.code = "invalid-charm-base"
+
                                     class MockExtra:
                                         def __init__(self):
                                             self.default_bases = [MockBase()]
+
                                     self.extra = MockExtra()
+
                             self.error = MockError()
                         else:
                             self.error = None
-                            
+
                         self.name = "test-charm"
                         self.effective_channel = "stable"
 
@@ -146,6 +150,7 @@ class TestLimitApplication:
         # THEN the endpoint has the correct limit
         database_endpoint = next(e for e in charm.endpoints if e.name == "database")
         assert database_endpoint.limit == 2
+
 
 class TestApplicationEndpoint:
     sample_application_endpoint = ApplicationEndpoint("postgresql-k8s", "certificates")

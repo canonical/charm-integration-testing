@@ -111,6 +111,25 @@ class Bundle:
         """Count how many connections an endpoint currently has."""
         return sum(1 for integration in self.integrations if endpoint in integration)
 
+    def get_application_names_for_charm(self, charm_name: str) -> frozenset[str]:
+        """Get all application names that use a specific charm."""
+        return frozenset({app.name for app in self.applications if app.charm.name == charm_name})
+
+    def generate_unique_application_name(self, charm_name: str) -> str:
+        """Generate a unique application name for a charm, adding suffix if needed."""
+        existing_names = {app.name for app in self.applications}
+
+        # If the base charm name is not taken, use it
+        if charm_name not in existing_names:
+            return charm_name
+
+        # Otherwise, find the next available suffix
+        counter = 2
+        while f"{charm_name}-{counter}" in existing_names:
+            counter += 1
+
+        return f"{charm_name}-{counter}"
+
     # Export bundle to yaml string
     def export(self) -> str:
         # Validate platform is supported
