@@ -399,9 +399,15 @@ class CharmhubClient:
                     optionality = CharmEndpointOptionality.from_bool(True)
 
                 # Determine endpoint limit from overrides
-                limit = None
-                if endpoint_name in metadata_overrides_map:
+                if endpoint_name in metadata_overrides_map and metadata_overrides_map[endpoint_name].limit is not None:
                     limit = metadata_overrides_map[endpoint_name].limit
+                elif endpoint.limit is not None:
+                    limit = endpoint.limit
+                elif endpoint_name in edge_endpoint_map and edge_endpoint_map[endpoint_name].limit is not None:
+                    limit = edge_endpoint_map[endpoint_name].limit
+                else:
+                    limit = None
+
 
                 # Add endpoint
                 endpoints.add(

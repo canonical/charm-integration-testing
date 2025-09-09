@@ -86,14 +86,14 @@ class Bundle:
                     continue
 
                 # Count current connections for this endpoint
-                current_connections = sum(1 for integration in self.integrations if app_endpoint in integration)
+                current_connections = self.count_endpoint_connections(app_endpoint)
 
                 # Check if endpoint has reached its limit
                 if endpoint.limit is not None and current_connections >= endpoint.limit:
                     continue
 
-                # If endpoint has no connections or hasn't reached limit, it's unfulfilled
-                if current_connections == 0 or (endpoint.limit is not None and current_connections < endpoint.limit):
+                # If endpoint has no connections, it's unfulfilled
+                if current_connections == 0:
                     non_optional_unfulfilled_endpoints.add(app_endpoint)
 
         return frozenset(non_optional_unfulfilled_endpoints)
@@ -106,6 +106,10 @@ class Bundle:
                 for application_endpoint in self.unfulfilled_endpoints
             }
         )
+
+    def count_endpoint_connections(self, endpoint: ApplicationEndpoint) -> int:
+        """Count how many connections an endpoint currently has."""
+        return sum(1 for integration in self.integrations if endpoint in integration)
 
     # Export bundle to yaml string
     def export(self) -> str:

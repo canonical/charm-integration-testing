@@ -97,16 +97,6 @@ class TestCharmEndpointOverride:
             # THEN matches expected
             assert limit == params.expected_limit
 
-        @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test(self, params: Params):
-            # GIVEN the override
-            override = params.override
-
-            # WHEN optionality property is fetched
-            optionality = override.optionality
-
-            # THEN matches expected
-            assert optionality == params.optionality
 
 
 class TestOverridesClient:

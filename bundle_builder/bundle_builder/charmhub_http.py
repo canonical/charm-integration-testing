@@ -65,6 +65,7 @@ class CharmMetadata:
     class Endpoint:
         interface: str
         optional: bool | None = None
+        limit: int | None = None
 
     peers: dict[str, Endpoint] = Field(default_factory=dict)
     requires: dict[str, Endpoint] = Field(default_factory=dict)

@@ -144,7 +144,7 @@ class BundleBuilder:
                         continue
 
                     # Check endpoint limits
-                    if not self._can_add_integration(
+                    if not self._can_add_integration_within_charm_limits(
                         bundle, possible_application_endpoint, unfulfilled_application_endpoint
                     ):
                         continue
@@ -171,13 +171,13 @@ class BundleBuilder:
                 # No more integrations can be fulfilled
                 return bundle
 
-    def _can_add_integration(
+    def _can_add_integration_within_charm_limits(
         self, bundle: Bundle, endpoint1: ApplicationEndpoint, endpoint2: ApplicationEndpoint
     ) -> bool:
         """Check if adding an integration between two endpoints would exceed any limits."""
         # Get current connection counts for both endpoints
-        endpoint1_connections = self._count_endpoint_connections(bundle, endpoint1)
-        endpoint2_connections = self._count_endpoint_connections(bundle, endpoint2)
+        endpoint1_connections = bundle.count_endpoint_connections(endpoint1)
+        endpoint2_connections = bundle.count_endpoint_connections(endpoint2)
 
         # Get the charm endpoints to check limits
         charm_endpoint1 = bundle.application_endpoints[endpoint1]
@@ -191,13 +191,7 @@ class BundleBuilder:
 
         return True
 
-    def _count_endpoint_connections(self, bundle: Bundle, endpoint: ApplicationEndpoint) -> int:
-        """Count how many connections an endpoint currently has."""
-        count = 0
-        for integration in bundle.integrations:
-            if endpoint in integration:
-                count += 1
-        return count
+
 
     # Return a new node, including the possible child charms
     def new_node(self, bundle: Bundle, balance: float = 1.0) -> Node:

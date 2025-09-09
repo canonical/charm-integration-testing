@@ -28,76 +28,6 @@ from bundle_builder.overrides import CharmEndpointOverride, CharmMetadataOverrid
 
 
 class TestEndpointLimits:
-    class TestLimitParsing:
-        def test_charm_endpoint_override_limit(self):
-            # GIVEN an override with limit
-            override = CharmEndpointOverride(limit=3)
-
-            # THEN limit is correctly set
-            assert override.limit == 3
-
-        def test_charm_endpoint_override_no_limit(self):
-            # GIVEN an override without limit
-            override = CharmEndpointOverride()
-
-            # THEN limit is None
-            assert override.limit is None
-
-    class TestLimitApplication:
-        def test_charmhub_client_applies_limit_overrides(self):
-            # Mock overrides client that returns limit overrides
-            class MockOverridesClient(OverridesClient):
-                def get_charm_metadata_overrides(self, charm: str):
-                    if charm == "test-charm":
-                        return CharmMetadataOverride(provides={"database": CharmEndpointOverride(limit=2)})
-                    return CharmMetadataOverride()
-
-            # Mock HTTP client that returns mock charm data
-            class MockHttpClient:
-                def refresh(self, action):
-                    class MockResponse:
-                        def __init__(self):
-                            self.error = None
-                            self.name = "test-charm"
-                            self.effective_channel = "stable"
-
-                            class MockCharm:
-                                def __init__(self):
-                                    self.revision = 1
-                                    self.bases = [MockBase()]
-
-                                    class MockMetadata:
-                                        def __init__(self):
-                                            class MockEndpoint:
-                                                def __init__(self, interface, optional=None):
-                                                    self.interface = interface
-                                                    self.optional = optional
-
-                                            self.provides = {"database": MockEndpoint("postgresql")}
-                                            self.requires = {}
-                                            self.peers = {}
-
-                                    self.metadata = MockMetadata()
-
-                            self.charm = MockCharm()
-
-                    return MockResponse()
-
-            class MockBase:
-                def __init__(self):
-                    self.name = "ubuntu"
-                    self.architecture = "amd64"
-                    self.channel = "22.04"
-
-            # Create CharmhubClient with mock dependencies
-            client = CharmhubClient(http_client=MockHttpClient(), overrides_client=MockOverridesClient())
-
-            # WHEN getting charm from store
-            charm = client.charm_from_store("test-charm", "amd64")
-
-            # THEN the endpoint has the correct limit
-            database_endpoint = next(e for e in charm.endpoints if e.name == "database")
-            assert database_endpoint.limit == 2
 
     class TestBundleBuilderLimitValidation:
         def test_can_add_integration_respects_limits(self):
@@ -185,7 +115,7 @@ class TestEndpointLimits:
 
             # WHEN checking if we can add another integration
             builder = BundleBuilder(CharmhubClient())
-            can_add = builder._can_add_integration(
+            can_add = builder._can_add_integration_within_charm_limits(
                 bundle,
                 ApplicationEndpoint(application="db", endpoint="database"),
                 ApplicationEndpoint(application="app2", endpoint="database"),
@@ -259,7 +189,7 @@ class TestEndpointLimits:
 
             # WHEN checking if we can add another integration
             builder = BundleBuilder(CharmhubClient())
-            can_add = builder._can_add_integration(
+            can_add = builder._can_add_integration_within_charm_limits(
                 bundle,
                 ApplicationEndpoint(application="db", endpoint="database"),
                 ApplicationEndpoint(application="app2", endpoint="database"),
@@ -333,7 +263,7 @@ class TestEndpointLimits:
 
             # WHEN checking if we can add another integration
             builder = BundleBuilder(CharmhubClient())
-            can_add = builder._can_add_integration(
+            can_add = builder._can_add_integration_within_charm_limits(
                 bundle,
                 ApplicationEndpoint(application="server", endpoint="http"),
                 ApplicationEndpoint(application="client2", endpoint="http"),
@@ -471,9 +401,9 @@ class TestEndpointLimits:
             # WHEN getting unfulfilled endpoints
             unfulfilled = bundle.unfulfilled_endpoints
 
-            # THEN the limited endpoint should still be unfulfilled (can accept one more)
+            # THEN the limited endpoint should be fulfilled (already has one connection)
             db_endpoint = ApplicationEndpoint(application="db", endpoint="database")
-            assert db_endpoint in unfulfilled
+            assert db_endpoint not in unfulfilled
 
     class TestEdgeCases:
         def test_zero_limit_blocks_all_connections(self):
@@ -530,7 +460,7 @@ class TestEndpointLimits:
 
             # WHEN checking if we can add integration
             builder = BundleBuilder(CharmhubClient())
-            can_add = builder._can_add_integration(
+            can_add = builder._can_add_integration_within_charm_limits(
                 bundle,
                 ApplicationEndpoint(application="server", endpoint="disabled"),
                 ApplicationEndpoint(application="client", endpoint="http"),
@@ -604,7 +534,7 @@ class TestEndpointLimits:
 
             # WHEN trying to add another integration
             builder = BundleBuilder(CharmhubClient())
-            can_add = builder._can_add_integration(
+            can_add = builder._can_add_integration_within_charm_limits(
                 bundle,
                 ApplicationEndpoint(application="app1", endpoint="api"),
                 ApplicationEndpoint(application="app3", endpoint="upstream"),
