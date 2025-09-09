@@ -73,18 +73,30 @@ class Bundle:
         # Collect all fulfilled application endpoints
         fulfilled_endpoints = {endpoint for integration in self.integrations for endpoint in integration}
 
-        # Collect all non-optional application endpoints
-        non_optional_endpoints = {
-            ApplicationEndpoint(application=application.name, endpoint=endpoint.name)
-            for application in self.applications
-            for endpoint in application.charm.endpoints
-            if not endpoint.optionality.is_optional(
-                {endpoint.endpoint for endpoint in fulfilled_endpoints if endpoint.application == application.name}
-            )
-        }
+        # Collect all non-optional application endpoints that haven't reached their limits
+        non_optional_unfulfilled_endpoints = set()
+        for application in self.applications:
+            for endpoint in application.charm.endpoints:
+                app_endpoint = ApplicationEndpoint(application=application.name, endpoint=endpoint.name)
 
-        # Return the difference
-        return frozenset(non_optional_endpoints - fulfilled_endpoints)
+                # Check if endpoint is optional
+                if endpoint.optionality.is_optional(
+                    {endpoint.endpoint for endpoint in fulfilled_endpoints if endpoint.application == application.name}
+                ):
+                    continue
+
+                # Count current connections for this endpoint
+                current_connections = sum(1 for integration in self.integrations if app_endpoint in integration)
+
+                # Check if endpoint has reached its limit
+                if endpoint.limit is not None and current_connections >= endpoint.limit:
+                    continue
+
+                # If endpoint has no connections or hasn't reached limit, it's unfulfilled
+                if current_connections == 0 or (endpoint.limit is not None and current_connections < endpoint.limit):
+                    non_optional_unfulfilled_endpoints.add(app_endpoint)
+
+        return frozenset(non_optional_unfulfilled_endpoints)
 
     @computed_property
     def unfulfilled_interfaces(self) -> frozenset[str]:

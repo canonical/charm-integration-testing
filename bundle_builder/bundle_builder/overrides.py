@@ -27,6 +27,7 @@ from .immutable_dataclass import immutable_dataclass
 class CharmEndpointOverride:
     optional: bool | None = None
     optional_if: list[CharmEndpointOptionality] | None = None
+    limit: int | None = None
 
     @property
     def optionality(self) -> CharmEndpointOptionality | None:

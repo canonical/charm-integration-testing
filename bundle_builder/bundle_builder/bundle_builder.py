@@ -143,6 +143,12 @@ class BundleBuilder:
                     ):
                         continue
 
+                    # Check endpoint limits
+                    if not self._can_add_integration(
+                        bundle, possible_application_endpoint, unfulfilled_application_endpoint
+                    ):
+                        continue
+
                     # Integration is good, add and start again
                     bundle = Bundle(
                         applications=bundle.applications,
@@ -164,6 +170,34 @@ class BundleBuilder:
             else:
                 # No more integrations can be fulfilled
                 return bundle
+
+    def _can_add_integration(
+        self, bundle: Bundle, endpoint1: ApplicationEndpoint, endpoint2: ApplicationEndpoint
+    ) -> bool:
+        """Check if adding an integration between two endpoints would exceed any limits."""
+        # Get current connection counts for both endpoints
+        endpoint1_connections = self._count_endpoint_connections(bundle, endpoint1)
+        endpoint2_connections = self._count_endpoint_connections(bundle, endpoint2)
+
+        # Get the charm endpoints to check limits
+        charm_endpoint1 = bundle.application_endpoints[endpoint1]
+        charm_endpoint2 = bundle.application_endpoints[endpoint2]
+
+        # Check if adding one connection would exceed limits
+        if charm_endpoint1.limit is not None and endpoint1_connections >= charm_endpoint1.limit:
+            return False
+        if charm_endpoint2.limit is not None and endpoint2_connections >= charm_endpoint2.limit:
+            return False
+
+        return True
+
+    def _count_endpoint_connections(self, bundle: Bundle, endpoint: ApplicationEndpoint) -> int:
+        """Count how many connections an endpoint currently has."""
+        count = 0
+        for integration in bundle.integrations:
+            if endpoint in integration:
+                count += 1
+        return count
 
     # Return a new node, including the possible child charms
     def new_node(self, bundle: Bundle, balance: float = 1.0) -> Node:
