@@ -69,34 +69,48 @@ class Bundle:
         return frozenset({application.charm.name for application in self.applications})
 
     @computed_property
+    def endpoint_connection_counts(self) -> dict[ApplicationEndpoint, int]:
+        counts = {}
+        for integration in self.integrations:
+            for endpoint in integration:
+                if endpoint in counts:
+                    counts[endpoint] += 1
+                else:
+                    counts[endpoint] = 1
+        return counts
+
+    @computed_property
+    def saturated_endpoints(self) -> frozenset[ApplicationEndpoint]:
+        saturated_endpoints = set()
+        counts: dict[ApplicationEndpoint, int] = self.endpoint_connection_counts
+
+        # Check if they are saturated
+        for app in self.applications:
+            for endpoint in app.charm.endpoints:
+                application_endpoint = ApplicationEndpoint(application=app.name, endpoint=endpoint.name)
+                if endpoint.limit is not None and application_endpoint in counts:
+                    if counts[application_endpoint] >= endpoint.limit:
+                        print(
+                            f"Saturated endpoint {application_endpoint} with count {counts[application_endpoint]} and limit {endpoint.limit}"
+                        )
+                        saturated_endpoints.add(application_endpoint)
+
+        return frozenset(saturated_endpoints)
+
+    @computed_property
     def unfulfilled_endpoints(self) -> frozenset[ApplicationEndpoint]:
         # Collect all fulfilled application endpoints
         fulfilled_endpoints = {endpoint for integration in self.integrations for endpoint in integration}
 
-        # Collect all non-optional application endpoints that haven't reached their limits
-        non_optional_unfulfilled_endpoints = set()
-        for application in self.applications:
-            for endpoint in application.charm.endpoints:
-                app_endpoint = ApplicationEndpoint(application=application.name, endpoint=endpoint.name)
-
-                # Check if endpoint is optional
-                if endpoint.optionality.is_optional(
-                    {endpoint.endpoint for endpoint in fulfilled_endpoints if endpoint.application == application.name}
-                ):
-                    continue
-
-                # Count current connections for this endpoint
-                current_connections = self.count_endpoint_connections(app_endpoint)
-
-                # Check if endpoint has reached its limit
-                if endpoint.limit is not None and current_connections >= endpoint.limit:
-                    continue
-
-                # If endpoint has no connections, it's unfulfilled
-                if current_connections == 0:
-                    non_optional_unfulfilled_endpoints.add(app_endpoint)
-
-        return frozenset(non_optional_unfulfilled_endpoints)
+        non_optional_endpoints = {
+            ApplicationEndpoint(application=application.name, endpoint=endpoint.name)
+            for application in self.applications
+            for endpoint in application.charm.endpoints
+            if not endpoint.optionality.is_optional(
+                {endpoint.endpoint for endpoint in fulfilled_endpoints if endpoint.application == application.name}
+            )
+        }
+        return frozenset(non_optional_endpoints - fulfilled_endpoints - self.saturated_endpoints)
 
     @computed_property
     def unfulfilled_interfaces(self) -> frozenset[str]:
@@ -106,10 +120,6 @@ class Bundle:
                 for application_endpoint in self.unfulfilled_endpoints
             }
         )
-
-    def count_endpoint_connections(self, endpoint: ApplicationEndpoint) -> int:
-        """Count how many connections an endpoint currently has."""
-        return sum(1 for integration in self.integrations if endpoint in integration)
 
     def get_application_names_for_charm(self, charm_name: str) -> frozenset[str]:
         """Get all application names that use a specific charm."""

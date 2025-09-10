@@ -15,7 +15,7 @@
 
 [project]
 name = "bundle-builder"
-version = "0.1.1"
+version = "0.1.2"
 description = "Framework to generate Juju compatible bundles from charmhub."
 authors = [
     {name = "SQA Team",email = "solutionsqa@canonical.com"}

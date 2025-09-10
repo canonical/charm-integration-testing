@@ -56,7 +56,7 @@ class Node:
 
     @computed_property
     def stats(self) -> str:
-        return f"{len(self.bundle.applications)} applications ({len(self.bundle.unfulfilled_interfaces)} unfulfilled and {len(self.fulfillable_interfaces)} fulfillable interfaces)"
+        return f"{len(self.bundle.applications)} applications ({len(self.bundle.unfulfilled_interfaces)} unfulfilled, {len(self.fulfillable_interfaces)} fulfillable interfaces, and {len(self.bundle.saturated_endpoints)} saturated endpoints)"
 
     def __lt__(self, other):
         return self.score < other.score
@@ -176,21 +176,8 @@ class BundleBuilder:
         self, bundle: Bundle, endpoint1: ApplicationEndpoint, endpoint2: ApplicationEndpoint
     ) -> bool:
         """Check if adding an integration between two endpoints would exceed any limits."""
-        # Get current connection counts for both endpoints
-        endpoint1_connections = bundle.count_endpoint_connections(endpoint1)
-        endpoint2_connections = bundle.count_endpoint_connections(endpoint2)
 
-        # Get the charm endpoints to check limits
-        charm_endpoint1 = bundle.application_endpoints[endpoint1]
-        charm_endpoint2 = bundle.application_endpoints[endpoint2]
-
-        # Check if adding one connection would exceed limits
-        if charm_endpoint1.limit is not None and endpoint1_connections >= charm_endpoint1.limit:
-            return False
-        if charm_endpoint2.limit is not None and endpoint2_connections >= charm_endpoint2.limit:
-            return False
-
-        return True
+        return not (endpoint1 in bundle.saturated_endpoints or endpoint2 in bundle.saturated_endpoints)
 
     def _would_exceed_charm_instance_limit(self, bundle: Bundle, charm_name: str) -> bool:
         """Check if adding another instance of a charm would exceed the limit."""

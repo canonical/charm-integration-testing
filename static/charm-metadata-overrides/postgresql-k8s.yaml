@@ -4,10 +4,13 @@ provides:
     optional: true
   database:
     optional: true
+    limit: 1
   db:
     optional: true
+    limit: 1
   db-admin:
     optional: true
+    limit: 1
   metrics-endpoint:
     optional: true
   grafana-dashboard:
