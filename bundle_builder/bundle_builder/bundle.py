@@ -88,11 +88,10 @@ class Bundle:
         for app in self.applications:
             for endpoint in app.charm.endpoints:
                 application_endpoint = ApplicationEndpoint(application=app.name, endpoint=endpoint.name)
-                if endpoint.limit is not None and application_endpoint in counts:
-                    if counts[application_endpoint] >= endpoint.limit:
-                        print(
-                            f"Saturated endpoint {application_endpoint} with count {counts[application_endpoint]} and limit {endpoint.limit}"
-                        )
+                if endpoint.limit is not None:
+                    # Get the current connection count (default to 0 if not in counts)
+                    current_count = counts.get(application_endpoint, 0)
+                    if current_count >= endpoint.limit:
                         saturated_endpoints.add(application_endpoint)
 
         return frozenset(saturated_endpoints)

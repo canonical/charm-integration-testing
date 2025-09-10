@@ -31,6 +31,7 @@ from bundle_builder.charm import (
     CharmEndpoint,
     CharmEndpointOptionality,
 )
+from bundle_builder.charmhub import CharmhubClient
 
 from .test_bundle import sample_bundle_postgresql_k8s_kratos
 from .test_charm import (
@@ -216,7 +217,7 @@ class TestNode:
         stats = node.stats
 
         # THEN stats matches expected
-        assert stats == "2 applications (1 unfulfilled and 1 fulfillable interfaces)"
+        assert stats == "2 applications (1 unfulfilled, 1 fulfillable interfaces, and 0 saturated endpoints)"
 
     def test_lt(self):
         # GIVEN the sample node
@@ -730,6 +731,382 @@ class TestBundleBuilder:
             # THEN matches expected config
             assert config == params.expected
 
+    class TestBundleBuilderLimitValidation:
+        def test_can_add_integration_respects_limits(self):
+            # GIVEN a charm with limited endpoint
+            limited_charm = Charm(
+                name="limited-charm",
+                channel="stable",
+                revision=1,
+                ubuntu_version="22.04",
+                ubuntu_arch="amd64",
+                endpoints=frozenset(
+                    {
+                        CharmEndpoint(
+                            type=ENDPOINT_PROVIDES,
+                            name="database",
+                            interface="postgresql",
+                            optionality=CharmEndpointOptionality.from_bool(False),
+                            limit=1,
+                        )
+                    }
+                ),
+            )
+
+            # AND a charm that requires database
+            requiring_charm1 = Charm(
+                name="app1",
+                channel="stable",
+                revision=1,
+                ubuntu_version="22.04",
+                ubuntu_arch="amd64",
+                endpoints=frozenset(
+                    {
+                        CharmEndpoint(
+                            type=ENDPOINT_REQUIRES,
+                            name="database",
+                            interface="postgresql",
+                            optionality=CharmEndpointOptionality.from_bool(False),
+                            limit=None,
+                        )
+                    }
+                ),
+            )
+
+            requiring_charm2 = Charm(
+                name="app2",
+                channel="stable",
+                revision=1,
+                ubuntu_version="22.04",
+                ubuntu_arch="amd64",
+                endpoints=frozenset(
+                    {
+                        CharmEndpoint(
+                            type=ENDPOINT_REQUIRES,
+                            name="database",
+                            interface="postgresql",
+                            optionality=CharmEndpointOptionality.from_bool(False),
+                            limit=None,
+                        )
+                    }
+                ),
+            )
+
+            # AND a bundle with these applications
+            bundle = Bundle(
+                applications=frozenset(
+                    {
+                        Application(name="db", charm=limited_charm),
+                        Application(name="app1", charm=requiring_charm1),
+                        Application(name="app2", charm=requiring_charm2),
+                    }
+                ),
+                integrations=frozenset(
+                    {
+                        Integration(
+                            {
+                                ApplicationEndpoint(application="db", endpoint="database"),
+                                ApplicationEndpoint(application="app1", endpoint="database"),
+                            }
+                        )
+                    }
+                ),
+                platform="machine",
+                arch="amd64",
+            )
+
+            # WHEN checking if we can add another integration
+            builder = BundleBuilder(CharmhubClient())
+            can_add = builder._can_add_integration_within_charm_limits(
+                bundle,
+                ApplicationEndpoint(application="db", endpoint="database"),
+                ApplicationEndpoint(application="app2", endpoint="database"),
+            )
+
+            # THEN it should return False (limit reached)
+            assert can_add is False
+
+        def test_can_add_integration_allows_when_under_limit(self):
+            # GIVEN a charm with higher limit
+            limited_charm = Charm(
+                name="limited-charm",
+                channel="stable",
+                revision=1,
+                ubuntu_version="22.04",
+                ubuntu_arch="amd64",
+                endpoints=frozenset(
+                    {
+                        CharmEndpoint(
+                            type=ENDPOINT_PROVIDES,
+                            name="database",
+                            interface="postgresql",
+                            optionality=CharmEndpointOptionality.from_bool(False),
+                            limit=2,
+                        )
+                    }
+                ),
+            )
+
+            requiring_charm = Charm(
+                name="app",
+                channel="stable",
+                revision=1,
+                ubuntu_version="22.04",
+                ubuntu_arch="amd64",
+                endpoints=frozenset(
+                    {
+                        CharmEndpoint(
+                            type=ENDPOINT_REQUIRES,
+                            name="database",
+                            interface="postgresql",
+                            optionality=CharmEndpointOptionality.from_bool(False),
+                            limit=None,
+                        )
+                    }
+                ),
+            )
+
+            # AND a bundle with one existing integration
+            bundle = Bundle(
+                applications=frozenset(
+                    {
+                        Application(name="db", charm=limited_charm),
+                        Application(name="app1", charm=requiring_charm),
+                        Application(name="app2", charm=requiring_charm),
+                    }
+                ),
+                integrations=frozenset(
+                    {
+                        Integration(
+                            {
+                                ApplicationEndpoint(application="db", endpoint="database"),
+                                ApplicationEndpoint(application="app1", endpoint="database"),
+                            }
+                        )
+                    }
+                ),
+                platform="machine",
+                arch="amd64",
+            )
+
+            # WHEN checking if we can add another integration
+            builder = BundleBuilder(CharmhubClient())
+            can_add = builder._can_add_integration_within_charm_limits(
+                bundle,
+                ApplicationEndpoint(application="db", endpoint="database"),
+                ApplicationEndpoint(application="app2", endpoint="database"),
+            )
+
+            # THEN it should return True (under limit)
+            assert can_add is True
+
+        def test_can_add_integration_allows_unlimited_endpoints(self):
+            # GIVEN charms with no limits
+            unlimited_charm = Charm(
+                name="unlimited-charm",
+                channel="stable",
+                revision=1,
+                ubuntu_version="22.04",
+                ubuntu_arch="amd64",
+                endpoints=frozenset(
+                    {
+                        CharmEndpoint(
+                            type=ENDPOINT_PROVIDES,
+                            name="http",
+                            interface="http",
+                            optionality=CharmEndpointOptionality.from_bool(False),
+                            limit=None,
+                        )
+                    }
+                ),
+            )
+
+            requiring_charm = Charm(
+                name="app",
+                channel="stable",
+                revision=1,
+                ubuntu_version="22.04",
+                ubuntu_arch="amd64",
+                endpoints=frozenset(
+                    {
+                        CharmEndpoint(
+                            type=ENDPOINT_REQUIRES,
+                            name="http",
+                            interface="http",
+                            optionality=CharmEndpointOptionality.from_bool(False),
+                            limit=None,
+                        )
+                    }
+                ),
+            )
+
+            # AND a bundle with existing integrations
+            bundle = Bundle(
+                applications=frozenset(
+                    {
+                        Application(name="server", charm=unlimited_charm),
+                        Application(name="client1", charm=requiring_charm),
+                        Application(name="client2", charm=requiring_charm),
+                    }
+                ),
+                integrations=frozenset(
+                    {
+                        Integration(
+                            {
+                                ApplicationEndpoint(application="server", endpoint="http"),
+                                ApplicationEndpoint(application="client1", endpoint="http"),
+                            }
+                        )
+                    }
+                ),
+                platform="machine",
+                arch="amd64",
+            )
+
+            # WHEN checking if we can add another integration
+            builder = BundleBuilder(CharmhubClient())
+            can_add = builder._can_add_integration_within_charm_limits(
+                bundle,
+                ApplicationEndpoint(application="server", endpoint="http"),
+                ApplicationEndpoint(application="client2", endpoint="http"),
+            )
+
+            # THEN it should return True (no limit)
+            assert can_add is True
+
+    class TestBundleUnfulfilledEndpoints:
+        def test_unfulfilled_endpoints_considers_limits(self):
+            # GIVEN a charm with limit 1
+            limited_charm = Charm(
+                name="limited-charm",
+                channel="stable",
+                revision=1,
+                ubuntu_version="22.04",
+                ubuntu_arch="amd64",
+                endpoints=frozenset(
+                    {
+                        CharmEndpoint(
+                            type=ENDPOINT_PROVIDES,
+                            name="database",
+                            interface="postgresql",
+                            optionality=CharmEndpointOptionality.from_bool(False),
+                            limit=1,
+                        )
+                    }
+                ),
+            )
+
+            requiring_charm = Charm(
+                name="app",
+                channel="stable",
+                revision=1,
+                ubuntu_version="22.04",
+                ubuntu_arch="amd64",
+                endpoints=frozenset(
+                    {
+                        CharmEndpoint(
+                            type=ENDPOINT_REQUIRES,
+                            name="database",
+                            interface="postgresql",
+                            optionality=CharmEndpointOptionality.from_bool(False),
+                            limit=None,
+                        )
+                    }
+                ),
+            )
+
+            # AND a bundle where the limit is reached
+            bundle = Bundle(
+                applications=frozenset(
+                    {Application(name="db", charm=limited_charm), Application(name="app", charm=requiring_charm)}
+                ),
+                integrations=frozenset(
+                    {
+                        Integration(
+                            {
+                                ApplicationEndpoint(application="db", endpoint="database"),
+                                ApplicationEndpoint(application="app", endpoint="database"),
+                            }
+                        )
+                    }
+                ),
+                platform="machine",
+                arch="amd64",
+            )
+
+            # WHEN getting unfulfilled endpoints
+            unfulfilled = bundle.unfulfilled_endpoints
+
+            # THEN the limited endpoint should not be unfulfilled (limit reached)
+            db_endpoint = ApplicationEndpoint(application="db", endpoint="database")
+            assert db_endpoint not in unfulfilled
+
+        def test_unfulfilled_endpoints_includes_under_limit(self):
+            # GIVEN a charm with limit 2
+            limited_charm = Charm(
+                name="limited-charm",
+                channel="stable",
+                revision=1,
+                ubuntu_version="22.04",
+                ubuntu_arch="amd64",
+                endpoints=frozenset(
+                    {
+                        CharmEndpoint(
+                            type=ENDPOINT_PROVIDES,
+                            name="database",
+                            interface="postgresql",
+                            optionality=CharmEndpointOptionality.from_bool(False),
+                            limit=2,
+                        )
+                    }
+                ),
+            )
+
+            requiring_charm = Charm(
+                name="app",
+                channel="stable",
+                revision=1,
+                ubuntu_version="22.04",
+                ubuntu_arch="amd64",
+                endpoints=frozenset(
+                    {
+                        CharmEndpoint(
+                            type=ENDPOINT_REQUIRES,
+                            name="database",
+                            interface="postgresql",
+                            optionality=CharmEndpointOptionality.from_bool(False),
+                            limit=None,
+                        )
+                    }
+                ),
+            )
+
+            # AND a bundle with one integration (under limit)
+            bundle = Bundle(
+                applications=frozenset(
+                    {Application(name="db", charm=limited_charm), Application(name="app", charm=requiring_charm)}
+                ),
+                integrations=frozenset(
+                    {
+                        Integration(
+                            {
+                                ApplicationEndpoint(application="db", endpoint="database"),
+                                ApplicationEndpoint(application="app", endpoint="database"),
+                            }
+                        )
+                    }
+                ),
+                platform="machine",
+                arch="amd64",
+            )
+
+            # WHEN getting unfulfilled endpoints
+            unfulfilled = bundle.unfulfilled_endpoints
+
+            # THEN the limited endpoint should be fulfilled (already has one connection)
+            db_endpoint = ApplicationEndpoint(application="db", endpoint="database")
+            assert db_endpoint not in unfulfilled
+
 
 class TestDuplicateCharms:
     """Test that the bundle builder can handle multiple instances of the same charm."""
@@ -1012,12 +1389,12 @@ class TestDuplicateCharms:
         )
 
         # THEN each database should have exactly one connection (respecting the limit)
-        db1_connections = bundle.count_endpoint_connections(
+        db1_connections = bundle.endpoint_connection_counts[
             ApplicationEndpoint(application="postgresql-k8s", endpoint="database")
-        )
-        db2_connections = bundle.count_endpoint_connections(
+        ]
+        db2_connections = bundle.endpoint_connection_counts[
             ApplicationEndpoint(application="postgresql-k8s-2", endpoint="database")
-        )
+        ]
 
         assert db1_connections == 1
         assert db2_connections == 1
