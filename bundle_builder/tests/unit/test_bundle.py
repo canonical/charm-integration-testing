@@ -20,6 +20,9 @@ import yaml
 from pydantic.dataclasses import dataclass
 
 from bundle_builder.bundle import Application, ApplicationEndpoint, Bundle, Integration
+from bundle_builder.charmhub import CharmhubClient
+from bundle_builder.charmhub_http import CharmhubBase
+from bundle_builder.overrides import CharmEndpointOverride, CharmMetadataOverride, OverridesClient
 
 from .test_charm import (
     sample_charm_endpoint_kratos_pg_database,
@@ -61,6 +64,92 @@ class TestApplication:
 
             # THEN matches expected
             assert repr == params.repr
+
+
+class TestLimitParsing:
+    def test_charm_endpoint_override_limit(self):
+        # GIVEN an override with limit
+        override = CharmEndpointOverride(limit=3)
+
+        # THEN limit is correctly set
+        assert override.limit == 3
+
+    def test_charm_endpoint_override_no_limit(self):
+        # GIVEN an override without limit
+        override = CharmEndpointOverride()
+
+        # THEN limit is None
+        assert override.limit is None
+
+
+class TestLimitApplication:
+    def test_charmhub_client_applies_limit_overrides(self):
+        # Mock overrides client that returns limit overrides
+        class MockOverridesClient(OverridesClient):
+            def get_charm_metadata_overrides(self, charm: str):
+                if charm == "test-charm":
+                    return CharmMetadataOverride(provides={"database": CharmEndpointOverride(limit=2)})
+                return CharmMetadataOverride()
+
+        # Mock HTTP client that returns mock charm data
+        class MockHttpClient:
+            def refresh(self, action):
+                class MockResponse:
+                    def __init__(self):
+                        # Mock error for default base lookup (when base is "NA")
+                        if hasattr(action, "base") and action.base.name == "NA":
+
+                            class MockError:
+                                def __init__(self):
+                                    self.code = "invalid-charm-base"
+
+                                    class MockExtra:
+                                        def __init__(self):
+                                            self.default_bases = [MockBase()]
+
+                                    self.extra = MockExtra()
+
+                            self.error = MockError()
+                        else:
+                            self.error = None
+
+                        self.name = "test-charm"
+                        self.effective_channel = "stable"
+
+                        class MockCharm:
+                            def __init__(self):
+                                self.revision = 1
+                                self.bases = [MockBase()]
+
+                                class MockMetadata:
+                                    def __init__(self):
+                                        class MockEndpoint:
+                                            def __init__(self, interface, optional=None):
+                                                self.interface = interface
+                                                self.optional = optional
+
+                                        self.provides = {"database": MockEndpoint("postgresql")}
+                                        self.requires = {}
+                                        self.peers = {}
+
+                                self.metadata = MockMetadata()
+
+                        self.charm = MockCharm()
+
+                return MockResponse()
+
+        def MockBase():
+            return CharmhubBase(name="ubuntu", architecture="amd64", channel="22.04")
+
+        # Create CharmhubClient with mock dependencies
+        client = CharmhubClient(http_client=MockHttpClient(), overrides_client=MockOverridesClient())
+
+        # WHEN getting charm from store
+        charm = client.charm_from_store("test-charm", "amd64")
+
+        # THEN the endpoint has the correct limit
+        database_endpoint = next(e for e in charm.endpoints if e.name == "database")
+        assert database_endpoint.limit == 2
 
 
 class TestApplicationEndpoint:

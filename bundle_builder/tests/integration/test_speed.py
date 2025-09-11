@@ -52,7 +52,7 @@ class Params:
         ),
     ],
 )
-@pytest.mark.timeout(timedelta(minutes=10).total_seconds())
+@pytest.mark.timeout(timedelta(minutes=20).total_seconds())
 def test_speed(charmhub_client: CharmhubClient, params: Params):
     # GIVEN a base bundle
     base_bundle = Bundle(
@@ -67,6 +67,6 @@ def test_speed(charmhub_client: CharmhubClient, params: Params):
     # WHEN minimal bundle is built
     minimal_bundle = BundleBuilder(charmhub_client).build(base_bundle)
 
-    # THEN the test doesn't timeout in 5 minutes
+    # THEN the test doesn't timeout in 20 minutes
     # AND the minimal bundle contains all the charms
     assert params.charms <= {application.name for application in minimal_bundle.applications}

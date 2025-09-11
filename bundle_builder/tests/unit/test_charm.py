@@ -27,6 +27,7 @@ def sample_charm_endpoint_postgresql_k8s_certificates() -> CharmEndpoint:
         name="certificates",
         interface="tls-certificates",
         optionality=CharmEndpointOptionality.from_bool(True),
+        limit=None,
     )
 
 
@@ -36,6 +37,7 @@ def sample_charm_endpoint_postgresql_k8s_database() -> CharmEndpoint:
         name="database",
         interface="db",
         optionality=CharmEndpointOptionality.from_bool(True),
+        limit=None,
     )
 
 
@@ -61,6 +63,7 @@ def sample_charm_endpoint_kratos_pg_database() -> CharmEndpoint:
         name="pg-database",
         interface="db",
         optionality=CharmEndpointOptionality.from_bool(False),
+        limit=None,
     )
 
 
@@ -85,6 +88,7 @@ def sample_charm_endpoint_self_signed_certificates_certificates() -> CharmEndpoi
         name="certificates",
         interface="tls-certificates",
         optionality=CharmEndpointOptionality.from_bool(True),
+        limit=None,
     )
 
 

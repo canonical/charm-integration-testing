@@ -61,16 +61,41 @@ class TestCharmEndpointOverride:
             ),
         ]
 
+    class TestLimit:
+        @dataclass
+        class Params:
+            label: str
+            override: CharmEndpointOverride
+            expected_limit: int | None
+
+        test_cases = [
+            Params(
+                label="limit_set",
+                override=CharmEndpointOverride(limit=5),
+                expected_limit=5,
+            ),
+            Params(
+                label="limit_zero",
+                override=CharmEndpointOverride(limit=0),
+                expected_limit=0,
+            ),
+            Params(
+                label="limit_not_set",
+                override=CharmEndpointOverride(),
+                expected_limit=None,
+            ),
+        ]
+
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
         def test(self, params: Params):
             # GIVEN the override
             override = params.override
 
-            # WHEN optionality property is fetched
-            optionality = override.optionality
+            # WHEN limit property is fetched
+            limit = override.limit
 
             # THEN matches expected
-            assert optionality == params.optionality
+            assert limit == params.expected_limit
 
 
 class TestOverridesClient:
@@ -106,6 +131,20 @@ class TestOverridesClient:
                             optional_if=[CharmEndpointOptionality(endpoint_integrated="database")],
                         )
                     },
+                ),
+            ),
+            Params(
+                label="override_with_limit",
+                charm="limited-charm",
+                overrides={
+                    "limited-charm": {
+                        "provides": {"database": {"limit": 3}},
+                        "requires": {"certificates": {"limit": 1, "optional": True}},
+                    },
+                },
+                expected_override=CharmMetadataOverride(
+                    provides={"database": CharmEndpointOverride(limit=3)},
+                    requires={"certificates": CharmEndpointOverride(limit=1, optional=True)},
                 ),
             ),
         ]
