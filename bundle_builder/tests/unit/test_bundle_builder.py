@@ -252,6 +252,7 @@ class TestBundleBuilder:
             base_bundle: Bundle
             expected_bundle: Bundle
             charmhub_client: CharmhubClientStub = Field(default_factory=CharmhubClientStub)
+            charm_priorities: dict[str, int] = Field(default_factory=dict)
 
         test_cases = [
             Params(
@@ -354,6 +355,15 @@ class TestBundleBuilder:
                     ),
                 ),
             ),
+            Params(
+                label="custom_priority_affects_node_score",
+                base_bundle=sample_node_kratos().bundle,
+                expected_bundle=dataclasses.replace(
+                    sample_node_postgresql_k8s_kratos().bundle,
+                    priority_sum=5,
+                ),
+                charm_priorities={"kratos": 4},
+            ),
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
@@ -362,7 +372,7 @@ class TestBundleBuilder:
             base_bundle = params.base_bundle
 
             # WHEN the minimal bundle is build
-            minimal_bundle = BundleBuilder(charmhub_client=params.charmhub_client).build(base_bundle)
+            minimal_bundle = BundleBuilder(charmhub_client=params.charmhub_client, charm_priorities=params.charm_priorities).build(base_bundle)
 
             # THEN matches expected bundle
             assert minimal_bundle == params.expected_bundle
