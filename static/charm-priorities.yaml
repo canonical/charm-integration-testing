@@ -1,0 +1,2 @@
+pgbouncer-k8s: 2
+mysql-router-k8s: 2
