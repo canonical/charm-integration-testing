@@ -1,4 +1,17 @@
 # Leave a blank line at the end of this file to support concatenation
+prioritized
+prioritization
+prioritize
+fulfills
+fulfillable
+unfulfillable
+fulfill
+UCS
+DFS
+BFS
+integrations
+pathfinding
+py
 backend
 backends
 Charmcraft

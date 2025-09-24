@@ -1,7 +1,7 @@
 .. _build:
 
-The Bundle Building Algorithm
-===========================
+The bundle building algorithm
+=============================
 
 Goal
 ----
@@ -57,7 +57,7 @@ referred to as unfulfillable interfaces.
 There may be more than one of these nodes in the graph, but due to the size of some of the graphs,
 we cannot fully explore and find all these nodes.
 
-Graph Traversal: Uniform Cost Search
+Graph traversal: uniform cost search
 ------------------------------------
 
 Uniform Cost Search (UCS) is a pathfinding algorithm that expands the lowest-cost node first using a
@@ -80,7 +80,7 @@ Node score
 
 The node score is the computed value for the cost of a node in the graph. Ideally, this would just
 be the number of applications in the bundle result in a BFS algorithm, but we cannot only use BFS
-for the reason below.
+for a reason explained further below.
 
 The other metric we consider is therefore the number of remaining non-optional interfaces that can
 be fulfilled in the bundle. The idea here is that bundles with fewer remaining fulfillable
@@ -110,10 +110,27 @@ remove, when other paths would contain fewer applications, such as in the exampl
         A-->X;
         X-. Not taken .->Y;
 
-Therefore, the node score is a combination of these two metrics. Initially, the number of
+Therefore, the node score becomes a combination of these two metrics. Initially, the number of
 applications in the bundle is the prioritized metric, and as the number of nodes visited increases,
 the contribution of the number of fulfillable interfaces to the score increases. This leads to a
 balance of finding the optimal bundle in a reasonable (and finite) amount of time.
+
+Let :math:`s,b,A,I` be the score, the balance factor, the applications set and the fulfillable interfaces set, respectively, then:
+
+.. math::
+
+   s = b\times|A| + (1-b)\times|I|
+
+
+Finally, we also add prioritization to specific charms, because it can be desirable to prioritize 
+a bundle with certain charms over others. This prioritization is configurable and applied as a 
+replacement to the value of :math:`A` above. Instead of using the number of applications, we add up
+the priority value of each application's charm (with the default being 1). Let :math:`S` be this new
+value, then the final calculation of :math:`s` is as follows:
+
+.. math::
+
+   s = b\times S + (1-b)\times|I|
 
 Why not DFS?
 ~~~~~~~~~~~~
