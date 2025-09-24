@@ -90,6 +90,7 @@ def sample_node_postgresql_k8s_kratos() -> Node:
         ),
         application_endpoint_to_possible_charm=frozenset(),
         balance=1.0,
+        priority_sum=2
     )
 
 
@@ -110,6 +111,7 @@ def sample_node_kratos() -> Node:
                 (ApplicationEndpoint("kratos", "pg-database"), "postgresql-k8s"),
             }
         ),
+        priority_sum=1,
     )
 
 
@@ -125,6 +127,7 @@ def sample_node_kratos_self_signed_certificates() -> Node:
                 }
             ),
         ),
+        priority_sum=2,
     )
 
 
@@ -160,6 +163,14 @@ class TestNode:
                     balance=0.5,
                 ),
                 score=1.5,
+            ),
+            Params(
+                label="higher_priority_for_kratos",
+                node=dataclasses.replace(
+                    sample_node_kratos_self_signed_certificates(),
+                    priority_sum=3,
+                ),
+                score=3.0,
             ),
         ]
 
