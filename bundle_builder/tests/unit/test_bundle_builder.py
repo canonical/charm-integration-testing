@@ -90,7 +90,7 @@ def sample_node_postgresql_k8s_kratos() -> Node:
         ),
         application_endpoint_to_possible_charm=frozenset(),
         balance=1.0,
-        priority_sum=2
+        priority_sum=2,
     )
 
 
@@ -372,7 +372,9 @@ class TestBundleBuilder:
             base_bundle = params.base_bundle
 
             # WHEN the minimal bundle is build
-            minimal_bundle = BundleBuilder(charmhub_client=params.charmhub_client, charm_priorities=params.charm_priorities).build(base_bundle)
+            minimal_bundle = BundleBuilder(
+                charmhub_client=params.charmhub_client, charm_priorities=params.charm_priorities
+            ).build(base_bundle)
 
             # THEN matches expected bundle
             assert minimal_bundle == params.expected_bundle

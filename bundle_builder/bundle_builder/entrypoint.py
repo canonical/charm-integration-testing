@@ -84,9 +84,7 @@ def add_args_to_parser(parser: argparse.ArgumentParser):
     parser.add_argument(
         "--log-level", type=str.upper, choices=["INFO", "DEBUG", "WARNING", "ERROR", "CRITICAL"], default="INFO"
     )
-    parser.add_argument(
-        "--charm-priorities", type=Path, help="Path to file containing charm priorities", default=None
-    )
+    parser.add_argument("--charm-priorities", type=Path, help="Path to file containing charm priorities", default=None)
 
 
 # Get charms from args
@@ -215,11 +213,13 @@ def main():
         if not args.charm_priorities.is_file():
             parser.error(f"The charm priorities path '{args.charm_priorities}' is not a valid file.")
         try:
-            with open(args.charm_priorities, 'r') as file:
+            with open(args.charm_priorities, "r") as file:
                 charm_priorities = safe_load(file)
         except Exception as e:
             parser.error(f"Error parsing charm priorities: {e}")
-    built_bundle = BundleBuilder(charmhub_client=charmhub_client, logger=logger, charm_priorities=charm_priorities).build(base_bundle)
+    built_bundle = BundleBuilder(
+        charmhub_client=charmhub_client, logger=logger, charm_priorities=charm_priorities
+    ).build(base_bundle)
     logger.info(f"Generated bundle: \n{'-' * 80}\n{built_bundle.export()}{'-' * 80}")
 
     # Export the bundle to file

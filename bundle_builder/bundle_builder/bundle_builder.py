@@ -18,7 +18,6 @@ import dataclasses
 import heapq
 import logging
 import random
-from typing import Sequence
 
 from .bundle import Application, ApplicationEndpoint, Bundle, Integration
 from .charm import ENDPOINT_PROVIDES, ENDPOINT_REQUIRES, CharmConfig
