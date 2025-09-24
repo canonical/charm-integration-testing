@@ -30,7 +30,7 @@ class Node:
     bundle: Bundle
     application_endpoint_to_possible_charm: frozenset[tuple[ApplicationEndpoint, str]]
     balance: float
-    priority_sum: int
+    priority_sum: float
 
     @computed_property
     def fulfillable_interfaces(self) -> frozenset[str]:
@@ -187,6 +187,9 @@ class BundleBuilder:
         existing_count = len(bundle.get_application_names_for_charm(charm_name))
         return existing_count >= self.max_same_charm_instances
 
+    def get_priority_sum(self, applications: frozenset[Application]) -> float:
+        return sum(self.charm_priorities.get(app.charm.name, 1.0) for app in applications)
+
     # Return a new node, including the possible child charms
     def new_node(self, bundle: Bundle, balance: float = 1.0) -> Node:
         # Ensure all possible integrations are fulfilled by the bundle
@@ -226,9 +229,6 @@ class BundleBuilder:
             balance=balance,
             priority_sum=priority_sum,
         )
-
-    def get_priority_sum(self, applications: frozenset[Application]) -> int:
-        return sum(self.charm_priorities.get(app.charm.name, 1) for app in applications)
 
     # Each child node is the addition of an application to the bundle that fulfills a
     # missing non-optional required endpoint

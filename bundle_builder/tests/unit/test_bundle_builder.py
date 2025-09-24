@@ -90,7 +90,7 @@ def sample_node_postgresql_k8s_kratos() -> Node:
         ),
         application_endpoint_to_possible_charm=frozenset(),
         balance=1.0,
-        priority_sum=2,
+        priority_sum=2.0,
     )
 
 
@@ -111,7 +111,7 @@ def sample_node_kratos() -> Node:
                 (ApplicationEndpoint("kratos", "pg-database"), "postgresql-k8s"),
             }
         ),
-        priority_sum=1,
+        priority_sum=1.0,
     )
 
 
@@ -127,7 +127,7 @@ def sample_node_kratos_self_signed_certificates() -> Node:
                 }
             ),
         ),
-        priority_sum=2,
+        priority_sum=2.0,
     )
 
 
@@ -168,7 +168,7 @@ class TestNode:
                 label="higher_priority_for_kratos",
                 node=dataclasses.replace(
                     sample_node_kratos_self_signed_certificates(),
-                    priority_sum=3,
+                    priority_sum=3.0,
                 ),
                 score=3.0,
             ),
@@ -360,9 +360,9 @@ class TestBundleBuilder:
                 base_bundle=sample_node_kratos().bundle,
                 expected_bundle=dataclasses.replace(
                     sample_node_postgresql_k8s_kratos().bundle,
-                    priority_sum=5,
+                    priority_sum=5.0,
                 ),
-                charm_priorities={"kratos": 4},
+                charm_priorities={"kratos": 4.0},
             ),
         ]
 
