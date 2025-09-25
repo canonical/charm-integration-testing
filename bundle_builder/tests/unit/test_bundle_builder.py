@@ -753,6 +753,7 @@ class TestBundleBuilder:
                         )
                     }
                 ),
+                priority=1.0,
             )
 
             # AND a charm that requires database
@@ -773,6 +774,7 @@ class TestBundleBuilder:
                         )
                     }
                 ),
+                priority=1.0,
             )
 
             requiring_charm2 = Charm(
@@ -792,6 +794,7 @@ class TestBundleBuilder:
                         )
                     }
                 ),
+                priority=1.0,
             )
 
             # AND a bundle with these applications
@@ -847,6 +850,7 @@ class TestBundleBuilder:
                         )
                     }
                 ),
+                priority=1.0
             )
 
             requiring_charm = Charm(
@@ -866,6 +870,7 @@ class TestBundleBuilder:
                         )
                     }
                 ),
+                priority=1.0,
             )
 
             # AND a bundle with one existing integration
@@ -921,6 +926,7 @@ class TestBundleBuilder:
                         )
                     }
                 ),
+                priority=1.0,
             )
 
             requiring_charm = Charm(
@@ -940,6 +946,7 @@ class TestBundleBuilder:
                         )
                     }
                 ),
+                priority=1.0,
             )
 
             # AND a bundle with existing integrations
@@ -996,6 +1003,7 @@ class TestBundleBuilder:
                         )
                     }
                 ),
+                priority=1.0,
             )
 
             requiring_charm = Charm(
@@ -1015,6 +1023,7 @@ class TestBundleBuilder:
                         )
                     }
                 ),
+                priority=1.0,
             )
 
             # AND a bundle where the limit is reached
@@ -1062,6 +1071,7 @@ class TestBundleBuilder:
                         )
                     }
                 ),
+                priority=1.0,
             )
 
             requiring_charm = Charm(
@@ -1081,6 +1091,7 @@ class TestBundleBuilder:
                         )
                     }
                 ),
+                priority=1.0,
             )
 
             # AND a bundle with one integration (under limit)
@@ -1123,6 +1134,7 @@ class TestDuplicateCharms:
             ubuntu_version="22.04",
             ubuntu_arch="amd64",
             endpoints=frozenset(),
+            priority=1.0,
         )
 
         # AND a bundle with one instance of the charm
@@ -1183,6 +1195,7 @@ class TestDuplicateCharms:
             ubuntu_version="22.04",
             ubuntu_arch="amd64",
             endpoints=frozenset(),
+            priority=1.0,
         )
 
         # AND a bundle with multiple instances of the charm
@@ -1219,6 +1232,7 @@ class TestDuplicateCharms:
             ubuntu_version="22.04",
             ubuntu_arch="amd64",
             endpoints=frozenset(),
+            priority=1.0,
         )
 
         # AND a bundle with two instances of the charm (at the limit)
@@ -1254,6 +1268,7 @@ class TestDuplicateCharms:
             ubuntu_version="22.04",
             ubuntu_arch="amd64",
             endpoints=frozenset(),
+            priority=1.0,
         )
 
         # AND a bundle with one instance of the charm
@@ -1284,6 +1299,7 @@ class TestDuplicateCharms:
             ubuntu_version="22.04",
             ubuntu_arch="amd64",
             endpoints=frozenset(),
+            priority=1.0,
         )
 
         # AND two bundles with the same charm but different application names
@@ -1339,6 +1355,7 @@ class TestDuplicateCharms:
                     )
                 }
             ),
+            priority=1.0,
         )
 
         app_charm = Charm(
@@ -1358,6 +1375,7 @@ class TestDuplicateCharms:
                     )
                 }
             ),
+            priority=1.0,
         )
 
         # AND a bundle with two database instances and two app instances
