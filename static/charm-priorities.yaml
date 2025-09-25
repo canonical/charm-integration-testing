@@ -1,4 +1,3 @@
 priorities:
   pgbouncer-k8s: 2.0
   mysql-router-k8s: 2.0
-  loki-k8s: 2000.0
