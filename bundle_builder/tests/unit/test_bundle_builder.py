@@ -151,7 +151,7 @@ class TestNode:
                     sample_node_kratos_self_signed_certificates(),
                     balance=1.0,
                 ),
-                score=2.0,
+                score=1.25,
             ),
             Params(
                 label="prioritize_equally",
@@ -159,7 +159,7 @@ class TestNode:
                     sample_node_kratos_self_signed_certificates(),
                     balance=0.5,
                 ),
-                score=1.5,
+                score=1.125,
             ),
         ]
 
