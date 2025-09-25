@@ -90,7 +90,6 @@ def sample_node_postgresql_k8s_kratos() -> Node:
         ),
         application_endpoint_to_possible_charm=frozenset(),
         balance=1.0,
-        priority_sum=2.0,
     )
 
 
@@ -111,7 +110,6 @@ def sample_node_kratos() -> Node:
                 (ApplicationEndpoint("kratos", "pg-database"), "postgresql-k8s"),
             }
         ),
-        priority_sum=1.0,
     )
 
 
@@ -127,7 +125,6 @@ def sample_node_kratos_self_signed_certificates() -> Node:
                 }
             ),
         ),
-        priority_sum=2.0,
     )
 
 
@@ -163,14 +160,6 @@ class TestNode:
                     balance=0.5,
                 ),
                 score=1.5,
-            ),
-            Params(
-                label="higher_priority_for_kratos",
-                node=dataclasses.replace(
-                    sample_node_kratos_self_signed_certificates(),
-                    priority_sum=3.0,
-                ),
-                score=3.0,
             ),
         ]
 
@@ -252,7 +241,6 @@ class TestBundleBuilder:
             base_bundle: Bundle
             expected_bundle: Bundle
             charmhub_client: CharmhubClientStub = Field(default_factory=CharmhubClientStub)
-            charm_priorities: dict[str, int] = Field(default_factory=dict)
 
         test_cases = [
             Params(
@@ -355,15 +343,6 @@ class TestBundleBuilder:
                     ),
                 ),
             ),
-            Params(
-                label="custom_priority_affects_node_score",
-                base_bundle=sample_node_kratos().bundle,
-                expected_bundle=dataclasses.replace(
-                    sample_node_postgresql_k8s_kratos().bundle,
-                    priority_sum=5.0,
-                ),
-                charm_priorities={"kratos": 4.0},
-            ),
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
@@ -373,7 +352,7 @@ class TestBundleBuilder:
 
             # WHEN the minimal bundle is build
             minimal_bundle = BundleBuilder(
-                charmhub_client=params.charmhub_client, charm_priorities=params.charm_priorities
+                charmhub_client=params.charmhub_client
             ).build(base_bundle)
 
             # THEN matches expected bundle

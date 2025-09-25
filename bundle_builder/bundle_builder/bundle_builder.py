@@ -30,7 +30,6 @@ class Node:
     bundle: Bundle
     application_endpoint_to_possible_charm: frozenset[tuple[ApplicationEndpoint, str]]
     balance: float
-    priority_sum: float
 
     @computed_property
     def fulfillable_interfaces(self) -> frozenset[str]:
@@ -45,7 +44,8 @@ class Node:
     def score(self) -> float:
         # balance changes the weight prioritizing number of applications over unfulfilled interfaces
         # it is expected to be between 0 and 1, where 1 prioritizes the smallest bundle
-        return self.balance * self.priority_sum + (1.0 - self.balance) * len(self.fulfillable_interfaces)
+        weight = sum(1.0/app.charm.priority for app in self.bundle.applications)
+        return self.balance * weight + (1.0 - self.balance) * len(self.fulfillable_interfaces)
 
     @computed_property
     def fingerprint(self) -> frozenset[str]:
@@ -69,12 +69,10 @@ class BundleBuilder:
     max_nodes_visited: int = 50000
     rebalance_interval: int = 1000
     max_same_charm_instances: int = 3  # Limit instances of the same charm to prevent cycles
-    charm_priorities: dict[str, int]
 
-    def __init__(self, charmhub_client: CharmhubClient, logger=logging.getLogger(__name__), charm_priorities={}):
+    def __init__(self, charmhub_client: CharmhubClient, logger=logging.getLogger(__name__)):
         self.charmhub_client = charmhub_client
         self.logger = logger
-        self.charm_priorities = charm_priorities
 
     # Build out the bundle, pulling in charms that fulfill non-optional hanging required integrations
     def build(self, base: Bundle) -> Bundle:
@@ -187,9 +185,6 @@ class BundleBuilder:
         existing_count = len(bundle.get_application_names_for_charm(charm_name))
         return existing_count >= self.max_same_charm_instances
 
-    def get_priority_sum(self, applications: frozenset[Application]) -> float:
-        return sum(self.charm_priorities.get(app.charm.name, 1.0) for app in applications)
-
     # Return a new node, including the possible child charms
     def new_node(self, bundle: Bundle, balance: float = 1.0) -> Node:
         # Ensure all possible integrations are fulfilled by the bundle
@@ -220,14 +215,11 @@ class BundleBuilder:
             # Save mappings
             application_endpoint_to_possible_charm |= {(application_endpoint, charm) for charm in filtered_charms}
 
-        priority_sum = self.get_priority_sum(bundle.applications)
-
         # Return node
         return Node(
             bundle=bundle,
             application_endpoint_to_possible_charm=frozenset(application_endpoint_to_possible_charm),
             balance=balance,
-            priority_sum=priority_sum,
         )
 
     # Each child node is the addition of an application to the bundle that fulfills a

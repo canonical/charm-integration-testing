@@ -82,6 +82,7 @@ class Charm:
     ubuntu_arch: str
     endpoints: frozenset[CharmEndpoint]
     test_configs: tuple[CharmConfig, ...] = Field(default_factory=tuple)
+    priority: float = 1.0
 
     def __repr__(self):
         return self.name
