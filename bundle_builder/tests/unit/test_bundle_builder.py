@@ -351,9 +351,7 @@ class TestBundleBuilder:
             base_bundle = params.base_bundle
 
             # WHEN the minimal bundle is build
-            minimal_bundle = BundleBuilder(
-                charmhub_client=params.charmhub_client
-            ).build(base_bundle)
+            minimal_bundle = BundleBuilder(charmhub_client=params.charmhub_client).build(base_bundle)
 
             # THEN matches expected bundle
             assert minimal_bundle == params.expected_bundle
@@ -850,7 +848,7 @@ class TestBundleBuilder:
                         )
                     }
                 ),
-                priority=1.0
+                priority=1.0,
             )
 
             requiring_charm = Charm(

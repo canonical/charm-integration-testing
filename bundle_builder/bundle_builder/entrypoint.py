@@ -17,8 +17,6 @@ import argparse
 import logging
 from pathlib import Path
 
-from yaml import safe_load
-
 from .bundle import Application, ApplicationEndpoint, Bundle, Integration
 from .bundle_builder import BundleBuilder
 from .charm import Charm
@@ -84,7 +82,9 @@ def add_args_to_parser(parser: argparse.ArgumentParser):
     parser.add_argument(
         "--log-level", type=str.upper, choices=["INFO", "DEBUG", "WARNING", "ERROR", "CRITICAL"], default="INFO"
     )
-    parser.add_argument("--charm-priorities-config", type=Path, help="Path to file containing charm priorities", default=None)
+    parser.add_argument(
+        "--charm-priorities-config", type=Path, help="Path to file containing charm priorities", default=None
+    )
 
 
 # Get charms from args
@@ -211,9 +211,7 @@ def main():
     )
 
     # Build the bundle
-    built_bundle = BundleBuilder(
-        charmhub_client=charmhub_client, logger=logger
-    ).build(base_bundle)
+    built_bundle = BundleBuilder(charmhub_client=charmhub_client, logger=logger).build(base_bundle)
     logger.info(f"Generated bundle: \n{'-' * 80}\n{built_bundle.export()}{'-' * 80}")
 
     # Export the bundle to file

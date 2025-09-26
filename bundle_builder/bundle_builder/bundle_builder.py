@@ -44,7 +44,7 @@ class Node:
     def score(self) -> float:
         # balance changes the weight prioritizing number of applications over unfulfilled interfaces
         # it is expected to be between 0 and 1, where 1 prioritizes the smallest bundle
-        weight = sum(1.0/app.charm.priority for app in self.bundle.applications)
+        weight = sum(1.0 / app.charm.priority for app in self.bundle.applications)
         return self.balance * weight + (1.0 - self.balance) * len(self.fulfillable_interfaces)
 
     @computed_property
