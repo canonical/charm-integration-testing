@@ -1,5 +1,3 @@
-.. _build:
-
 The bundle building algorithm
 =============================
 

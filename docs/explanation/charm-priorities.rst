@@ -1,5 +1,3 @@
-.. _build:
-
 Charm priorities in the bundle builder
 ======================================
 The bundle builder allows setting charm priorities from a YAML file based on the ``charm-priorities-config`` argument, where the YAML file looks similar to this:
