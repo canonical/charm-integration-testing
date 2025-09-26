@@ -93,14 +93,14 @@ def sample_node_postgresql_k8s_kratos() -> Node:
     )
 
 
-def sample_node_kratos() -> Node:
+def sample_node_kratos(charm_priority: float = 1.0) -> Node:
     return dataclasses.replace(
         sample_node_postgresql_k8s_kratos(),
         bundle=dataclasses.replace(
             sample_node_postgresql_k8s_kratos().bundle,
             applications=frozenset(
                 {
-                    Application("kratos", sample_charm_kratos()),
+                    Application("kratos", dataclasses.replace(sample_charm_kratos(), priority=charm_priority)),
                 }
             ),
             integrations=frozenset(),
@@ -230,6 +230,17 @@ class TestNode:
         result = node_lower_score < node
 
         # THEN lower score node is less
+        assert result
+
+    def test_bundle_with_higher_priority_has_lower_score(self):
+        # GIVEN two sample nodes with different priorities
+        node_with_higher_priority = sample_node_kratos(charm_priority=2.0)
+        node_with_lower_priority = sample_node_kratos(charm_priority=1.0)
+
+        # WHEN their scores are compared
+        result = node_with_higher_priority < node_with_lower_priority
+
+        # THEN the node with higher priority has the lower score
         assert result
 
 
