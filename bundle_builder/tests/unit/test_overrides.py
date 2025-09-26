@@ -296,11 +296,7 @@ class TestOverridesClient:
 
         test_cases = [
             Params(label="overrides_file_not_given", supply_file=False, expected_priorities={}),
-            Params(
-                label="overrides_are_empty", 
-                overrides={"priorities": {}}, 
-                expected_priorities={}
-            ),
+            Params(label="overrides_are_empty", overrides={"priorities": {}}, expected_priorities={}),
             Params(
                 label="overrides_are_provided",
                 overrides={"priorities": {"charm-a": 1.0, "charm-b": 0.5, "charm-c": 2.0}},
@@ -317,9 +313,7 @@ class TestOverridesClient:
                 with override_file.open("w") as file:
                     yaml.dump(params.overrides, file)
             # AND an OverridesClient constructed from it
-            overrides_client = OverridesClient(
-                charm_priorities_config=override_file if params.supply_file else None
-            )
+            overrides_client = OverridesClient(charm_priorities_config=override_file if params.supply_file else None)
 
             # WHEN the charm priorities mapping is retrieved
             actual = overrides_client.get_charm_priorities_mapping()
