@@ -2,6 +2,7 @@
 prioritized
 prioritization
 prioritize
+prioritizing
 fulfills
 fulfillable
 unfulfillable
@@ -12,6 +13,7 @@ BFS
 integrations
 pathfinding
 py
+yaml
 backend
 backends
 Charmcraft
