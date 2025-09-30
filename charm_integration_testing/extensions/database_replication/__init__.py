@@ -1,0 +1,3 @@
+from .extension import PostgresqlDatabaseReplicationExtension, PostgresqlK8sDatabaseReplicationExtension
+
+__all__ = ["PostgresqlDatabaseReplicationExtension", "PostgresqlK8sDatabaseReplicationExtension"]
