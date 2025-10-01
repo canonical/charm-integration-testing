@@ -94,6 +94,12 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def integration_exists(
+        self, application_1: str, endpoint_1: str, application_2: str, endpoint_2: str, model: str
+    ) -> bool:
+        raise NotImplementedError
+
+    @abstractmethod
     def wait_idle(self, model: str, timeout: timedelta | None, period: timedelta | None):
         raise NotImplementedError
 

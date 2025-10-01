@@ -10,7 +10,13 @@ from pathlib import Path
 from typing import Callable
 
 import pytest
-from extensions import S3IntegratorMinIOBackendExtension, UnsealVaultJujuExtension, UnsealVaultK8sJujuExtension
+from extensions import (
+    PostgresqlDatabaseReplicationExtension,
+    PostgresqlK8sDatabaseReplicationExtension,
+    S3IntegratorMinIOBackendExtension,
+    UnsealVaultJujuExtension,
+    UnsealVaultK8sJujuExtension,
+)
 from juju import JujuBackend, JujuClient, JujuWaitTimeoutError
 from juju_jubilant import JubilantBackend
 from pytest import CollectReport, StashKey
@@ -41,6 +47,8 @@ def juju_client(juju_backend: JujuBackend, logger: logging.Logger, minio_client_
             UnsealVaultJujuExtension(juju_backend, logger),
             UnsealVaultK8sJujuExtension(juju_backend, logger),
             S3IntegratorMinIOBackendExtension(juju_backend, logger, minio_client_file),
+            PostgresqlDatabaseReplicationExtension(juju_backend, logger),
+            PostgresqlK8sDatabaseReplicationExtension(juju_backend, logger),
         ],
     )
 

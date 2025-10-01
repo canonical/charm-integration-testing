@@ -17,6 +17,7 @@ from .wait import (
     applications_are_removed,
     applications_are_scaled,
     applications_have_no_units,
+    get_integrations,
     integrations_are_removed,
     units_have_message,
 )
@@ -158,3 +159,16 @@ class JubilantBackend(JujuCmdBackend):
 
     def get_charm_revisions(self, model: str) -> set[tuple[str, int]]:
         return {(app_info.charm, app_info.charm_rev) for app_info in self.client.model(model).status().apps.values()}
+
+    def integration_exists(
+        self, application_1: str, endpoint_1: str, application_2: str, endpoint_2: str, model: str
+    ) -> bool:
+        status = self.client.model(model).status()
+        integrations = get_integrations(status)
+
+        target_applications = {
+            JujuIntegrationApplication(application_1, endpoint_1),
+            JujuIntegrationApplication(application_2, endpoint_2),
+        }
+
+        return target_applications in {integration.applications for integration in integrations}
