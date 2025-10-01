@@ -6,8 +6,16 @@ import logging
 from datetime import timedelta
 
 from juju import JujuBackend
+from pydantic.dataclasses import dataclass
 
 from .database_client import DatabaseClient
+
+
+@dataclass
+class CharmInfo:
+    name: str
+    offer_endpoint: str
+    consumer_endpoint: str
 
 
 class DatabaseReplicator:
@@ -15,10 +23,12 @@ class DatabaseReplicator:
     logger: logging.Logger
     database_client: DatabaseClient
 
-    def __init__(self, charm_name: str, juju: JujuBackend, logger: logging.Logger, database_client: DatabaseClient):
+    def __init__(
+        self, charm_info: CharmInfo, juju: JujuBackend, logger: logging.Logger, database_client: DatabaseClient
+    ):
         self.juju = juju
         self.logger = logger
-        self.charm_name = charm_name
+        self.charm_info = charm_info
         self.database_client = database_client
 
     def try_replicate_all_database_clusters(self, model: str):
@@ -26,7 +36,7 @@ class DatabaseReplicator:
         database_applications = set()
 
         for application in self.juju.list_applications(model):
-            if self.juju.application_charm(model, application) == self.charm_name:
+            if self.juju.application_charm(model, application) == self.charm_info.name:
                 database_applications.add(application)
 
         if len(database_applications) < 2:
@@ -37,7 +47,11 @@ class DatabaseReplicator:
             for application2 in database_applications:
                 if application1 != application2:
                     if self.juju.integration_exists(
-                        application1, "logical-replication-offer", application2, "logical-replication", model
+                        application1,
+                        self.charm_info.offer_endpoint,
+                        application2,
+                        self.charm_info.consumer_endpoint,
+                        model,
                     ):
                         self.logger.info(f"Found replication integration between {application1} and {application2}.")
                         self.try_replicate_database_cluster(
@@ -47,13 +61,13 @@ class DatabaseReplicator:
     def try_replicate_database_cluster(self, model: str, application_offer: str, application_consumer: str):
         # Wait for application to be scaled
         self.logger.info(
-            f"Waiting for database charm '{self.charm_name}' application '{application_offer}' to be scaled"
+            f"Waiting for database charm '{self.charm_info.name}' application '{application_offer}' to be scaled"
         )
         self.juju.wait_application_scaled(model, application_offer, timedelta(minutes=10))
 
         # Wait for units to settle
         self.logger.info(
-            f"Waiting for database charm '{self.charm_name}' application '{application_offer}' units to be settled"
+            f"Waiting for database charm '{self.charm_info.name}' application '{application_offer}' units to be settled"
         )
         self.juju.wait_application_settled(model, application_offer, timedelta(minutes=10))
 
@@ -64,12 +78,12 @@ class DatabaseReplicator:
 
         # Wait for consumer application to be scaled and settled
         self.logger.info(
-            f"Waiting for database charm '{self.charm_name}' application '{application_consumer}' to be scaled"
+            f"Waiting for database charm '{self.charm_info.name}' application '{application_consumer}' to be scaled"
         )
         self.juju.wait_application_scaled(model, application_consumer, timedelta(minutes=10))
 
         self.logger.info(
-            f"Waiting for database charm '{self.charm_name}' application '{application_consumer}' units to be settled"
+            f"Waiting for database charm '{self.charm_info.name}' application '{application_consumer}' units to be settled"
         )
         self.juju.wait_application_settled(model, application_consumer, timedelta(minutes=10))
 
@@ -79,7 +93,7 @@ class DatabaseReplicator:
             return
 
         self.logger.info(
-            "Running database replication extension for consumer application {application_consumer} and offer application {application_offer}."
+            f"Running database replication extension for consumer application {application_consumer} and offer application {application_offer}."
         )
         # Find common databases between offer and consumer
         common_databases = self.find_common_databases(model, application_offer, application_consumer)

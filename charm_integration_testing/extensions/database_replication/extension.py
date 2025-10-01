@@ -7,7 +7,7 @@ from abc import ABC
 from juju import JujuBackend, JujuExtension
 
 from .database_client import PostgresqlDatabaseClient
-from .database_replicator import DatabaseReplicator
+from .database_replicator import CharmInfo, DatabaseReplicator
 
 
 class GenericDatabaseReplicationExtension(JujuExtension, ABC):
@@ -23,10 +23,32 @@ class GenericDatabaseReplicationExtension(JujuExtension, ABC):
 class PostgresqlK8sDatabaseReplicationExtension(GenericDatabaseReplicationExtension):
     def __init__(self, juju: JujuBackend, logger: logging.Logger):
         database_client = PostgresqlDatabaseClient(juju, logger)
-        super().__init__(DatabaseReplicator("postgresql-k8s", juju, logger, database_client))
+        super().__init__(
+            DatabaseReplicator(
+                CharmInfo(
+                    name="postgresql-k8s",
+                    offer_endpoint="logical-replication-offer",
+                    consumer_endpoint="logical-replication",
+                ),
+                juju,
+                logger,
+                database_client,
+            )
+        )
 
 
 class PostgresqlDatabaseReplicationExtension(GenericDatabaseReplicationExtension):
     def __init__(self, juju: JujuBackend, logger: logging.Logger):
         database_client = PostgresqlDatabaseClient(juju, logger)
-        super().__init__(DatabaseReplicator("postgresql", juju, logger, database_client))
+        super().__init__(
+            DatabaseReplicator(
+                CharmInfo(
+                    name="postgresql",
+                    offer_endpoint="logical-replication-offer",
+                    consumer_endpoint="logical-replication",
+                ),
+                juju,
+                logger,
+                database_client,
+            )
+        )

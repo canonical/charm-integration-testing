@@ -145,10 +145,6 @@ class JujuClient:
     def get_charm_revisions(self, model: str = "default") -> set[tuple[str, int]]:
         return self.backend.get_charm_revisions(model)
 
-    def run_action(self, unit: str, action: str, arguments: dict, model: str = "default"):
-        self.logger.info(f"Running action '{action}' on unit '{unit}' with arguments: {arguments}")
-        return self.backend.run_action(model, unit, action, arguments)
-
     def configure_application(self, application: str, values: dict[str, str], model: str = "default"):
         self.logger.info(f"Configuring application '{application}' with values: {values}")
         self.backend.configure_application(model, application, values)

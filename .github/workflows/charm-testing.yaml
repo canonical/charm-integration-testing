@@ -215,7 +215,7 @@ jobs:
           ./scripts/build-bundle.sh \
             --charms \
               "target::${charm_under_test}::${revision}::${series}" \
-              "neighbor::${neighbor}::${revision}::default" \
+              "neighbor::${neighbor}::default::default" \
             --integrations "target:${charm_endpoint}::neighbor:${neighbor_endpoint}" \
             --substrate "${substrate}" \
             --output-file generated-bundle.yaml

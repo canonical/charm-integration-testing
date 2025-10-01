@@ -2,6 +2,7 @@
 # See LICENSE file for licensing details.
 
 import logging
+import shlex
 from abc import ABC, abstractmethod
 
 from juju import JujuBackend
@@ -93,8 +94,8 @@ class PostgresqlDatabaseClient(DatabaseClient):
         unit = units[0]
 
         # Query for tables in the database, excluding system schemas
-        # Database name comes from querying PostgreSQL, not user input
-        command = f"""PGPASSWORD=$(cat /var/lib/postgresql/data/pgpass | head -n1 | cut -d: -f5) psql -h localhost -U operator -d {database} -t -c "SELECT schemaname || '.' || tablename FROM pg_tables WHERE schemaname NOT IN ('pg_catalog', 'information_schema');" """  # nosec B608
+        # Database name is properly escaped with shlex.quote() to prevent command injection
+        command = f"""PGPASSWORD=$(cat /var/lib/postgresql/data/pgpass | head -n1 | cut -d: -f5) psql -h localhost -U operator -d {shlex.quote(database)} -t -c "SELECT schemaname || '.' || tablename FROM pg_tables WHERE schemaname NOT IN ('pg_catalog', 'information_schema');" """  # nosec B608
 
         result = self.juju.exec_unit(model, unit, command)
 

@@ -7,6 +7,7 @@ from datetime import timedelta
 
 import pytest
 from extensions.database_replication.database_client import DatabaseClient
+from extensions.database_replication.database_replicator import CharmInfo
 
 
 @dataclass
@@ -85,7 +86,10 @@ class TestPostgreSQLDatabaseReplicationExtension:
         """Provide a PostgresqlDatabaseReplicationExtension instance with stubbed client"""
         from extensions.database_replication.database_replicator import DatabaseReplicator
 
-        replicator = DatabaseReplicator("postgresql", juju, logging.getLogger("test"), database_client)
+        charm_info = CharmInfo(
+            name="postgresql", offer_endpoint="logical-replication-offer", consumer_endpoint="logical-replication"
+        )
+        replicator = DatabaseReplicator(charm_info, juju, logging.getLogger("test"), database_client)
         from extensions.database_replication.extension import GenericDatabaseReplicationExtension
 
         ext = GenericDatabaseReplicationExtension(replicator)
@@ -98,7 +102,10 @@ class TestPostgreSQLDatabaseReplicationExtension:
             from extensions.database_replication.database_replicator import DatabaseReplicator
             from extensions.database_replication.extension import GenericDatabaseReplicationExtension
 
-            replicator = DatabaseReplicator("postgresql", juju, logging.getLogger("test"), database_client)
+            charm_info = CharmInfo(
+                name="postgresql", offer_endpoint="logical-replication-offer", consumer_endpoint="logical-replication"
+            )
+            replicator = DatabaseReplicator(charm_info, juju, logging.getLogger("test"), database_client)
             extension = GenericDatabaseReplicationExtension(replicator)
 
             # WHEN post_deploy is called
@@ -114,7 +121,10 @@ class TestPostgreSQLDatabaseReplicationExtension:
             from extensions.database_replication.database_replicator import DatabaseReplicator
             from extensions.database_replication.extension import GenericDatabaseReplicationExtension
 
-            replicator = DatabaseReplicator("postgresql", juju, logging.getLogger("test"), database_client)
+            charm_info = CharmInfo(
+                name="postgresql", offer_endpoint="logical-replication-offer", consumer_endpoint="logical-replication"
+            )
+            replicator = DatabaseReplicator(charm_info, juju, logging.getLogger("test"), database_client)
             extension = GenericDatabaseReplicationExtension(replicator)
 
             # WHEN post_deploy is called
