@@ -39,6 +39,7 @@ class DatabaseReplicator:
                     if self.juju.integration_exists(
                         application1, "logical-replication-offer", application2, "logical-replication", model
                     ):
+                        self.logger.info(f"Found replication integration between {application1} and {application2}.")
                         self.try_replicate_database_cluster(
                             model=model, application_offer=application1, application_consumer=application2
                         )
@@ -58,6 +59,7 @@ class DatabaseReplicator:
 
         # Skip if no units
         if self.juju.num_units(model, application_offer) == 0:
+            self.logger.info(f"Skipping replication config as no units for {application_offer} were found.")
             return
 
         # Wait for consumer application to be scaled and settled
@@ -73,8 +75,12 @@ class DatabaseReplicator:
 
         # Skip if consumer has no units
         if self.juju.num_units(model, application_consumer) == 0:
+            self.logger.info(f"Skipping replication config as no units for {application_consumer} were found.")
             return
 
+        self.logger.info(
+            "Running database replication extension for consumer application {application_consumer} and offer application {application_offer}."
+        )
         # Find common databases between offer and consumer
         common_databases = self.find_common_databases(model, application_offer, application_consumer)
 
