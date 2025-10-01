@@ -112,14 +112,6 @@ class JujuCmdBackend(JujuBackend):
             and application_2 == integration_1.integrated_application
         }
 
-    def integration_exists(
-        self, application_1: str, endpoint_1: str, application_2: str, endpoint_2: str, model: str
-    ) -> bool:
-        return {
-            JujuIntegrationApplication(application_1, endpoint_1),
-            JujuIntegrationApplication(application_2, endpoint_2),
-        } in {integration.applications for integration in self.list_integrations(model)}
-
     def _wait_for(self, model: str, scope: str, specifier: str, query: str, timeout: timedelta | None):
         try:
             self._call_juju(
