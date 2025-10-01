@@ -47,6 +47,7 @@ class TestEndpointLimits:
                         )
                     }
                 ),
+                priority=1.0,
             )
 
             requiring_charm = Charm(
@@ -66,6 +67,7 @@ class TestEndpointLimits:
                         )
                     }
                 ),
+                priority=1.0,
             )
 
             bundle = Bundle(
@@ -110,6 +112,7 @@ class TestEndpointLimits:
                         )
                     }
                 ),
+                priority=1.0,
             )
 
             charm2 = Charm(
@@ -129,6 +132,7 @@ class TestEndpointLimits:
                         )
                     }
                 ),
+                priority=1.0,
             )
 
             # AND bundle with both at their limits
@@ -190,6 +194,7 @@ class TestEndpointLimits:
                         )
                     }
                 ),
+                priority=1.0,
             )
 
             # AND indico that needs database and juju-info connection
@@ -217,6 +222,7 @@ class TestEndpointLimits:
                         ),
                     }
                 ),
+                priority=1.0,
             )
 
             # AND some-dependency-k8s that provides juju-info but also needs its own database
@@ -244,6 +250,7 @@ class TestEndpointLimits:
                         ),
                     }
                 ),
+                priority=1.0,
             )
 
             # AND a base bundle with postgresql connected to indico
@@ -356,6 +363,7 @@ class TestEndpointLimits:
                         ),
                     }
                 ),
+                priority=1.0,
             )
 
             # AND an app that needs tracing
@@ -376,6 +384,7 @@ class TestEndpointLimits:
                         ),
                     }
                 ),
+                priority=1.0,
             )
 
             # AND a base bundle

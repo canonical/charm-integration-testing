@@ -93,14 +93,14 @@ def sample_node_postgresql_k8s_kratos() -> Node:
     )
 
 
-def sample_node_kratos() -> Node:
+def sample_node_kratos(charm_priority: float = 1.0) -> Node:
     return dataclasses.replace(
         sample_node_postgresql_k8s_kratos(),
         bundle=dataclasses.replace(
             sample_node_postgresql_k8s_kratos().bundle,
             applications=frozenset(
                 {
-                    Application("kratos", sample_charm_kratos()),
+                    Application("kratos", dataclasses.replace(sample_charm_kratos(), priority=charm_priority)),
                 }
             ),
             integrations=frozenset(),
@@ -151,7 +151,7 @@ class TestNode:
                     sample_node_kratos_self_signed_certificates(),
                     balance=1.0,
                 ),
-                score=2.0,
+                score=1.25,
             ),
             Params(
                 label="prioritize_equally",
@@ -159,7 +159,7 @@ class TestNode:
                     sample_node_kratos_self_signed_certificates(),
                     balance=0.5,
                 ),
-                score=1.5,
+                score=1.125,
             ),
         ]
 
@@ -230,6 +230,17 @@ class TestNode:
         result = node_lower_score < node
 
         # THEN lower score node is less
+        assert result
+
+    def test_bundle_with_higher_priority_has_lower_score(self):
+        # GIVEN two sample nodes with different priorities
+        node_with_higher_priority = sample_node_kratos(charm_priority=2.0)
+        node_with_lower_priority = sample_node_kratos(charm_priority=1.0)
+
+        # WHEN their scores are compared
+        result = node_with_higher_priority < node_with_lower_priority
+
+        # THEN the node with higher priority has the lower score
         assert result
 
 
@@ -751,6 +762,7 @@ class TestBundleBuilder:
                         )
                     }
                 ),
+                priority=1.0,
             )
 
             # AND a charm that requires database
@@ -771,6 +783,7 @@ class TestBundleBuilder:
                         )
                     }
                 ),
+                priority=1.0,
             )
 
             requiring_charm2 = Charm(
@@ -790,6 +803,7 @@ class TestBundleBuilder:
                         )
                     }
                 ),
+                priority=1.0,
             )
 
             # AND a bundle with these applications
@@ -845,6 +859,7 @@ class TestBundleBuilder:
                         )
                     }
                 ),
+                priority=1.0,
             )
 
             requiring_charm = Charm(
@@ -864,6 +879,7 @@ class TestBundleBuilder:
                         )
                     }
                 ),
+                priority=1.0,
             )
 
             # AND a bundle with one existing integration
@@ -919,6 +935,7 @@ class TestBundleBuilder:
                         )
                     }
                 ),
+                priority=1.0,
             )
 
             requiring_charm = Charm(
@@ -938,6 +955,7 @@ class TestBundleBuilder:
                         )
                     }
                 ),
+                priority=1.0,
             )
 
             # AND a bundle with existing integrations
@@ -994,6 +1012,7 @@ class TestBundleBuilder:
                         )
                     }
                 ),
+                priority=1.0,
             )
 
             requiring_charm = Charm(
@@ -1013,6 +1032,7 @@ class TestBundleBuilder:
                         )
                     }
                 ),
+                priority=1.0,
             )
 
             # AND a bundle where the limit is reached
@@ -1060,6 +1080,7 @@ class TestBundleBuilder:
                         )
                     }
                 ),
+                priority=1.0,
             )
 
             requiring_charm = Charm(
@@ -1079,6 +1100,7 @@ class TestBundleBuilder:
                         )
                     }
                 ),
+                priority=1.0,
             )
 
             # AND a bundle with one integration (under limit)
@@ -1121,6 +1143,7 @@ class TestDuplicateCharms:
             ubuntu_version="22.04",
             ubuntu_arch="amd64",
             endpoints=frozenset(),
+            priority=1.0,
         )
 
         # AND a bundle with one instance of the charm
@@ -1181,6 +1204,7 @@ class TestDuplicateCharms:
             ubuntu_version="22.04",
             ubuntu_arch="amd64",
             endpoints=frozenset(),
+            priority=1.0,
         )
 
         # AND a bundle with multiple instances of the charm
@@ -1217,6 +1241,7 @@ class TestDuplicateCharms:
             ubuntu_version="22.04",
             ubuntu_arch="amd64",
             endpoints=frozenset(),
+            priority=1.0,
         )
 
         # AND a bundle with two instances of the charm (at the limit)
@@ -1252,6 +1277,7 @@ class TestDuplicateCharms:
             ubuntu_version="22.04",
             ubuntu_arch="amd64",
             endpoints=frozenset(),
+            priority=1.0,
         )
 
         # AND a bundle with one instance of the charm
@@ -1282,6 +1308,7 @@ class TestDuplicateCharms:
             ubuntu_version="22.04",
             ubuntu_arch="amd64",
             endpoints=frozenset(),
+            priority=1.0,
         )
 
         # AND two bundles with the same charm but different application names
@@ -1337,6 +1364,7 @@ class TestDuplicateCharms:
                     )
                 }
             ),
+            priority=1.0,
         )
 
         app_charm = Charm(
@@ -1356,6 +1384,7 @@ class TestDuplicateCharms:
                     )
                 }
             ),
+            priority=1.0,
         )
 
         # AND a bundle with two database instances and two app instances

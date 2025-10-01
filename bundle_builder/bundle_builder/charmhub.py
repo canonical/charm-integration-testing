@@ -225,6 +225,7 @@ class CharmhubClient:
             ubuntu_arch=ubuntu_arch,
             endpoints=self._all_charm_endpoints(refresh_info),
             test_configs=self._charm_test_configs(charm_name),
+            priority=self._get_charm_priority(charm_name),
         )
 
     def _charm_from_store_by_channel(
@@ -263,6 +264,7 @@ class CharmhubClient:
             ubuntu_arch=ubuntu_arch,
             endpoints=self._all_charm_endpoints(refresh_info),
             test_configs=self._charm_test_configs(charm_name),
+            priority=self._get_charm_priority(charm_name),
         )
 
     def _charm_from_store_default(
@@ -293,6 +295,7 @@ class CharmhubClient:
             ubuntu_arch=ubuntu_arch,
             endpoints=self._all_charm_endpoints(refresh_info),
             test_configs=self._charm_test_configs(charm_name),
+            priority=self._get_charm_priority(charm_name),
         )
 
     def _default_ubuntu_version(self, charm_name: str, ubuntu_arch: str, charm_channel: str | None = None) -> str:
@@ -431,3 +434,6 @@ class CharmhubClient:
 
         # Return configs as hashable tuples
         return tuple(tuple((key, value) for key, value in config.items()) for config in test_configs)
+
+    def _get_charm_priority(self, charm_name: str) -> float:
+        return self.overrides_client.get_charm_priorities_mapping().get(charm_name, 1.0)

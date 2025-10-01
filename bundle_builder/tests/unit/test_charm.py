@@ -54,6 +54,7 @@ def sample_charm_postgresql_k8s() -> Charm:
                 sample_charm_endpoint_postgresql_k8s_database(),
             }
         ),
+        priority=2.0,
     )
 
 
@@ -79,6 +80,7 @@ def sample_charm_kratos() -> Charm:
                 sample_charm_endpoint_kratos_pg_database(),
             }
         ),
+        priority=1.0,
     )
 
 
@@ -104,6 +106,7 @@ def sample_charm_self_signed_certificates() -> Charm:
                 sample_charm_endpoint_self_signed_certificates_certificates(),
             }
         ),
+        priority=4.0,
     )
 
 

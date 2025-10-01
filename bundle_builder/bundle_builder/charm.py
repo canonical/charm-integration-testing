@@ -81,6 +81,7 @@ class Charm:
     ubuntu_version: str
     ubuntu_arch: str
     endpoints: frozenset[CharmEndpoint]
+    priority: float  # greater priority values mean a node with this charm is prioritized
     test_configs: tuple[CharmConfig, ...] = Field(default_factory=tuple)
 
     def __repr__(self):

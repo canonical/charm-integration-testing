@@ -285,3 +285,38 @@ class TestOverridesClient:
 
             # THEN
             assert actual == params.expected
+
+    class TestGetCharmPrioritiesMapping:
+        @dataclass
+        class Params:
+            label: str
+            overrides: dict = Field(default_factory=dict)
+            expected_priorities: dict[str, float] = Field(default_factory=dict)
+            supply_file: bool = True
+
+        test_cases = [
+            Params(label="overrides_file_not_given", supply_file=False, expected_priorities={}),
+            Params(label="overrides_are_empty", overrides={"priorities": {}}, expected_priorities={}),
+            Params(
+                label="overrides_are_provided",
+                overrides={"priorities": {"charm-a": 1.0, "charm-b": 0.5, "charm-c": 2.0}},
+                expected_priorities={"charm-a": 1.0, "charm-b": 0.5, "charm-c": 2.0},
+            ),
+        ]
+
+        @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
+        def test(self, params: Params, tmp_path: Path):
+            # GIVEN a yaml file
+            override_file = tmp_path / "priorities.yaml"
+            # AND its content according to params.overrides
+            if params.supply_file:
+                with override_file.open("w") as file:
+                    yaml.dump(params.overrides, file)
+            # AND an OverridesClient constructed from it
+            overrides_client = OverridesClient(charm_priorities_config=override_file if params.supply_file else None)
+
+            # WHEN the charm priorities mapping is retrieved
+            actual = overrides_client.get_charm_priorities_mapping()
+
+            # THEN the resulting priorities are as defined in the file
+            assert actual == params.expected_priorities

@@ -10,6 +10,7 @@ The charm integration testing documentation helps you set up, run and debug test
    Tutorials </tutorial/index>
    How-to guides </how-to/index>
    Reference </reference/index>
+   Explanation </explanation/index>
 
 In this documentation
 ---------------------
@@ -35,3 +36,9 @@ In this documentation
       :link-type: doc
 
       **Technical information** - understand the structure of automatic tests.
+
+   .. grid-item-card:: Explanation
+      :link: /explanation/index
+      :link-type: doc
+
+      **Discussion and clarification** - concepts and workflows.
