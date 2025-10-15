@@ -20,7 +20,7 @@ import yaml
 from pydantic.dataclasses import dataclass
 
 from bundle_builder.bundle import Application, ApplicationEndpoint, Bundle, Integration
-from bundle_builder.charm import ENDPOINT_PROVIDES, ENDPOINT_REQUIRES
+from bundle_builder.charm import ENDPOINT_PROVIDES, ENDPOINT_REQUIRES, Charm, CharmEndpoint, CharmEndpointOptionality
 from bundle_builder.charmhub import CharmhubClient
 from bundle_builder.charmhub_http import CharmhubBase
 from bundle_builder.overrides import CharmEndpointOverride, CharmMetadataOverride, OverridesClient
@@ -329,6 +329,142 @@ class TestBundle:
 
             # THEN unfulfilled endpoints match
             assert unfulfilled_endpoints == params.unfulfilled_endpoints
+
+        def test_unfulfilled_endpoints_considers_limits(self):
+            # GIVEN a charm with limit 1
+            limited_charm = Charm(
+                name="limited-charm",
+                channel="stable",
+                revision=1,
+                ubuntu_version="22.04",
+                ubuntu_arch="amd64",
+                endpoints=frozenset(
+                    {
+                        CharmEndpoint(
+                            type=ENDPOINT_PROVIDES,
+                            name="database",
+                            interface="postgresql",
+                            optionality=CharmEndpointOptionality.from_bool(False),
+                            limit=1,
+                        )
+                    }
+                ),
+                priority=1.0,
+            )
+
+            requiring_charm = Charm(
+                name="app",
+                channel="stable",
+                revision=1,
+                ubuntu_version="22.04",
+                ubuntu_arch="amd64",
+                endpoints=frozenset(
+                    {
+                        CharmEndpoint(
+                            type=ENDPOINT_REQUIRES,
+                            name="database",
+                            interface="postgresql",
+                            optionality=CharmEndpointOptionality.from_bool(False),
+                            limit=None,
+                        )
+                    }
+                ),
+                priority=1.0,
+            )
+
+            # AND a bundle where the limit is reached
+            bundle = Bundle(
+                applications=frozenset(
+                    {Application(name="db", charm=limited_charm), Application(name="app", charm=requiring_charm)}
+                ),
+                integrations=frozenset(
+                    {
+                        Integration(
+                            {
+                                ApplicationEndpoint(application="db", endpoint="database"),
+                                ApplicationEndpoint(application="app", endpoint="database"),
+                            }
+                        )
+                    }
+                ),
+                platform="machine",
+                arch="amd64",
+            )
+
+            # WHEN getting unfulfilled endpoints
+            unfulfilled = bundle.unfulfilled_endpoints
+
+            # THEN the limited endpoint should not be unfulfilled (limit reached)
+            db_endpoint = ApplicationEndpoint(application="db", endpoint="database")
+            assert db_endpoint not in unfulfilled
+
+        def test_unfulfilled_endpoints_includes_under_limit(self):
+            # GIVEN a charm with limit 2
+            limited_charm = Charm(
+                name="limited-charm",
+                channel="stable",
+                revision=1,
+                ubuntu_version="22.04",
+                ubuntu_arch="amd64",
+                endpoints=frozenset(
+                    {
+                        CharmEndpoint(
+                            type=ENDPOINT_PROVIDES,
+                            name="database",
+                            interface="postgresql",
+                            optionality=CharmEndpointOptionality.from_bool(False),
+                            limit=2,
+                        )
+                    }
+                ),
+                priority=1.0,
+            )
+
+            requiring_charm = Charm(
+                name="app",
+                channel="stable",
+                revision=1,
+                ubuntu_version="22.04",
+                ubuntu_arch="amd64",
+                endpoints=frozenset(
+                    {
+                        CharmEndpoint(
+                            type=ENDPOINT_REQUIRES,
+                            name="database",
+                            interface="postgresql",
+                            optionality=CharmEndpointOptionality.from_bool(False),
+                            limit=None,
+                        )
+                    }
+                ),
+                priority=1.0,
+            )
+
+            # AND a bundle with one integration (under limit)
+            bundle = Bundle(
+                applications=frozenset(
+                    {Application(name="db", charm=limited_charm), Application(name="app", charm=requiring_charm)}
+                ),
+                integrations=frozenset(
+                    {
+                        Integration(
+                            {
+                                ApplicationEndpoint(application="db", endpoint="database"),
+                                ApplicationEndpoint(application="app", endpoint="database"),
+                            }
+                        )
+                    }
+                ),
+                platform="machine",
+                arch="amd64",
+            )
+
+            # WHEN getting unfulfilled endpoints
+            unfulfilled = bundle.unfulfilled_endpoints
+
+            # THEN the limited endpoint should be fulfilled (already has one connection)
+            db_endpoint = ApplicationEndpoint(application="db", endpoint="database")
+            assert db_endpoint not in unfulfilled
 
     class TestDependencyGraph:
         @dataclass
