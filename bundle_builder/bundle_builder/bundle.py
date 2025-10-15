@@ -124,8 +124,7 @@ class Bundle:
     @immutable_dataclass
     class EndpointDependency:
         application: str
-        charm: str
-        endpoint: str
+        dependent_endpoint: str
 
     @dataclass
     class EndpointDependencies:
@@ -138,23 +137,21 @@ class Bundle:
         graph = {app.name: Bundle.EndpointDependencies() for app in self.applications}
         for integration in self.integrations:
             ep1, ep2 = list(integration)
-            charm_1 = self.application_lookup[ep1.application].charm
-            charm_2 = self.application_lookup[ep2.application].charm
             charm_ep1 = self.application_endpoints[ep1]
             charm_ep2 = self.application_endpoints[ep2]
             if charm_ep1.type == ENDPOINT_REQUIRES and charm_ep2.type == ENDPOINT_PROVIDES:
                 graph[ep1.application].requires.add(
-                    Bundle.EndpointDependency(application=ep2.application, charm=charm_1.name, endpoint=charm_ep1.name)
+                    Bundle.EndpointDependency(application=ep2.application, dependent_endpoint=charm_ep1.name)
                 )
                 graph[ep2.application].provides.add(
-                    Bundle.EndpointDependency(application=ep1.application, charm=charm_2.name, endpoint=charm_ep2.name)
+                    Bundle.EndpointDependency(application=ep1.application, dependent_endpoint=charm_ep2.name)
                 )
             elif charm_ep1.type == ENDPOINT_PROVIDES and charm_ep2.type == ENDPOINT_REQUIRES:
                 graph[ep2.application].requires.add(
-                    Bundle.EndpointDependency(application=ep1.application, charm=charm_2.name, endpoint=charm_ep2.name)
+                    Bundle.EndpointDependency(application=ep1.application, dependent_endpoint=charm_ep2.name)
                 )
                 graph[ep1.application].provides.add(
-                    Bundle.EndpointDependency(application=ep2.application, charm=charm_1.name, endpoint=charm_ep1.name)
+                    Bundle.EndpointDependency(application=ep2.application, dependent_endpoint=charm_ep1.name)
                 )
         return graph
 
@@ -189,7 +186,10 @@ class Bundle:
             else:
                 dependencies = self.dependency_graph[current_app].requires
             for dependency in dependencies:
-                if dependency.charm == charm_name and dependency.endpoint == charm_endpoint:
+                if (
+                    self.application_lookup[current_app].charm.name == charm_name
+                    and dependency.dependent_endpoint == charm_endpoint
+                ):
                     return True
                 stack.append(dependency.application)
         return False

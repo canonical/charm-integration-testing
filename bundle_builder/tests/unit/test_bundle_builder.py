@@ -141,12 +141,6 @@ class TestNode:
         )
         assert node2.score < score
 
-    def test_score_aggression_increases_integration_weight(self):
-        node = sample_node_kratos_self_signed_certificates()
-        node_high_aggr = dataclasses.replace(node, aggression=1.0)
-        node_low_aggr = dataclasses.replace(node, aggression=0.0)
-        assert node_high_aggr.score < node_low_aggr.score or node_high_aggr.score == node_low_aggr.score
-
     def test_fingerprint_is_bundle_integrations(self):
         node = sample_node_kratos_self_signed_certificates()
         assert node.fingerprint == node.bundle.integrations

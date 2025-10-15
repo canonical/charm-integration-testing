@@ -35,11 +35,11 @@ class Node:
         # Prioritize fewer applications, accounting for charm priorities
         weight_applications = sum(1.0 / app.charm.priority for app in self.bundle.applications)
         # Prioritize fewer unfulfilled endpoints
-        weight_unfulfilled_endpoints = len(self.bundle.unfulfilled_endpoints)
+        weight_unfulfilled_endpoints = self.aggression * len(self.bundle.unfulfilled_endpoints)
         # Prioritize more integrations, scaled by aggression
         # As aggression increases (expected to be between 0 and 1) the weight of integrations increases
         # This forces the algorithm to explore deeper (DFS) rather than wider (BFS) into the graph in order to find a solution sooner as aggression is increased
-        weight_integrations = self.aggression * len(self.bundle.integrations) / 2 * -1
+        weight_integrations = self.aggression * len(self.bundle.integrations) * -1
         # Sum the weights to get the final score
         return weight_applications + weight_unfulfilled_endpoints + weight_integrations
 
@@ -68,7 +68,7 @@ class BundleBuilder:
         charmhub_client: CharmhubClient,
         logger: logging.Logger = logging.getLogger(__name__),
         max_nodes_visited: int | None = None,
-        aggression_limit: int = 50000,
+        aggression_limit: int = 200000,
         aggression_interval: int = 5000,
         avoid_application_dependency_cycles: bool = False,
     ):
