@@ -16,8 +16,9 @@
 
 import yaml
 from pydantic import Field
+from pydantic.dataclasses import dataclass
 
-from .charm import Charm, CharmConfig, CharmEndpoint
+from .charm import ENDPOINT_PROVIDES, ENDPOINT_REQUIRES, Charm, CharmConfig, CharmEndpoint
 from .immutable_dataclass import computed_property, immutable_dataclass
 
 
@@ -55,6 +56,10 @@ class Bundle:
     integrations: frozenset[Integration]
     platform: str
     arch: str
+
+    @computed_property
+    def application_lookup(self) -> dict[str, Application]:
+        return {application.name: application for application in self.applications}
 
     @computed_property
     def application_endpoints(self) -> dict[ApplicationEndpoint, CharmEndpoint]:
@@ -101,6 +106,7 @@ class Bundle:
         # Collect all fulfilled application endpoints
         fulfilled_endpoints = {endpoint for integration in self.integrations for endpoint in integration}
 
+        # Collect all non-optional endpoints
         non_optional_endpoints = {
             ApplicationEndpoint(application=application.name, endpoint=endpoint.name)
             for application in self.applications
@@ -109,24 +115,90 @@ class Bundle:
                 {endpoint.endpoint for endpoint in fulfilled_endpoints if endpoint.application == application.name}
             )
         }
-        return frozenset(non_optional_endpoints - fulfilled_endpoints - self.saturated_endpoints)
+
+        # Collect all saturated endpoints
+        saturated_endpoints = self.saturated_endpoints
+
+        return frozenset(non_optional_endpoints - fulfilled_endpoints - saturated_endpoints)
+
+    @immutable_dataclass
+    class EndpointDependency:
+        application: str
+        charm: str
+        endpoint: str
+
+    @dataclass
+    class EndpointDependencies:
+        provides: set["Bundle.EndpointDependency"] = Field(default_factory=set)
+        requires: set["Bundle.EndpointDependency"] = Field(default_factory=set)
 
     @computed_property
-    def unfulfilled_interfaces(self) -> frozenset[str]:
-        return frozenset(
-            {
-                self.application_endpoints[application_endpoint].interface
-                for application_endpoint in self.unfulfilled_endpoints
-            }
-        )
+    def dependency_graph(self) -> dict[str, EndpointDependencies]:
+        """Return a graph mapping each application to its endpoint dependencies."""
+        graph = {app.name: Bundle.EndpointDependencies() for app in self.applications}
+        for integration in self.integrations:
+            ep1, ep2 = list(integration)
+            charm_1 = self.application_lookup[ep1.application].charm
+            charm_2 = self.application_lookup[ep2.application].charm
+            charm_ep1 = self.application_endpoints[ep1]
+            charm_ep2 = self.application_endpoints[ep2]
+            if charm_ep1.type == ENDPOINT_REQUIRES and charm_ep2.type == ENDPOINT_PROVIDES:
+                graph[ep1.application].requires.add(
+                    Bundle.EndpointDependency(application=ep2.application, charm=charm_1.name, endpoint=charm_ep1.name)
+                )
+                graph[ep2.application].provides.add(
+                    Bundle.EndpointDependency(application=ep1.application, charm=charm_2.name, endpoint=charm_ep2.name)
+                )
+            elif charm_ep1.type == ENDPOINT_PROVIDES and charm_ep2.type == ENDPOINT_REQUIRES:
+                graph[ep2.application].requires.add(
+                    Bundle.EndpointDependency(application=ep1.application, charm=charm_2.name, endpoint=charm_ep2.name)
+                )
+                graph[ep1.application].provides.add(
+                    Bundle.EndpointDependency(application=ep2.application, charm=charm_1.name, endpoint=charm_ep1.name)
+                )
+        return graph
 
-    def get_application_names_for_charm(self, charm_name: str) -> frozenset[str]:
-        """Get all application names that use a specific charm."""
-        return frozenset({app.name for app in self.applications if app.charm.name == charm_name})
+    def has_application_dependency(self, dependent_application: str, depended_on_application: str) -> bool:
+        """Return True if dependent_application depends on depended_on_application."""
+        visited = set()
+        stack = [dependent_application]
+        while stack:
+            application = stack.pop()
+            if application == depended_on_application:
+                return True
+            if application in visited:
+                continue
+            visited.add(application)
+            for dependency in self.dependency_graph[application].requires:
+                stack.append(dependency.application)
+        return False
+
+    def has_endpoint_dependency(
+        self, application: str, charm_name: str, charm_endpoint: str, endpoint_type: str
+    ) -> bool:
+        """Return True if application depends on a specific charm endpoint."""
+        visited = set()
+        stack = [application]
+        while stack:
+            current_app = stack.pop()
+            if current_app in visited:
+                continue
+            visited.add(current_app)
+            if endpoint_type == ENDPOINT_PROVIDES:
+                dependencies = self.dependency_graph[current_app].provides
+            else:
+                dependencies = self.dependency_graph[current_app].requires
+            for dependency in dependencies:
+                if dependency.charm == charm_name and dependency.endpoint == charm_endpoint:
+                    return True
+                stack.append(dependency.application)
+        return False
 
     def generate_unique_application_name(self, charm_name: str) -> str:
         """Generate a unique application name for a charm, adding suffix if needed."""
-        existing_names = {app.name for app in self.applications}
+
+        # Gather existing application names
+        existing_names = self.application_lookup.keys()
 
         # If the base charm name is not taken, use it
         if charm_name not in existing_names:
@@ -139,8 +211,9 @@ class Bundle:
 
         return f"{charm_name}-{counter}"
 
-    # Export bundle to yaml string
     def export(self) -> str:
+        """Export bundle to yaml string."""
+
         # Validate platform is supported
         if self.platform not in ["kubernetes", "machine"]:
             raise ValueError(f"Unsupported platform: {self.platform}")
@@ -163,13 +236,17 @@ class Bundle:
                     for application in self.applications
                 },
                 "bundle": self.platform,
-                "relations": [
+                "relations": sorted(
                     [
-                        f"{application_endpoint.application}:{application_endpoint.endpoint}"
-                        for application_endpoint in sorted(integration)
+                        sorted(
+                            [
+                                f"{application_endpoint.application}:{application_endpoint.endpoint}"
+                                for application_endpoint in sorted(integration)
+                            ]
+                        )
+                        for integration in sorted(self.integrations)
                     ]
-                    for integration in sorted(self.integrations)
-                ],
+                ),
             },
             default_flow_style=False,
             sort_keys=True,
