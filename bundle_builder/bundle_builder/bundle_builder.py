@@ -39,7 +39,7 @@ class Node:
         # Prioritize more integrations, scaled by aggression
         # As aggression increases (expected to be between 0 and 1) the weight of integrations increases
         # This forces the algorithm to explore deeper (DFS) rather than wider (BFS) into the graph in order to find a solution sooner as aggression is increased
-        weight_integrations = self.aggression * len(self.bundle.integrations) / 4 * -1
+        weight_integrations = self.aggression * len(self.bundle.integrations) / 2 * -1
         # Sum the weights to get the final score
         return weight_applications + weight_unfulfilled_endpoints + weight_integrations
 
@@ -85,7 +85,7 @@ class BundleBuilder:
         queued_nodes = [
             Node(
                 bundle=base,
-                aggression=1.0,
+                aggression=0.0,
             )
         ]
         best_node = queued_nodes[0]
@@ -95,7 +95,7 @@ class BundleBuilder:
             # Rebalance node scores
             num_visited_nodes = len(known_nodes) - len(queued_nodes)
             if num_visited_nodes % self.aggression_interval == 0 and num_visited_nodes <= self.aggression_limit:
-                aggression = 1 - max((self.aggression_limit - num_visited_nodes) / self.aggression_limit, 0)
+                aggression = 1.0 - max((self.aggression_limit - num_visited_nodes) / self.aggression_limit, 0.0)
                 best_node = dataclasses.replace(best_node, aggression=aggression)
                 queued_nodes = [dataclasses.replace(node, aggression=aggression) for node in queued_nodes]
                 heapq.heapify(queued_nodes)
