@@ -58,6 +58,43 @@ def sample_charm_postgresql_k8s() -> Charm:
     )
 
 
+def sample_charm_endpoint_pgbouncer_k8s_database() -> CharmEndpoint:
+    return CharmEndpoint(
+        type=ENDPOINT_PROVIDES,
+        name="database",
+        interface="db",
+        optionality=CharmEndpointOptionality.from_bool(True),
+        limit=None,
+    )
+
+
+def sample_charm_endpoint_pgbouncer_k8s_backend_database() -> CharmEndpoint:
+    return CharmEndpoint(
+        type=ENDPOINT_REQUIRES,
+        name="backend-database",
+        interface="db",
+        optionality=CharmEndpointOptionality.from_bool(False),
+        limit=None,
+    )
+
+
+def sample_charm_pgbouncer_k8s() -> Charm:
+    return Charm(
+        name="pgbouncer-k8s",
+        channel="stable",
+        revision=1,
+        ubuntu_version="22.04",
+        ubuntu_arch="amd64",
+        endpoints=frozenset(
+            {
+                sample_charm_endpoint_pgbouncer_k8s_database(),
+                sample_charm_endpoint_pgbouncer_k8s_backend_database(),
+            }
+        ),
+        priority=2.0,
+    )
+
+
 def sample_charm_endpoint_kratos_pg_database() -> CharmEndpoint:
     return CharmEndpoint(
         type=ENDPOINT_REQUIRES,

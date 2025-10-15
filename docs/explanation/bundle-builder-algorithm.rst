@@ -18,30 +18,31 @@ endpoints as possible.
 How the graph is defined
 ------------------------
 
-Each edge in our graph is defined as the addition of a charm to a base bundle. Each node therefore
-represents an unordered set of charms bundle.
+
+Each edge in our graph is defined as the addition of a charm and its associated integration(s) to a base bundle. Each node therefore represents an unordered set of integrations (connections between application endpoints), along with the set of applications present in the bundle.
+
+This means that the uniqueness of a node is determined by the set of integrations it contains, not just the set of applications. Two bundles with the same applications but different integrations are considered different nodes in the graph.
 
 The depth of a node, or the number of edges from the root node, is equivalent to the number of
-charms added by the bundle builder.
+integrations added by the bundle builder.
 
-It should be noted that because a node's uniqueness is defined as the *unordered* set of charms,
-child nodes can converge, as shown in the example below, so this is not a tree. This makes the
-traversal more efficient as it removes repetitive checking of paths.
+
+It should be noted that because a node's uniqueness is defined as the *unordered* set of integrations, child nodes can converge, as shown in the example below, so this is not a tree. This makes the traversal more efficient as it removes repetitive checking of paths and allows the algorithm to explore bundles with different integration structures.
 
 .. mermaid:: 
 
     graph TD;
-        A[grafana-k8s<br>grafana-agent-k8s];
-        B[grafana-k8s<br>grafana-agent-k8s<br>postgresql-k8s];
-        C[grafana-k8s<br>grafana-agent-k8s<br>traefik-k8s];
-        E[grafana-k8s<br>grafana-agent-k8s<br>mysql-k8s];
-        D[grafana-k8s<br>grafana-agent-k8s<br>postgresql-k8s<br>traefik-k8s];
+        A[grafana-k8s<br>grafana-agent-k8s];
+        B[grafana-k8s<br>grafana-agent-k8s<br>postgresql-k8s];
+        C[grafana-k8s<br>grafana-agent-k8s<br>traefik-k8s];
+        E[grafana-k8s<br>grafana-agent-k8s<br>mysql-k8s];
+        D[grafana-k8s<br>grafana-agent-k8s<br>postgresql-k8s<br>traefik-k8s];
 
-        A-->B;
-        A-->C;
-        A-->E;
-        B-->D;
-        C-->D;
+        A-->B;
+        A-->C;
+        A-->E;
+        B-->D;
+        C-->D;
 
 The target node
 ---------------
@@ -76,59 +77,36 @@ The algorithm implementation is in
 Node score
 ~~~~~~~~~~
 
-The node score is the computed value for the cost of a node in the graph. Ideally, this would just
-be the number of applications in the bundle result in a BFS algorithm, but we cannot only use BFS
-for a reason explained further below.
+The node score is a computed value that determines which bundle configurations are preferred during graph traversal. The scoring algorithm combines three main factors:
 
-The other metric we consider is therefore the number of remaining non-optional interfaces that can
-be fulfilled in the bundle. The idea here is that bundles with fewer remaining fulfillable
-interfaces are closer to the target node and should require fewer charms to be added.
+1. **Fewer applications, accounting for charm priorities:**
+    - For each application in the bundle, the score adds $1/\text{priority}$, so higher-priority charms reduce the score more.
+    - This encourages bundles with fewer applications and favours those with higher-priority charms.
 
-It is not optimal to just use the number of interfaces that can be fulfilled, however. We have found
-in practice that this can lead down a path of charms adding as many unfulfilled interfaces as they
-remove, when other paths would contain fewer applications, such as in the example below.
+2. **Fewer unfulfilled endpoints:**
+    - The score adds the number of unfulfilled endpoints remaining in the bundle.
+    - Bundles with fewer unfulfilled endpoints are preferred, as they are closer to being fully resolved (greater endpoint fulfilment).
+
+3. **More integrations, scaled by aggression:**
+    - The score subtracts $\text{aggression} \times \text{number of integrations} / 4$.
+    - As aggression increases (from 0 to 1), the algorithm is more willing to explore bundles with more integrations, effectively searching deeper (DFS) rather than wider (BFS).
+
+The final score is the sum of these components.
+
+Lower scores are preferred. This scoring system balances the desire for minimal bundles (few, high-priority applications), rapid endpoint fulfilment, and the need to explore deeper solutions as the search progresses.
+
+Example:
 
 .. mermaid::
 
-    graph TD;
-        A[Bundle A<br>Fulfillable: 3];
-        B[Bundle B<br>Fulfillable: 1];
-        C[Bundle C<br>Fulfillable: 1];
-        D[Bundle D<br>Fulfillable: 1];
-        E[Bundle E<br>Fulfillable: 0];
-        X[Bundle X<br>Fulfillable: 2];
-        Y[Bundle Y<br>Fulfillable: 0];
-        
-        
-        A-->B;
-        B-->C;
-        C-->D;
-        D-->E;
-        
-        A-->X;
-        X-. Not taken .->Y;
+     graph TD;
+          A[Bundle A<br>Apps: 2<br>Unfulfilled: 3<br>Integrations: 1];
+          B[Bundle B<br>Apps: 3<br>Unfulfilled: 1<br>Integrations: 2];
+          C[Bundle C<br>Apps: 4<br>Unfulfilled: 0<br>Integrations: 3];
+          A-->B;
+          B-->C;
 
-Therefore, the node score becomes a combination of these two metrics. Initially, the number of
-applications in the bundle is the prioritized metric, and as the number of nodes visited increases,
-the contribution of the number of fulfillable interfaces to the score increases. This leads to a
-balance of finding the optimal bundle in a reasonable (and finite) amount of time.
-
-Let :math:`s,b,A,I` be the score, the balance factor, the applications set and the fulfillable interfaces set, respectively, then:
-
-.. math::
-
-   s = b\times|A| + (1-b)\times|I|
-
-
-Finally, we also add prioritization to specific charms, because it can be desirable to prioritize 
-a bundle with certain charms over others. This prioritization is configurable and applied as a 
-replacement to the value of :math:`A` above. Instead of using the number of applications, we add up
-the priority value of each application's charm (with the default being 1). Let :math:`S` be this new
-value, then the final calculation of :math:`s` is as follows:
-
-.. math::
-
-   s = b\times S + (1-b)\times|I|
+Depending on the aggression value, the algorithm may prefer B over A (fewer unfulfilled endpoints), or A over B (fewer apps), and ultimately C as the goal (all endpoints fulfilled).
 
 Why not DFS?
 ~~~~~~~~~~~~
@@ -139,6 +117,9 @@ repeating that until there are no more unfulfilled charm endpoints.
 
 This results in bundles that contain many applications, and more applications included in the
 minimal bundle increases the chance of deployment failures.
+
+However, this is a very fast way to find a bundle with all endpoints fulfilled, so the algorithm
+increases aggression towards DFS as the number of nodes visited increases.
 
 Why not BFS?
 ~~~~~~~~~~~~

@@ -15,7 +15,6 @@
 
 
 from dataclasses import field
-from types import MethodType
 from typing import Any, Callable, get_type_hints
 
 from pydantic.dataclasses import dataclass
@@ -33,36 +32,36 @@ def computed_property(func: Callable) -> Callable:
 # and defaults slots=True
 def immutable_dataclass(_cls=None, **dataclass_kwargs):
     def wrap(cls):
-        computed_properties = {}
-        annotations = dict(getattr(cls, "__annotations__", {}))
-
         # Collect methods decorated as computed fields
+        computed_fields = {}
         for name, val in cls.__dict__.items():
-            if not getattr(val, "_is_computed_property", False):
-                continue
+            if getattr(val, "_is_computed_property", False):
+                computed_fields[name] = val
 
-            computed_properties[name] = val
+        # Create a private slot for each computed field
+        _UNINITIALIZED = object()
+        annotations = dict(getattr(cls, "__annotations__", {}))
+        for name, method in computed_fields.items():
+            # Use a private slot for the cached value
+            private_name = f"_{name}"
+            annotations[private_name] = get_type_hints(cls).get(name, Any)
+            setattr(cls, private_name, field(init=False, repr=False, hash=False, compare=False, default=_UNINITIALIZED))
 
-            # Add field to ensure slot is created
-            annotations[name] = get_type_hints(cls).get(name, Any)
-            setattr(cls, name, field(init=False, repr=False, hash=False, compare=False))
+            # Replace the method with a property that computes the value once
+            def make_lazy_property(private_name, method):
+                def prop(self):
+                    value = getattr(self, private_name)
+                    if value is _UNINITIALIZED:
+                        value = method(self)
+                        object.__setattr__(self, private_name, value)
+                        value = getattr(self, private_name)
+                    return value
+
+                return property(prop)
+
+            setattr(cls, name, make_lazy_property(private_name, method))
 
         cls.__annotations__ = annotations
-
-        # Wrap or extend __post_init__
-        orig_post_init = getattr(cls, "__post_init__", None)
-
-        def __post_init__(self):
-            # Call original post-init if defined
-            if orig_post_init:
-                MethodType(orig_post_init, self)()
-
-            # Evaluate computed fields
-            for name, method in computed_properties.items():
-                value = method(self)
-                object.__setattr__(self, name, value)
-
-        cls.__post_init__ = __post_init__
 
         # Apply dataclass with requested options
         return dataclass(frozen=True, slots=True, **dataclass_kwargs)(cls)
