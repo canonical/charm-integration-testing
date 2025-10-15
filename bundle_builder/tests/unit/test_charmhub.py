@@ -261,7 +261,7 @@ class TestCharmhubClient:
                 ),
             ),
             Params(
-                label="prefer_track_from_matching_release",
+                label="matching_release_error",
                 charm="my-charm",
                 base=matching_base,
                 refresh_info={
@@ -275,7 +275,6 @@ class TestCharmhubClient:
                             message="Missing revision",
                             extra=RefreshResponse.Error.Extra(
                                 releases=[
-                                    RefreshResponse.Error.Extra.Release(channel="edge", base=matching_base),
                                     RefreshResponse.Error.Extra.Release(channel="latest/edge", base=matching_base),
                                 ]
                             ),
@@ -287,16 +286,13 @@ class TestCharmhubClient:
                         charm_channel="latest/edge",
                     ): RefreshResponse(
                         name="my-charm",
-                        effective_channel="latest/edge",
+                        error=RefreshResponse.Error(message="Error Message", code="error-code"),
                     ),
                 },
-                expected_refresh_info=RefreshResponse(
-                    name="my-charm",
-                    effective_channel="latest/edge",
-                ),
+                raise_exception=True,
             ),
             Params(
-                label="matching_release_error",
+                label="try_adding_latest_track",
                 charm="my-charm",
                 base=matching_base,
                 refresh_info={
@@ -323,8 +319,19 @@ class TestCharmhubClient:
                         name="my-charm",
                         error=RefreshResponse.Error(message="Error Message", code="error-code"),
                     ),
+                    RefreshAction(
+                        charm_name="my-charm",
+                        base=matching_base,
+                        charm_channel="latest/edge",
+                    ): RefreshResponse(
+                        name="my-charm",
+                        effective_channel="latest/edge",
+                    ),
                 },
-                raise_exception=True,
+                expected_refresh_info=RefreshResponse(
+                    name="my-charm",
+                    effective_channel="latest/edge",
+                ),
             ),
         ]
 
