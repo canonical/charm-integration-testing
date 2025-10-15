@@ -23,7 +23,8 @@ from bundle_builder.charm import (
     CharmEndpoint,
     CharmEndpointOptionality,
 )
-from bundle_builder.charmhub import CharmhubClient
+
+from .conftest import CharmhubClientStub
 
 
 class TestEndpointLimits:
@@ -81,17 +82,20 @@ class TestEndpointLimits:
                 platform="machine",
                 arch="amd64",
             )
+            # AND a bundle builder with a charmhub client that knows about the charms
+            builder = BundleBuilder(CharmhubClientStub(zero_limit_charm, requiring_charm))
 
-            # WHEN checking if we can add integration
-            builder = BundleBuilder(CharmhubClient())
-            can_add = builder._can_add_integration_within_charm_limits(
-                bundle,
-                ApplicationEndpoint(application="server", endpoint="disabled"),
-                ApplicationEndpoint(application="client", endpoint="http"),
+            # WHEN we build the bundle
+            new_bundle = builder.build(bundle)
+
+            # THEN no integration should exist between server:disabled and client:http
+            expected = Integration(
+                {
+                    ApplicationEndpoint("server", "disabled"),
+                    ApplicationEndpoint("client", "http"),
+                }
             )
-
-            # THEN it should be blocked
-            assert can_add is False
+            assert expected not in new_bundle.integrations
 
         def test_limit_applies_to_both_endpoints_in_integration(self):
             # GIVEN two charms both with limits
@@ -134,7 +138,6 @@ class TestEndpointLimits:
                 ),
                 priority=1.0,
             )
-
             # AND bundle with both at their limits
             bundle = Bundle(
                 applications=frozenset(
@@ -157,25 +160,34 @@ class TestEndpointLimits:
                 platform="machine",
                 arch="amd64",
             )
+            # AND a bundle builder with a charmhub client that knows about the charms
+            builder = BundleBuilder(CharmhubClientStub(charm1, charm2))
 
-            # WHEN trying to add another integration
-            builder = BundleBuilder(CharmhubClient())
-            can_add = builder._can_add_integration_within_charm_limits(
-                bundle,
-                ApplicationEndpoint(application="app1", endpoint="api"),
-                ApplicationEndpoint(application="app3", endpoint="upstream"),
+            # WHEN we build the bundle
+            new_bundle = builder.build(bundle)
+
+            # THEN only the expected integration between app1:api and app2:upstream should exist
+            expected = Integration(
+                {
+                    ApplicationEndpoint("app1", "api"),
+                    ApplicationEndpoint("app2", "upstream"),
+                }
             )
-
-            # THEN it should be blocked (app1's endpoint reached limit)
-            assert can_add is False
+            # Filter integrations to only those involving app1/app2/app3
+            test_apps = {"app1", "app2", "app3"}
+            relevant_integrations = [
+                integration
+                for integration in new_bundle.integrations
+                if all(endpoint.application in test_apps for endpoint in integration)
+            ]
+            assert len(relevant_integrations) == 1
+            assert expected in relevant_integrations
 
     class TestMultipleCharmInstances:
         """Test scenarios where multiple instances of the same charm are needed."""
 
         def test_multiple_postgresql_instances_for_dependencies(self):
             """Test the exact scenario from PR feedback where indico needs postgresql and a dependency that also needs postgresql."""
-            from unittest.mock import MagicMock
-
             # GIVEN postgresql-k8s with limit=1 (can only connect to one app)
             postgresql_charm = Charm(
                 name="postgresql-k8s",
@@ -196,7 +208,6 @@ class TestEndpointLimits:
                 ),
                 priority=1.0,
             )
-
             # AND indico that needs database and juju-info connection
             indico_charm = Charm(
                 name="indico",
@@ -224,7 +235,6 @@ class TestEndpointLimits:
                 ),
                 priority=1.0,
             )
-
             # AND some-dependency-k8s that provides juju-info but also needs its own database
             dependency_charm = Charm(
                 name="some-dependency-k8s",
@@ -252,7 +262,6 @@ class TestEndpointLimits:
                 ),
                 priority=1.0,
             )
-
             # AND a base bundle with postgresql connected to indico
             base_bundle = Bundle(
                 applications=frozenset(
@@ -274,29 +283,10 @@ class TestEndpointLimits:
                 platform="kubernetes",
                 arch="amd64",
             )
+            # AND a bundle builder with a charmhub client that knows about the charms
+            builder = BundleBuilder(CharmhubClientStub(postgresql_charm, indico_charm, dependency_charm))
 
-            # AND a mock charmhub client
-            mock_client = MagicMock(spec=CharmhubClient)
-
-            def mock_find_charms(**kwargs):
-                if kwargs.get("provides") == "juju-info":
-                    return {"some-dependency-k8s"}
-                elif kwargs.get("provides") == "postgresql":
-                    return {"postgresql-k8s"}
-                return set()
-
-            def mock_charm_from_store(charm_name, **kwargs):
-                if charm_name == "postgresql-k8s":
-                    return postgresql_charm
-                elif charm_name == "some-dependency-k8s":
-                    return dependency_charm
-                return None
-
-            mock_client.find_charms.side_effect = mock_find_charms
-            mock_client.charm_from_store.side_effect = mock_charm_from_store
-
-            # WHEN building the bundle
-            builder = BundleBuilder(mock_client)
+            # WHEN we build the bundle
             result = builder.build(base_bundle)
 
             # THEN it should have the original apps plus dependency and second postgresql
@@ -309,7 +299,6 @@ class TestEndpointLimits:
 
             # We should have at least 4 applications
             assert len(result.applications) >= 4
-
             # AND the integrations should be set up correctly
             integration_pairs = [{str(ep) for ep in integration} for integration in result.integrations]
 
@@ -336,8 +325,6 @@ class TestEndpointLimits:
 
         def test_prevents_infinite_charm_chain(self):
             """Test that self-referential charms don't create infinite chains."""
-            from unittest.mock import MagicMock
-
             # GIVEN a charm that both provides and requires the same interface (like grafana-agent-k8s)
             self_ref_charm = Charm(
                 name="grafana-agent-k8s",
@@ -365,7 +352,6 @@ class TestEndpointLimits:
                 ),
                 priority=1.0,
             )
-
             # AND an app that needs tracing
             app_charm = Charm(
                 name="mattermost-k8s",
@@ -386,7 +372,6 @@ class TestEndpointLimits:
                 ),
                 priority=1.0,
             )
-
             # AND a base bundle
             base_bundle = Bundle(
                 applications=frozenset(
@@ -408,20 +393,15 @@ class TestEndpointLimits:
                 platform="kubernetes",
                 arch="amd64",
             )
-
-            # AND a mock client that only returns grafana-agent for tracing
-            mock_client = MagicMock(spec=CharmhubClient)
-            mock_client.find_charms.return_value = {"grafana-agent-k8s"}
-            mock_client.charm_from_store.return_value = self_ref_charm
-
-            # WHEN building with a limit on same-charm instances
-            builder = BundleBuilder(mock_client)
+            # AND a bundle builder with a charmhub client that knows about the charm
+            builder = BundleBuilder(CharmhubClientStub(self_ref_charm, app_charm))
             builder.max_same_charm_instances = 3
+
+            # WHEN we build the bundle
             result = builder.build(base_bundle)
 
             # THEN it should not exceed the limit
             grafana_apps = [app for app in result.applications if app.charm.name == "grafana-agent-k8s"]
             assert len(grafana_apps) <= builder.max_same_charm_instances
-
             # AND it should stop adding new instances when limit is reached
             assert len(grafana_apps) < 10  # Definitely not infinite!
