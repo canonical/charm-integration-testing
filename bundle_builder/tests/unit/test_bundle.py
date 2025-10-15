@@ -20,16 +20,22 @@ import yaml
 from pydantic.dataclasses import dataclass
 
 from bundle_builder.bundle import Application, ApplicationEndpoint, Bundle, Integration
+from bundle_builder.charm import ENDPOINT_PROVIDES, ENDPOINT_REQUIRES
 from bundle_builder.charmhub import CharmhubClient
 from bundle_builder.charmhub_http import CharmhubBase
 from bundle_builder.overrides import CharmEndpointOverride, CharmMetadataOverride, OverridesClient
 
 from .test_charm import (
     sample_charm_endpoint_kratos_pg_database,
+    sample_charm_endpoint_pgbouncer_k8s_backend_database,
+    sample_charm_endpoint_pgbouncer_k8s_database,
     sample_charm_endpoint_postgresql_k8s_certificates,
     sample_charm_endpoint_postgresql_k8s_database,
+    sample_charm_endpoint_self_signed_certificates_certificates,
     sample_charm_kratos,
+    sample_charm_pgbouncer_k8s,
     sample_charm_postgresql_k8s,
+    sample_charm_self_signed_certificates,
 )
 
 
@@ -196,7 +202,7 @@ def sample_bundle_postgresql_k8s_kratos() -> Bundle:
                 Integration(
                     {
                         ApplicationEndpoint("target", "database"),
-                        ApplicationEndpoint("neighbor", "pg-database"),
+                        ApplicationEndpoint("neighbor", sample_charm_endpoint_kratos_pg_database().name),
                     }
                 )
             }
@@ -218,7 +224,9 @@ class TestBundle:
         assert application_endpoints == {
             ApplicationEndpoint("target", "certificates"): sample_charm_endpoint_postgresql_k8s_certificates(),
             ApplicationEndpoint("target", "database"): sample_charm_endpoint_postgresql_k8s_database(),
-            ApplicationEndpoint("neighbor", "pg-database"): sample_charm_endpoint_kratos_pg_database(),
+            ApplicationEndpoint(
+                "neighbor", sample_charm_endpoint_kratos_pg_database().name
+            ): sample_charm_endpoint_kratos_pg_database(),
         }
 
     class TestCharms:
@@ -300,7 +308,9 @@ class TestBundle:
                     ),
                     integrations=frozenset(),
                 ),
-                unfulfilled_endpoints=frozenset({ApplicationEndpoint("neighbor", "pg-database")}),
+                unfulfilled_endpoints=frozenset(
+                    {ApplicationEndpoint("neighbor", sample_charm_endpoint_kratos_pg_database().name)}
+                ),
             ),
             Params(
                 label="non_optional_endpoint_fulfilled",
@@ -320,66 +330,278 @@ class TestBundle:
             # THEN unfulfilled endpoints match
             assert unfulfilled_endpoints == params.unfulfilled_endpoints
 
-    class TestUnfulfilledInterfaces:
+    class TestDependencyGraph:
         @dataclass
         class Params:
             label: str
             bundle: Bundle
-            unfulfilled_interfaces: set[str]
+            expected_graph_keys: set[str]
+            expected_requires: dict[str, set[str]]
+            expected_provides: dict[str, set[str]]
+            application_dependencies: list[tuple[str, str, bool]]
+            endpoint_dependencies: list[tuple[str, str, str, str, bool]]
 
         test_cases = [
             Params(
-                label="no_unfulfilled_interfaces",
-                bundle=dataclasses.replace(
-                    sample_bundle_postgresql_k8s_kratos(),
+                label="no_integrations",
+                bundle=Bundle(
                     applications=frozenset(
                         {
-                            Application(name="target", charm=sample_charm_postgresql_k8s()),
+                            Application(name="a", charm=sample_charm_pgbouncer_k8s()),
+                            Application(name="b", charm=sample_charm_pgbouncer_k8s()),
                         }
                     ),
                     integrations=frozenset(),
+                    platform="kubernetes",
+                    arch="amd64",
                 ),
-                unfulfilled_interfaces=frozenset(),
+                expected_graph_keys={"a", "b"},
+                expected_requires={"a": set(), "b": set()},
+                expected_provides={"a": set(), "b": set()},
+                application_dependencies=[("a", "b", False), ("b", "a", False)],
+                endpoint_dependencies=[
+                    (
+                        "a",
+                        sample_charm_pgbouncer_k8s().name,
+                        sample_charm_endpoint_pgbouncer_k8s_database().name,
+                        "requires",
+                        False,
+                    ),
+                    (
+                        "b",
+                        sample_charm_pgbouncer_k8s().name,
+                        sample_charm_endpoint_pgbouncer_k8s_database().name,
+                        "requires",
+                        False,
+                    ),
+                ],
             ),
             Params(
-                label="unfulfilled_interface",
-                bundle=dataclasses.replace(
-                    sample_bundle_postgresql_k8s_kratos(),
+                label="simple_chain",
+                bundle=Bundle(
                     applications=frozenset(
                         {
-                            Application(name="neighbor", charm=sample_charm_kratos()),
+                            Application(name="a", charm=sample_charm_pgbouncer_k8s()),
+                            Application(name="b", charm=sample_charm_pgbouncer_k8s()),
+                            Application(name="c", charm=sample_charm_pgbouncer_k8s()),
                         }
                     ),
-                    integrations=frozenset(),
+                    integrations=frozenset(
+                        {
+                            Integration(
+                                {
+                                    ApplicationEndpoint(
+                                        "a", sample_charm_endpoint_pgbouncer_k8s_backend_database().name
+                                    ),
+                                    ApplicationEndpoint("b", sample_charm_endpoint_pgbouncer_k8s_database().name),
+                                }
+                            ),
+                            Integration(
+                                {
+                                    ApplicationEndpoint(
+                                        "b", sample_charm_endpoint_pgbouncer_k8s_backend_database().name
+                                    ),
+                                    ApplicationEndpoint("c", sample_charm_endpoint_pgbouncer_k8s_database().name),
+                                }
+                            ),
+                        }
+                    ),
+                    platform="kubernetes",
+                    arch="amd64",
                 ),
-                unfulfilled_interfaces=frozenset({"db"}),
+                expected_graph_keys={"a", "b", "c"},
+                expected_requires={"a": {"b"}, "b": {"c"}, "c": set()},
+                expected_provides={"a": set(), "b": {"a"}, "c": {"b"}},
+                application_dependencies=[("a", "b", True), ("b", "c", True), ("a", "c", True)],
+                endpoint_dependencies=[
+                    (
+                        "a",
+                        sample_charm_pgbouncer_k8s().name,
+                        sample_charm_endpoint_pgbouncer_k8s_backend_database().name,
+                        ENDPOINT_REQUIRES,
+                        True,
+                    ),
+                    (
+                        "b",
+                        sample_charm_pgbouncer_k8s().name,
+                        sample_charm_endpoint_pgbouncer_k8s_backend_database().name,
+                        ENDPOINT_REQUIRES,
+                        True,
+                    ),
+                    (
+                        "c",
+                        sample_charm_pgbouncer_k8s().name,
+                        sample_charm_endpoint_pgbouncer_k8s_backend_database().name,
+                        ENDPOINT_REQUIRES,
+                        False,
+                    ),
+                    (
+                        "a",
+                        sample_charm_pgbouncer_k8s().name,
+                        sample_charm_endpoint_pgbouncer_k8s_database().name,
+                        ENDPOINT_PROVIDES,
+                        False,
+                    ),
+                    (
+                        "b",
+                        sample_charm_pgbouncer_k8s().name,
+                        sample_charm_endpoint_pgbouncer_k8s_database().name,
+                        ENDPOINT_PROVIDES,
+                        True,
+                    ),
+                    (
+                        "c",
+                        sample_charm_pgbouncer_k8s().name,
+                        sample_charm_endpoint_pgbouncer_k8s_database().name,
+                        ENDPOINT_PROVIDES,
+                        True,
+                    ),
+                ],
             ),
             Params(
-                label="multiple_same_unfulfilled_interface",
-                bundle=dataclasses.replace(
-                    sample_bundle_postgresql_k8s_kratos(),
+                label="cycle",
+                bundle=Bundle(
                     applications=frozenset(
                         {
-                            Application(name="kratos-1", charm=sample_charm_kratos()),
-                            Application(name="kratos-2", charm=sample_charm_kratos()),
+                            Application(name="a", charm=sample_charm_pgbouncer_k8s()),
+                            Application(name="b", charm=sample_charm_pgbouncer_k8s()),
                         }
                     ),
-                    integrations=frozenset(),
+                    integrations=frozenset(
+                        {
+                            Integration(
+                                {
+                                    ApplicationEndpoint("a", sample_charm_endpoint_pgbouncer_k8s_database().name),
+                                    ApplicationEndpoint(
+                                        "b", sample_charm_endpoint_pgbouncer_k8s_backend_database().name
+                                    ),
+                                }
+                            ),
+                            Integration(
+                                {
+                                    ApplicationEndpoint("b", sample_charm_endpoint_pgbouncer_k8s_database().name),
+                                    ApplicationEndpoint(
+                                        "a", sample_charm_endpoint_pgbouncer_k8s_backend_database().name
+                                    ),
+                                }
+                            ),
+                        }
+                    ),
+                    platform="kubernetes",
+                    arch="amd64",
                 ),
-                unfulfilled_interfaces=frozenset({"db"}),
+                expected_graph_keys={"a", "b"},
+                expected_requires={"a": {"b"}, "b": {"a"}},
+                expected_provides={"a": {"b"}, "b": {"a"}},
+                application_dependencies=[("a", "b", True), ("b", "a", True)],
+                endpoint_dependencies=[],
+            ),
+            Params(
+                label="multiple_interfaces",
+                bundle=Bundle(
+                    applications=frozenset(
+                        {
+                            Application(name="a", charm=sample_charm_kratos()),
+                            Application(name="b", charm=sample_charm_postgresql_k8s()),
+                            Application(name="c", charm=sample_charm_self_signed_certificates()),
+                        }
+                    ),
+                    integrations=frozenset(
+                        {
+                            Integration(
+                                {
+                                    ApplicationEndpoint("a", sample_charm_endpoint_kratos_pg_database().name),
+                                    ApplicationEndpoint("b", sample_charm_endpoint_postgresql_k8s_database().name),
+                                }
+                            ),
+                            Integration(
+                                {
+                                    ApplicationEndpoint("b", sample_charm_endpoint_postgresql_k8s_certificates().name),
+                                    ApplicationEndpoint(
+                                        "c", sample_charm_endpoint_self_signed_certificates_certificates().name
+                                    ),
+                                }
+                            ),
+                        }
+                    ),
+                    platform="kubernetes",
+                    arch="amd64",
+                ),
+                expected_graph_keys={"a", "b", "c"},
+                expected_requires={"a": {"b"}, "b": {"c"}, "c": set()},
+                expected_provides={"a": set(), "b": {"a"}, "c": {"b"}},
+                application_dependencies=[("a", "b", True), ("b", "a", False), ("a", "c", True), ("c", "a", False)],
+                endpoint_dependencies=[
+                    (
+                        "a",
+                        sample_charm_kratos().name,
+                        sample_charm_endpoint_kratos_pg_database().name,
+                        ENDPOINT_REQUIRES,
+                        True,
+                    ),
+                    (
+                        "a",
+                        sample_charm_postgresql_k8s().name,
+                        sample_charm_endpoint_postgresql_k8s_database().name,
+                        ENDPOINT_PROVIDES,
+                        False,
+                    ),
+                    (
+                        "a",
+                        sample_charm_postgresql_k8s().name,
+                        sample_charm_endpoint_postgresql_k8s_certificates().name,
+                        ENDPOINT_REQUIRES,
+                        True,
+                    ),
+                    (
+                        "a",
+                        sample_charm_self_signed_certificates().name,
+                        sample_charm_endpoint_self_signed_certificates_certificates().name,
+                        ENDPOINT_PROVIDES,
+                        False,
+                    ),
+                ],
             ),
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test(self, params: Params):
-            # GIVEN the bundle
+        def test_graph_and_dependencies(self, params: Params):
+            # GIVEN a bundle
             bundle = params.bundle
 
-            # WHEN unfulfilled interfaces is called
-            unfulfilled_interfaces = bundle.unfulfilled_interfaces
+            # WHEN dependency_graph is called
+            graph = bundle.dependency_graph
 
-            # THEN unfulfilled endpoints match
-            assert unfulfilled_interfaces == params.unfulfilled_interfaces
+            # THEN graph keys match
+            assert set(graph.keys()) == params.expected_graph_keys
+
+            # AND requires/provides match expected
+            for app in params.expected_graph_keys:
+                assert {dep.application for dep in graph[app].requires} == params.expected_requires[app]
+                assert {dep.application for dep in graph[app].provides} == params.expected_provides[app]
+
+            # AND has_application_dependency matches expected
+            for dep_app, dep_on_app, expected in params.application_dependencies:
+                assert bundle.has_application_dependency(dep_app, dep_on_app) is expected
+
+            # AND has_endpoint_dependency matches expected (if provided)
+            for dep_args in params.endpoint_dependencies:
+                app, charm, endpoint, typ, expected = dep_args
+                assert bundle.has_endpoint_dependency(app, charm, endpoint, typ) is expected
+
+    def test_generate_unique_application_name(self):
+        # GIVEN a bundle with two applications
+        bundle = sample_bundle_postgresql_k8s_kratos()
+
+        # WHEN generating a unique name for an existing charm
+        name1 = bundle.generate_unique_application_name("kratos")
+        name2 = bundle.generate_unique_application_name("postgresql-k8s")
+        # THEN it should return the name if only one instance exists
+        assert name1 == "kratos"
+        assert name2 == "postgresql-k8s"
+        # WHEN generating for a new charm
+        name3 = bundle.generate_unique_application_name("new-charm")
+        assert name3 == "new-charm"
 
     def test_export(self):
         # GIVEN a bundle
