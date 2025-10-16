@@ -39,7 +39,6 @@ def make_lazy_property(private_name, method):
         if value is _UNINITIALIZED:
             value = method(self)
             object.__setattr__(self, private_name, value)
-            value = getattr(self, private_name)
         return value
 
     return property(prop)
