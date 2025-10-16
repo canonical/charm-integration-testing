@@ -28,6 +28,22 @@ def computed_property(func: Callable) -> Callable:
     return func
 
 
+# Sentinel value for uninitialized computed fields
+_UNINITIALIZED = object()
+
+
+# Create a lazy property that computes its value once
+def make_lazy_property(private_name, method):
+    def prop(self):
+        value = getattr(self, private_name)
+        if value is _UNINITIALIZED:
+            value = method(self)
+            object.__setattr__(self, private_name, value)
+        return value
+
+    return property(prop)
+
+
 # Create an immutable dataclass using frozen=True
 # and defaults slots=True
 def immutable_dataclass(_cls=None, **dataclass_kwargs):
@@ -39,28 +55,15 @@ def immutable_dataclass(_cls=None, **dataclass_kwargs):
                 computed_fields[name] = val
 
         # Create a private slot for each computed field
-        _UNINITIALIZED = object()
         annotations = dict(getattr(cls, "__annotations__", {}))
         for name, method in computed_fields.items():
-            # Use a private slot for the cached value
+            # Modify the class in place to add the private field
             private_name = f"_{name}"
             annotations[private_name] = get_type_hints(cls).get(name, Any)
+            setattr(cls, name, make_lazy_property(private_name, method))
             setattr(cls, private_name, field(init=False, repr=False, hash=False, compare=False, default=_UNINITIALIZED))
 
-            # Replace the method with a property that computes the value once
-            def make_lazy_property(private_name, method):
-                def prop(self):
-                    value = getattr(self, private_name)
-                    if value is _UNINITIALIZED:
-                        value = method(self)
-                        object.__setattr__(self, private_name, value)
-                        value = getattr(self, private_name)
-                    return value
-
-                return property(prop)
-
-            setattr(cls, name, make_lazy_property(private_name, method))
-
+        # Update the class annotations
         cls.__annotations__ = annotations
 
         # Apply dataclass with requested options
