@@ -336,16 +336,18 @@ class CharmhubClient:
         # If error check extra releases for base
         if refresh_info.error and refresh_info.error.code == "revision-not-found":
             # Gather channels with matching base
-            channels = [release.channel for release in refresh_info.error.extra.releases if release.base == base]
+            channels = {release.channel for release in refresh_info.error.extra.releases if release.base == base}
 
-            # Prefer channels with track, move to front
-            channels = sorted(channels, key=lambda channel: "/" not in channel)
+            # Try channels with default track as well
+            channels |= {f"latest/{channel}" for channel in channels if "/" not in channel}
 
-            # If a channel is found, fetch the refresh info for it
-            if len(channels) > 0:
+            # Try calling refresh with each channel
+            for channel in channels:
                 refresh_info = self.http_client.refresh(
-                    RefreshAction(charm_name=charm_name, base=base, charm_channel=channels[0])
+                    RefreshAction(charm_name=charm_name, base=base, charm_channel=channel)
                 )
+                if refresh_info.error is None:
+                    break
 
         # Check refresh info for error
         if refresh_info.error:

@@ -68,7 +68,7 @@ class BundleBuilder:
         charmhub_client: CharmhubClient,
         logger: logging.Logger = logging.getLogger(__name__),
         max_nodes_visited: int | None = None,
-        aggression_limit: int = 200000,
+        aggression_limit: int = 50000,
         aggression_interval: int = 5000,
         avoid_application_dependency_cycles: bool = False,
     ):
