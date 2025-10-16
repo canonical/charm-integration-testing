@@ -347,17 +347,17 @@ jobs:
           echo "junit_xml=$(realpath junit.xml)" >> $GITHUB_OUTPUT
           cat junit.xml
 
-      - name: Post results to Test Observer
+      - name: Post execution metadata to Test Observer
         if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
-        uses: ./.github/actions/test-observer/post-results
+        uses: ./.github/actions/test-observer/post-execution-metadata
         with:
           test_observer_api: ${{ env.test_observer_api }}
           test_execution_id: ${{ inputs.execution_id }}
           junit_xml: ${{ steps.junit_results.outputs.junit_xml }}
 
-      - name: Post execution metadata to Test Observer
+      - name: Post results to Test Observer
         if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
-        uses: ./.github/actions/test-observer/post-execution-metadata
+        uses: ./.github/actions/test-observer/post-results
         with:
           test_observer_api: ${{ env.test_observer_api }}
           test_execution_id: ${{ inputs.execution_id }}
