@@ -1,6 +1,10 @@
 name: Clean up K8s environments
 run-name: "Cleaning up ${{ inputs.environment }} K8s environment"
 
+concurrency:
+  group: ${{ github.workflow }}-${{ inputs.environment }}
+  cancel-in-progress: true
+
 permissions:
   contents: read # only needed for private repos
 
