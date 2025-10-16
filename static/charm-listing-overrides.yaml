@@ -1,6 +1,3 @@
 unlisted_charms:
-  # https://github.com/canonical/prometheus-k8s-operator/issues/707
-  - prometheus-k8s
-  # https://github.com/canonical/tempo-operators/issues/25
-  - tempo-coordinator-k8s
-  - tempo-worker-k8s
+  # https://github.com/canonical/redis-k8s-operator/issues/115
+  - redis-k8s
