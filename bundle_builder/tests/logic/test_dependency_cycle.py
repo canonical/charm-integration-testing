@@ -1,0 +1,316 @@
+# Copyright (C) 2025 Canonical Ltd
+
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+
+from bundle_builder.bundle import Application, ApplicationEndpoint, Bundle, Integration
+from bundle_builder.bundle_builder import BundleBuilder
+from bundle_builder.charm import (
+    ENDPOINT_PROVIDES,
+    ENDPOINT_REQUIRES,
+    Charm,
+    CharmEndpoint,
+    CharmEndpointOptionality,
+)
+
+from .conftest import CharmhubClientStub
+
+
+class TestDependencyCycle:
+    def test_charm_self_loop(self):
+        # GIVEN a charm that provides and requires the same interface
+        provides_and_requires_same_interface_charm = Charm(
+            name="charm-a",
+            channel="stable",
+            revision=1,
+            ubuntu_version="22.04",
+            ubuntu_arch="amd64",
+            endpoints=frozenset(
+                {
+                    CharmEndpoint(
+                        type=ENDPOINT_PROVIDES,
+                        name="interface-provider",
+                        interface="some-interface",
+                        optionality=CharmEndpointOptionality.from_bool(True),
+                        limit=None,
+                    ),
+                    CharmEndpoint(
+                        type=ENDPOINT_REQUIRES,
+                        name="interface-consumer",
+                        interface="some-interface",
+                        optionality=CharmEndpointOptionality.from_bool(False),
+                        limit=None,
+                    ),
+                },
+            ),
+            priority=1.0,
+        )
+        # AND a base bundle with an easy to make cycle
+        bundle = Bundle(
+            applications=frozenset(
+                {
+                    Application(name="application-1", charm=provides_and_requires_same_interface_charm),
+                }
+            ),
+            integrations=frozenset(),
+            platform="machine",
+            arch="amd64",
+        )
+        # AND a bundle builder with a charmhub client that knows about the charm
+        builder = BundleBuilder(CharmhubClientStub(provides_and_requires_same_interface_charm))
+
+        # WHEN we build the bundle
+        new_bundle = builder.build(bundle)
+
+        # THEN the charm should be added once
+        assert len(new_bundle.applications) == 2
+        # AND the integration exists once
+        assert new_bundle.integrations == {
+            Integration(
+                {
+                    ApplicationEndpoint("application-1", "interface-consumer"),
+                    ApplicationEndpoint("charm-a", "interface-provider"),
+                }
+            ),
+        }
+
+    def test_charm_self_loop_provides(self):
+        # GIVEN a charm that provides and requires the same interface
+        provides_and_requires_same_interface_charm = Charm(
+            name="charm-a",
+            channel="stable",
+            revision=1,
+            ubuntu_version="22.04",
+            ubuntu_arch="amd64",
+            endpoints=frozenset(
+                {
+                    CharmEndpoint(
+                        type=ENDPOINT_PROVIDES,
+                        name="interface-provider",
+                        interface="some-interface",
+                        optionality=CharmEndpointOptionality.from_bool(False),
+                        limit=None,
+                    ),
+                    CharmEndpoint(
+                        type=ENDPOINT_REQUIRES,
+                        name="interface-consumer",
+                        interface="some-interface",
+                        optionality=CharmEndpointOptionality.from_bool(True),
+                        limit=None,
+                    ),
+                },
+            ),
+            priority=1.0,
+        )
+        # AND a base bundle with an easy to make cycle
+        bundle = Bundle(
+            applications=frozenset(
+                {
+                    Application(name="application-1", charm=provides_and_requires_same_interface_charm),
+                }
+            ),
+            integrations=frozenset(),
+            platform="machine",
+            arch="amd64",
+        )
+        # AND a bundle builder with a charmhub client that knows about the charm
+        builder = BundleBuilder(CharmhubClientStub(provides_and_requires_same_interface_charm))
+
+        # WHEN we build the bundle
+        new_bundle = builder.build(bundle)
+
+        # THEN the charm should be added once
+        assert len(new_bundle.applications) == 2
+        # AND the integration exists once
+        assert new_bundle.integrations == {
+            Integration(
+                {
+                    ApplicationEndpoint("application-1", "interface-provider"),
+                    ApplicationEndpoint("charm-a", "interface-consumer"),
+                }
+            ),
+        }
+
+    def test_multiple_charms_provided(self):
+        # GIVEN a charm that provides and requires the same interface
+        charm_a = Charm(
+            name="charm-a",
+            channel="stable",
+            revision=1,
+            ubuntu_version="22.04",
+            ubuntu_arch="amd64",
+            endpoints=frozenset(
+                {
+                    CharmEndpoint(
+                        type=ENDPOINT_PROVIDES,
+                        name="interface-provider",
+                        interface="some-interface",
+                        optionality=CharmEndpointOptionality.from_bool(True),
+                        limit=1,
+                    ),
+                    CharmEndpoint(
+                        type=ENDPOINT_REQUIRES,
+                        name="interface-consumer",
+                        interface="some-interface",
+                        optionality=CharmEndpointOptionality.from_bool(False),
+                        limit=1,
+                    ),
+                },
+            ),
+            priority=1.0,
+        )
+        # AND a second charm that only provides the interface
+        charm_b = Charm(
+            name="charm-b",
+            channel="stable",
+            revision=1,
+            ubuntu_version="22.04",
+            ubuntu_arch="amd64",
+            endpoints=frozenset(
+                {
+                    CharmEndpoint(
+                        type=ENDPOINT_PROVIDES,
+                        name="interface-provider",
+                        interface="some-interface",
+                        optionality=CharmEndpointOptionality.from_bool(True),
+                        limit=1,
+                    ),
+                },
+            ),
+            priority=1.0,
+        )
+        # AND a base bundle with several of the recursively dependent charms
+        bundle = Bundle(
+            applications=frozenset(
+                {
+                    Application(name="application-1", charm=charm_a),
+                    Application(name="application-2", charm=charm_a),
+                    Application(name="application-3", charm=charm_a),
+                }
+            ),
+            integrations=frozenset(),
+            platform="machine",
+            arch="amd64",
+        )
+        # AND a bundle builder with a charmhub client that knows about the charms
+        builder = BundleBuilder(CharmhubClientStub(charm_a, charm_b))
+
+        # WHEN we build the bundle
+        new_bundle = builder.build(bundle)
+
+        # THEN the three applications should be integrated in a chain
+        assert {
+            ApplicationEndpoint("application-1", "interface-consumer"),
+            ApplicationEndpoint("application-2", "interface-consumer"),
+            ApplicationEndpoint("application-3", "interface-consumer"),
+        } <= {endpoint for integration in new_bundle.integrations for endpoint in integration}
+        # AND the providing charm provides the integration
+        assert ApplicationEndpoint("charm-b", "interface-provider") in {
+            endpoint for integration in new_bundle.integrations for endpoint in integration
+        }
+
+    def test_multiple_charms_dependency_chain(self):
+        # GIVEN a charm that provides and requires some interface
+        charm_a = Charm(
+            name="charm-a",
+            channel="stable",
+            revision=1,
+            ubuntu_version="22.04",
+            ubuntu_arch="amd64",
+            endpoints=frozenset(
+                {
+                    CharmEndpoint(
+                        type=ENDPOINT_PROVIDES,
+                        name="interface-provider",
+                        interface="some-interface-1",
+                        optionality=CharmEndpointOptionality.from_bool(True),
+                        limit=1,
+                    ),
+                    CharmEndpoint(
+                        type=ENDPOINT_REQUIRES,
+                        name="interface-consumer",
+                        interface="some-interface-2",
+                        optionality=CharmEndpointOptionality.from_bool(False),
+                        limit=1,
+                    ),
+                },
+            ),
+            priority=1.0,
+        )
+        # AND a second charm that provides and requires the opposite interfaces
+        charm_b = Charm(
+            name="charm-b",
+            channel="stable",
+            revision=1,
+            ubuntu_version="22.04",
+            ubuntu_arch="amd64",
+            endpoints=frozenset(
+                {
+                    CharmEndpoint(
+                        type=ENDPOINT_PROVIDES,
+                        name="interface-provider",
+                        interface="some-interface-2",
+                        optionality=CharmEndpointOptionality.from_bool(True),
+                        limit=1,
+                    ),
+                    CharmEndpoint(
+                        type=ENDPOINT_REQUIRES,
+                        name="interface-consumer",
+                        interface="some-interface-1",
+                        optionality=CharmEndpointOptionality.from_bool(False),
+                        limit=1,
+                    ),
+                },
+            ),
+            priority=1.0,
+        )
+        # AND a base bundle with a charm
+        bundle = Bundle(
+            applications=frozenset(
+                {
+                    Application(name="application-1", charm=charm_a),
+                }
+            ),
+            integrations=frozenset(),
+            platform="machine",
+            arch="amd64",
+        )
+        # AND a bundle builder with a charmhub client that knows about the charms
+        builder = BundleBuilder(CharmhubClientStub(charm_a, charm_b), avoid_application_dependency_cycles=True)
+
+        # WHEN we build the bundle
+        new_bundle = builder.build(bundle)
+
+        # THEN the given charm should be integrated with the second charm
+        assert (
+            Integration(
+                {
+                    ApplicationEndpoint("application-1", "interface-consumer"),
+                    ApplicationEndpoint("charm-b", "interface-provider"),
+                }
+            )
+            in new_bundle.integrations
+        )
+        # AND the second charm is integrated with another instance of the first charm
+        assert (
+            Integration(
+                {
+                    ApplicationEndpoint("charm-b", "interface-consumer"),
+                    ApplicationEndpoint("charm-a", "interface-provider"),
+                }
+            )
+            in new_bundle.integrations
+        )
+        # AND there are no more integrations
+        assert len(new_bundle.integrations) == 2

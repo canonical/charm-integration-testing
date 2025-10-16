@@ -28,36 +28,28 @@ from .immutable_dataclass import computed_property, immutable_dataclass
 @immutable_dataclass
 class Node:
     bundle: Bundle
-    application_endpoint_to_possible_charm: frozenset[tuple[ApplicationEndpoint, str]]
-    balance: float
+    aggression: float
 
     @computed_property
-    def fulfillable_interfaces(self) -> frozenset[str]:
-        return frozenset(
-            {
-                self.bundle.application_endpoints[application_endpoint].interface
-                for application_endpoint, _ in self.application_endpoint_to_possible_charm
-            }
-        )
+    def score(self):
+        # Prioritize fewer applications, accounting for charm priorities
+        weight_applications = sum(1.0 / app.charm.priority for app in self.bundle.applications)
+        # Prioritize fewer unfulfilled endpoints
+        weight_unfulfilled_endpoints = self.aggression * len(self.bundle.unfulfilled_endpoints)
+        # Prioritize more integrations, scaled by aggression
+        # As aggression increases (expected to be between 0 and 1) the weight of integrations increases
+        # This forces the algorithm to explore deeper (DFS) rather than wider (BFS) into the graph in order to find a solution sooner as aggression is increased
+        weight_integrations = self.aggression * len(self.bundle.integrations) * -1
+        # Sum the weights to get the final score
+        return weight_applications + weight_unfulfilled_endpoints + weight_integrations
 
     @computed_property
-    def score(self) -> float:
-        # balance changes the weight prioritizing number of applications over unfulfilled interfaces
-        # it is expected to be between 0 and 1, where 1 prioritizes the smallest bundle
-        weight = sum(1.0 / app.charm.priority for app in self.bundle.applications)
-        return self.balance * weight + (1.0 - self.balance) * len(self.fulfillable_interfaces)
-
-    @computed_property
-    def fingerprint(self) -> frozenset[str]:
-        return frozenset({app.name for app in self.bundle.applications})
-
-    @computed_property
-    def child_charms(self) -> frozenset[str]:
-        return frozenset({charm_name for _, charm_name in self.application_endpoint_to_possible_charm})
+    def fingerprint(self) -> frozenset[Integration]:
+        return self.bundle.integrations
 
     @computed_property
     def stats(self) -> str:
-        return f"{len(self.bundle.applications)} applications ({len(self.bundle.unfulfilled_interfaces)} unfulfilled, {len(self.fulfillable_interfaces)} fulfillable interfaces, and {len(self.bundle.saturated_endpoints)} saturated endpoints)"
+        return f"{len(self.bundle.applications)} applications ({len(self.bundle.unfulfilled_endpoints)} unfulfilled endpoints, {len(self.bundle.saturated_endpoints)} saturated endpoints)"
 
     def __lt__(self, other):
         return self.score < other.score
@@ -66,27 +58,46 @@ class Node:
 class BundleBuilder:
     charmhub_client: CharmhubClient
     logger: logging.Logger
-    max_nodes_visited: int = 50000
-    rebalance_interval: int = 1000
-    max_same_charm_instances: int = 3  # Limit instances of the same charm to prevent cycles
+    max_nodes_visited: int | None
+    aggression_limit: int
+    aggression_interval: int
+    avoid_application_dependency_cycles: bool
 
-    def __init__(self, charmhub_client: CharmhubClient, logger=logging.getLogger(__name__)):
+    def __init__(
+        self,
+        charmhub_client: CharmhubClient,
+        logger: logging.Logger = logging.getLogger(__name__),
+        max_nodes_visited: int | None = None,
+        aggression_limit: int = 50000,
+        aggression_interval: int = 5000,
+        avoid_application_dependency_cycles: bool = False,
+    ):
         self.charmhub_client = charmhub_client
         self.logger = logger
+        self.max_nodes_visited = max_nodes_visited
+        self.aggression_limit = aggression_limit
+        self.aggression_interval = aggression_interval
+        self.avoid_application_dependency_cycles = avoid_application_dependency_cycles
 
     # Build out the bundle, pulling in charms that fulfill non-optional hanging required integrations
     def build(self, base: Bundle) -> Bundle:
         # This follows a rough uniform cost algorithm
-        queued_nodes = [self.new_node(base)]
+        queued_nodes = [
+            Node(
+                bundle=base,
+                aggression=0.0,
+            )
+        ]
         best_node = queued_nodes[0]
         known_nodes = {best_node.fingerprint}
         self.logger.info(f"Starting with bundle: {best_node.stats}")
         while len(queued_nodes) > 0:
             # Rebalance node scores
             num_visited_nodes = len(known_nodes) - len(queued_nodes)
-            if num_visited_nodes % self.rebalance_interval == 0:
-                balance = max((self.max_nodes_visited - num_visited_nodes) / self.max_nodes_visited, 0)
-                queued_nodes = [dataclasses.replace(node, balance=balance) for node in queued_nodes]
+            if num_visited_nodes % self.aggression_interval == 0 and num_visited_nodes <= self.aggression_limit:
+                aggression = 1.0 - max((self.aggression_limit - num_visited_nodes) / self.aggression_limit, 0.0)
+                best_node = dataclasses.replace(best_node, aggression=aggression)
+                queued_nodes = [dataclasses.replace(node, aggression=aggression) for node in queued_nodes]
                 heapq.heapify(queued_nodes)
 
             # Get node with with the best score from the sorted queue
@@ -95,166 +106,202 @@ class BundleBuilder:
                 f"Checking bundle: {node.stats}, visited nodes: {num_visited_nodes}, queued nodes: {len(queued_nodes)}"
             )
 
-            # If there are no fulfillable interfaces quit now
-            # We could exhaustively search the graph but that comes at the cost of compute
-            if len(node.fulfillable_interfaces) == 0:
-                self.logger.info("Bundle has no more fulfillable interfaces, stopping")
+            # If this is the best node we've seen note it
+            if node < best_node:
+                self.logger.info(f"New best bundle: {node.stats}")
+                best_node = node
+
+            # If we've reached the maximum number of visited nodes stop
+            if self.max_nodes_visited is not None and num_visited_nodes >= self.max_nodes_visited:
+                self.logger.info("Reached maximum number of visited nodes, stopping")
+                break
+
+            # Get the child nodes
+            child_nodes = self.child_nodes(node)
+
+            # If there are no child nodes quit now
+            # No more child nodes means no further integrations can be added
+            if len(child_nodes) == 0:
+                self.logger.info("Node has no more child nodes, stopping")
                 best_node = node
                 break
 
             # Add this node's children to the sorted queue
-            for child_node in self.child_nodes(node):
-                if child_node.fingerprint not in known_nodes:
-                    known_nodes.add(child_node.fingerprint)
-                    heapq.heappush(queued_nodes, child_node)
+            for child_node in child_nodes:
+                if child_node.fingerprint in known_nodes:
+                    continue
+                known_nodes.add(child_node.fingerprint)
+                heapq.heappush(queued_nodes, child_node)
 
         # Note unresolved endpoints
         for application_endpoint in best_node.bundle.unfulfilled_endpoints:
             self.logger.warning(f"Cannot resolve application endpoint: {application_endpoint}")
 
-        # Return best node
+        # Return best node bundle
         return best_node.bundle
 
-    def add_missing_integrations(self, bundle: Bundle) -> Bundle:
-        # Start over whenever a new integration is added
-        while True:
-            start_over = False
+    def child_nodes(self, node: Node) -> set[Node]:
+        # Check each unfulfilled endpoint
+        child_nodes: set[Node] = set()
+        for unfulfilled_application_endpoint in node.bundle.unfulfilled_endpoints:
+            # Get all possible child nodes by integrating with existing_applications
+            child_nodes |= self.child_nodes_existing_applications(node, unfulfilled_application_endpoint)
 
-            # Check all unfulfilled endpoints to see if they are fulfillable
-            for unfulfilled_application_endpoint in bundle.unfulfilled_endpoints:
-                unfulfilled_charm_endpoint = bundle.application_endpoints[unfulfilled_application_endpoint]
+            # Get all possible child nodes by adding and integrating with new applications
+            child_nodes |= self.child_nodes_new_applications(node, unfulfilled_application_endpoint)
 
-                # Check all potential application endpoints to see if they can fulfill the unfulfilled endpoint
-                for possible_application_endpoint, possible_charm_endpoint in bundle.application_endpoints.items():
-                    # Will not integrate with self
-                    if possible_application_endpoint.application == unfulfilled_application_endpoint.application:
-                        continue
-                    # Will not integrate different interfaces
-                    if possible_charm_endpoint.interface != unfulfilled_charm_endpoint.interface:
-                        continue
-                    # Will not integrate wrong endpoint types
-                    if not (
-                        (
-                            possible_charm_endpoint.type == ENDPOINT_REQUIRES
-                            and unfulfilled_charm_endpoint.type == ENDPOINT_PROVIDES
-                        )
-                        or (
-                            possible_charm_endpoint.type == ENDPOINT_PROVIDES
-                            and unfulfilled_charm_endpoint.type == ENDPOINT_REQUIRES
-                        )
-                    ):
-                        continue
+        return child_nodes
 
-                    # Check endpoint limits
-                    if not self._can_add_integration_within_charm_limits(
-                        bundle, possible_application_endpoint, unfulfilled_application_endpoint
-                    ):
-                        continue
+    def child_nodes_existing_applications(
+        self, node: Node, unfulfilled_application_endpoint: ApplicationEndpoint
+    ) -> set[Node]:
+        # Check all potential application endpoints to see if they can fulfill the unfulfilled endpoint
+        child_nodes: set[Node] = set()
+        for possible_application_endpoint in node.bundle.application_endpoints:
+            # Get charm endpoints
+            unfulfilled_charm_endpoint = node.bundle.application_endpoints[unfulfilled_application_endpoint]
+            possible_charm_endpoint = node.bundle.application_endpoints[possible_application_endpoint]
 
-                    # Integration is good, add and start again
-                    bundle = Bundle(
-                        applications=bundle.applications,
-                        integrations=frozenset(
-                            bundle.integrations
-                            | {Integration({unfulfilled_application_endpoint, possible_application_endpoint})}
-                        ),
-                        platform=bundle.platform,
-                        arch=bundle.arch,
-                    )
+            # Will not integrate same application
+            if possible_application_endpoint.application == unfulfilled_application_endpoint.application:
+                continue
 
-                    # Start over with new bundle
-                    start_over = True
-                    break
+            # Will not integrate different interfaces
+            if possible_charm_endpoint.interface != unfulfilled_charm_endpoint.interface:
+                continue
 
-                # Start again
-                if start_over:
-                    break
-            else:
-                # No more integrations can be fulfilled
-                return bundle
-
-    def _can_add_integration_within_charm_limits(
-        self, bundle: Bundle, endpoint1: ApplicationEndpoint, endpoint2: ApplicationEndpoint
-    ) -> bool:
-        """Check if adding an integration between two endpoints would exceed any limits."""
-
-        return not (endpoint1 in bundle.saturated_endpoints or endpoint2 in bundle.saturated_endpoints)
-
-    def _would_exceed_charm_instance_limit(self, bundle: Bundle, charm_name: str) -> bool:
-        """Check if adding another instance of a charm would exceed the limit."""
-        existing_count = len(bundle.get_application_names_for_charm(charm_name))
-        return existing_count >= self.max_same_charm_instances
-
-    # Return a new node, including the possible child charms
-    def new_node(self, bundle: Bundle, balance: float = 1.0) -> Node:
-        # Ensure all possible integrations are fulfilled by the bundle
-        bundle = self.add_missing_integrations(bundle)
-
-        # Get all possible fulfillments for unfulfilled endpoints
-        application_endpoint_to_possible_charm = set()
-        for application_endpoint in bundle.unfulfilled_endpoints:
-            # Get the charm endpoint
-            charm_endpoint = bundle.application_endpoints[application_endpoint]
-
-            # Find fulfilling charms
-            fulfilling_charms = set()
-            if charm_endpoint.type == ENDPOINT_REQUIRES:
-                fulfilling_charms = self.charmhub_client.find_charms(
-                    provides=charm_endpoint.interface, platform=bundle.platform
+            # Will not integrate wrong endpoint types
+            if not (
+                (
+                    possible_charm_endpoint.type == ENDPOINT_REQUIRES
+                    and unfulfilled_charm_endpoint.type == ENDPOINT_PROVIDES
                 )
-            if charm_endpoint.type == ENDPOINT_PROVIDES:
-                fulfilling_charms = self.charmhub_client.find_charms(
-                    requires=charm_endpoint.interface, platform=bundle.platform
+                or (
+                    possible_charm_endpoint.type == ENDPOINT_PROVIDES
+                    and unfulfilled_charm_endpoint.type == ENDPOINT_REQUIRES
                 )
+            ):
+                continue
 
-            # Filter out charms that would exceed instance limit to prevent cycles
-            filtered_charms = {
-                charm for charm in fulfilling_charms if not self._would_exceed_charm_instance_limit(bundle, charm)
-            }
+            # Will not integrate if it exceeds limit
+            if possible_application_endpoint in node.bundle.saturated_endpoints:
+                continue
 
-            # Save mappings
-            application_endpoint_to_possible_charm |= {(application_endpoint, charm) for charm in filtered_charms}
+            # Will not integrate applications that would create a cycle
+            if self.avoid_application_dependency_cycles:
+                if unfulfilled_charm_endpoint.type == ENDPOINT_REQUIRES:
+                    requiring_application = unfulfilled_application_endpoint.application
+                    providing_application = possible_application_endpoint.application
+                else:
+                    requiring_application = possible_application_endpoint.application
+                    providing_application = unfulfilled_application_endpoint.application
+                if node.bundle.has_application_dependency(providing_application, requiring_application):
+                    continue
 
-        # Return node
-        return Node(
-            bundle=bundle,
-            application_endpoint_to_possible_charm=frozenset(application_endpoint_to_possible_charm),
-            balance=balance,
-        )
+            # Will not integrate if it creates a recursive dependency chain
+            if node.bundle.has_endpoint_dependency(
+                unfulfilled_application_endpoint.application,
+                node.bundle.application_lookup[possible_application_endpoint.application].charm.name,
+                possible_charm_endpoint.name,
+                possible_charm_endpoint.type,
+            ):
+                continue
 
-    # Each child node is the addition of an application to the bundle that fulfills a
-    # missing non-optional required endpoint
-    def child_nodes(self, node: Node) -> frozenset[Node]:
-        # Get the default release for all the child charms
-        child_charms = {
-            self.charmhub_client.charm_from_store(charm_name=charm_name, ubuntu_arch=node.bundle.arch)
-            for charm_name in node.child_charms
-        }
-
-        # Create a child node for each child charm
-        return frozenset(
-            {
-                self.new_node(
-                    bundle=Bundle(
-                        applications=frozenset(
-                            node.bundle.applications
-                            | {
-                                Application(
-                                    name=node.bundle.generate_unique_application_name(charm.name),
-                                    charm=charm,
-                                    config=self.random_test_config(charm),
-                                )
-                            }
-                        ),
-                        integrations=node.bundle.integrations,
-                        platform=node.bundle.platform,
-                        arch=node.bundle.arch,
+            # Add this as a child node
+            child_nodes.add(
+                Node(
+                    bundle=dataclasses.replace(
+                        node.bundle,
+                        integrations=node.bundle.integrations
+                        | {Integration({possible_application_endpoint, unfulfilled_application_endpoint})},
                     ),
-                    balance=node.balance,
+                    aggression=node.aggression,
                 )
-                for charm in child_charms
-            }
-        )
+            )
+
+        return child_nodes
+
+    def child_nodes_new_applications(
+        self, node: Node, unfulfilled_application_endpoint: ApplicationEndpoint
+    ) -> set[Node]:
+        # Get the charm endpoint
+        unfulfilled_charm_endpoint = node.bundle.application_endpoints[unfulfilled_application_endpoint]
+
+        # Find fulfilling charms
+        fulfilling_charms: set[str] = set()
+        if unfulfilled_charm_endpoint.type == ENDPOINT_REQUIRES:
+            fulfilling_charms |= self.charmhub_client.find_charms(
+                provides=unfulfilled_charm_endpoint.interface, platform=node.bundle.platform
+            )
+        if unfulfilled_charm_endpoint.type == ENDPOINT_PROVIDES:
+            fulfilling_charms |= self.charmhub_client.find_charms(
+                requires=unfulfilled_charm_endpoint.interface, platform=node.bundle.platform
+            )
+
+        # Check each fulfilling charm to see if it can integrate
+        child_nodes: set[Node] = set()
+        for charm_name in fulfilling_charms:
+            # Get the default charm release
+            charm = self.charmhub_client.charm_from_store(charm_name=charm_name, ubuntu_arch=node.bundle.arch)
+
+            # Create the application
+            application = Application(
+                name=node.bundle.generate_unique_application_name(charm_name),
+                charm=charm,
+                config=self.random_test_config(charm),
+            )
+
+            # Check each endpoint on the charm to see if it can fulfill the unfulfilled endpoint
+            for possible_charm_endpoint in application.charm.endpoints:
+                # Will not integrate different interfaces
+                if possible_charm_endpoint.interface != unfulfilled_charm_endpoint.interface:
+                    continue
+
+                # Will not integrate wrong endpoint types
+                if not (
+                    (
+                        possible_charm_endpoint.type == ENDPOINT_REQUIRES
+                        and unfulfilled_charm_endpoint.type == ENDPOINT_PROVIDES
+                    )
+                    or (
+                        possible_charm_endpoint.type == ENDPOINT_PROVIDES
+                        and unfulfilled_charm_endpoint.type == ENDPOINT_REQUIRES
+                    )
+                ):
+                    continue
+
+                # Will not integrate if it creates a recursive dependency chain
+                if node.bundle.has_endpoint_dependency(
+                    unfulfilled_application_endpoint.application,
+                    charm_name,
+                    possible_charm_endpoint.name,
+                    possible_charm_endpoint.type,
+                ):
+                    continue
+
+                # Add as a valid child node
+                child_nodes.add(
+                    Node(
+                        bundle=dataclasses.replace(
+                            node.bundle,
+                            applications=node.bundle.applications | {application},
+                            integrations=node.bundle.integrations
+                            | {
+                                Integration(
+                                    {
+                                        unfulfilled_application_endpoint,
+                                        ApplicationEndpoint(
+                                            application=application.name, endpoint=possible_charm_endpoint.name
+                                        ),
+                                    }
+                                )
+                            },
+                        ),
+                        aggression=node.aggression,
+                    )
+                )
+
+        return child_nodes
 
     @staticmethod
     def random_test_config(charm) -> CharmConfig:
