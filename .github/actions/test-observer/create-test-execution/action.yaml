@@ -90,6 +90,7 @@ runs:
         request_body: "@${{ steps.request-body.outputs.file }}"
 
     - name: Read response
+      id: read-response
       shell: bash
       env:
         response_file: "${{ steps.call-api.outputs.response_file }}"
