@@ -5,7 +5,9 @@ inputs:
   test_observer_api:
     description: "URL for the Test Observer API"
     required: True
-
+  test_observer_token:
+    description: "Bearer token to send as Authorization header"
+    required: True
   test_execution_id:
     description: "ID for the Test Execution"
     required: True
@@ -36,8 +38,8 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - id: get-json-body
-      name: Get Test Observer JSON
+    - name: Get Test Observer JSON
+      id: request-body
       shell: bash
       env:
         status: ${{ inputs.status }}
@@ -52,16 +54,13 @@ runs:
             "ci_link": (if $ci_link != "null" then $ci_link else null end)
           } | with_entries(select(.value != null))
         ' > body.json
-        cat body.json
+        echo "file=$(realpath body.json)" >> "$GITHUB_OUTPUT"
 
-    - name: Send PATCH request to Test Observer
-      shell: bash
-      env:
-        test_observer_api: ${{ inputs.test_observer_api }}
-        test_execution_id: ${{ inputs.test_execution_id }}
-      run: |
-        curl --fail-with-body \
-          --retry 10 \
-          -X PATCH "${test_observer_api}/v1/test-executions/${test_execution_id}" \
-          -H "Content-Type: application/json" \
-          -d @body.json
+    - name: Send request to Test Observer
+      uses: ./.github/actions/test-observer/call-api
+      id: call-api
+      with:
+        test_observer_api: "${{ inputs.test_observer_api }}/v1/test-executions/${{ inputs.test_execution_id }}"
+        test_observer_token: "${{ inputs.test_observer_token }}"
+        method_type: "PATCH"
+        request_body: "@${{ steps.request-body.outputs.file }}"

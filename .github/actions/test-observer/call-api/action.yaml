@@ -1,0 +1,51 @@
+name: Call Test Observer API
+description: Call the Test Observer API
+
+inputs:
+  test_observer_api:
+    description: "URL for the Test Observer API"
+    required: True
+  test_observer_token:
+    description: "Bearer token to send as Authorization header"
+    required: True
+  method_type:
+    description: "HTTP method to use (e.g., GET, POST)"
+    required: True
+  request_body:
+    description: "Request body"
+    required: False
+
+outputs:
+  response_file:
+    description: "Path to the response file written by the action"
+    value: ${{ steps.call-api.outputs.response_file }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Send request to Test Observer API
+      id: call-api
+      shell: bash
+      env:
+        test_observer_api: ${{ inputs.test_observer_api }}
+        test_observer_token: ${{ inputs.test_observer_token }}
+        method_type: ${{ inputs.method_type }}
+        request_body: ${{ inputs.request_body }}
+      run: |
+        # Build curl arguments
+        curl_args=( --fail-with-body )
+        curl_args+=( --retry-all-errors )
+        curl_args+=( --retry 10 )
+        curl_args+=( --retry-delay 5 )
+        curl_args+=( -X "${method_type}" )
+        curl_args+=( "${test_observer_api}" )
+        curl_args+=( -H "Authorization: Bearer ${test_observer_token}" )
+        curl_args+=( -o response_file )
+        curl_args+=( -H "Content-Type: application/json" )
+        curl_args+=( -d "${request_body}" )
+
+        # Execute curl with constructed args
+        curl "${curl_args[@]}"
+
+        # Record response file path as a step output
+        echo "response_file=$(realpath response_file)" >> "$GITHUB_OUTPUT"
