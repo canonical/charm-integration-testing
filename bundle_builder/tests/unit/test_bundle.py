@@ -201,7 +201,7 @@ def sample_bundle_postgresql_k8s_kratos() -> Bundle:
             {
                 Integration(
                     {
-                        ApplicationEndpoint("target", "database"),
+                        ApplicationEndpoint("target", sample_charm_endpoint_postgresql_k8s_database().name),
                         ApplicationEndpoint("neighbor", sample_charm_endpoint_kratos_pg_database().name),
                     }
                 )
@@ -213,6 +213,177 @@ def sample_bundle_postgresql_k8s_kratos() -> Bundle:
 
 
 class TestBundle:
+    class TestValidate:
+        @dataclass
+        class Params:
+            label: str
+            bundle: Bundle
+            should_raise: bool
+            match: str | None = None
+
+        test_cases = [
+            Params(
+                label="valid_bundle",
+                bundle=sample_bundle_postgresql_k8s_kratos(),
+                should_raise=False,
+            ),
+            Params(
+                label="duplicate_application_names",
+                bundle=dataclasses.replace(
+                    sample_bundle_postgresql_k8s_kratos(),
+                    applications=frozenset(
+                        {
+                            Application(name="dup", charm=sample_charm_kratos()),
+                            Application(name="dup", charm=sample_charm_postgresql_k8s()),
+                        }
+                    ),
+                ),
+                should_raise=True,
+                match="Application names must be unique",
+            ),
+            Params(
+                label="more_than_two_endpoints_in_integration",
+                bundle=dataclasses.replace(
+                    sample_bundle_postgresql_k8s_kratos(),
+                    integrations=frozenset(
+                        {
+                            Integration(
+                                {
+                                    ApplicationEndpoint("target", sample_charm_endpoint_postgresql_k8s_database().name),
+                                    ApplicationEndpoint("neighbor", sample_charm_endpoint_kratos_pg_database().name),
+                                    ApplicationEndpoint(
+                                        "target", sample_charm_endpoint_postgresql_k8s_certificates().name
+                                    ),
+                                }
+                            )
+                        }
+                    ),
+                ),
+                should_raise=True,
+                match="connect exactly two endpoints",
+            ),
+            Params(
+                label="unknown_application_in_integration",
+                bundle=dataclasses.replace(
+                    sample_bundle_postgresql_k8s_kratos(),
+                    integrations=frozenset(
+                        {
+                            Integration(
+                                {
+                                    ApplicationEndpoint("target", sample_charm_endpoint_postgresql_k8s_database().name),
+                                    ApplicationEndpoint("unknown", sample_charm_endpoint_kratos_pg_database().name),
+                                }
+                            )
+                        }
+                    ),
+                ),
+                should_raise=True,
+                match="Integration references unknown endpoint",
+            ),
+            Params(
+                label="unknown_endpoint_in_integration",
+                bundle=dataclasses.replace(
+                    sample_bundle_postgresql_k8s_kratos(),
+                    integrations=frozenset(
+                        {
+                            Integration(
+                                {
+                                    ApplicationEndpoint("target", sample_charm_endpoint_postgresql_k8s_database().name),
+                                    ApplicationEndpoint("neighbor", "unknown"),
+                                }
+                            )
+                        }
+                    ),
+                ),
+                should_raise=True,
+                match="Integration references unknown endpoint",
+            ),
+            Params(
+                label="different_interface_types_in_integration",
+                bundle=dataclasses.replace(
+                    sample_bundle_postgresql_k8s_kratos(),
+                    applications=frozenset(
+                        {
+                            Application(
+                                name="app1",
+                                charm=sample_charm_kratos(),
+                            ),
+                            Application(
+                                name="app2",
+                                charm=sample_charm_kratos(),
+                            ),
+                        }
+                    ),
+                    integrations=frozenset(
+                        {
+                            Integration(
+                                {
+                                    ApplicationEndpoint("app1", sample_charm_endpoint_kratos_pg_database().name),
+                                    ApplicationEndpoint("app2", sample_charm_endpoint_kratos_pg_database().name),
+                                }
+                            )
+                        }
+                    ),
+                ),
+                should_raise=True,
+                match="Incompatible endpoint types in integration",
+            ),
+            Params(
+                label="endpoint_limit_exceeded",
+                bundle=dataclasses.replace(
+                    sample_bundle_postgresql_k8s_kratos(),
+                    applications=frozenset(
+                        {
+                            Application(
+                                name="db",
+                                charm=dataclasses.replace(
+                                    sample_charm_postgresql_k8s(),
+                                    endpoints=frozenset(
+                                        {dataclasses.replace(sample_charm_endpoint_postgresql_k8s_database(), limit=1)}
+                                    ),
+                                ),
+                            ),
+                            Application(
+                                name="app1",
+                                charm=sample_charm_kratos(),
+                            ),
+                            Application(
+                                name="app2",
+                                charm=sample_charm_kratos(),
+                            ),
+                        }
+                    ),
+                    integrations=frozenset(
+                        {
+                            Integration(
+                                {
+                                    ApplicationEndpoint("db", sample_charm_endpoint_postgresql_k8s_database().name),
+                                    ApplicationEndpoint("app1", sample_charm_endpoint_kratos_pg_database().name),
+                                }
+                            ),
+                            Integration(
+                                {
+                                    ApplicationEndpoint("db", sample_charm_endpoint_postgresql_k8s_database().name),
+                                    ApplicationEndpoint("app2", sample_charm_endpoint_kratos_pg_database().name),
+                                }
+                            ),
+                        }
+                    ),
+                ),
+                should_raise=True,
+                match="exceeding its limit",
+            ),
+        ]
+
+        @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
+        def test_validate(self, params: Params):
+            if params.should_raise:
+                with pytest.raises(ValueError, match=params.match if params.match else ""):
+                    params.bundle.validate()
+            else:
+                # should not raise
+                params.bundle.validate()
+
     def test_application_endpoints(self):
         # GIVEN a bundle
         bundle = sample_bundle_postgresql_k8s_kratos()

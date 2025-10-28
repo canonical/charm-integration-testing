@@ -210,6 +210,9 @@ def main():
         arch=args.arch,
     )
 
+    # Validate the base bundle
+    base_bundle.validate()
+
     # Build the bundle
     built_bundle = BundleBuilder(charmhub_client=charmhub_client, logger=logger).build(base_bundle)
     logger.info(f"Generated bundle: \n{'-' * 80}\n{built_bundle.export()}{'-' * 80}")
