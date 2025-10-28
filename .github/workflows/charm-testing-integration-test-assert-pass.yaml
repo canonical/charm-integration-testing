@@ -24,6 +24,9 @@ on:
       neighbor_endpoint:
         type: string
         required: true
+    secrets:
+      STG_TEST_OBSERVER_TOKEN:
+        required: true
 
 jobs:
   run-charm-tests-and-assert-pass:
@@ -44,7 +47,7 @@ jobs:
         uses: ./.github/actions/test-observer/create-test-execution
         with:
           test_observer_api: ${{ vars.STG_TEST_OBSERVER_API }}
-          test_observer_token: ${{ vars.STG_TEST_OBSERVER_TOKEN }}
+          test_observer_token: ${{ secrets.STG_TEST_OBSERVER_TOKEN }}
           charm: ${{ inputs.target_charm }}
           revision: ${{ inputs.target_revision }}
           arch: "charm-testing-integration-test-assert-pass-arch"
@@ -92,7 +95,7 @@ jobs:
         uses: ./.github/actions/test-observer/get-test-execution
         with:
           test_observer_api: ${{ vars.STG_TEST_OBSERVER_API }}
-          test_observer_token: ${{ vars.STG_TEST_OBSERVER_TOKEN }}
+          test_observer_token: ${{ secrets.STG_TEST_OBSERVER_TOKEN }}
           test_execution_id: ${{ steps.create-test-execution.outputs.test_execution_id }}
 
       - name: Ensure Test Execution Passed

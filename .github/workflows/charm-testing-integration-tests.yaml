@@ -30,3 +30,5 @@ jobs:
       target_base: ${{ matrix.params.target_base }}
       neighbor_charm: ${{ matrix.params.neighbor_charm }}
       neighbor_endpoint: ${{ matrix.params.neighbor_endpoint }}
+    secrets:
+      STG_TEST_OBSERVER_TOKEN: ${{ secrets.STG_TEST_OBSERVER_TOKEN }}
