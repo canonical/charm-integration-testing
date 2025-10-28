@@ -221,7 +221,7 @@ class JujuCmdBackend(JujuBackend):
 
     def deploy_bundle_file(self, model: str, bundle: str):
         if not os.path.isfile(bundle):
-            raise ValueError("Bundle file not found.")
+            raise ValueError(f"Bundle file '{bundle}' not found.")
         self._call_juju(
             CmdArg(value="deploy"),
             CmdArg(name="model", value=model),
