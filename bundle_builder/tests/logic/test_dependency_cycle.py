@@ -60,7 +60,7 @@ class TestDependencyCycle:
         bundle = Bundle(
             applications=frozenset(
                 {
-                    Application(name="application-1", charm=provides_and_requires_same_interface_charm),
+                    Application(name="application-a", charm=provides_and_requires_same_interface_charm),
                 }
             ),
             integrations=frozenset(),
@@ -79,7 +79,7 @@ class TestDependencyCycle:
         assert new_bundle.integrations == {
             Integration(
                 {
-                    ApplicationEndpoint("application-1", "interface-consumer"),
+                    ApplicationEndpoint("application-a", "interface-consumer"),
                     ApplicationEndpoint("charm-a", "interface-provider"),
                 }
             ),
@@ -117,7 +117,7 @@ class TestDependencyCycle:
         bundle = Bundle(
             applications=frozenset(
                 {
-                    Application(name="application-1", charm=provides_and_requires_same_interface_charm),
+                    Application(name="application-a", charm=provides_and_requires_same_interface_charm),
                 }
             ),
             integrations=frozenset(),
@@ -136,7 +136,7 @@ class TestDependencyCycle:
         assert new_bundle.integrations == {
             Integration(
                 {
-                    ApplicationEndpoint("application-1", "interface-provider"),
+                    ApplicationEndpoint("application-a", "interface-provider"),
                     ApplicationEndpoint("charm-a", "interface-consumer"),
                 }
             ),
@@ -194,9 +194,9 @@ class TestDependencyCycle:
         bundle = Bundle(
             applications=frozenset(
                 {
-                    Application(name="application-1", charm=charm_a),
-                    Application(name="application-2", charm=charm_a),
-                    Application(name="application-3", charm=charm_a),
+                    Application(name="application-a", charm=charm_a),
+                    Application(name="application-b", charm=charm_a),
+                    Application(name="application-c", charm=charm_a),
                 }
             ),
             integrations=frozenset(),
@@ -211,9 +211,9 @@ class TestDependencyCycle:
 
         # THEN the three applications should be integrated in a chain
         assert {
-            ApplicationEndpoint("application-1", "interface-consumer"),
-            ApplicationEndpoint("application-2", "interface-consumer"),
-            ApplicationEndpoint("application-3", "interface-consumer"),
+            ApplicationEndpoint("application-a", "interface-consumer"),
+            ApplicationEndpoint("application-b", "interface-consumer"),
+            ApplicationEndpoint("application-c", "interface-consumer"),
         } <= {endpoint for integration in new_bundle.integrations for endpoint in integration}
         # AND the providing charm provides the integration
         assert ApplicationEndpoint("charm-b", "interface-provider") in {
@@ -233,14 +233,14 @@ class TestDependencyCycle:
                     CharmEndpoint(
                         type=ENDPOINT_PROVIDES,
                         name="interface-provider",
-                        interface="some-interface-1",
+                        interface="some-interface-a",
                         optionality=CharmEndpointOptionality.from_bool(True),
                         limit=1,
                     ),
                     CharmEndpoint(
                         type=ENDPOINT_REQUIRES,
                         name="interface-consumer",
-                        interface="some-interface-2",
+                        interface="some-interface-b",
                         optionality=CharmEndpointOptionality.from_bool(False),
                         limit=1,
                     ),
@@ -260,14 +260,14 @@ class TestDependencyCycle:
                     CharmEndpoint(
                         type=ENDPOINT_PROVIDES,
                         name="interface-provider",
-                        interface="some-interface-2",
+                        interface="some-interface-b",
                         optionality=CharmEndpointOptionality.from_bool(True),
                         limit=1,
                     ),
                     CharmEndpoint(
                         type=ENDPOINT_REQUIRES,
                         name="interface-consumer",
-                        interface="some-interface-1",
+                        interface="some-interface-a",
                         optionality=CharmEndpointOptionality.from_bool(False),
                         limit=1,
                     ),
@@ -279,7 +279,7 @@ class TestDependencyCycle:
         bundle = Bundle(
             applications=frozenset(
                 {
-                    Application(name="application-1", charm=charm_a),
+                    Application(name="application-a", charm=charm_a),
                 }
             ),
             integrations=frozenset(),
@@ -296,7 +296,7 @@ class TestDependencyCycle:
         assert (
             Integration(
                 {
-                    ApplicationEndpoint("application-1", "interface-consumer"),
+                    ApplicationEndpoint("application-a", "interface-consumer"),
                     ApplicationEndpoint("charm-b", "interface-provider"),
                 }
             )
