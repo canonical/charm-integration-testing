@@ -204,12 +204,23 @@ class Bundle:
         if charm_name not in existing_names:
             return charm_name
 
-        # Otherwise, find the next available suffix
-        counter = 2
-        while f"{charm_name}-{counter}" in existing_names:
-            counter += 1
+        # Otherwise, append alphabetic suffixes
+        def _num_to_letters(n: int) -> str:
+            # Convert 1 -> 'a', 2 -> 'b', ..., 26 -> 'z', 27 -> 'aa', etc.
+            letters: list[str] = []
+            while n > 0:
+                n -= 1
+                letters.append(chr(ord("a") + (n % 26)))
+                n //= 26
+            return "".join(reversed(letters))
 
-        return f"{charm_name}-{counter}"
+        counter = 1
+        candidate = f"{charm_name}-{_num_to_letters(counter)}"
+        while candidate in existing_names:
+            counter += 1
+            candidate = f"{charm_name}-{_num_to_letters(counter)}"
+
+        return candidate
 
     def export(self) -> str:
         """Export bundle to yaml string."""
