@@ -211,7 +211,10 @@ def main():
     )
 
     # Validate the base bundle
-    base_bundle.validate()
+    try:
+        base_bundle.validate()
+    except ValueError as e:
+        parser.error(f"Invalid bundle: {e}")
 
     # Build the bundle
     built_bundle = BundleBuilder(charmhub_client=charmhub_client, logger=logger).build(base_bundle)

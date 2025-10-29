@@ -202,7 +202,6 @@ jobs:
 
       - name: Generate dynamic bundles
         id: build_bundle
-        continue-on-error: true
         shell: bash
         env:
           charm_under_test: ${{ inputs.charm_under_test }}
@@ -213,6 +212,8 @@ jobs:
           neighbor_endpoint: ${{ inputs.neighbor_endpoint }}
           substrate: ${{ inputs.substrate }}
         run: |
+          # Run the bundle builder
+          set +e
           ./scripts/build-bundle.sh \
             --charms \
               "target::${charm_under_test}::${revision}::${series}" \
@@ -220,12 +221,23 @@ jobs:
             --integrations "target:${charm_endpoint}::neighbor:${neighbor_endpoint}" \
             --substrate "${substrate}" \
             --output-file generated-bundle.yaml
-          echo "bundle=$(realpath generated-bundle.yaml)" >> $GITHUB_OUTPUT
+          rc=$?
+          set -e
 
-          echo '### Generated Juju Bundle' >> $GITHUB_STEP_SUMMARY
-          echo '```yaml' >> $GITHUB_STEP_SUMMARY
-          cat generated-bundle.yaml >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
+          # Handle the result
+          if [ "$rc" -eq 2 ]; then
+            echo "Bundle generation failed due to invalid input" >&2
+          elif [ "$rc" -ne 0 ]; then
+            echo "Bundle generation failed (exit code $rc)" >&2
+            exit $rc
+          else
+            echo "bundle=$(realpath generated-bundle.yaml)" >> $GITHUB_OUTPUT
+
+            echo '### Generated Juju Bundle' >> $GITHUB_STEP_SUMMARY
+            echo '```yaml' >> $GITHUB_STEP_SUMMARY
+            cat generated-bundle.yaml >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
 
       - name: Post 'test_deploy_start' event
         if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}

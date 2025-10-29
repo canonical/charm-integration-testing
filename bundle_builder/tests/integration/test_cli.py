@@ -82,5 +82,7 @@ def test_cli_invalid_integration(
     except subprocess.CalledProcessError as e:
         # AND the error message indicates the invalid integration
         assert "Incompatible endpoint types in integration" in e.stderr.decode()
+        # AND the return code is 2
+        assert e.returncode == 2
     else:
         raise AssertionError("Expected CalledProcessError was not raised")
