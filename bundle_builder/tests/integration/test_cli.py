@@ -53,6 +53,32 @@ def test_cli_write_output(tmp_path: Path, sample_independent_charm: str, overrid
     assert {application for application in bundle_specs.get("applications", {})} == {sample_independent_charm}
 
 
+def test_cli_unknown_charm():
+    # GIVEN an unknown charm
+    app = "app::unknown::default::default"
+
+    # WHEN the bundle builder is run from cli
+    result = subprocess.run(
+        [
+            "bundle-builder",
+            "--charms",
+            app,
+        ],
+        capture_output=True,
+    )
+
+    # THEN the cli fails
+    try:
+        result.check_returncode()
+    except subprocess.CalledProcessError as e:
+        # AND the error message indicates the unknown charm
+        assert "Charm release not found" in e.stderr.decode()
+        # AND the return code is 2
+        assert e.returncode == 2
+    else:
+        raise AssertionError("Expected CalledProcessError was not raised")
+
+
 def test_cli_invalid_integration(
     sample_independent_charm: str,
     sample_independent_charm_endpoint: str,

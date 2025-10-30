@@ -23,6 +23,7 @@ from pydantic.dataclasses import dataclass
 
 from bundle_builder.bundle import Application, ApplicationEndpoint, Integration
 from bundle_builder.charm import Charm
+from bundle_builder.charmhub_http import CharmReleaseNotFoundException
 from bundle_builder.entrypoint import (
     add_args_to_parser,
     applications_from_args,
@@ -125,8 +126,10 @@ class TestApplicationFromArgs:
         ) -> Charm:
             if charm_name == "postgresql-k8s":
                 charm = sample_charm_postgresql_k8s()
-            else:
+            elif charm_name == "self-signed-certificates":
                 charm = sample_charm_self_signed_certificates()
+            else:
+                raise CharmReleaseNotFoundException(f"Charm release not found: {charm_name}")
 
             return dataclasses.replace(
                 charm,
@@ -187,6 +190,11 @@ class TestApplicationFromArgs:
         Params(
             label="bad_format",
             specs=["bad::format"],
+            fail=True,
+        ),
+        Params(
+            label="unknown_charm",
+            specs=["app::unknown::default::default"],
             fail=True,
         ),
     ]
