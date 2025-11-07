@@ -120,13 +120,7 @@ def applications_from_args(
             parser.error(f"Charm release not found for '{spec}': {e}")
 
         # Add application
-        applications.add(
-            Application(
-                name=name,
-                charm=charm,
-                config=BundleBuilder.random_test_config(charm),
-            )
-        )
+        applications.add(Application(name=name, charm=charm))
     return frozenset(applications)
 
 

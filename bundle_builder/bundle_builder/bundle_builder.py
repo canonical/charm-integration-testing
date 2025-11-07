@@ -133,12 +133,18 @@ class BundleBuilder:
                 known_nodes.add(child_node.fingerprint)
                 heapq.heappush(queued_nodes, child_node)
 
+        # Pick the best bundle
+        best_bundle = best_node.bundle
+
         # Note unresolved endpoints
-        for application_endpoint in best_node.bundle.unfulfilled_endpoints:
+        for application_endpoint in best_bundle.unfulfilled_endpoints:
             self.logger.warning(f"Cannot resolve application endpoint: {application_endpoint}")
 
-        # Return best node bundle
-        return best_node.bundle
+        # Resolve test configs
+        best_bundle = self.add_test_configs(best_bundle)
+
+        # Return best bundle
+        return best_bundle
 
     def child_nodes(self, node: Node) -> set[Node]:
         # Check each unfulfilled endpoint
@@ -248,7 +254,6 @@ class BundleBuilder:
             application = Application(
                 name=node.bundle.generate_unique_application_name(charm_name),
                 charm=charm,
-                config=self.random_test_config(charm),
             )
 
             # Check each endpoint on the charm to see if it can fulfill the unfulfilled endpoint
@@ -304,11 +309,29 @@ class BundleBuilder:
         return child_nodes
 
     @staticmethod
-    def random_test_config(charm) -> CharmConfig:
-        # If there are not test configs defined return empty
-        if len(charm.test_configs) == 0:
-            return CharmConfig()
+    def add_test_configs(bundle: Bundle) -> Bundle:
+        applications: set[Application] = set()
+        for application in bundle.applications:
+            possible_configs: list[CharmConfig] = []
+            integrated_endpoints = {
+                endpoint.endpoint
+                for integration in bundle.integrations
+                for endpoint in integration
+                if endpoint.application == application.name
+            }
+            for test_config in application.charm.test_configs:
+                if test_config.criteria.valid(
+                    channel=application.charm.channel,
+                    integrated_endpoints=integrated_endpoints,
+                ):
+                    possible_configs.append(test_config.config)
 
-        # Pick a random config
-        # This function is not secure in cryptography, but should be fine to use here
-        return random.choice(charm.test_configs)  # nosec B311
+            # If there are not test configs defined return empty
+            if len(possible_configs) == 0:
+                possible_configs = [CharmConfig()]
+
+            # Pick a random config
+            # This function is not secure in cryptography, but should be fine to use here
+            applications.add(dataclasses.replace(application, config=random.choice(possible_configs)))  # nosec B311
+
+        return dataclasses.replace(bundle, applications=frozenset(applications))

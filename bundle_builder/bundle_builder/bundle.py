@@ -285,7 +285,7 @@ class Bundle:
                 "applications": {
                     application.name: {
                         "charm": application.charm.name,
-                        "channel": application.charm.channel,
+                        "channel": str(application.charm.channel),
                         "revision": application.charm.revision,
                         "base": f"ubuntu@{application.charm.ubuntu_version}",
                         scale_key: 1,
