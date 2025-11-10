@@ -68,15 +68,9 @@ def test_cli_unknown_charm():
     )
 
     # THEN the cli fails
-    try:
-        result.check_returncode()
-    except subprocess.CalledProcessError as e:
-        # AND the error message indicates the unknown charm
-        assert "Charm release not found" in e.stderr.decode()
-        # AND the return code is 2
-        assert e.returncode == 2
-    else:
-        raise AssertionError("Expected CalledProcessError was not raised")
+    assert result.returncode == 2
+    # AND the error message indicates the unknown charm
+    assert "Charm release not found" in result.stderr.decode()
 
 
 def test_cli_invalid_integration(
@@ -103,12 +97,6 @@ def test_cli_invalid_integration(
     )
 
     # THEN the cli fails
-    try:
-        result.check_returncode()
-    except subprocess.CalledProcessError as e:
-        # AND the error message indicates the invalid integration
-        assert "Incompatible endpoint types in integration" in e.stderr.decode()
-        # AND the return code is 2
-        assert e.returncode == 2
-    else:
-        raise AssertionError("Expected CalledProcessError was not raised")
+    assert result.returncode == 2
+    # AND the error message indicates the invalid integration
+    assert "Incompatible endpoint types in integration" in result.stderr.decode()
