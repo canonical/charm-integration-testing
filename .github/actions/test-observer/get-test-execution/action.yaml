@@ -28,6 +28,7 @@ runs:
       id: call-api
       # There isn't a way with the TO API to just fetch a test execution's information with an id
       # But submitting an empty PATCH request works
+      # Issue filed: https://github.com/canonical/test_observer/issues/444
       with:
         test_observer_api: "${{ inputs.test_observer_api }}/v1/test-executions/${{ inputs.test_execution_id }}"
         test_observer_token: "${{ inputs.test_observer_token }}"
