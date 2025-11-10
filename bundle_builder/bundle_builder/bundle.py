@@ -57,6 +57,54 @@ class Bundle:
     platform: str
     arch: str
 
+    def validate(self):
+        # Ensure all applications have unique names
+        if len(self.application_lookup) != len(self.applications):
+            raise ValueError("Application names must be unique in the bundle.")
+
+        # Validate integrations
+        for integration in self.integrations:
+            # Ensure integrations connect exactly two endpoints
+            if len(integration) != 2:
+                raise ValueError("Each integration must connect exactly two endpoints.")
+
+            # Ensure all integrations reference valid applications and endpoints
+            for app_endpoint in integration:
+                if app_endpoint not in self.application_endpoints:
+                    raise ValueError(f"Integration references unknown endpoint '{app_endpoint}'")
+
+            # Ensure integration does not connect endpoints with different interfaces
+            ep1, ep2 = list(integration)
+            charm_ep1 = self.application_endpoints[ep1]
+            charm_ep2 = self.application_endpoints[ep2]
+            if charm_ep1.interface != charm_ep2.interface:
+                raise ValueError(
+                    f"Integration connects endpoints with different interfaces: '{ep1}' ({charm_ep1.interface}) "
+                    f"and '{ep2}' ({charm_ep2.interface})"
+                )
+
+            # Ensure integration connects different applications
+            if len({ep.application for ep in integration}) < len(integration):
+                raise ValueError(f"Integration must connect different applications: '{integration}'")
+
+            # Ensure integration connects compatible endpoint types
+            if not (
+                (charm_ep1.type == ENDPOINT_PROVIDES and charm_ep2.type == ENDPOINT_REQUIRES)
+                or (charm_ep1.type == ENDPOINT_REQUIRES and charm_ep2.type == ENDPOINT_PROVIDES)
+            ):
+                raise ValueError(
+                    f"Incompatible endpoint types in integration: '{ep1}' ({charm_ep1.type}) "
+                    f"and '{ep2}' ({charm_ep2.type})"
+                )
+
+        # Ensure endpoints are not integrated more than their limit
+        for endpoint, count in self.endpoint_connection_counts.items():
+            charm_endpoint = self.application_endpoints[endpoint]
+            if charm_endpoint.limit is not None and count > charm_endpoint.limit:
+                raise ValueError(
+                    f"Endpoint '{endpoint}' is connected {count} times, exceeding its limit of {charm_endpoint.limit}"
+                )
+
     @computed_property
     def application_lookup(self) -> dict[str, Application]:
         return {application.name: application for application in self.applications}

@@ -20,7 +20,7 @@ from pathlib import Path
 from .bundle import Application, ApplicationEndpoint, Bundle, Integration
 from .bundle_builder import BundleBuilder
 from .charm import Charm
-from .charmhub import CharmhubClient
+from .charmhub import CharmhubClient, CharmReleaseNotFoundException
 from .overrides import OverridesClient
 
 
@@ -108,13 +108,16 @@ def applications_from_args(
         base = base if base != "default" else None
 
         # Get charm from store
-        charm = charmhub_client.charm_from_store(
-            charm_name=charm,
-            charm_channel=channel,
-            charm_revision=revision,
-            ubuntu_version=base,
-            ubuntu_arch=arch,
-        )
+        try:
+            charm = charmhub_client.charm_from_store(
+                charm_name=charm,
+                charm_channel=channel,
+                charm_revision=revision,
+                ubuntu_version=base,
+                ubuntu_arch=arch,
+            )
+        except CharmReleaseNotFoundException as e:
+            parser.error(f"Charm release not found for '{spec}': {e}")
 
         # Add application
         applications.add(
@@ -209,6 +212,12 @@ def main():
         platform=platform_from_args(parser, args.substrate),
         arch=args.arch,
     )
+
+    # Validate the base bundle
+    try:
+        base_bundle.validate()
+    except ValueError as e:
+        parser.error(f"Invalid bundle: {e}")
 
     # Build the bundle
     built_bundle = BundleBuilder(charmhub_client=charmhub_client, logger=logger).build(base_bundle)

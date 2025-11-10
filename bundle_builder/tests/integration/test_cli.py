@@ -51,3 +51,52 @@ def test_cli_write_output(tmp_path: Path, sample_independent_charm: str, overrid
         bundle_specs = yaml.safe_load(f)
     # AND the bundle contains the expected charms
     assert {application for application in bundle_specs.get("applications", {})} == {sample_independent_charm}
+
+
+def test_cli_unknown_charm():
+    # GIVEN an unknown charm
+    app = "app::unknown::default::default"
+
+    # WHEN the bundle builder is run from cli
+    result = subprocess.run(
+        [
+            "bundle-builder",
+            "--charms",
+            app,
+        ],
+        capture_output=True,
+    )
+
+    # THEN the cli fails
+    assert result.returncode == 2
+    # AND the error message indicates the unknown charm
+    assert "Charm release not found" in result.stderr.decode()
+
+
+def test_cli_invalid_integration(
+    sample_independent_charm: str,
+    sample_independent_charm_endpoint: str,
+):
+    # GIVEN two of the same charm
+    app_1 = f"app1::{sample_independent_charm}::default::default"
+    app_2 = f"app2::{sample_independent_charm}::default::default"
+    # AND an invalid integration between them
+    integration = f"app1:{sample_independent_charm_endpoint}::app2:{sample_independent_charm_endpoint}"
+
+    # WHEN the bundle builder is run from cli
+    result = subprocess.run(
+        [
+            "bundle-builder",
+            "--charms",
+            app_1,
+            app_2,
+            "--integrations",
+            integration,
+        ],
+        capture_output=True,
+    )
+
+    # THEN the cli fails
+    assert result.returncode == 2
+    # AND the error message indicates the invalid integration
+    assert "Incompatible endpoint types in integration" in result.stderr.decode()
