@@ -725,19 +725,76 @@ class TestBundle:
                 app, charm, endpoint, typ, expected = dep_args
                 assert bundle.has_endpoint_dependency(app, charm, endpoint, typ) is expected
 
-    def test_generate_unique_application_name(self):
-        # GIVEN a bundle with two applications
-        bundle = sample_bundle_postgresql_k8s_kratos()
+    class TestGenerateUniqueApplicationName:
+        @dataclass
+        class Params:
+            label: str
+            applications: set[Application]
+            charm: str
+            name: str
 
-        # WHEN generating a unique name for an existing charm
-        name1 = bundle.generate_unique_application_name("kratos")
-        name2 = bundle.generate_unique_application_name("postgresql-k8s")
-        # THEN it should return the name if only one instance exists
-        assert name1 == "kratos"
-        assert name2 == "postgresql-k8s"
-        # WHEN generating for a new charm
-        name3 = bundle.generate_unique_application_name("new-charm")
-        assert name3 == "new-charm"
+        test_cases = [
+            Params(
+                label="charm_does_not_exist",
+                applications=set(),
+                charm="kratos",
+                name="kratos",
+            ),
+            Params(
+                label="instance_of_charm_exists_with_different_name",
+                applications={Application("app", sample_charm_kratos())},
+                charm="kratos",
+                name="kratos",
+            ),
+            Params(
+                label="instance_of_charm_exists",
+                applications={Application("kratos", sample_charm_kratos())},
+                charm="kratos",
+                name="kratos-a",
+            ),
+            Params(
+                label="two_instances_of_charm_exist",
+                applications={
+                    Application("kratos", sample_charm_kratos()),
+                    Application("kratos-a", sample_charm_kratos()),
+                },
+                charm="kratos",
+                name="kratos-b",
+            ),
+            Params(
+                label="two_instances_of_charm_exist_with_skip",
+                applications={
+                    Application("kratos", sample_charm_kratos()),
+                    Application("kratos-b", sample_charm_kratos()),
+                },
+                charm="kratos",
+                name="kratos-a",
+            ),
+            Params(
+                label="over_26_instances_of_charm_exist",
+                applications={
+                    Application("kratos", sample_charm_kratos()),
+                    *{Application(f"kratos-{chr(ord('a') + i)}", sample_charm_kratos()) for i in range(26)},
+                    Application("kratos-aa", sample_charm_kratos()),
+                },
+                charm="kratos",
+                name="kratos-ab",
+            ),
+        ]
+
+        @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
+        def test(self, params: Params):
+            # GIVEN a bundle with the applications
+            bundle = dataclasses.replace(
+                sample_bundle_postgresql_k8s_kratos(),
+                applications=frozenset(params.applications),
+            )
+
+            # WHEN a unique name is generated
+            name = bundle.generate_unique_application_name(params.charm)
+
+            # THEN matches expected
+            assert name == params.name
 
     def test_export(self):
         # GIVEN a bundle

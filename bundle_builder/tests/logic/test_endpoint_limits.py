@@ -295,7 +295,7 @@ class TestEndpointLimits:
             assert "postgresql-k8s" in app_names
             assert "indico" in app_names
             assert "some-dependency-k8s" in app_names
-            assert "postgresql-k8s-2" in app_names  # The second instance!
+            assert "postgresql-k8s-a" in app_names  # The second instance!
 
             # We should have at least 4 applications
             assert len(result.applications) >= 4
@@ -309,7 +309,7 @@ class TestEndpointLimits:
             assert {"some-dependency-k8s:juju-info", "indico:juju-info"} in integration_pairs
 
             # Check that some-dependency-k8s has a database connection to SOME postgresql instance
-            # (could be postgresql-k8s-2, postgresql-k8s-3, etc due to non-deterministic graph exploration)
+            # (could be postgresql-k8s-a, postgresql-k8s-b, etc due to non-deterministic graph exploration)
             dependency_has_db = any(
                 "some-dependency-k8s:database" in str(pair)
                 and any(ep.startswith("postgresql-k8s") and ep.endswith(":database") for ep in pair)
