@@ -43,13 +43,14 @@ class VaultUnsealer:
         self.logger.info(f"Waiting for vault charm '{self.charm.name}' application '{application}' to be scaled")
         self.juju.wait_application_scaled(model, application, timedelta(minutes=10))
 
+        # Skip if no units
+        if self.juju.num_units(model, application) == 0:
+            self.logger.info(f"Vault charm '{self.charm.name}' application '{application}' has no units")
+            return
+
         # Wait for units to settle
         self.logger.info(f"Waiting for vault charm '{self.charm.name}' application '{application}' units to be settled")
         self.juju.wait_application_settled(model, application, timedelta(minutes=10))
-
-        # Skip if no units
-        if self.juju.num_units(model, application) == 0:
-            return
 
         # Try to initialize vault
         self.try_init_vault(model, application)
