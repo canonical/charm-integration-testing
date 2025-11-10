@@ -5,6 +5,9 @@ inputs:
   test_observer_api:
     description: "URL for the Test Observer API"
     required: true
+  test_observer_token:
+    description: "Bearer token to send as Authorization header"
+    required: True
   test_execution_id:
     description: "Test Execution ID"
     required: true
@@ -15,8 +18,8 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - id: get-json-body
-      name: Get Test Observer JSON
+    - name: Get Test Observer JSON
+      id: request-body
       shell: bash
       env:
         job_uuid: ${{ inputs.job_uuid }}
@@ -29,16 +32,13 @@ runs:
             "url": "https://charm.logs.test-observer.canonical.com/\($job_uuid)/index.html"
           }
         ' > body.json
-        cat body.json
+        echo "file=$(realpath body.json)" >> "$GITHUB_OUTPUT"
 
-    - name: Post relevant link to Test Observer
-      shell: bash
-      env:
-        test_observer_api: ${{ inputs.test_observer_api }}
-        test_execution_id: ${{ inputs.test_execution_id }}
-      run: |
-        curl --fail-with-body \
-          --retry 10 \
-          -X POST "${test_observer_api}/v1/test-executions/${test_execution_id}/links" \
-          -H "Content-Type: application/json" \
-          -d @body.json
+    - name: Send request to Test Observer
+      uses: ./.github/actions/test-observer/call-api
+      id: call-api
+      with:
+        test_observer_api: "${{ inputs.test_observer_api }}/v1/test-executions/${{ inputs.test_execution_id }}/links"
+        test_observer_token: "${{ inputs.test_observer_token }}"
+        method_type: "POST"
+        request_body: "@${{ steps.request-body.outputs.file }}"

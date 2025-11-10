@@ -77,6 +77,7 @@ jobs:
       - charm_qa
     env:
       test_observer_api: ${{ inputs.environment == 'production' && vars.PROD_TEST_OBSERVER_API || (inputs.environment == 'staging' && vars.STG_TEST_OBSERVER_API || '') }}
+      test_observer_token: ${{ inputs.environment == 'production' && secrets.PROD_TEST_OBSERVER_TOKEN || (inputs.environment == 'staging' && secrets.STG_TEST_OBSERVER_TOKEN || '') }}
     steps:
       - name: Clone Repo
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -134,6 +135,7 @@ jobs:
         uses: ./.github/actions/test-observer/patch-test-execution
         with:
           test_observer_api: ${{ env.test_observer_api }}
+          test_observer_token: ${{ env.test_observer_token }}
           test_execution_id: ${{ inputs.execution_id }}
           status: "IN_PROGRESS"
           ci_link: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
@@ -143,6 +145,7 @@ jobs:
         uses: ./.github/actions/test-observer/post-events
         with:
           test_observer_api: ${{ env.test_observer_api }}
+          test_observer_token: ${{ env.test_observer_token }}
           test_execution_id: ${{ inputs.execution_id }}
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
           event_name: "job_start"
@@ -231,6 +234,7 @@ jobs:
         uses: ./.github/actions/test-observer/post-events
         with:
           test_observer_api: ${{ env.test_observer_api }}
+          test_observer_token: ${{ env.test_observer_token }}
           test_execution_id: ${{ inputs.execution_id }}
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
           event_name: "test_deploy_start"
@@ -255,6 +259,7 @@ jobs:
         uses: ./.github/actions/test-observer/post-events
         with:
           test_observer_api: ${{ env.test_observer_api }}
+          test_observer_token: ${{ env.test_observer_token }}
           test_execution_id: ${{ inputs.execution_id }}
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
           event_name: "test_deploy_end"
@@ -265,6 +270,7 @@ jobs:
         uses: ./.github/actions/test-observer/post-events
         with:
           test_observer_api: ${{ env.test_observer_api }}
+          test_observer_token: ${{ env.test_observer_token }}
           test_execution_id: ${{ inputs.execution_id }}
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
           event_name: "test_integration_start"
@@ -293,6 +299,7 @@ jobs:
         uses: ./.github/actions/test-observer/post-events
         with:
           test_observer_api: ${{ env.test_observer_api }}
+          test_observer_token: ${{ env.test_observer_token }}
           test_execution_id: ${{ inputs.execution_id }}
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
           event_name: "test_integration_end"
@@ -303,6 +310,7 @@ jobs:
         uses: ./.github/actions/test-observer/post-events
         with:
           test_observer_api: ${{ env.test_observer_api }}
+          test_observer_token: ${{ env.test_observer_token }}
           test_execution_id: ${{ inputs.execution_id }}
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
           event_name: "test_teardown_start"
@@ -326,6 +334,7 @@ jobs:
         uses: ./.github/actions/test-observer/post-events
         with:
           test_observer_api: ${{ env.test_observer_api }}
+          test_observer_token: ${{ env.test_observer_token }}
           test_execution_id: ${{ inputs.execution_id }}
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
           event_name: "test_teardown_end"
@@ -352,6 +361,7 @@ jobs:
         uses: ./.github/actions/test-observer/post-execution-metadata
         with:
           test_observer_api: ${{ env.test_observer_api }}
+          test_observer_token: ${{ env.test_observer_token }}
           test_execution_id: ${{ inputs.execution_id }}
           junit_xml: ${{ steps.junit_results.outputs.junit_xml }}
 
@@ -360,6 +370,7 @@ jobs:
         uses: ./.github/actions/test-observer/post-results
         with:
           test_observer_api: ${{ env.test_observer_api }}
+          test_observer_token: ${{ env.test_observer_token }}
           test_execution_id: ${{ inputs.execution_id }}
           junit_xml: ${{ steps.junit_results.outputs.junit_xml }}
 
@@ -428,6 +439,7 @@ jobs:
         uses: ./.github/actions/test-observer/post-events
         with:
           test_observer_api: ${{ env.test_observer_api }}
+          test_observer_token: ${{ env.test_observer_token }}
           test_execution_id: ${{ inputs.execution_id }}
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
           event_name: "log_collection_finished"
@@ -438,6 +450,7 @@ jobs:
         uses: ./.github/actions/test-observer/post-links
         with:
           test_observer_api: ${{ env.test_observer_api }}
+          test_observer_token: ${{ env.test_observer_token }}
           test_execution_id: ${{ inputs.execution_id }}
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
 
@@ -446,6 +459,7 @@ jobs:
         uses: ./.github/actions/test-observer/post-events
         with:
           test_observer_api: ${{ env.test_observer_api }}
+          test_observer_token: ${{ env.test_observer_token }}
           test_execution_id: ${{ inputs.execution_id }}
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
           event_name: "job_end"
@@ -456,6 +470,7 @@ jobs:
         uses: ./.github/actions/test-observer/patch-test-execution
         with:
           test_observer_api: ${{ env.test_observer_api }}
+          test_observer_token: ${{ env.test_observer_token }}
           test_execution_id: ${{ inputs.execution_id }}
           status: "COMPLETED"
 
@@ -464,6 +479,7 @@ jobs:
         uses: ./.github/actions/test-observer/trigger-rerun
         with:
           test_observer_api: ${{ env.test_observer_api }}
+          test_observer_token: ${{ env.test_observer_token }}
           test_execution_id: ${{ inputs.execution_id }}
 
       - name: Teardown Controller
