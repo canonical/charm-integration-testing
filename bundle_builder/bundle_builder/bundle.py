@@ -154,18 +154,30 @@ class Bundle:
         # Collect all fulfilled application endpoints
         fulfilled_endpoints = {endpoint for integration in self.integrations for endpoint in integration}
 
-        # Collect all non-optional endpoints
-        non_optional_endpoints = {
-            ApplicationEndpoint(application=application.name, endpoint=endpoint.name)
-            for application in self.applications
-            for endpoint in application.charm.endpoints
-            if not endpoint.optionality.is_optional(
-                {endpoint.endpoint for endpoint in fulfilled_endpoints if endpoint.application == application.name}
-            )
-        }
-
         # Collect all saturated endpoints
         saturated_endpoints = self.saturated_endpoints
+
+        # Collect all non-optional endpoints
+        non_optional_endpoints = set()
+        for application in self.applications:
+            integrated_endpoints_for_application = {
+                endpoint.endpoint for endpoint in fulfilled_endpoints if endpoint.application == application.name
+            }
+
+            for endpoint in application.charm.endpoints:
+                if not endpoint.optionality.is_optional(integrated_endpoints_for_application):
+                    non_optional_endpoints.add(
+                        ApplicationEndpoint(application=application.name, endpoint=endpoint.name)
+                    )
+
+        # non_optional_endpoints = {
+        #     ApplicationEndpoint(application=application.name, endpoint=endpoint.name)
+        #     for application in self.applications
+        #     for endpoint in application.charm.endpoints
+        #     if not endpoint.optionality.is_optional(
+        #         {endpoint.endpoint for endpoint in fulfilled_endpoints if endpoint.application == application.name}
+        #     )
+        # }
 
         return frozenset(non_optional_endpoints - fulfilled_endpoints - saturated_endpoints)
 
