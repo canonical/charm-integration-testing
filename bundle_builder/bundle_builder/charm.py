@@ -13,6 +13,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+from functools import cache
 
 from pydantic import Field
 
@@ -32,26 +33,9 @@ class CharmEndpointOptionality:
 
     def is_optional(
         self,
-        integrated_endpoints: set[str],
+        integrated_endpoints: set[str] | frozenset[str],
     ) -> bool:
-        return all(
-            [
-                # all of
-                all(condition.is_optional(integrated_endpoints) for condition in self.all_of)
-                if self.all_of is not None
-                else True,
-                # any of
-                any(condition.is_optional(integrated_endpoints) for condition in self.any_of)
-                if self.any_of is not None
-                else True,
-                # none of
-                all(not condition.is_optional(integrated_endpoints) for condition in self.none_of)
-                if self.none_of is not None
-                else True,
-                # endpoint integrated
-                (self.endpoint_integrated in integrated_endpoints) if self.endpoint_integrated is not None else True,
-            ]
-        )
+        return _is_optional(self, frozenset(integrated_endpoints))
 
     @classmethod
     def from_bool(cls, value: bool) -> "CharmEndpointOptionality":
@@ -59,6 +43,28 @@ class CharmEndpointOptionality:
             return cls(all_of=frozenset())
         else:
             return cls(any_of=frozenset())
+
+
+@cache
+def _is_optional(self: CharmEndpointOptionality, integrated_endpoints: frozenset[str]) -> bool:
+    return all(
+        [
+            # all of
+            all(condition.is_optional(integrated_endpoints) for condition in self.all_of)
+            if self.all_of is not None
+            else True,
+            # any of
+            any(condition.is_optional(integrated_endpoints) for condition in self.any_of)
+            if self.any_of is not None
+            else True,
+            # none of
+            all(not condition.is_optional(integrated_endpoints) for condition in self.none_of)
+            if self.none_of is not None
+            else True,
+            # endpoint integrated
+            (self.endpoint_integrated in integrated_endpoints) if self.endpoint_integrated is not None else True,
+        ]
+    )
 
 
 @immutable_dataclass
