@@ -140,8 +140,8 @@ class Bundle:
         # Check if they are saturated
         for app in self.applications:
             for endpoint in app.charm.endpoints:
-                application_endpoint = ApplicationEndpoint(application=app.name, endpoint=endpoint.name)
                 if endpoint.limit is not None:
+                    application_endpoint = ApplicationEndpoint(application=app.name, endpoint=endpoint.name)
                     # Get the current connection count (default to 0 if not in counts)
                     current_count = counts.get(application_endpoint, 0)
                     if current_count >= endpoint.limit:
