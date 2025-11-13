@@ -13,6 +13,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+from typing import NamedTuple
 
 import yaml
 from pydantic import Field
@@ -35,8 +36,8 @@ class Application:
             return f"{self.name}({self.charm.name})"
 
 
-@immutable_dataclass(order=True)
-class ApplicationEndpoint:
+# @immutable_dataclass(order=True)
+class ApplicationEndpoint(NamedTuple):
     application: str
     endpoint: str
 
@@ -135,19 +136,16 @@ class Bundle:
     @computed_property
     def saturated_endpoints(self) -> frozenset[ApplicationEndpoint]:
         saturated_endpoints = set()
-        # PERF: Converting ApplicationEndpoint to str because that is significantly faster to compare later
-        counts = {f"{k.application}::{k.endpoint}": v for k, v in self.endpoint_connection_counts.items()}
+        counts: dict[ApplicationEndpoint, int] = self.endpoint_connection_counts
 
         # Check if they are saturated
         for app in self.applications:
             for endpoint in app.charm.endpoints:
                 if endpoint.limit is not None:
-                    # PERF: Make sure to use the same pattern as in `counts`
-                    application_endpoint_str = f"{app.name}::{endpoint.name}"
+                    application_endpoint = ApplicationEndpoint(application=app.name, endpoint=endpoint.name)
                     # Get the current connection count (default to 0 if not in counts)
-                    current_count = counts.get(application_endpoint_str, 0)
+                    current_count = counts.get(application_endpoint, 0)
                     if current_count >= endpoint.limit:
-                        application_endpoint = ApplicationEndpoint(application=app.name, endpoint=endpoint.name)
                         saturated_endpoints.add(application_endpoint)
 
         return frozenset(saturated_endpoints)
