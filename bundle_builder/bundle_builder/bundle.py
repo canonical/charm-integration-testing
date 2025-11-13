@@ -160,9 +160,9 @@ class Bundle:
         # Collect all non-optional endpoints
         non_optional_endpoints = set()
         for application in self.applications:
-            integrated_endpoints_for_application = {
+            integrated_endpoints_for_application = frozenset(
                 endpoint.endpoint for endpoint in fulfilled_endpoints if endpoint.application == application.name
-            }
+            )
 
             for endpoint in application.charm.endpoints:
                 if not endpoint.optionality.is_optional(integrated_endpoints_for_application):
