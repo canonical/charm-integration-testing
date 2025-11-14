@@ -38,6 +38,7 @@ class CharmEndpointOptionality:
         compare=False,
     )
 
+    # NOTE: like `computed_property`, this method is not thread-safe
     def is_optional(self, integrated_endpoints: frozenset[str]) -> bool:
         if (result := self._known_optional.get(integrated_endpoints)) is None:
             result = all(
