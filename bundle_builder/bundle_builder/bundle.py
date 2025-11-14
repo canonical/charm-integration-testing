@@ -173,15 +173,6 @@ class Bundle:
                         ApplicationEndpoint(application=application.name, endpoint=endpoint.name)
                     )
 
-        # non_optional_endpoints = {
-        #     ApplicationEndpoint(application=application.name, endpoint=endpoint.name)
-        #     for application in self.applications
-        #     for endpoint in application.charm.endpoints
-        #     if not endpoint.optionality.is_optional(
-        #         {endpoint.endpoint for endpoint in fulfilled_endpoints if endpoint.application == application.name}
-        #     )
-        # }
-
         return frozenset(non_optional_endpoints - fulfilled_endpoints - saturated_endpoints)
 
     @immutable_dataclass
