@@ -7,6 +7,7 @@ import logging
 import re
 from datetime import timedelta
 from pathlib import Path
+from subprocess import CalledProcessError  # nosec
 from typing import Callable
 
 import pytest
@@ -92,7 +93,7 @@ def pytest_runtest_makereport(item, call):
             item.stash[failure_message] = str(report.longrepr)
 
     # Save failure exception
-    if call.excinfo and call.when == "call":
+    if call.excinfo:
         item.stash[failure_exception] = call.excinfo.value
 
 
@@ -193,7 +194,13 @@ def record_charms_and_revisions_execution_metadata(
     record_charms_and_revisions_execution_metadata_instantaneous(juju_client, model, execution_metadata)
 
 
-def normalize_message(message: str) -> str:
+def normalize_message(message: any) -> str:
+    # Convert to string if needed
+    if isinstance(message, bytes):
+        message = message.decode("utf-8", errors="replace")
+    else:
+        message = str(message)
+
     # Replace all numeric sequences with "XXX"
     # Should normalize timestamps, IP addresses, and other variable data
     message = re.sub(r"\d+", "XXX", message)
@@ -237,3 +244,11 @@ def record_failure_execution_metadata(
                     f"failure:charm:{unit.charm}:status",
                     f"unit:{unit.status}:{normalize_message(unit.message)}",
                 )
+        elif isinstance(exc, CalledProcessError):
+            cmd = " ".join(exc.cmd) if isinstance(exc.cmd, (list, tuple)) else exc.cmd
+            execution_metadata("failure:cli:cmd", normalize_message(cmd))
+            execution_metadata("failure:cli:return_code", str(exc.returncode))
+            if exc.stdout:
+                execution_metadata("failure:cli:stdout", normalize_message(exc.stdout))
+            if exc.stderr:
+                execution_metadata("failure:cli:stderr", normalize_message(exc.stderr))

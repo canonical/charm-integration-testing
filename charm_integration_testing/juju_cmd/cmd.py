@@ -19,14 +19,17 @@ class CmdArg:
         return str(value)
 
 
-class CmdError(RuntimeError):
-    def __init__(self, command: str, return_code: int, stdout: str = "", stderr: str = ""):
-        super().__init__(f"Command '{command}' exited with return code '{return_code}', stderr: {stderr}")
+class CmdError(subprocess.CalledProcessError):
+    def __init__(self, command: str, return_code: int, stdout: str | None = None, stderr: str | None = None):
+        super().__init__(
+            returncode=return_code,
+            cmd=command,
+            output=stdout,
+            stderr=stderr,
+        )
 
-        self.command = command
-        self.return_code = return_code
-        self.stdout = stdout
-        self.stderr = stderr
+    def __str__(self) -> str:
+        return f"Command '{self.cmd}' exited with return code '{self.returncode}', stderr: {self.stderr}"
 
 
 class CmdClient:
