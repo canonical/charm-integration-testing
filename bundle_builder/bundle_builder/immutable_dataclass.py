@@ -66,7 +66,8 @@ def make_cached_method(cached_field_name, method):
     def wrapped(*args, **kwargs):
         cache = getattr(args[0], cached_field_name)
         cache_key = tuple(args[1:]) + tuple(kwargs.items())
-        if (result := cache.get(cache_key, _CACHE_MISS)) == _CACHE_MISS:
+        result = cache.get(cache_key, _CACHE_MISS)
+        if result == _CACHE_MISS:
             result = method(*args, **kwargs)
             cache[cache_key] = result
         return result
