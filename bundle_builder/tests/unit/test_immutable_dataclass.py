@@ -14,11 +14,12 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
+import time
 from dataclasses import FrozenInstanceError
 
 import pytest
 
-from bundle_builder.immutable_dataclass import computed_property, immutable_dataclass
+from bundle_builder.immutable_dataclass import cached_method, computed_property, immutable_dataclass
 
 
 @immutable_dataclass
@@ -29,6 +30,10 @@ class User:
     @computed_property
     def full_name(self) -> str:
         return f"{self.first} {self.last}"
+
+    @cached_method
+    def echo_with_time_stamp(self, message: str) -> tuple[str, float]:
+        return message, time.time()
 
 
 def test_computed_property_value():
@@ -43,6 +48,27 @@ def test_computed_property_type():
     u = User(first="Grace", last="Hopper")
     # THEN the computed full_name should be a string
     assert isinstance(u.full_name, str)
+
+
+def test_cached_method_is_executed_for_different_inputs():
+    # GIVEN a frozen User dataclass
+    u = User(first="Alan", last="Turing")
+    # WHEN asked to echo something hello and bye
+    hello = u.echo_with_time_stamp("hello")
+    bye = u.echo_with_time_stamp("bye")
+    # THEN echos input with timestamp
+    assert hello[0] == "hello"
+    assert bye[0] == "bye"
+
+
+def test_cached_method_result_remains_same():
+    # GIVEN a frozen User dataclass who echoed hello with timestamp
+    u = User(first="Alan", last="Turing")
+    response_1 = u.echo_with_time_stamp("hello")
+    # WHEN asked to echo hello again
+    response_2 = u.echo_with_time_stamp("hello")
+    # THEN responds with the exact original response
+    assert response_2 == response_1
 
 
 def test_frozen_enforcement():
@@ -66,6 +92,14 @@ class Measurement:
     def inches(self) -> float:
         return self.meters * 39.3701
 
+    @cached_method
+    def centimeters_with_prefix(self, name: str) -> str:
+        return f"{name}: {self.centimeters:.2f} cm"
+
+    @cached_method
+    def inches_with_prefix(self, name: str) -> str:
+        return f"{name}: {self.inches:.2f} inches"
+
 
 def test_multiple_computed_fields():
     # WHEN a measurement in meters
@@ -73,6 +107,14 @@ def test_multiple_computed_fields():
     # THEN computed centimeters and inches should be correct
     assert m.centimeters == 150.0
     assert round(m.inches, 2) == 59.06
+
+
+def test_multiple_cached_methods():
+    # WHEN a measurement in meters
+    m = Measurement(meters=1.5)
+    # THEN centimeters and inches with prefix should be correct
+    assert m.centimeters_with_prefix("measured") == "measured: 150.00 cm"
+    assert m.inches_with_prefix("measured") == "measured: 59.06 inches"
 
 
 @immutable_dataclass

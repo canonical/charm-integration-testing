@@ -16,7 +16,7 @@
 
 from pydantic import Field, model_serializer, model_validator
 
-from .immutable_dataclass import immutable_dataclass
+from .immutable_dataclass import cached_method, immutable_dataclass
 
 ENDPOINT_PEERS = "peers"
 ENDPOINT_REQUIRES = "requires"
@@ -61,10 +61,8 @@ class CharmEndpointOptionality:
     none_of: frozenset["CharmEndpointOptionality"] | None = None
     endpoint_integrated: str | None = None
 
-    def is_optional(
-        self,
-        integrated_endpoints: set[str],
-    ) -> bool:
+    @cached_method
+    def is_optional(self, integrated_endpoints: frozenset[str]) -> bool:
         return all(
             [
                 # all of
