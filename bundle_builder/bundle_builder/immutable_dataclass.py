@@ -92,7 +92,7 @@ def immutable_dataclass(_cls=None, **dataclass_kwargs):
         for name, method in computed_fields.items():
             # Modify the class in place to add the private field
             private_name = f"_{name}"
-            annotations[private_name] = get_type_hints(method).get('return', Any)
+            annotations[private_name] = get_type_hints(method).get("return", Any)
             setattr(cls, name, make_lazy_property(private_name, method))
             setattr(cls, private_name, field(init=False, repr=False, hash=False, compare=False, default=_UNINITIALIZED))
 
