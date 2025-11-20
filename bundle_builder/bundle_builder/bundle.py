@@ -135,16 +135,17 @@ class Bundle:
     @computed_property
     def saturated_endpoints(self) -> frozenset[ApplicationEndpoint]:
         saturated_endpoints = set()
-        counts: dict[ApplicationEndpoint, int] = self.endpoint_connection_counts
+        # PERF: It is faster to create tuple keys than ApplicationEndpoint in queries below
+        counts = {(k.application, k.endpoint): v for k, v in self.endpoint_connection_counts.items()}
 
         # Check if they are saturated
         for app in self.applications:
             for endpoint in app.charm.endpoints:
-                application_endpoint = ApplicationEndpoint(application=app.name, endpoint=endpoint.name)
                 if endpoint.limit is not None:
                     # Get the current connection count (default to 0 if not in counts)
-                    current_count = counts.get(application_endpoint, 0)
+                    current_count = counts.get((app.name, endpoint.name), 0)
                     if current_count >= endpoint.limit:
+                        application_endpoint = ApplicationEndpoint(application=app.name, endpoint=endpoint.name)
                         saturated_endpoints.add(application_endpoint)
 
         return frozenset(saturated_endpoints)
@@ -154,18 +155,21 @@ class Bundle:
         # Collect all fulfilled application endpoints
         fulfilled_endpoints = {endpoint for integration in self.integrations for endpoint in integration}
 
-        # Collect all non-optional endpoints
-        non_optional_endpoints = {
-            ApplicationEndpoint(application=application.name, endpoint=endpoint.name)
-            for application in self.applications
-            for endpoint in application.charm.endpoints
-            if not endpoint.optionality.is_optional(
-                {endpoint.endpoint for endpoint in fulfilled_endpoints if endpoint.application == application.name}
-            )
-        }
-
         # Collect all saturated endpoints
         saturated_endpoints = self.saturated_endpoints
+
+        # Collect all non-optional endpoints
+        non_optional_endpoints = set()
+        for application in self.applications:
+            integrated_endpoints_for_application = frozenset(
+                endpoint.endpoint for endpoint in fulfilled_endpoints if endpoint.application == application.name
+            )
+
+            for endpoint in application.charm.endpoints:
+                if not endpoint.optionality.is_optional(integrated_endpoints_for_application):
+                    non_optional_endpoints.add(
+                        ApplicationEndpoint(application=application.name, endpoint=endpoint.name)
+                    )
 
         return frozenset(non_optional_endpoints - fulfilled_endpoints - saturated_endpoints)
 

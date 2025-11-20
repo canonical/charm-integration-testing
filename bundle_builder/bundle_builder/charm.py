@@ -13,10 +13,9 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-
 from pydantic import Field
 
-from .immutable_dataclass import immutable_dataclass
+from .immutable_dataclass import cached_method, immutable_dataclass
 
 ENDPOINT_PEERS = "peers"
 ENDPOINT_REQUIRES = "requires"
@@ -30,10 +29,8 @@ class CharmEndpointOptionality:
     none_of: frozenset["CharmEndpointOptionality"] | None = None
     endpoint_integrated: str | None = None
 
-    def is_optional(
-        self,
-        integrated_endpoints: set[str],
-    ) -> bool:
+    @cached_method
+    def is_optional(self, integrated_endpoints: frozenset[str]) -> bool:
         return all(
             [
                 # all of
