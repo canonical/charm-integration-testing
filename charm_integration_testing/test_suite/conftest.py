@@ -8,7 +8,7 @@ import re
 from datetime import timedelta
 from pathlib import Path
 from subprocess import CalledProcessError  # nosec
-from typing import Callable
+from typing import Any, Callable
 
 import pytest
 from extensions import (
@@ -194,7 +194,7 @@ def record_charms_and_revisions_execution_metadata(
     record_charms_and_revisions_execution_metadata_instantaneous(juju_client, model, execution_metadata)
 
 
-def normalize_message(message: any) -> str:
+def normalize_message(message: Any) -> str:
     # Convert to string if needed
     if isinstance(message, bytes):
         message = message.decode("utf-8", errors="replace")

@@ -20,7 +20,9 @@ class CmdArg:
 
 
 class CmdError(subprocess.CalledProcessError):
-    def __init__(self, command: str, return_code: int, stdout: str | None = None, stderr: str | None = None):
+    def __init__(
+        self, command: str | list[str], return_code: int, stdout: str | None = None, stderr: str | None = None
+    ):
         super().__init__(
             returncode=return_code,
             cmd=command,
