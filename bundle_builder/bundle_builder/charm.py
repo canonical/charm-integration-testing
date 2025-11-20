@@ -29,7 +29,6 @@ class CharmEndpointOptionality:
     none_of: frozenset["CharmEndpointOptionality"] | None = None
     endpoint_integrated: str | None = None
 
-    # NOTE: like `computed_property`, this method is not thread-safe
     @cached_method
     def is_optional(self, integrated_endpoints: frozenset[str]) -> bool:
         return all(
