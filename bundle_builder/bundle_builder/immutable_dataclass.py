@@ -15,7 +15,8 @@
 
 
 from dataclasses import field
-from typing import Any, Callable, get_type_hints
+from functools import wraps
+from typing import Any, Callable, Dict, get_type_hints
 
 from pydantic.dataclasses import dataclass
 
@@ -44,24 +45,65 @@ def make_lazy_property(private_name, method):
     return property(prop)
 
 
+# custom attribute used by @immutable_dataclss to identify cached methods
+_MARKED_AS_CACHED_METHOD = "_is_cached_method"
+
+# Sentinel value to identify cache-misses, because `None` can be a valid value
+_CACHE_MISS = object()
+
+
+# Cached method backed by instance-level cache
+# Meant for use with @immutable_dataclass
+# Much like functools.cache, but at the instance level instead of global
+def cached_method(func):
+    setattr(func, _MARKED_AS_CACHED_METHOD, True)
+    return func
+
+
+# Wraps the method to cache results in the given field in the instance
+def make_cached_method(cached_field_name, method):
+    @wraps(method)
+    def wrapped(*args, **kwargs):
+        cache = getattr(args[0], cached_field_name)
+        cache_key = tuple(args[1:]) + tuple(kwargs.items())
+        if (result := cache.get(cache_key, _CACHE_MISS)) == _CACHE_MISS:
+            result = method(*args, **kwargs)
+            cache[cache_key] = result
+        return result
+
+    return wrapped
+
+
 # Create an immutable dataclass using frozen=True
 # and defaults slots=True
 def immutable_dataclass(_cls=None, **dataclass_kwargs):
     def wrap(cls):
         # Collect methods decorated as computed fields
         computed_fields = {}
+        cached_methods = {}
         for name, val in cls.__dict__.items():
             if getattr(val, "_is_computed_property", False):
                 computed_fields[name] = val
+            elif getattr(val, _MARKED_AS_CACHED_METHOD, False):
+                cached_methods[name] = val
 
         # Create a private slot for each computed field
         annotations = dict(getattr(cls, "__annotations__", {}))
         for name, method in computed_fields.items():
             # Modify the class in place to add the private field
             private_name = f"_{name}"
-            annotations[private_name] = get_type_hints(cls).get(name, Any)
+            annotations[private_name] = get_type_hints(cls).get(name, Any)  # FIXME: always returns Any
             setattr(cls, name, make_lazy_property(private_name, method))
             setattr(cls, private_name, field(init=False, repr=False, hash=False, compare=False, default=_UNINITIALIZED))
+
+        # Create a private slot for the cache of each computed field, similar to above
+        for name, method in cached_methods.items():
+            cached_field_name = f"_cached_{name}"
+            annotations[cached_field_name] = Dict  # IDEA: add full signature
+            setattr(cls, name, make_cached_method(cached_field_name, method))
+            setattr(
+                cls, cached_field_name, field(init=False, repr=False, hash=False, compare=False, default_factory=dict)
+            )
 
         # Update the class annotations
         cls.__annotations__ = annotations

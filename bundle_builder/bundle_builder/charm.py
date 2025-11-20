@@ -13,11 +13,9 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from dataclasses import field
-
 from pydantic import Field
 
-from .immutable_dataclass import immutable_dataclass
+from .immutable_dataclass import cached_method, immutable_dataclass
 
 ENDPOINT_PEERS = "peers"
 ENDPOINT_REQUIRES = "requires"
@@ -30,39 +28,28 @@ class CharmEndpointOptionality:
     any_of: frozenset["CharmEndpointOptionality"] | None = None
     none_of: frozenset["CharmEndpointOptionality"] | None = None
     endpoint_integrated: str | None = None
-    _known_optional: dict[frozenset[str], bool] = field(
-        init=False,
-        default_factory=dict,
-        repr=False,
-        hash=False,
-        compare=False,
-    )
 
     # NOTE: like `computed_property`, this method is not thread-safe
+    @cached_method
     def is_optional(self, integrated_endpoints: frozenset[str]) -> bool:
-        if (result := self._known_optional.get(integrated_endpoints)) is None:
-            result = all(
-                [
-                    # all of
-                    all(condition.is_optional(integrated_endpoints) for condition in self.all_of)
-                    if self.all_of is not None
-                    else True,
-                    # any of
-                    any(condition.is_optional(integrated_endpoints) for condition in self.any_of)
-                    if self.any_of is not None
-                    else True,
-                    # none of
-                    all(not condition.is_optional(integrated_endpoints) for condition in self.none_of)
-                    if self.none_of is not None
-                    else True,
-                    # endpoint integrated
-                    (self.endpoint_integrated in integrated_endpoints)
-                    if self.endpoint_integrated is not None
-                    else True,
-                ]
-            )
-            self._known_optional[integrated_endpoints] = result
-        return result
+        return all(
+            [
+                # all of
+                all(condition.is_optional(integrated_endpoints) for condition in self.all_of)
+                if self.all_of is not None
+                else True,
+                # any of
+                any(condition.is_optional(integrated_endpoints) for condition in self.any_of)
+                if self.any_of is not None
+                else True,
+                # none of
+                all(not condition.is_optional(integrated_endpoints) for condition in self.none_of)
+                if self.none_of is not None
+                else True,
+                # endpoint integrated
+                (self.endpoint_integrated in integrated_endpoints) if self.endpoint_integrated is not None else True,
+            ]
+        )
 
     @classmethod
     def from_bool(cls, value: bool) -> "CharmEndpointOptionality":
