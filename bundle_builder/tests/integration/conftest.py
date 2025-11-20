@@ -56,6 +56,16 @@ def sample_independent_charm_endpoint() -> str:
 
 
 @pytest.fixture
+def sample_independent_charm_revision() -> int:
+    return 495
+
+
+@pytest.fixture
+def sample_dependent_charm_revision() -> int:
+    return 561
+
+
+@pytest.fixture
 def sample_arch() -> str:
     return "amd64"
 
