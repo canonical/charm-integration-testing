@@ -103,7 +103,10 @@ def pytest_runtest_makereport(item, call):
                 xfailreason = xfailreason[8:]
             item.stash[skipped_message] = xfailreason
         else:
-            _, _, skipreason = report.longrepr
+            if isinstance(report.longrepr, tuple) and len(report.longrepr) >= 3:
+                _, _, skipreason = report.longrepr
+            else:
+                skipreason = str(report.longrepr)
             if skipreason.startswith("Skipped: "):
                 skipreason = skipreason[9:]
             item.stash[skipped_message] = skipreason
