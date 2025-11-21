@@ -470,7 +470,7 @@ jobs:
         env:
           crashdump: ${{ steps.juju_k8s_crashdump.outputs.crashdump_path }}
           junit_xml: ${{ steps.junit_results.outputs.junit_xml }}
-          generated_bundle: ${{ steps.register_bundle.outputs.bundle }}
+          generated_bundle: ${{ steps.verify_bundle.outputs.bundle }}
           openstack_model_crashdump: ${{ steps.juju_crashdump.outputs.OS_MODEL_CRASHDUMP }}
           openstack_controller_crashdump: ${{ steps.juju_crashdump.outputs.OS_CONTROLLER_CRASHDUMP }}
         run: |
