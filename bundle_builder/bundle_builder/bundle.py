@@ -151,12 +151,12 @@ class Bundle:
         return frozenset(saturated_endpoints)
 
     @computed_property
-    def application_to_integrated_endpoints(self) -> dict[str, set[str]]:
+    def application_to_integrated_endpoints(self) -> dict[str, frozenset[str]]:
         map = {application.name: set() for application in self.applications}
         for integration in self.integrations:
             for endpoint in integration:
                 map[endpoint.application].add(endpoint.endpoint)
-        return map
+        return {application: frozenset(endpoints) for application, endpoints in map.items()}
 
     @computed_property
     def unfulfilled_endpoints(self) -> frozenset[ApplicationEndpoint]:
@@ -170,9 +170,7 @@ class Bundle:
         non_optional_endpoints = set()
         for application in self.applications:
             for endpoint in application.charm.endpoints:
-                if endpoint.optionality.is_optional(
-                    frozenset(self.application_to_integrated_endpoints[application.name])
-                ):
+                if endpoint.optionality.is_optional(self.application_to_integrated_endpoints[application.name]):
                     continue
                 non_optional_endpoints.add(ApplicationEndpoint(application=application.name, endpoint=endpoint.name))
 
