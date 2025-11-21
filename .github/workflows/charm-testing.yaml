@@ -125,7 +125,7 @@ jobs:
           else
             echo "bundle=$(realpath generated-bundle.yaml)" >> $GITHUB_OUTPUT
 
-            echo '### Generated Juju Bundle (built on large runner)' >> $GITHUB_STEP_SUMMARY
+            echo '### Generated Juju Bundle' >> $GITHUB_STEP_SUMMARY
             echo '```yaml' >> $GITHUB_STEP_SUMMARY
             cat generated-bundle.yaml >> $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY
