@@ -219,6 +219,28 @@ jobs:
           event_name: "job_start"
           detail: "Charm integration test job started."
 
+      - name: Download generated bundle artifact
+        id: retrieve_bundle
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+        with:
+          name: generated-bundle
+          path: .
+
+      - name: Verify generated bundle
+        id: verify_bundle
+        shell: bash
+        run: |
+          if [ ! -f generated-bundle.yaml ]; then
+            echo "generated-bundle.yaml artifact not found" >&2
+            exit 1
+          fi
+
+          echo "::group::Contents of retrieved generated-bundle.yaml"
+          cat generated-bundle.yaml
+          echo "::endgroup::"
+
+          echo "bundle=$(realpath generated-bundle.yaml)" >> $GITHUB_OUTPUT
+
       - name: Install Juju
         shell: bash
         env:
@@ -270,23 +292,6 @@ jobs:
           EOF
           pipx install poetry==2.0
           HTTPS_PROXY="http://squid.internal:3128" poetry install
-
-      - name: Download generated bundle artifact
-        id: retrieve_bundle
-        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
-        with:
-          name: generated-bundle
-          path: .
-
-      - name: Verify generated bundle
-        id: verify_bundle
-        shell: bash
-        run: |
-          if [ ! -f generated-bundle.yaml ]; then
-            echo "generated-bundle.yaml artifact not found" >&2
-            exit 1
-          fi
-          echo "bundle=$(realpath generated-bundle.yaml)" >> $GITHUB_OUTPUT
 
       - name: Post 'test_deploy_start' event
         if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
