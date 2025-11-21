@@ -222,12 +222,14 @@ jobs:
       - name: Download generated bundle artifact
         id: retrieve_bundle
         uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+        continue-on-error: true  # bundle wasn't built due to bad input
         with:
           name: generated-bundle
           path: .
 
       - name: Verify generated bundle
         id: verify_bundle
+        continue-on-error: true  # bundle wasn't built due to bad input
         shell: bash
         run: |
           if [ ! -f generated-bundle.yaml ]; then
