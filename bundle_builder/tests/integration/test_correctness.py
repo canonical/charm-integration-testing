@@ -18,14 +18,23 @@ from bundle_builder import Application, ApplicationEndpoint, Bundle, BundleBuild
 
 
 def test_correctness_independent(
-    charmhub_client: CharmhubClient, sample_independent_charm: str, sample_arch: str, sample_platform: str
+    charmhub_client: CharmhubClient,
+    sample_independent_charm: str,
+    sample_independent_charm_revision: int,
+    sample_arch: str,
+    sample_platform: str,
 ):
     # GIVEN a base bundle with a dependent charm
     base_bundle = Bundle(
         applications=frozenset(
             {
                 Application(
-                    sample_independent_charm, charmhub_client.charm_from_store(sample_independent_charm, sample_arch)
+                    sample_independent_charm,
+                    charmhub_client.charm_from_store(
+                        charm_name=sample_independent_charm,
+                        charm_revision=sample_independent_charm_revision,
+                        ubuntu_arch=sample_arch,
+                    ),
                 )
             }
         ),
@@ -49,6 +58,7 @@ def test_correctness_dependent(
     sample_dependent_charm: str,
     sample_independent_charm_endpoint: str,
     sample_dependent_charm_endpoint: str,
+    sample_dependent_charm_revision: int,
     sample_arch: str,
     sample_platform: str,
 ):
@@ -57,7 +67,12 @@ def test_correctness_dependent(
         applications=frozenset(
             {
                 Application(
-                    sample_dependent_charm, charmhub_client.charm_from_store(sample_dependent_charm, sample_arch)
+                    sample_dependent_charm,
+                    charmhub_client.charm_from_store(
+                        charm_name=sample_dependent_charm,
+                        charm_revision=sample_dependent_charm_revision,
+                        ubuntu_arch=sample_arch,
+                    ),
                 )
             },
         ),

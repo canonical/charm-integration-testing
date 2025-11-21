@@ -22,7 +22,12 @@ import yaml
 from bundle_builder import OverridesClient
 
 
-def test_cli_write_output(tmp_path: Path, sample_independent_charm: str, overrides_client: OverridesClient):
+def test_cli_write_output(
+    tmp_path: Path,
+    sample_independent_charm: str,
+    sample_independent_charm_revision: int,
+    overrides_client: OverridesClient,
+):
     # GIVEN an output file
     output_bundle = tmp_path / "output_bundle.yaml"
     # AND the bundle doesn't exist
@@ -33,7 +38,7 @@ def test_cli_write_output(tmp_path: Path, sample_independent_charm: str, overrid
         [
             "bundle-builder",
             "--charms",
-            f"{sample_independent_charm}::{sample_independent_charm}::default::default",
+            f"{sample_independent_charm}::{sample_independent_charm}::{sample_independent_charm_revision}::default",
             "--charm-metadata-overrides",
             overrides_client.charm_metadata_overrides.resolve().absolute(),
             "--output-file",
@@ -76,10 +81,11 @@ def test_cli_unknown_charm():
 def test_cli_invalid_integration(
     sample_independent_charm: str,
     sample_independent_charm_endpoint: str,
+    sample_independent_charm_revision: int,
 ):
     # GIVEN two of the same charm
-    app_1 = f"app1::{sample_independent_charm}::default::default"
-    app_2 = f"app2::{sample_independent_charm}::default::default"
+    app_1 = f"app1::{sample_independent_charm}::{sample_independent_charm_revision}::default"
+    app_2 = f"app2::{sample_independent_charm}::{sample_independent_charm_revision}::default"
     # AND an invalid integration between them
     integration = f"app1:{sample_independent_charm_endpoint}::app2:{sample_independent_charm_endpoint}"
 
