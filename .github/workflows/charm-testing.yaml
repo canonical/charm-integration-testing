@@ -74,7 +74,7 @@ jobs:
     name: Build dynamic bundle
     runs-on:
       - self-hosted
-      - charm_qa
+      - medium
     outputs:
       bundle: ${{ steps.build_bundle.outputs.bundle }}
     steps:
