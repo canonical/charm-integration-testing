@@ -88,12 +88,9 @@ jobs:
         run: |
           sudo apt-get update --quiet
           sudo apt-get install pipx --quiet --assume-yes
-          sudo tee /etc/pip.conf <<EOF
-          [global]
-          proxy= http://squid.internal:3128
-          EOF
+          # no proxy needed
           pipx install poetry==2.0
-          HTTPS_PROXY="http://squid.internal:3128" poetry install
+          poetry install
 
       - name: Generate dynamic bundles
         id: build_bundle
