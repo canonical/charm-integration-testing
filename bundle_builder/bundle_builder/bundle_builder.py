@@ -313,16 +313,10 @@ class BundleBuilder:
         applications: set[Application] = set()
         for application in bundle.applications:
             possible_configs: list[CharmConfig] = []
-            integrated_endpoints = {
-                endpoint.endpoint
-                for integration in bundle.integrations
-                for endpoint in integration
-                if endpoint.application == application.name
-            }
             for test_config in application.charm.test_configs:
                 if test_config.criteria.valid(
                     channel=application.charm.channel,
-                    integrated_endpoints=integrated_endpoints,
+                    integrated_endpoints=bundle.application_to_integrated_endpoints[application.name],
                 ):
                     possible_configs.append(test_config.config)
 
