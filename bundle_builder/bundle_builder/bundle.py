@@ -152,11 +152,9 @@ class Bundle:
 
     @computed_property
     def application_to_integrated_endpoints(self) -> dict[str, set[str]]:
-        map = {}
+        map = {application.name: set() for application in self.applications}
         for integration in self.integrations:
             for endpoint in integration:
-                if endpoint.application not in map:
-                    map[endpoint.application] = set()
                 map[endpoint.application].add(endpoint.endpoint)
         return map
 
@@ -172,7 +170,9 @@ class Bundle:
         non_optional_endpoints = set()
         for application in self.applications:
             for endpoint in application.charm.endpoints:
-                if endpoint.optionality.is_optional(self.application_to_integrated_endpoints[application.name]):
+                if endpoint.optionality.is_optional(
+                    frozenset(self.application_to_integrated_endpoints[application.name])
+                ):
                     continue
                 non_optional_endpoints.add(ApplicationEndpoint(application=application.name, endpoint=endpoint.name))
 

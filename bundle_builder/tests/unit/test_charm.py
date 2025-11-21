@@ -375,6 +375,15 @@ class TestCharmChannel:
             assert channel.risk == params.expected_risk
             assert channel.branch == params.expected_branch
 
+        def test_invalid_channel_raises_error(self):
+            # GIVEN an invalid channel string with too many parts
+            invalid_channel = "track/risk/branch/extra"
+
+            # WHEN creating a CharmChannel from the invalid string
+            # THEN it raises a ValueError
+            with pytest.raises(ValueError, match="Invalid channel string: track/risk/branch/extra"):
+                channel_from_string(invalid_channel)
+
     class TestSerialize:
         @dataclass
         class Params:

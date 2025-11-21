@@ -22,17 +22,15 @@ from pydantic.dataclasses import dataclass
 from bundle_builder.bundle import Application, ApplicationEndpoint, Bundle, Integration
 from bundle_builder.bundle_builder import BundleBuilder, Node
 from bundle_builder.charm import (
-    ENDPOINT_PROVIDES,
-    ENDPOINT_REQUIRES,
-    Charm,
     CharmConfigCriteria,
-    CharmEndpoint,
     CharmEndpointOptionality,
     CharmTestConfig,
 )
 
 from .test_bundle import sample_bundle_postgresql_k8s_kratos
 from .test_charm import (
+    sample_charm_endpoint_kratos_pg_database,
+    sample_charm_endpoint_postgresql_k8s_database,
     sample_charm_kratos,
     sample_charm_postgresql_k8s,
     sample_charm_self_signed_certificates,
@@ -205,65 +203,47 @@ class TestBundleBuilder:
     class TestBundleBuilderLimitValidation:
         def test_can_add_integration_respects_limits(self):
             # GIVEN a charm with limited endpoint
-            limited_charm = Charm(
+            limited_charm = dataclasses.replace(
+                sample_charm_postgresql_k8s(),
                 name="limited-charm",
-                channel="stable",
-                revision=1,
-                ubuntu_version="22.04",
-                ubuntu_arch="amd64",
                 endpoints=frozenset(
                     {
-                        CharmEndpoint(
-                            type=ENDPOINT_PROVIDES,
-                            name="database",
+                        dataclasses.replace(
+                            sample_charm_endpoint_postgresql_k8s_database(),
                             interface="postgresql",
-                            optionality=CharmEndpointOptionality.from_bool(False),
                             limit=1,
                         )
                     }
                 ),
-                priority=1.0,
             )
 
-            # AND a charm that requires database
-            requiring_charm1 = Charm(
+            # AND charms that require database
+            requiring_charm1 = dataclasses.replace(
+                sample_charm_kratos(),
                 name="app1",
-                channel="stable",
-                revision=1,
-                ubuntu_version="22.04",
-                ubuntu_arch="amd64",
                 endpoints=frozenset(
                     {
-                        CharmEndpoint(
-                            type=ENDPOINT_REQUIRES,
+                        dataclasses.replace(
+                            sample_charm_endpoint_kratos_pg_database(),
                             name="database",
                             interface="postgresql",
-                            optionality=CharmEndpointOptionality.from_bool(False),
-                            limit=None,
                         )
                     }
                 ),
-                priority=1.0,
             )
 
-            requiring_charm2 = Charm(
+            requiring_charm2 = dataclasses.replace(
+                sample_charm_kratos(),
                 name="app2",
-                channel="stable",
-                revision=1,
-                ubuntu_version="22.04",
-                ubuntu_arch="amd64",
                 endpoints=frozenset(
                     {
-                        CharmEndpoint(
-                            type=ENDPOINT_REQUIRES,
+                        dataclasses.replace(
+                            sample_charm_endpoint_kratos_pg_database(),
                             name="database",
                             interface="postgresql",
-                            optionality=CharmEndpointOptionality.from_bool(False),
-                            limit=None,
                         )
                     }
                 ),
-                priority=1.0,
             )
 
             # AND a bundle with these applications
@@ -297,44 +277,32 @@ class TestBundleBuilder:
 
         def test_can_add_integration_allows_when_under_limit(self):
             # GIVEN a charm with higher limit
-            limited_charm = Charm(
+            limited_charm = dataclasses.replace(
+                sample_charm_postgresql_k8s(),
                 name="limited-charm",
-                channel="stable",
-                revision=1,
-                ubuntu_version="22.04",
-                ubuntu_arch="amd64",
                 endpoints=frozenset(
                     {
-                        CharmEndpoint(
-                            type=ENDPOINT_PROVIDES,
-                            name="database",
+                        dataclasses.replace(
+                            sample_charm_endpoint_postgresql_k8s_database(),
                             interface="postgresql",
-                            optionality=CharmEndpointOptionality.from_bool(False),
                             limit=2,
                         )
                     }
                 ),
-                priority=1.0,
             )
 
-            requiring_charm = Charm(
+            requiring_charm = dataclasses.replace(
+                sample_charm_kratos(),
                 name="app",
-                channel="stable",
-                revision=1,
-                ubuntu_version="22.04",
-                ubuntu_arch="amd64",
                 endpoints=frozenset(
                     {
-                        CharmEndpoint(
-                            type=ENDPOINT_REQUIRES,
+                        dataclasses.replace(
+                            sample_charm_endpoint_kratos_pg_database(),
                             name="database",
                             interface="postgresql",
-                            optionality=CharmEndpointOptionality.from_bool(False),
-                            limit=None,
                         )
                     }
                 ),
-                priority=1.0,
             )
 
             # AND a bundle with one existing integration
@@ -367,44 +335,32 @@ class TestBundleBuilder:
 
         def test_can_add_integration_allows_unlimited_endpoints(self):
             # GIVEN charms with no limits
-            unlimited_charm = Charm(
+            unlimited_charm = dataclasses.replace(
+                sample_charm_postgresql_k8s(),
                 name="unlimited-charm",
-                channel="stable",
-                revision=1,
-                ubuntu_version="22.04",
-                ubuntu_arch="amd64",
                 endpoints=frozenset(
                     {
-                        CharmEndpoint(
-                            type=ENDPOINT_PROVIDES,
+                        dataclasses.replace(
+                            sample_charm_endpoint_postgresql_k8s_database(),
                             name="http",
                             interface="http",
-                            optionality=CharmEndpointOptionality.from_bool(False),
-                            limit=None,
                         )
                     }
                 ),
-                priority=1.0,
             )
 
-            requiring_charm = Charm(
+            requiring_charm = dataclasses.replace(
+                sample_charm_kratos(),
                 name="app",
-                channel="stable",
-                revision=1,
-                ubuntu_version="22.04",
-                ubuntu_arch="amd64",
                 endpoints=frozenset(
                     {
-                        CharmEndpoint(
-                            type=ENDPOINT_REQUIRES,
+                        dataclasses.replace(
+                            sample_charm_endpoint_kratos_pg_database(),
                             name="http",
                             interface="http",
-                            optionality=CharmEndpointOptionality.from_bool(False),
-                            limit=None,
                         )
                     }
                 ),
-                priority=1.0,
             )
 
             # AND a bundle with existing integrations
@@ -443,15 +399,7 @@ class TestDuplicateCharms:
         max_instances = 2
 
         # AND a charm
-        charm = Charm(
-            name="postgresql-k8s",
-            channel="stable",
-            revision=1,
-            ubuntu_version="22.04",
-            ubuntu_arch="amd64",
-            endpoints=frozenset(),
-            priority=1.0,
-        )
+        charm = dataclasses.replace(sample_charm_postgresql_k8s(), endpoints=frozenset())
 
         # AND a bundle with two instances of the charm (at the limit)
         bundle = Bundle(
@@ -478,15 +426,7 @@ class TestDuplicateCharms:
         max_instances = 3
 
         # AND a charm
-        charm = Charm(
-            name="postgresql-k8s",
-            channel="stable",
-            revision=1,
-            ubuntu_version="22.04",
-            ubuntu_arch="amd64",
-            endpoints=frozenset(),
-            priority=1.0,
-        )
+        charm = dataclasses.replace(sample_charm_postgresql_k8s(), endpoints=frozenset())
 
         # AND a bundle with one instance of the charm
         bundle = Bundle(
@@ -510,15 +450,7 @@ class TestDuplicateCharms:
     def test_node_fingerprint_uses_application_names(self):
         """Test that the node fingerprint is based on application names, not charm names."""
         # GIVEN a charm
-        charm = Charm(
-            name="postgresql-k8s",
-            channel="stable",
-            revision=1,
-            ubuntu_version="22.04",
-            ubuntu_arch="amd64",
-            endpoints=frozenset(),
-            priority=1.0,
-        )
+        charm = dataclasses.replace(sample_charm_postgresql_k8s(), endpoints=frozenset())
 
         # AND two bundles with the same charm but different application names
         bundle1 = Bundle(
@@ -553,45 +485,32 @@ class TestDuplicateCharms:
 
     def test_multiple_instances_with_integrations(self):
         """Test that multiple instances of the same charm can have different integrations."""
-        # GIVEN two database charms and two applications
-        db_charm = Charm(
-            name="postgresql-k8s",
-            channel="stable",
-            revision=1,
-            ubuntu_version="22.04",
-            ubuntu_arch="amd64",
+        # GIVEN a database charm and an app charm
+        db_charm = dataclasses.replace(
+            sample_charm_postgresql_k8s(),
             endpoints=frozenset(
                 {
-                    CharmEndpoint(
-                        type=ENDPOINT_PROVIDES,
-                        name="database",
+                    dataclasses.replace(
+                        sample_charm_endpoint_postgresql_k8s_database(),
                         interface="postgresql",
-                        optionality=CharmEndpointOptionality.from_bool(False),
                         limit=1,
                     )
                 }
             ),
-            priority=1.0,
         )
 
-        app_charm = Charm(
+        app_charm = dataclasses.replace(
+            sample_charm_kratos(),
             name="app",
-            channel="stable",
-            revision=1,
-            ubuntu_version="22.04",
-            ubuntu_arch="amd64",
             endpoints=frozenset(
                 {
-                    CharmEndpoint(
-                        type=ENDPOINT_REQUIRES,
+                    dataclasses.replace(
+                        sample_charm_endpoint_kratos_pg_database(),
                         name="database",
                         interface="postgresql",
-                        optionality=CharmEndpointOptionality.from_bool(False),
-                        limit=None,
                     )
                 }
             ),
-            priority=1.0,
         )
 
         # AND a bundle with two database instances and two app instances
@@ -640,14 +559,10 @@ class TestAddTestConfigs:
     class TestConfigSelection:
         def test_selects_config_matching_channel_track(self):
             # GIVEN a charm with test configs for different tracks
-            charm = Charm(
+            charm = dataclasses.replace(
+                sample_charm_postgresql_k8s(),
                 name="test-charm",
                 channel="1.0/stable",
-                revision=1,
-                ubuntu_version="22.04",
-                ubuntu_arch="amd64",
-                endpoints=frozenset(),
-                priority=1.0,
                 test_configs=(
                     CharmTestConfig(
                         criteria=CharmConfigCriteria(track="1.0"),
@@ -675,24 +590,19 @@ class TestAddTestConfigs:
 
         def test_selects_config_matching_integrated_endpoint(self):
             # GIVEN a charm with test configs based on endpoint integration
-            charm = Charm(
+            charm = dataclasses.replace(
+                sample_charm_kratos(),
                 name="test-charm",
-                channel="stable",
-                revision=1,
-                ubuntu_version="22.04",
-                ubuntu_arch="amd64",
                 endpoints=frozenset(
                     {
-                        CharmEndpoint(
-                            type=ENDPOINT_REQUIRES,
+                        dataclasses.replace(
+                            sample_charm_endpoint_kratos_pg_database(),
                             name="database",
                             interface="db",
                             optionality=CharmEndpointOptionality.from_bool(True),
-                            limit=None,
                         ),
                     }
                 ),
-                priority=1.0,
                 test_configs=(
                     CharmTestConfig(
                         criteria=CharmConfigCriteria(endpoint_integrated="database"),
@@ -706,8 +616,25 @@ class TestAddTestConfigs:
                     ),
                 ),
             )
+            db_charm = dataclasses.replace(
+                sample_charm_postgresql_k8s(),
+                name="db-charm",
+                endpoints=frozenset(
+                    {
+                        dataclasses.replace(
+                            sample_charm_endpoint_postgresql_k8s_database(),
+                            interface="db",
+                        ),
+                    }
+                ),
+            )
             bundle = Bundle(
-                applications=frozenset({Application(name="app", charm=charm)}),
+                applications=frozenset(
+                    {
+                        Application(name="app", charm=charm),
+                        Application(name="db", charm=db_charm),
+                    }
+                ),
                 integrations=frozenset(
                     {
                         Integration(
@@ -731,14 +658,9 @@ class TestAddTestConfigs:
 
         def test_returns_empty_config_when_no_test_configs(self):
             # GIVEN a charm with no test configs
-            charm = Charm(
+            charm = dataclasses.replace(
+                sample_charm_postgresql_k8s(),
                 name="test-charm",
-                channel="stable",
-                revision=1,
-                ubuntu_version="22.04",
-                ubuntu_arch="amd64",
-                endpoints=frozenset(),
-                priority=1.0,
                 test_configs=(),
             )
             bundle = Bundle(
@@ -757,14 +679,9 @@ class TestAddTestConfigs:
 
         def test_returns_empty_config_when_no_matching_criteria(self):
             # GIVEN a charm with test configs that don't match
-            charm = Charm(
+            charm = dataclasses.replace(
+                sample_charm_postgresql_k8s(),
                 name="test-charm",
-                channel="stable",
-                revision=1,
-                ubuntu_version="22.04",
-                ubuntu_arch="amd64",
-                endpoints=frozenset(),
-                priority=1.0,
                 test_configs=(
                     CharmTestConfig(
                         criteria=CharmConfigCriteria(track="1.0"),
@@ -788,14 +705,10 @@ class TestAddTestConfigs:
 
         def test_handles_multiple_applications(self):
             # GIVEN multiple applications with different configs
-            charm1 = Charm(
+            charm1 = dataclasses.replace(
+                sample_charm_postgresql_k8s(),
                 name="charm1",
                 channel="1.0/stable",
-                revision=1,
-                ubuntu_version="22.04",
-                ubuntu_arch="amd64",
-                endpoints=frozenset(),
-                priority=1.0,
                 test_configs=(
                     CharmTestConfig(
                         criteria=CharmConfigCriteria(track="1.0"),
@@ -803,14 +716,10 @@ class TestAddTestConfigs:
                     ),
                 ),
             )
-            charm2 = Charm(
+            charm2 = dataclasses.replace(
+                sample_charm_kratos(),
                 name="charm2",
                 channel="2.0/stable",
-                revision=1,
-                ubuntu_version="22.04",
-                ubuntu_arch="amd64",
-                endpoints=frozenset(),
-                priority=1.0,
                 test_configs=(
                     CharmTestConfig(
                         criteria=CharmConfigCriteria(track="2.0"),
@@ -841,14 +750,9 @@ class TestAddTestConfigs:
 
         def test_selects_from_multiple_valid_configs(self):
             # GIVEN a charm with multiple valid test configs
-            charm = Charm(
+            charm = dataclasses.replace(
+                sample_charm_postgresql_k8s(),
                 name="test-charm",
-                channel="stable",
-                revision=1,
-                ubuntu_version="22.04",
-                ubuntu_arch="amd64",
-                endpoints=frozenset(),
-                priority=1.0,
                 test_configs=(
                     CharmTestConfig(
                         criteria=CharmConfigCriteria.from_bool(True),
@@ -876,24 +780,20 @@ class TestAddTestConfigs:
 
         def test_complex_criteria_all_of_and_endpoint(self):
             # GIVEN a charm with complex criteria (all_of with track and endpoint)
-            charm = Charm(
+            charm = dataclasses.replace(
+                sample_charm_kratos(),
                 name="test-charm",
                 channel="1.0/stable",
-                revision=1,
-                ubuntu_version="22.04",
-                ubuntu_arch="amd64",
                 endpoints=frozenset(
                     {
-                        CharmEndpoint(
-                            type=ENDPOINT_REQUIRES,
+                        dataclasses.replace(
+                            sample_charm_endpoint_kratos_pg_database(),
                             name="database",
                             interface="db",
                             optionality=CharmEndpointOptionality.from_bool(True),
-                            limit=None,
                         ),
                     }
                 ),
-                priority=1.0,
                 test_configs=(
                     CharmTestConfig(
                         criteria=CharmConfigCriteria(
@@ -912,8 +812,25 @@ class TestAddTestConfigs:
                     ),
                 ),
             )
+            db_charm = dataclasses.replace(
+                sample_charm_postgresql_k8s(),
+                name="db-charm",
+                endpoints=frozenset(
+                    {
+                        dataclasses.replace(
+                            sample_charm_endpoint_postgresql_k8s_database(),
+                            interface="db",
+                        ),
+                    }
+                ),
+            )
             bundle = Bundle(
-                applications=frozenset({Application(name="app", charm=charm)}),
+                applications=frozenset(
+                    {
+                        Application(name="app", charm=charm),
+                        Application(name="db", charm=db_charm),
+                    }
+                ),
                 integrations=frozenset(
                     {
                         Integration(

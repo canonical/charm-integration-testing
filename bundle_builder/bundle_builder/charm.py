@@ -34,12 +34,15 @@ class CharmChannel:
     def validate_from_string(cls, value):
         if isinstance(value, str):
             parts = value.split("/")
-            if len(parts) == 1:
-                return {"track": "", "risk": parts[0], "branch": ""}
-            elif len(parts) == 2:
-                return {"track": parts[0], "risk": parts[1], "branch": ""}
-            elif len(parts) == 3:
-                return {"track": parts[0], "risk": parts[1], "branch": parts[2]}
+            match len(parts):
+                case 1:
+                    return {"track": "", "risk": parts[0], "branch": ""}
+                case 2:
+                    return {"track": parts[0], "risk": parts[1], "branch": ""}
+                case 3:
+                    return {"track": parts[0], "risk": parts[1], "branch": parts[2]}
+                case _:
+                    raise ValueError(f"Invalid channel string: {value}")
         return value
 
     @model_serializer(mode="plain")
