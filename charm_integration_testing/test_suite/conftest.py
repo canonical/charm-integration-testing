@@ -98,18 +98,13 @@ def pytest_runtest_makereport(item, call):
     if report.skipped:
         # Adapted from https://docs.pytest.org/en/stable/_modules/_pytest/junitxml.html
         if hasattr(report, "wasxfail"):
-            xfailreason = report.wasxfail
-            if xfailreason.startswith("reason: "):
-                xfailreason = xfailreason[8:]
-            item.stash[skipped_message] = xfailreason
+            item.stash[skipped_message] = report.wasxfail.removeprefix("reason: ")
         else:
             if isinstance(report.longrepr, tuple) and len(report.longrepr) >= 3:
                 _, _, skipreason = report.longrepr
             else:
                 skipreason = str(report.longrepr)
-            if skipreason.startswith("Skipped: "):
-                skipreason = skipreason[9:]
-            item.stash[skipped_message] = skipreason
+            item.stash[skipped_message] = skipreason.removeprefix("Skipped: ")
 
     # Save failure exception
     if call.excinfo:
