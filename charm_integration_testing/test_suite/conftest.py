@@ -75,6 +75,7 @@ def minio_client_file(request: pytest.FixtureRequest) -> Path | None:
 
 
 failure_message = StashKey[CollectReport]()
+skipped_message = StashKey[CollectReport]()
 failure_exception = StashKey[CollectReport]()
 
 
@@ -86,11 +87,24 @@ def pytest_runtest_makereport(item, call):
 
     # Save failure message
     if report.failed:
+        # Adapted from https://docs.pytest.org/en/stable/_modules/_pytest/junitxml.html
         reprcrash = getattr(report.longrepr, "reprcrash", None)
         if reprcrash is not None:
             item.stash[failure_message] = reprcrash.message
         else:
             item.stash[failure_message] = str(report.longrepr)
+
+    # Save skip message
+    if report.skipped:
+        # Adapted from https://docs.pytest.org/en/stable/_modules/_pytest/junitxml.html
+        if hasattr(report, "wasxfail"):
+            item.stash[skipped_message] = report.wasxfail.removeprefix("reason: ")
+        else:
+            if isinstance(report.longrepr, tuple) and len(report.longrepr) >= 3:
+                _, _, skipreason = report.longrepr
+            else:
+                skipreason = str(report.longrepr)
+            item.stash[skipped_message] = skipreason.removeprefix("Skipped: ")
 
     # Save failure exception
     if call.excinfo:
@@ -119,6 +133,8 @@ def print_setup_and_teardown_info(
     # Log error
     if failure_message in request.node.stash:
         logger.error(f"Failure in {request.node.name}: {request.node.stash[failure_message]}")
+    elif skipped_message in request.node.stash:
+        logger.info(f"Skipped {request.node.name}: {request.node.stash[skipped_message]}")
     else:
         logger.info(f"Successfully ran {request.node.name}")
 
@@ -223,6 +239,10 @@ def record_failure_execution_metadata(
     # Save the failure message
     if failure_message in request.node.stash:
         execution_metadata("failure:message", normalize_message(request.node.stash[failure_message]))
+
+    # Save the skip message
+    if skipped_message in request.node.stash:
+        execution_metadata("skipped:message", normalize_message(request.node.stash[skipped_message]))
 
     # Save extra metadata from exception
     if failure_exception in request.node.stash:

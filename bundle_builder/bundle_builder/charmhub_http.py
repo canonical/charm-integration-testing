@@ -155,7 +155,7 @@ class CharmhubHttpClient:
         # Setup requests session with retries
         retry_strategy = Retry(
             total=10,
-            status_forcelist=[429, 500, 502, 503, 504],
+            status_forcelist=[408, 429, 500, 502, 503, 504],
             allowed_methods=Retry.DEFAULT_ALLOWED_METHODS | {"GET", "POST"},
             backoff_factor=0.5,
         )
