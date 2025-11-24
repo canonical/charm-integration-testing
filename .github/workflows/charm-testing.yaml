@@ -496,10 +496,7 @@ jobs:
               errors=$(xq -x '/testsuites/@errors' "$JUNIT_FILE")
           else
               echo "Warning: JUNIT_FILE '$JUNIT_FILE' does not exist. Defaulting test counts to 0."
-              tests=0
-              skipped=0
-              failures=0
-              errors=0
+              exit 1
           fi
 
           TEST_STATUS="SUCCESS"
