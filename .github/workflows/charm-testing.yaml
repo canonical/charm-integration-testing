@@ -491,7 +491,7 @@ jobs:
           if [[ -f "$JUNIT_FILE" ]]; then
               # Parse test status from JUNIT
               tests=$(yq -p xml -oy '.testsuites.+@tests' "$JUNIT_FILE")
-              skipped=$yq -p xml -oy '.testsuites.+@skipped' "$JUNIT_FILE")
+              skipped=$(yq -p xml -oy '.testsuites.+@skipped' "$JUNIT_FILE")
               failures=$(yq -p xml -oy '.testsuites.+@failures' "$JUNIT_FILE")
               errors=$(yq -p xml -oy '.testsuites.+@errors' "$JUNIT_FILE")
           else
