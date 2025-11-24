@@ -478,14 +478,51 @@ jobs:
           event_name: "job_end"
           detail: "Charm integration test job completed."
 
-      - name: Mark Test Execution completed on Test Observer
+      - name: Calculate Job Status
+        id: calculate_job_status
+        env:
+          JUNIT_FILE: ${{ steps.junit_results.outputs.junit_xml }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          set -eu
+          sudo snap install yq
+
+          # Validate JUNIT_FILE existence
+          if [[ -f "$JUNIT_FILE" ]]; then
+              # Parse test status from JUNIT
+              tests=$(yq -p xml -oy '.testsuites.+@tests' "$JUNIT_FILE")
+              skipped=$(yq -p xml -oy '.testsuites.+@skipped' "$JUNIT_FILE")
+              failures=$(yq -p xml -oy '.testsuites.+@failures' "$JUNIT_FILE")
+              errors=$(yq -p xml -oy '.testsuites.+@errors' "$JUNIT_FILE")
+          else
+              echo "Warning: JUNIT_FILE '$JUNIT_FILE' does not exist. Failing job."
+              exit 1
+          fi
+
+          TEST_STATUS="PASSED"
+
+          # If all tests are skipped, then fail right away.
+          if [[ "$tests" -gt 0 && "$tests" -eq "$skipped" ]]; then
+              echo "Error: All $tests tests were skipped"
+              TEST_STATUS="FAILED"
+
+          # If there is at least one error in the JUNIT, then fail right away
+          elif [[ "$failures" -gt 0 || "$errors" -gt 0 ]]; then
+              echo "Error: JUNIT has test failures."
+              TEST_STATUS="FAILED"
+          fi
+
+          echo "Summary: #tests: $tests | Failed: $failures | Errors: $errors | Skipped: $skipped"
+          echo "test_status=$TEST_STATUS" >> $GITHUB_OUTPUT
+
+      - name: Mark Test Execution completed on Test Observer with the correct status
         if: ${{ always() && env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/patch-test-execution
         with:
           test_observer_api: ${{ env.test_observer_api }}
           test_observer_token: ${{ env.test_observer_token }}
           test_execution_id: ${{ inputs.execution_id }}
-          status: "COMPLETED"
+          status: ${{ steps.calculate_job_status.outputs.test_status != '' && steps.calculate_job_status.outputs.test_status || 'ENDED_PREMATURELY' }}
 
       - name: Trigger rerun on Test Observer if failure
         if: ${{ failure() && env.test_observer_api != '' && inputs.execution_id != '' }}
