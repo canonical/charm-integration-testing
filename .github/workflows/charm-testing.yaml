@@ -495,11 +495,11 @@ jobs:
               failures=$(yq -p xml -oy '.testsuites.+@failures' "$JUNIT_FILE")
               errors=$(yq -p xml -oy '.testsuites.+@errors' "$JUNIT_FILE")
           else
-              echo "Warning: JUNIT_FILE '$JUNIT_FILE' does not exist. Defaulting test counts to 0."
+              echo "Warning: JUNIT_FILE '$JUNIT_FILE' does not exist. Failing job."
               exit 1
           fi
 
-          TEST_STATUS="SUCCESS"
+          TEST_STATUS="PASSED"
 
           # If all tests are skipped, then fail right away.
           if [[ "$tests" -gt 0 && "$tests" -eq "$skipped" ]]; then
