@@ -5,18 +5,19 @@
 import os
 import time
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 
 import yaml
 from juju import JujuBackend, JujuExecOutput, JujuIntegration, JujuIntegrationApplication, JujuWaitTimeoutError
 
 from .cmd import CmdArg, CmdClient, CmdError
 from .structures import JujuExecTask, JujuModel, JujuSecretInfo, JujuStatus
-
+    
 
 class JujuCmdBackend(JujuBackend):
     cmd_client: CmdClient
 
-    def __init__(self, cmd_client: CmdClient = None):
+    def __init__(self, cmd_client: Optional[CmdClient] = None):
         self.cmd_client = cmd_client if cmd_client is not None else CmdClient()
 
     def _call_juju(self, *args: list[CmdArg]) -> str:

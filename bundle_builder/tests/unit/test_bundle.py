@@ -14,6 +14,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import dataclasses
+from typing import Optional
 
 import pytest
 import yaml
@@ -114,10 +115,10 @@ class TestLimitApplication:
                                             self.default_bases = [MockBase()]
 
                                     self.extra = MockExtra()
-
-                            self.error = MockError()
+    
+                            self.error: Optional[MockError] = MockError()
                         else:
-                            self.error = None
+                            self.error: Optional[MockError] = None
 
                         self.name = "test-charm"
                         self.effective_channel = "stable"
@@ -130,7 +131,7 @@ class TestLimitApplication:
                                 class MockMetadata:
                                     def __init__(self) -> None:
                                         class MockEndpoint:
-                                            def __init__(self, interface: str, optional: bool | None = None) -> None:
+                                            def __init__(self, interface, optional=None) -> None:
                                                 self.interface = interface
                                                 self.optional = optional
 
