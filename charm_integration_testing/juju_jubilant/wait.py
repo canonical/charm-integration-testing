@@ -5,6 +5,7 @@
 from typing import Callable, Iterator
 
 import jubilant
+from jubilant.statustypes import AppStatusRelation
 from juju import JujuApplicationState, JujuIntegration, JujuIntegrationApplication, JujuUnitState, JujuWaitState
 
 
@@ -53,7 +54,7 @@ def get_unit_info(status: jubilant.Status, unit: str) -> jubilant.statustypes.Un
     return None
 
 
-def generate_endpoint_integrations(status: jubilant.Status) -> Iterator[tuple[str, str, str]]:
+def generate_endpoint_integrations(status: jubilant.Status) -> Iterator[tuple[str, str, AppStatusRelation]]:
     for application, application_info in status.apps.items():
         for endpoint, integrations in application_info.relations.items():
             for integration in integrations:

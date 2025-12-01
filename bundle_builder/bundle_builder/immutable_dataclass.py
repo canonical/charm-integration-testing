@@ -16,17 +16,23 @@
 
 from dataclasses import field
 from functools import wraps
-from typing import Any, Callable, Dict, get_type_hints
+from typing import Any, Callable, Dict, TypeVar, get_type_hints
 
 from pydantic.dataclasses import dataclass
+
+_F = TypeVar("_F", bound=Callable[..., Any])
 
 
 # Computed property attribute
 # Meant for use with @immutable_dataclass
 # Computed at initialization once
-def computed_property(func: Callable) -> Callable:
-    func._is_computed_property = True
-    return func
+def computed_property(func: _F) -> Any:
+    # Create a property object so mypy understands this is a property
+    prop = property(func)
+    # Mark it so immutable_dataclass knows to handle it specially
+    prop._is_computed_property = True  # type: ignore[attr-defined]
+    prop._original_func = func  # type: ignore[attr-defined]
+    return prop
 
 
 # Sentinel value for uninitialized computed fields
@@ -55,7 +61,7 @@ _CACHE_MISS = object()
 # Cached method backed by instance-level cache
 # Meant for use with @immutable_dataclass
 # Much like functools.cache, but at the instance level instead of global
-def cached_method(func: Callable) -> Callable:
+def cached_method(func: _F) -> _F:
     setattr(func, _MARKED_AS_CACHED_METHOD, True)
     return func
 
@@ -84,7 +90,9 @@ def immutable_dataclass(_cls: type = None, **dataclass_kwargs: dict) -> dataclas
         cached_methods = {}
         for name, val in cls.__dict__.items():
             if getattr(val, "_is_computed_property", False):
-                computed_fields[name] = val
+                # Extract the original function from the property
+                original_func = getattr(val, "_original_func", val.fget if isinstance(val, property) else val)
+                computed_fields[name] = original_func
             elif getattr(val, _MARKED_AS_CACHED_METHOD, False):
                 cached_methods[name] = val
 

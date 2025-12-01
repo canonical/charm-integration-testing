@@ -5,7 +5,8 @@ from dataclasses import dataclass, field
 from datetime import timedelta
 
 from extensions.unseal_vault.vault_client import VaultStatus
-from extensions.unseal_vault.vault_unsealer import CharmInfo, VaultTokenSecret, VaultUnsealer
+from extensions.unseal_vault.vault_unsealer import CharmInfo, VaultUnsealer
+from extensions.unseal_vault.vault_client import VaultTokenSecret
 
 
 @dataclass

@@ -46,7 +46,7 @@ class CmdClient:
 
         return result.stdout
 
-    def parse_args(self, *args: list[CmdArg]) -> list[str]:
+    def parse_args(self, *args: CmdArg) -> list[str]:
         results = []
         for arg in args:
             if arg.name is not None:

@@ -62,6 +62,7 @@ class BundleBuilder:
     aggression_limit: int
     aggression_interval: int
     avoid_application_dependency_cycles: bool
+    max_same_charm_instances: int
 
     def __init__(
         self,

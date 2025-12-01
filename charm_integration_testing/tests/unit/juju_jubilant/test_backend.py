@@ -3,17 +3,19 @@
 
 from dataclasses import field
 from datetime import timedelta
+from typing import Any
 
 import jubilant
 import yaml
-from juju_jubilant.backend import JubilantBackend, JubilantClient
+from juju_jubilant.backend import JubilantBackend
+from juju_jubilant.client import JubilantClient
 from pydantic.dataclasses import dataclass
 
 
 class JubilantClientStub:
-    client: any
+    client: Any
 
-    def __init__(self, client: any) -> None:
+    def __init__(self, client: Any) -> None:
         self.client = client
 
     def model(self, model: str) -> any:

@@ -20,13 +20,14 @@ from pydantic import Field
 from pydantic.dataclasses import dataclass
 
 from bundle_builder.charm import CharmConfig
-from bundle_builder.charmhub import CharmhubClient, CharmReleaseNotFoundException
+from bundle_builder.charmhub import CharmhubClient
 from bundle_builder.charmhub_http import (
     CharmhubBase,
     FindResponse,
     InfoResponse,
     RefreshAction,
     RefreshResponse,
+    CharmReleaseNotFoundException,
 )
 
 
