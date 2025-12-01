@@ -21,6 +21,7 @@ build-backend = "poetry.core.masonry.api"
 ruff = "^0.5.5"
 bandit = "^1.7.9"
 pytest-cov = "^6.2.1"
+mypy = "^1.19.0"
 
 [tool.ruff]
 line-length = 120
@@ -42,3 +43,17 @@ junit_duration_report = "total"
 
 [tool.bandit.assert_used]
 skips = ['charm_integration_testing/test_suite/*']
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_any_generics = true
+check_untyped_defs = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+show_error_codes = true
