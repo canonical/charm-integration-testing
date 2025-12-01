@@ -15,6 +15,7 @@
 
 import logging
 from functools import cache
+from typing import Any
 
 import requests
 import yaml
@@ -207,7 +208,7 @@ class CharmhubHttpClient:
         # Formulate request
         request_url = CHARM_REFRESH_ENDPOINT
         request_headers = {"Content-Type": "application/json"}
-        action_dict = {"name": action.charm_name}
+        action_dict: dict[str, Any] = {"name": action.charm_name}
         if action.charm_revision is not None:
             action_dict["revision"] = action.charm_revision
         if action.charm_channel is not None:

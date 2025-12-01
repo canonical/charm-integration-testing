@@ -16,23 +16,28 @@
 
 from dataclasses import field
 from functools import wraps
-from typing import Any, Callable, Dict, TypeVar, get_type_hints
+from typing import Any, Callable, Dict, TypeVar, get_type_hints, Optional
 
 from pydantic.dataclasses import dataclass
 
 _F = TypeVar("_F", bound=Callable[..., Any])
 
 
+# Custom property subclass that allows marking for computed properties
+class _ComputedProperty(property):
+    _is_computed_property = True
+    
+    def __init__(self, func: Callable[..., Any]) -> None:
+        super().__init__(func)
+        self._original_func = func
+
+
 # Computed property attribute
 # Meant for use with @immutable_dataclass
 # Computed at initialization once
 def computed_property(func: _F) -> Any:
-    # Create a property object so mypy understands this is a property
-    prop = property(func)
-    # Mark it so immutable_dataclass knows to handle it specially
-    prop._is_computed_property = True  # type: ignore[attr-defined]
-    prop._original_func = func  # type: ignore[attr-defined]
-    return prop
+    # Return a custom property that mypy understands as a property
+    return _ComputedProperty(func)
 
 
 # Sentinel value for uninitialized computed fields
@@ -83,7 +88,7 @@ def make_cached_method(cached_field_name: str, method: Callable) -> Callable:
 
 # Create an immutable dataclass using frozen=True
 # and defaults slots=True
-def immutable_dataclass(_cls: type = None, **dataclass_kwargs: dict) -> dataclass:
+def immutable_dataclass(_cls: Optional[type] = None, **dataclass_kwargs: dict) -> dataclass:
     def wrap(cls: type) -> dataclass:
         # Collect methods decorated as computed fields
         computed_fields = {}

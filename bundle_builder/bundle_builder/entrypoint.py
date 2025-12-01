@@ -95,7 +95,7 @@ def applications_from_args(
     for spec in specs:
         # Get charm specs
         try:
-            name, charm, channel_or_revision, base = spec.split("::")
+            name, spec_charm, channel_or_revision, spec_base = spec.split("::")
         except ValueError:
             parser.error(f"Invalid charm format: '{spec}'")
         channel = None
@@ -105,12 +105,12 @@ def applications_from_args(
                 revision = int(channel_or_revision)
             else:
                 channel = channel_or_revision
-        base = base if base != "default" else None
+        base = spec_base if spec_base != "default" else None
 
         # Get charm from store
         try:
             charm = charmhub_client.charm_from_store(
-                charm_name=charm,
+                charm_name=spec_charm,
                 charm_channel=channel,
                 charm_revision=revision,
                 ubuntu_version=base,
