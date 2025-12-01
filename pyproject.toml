@@ -57,3 +57,7 @@ warn_redundant_casts = true
 warn_unused_ignores = true
 warn_no_return = true
 show_error_codes = true
+exclude = [
+    "^bundle_builder/bundle_builder/",
+    "^charm_integration_testing/charm_integration_testing/",
+]
