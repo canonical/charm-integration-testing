@@ -49,6 +49,7 @@ class CharmhubClientStub:
             return frozenset({"kratos"})
         if provides == "unknown":
             return frozenset()
+        return frozenset()
 
     def charm_from_store(
         self,
@@ -60,6 +61,7 @@ class CharmhubClientStub:
     ) -> Charm | None:
         if charm_name == "postgresql-k8s":
             return sample_charm_postgresql_k8s()
+        return None
 
 
 def sample_node_postgresql_k8s_kratos() -> Node:
