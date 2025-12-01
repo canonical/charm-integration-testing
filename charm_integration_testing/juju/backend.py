@@ -78,7 +78,7 @@ class JujuExecOutput:
 
 class JujuBackend(ABC):
     @abstractmethod
-    def scale_application(self, model: str, application: str, num: int):
+    def scale_application(self, model: str, application: str, num: int) -> None:
         raise NotImplementedError
 
     @abstractmethod
@@ -100,19 +100,19 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def wait_idle(self, model: str, timeout: timedelta | None, period: timedelta | None):
+    def wait_idle(self, model: str, timeout: timedelta | None, period: timedelta | None) -> None:
         raise NotImplementedError
 
     @abstractmethod
-    def wait_application_settled(self, model: str, application: str, timeout: timedelta | None):
+    def wait_application_settled(self, model: str, application: str, timeout: timedelta | None) -> None:
         raise NotImplementedError
 
     @abstractmethod
-    def wait_application_scaled(self, model: str, application: str, timeout: timedelta | None):
+    def wait_application_scaled(self, model: str, application: str, timeout: timedelta | None) -> None:
         raise NotImplementedError
 
     @abstractmethod
-    def wait_for_unit_message(self, model: str, unit: str, message: str, timeout: timedelta | None):
+    def wait_for_unit_message(self, model: str, unit: str, message: str, timeout: timedelta | None) -> None:
         raise NotImplementedError
 
     @abstractmethod
@@ -120,25 +120,25 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def integrate(self, model: str, target_1: JujuIntegrationApplication, target_2: JujuIntegrationApplication):
+    def integrate(self, model: str, target_1: JujuIntegrationApplication, target_2: JujuIntegrationApplication) -> None:
         raise NotImplementedError
 
     @abstractmethod
     def remove_integration(
         self, model: str, target_1: JujuIntegrationApplication, target_2: JujuIntegrationApplication
-    ):
+    ) -> None:
         raise NotImplementedError
 
     @abstractmethod
-    def deploy_bundle_file(self, model: str, bundle: str):
+    def deploy_bundle_file(self, model: str, bundle: str) -> None:
         raise NotImplementedError
 
     @abstractmethod
-    def remove_applications(self, model: str, *applications: str):
+    def remove_applications(self, model: str, *applications: str) -> None:
         raise NotImplementedError
 
     @abstractmethod
-    def wait_for_removal(self, model: str, applications: list[str], timeout: timedelta | None):
+    def wait_for_removal(self, model: str, applications: list[str], timeout: timedelta | None) -> None:
         raise NotImplementedError
 
     @abstractmethod
@@ -148,11 +148,11 @@ class JujuBackend(ABC):
         endpoint_1: JujuIntegrationApplication,
         endpoint_2: JujuIntegrationApplication,
         timeout: timedelta | None,
-    ):
+    ) -> None:
         raise NotImplementedError
 
     @abstractmethod
-    def wait_for_removal_of_units(self, model: str, applications: list[str], timeout: timedelta | None):
+    def wait_for_removal_of_units(self, model: str, applications: list[str], timeout: timedelta | None) -> None:
         raise NotImplementedError
 
     @abstractmethod
@@ -168,7 +168,7 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def run_action(self, model: str, unit: str, action: str, arguments: dict):
+    def run_action(self, model: str, unit: str, action: str, arguments: dict) -> None:
         raise NotImplementedError
 
     @abstractmethod
@@ -180,27 +180,27 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def grant_secret(self, model: str, name_or_id: str, application: str):
+    def grant_secret(self, model: str, name_or_id: str, application: str) -> None:
         raise NotImplementedError
 
     @abstractmethod
-    def remove_secret(self, model: str, name_or_id: str):
+    def remove_secret(self, model: str, name_or_id: str) -> None:
         raise NotImplementedError
 
     @abstractmethod
-    def deploy_application(self, model: str, charm: str, application: str | None = None):
+    def deploy_application(self, model: str, charm: str, application: str | None = None) -> None:
         raise NotImplementedError
 
     @abstractmethod
-    def configure_application(self, model: str, application: str, values: dict[str, str]):
+    def configure_application(self, model: str, application: str, values: dict[str, str]) -> None:
         raise NotImplementedError
 
     @abstractmethod
-    def scp(self, model: str, source: str, destination: str):
+    def scp(self, model: str, source: str, destination: str) -> None:
         raise NotImplementedError
 
     @abstractmethod
-    def ssh(self, model: str, application: str, command: str):
+    def ssh(self, model: str, application: str, command: str) -> None:
         raise NotImplementedError
 
     @abstractmethod

@@ -41,43 +41,43 @@ class JujuStub:
     units: dict = field(default_factory=lambda: {"postgresql-1": 3, "postgresql-2": 3})
     configured_applications: list = field(default_factory=list)
 
-    def list_applications(self, model: str):
+    def list_applications(self, model: str) -> list[str]:
         """Return list of application names in the model"""
         return self.applications.keys()
 
-    def application_charm(self, model: str, application: str):
+    def application_charm(self, model: str, application: str) -> str:
         """Return the charm name for a given application"""
         return self.applications[application]
 
-    def integration_exists(self, application1: str, endpoint1: str, application2: str, endpoint2: str, model: str):
+    def integration_exists(self, application1: str, endpoint1: str, application2: str, endpoint2: str, model: str) -> bool:
         """Check if an integration exists between two applications"""
         return (application1, endpoint1, application2, endpoint2) in self.integrations
 
-    def wait_application_scaled(self, model: str, application: str, timeout: timedelta):
+    def wait_application_scaled(self, model: str, application: str, timeout: timedelta) -> None:
         """Wait for application to be scaled (captures call for verification)"""
         self.waited_scaled.append((model, application, str(timeout)))
 
-    def wait_application_settled(self, model: str, application: str, timeout: timedelta):
+    def wait_application_settled(self, model: str, application: str, timeout: timedelta) -> None:
         """Wait for application to settle (captures call for verification)"""
         self.waited_settled.append((model, application, str(timeout)))
 
-    def num_units(self, model: str, application: str):
+    def num_units(self, model: str, application: str) -> int:
         """Return the number of units for an application"""
         return self.units.get(application, 0)
 
-    def configure_application(self, model: str, application: str, values: dict):
+    def configure_application(self, model: str, application: str, values: dict) -> None:
         """Mock configuring an application (captures call for verification)"""
         self.configured_applications.append((model, application, values))
 
 
 class TestPostgreSQLDatabaseReplicationExtension:
     @pytest.fixture
-    def juju(self):
+    def juju(self) -> JujuStub:
         """Provide a JujuStub instance for testing"""
         return JujuStub()
 
     @pytest.fixture
-    def database_client(self):
+    def database_client(self) -> DatabaseClientStub:
         """Provide a DatabaseClientStub instance for testing"""
         return DatabaseClientStub()
 

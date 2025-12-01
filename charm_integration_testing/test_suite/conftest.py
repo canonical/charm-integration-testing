@@ -54,7 +54,7 @@ def juju_client(juju_backend: JujuBackend, logger: logging.Logger, minio_client_
     )
 
 
-def pytest_addoption(parser):
+def pytest_addoption(parser) -> None:
     parser.addoption("--model", type=str, required=True, help="Juju model to test in")
     parser.addoption(
         "--minio-client-file",
@@ -81,7 +81,7 @@ failure_exception = StashKey[CollectReport]()
 
 # Get failure message for logging
 @pytest.hookimpl(tryfirst=True, hookwrapper=True)
-def pytest_runtest_makereport(item, call):
+def pytest_runtest_makereport(item, call) -> None:
     result = yield
     report = result.get_result()
 
@@ -118,7 +118,7 @@ def print_setup_and_teardown_info(
     juju_client: JujuClient,
     model: str,
     record_execution_metadata: None,
-):
+) -> None:
     # Enforce fixture execution order
     _ = record_execution_metadata
 
@@ -143,7 +143,7 @@ def print_setup_and_teardown_info(
 
 
 @pytest.fixture(autouse=True)
-def assert_idle(juju_client: JujuClient, model: str, print_setup_and_teardown_info: None):
+def assert_idle(juju_client: JujuClient, model: str, print_setup_and_teardown_info: None) -> None:
     # Enforce fixture execution order
     _ = print_setup_and_teardown_info
 
@@ -154,11 +154,11 @@ def assert_idle(juju_client: JujuClient, model: str, print_setup_and_teardown_in
 
 
 @pytest.fixture
-def execution_metadata(record_property: Callable[[str, object], None]):
+def execution_metadata(record_property: Callable[[str, object], None]) -> Callable[[str, str], None]:
     # Create a function for adding and deduplicating metadata
     metadata: dict[str, set[str]] = {}
 
-    def add(category: str, value: str):
+    def add(category: str, value: str) -> None:
         if category not in metadata:
             metadata[category] = set()
         metadata[category].add(value)
@@ -179,7 +179,7 @@ def execution_metadata(record_property: Callable[[str, object], None]):
 def record_execution_metadata(
     record_failure_execution_metadata: None,
     record_charms_and_revisions_execution_metadata: None,
-):
+) -> None:
     # Save various execution metadata
     _ = record_failure_execution_metadata
     _ = record_charms_and_revisions_execution_metadata
@@ -187,7 +187,7 @@ def record_execution_metadata(
 
 def record_charms_and_revisions_execution_metadata_instantaneous(
     juju_client: JujuClient, model: str, execution_metadata: Callable[[str, str | int], None]
-):
+) -> None:
     # Get all charm revisions
     for charm, revision in juju_client.get_charm_revisions(model=model):
         # Save the charm
@@ -199,7 +199,7 @@ def record_charms_and_revisions_execution_metadata_instantaneous(
 @pytest.fixture
 def record_charms_and_revisions_execution_metadata(
     juju_client: JujuClient, model: str, execution_metadata: Callable[[str, str | int], None]
-):
+) -> None:
     # Save all charms and revisions at start of test
     record_charms_and_revisions_execution_metadata_instantaneous(juju_client, model, execution_metadata)
 
@@ -232,7 +232,7 @@ def normalize_message(message: Any) -> str:
 @pytest.fixture
 def record_failure_execution_metadata(
     request: pytest.FixtureRequest, execution_metadata: Callable[[str, str | int], None]
-):
+) -> None:
     # Let the test run
     yield
 

@@ -6,7 +6,7 @@ import pytest
 from juju import JujuClient
 
 
-def pytest_addoption(parser):
+def pytest_addoption(parser) -> None:
     parser.addoption(
         "--target-application",
         type=str,
@@ -60,7 +60,7 @@ def assert_applications_exist(
     model: str,
     target_application: str,
     neighbor_application: str,
-):
+) -> None:
     _ = assert_idle  # Enforce fixture execution order
 
     if not juju_client.application_exists(target_application, model=model):
@@ -78,7 +78,7 @@ def assert_applications_integrated(
     target_endpoint: str,
     neighbor_application: str,
     neighbor_endpoint: str,
-):
+) -> None:
     _ = assert_applications_exist  # Enforce fixture execution order
 
     if not juju_client.integration_exists(

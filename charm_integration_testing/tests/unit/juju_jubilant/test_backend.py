@@ -13,7 +13,7 @@ from pydantic.dataclasses import dataclass
 class JubilantClientStub:
     client: any
 
-    def __init__(self, client: any):
+    def __init__(self, client: any) -> None:
         self.client = client
 
     def model(self, model: str) -> any:
@@ -31,7 +31,7 @@ class JubilantCliStub:
 
 
 class TestJubilantClient:
-    def test_model(self):
+    def test_model(self) -> None:
         # GIVEN a jubilant client
         client = JubilantClient()
 
@@ -46,7 +46,7 @@ class TestJubilantClient:
 class WaitStub:
     raise_exception: bool = False
 
-    def wait(self, ready, timeout, delay, **kwargs):
+    def wait(self, ready: any, timeout: float, delay: float, **kwargs: any) -> None:
         self.ready = ready
         self.timeout = timeout
         self.delay = delay
@@ -58,7 +58,7 @@ class WaitStub:
 
 class TestJubilantBackend:
     class TestWaitIdle:
-        def test_wait_idle(self):
+        def test_wait_idle(self) -> None:
             # GIVEN
             stub = WaitStub()
             client = JubilantClientStub(client=stub)
@@ -70,7 +70,7 @@ class TestJubilantBackend:
             assert stub.timeout == 10
             assert stub.delay == 1
 
-        def test_timeout(self):
+        def test_timeout(self) -> None:
             # GIVEN
             stub = WaitStub(raise_exception=True)
             client = JubilantClientStub(client=stub)
@@ -86,7 +86,7 @@ class TestJubilantBackend:
                 assert False
 
     class TestWaitApplicationSettled:
-        def test_application_settled(self):
+        def test_application_settled(self) -> None:
             # GIVEN
             stub = WaitStub()
             client = JubilantClientStub(client=stub)
@@ -98,7 +98,7 @@ class TestJubilantBackend:
             assert stub.timeout == 10
             assert stub.delay == 1
 
-        def test_timeout(self):
+        def test_timeout(self) -> None:
             # GIVEN
             stub = WaitStub(raise_exception=True)
             client = JubilantClientStub(client=stub)
@@ -114,7 +114,7 @@ class TestJubilantBackend:
                 assert False
 
     class TestWaitApplicationScaled:
-        def test_application_scaled(self):
+        def test_application_scaled(self) -> None:
             # GIVEN
             stub = WaitStub()
             client = JubilantClientStub(client=stub)
@@ -126,7 +126,7 @@ class TestJubilantBackend:
             assert stub.timeout == 10
             assert stub.delay == 1
 
-        def test_timeout(self):
+        def test_timeout(self) -> None:
             # GIVEN
             stub = WaitStub(raise_exception=True)
             client = JubilantClientStub(client=stub)
@@ -142,7 +142,7 @@ class TestJubilantBackend:
                 assert False
 
     class TestWaitForUnitMessage:
-        def test_unit_message(self):
+        def test_unit_message(self) -> None:
             # GIVEN
             stub = WaitStub()
             client = JubilantClientStub(client=stub)
@@ -156,7 +156,7 @@ class TestJubilantBackend:
             assert stub.timeout == 10
             assert stub.delay == 1
 
-        def test_timeout(self):
+        def test_timeout(self) -> None:
             # GIVEN
             stub = WaitStub(raise_exception=True)
             client = JubilantClientStub(client=stub)
@@ -174,7 +174,7 @@ class TestJubilantBackend:
                 assert False
 
     class TestWaitForRemoval:
-        def test_removal(self):
+        def test_removal(self) -> None:
             # GIVEN
             stub = WaitStub()
             client = JubilantClientStub(client=stub)
@@ -186,7 +186,7 @@ class TestJubilantBackend:
             assert stub.timeout == 10
             assert stub.delay == 1
 
-        def test_timeout(self):
+        def test_timeout(self) -> None:
             # GIVEN
             stub = WaitStub(raise_exception=True)
             client = JubilantClientStub(client=stub)
@@ -202,7 +202,7 @@ class TestJubilantBackend:
                 assert False
 
     class TestWaitForRemovalOfIntegration:
-        def test_removal_of_integration(self):
+        def test_removal_of_integration(self) -> None:
             # GIVEN
             stub = WaitStub()
             client = JubilantClientStub(client=stub)
@@ -220,7 +220,7 @@ class TestJubilantBackend:
             assert stub.timeout == 10
             assert stub.delay == 1
 
-        def test_timeout(self):
+        def test_timeout(self) -> None:
             # GIVEN
             stub = WaitStub(raise_exception=True)
             client = JubilantClientStub(client=stub)
@@ -242,7 +242,7 @@ class TestJubilantBackend:
                 assert False
 
     class TestWaitForRemovalOfUnits:
-        def test_removal_of_units(self):
+        def test_removal_of_units(self) -> None:
             # GIVEN
             stub = WaitStub()
             client = JubilantClientStub(client=stub)
@@ -254,7 +254,7 @@ class TestJubilantBackend:
             assert stub.timeout == 10
             assert stub.delay == 1
 
-        def test_timeout(self):
+        def test_timeout(self) -> None:
             # GIVEN
             stub = WaitStub(raise_exception=True)
             client = JubilantClientStub(client=stub)
@@ -277,11 +277,11 @@ class TestJubilantBackend:
             secrets: dict = field(default_factory=dict)
             secret_uri: str = "secret:test-secret-id"
 
-            def add_secret(self, name: str, content: dict[str, str]):
+            def add_secret(self, name: str, content: dict[str, str]) -> jubilant.SecretURI:
                 self.secrets[name] = content
                 return jubilant.SecretURI(self.secret_uri)
 
-        def test(self):
+        def test(self) -> None:
             # GIVEN
             client = JubilantClientStub(client=self.AddSecretStub())
 
@@ -294,7 +294,7 @@ class TestJubilantBackend:
             assert client.client.secrets["my-secret"] == {"key": "value"}
 
     class TestReadSecret:
-        def test(self):
+        def test(self) -> None:
             # GIVEN
             client = JubilantClientStub(
                 client=JubilantCliStub(
@@ -324,7 +324,7 @@ class TestJubilantBackend:
             assert content == {"my-key": "my-value"}
 
     class TestGrantSecret:
-        def test(self):
+        def test(self) -> None:
             # GIVEN
             client = JubilantClientStub(client=JubilantCliStub())
 
@@ -335,7 +335,7 @@ class TestJubilantBackend:
             assert ("grant-secret", "my-secret", "my-application") in client.client.executions
 
     class TestRemoveSecret:
-        def test(self):
+        def test(self) -> None:
             # GIVEN
             client = JubilantClientStub(client=JubilantCliStub())
 
@@ -351,11 +351,11 @@ class TestJubilantBackend:
             charm: str | None = None
             app: str | None = None
 
-            def deploy(self, charm: str, app: str | None = None):
+            def deploy(self, charm: str, app: str | None = None) -> None:
                 self.charm = charm
                 self.app = app
 
-        def test(self):
+        def test(self) -> None:
             # GIVEN
             stub = self.DeployStub()
             client = JubilantClientStub(client=stub)
@@ -373,11 +373,11 @@ class TestJubilantBackend:
             app: str | None = None
             values: dict[str, str] = field(default_factory=dict)
 
-            def config(self, app: str, values: dict[str, str]):
+            def config(self, app: str, values: dict[str, str]) -> None:
                 self.app = app
                 self.values = values
 
-        def test(self):
+        def test(self) -> None:
             # GIVEN
             stub = self.ConfigStub()
             client = JubilantClientStub(client=stub)
@@ -395,11 +395,11 @@ class TestJubilantBackend:
             source: str = ""
             destination: str = ""
 
-            def scp(self, source: str, destination: str):
+            def scp(self, source: str, destination: str) -> None:
                 self.source = source
                 self.destination = destination
 
-        def test(self):
+        def test(self) -> None:
             # GIVEN
             stub = self.ScpStub()
             client = JubilantClientStub(client=stub)
@@ -417,11 +417,11 @@ class TestJubilantBackend:
             target: str = ""
             command: str = ""
 
-            def ssh(self, target: str, command: str):
+            def ssh(self, target: str, command: str) -> None:
                 self.target = target
                 self.command = command
 
-        def test(self):
+        def test(self) -> None:
             # GIVEN
             stub = self.SshStub()
             client = JubilantClientStub(client=stub)
@@ -435,16 +435,16 @@ class TestJubilantBackend:
 
     class TestUnitIp:
         class Unit:
-            def __init__(self, address, leader=False):
+            def __init__(self, address: str, leader: bool = False) -> None:
                 self.address = address
                 self.leader = leader
 
         class AppStatus:
-            def __init__(self, units):
+            def __init__(self, units) -> None:
                 self.units = units
 
         class ModelStatus:
-            def __init__(self):
+            def __init__(self) -> None:
                 self.apps = {
                     "my-app": TestJubilantBackend.TestUnitIp.AppStatus(
                         {
@@ -455,10 +455,10 @@ class TestJubilantBackend:
                 }
 
         class StatusStub:
-            def status(self):
+            def status(self) -> "TestJubilantBackend.TestUnitIp.ModelStatus":
                 return TestJubilantBackend.TestUnitIp.ModelStatus()
 
-        def test_by_unit_id(self):
+        def test_by_unit_id(self) -> None:
             # GIVEN
             stub = self.StatusStub()
             client = JubilantClientStub(client=stub)
@@ -469,7 +469,7 @@ class TestJubilantBackend:
             # THEN
             assert ip == "10.0.0.1"
 
-        def test_by_leader(self):
+        def test_by_leader(self) -> None:
             # GIVEN
             stub = self.StatusStub()
             client = JubilantClientStub(client=stub)
@@ -480,7 +480,7 @@ class TestJubilantBackend:
             # THEN
             assert ip == "10.0.0.2"
 
-        def test_not_found(self):
+        def test_not_found(self) -> None:
             # GIVEN
             stub = self.StatusStub()
             client = JubilantClientStub(client=stub)
@@ -495,7 +495,7 @@ class TestJubilantBackend:
 
     class TestGetCharmRevisions:
         class StatusStub:
-            def __init__(self, charm, charm_rev):
+            def __init__(self, charm: str, charm_rev: int) -> None:
                 self.apps = {
                     "my-app": jubilant.statustypes.AppStatus(
                         charm=charm,
@@ -507,23 +507,23 @@ class TestJubilantBackend:
                 }
 
         class ModelStatus:
-            def __init__(self, charm, charm_rev):
+            def __init__(self, charm: str, charm_rev: int) -> None:
                 self.apps = TestJubilantBackend.TestGetCharmRevisions.StatusStub(charm, charm_rev).apps
 
         class StatusStubClient:
-            def status(self):
+            def status(self) -> "TestJubilantBackend.TestGetCharmRevisions.ModelStatus":
                 return TestJubilantBackend.TestGetCharmRevisions.ModelStatus("my-charm", 1)
 
         class ModelStub:
             client: "TestJubilantBackend.TestGetCharmRevisions.StatusStubClient"
 
-            def __init__(self, client):
+            def __init__(self, client: "TestJubilantBackend.TestGetCharmRevisions.StatusStubClient") -> None:
                 self.client = client
 
-            def status(self):
+            def status(self) -> "TestJubilantBackend.TestGetCharmRevisions.ModelStatus":
                 return self.client.status()
 
-        def test_get_charm_revisions(self):
+        def test_get_charm_revisions(self) -> None:
             # GIVEN
             client = JubilantClientStub(client=self.ModelStub(client=self.StatusStubClient()))
 

@@ -37,7 +37,7 @@ from .test_charm import sample_charm_postgresql_k8s, sample_charm_self_signed_ce
 
 
 class TestSetupLogging:
-    def test_valid_level(self):
+    def test_valid_level(self) -> None:
         # GIVEN a valid log level
         log_level = "DEBUG"
 
@@ -93,7 +93,7 @@ class TestAddArgsToParser:
     ]
 
     @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-    def test(self, params: Params):
+    def test(self, params: Params) -> None:
         # GIVEN a new argument parser
         parser = argparse.ArgumentParser()
 
@@ -110,7 +110,7 @@ class TestAddArgsToParser:
 
 
 class ArgumentParserStub:
-    def error(self, message: str):
+    def error(self, message: str) -> None:
         raise RuntimeError
 
 
@@ -200,7 +200,7 @@ class TestApplicationFromArgs:
     ]
 
     @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-    def test(self, params: Params):
+    def test(self, params: Params) -> None:
         # GIVEN stubbed charmhub client
         charmhub_client = self.CharmhubClientStub()
         # AND stubbed argument parser
@@ -259,7 +259,7 @@ class TestIntegrationFromArgs:
     ]
 
     @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-    def test(self, params: Params):
+    def test(self, params: Params) -> None:
         # GIVEN stubbed argument parser
         parser = ArgumentParserStub()
 
@@ -300,7 +300,7 @@ class TestPlatformFromArgs:
     ]
 
     @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-    def test(self, params: Params):
+    def test(self, params: Params) -> None:
         # GIVEN stubbed argument parser
         parser = ArgumentParserStub()
 
@@ -324,7 +324,7 @@ class TestExportBundleToFile:
         def export(self) -> str:
             return "my bundle string"
 
-    def test_write(self, tmp_path: Path):
+    def test_write(self, tmp_path: Path) -> None:
         # GIVEN stubbed bundle
         bundle = self.BundleStub()
         # AND a file to write to

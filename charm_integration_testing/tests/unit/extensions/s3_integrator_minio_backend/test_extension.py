@@ -26,40 +26,40 @@ class JujuStub:
     applications: dict = field(default_factory=lambda: {"s3-app": "s3-integrator"})
     unit_ips: dict = field(default_factory=lambda: {"s3-app-minio/leader": "10.0.0.1"})
 
-    def list_applications(self, model: str):
+    def list_applications(self, model: str) -> list[str]:
         return self.applications.keys()
 
-    def application_charm(self, model: str, application: str):
+    def application_charm(self, model: str, application: str) -> str:
         return self.applications[application]
 
-    def deploy_application(self, model: str, charm: str, application: str):
+    def deploy_application(self, model: str, charm: str, application: str) -> None:
         self.deployed.append((model, charm, application))
 
-    def configure_application(self, model: str, application: str, values: dict):
+    def configure_application(self, model: str, application: str, values: dict) -> None:
         self.configured.append((model, application, values))
 
-    def wait_application_scaled(self, model: str, application: str, timeout):
+    def wait_application_scaled(self, model: str, application: str, timeout) -> None:
         self.waited_scaled.append((model, application, str(timeout)))
 
-    def wait_application_settled(self, model: str, application: str, timeout):
+    def wait_application_settled(self, model: str, application: str, timeout) -> None:
         self.waited_settled.append((model, application, str(timeout)))
 
-    def scp(self, model: str, source: str, destination: str):
+    def scp(self, model: str, source: str, destination: str) -> None:
         self.scp_calls.append((model, source, destination))
 
-    def ssh(self, model: str, target: str, command: str):
+    def ssh(self, model: str, target: str, command: str) -> None:
         self.ssh_calls.append((model, target, command))
 
-    def run_action(self, model: str, unit: str, action: str, params: dict):
+    def run_action(self, model: str, unit: str, action: str, params: dict) -> None:
         self.actions.append((model, unit, action, params))
 
-    def unit_ip(self, model: str, unit: str):
+    def unit_ip(self, model: str, unit: str) -> str:
         return self.unit_ips[unit]
 
 
 class TestS3IntegratorMinIOBackendExtension:
     @pytest.fixture
-    def juju(self):
+    def juju(self) -> JujuStub:
         return JujuStub()
 
     @pytest.fixture

@@ -41,13 +41,13 @@ class CustomError(Exception):
 class ResponseStub:
     raise_for_status_error: bool = False
 
-    def raise_for_status(self):
+    def raise_for_status(self) -> None:
         if self.raise_for_status_error:
             raise CustomError
 
     json_result: list | dict | None = None
 
-    def json(self):
+    def json(self) -> list | dict | None:
         return self.json_result
 
 
@@ -168,7 +168,7 @@ def sample_info_response() -> InfoResponse:
 
 class TestRefreshResponse:
     class TestCharm:
-        def test_parse_yaml(self):
+        def test_parse_yaml(self) -> None:
             # GIVEN metadata yaml
             metadata_yaml = yaml.dump(
                 {
@@ -240,7 +240,7 @@ class TestCharmhubHttpClient:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test(self, params: Params):
+        def test(self, params: Params) -> None:
             # GIVEN the query
             provides = params.provides
             requires = params.requires
@@ -376,7 +376,7 @@ class TestCharmhubHttpClient:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test(self, params: Params):
+        def test(self, params: Params) -> None:
             # GIVEN the action
             action = params.action
 
@@ -428,7 +428,7 @@ class TestCharmhubHttpClient:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test(self, params: Params):
+        def test(self, params: Params) -> None:
             # GIVEN the charm name
             charm = params.charm
 

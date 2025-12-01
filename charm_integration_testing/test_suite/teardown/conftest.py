@@ -6,7 +6,7 @@ import pytest
 from juju import JujuClient
 
 
-def pytest_addoption(parser):
+def pytest_addoption(parser) -> None:
     parser.addoption(
         "--applications",
         nargs="*",
@@ -28,7 +28,7 @@ def assert_applications_exist(
     juju_client: JujuClient,
     model: str,
     applications: list[str],
-):
+) -> None:
     _ = assert_idle  # Enforce fixture execution order
 
     for application in applications:

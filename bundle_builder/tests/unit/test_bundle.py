@@ -61,7 +61,7 @@ class TestApplication:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test(self, params: Params):
+        def test(self, params: Params) -> None:
             # GIVEN the application
             application = params.application
 
@@ -73,14 +73,14 @@ class TestApplication:
 
 
 class TestLimitParsing:
-    def test_charm_endpoint_override_limit(self):
+    def test_charm_endpoint_override_limit(self) -> None:
         # GIVEN an override with limit
         override = CharmEndpointOverride(limit=3)
 
         # THEN limit is correctly set
         assert override.limit == 3
 
-    def test_charm_endpoint_override_no_limit(self):
+    def test_charm_endpoint_override_no_limit(self) -> None:
         # GIVEN an override without limit
         override = CharmEndpointOverride()
 
@@ -89,28 +89,28 @@ class TestLimitParsing:
 
 
 class TestLimitApplication:
-    def test_charmhub_client_applies_limit_overrides(self):
+    def test_charmhub_client_applies_limit_overrides(self) -> None:
         # Mock overrides client that returns limit overrides
         class MockOverridesClient(OverridesClient):
-            def get_charm_metadata_overrides(self, charm: str):
+            def get_charm_metadata_overrides(self, charm: str) -> None:
                 if charm == "test-charm":
                     return CharmMetadataOverride(provides={"database": CharmEndpointOverride(limit=2)})
                 return CharmMetadataOverride()
 
         # Mock HTTP client that returns mock charm data
         class MockHttpClient:
-            def refresh(self, action):
+            def refresh(self, action) -> None:
                 class MockResponse:
-                    def __init__(self):
+                    def __init__(self) -> None:
                         # Mock error for default base lookup (when base is "NA")
                         if hasattr(action, "base") and action.base.name == "NA":
 
                             class MockError:
-                                def __init__(self):
+                                def __init__(self) -> None:
                                     self.code = "invalid-charm-base"
 
                                     class MockExtra:
-                                        def __init__(self):
+                                        def __init__(self) -> None:
                                             self.default_bases = [MockBase()]
 
                                     self.extra = MockExtra()
@@ -123,14 +123,14 @@ class TestLimitApplication:
                         self.effective_channel = "stable"
 
                         class MockCharm:
-                            def __init__(self):
+                            def __init__(self) -> None:
                                 self.revision = 1
                                 self.bases = [MockBase()]
 
                                 class MockMetadata:
-                                    def __init__(self):
+                                    def __init__(self) -> None:
                                         class MockEndpoint:
-                                            def __init__(self, interface, optional=None):
+                                            def __init__(self, interface, optional=None) -> None:
                                                 self.interface = interface
                                                 self.optional = optional
 
@@ -144,7 +144,7 @@ class TestLimitApplication:
 
                 return MockResponse()
 
-        def MockBase():
+        def MockBase() -> CharmhubBase:
             return CharmhubBase(name="ubuntu", architecture="amd64", channel="22.04")
 
         # Create CharmhubClient with mock dependencies
@@ -161,7 +161,7 @@ class TestLimitApplication:
 class TestApplicationEndpoint:
     sample_application_endpoint = ApplicationEndpoint("postgresql-k8s", "certificates")
 
-    def test_repr(self):
+    def test_repr(self) -> None:
         # GIVEN an application endpoint
         application_endpoint = self.sample_application_endpoint
 
@@ -171,7 +171,7 @@ class TestApplicationEndpoint:
         # THEN repr is application:endpoint
         assert repr == f"{application_endpoint.application}:{application_endpoint.endpoint}"
 
-    def test_str(self):
+    def test_str(self) -> None:
         # GIVEN an application endpoint
         application_endpoint = self.sample_application_endpoint
 
@@ -376,7 +376,7 @@ class TestBundle:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test_validate(self, params: Params):
+        def test_validate(self, params: Params) -> None:
             if params.should_raise:
                 with pytest.raises(ValueError, match=params.match if params.match else ""):
                     params.bundle.validate()
@@ -384,7 +384,7 @@ class TestBundle:
                 # should not raise
                 params.bundle.validate()
 
-    def test_application_endpoints(self):
+    def test_application_endpoints(self) -> None:
         # GIVEN a bundle
         bundle = sample_bundle_postgresql_k8s_kratos()
 
@@ -437,7 +437,7 @@ class TestBundle:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test(self, params: Params):
+        def test(self, params: Params) -> None:
             # GIVEN the bundle
             bundle = params.bundle
 
@@ -491,7 +491,7 @@ class TestBundle:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test(self, params: Params):
+        def test(self, params: Params) -> None:
             # GIVEN the bundle
             bundle = params.bundle
 
@@ -501,7 +501,7 @@ class TestBundle:
             # THEN unfulfilled endpoints match
             assert unfulfilled_endpoints == params.unfulfilled_endpoints
 
-        def test_unfulfilled_endpoints_considers_limits(self):
+        def test_unfulfilled_endpoints_considers_limits(self) -> None:
             # GIVEN a charm with limit 1
             limited_charm = Charm(
                 name="limited-charm",
@@ -569,7 +569,7 @@ class TestBundle:
             db_endpoint = ApplicationEndpoint(application="db", endpoint="database")
             assert db_endpoint not in unfulfilled
 
-        def test_unfulfilled_endpoints_includes_under_limit(self):
+        def test_unfulfilled_endpoints_includes_under_limit(self) -> None:
             # GIVEN a charm with limit 2
             limited_charm = Charm(
                 name="limited-charm",
@@ -872,7 +872,7 @@ class TestBundle:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test_graph_and_dependencies(self, params: Params):
+        def test_graph_and_dependencies(self, params: Params) -> None:
             # GIVEN a bundle
             bundle = params.bundle
 
@@ -954,7 +954,7 @@ class TestBundle:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test(self, params: Params):
+        def test(self, params: Params) -> None:
             # GIVEN a bundle with the applications
             bundle = dataclasses.replace(
                 sample_bundle_postgresql_k8s_kratos(),
@@ -967,7 +967,7 @@ class TestBundle:
             # THEN matches expected
             assert name == params.name
 
-    def test_export(self):
+    def test_export(self) -> None:
         # GIVEN a bundle
         bundle = sample_bundle_postgresql_k8s_kratos()
 
@@ -1028,7 +1028,7 @@ class TestBundle:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test_platform_specific_export(self, params: Params):
+        def test_platform_specific_export(self, params: Params) -> None:
             # GIVEN a bundle with specific platform
             bundle = dataclasses.replace(
                 sample_bundle_postgresql_k8s_kratos(),
@@ -1053,7 +1053,7 @@ class TestBundle:
                 # AND the platform is correctly set
                 assert parsed_yaml["bundle"] == params.platform
 
-        def test_platform_yaml_structure_consistency(self):
+        def test_platform_yaml_structure_consistency(self) -> None:
             # GIVEN bundles with different platforms
             kubernetes_bundle = dataclasses.replace(
                 sample_bundle_postgresql_k8s_kratos(),

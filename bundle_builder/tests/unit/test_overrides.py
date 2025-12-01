@@ -87,7 +87,7 @@ class TestCharmEndpointOverride:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test(self, params: Params):
+        def test(self, params: Params) -> None:
             # GIVEN the override
             override = params.override
 
@@ -150,7 +150,7 @@ class TestOverridesClient:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test(self, params: Params, tmp_path: Path):
+        def test(self, params: Params, tmp_path: Path) -> None:
             # GIVEN
             if params.overrides_directory:
                 for charm, override in params.overrides.items():
@@ -189,7 +189,7 @@ class TestOverridesClient:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test(self, params: Params, tmp_path: Path):
+        def test(self, params: Params, tmp_path: Path) -> None:
             # GIVEN
             if params.overrides_directory:
                 for charm, override in params.overrides.items():
@@ -225,7 +225,7 @@ class TestOverridesClient:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test(self, params: Params, tmp_path: Path):
+        def test(self, params: Params, tmp_path: Path) -> None:
             # GIVEN
             override_file = tmp_path / "listing.yaml"
             # AND
@@ -271,7 +271,7 @@ class TestOverridesClient:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test(self, params: Params, tmp_path: Path):
+        def test(self, params: Params, tmp_path: Path) -> None:
             # GIVEN
             if params.overrides_directory:
                 for charm, override in params.overrides.items():
@@ -305,7 +305,7 @@ class TestOverridesClient:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test(self, params: Params, tmp_path: Path):
+        def test(self, params: Params, tmp_path: Path) -> None:
             # GIVEN a yaml file
             override_file = tmp_path / "priorities.yaml"
             # AND its content according to params.overrides

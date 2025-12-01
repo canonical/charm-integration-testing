@@ -19,41 +19,41 @@ class JujuStub:
     secrets_granted: list[tuple[str, str]] = field(default_factory=list)
     actions_run: list[tuple[str, str, dict]] = field(default_factory=list)
 
-    def list_applications(self, model: str):
+    def list_applications(self, model: str) -> list[str]:
         return self.apps
 
-    def application_charm(self, model: str, application: str):
+    def application_charm(self, model: str, application: str) -> str:
         return self.charm_name
 
-    def wait_application_scaled(self, model, app, timeout):
+    def wait_application_scaled(self, model, app, timeout) -> None:
         self.scaled_apps.append(app)
 
-    def wait_application_settled(self, model, app, timeout):
+    def wait_application_settled(self, model, app, timeout) -> None:
         self.settled_apps.append(app)
 
-    def application_units(self, model, app):
+    def application_units(self, model, app) -> list[str]:
         return self.units.get(app, [])
 
-    def num_units(self, model, app):
+    def num_units(self, model, app) -> int:
         return len(self.units.get(app, []))
 
-    def wait_for_unit_message(self, model, unit, message, timeout):
+    def wait_for_unit_message(self, model, unit, message, timeout) -> None:
         self.messages.append((unit, message, timeout))
 
-    def add_secret(self, model, name, content):
+    def add_secret(self, model, name, content) -> str:
         self.secrets[name] = content
         return "secret-id"
 
-    def grant_secret(self, model, name, app):
+    def grant_secret(self, model, name, app) -> None:
         self.secrets_granted.append((name, app))
 
-    def run_action(self, model, unit, action, params):
+    def run_action(self, model, unit, action, params) -> None:
         self.actions_run.append((unit, action, params))
 
-    def remove_secret(self, model, name):
+    def remove_secret(self, model, name) -> None:
         del self.secrets[name]
 
-    def read_secret(self, model, name):
+    def read_secret(self, model, name) -> dict:
         return self.secrets[name]
 
 
@@ -84,15 +84,15 @@ class VaultStub:
 
 
 class LoggerStub:
-    def __init__(self):
+    def __init__(self) -> None:
         self.messages = []
 
-    def info(self, message):
+    def info(self, message) -> None:
         self.messages.append(message)
 
 
 class TestVaultUnsealer:
-    def test_try_init_or_unseal_all_vaults(self):
+    def test_try_init_or_unseal_all_vaults(self) -> None:
         # GIVEN
         juju = JujuStub(apps=["vault"], charm_name="vault", units={"vault": ["vault/leader"]})
         vault = VaultStub(initialized_units={"vault/leader": False})
@@ -106,7 +106,7 @@ class TestVaultUnsealer:
         assert "vault" in juju.scaled_apps
         assert "vault/leader" in vault.inits
 
-    def test_try_init_vault_skips_if_already_initialized(self):
+    def test_try_init_vault_skips_if_already_initialized(self) -> None:
         # GIVEN
         juju = JujuStub(units={"vault": ["vault/leader"]})
         vault = VaultStub(initialized_units={"vault/leader": True})
@@ -120,7 +120,7 @@ class TestVaultUnsealer:
         assert vault.inits == []
         assert vault.unseals == []
 
-    def test_try_unseal_vault_unseals_if_initialized_and_sealed(self):
+    def test_try_unseal_vault_unseals_if_initialized_and_sealed(self) -> None:
         # GIVEN
         juju = JujuStub(
             units={"vault": ["vault/0", "vault/1"]},
@@ -141,7 +141,7 @@ class TestVaultUnsealer:
         assert "vault/0" in vault.unseals
         assert "vault/1" not in vault.unseals
 
-    def test_authorize_vault_charm_runs_action_and_removes_secret(self):
+    def test_authorize_vault_charm_runs_action_and_removes_secret(self) -> None:
         # GIVEN
         juju = JujuStub()
         vault = VaultStub()
@@ -157,7 +157,7 @@ class TestVaultUnsealer:
         assert ("vault/leader", "authorize-charm", {"secret-id": "secret-id"}) in juju.actions_run
         assert "vault-secret-application-vault-one-time-token" not in juju.secrets
 
-    def test_save_and_get_vault_tokens(self):
+    def test_save_and_get_vault_tokens(self) -> None:
         # GIVEN
         juju = JujuStub()
         vault = VaultStub()

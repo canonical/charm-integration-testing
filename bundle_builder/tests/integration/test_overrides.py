@@ -23,7 +23,7 @@ from bundle_builder import Application, ApplicationEndpoint, Bundle, BundleBuild
 
 def test_overrides_metadata_make_optional(
     tmp_path: Path, sample_dependent_charm: str, sample_dependent_charm_endpoint: str
-):
+) -> None:
     # GIVEN an override to make an endpoint optional
     with (tmp_path / f"{sample_dependent_charm}.yaml").open("w") as f:
         yaml.dump(
@@ -62,7 +62,7 @@ def test_overrides_metadata_make_optional(
     }
 
 
-def test_charm_config(tmp_path: Path, sample_independent_charm: str):
+def test_charm_config(tmp_path: Path, sample_independent_charm: str) -> None:
     # GIVEN a charm test config
     with (tmp_path / f"{sample_independent_charm}.yaml").open("w") as f:
         yaml.dump(

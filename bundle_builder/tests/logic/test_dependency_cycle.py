@@ -28,7 +28,7 @@ from .conftest import CharmhubClientStub
 
 
 class TestDependencyCycle:
-    def test_charm_self_loop(self):
+    def test_charm_self_loop(self) -> None:
         # GIVEN a charm that provides and requires the same interface
         provides_and_requires_same_interface_charm = Charm(
             name="charm-a",
@@ -85,7 +85,7 @@ class TestDependencyCycle:
             ),
         }
 
-    def test_charm_self_loop_provides(self):
+    def test_charm_self_loop_provides(self) -> None:
         # GIVEN a charm that provides and requires the same interface
         provides_and_requires_same_interface_charm = Charm(
             name="charm-a",
@@ -142,7 +142,7 @@ class TestDependencyCycle:
             ),
         }
 
-    def test_multiple_charms_provided(self):
+    def test_multiple_charms_provided(self) -> None:
         # GIVEN a charm that provides and requires the same interface
         charm_a = Charm(
             name="charm-a",
@@ -220,7 +220,7 @@ class TestDependencyCycle:
             endpoint for integration in new_bundle.integrations for endpoint in integration
         }
 
-    def test_multiple_charms_dependency_chain(self):
+    def test_multiple_charms_dependency_chain(self) -> None:
         # GIVEN a charm that provides and requires some interface
         charm_a = Charm(
             name="charm-a",

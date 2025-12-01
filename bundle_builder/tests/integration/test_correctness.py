@@ -23,7 +23,7 @@ def test_correctness_independent(
     sample_independent_charm_revision: int,
     sample_arch: str,
     sample_platform: str,
-):
+) -> None:
     # GIVEN a base bundle with a dependent charm
     base_bundle = Bundle(
         applications=frozenset(
@@ -61,7 +61,7 @@ def test_correctness_dependent(
     sample_dependent_charm_revision: int,
     sample_arch: str,
     sample_platform: str,
-):
+) -> None:
     # GIVEN a base bundle of the independent charm
     base_bundle = Bundle(
         applications=frozenset(

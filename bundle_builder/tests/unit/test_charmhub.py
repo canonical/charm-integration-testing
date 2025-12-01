@@ -150,7 +150,7 @@ class TestCharmhubClient:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test(self, params: Params):
+        def test(self, params: Params) -> None:
             # GIVEN
             http_client = CharmhubHttpStub(
                 refresh_response={
@@ -336,7 +336,7 @@ class TestCharmhubClient:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test(self, params: Params):
+        def test(self, params: Params) -> None:
             # GIVEN
             http_client = CharmhubHttpStub(refresh_response=params.refresh_info)
 
@@ -430,7 +430,7 @@ class TestCharmhubClient:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test(self, params: Params):
+        def test(self, params: Params) -> None:
             # GIVEN
             http_client = CharmhubHttpStub(find_response=params.find_response, info_response=params.info_response)
             overrides_client = OverridesStub(
@@ -536,7 +536,7 @@ class TestCharmhubClient:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test(self, params: Params):
+        def test(self, params: Params) -> None:
             # GIVEN
             http_client = CharmhubHttpStub(info_response=params.info_response)
             overrides_client = OverridesStub(charm_listing_overrides=params.listing_overrides)
@@ -586,7 +586,7 @@ class TestCharmhubClient:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test(self, params: Params):
+        def test(self, params: Params) -> None:
             # GIVEN
             overrides_client = OverridesStub(charm_platform_overrides=params.platform_overrides)
 
@@ -645,7 +645,7 @@ class TestCharmhubClient:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test(self, params: Params):
+        def test(self, params: Params) -> None:
             # GIVEN
             client = CharmhubClient()
 
@@ -685,7 +685,7 @@ class TestCharmhubClient:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test(self, params: Params):
+        def test(self, params: Params) -> None:
             # GIVEN
             overrides_client = OverridesStub(charm_test_configs=params.charm_test_configs)
             client = CharmhubClient(overrides_client=overrides_client)

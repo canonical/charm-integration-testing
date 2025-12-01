@@ -37,7 +37,7 @@ class VaultClient(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def unseal(self, model: str, unit: str, tokens: VaultTokenSecret):
+    def unseal(self, model: str, unit: str, tokens: VaultTokenSecret) -> None:
         raise NotImplementedError
 
 
@@ -77,7 +77,7 @@ class VaultClientJujuExec(VaultClient):
         # Return tokens
         return VaultTokenSecret(root_token=init_response.root_token, unseal_key=init_response.unseal_keys_b64[0])
 
-    def unseal(self, model: str, unit: str, tokens: VaultTokenSecret):
+    def unseal(self, model: str, unit: str, tokens: VaultTokenSecret) -> None:
         # Unseal the vault
         unseal_result = self.juju.exec_unit(model, unit, self.JUJU_EXEC_VAULT_UNSEAL.format(**asdict(tokens)))
 

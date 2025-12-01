@@ -29,7 +29,7 @@ from .conftest import CharmhubClientStub
 
 class TestEndpointLimits:
     class TestEdgeCases:
-        def test_zero_limit_blocks_all_connections(self):
+        def test_zero_limit_blocks_all_connections(self) -> None:
             # GIVEN a charm with limit 0
             zero_limit_charm = Charm(
                 name="zero-limit-charm",
@@ -97,7 +97,7 @@ class TestEndpointLimits:
             )
             assert expected not in new_bundle.integrations
 
-        def test_limit_applies_to_both_endpoints_in_integration(self):
+        def test_limit_applies_to_both_endpoints_in_integration(self) -> None:
             # GIVEN two charms both with limits
             charm1 = Charm(
                 name="charm1",
@@ -186,7 +186,7 @@ class TestEndpointLimits:
     class TestMultipleCharmInstances:
         """Test scenarios where multiple instances of the same charm are needed."""
 
-        def test_multiple_postgresql_instances_for_dependencies(self):
+        def test_multiple_postgresql_instances_for_dependencies(self) -> None:
             """Test the exact scenario from PR feedback where indico needs postgresql and a dependency that also needs postgresql."""
             # GIVEN postgresql-k8s with limit=1 (can only connect to one app)
             postgresql_charm = Charm(
@@ -323,7 +323,7 @@ class TestEndpointLimits:
             postgresql_apps = [app for app in result.applications if app.charm.name == "postgresql-k8s"]
             assert len(postgresql_apps) >= 2, f"Should have at least 2 postgresql instances, got {len(postgresql_apps)}"
 
-        def test_prevents_infinite_charm_chain(self):
+        def test_prevents_infinite_charm_chain(self) -> None:
             """Test that self-referential charms don't create infinite chains."""
             # GIVEN a charm that both provides and requires the same interface (like grafana-agent-k8s)
             self_ref_charm = Charm(

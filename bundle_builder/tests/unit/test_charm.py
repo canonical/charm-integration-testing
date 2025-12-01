@@ -269,7 +269,7 @@ class TestCharmEndpointOptionality:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test(self, params: Params):
+        def test(self, params: Params) -> None:
             # GIVEN the optionality
             optionality = params.optionality
 
@@ -294,7 +294,7 @@ class TestCharmEndpointOptionality:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test(self, params: Params):
+        def test(self, params: Params) -> None:
             # GIVEN the optionality for the value
             optionality = CharmEndpointOptionality.from_bool(params.value)
 
@@ -306,7 +306,7 @@ class TestCharmEndpointOptionality:
 
 
 class TestCharm:
-    def test_repr(self):
+    def test_repr(self) -> None:
         # GIVEN a charm
         charm = sample_charm_postgresql_k8s()
 
