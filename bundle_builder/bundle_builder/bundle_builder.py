@@ -31,7 +31,7 @@ class Node:
     aggression: float
 
     @computed_property
-    def score(self):
+    def score(self) -> float:
         # Prioritize fewer applications, accounting for charm priorities
         weight_applications = sum(1.0 / app.charm.priority for app in self.bundle.applications)
         # Prioritize fewer unfulfilled endpoints

@@ -24,7 +24,7 @@ from .charmhub import CharmhubClient, CharmReleaseNotFoundException
 from .overrides import OverridesClient
 
 
-def setup_logging(log_level: str):
+def setup_logging(log_level: str) -> logging.Logger:
     logger = logging.getLogger("bundle_builder")
 
     logger.setLevel(logging.DEBUG)
@@ -40,7 +40,7 @@ def setup_logging(log_level: str):
     return logger
 
 
-def add_args_to_parser(parser: argparse.ArgumentParser):
+def add_args_to_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--charms",
         type=str,
@@ -164,7 +164,7 @@ def platform_from_args(parser: argparse.ArgumentParser, substrate: str) -> str:
 
 
 # Dump the bundle to file
-def export_bundle_to_file(filename: str, bundle: Bundle, logger: logging.Logger):
+def export_bundle_to_file(filename: str, bundle: Bundle, logger: logging.Logger) -> None:
     # Get proper file path
     path = Path(filename).absolute().resolve()
     logger.info(f"Saving bundle to '{path}'")
@@ -174,7 +174,7 @@ def export_bundle_to_file(filename: str, bundle: Bundle, logger: logging.Logger)
     logger.info("Saved bundle")
 
 
-def main():
+def main() -> None:
     # Get CLI arguments
     parser = argparse.ArgumentParser()
     add_args_to_parser(parser)

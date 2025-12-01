@@ -34,8 +34,8 @@ _UNINITIALIZED = object()
 
 
 # Create a lazy property that computes its value once
-def make_lazy_property(private_name, method):
-    def prop(self):
+def make_lazy_property(private_name, method) -> Any:
+    def prop(self) -> Any:
         value = getattr(self, private_name)
         if value is _UNINITIALIZED:
             value = method(self)
@@ -78,7 +78,7 @@ def make_cached_method(cached_field_name, method):
 # Create an immutable dataclass using frozen=True
 # and defaults slots=True
 def immutable_dataclass(_cls=None, **dataclass_kwargs):
-    def wrap(cls):
+    def wrap(cls) -> dataclass:
         # Collect methods decorated as computed fields
         computed_fields = {}
         cached_methods = {}

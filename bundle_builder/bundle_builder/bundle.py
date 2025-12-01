@@ -57,7 +57,7 @@ class Bundle:
     platform: str
     arch: str
 
-    def validate(self):
+    def validate(self) -> None:
         # Ensure all applications have unique names
         if len(self.application_lookup) != len(self.applications):
             raise ValueError("Application names must be unique in the bundle.")

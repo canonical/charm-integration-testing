@@ -234,7 +234,7 @@ class CharmhubClient:
         ubuntu_arch: str,
         charm_channel: str,
         ubuntu_version: str | None = None,
-    ):
+    ) -> Charm:
         # Get default ubuntu version if not given
         if not ubuntu_version:
             ubuntu_version = self._default_ubuntu_version(charm_name, ubuntu_arch, charm_channel=charm_channel)
@@ -272,7 +272,7 @@ class CharmhubClient:
         charm_name: str,
         ubuntu_arch: str,
         ubuntu_version: str | None = None,
-    ):
+    ) -> Charm:
         # Get default ubuntu version if not provided
         if not ubuntu_version:
             ubuntu_version = self._default_ubuntu_version(charm_name, ubuntu_arch)
@@ -357,7 +357,7 @@ class CharmhubClient:
 
         return refresh_info
 
-    def _all_charm_endpoints(self, refresh_info: RefreshResponse):
+    def _all_charm_endpoints(self, refresh_info: RefreshResponse) -> frozenset:
         metadata = refresh_info.charm.metadata
 
         # Get edge refresh info if any requires or provides endpoints don't have optional flag
