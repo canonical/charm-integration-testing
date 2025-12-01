@@ -82,7 +82,7 @@ class RefreshResponse:
 
         @field_validator("metadata", mode="before")
         @classmethod
-        def parse_yaml(cls, metadata_yaml):
+        def parse_yaml(cls, metadata_yaml: str) -> CharmMetadata:
             return CharmMetadata(**yaml.safe_load(metadata_yaml))
 
     @immutable_dataclass
@@ -127,7 +127,7 @@ class InfoResponse:
 
             @field_validator("metadata", mode="before")
             @classmethod
-            def parse_yaml(cls, metadata_yaml):
+            def parse_yaml(cls, metadata_yaml: str) -> CharmMetadata:
                 return CharmMetadata(**yaml.safe_load(metadata_yaml))
 
         revision: Revision = Field(default_factory=Revision)
@@ -149,7 +149,9 @@ class CharmhubHttpClient:
     session: requests.Session
     logger: logging.Logger
 
-    def __init__(self, logger=logging.getLogger(__name__), session: requests.Session | None = None):
+    def __init__(
+        self, logger: logging.Logger = logging.getLogger(__name__), session: requests.Session | None = None
+    ) -> None:
         self.logger = logger
 
         # Setup requests session with retries

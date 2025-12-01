@@ -81,5 +81,5 @@ class Charm:
     priority: float  # greater priority values mean a node with this charm is prioritized
     test_configs: tuple[CharmConfig, ...] = Field(default_factory=tuple)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return self.name

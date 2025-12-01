@@ -3,6 +3,7 @@
 
 import logging
 from dataclasses import dataclass, field
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -38,10 +39,10 @@ class JujuStub:
     def configure_application(self, model: str, application: str, values: dict) -> None:
         self.configured.append((model, application, values))
 
-    def wait_application_scaled(self, model: str, application: str, timeout) -> None:
+    def wait_application_scaled(self, model: str, application: str, timeout: timedelta) -> None:
         self.waited_scaled.append((model, application, str(timeout)))
 
-    def wait_application_settled(self, model: str, application: str, timeout) -> None:
+    def wait_application_settled(self, model: str, application: str, timeout: timedelta) -> None:
         self.waited_settled.append((model, application, str(timeout)))
 
     def scp(self, model: str, source: str, destination: str) -> None:
@@ -63,11 +64,13 @@ class TestS3IntegratorMinIOBackendExtension:
         return JujuStub()
 
     @pytest.fixture
-    def extension(self, juju):
+    def extension(self, juju: JujuStub) -> S3IntegratorMinIOBackendExtension:
         return S3IntegratorMinIOBackendExtension(juju, logging.getLogger("test"))
 
     class TestPostDeploy:
-        def test_deploys_minio_if_s3_integrator_present(self, extension, juju):
+        def test_deploys_minio_if_s3_integrator_present(
+            self, extension: S3IntegratorMinIOBackendExtension, juju: JujuStub
+        ) -> None:
             # GIVEN a model with an s3-integrator application
             # WHEN post_deploy is called
             extension.post_deploy("test-model")
@@ -75,7 +78,7 @@ class TestS3IntegratorMinIOBackendExtension:
             # THEN minio is deployed
             assert ("test-model", "minio", "s3-app-minio") in juju.deployed
 
-        def test_ignores_non_s3_integrator_apps(self, juju):
+        def test_ignores_non_s3_integrator_apps(self, juju: JujuStub) -> None:
             # GIVEN a model with no s3-integrator applications
             juju.applications = {"non-s3": "not-s3"}
             extension = S3IntegratorMinIOBackendExtension(juju, logging.getLogger("test"))
@@ -87,7 +90,9 @@ class TestS3IntegratorMinIOBackendExtension:
             assert juju.deployed == []
 
     class TestDeployMinIO:
-        def test_deploy_flow_sets_up_everything(self, extension, juju):
+        def test_deploy_flow_sets_up_everything(
+            self, extension: S3IntegratorMinIOBackendExtension, juju: JujuStub
+        ) -> None:
             # GIVEN a ready extension with the client downloaded
             extension.minio_client_file = Path("mc")
 
@@ -136,7 +141,7 @@ class TestS3IntegratorMinIOBackendExtension:
             ) in juju.configured
 
     class TestGetMinioClientFile:
-        def test_downloads_only_once(self, extension):
+        def test_downloads_only_once(self, extension: S3IntegratorMinIOBackendExtension) -> None:
             # GIVEN no client downloaded
             extension.minio_client_file = None
 
@@ -153,7 +158,7 @@ class TestS3IntegratorMinIOBackendExtension:
             assert path == path2
 
     class TestUtilityFunctions:
-        def test_minio_application_name(self, extension):
+        def test_minio_application_name(self, extension: S3IntegratorMinIOBackendExtension) -> None:
             # GIVEN an s3 integrator name
             # WHEN minio_application is called
             result = extension.minio_application("s3-app")
@@ -161,7 +166,7 @@ class TestS3IntegratorMinIOBackendExtension:
             # THEN the correct minio app name is returned
             assert result == "s3-app-minio"
 
-        def test_minio_unit_name(self, extension):
+        def test_minio_unit_name(self, extension: S3IntegratorMinIOBackendExtension) -> None:
             # GIVEN an s3 integrator name
             # WHEN minio_unit is called
             result = extension.minio_unit("s3-app")
@@ -169,7 +174,7 @@ class TestS3IntegratorMinIOBackendExtension:
             # THEN it returns the leader unit
             assert result == "s3-app-minio/leader"
 
-        def test_minio_address_builds_from_unit_ip(self, extension):
+        def test_minio_address_builds_from_unit_ip(self, extension: S3IntegratorMinIOBackendExtension) -> None:
             # GIVEN a known unit IP
             # WHEN minio_address is called
             result = extension.minio_address("test-model", "s3-app")

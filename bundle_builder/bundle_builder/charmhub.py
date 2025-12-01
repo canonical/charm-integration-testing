@@ -46,9 +46,9 @@ class CharmhubClient:
     def __init__(
         self,
         http_client: CharmhubHttpClient | None = None,
-        logger=logging.getLogger(__name__),
+        logger: logging.Logger = logging.getLogger(__name__),
         overrides_client: OverridesClient | None = None,
-    ):
+    ) -> None:
         self.http_client = http_client if http_client is not None else CharmhubHttpClient(logger=logger)
         self.logger = logger
         self.overrides_client = overrides_client if overrides_client is not None else OverridesClient()

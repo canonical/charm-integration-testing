@@ -34,8 +34,8 @@ _UNINITIALIZED = object()
 
 
 # Create a lazy property that computes its value once
-def make_lazy_property(private_name, method) -> Any:
-    def prop(self) -> Any:
+def make_lazy_property(private_name: str, method: Callable) -> Any:
+    def prop(self: object) -> Any:
         value = getattr(self, private_name)
         if value is _UNINITIALIZED:
             value = method(self)
@@ -55,15 +55,15 @@ _CACHE_MISS = object()
 # Cached method backed by instance-level cache
 # Meant for use with @immutable_dataclass
 # Much like functools.cache, but at the instance level instead of global
-def cached_method(func):
+def cached_method(func: Callable) -> Callable:
     setattr(func, _MARKED_AS_CACHED_METHOD, True)
     return func
 
 
 # Wraps the method to cache results in the given field in the instance
-def make_cached_method(cached_field_name, method):
+def make_cached_method(cached_field_name: str, method: Callable) -> Callable:
     @wraps(method)
-    def wrapped(*args, **kwargs):
+    def wrapped(*args: str, **kwargs: dict) -> Any:
         cache = getattr(args[0], cached_field_name)
         cache_key = tuple(args[1:]) + tuple(kwargs.items())
         result = cache.get(cache_key, _CACHE_MISS)
@@ -77,8 +77,8 @@ def make_cached_method(cached_field_name, method):
 
 # Create an immutable dataclass using frozen=True
 # and defaults slots=True
-def immutable_dataclass(_cls=None, **dataclass_kwargs):
-    def wrap(cls) -> dataclass:
+def immutable_dataclass(_cls: type = None, **dataclass_kwargs: dict) -> dataclass:
+    def wrap(cls: type) -> dataclass:
         # Collect methods decorated as computed fields
         computed_fields = {}
         cached_methods = {}

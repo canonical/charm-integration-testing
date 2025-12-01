@@ -8,6 +8,8 @@ from datetime import timedelta
 import pytest
 from extensions.database_replication.database_client import DatabaseClient
 from extensions.database_replication.database_replicator import CharmInfo
+from extensions.database_replication.extension import GenericDatabaseReplicationExtension
+from juju.backend import JujuBackend
 
 
 @dataclass
@@ -49,7 +51,9 @@ class JujuStub:
         """Return the charm name for a given application"""
         return self.applications[application]
 
-    def integration_exists(self, application1: str, endpoint1: str, application2: str, endpoint2: str, model: str) -> bool:
+    def integration_exists(
+        self, application1: str, endpoint1: str, application2: str, endpoint2: str, model: str
+    ) -> bool:
         """Check if an integration exists between two applications"""
         return (application1, endpoint1, application2, endpoint2) in self.integrations
 
@@ -82,7 +86,7 @@ class TestPostgreSQLDatabaseReplicationExtension:
         return DatabaseClientStub()
 
     @pytest.fixture
-    def extension(self, juju, database_client):
+    def extension(self, juju: JujuBackend, database_client: DatabaseClient) -> GenericDatabaseReplicationExtension:
         """Provide a PostgresqlDatabaseReplicationExtension instance with stubbed client"""
         from extensions.database_replication.database_replicator import DatabaseReplicator
 
@@ -90,13 +94,14 @@ class TestPostgreSQLDatabaseReplicationExtension:
             name="postgresql", offer_endpoint="logical-replication-offer", consumer_endpoint="logical-replication"
         )
         replicator = DatabaseReplicator(charm_info, juju, logging.getLogger("test"), database_client)
-        from extensions.database_replication.extension import GenericDatabaseReplicationExtension
 
         ext = GenericDatabaseReplicationExtension(replicator)
         return ext
 
     class TestPostDeploy:
-        def test_skips_when_no_postgresql_applications(self, juju, database_client):
+        def test_skips_when_no_postgresql_applications(
+            self, juju: JujuBackend, database_client: DatabaseClient
+        ) -> None:
             # GIVEN a model with no postgresql applications
             juju.applications = {"other-app": "other-charm"}
             from extensions.database_replication.database_replicator import DatabaseReplicator
@@ -115,7 +120,9 @@ class TestPostgreSQLDatabaseReplicationExtension:
             assert juju.waited_scaled == []
             assert juju.waited_settled == []
 
-        def test_skips_when_only_one_postgresql_application(self, juju, database_client):
+        def test_skips_when_only_one_postgresql_application(
+            self, juju: JujuBackend, database_client: DatabaseClient
+        ) -> None:
             # GIVEN a model with only one postgresql application
             juju.applications = {"postgresql-1": "postgresql"}
             from extensions.database_replication.database_replicator import DatabaseReplicator
@@ -134,7 +141,9 @@ class TestPostgreSQLDatabaseReplicationExtension:
             assert juju.waited_scaled == []
             assert juju.waited_settled == []
 
-        def test_processes_when_two_or_more_postgresql_applications_with_integration(self, extension, juju):
+        def test_processes_when_two_or_more_postgresql_applications_with_integration(
+            self, extension: GenericDatabaseReplicationExtension, juju: JujuBackend
+        ) -> None:
             # GIVEN a model with 2+ postgresql applications and an integration
             juju.integrations = [("postgresql-1", "logical-replication-offer", "postgresql-2", "logical-replication")]
 
@@ -145,7 +154,9 @@ class TestPostgreSQLDatabaseReplicationExtension:
             assert ("test-model", "postgresql-1", "0:10:00") in juju.waited_scaled
             assert ("test-model", "postgresql-1", "0:10:00") in juju.waited_settled
 
-        def test_skips_when_no_integrations_exist(self, extension, juju):
+        def test_skips_when_no_integrations_exist(
+            self, extension: GenericDatabaseReplicationExtension, juju: JujuBackend
+        ) -> None:
             # GIVEN a model with 2+ postgresql applications but no integrations
             juju.integrations = []
 
@@ -157,7 +168,9 @@ class TestPostgreSQLDatabaseReplicationExtension:
             assert juju.waited_settled == []
 
     class TestTryReplicateDatabaseCluster:
-        def test_waits_for_application_to_scale_and_settle(self, extension, juju):
+        def test_waits_for_application_to_scale_and_settle(
+            self, extension: GenericDatabaseReplicationExtension, juju: JujuBackend
+        ) -> None:
             # GIVEN a model with postgresql applications
             database_replicator = extension.database_replicator
 
@@ -170,7 +183,9 @@ class TestPostgreSQLDatabaseReplicationExtension:
             assert ("test-model", "postgresql-1", "0:10:00") in juju.waited_scaled
             assert ("test-model", "postgresql-1", "0:10:00") in juju.waited_settled
 
-        def test_skips_when_no_units_exist(self, extension, juju):
+        def test_skips_when_no_units_exist(
+            self, extension: GenericDatabaseReplicationExtension, juju: JujuBackend
+        ) -> None:
             # GIVEN an application with no units
             juju.units["postgresql-1"] = 0
             database_replicator = extension.database_replicator
@@ -186,7 +201,9 @@ class TestPostgreSQLDatabaseReplicationExtension:
             # No configuration should happen
             assert len(juju.configured_applications) == 0
 
-        def test_configures_replication_when_common_databases_and_tables_exist(self, extension, juju):
+        def test_configures_replication_when_common_databases_and_tables_exist(
+            self, extension: GenericDatabaseReplicationExtension, juju: JujuBackend
+        ) -> None:
             # GIVEN a model with postgresql applications that have common databases and tables
             juju.integrations = [("postgresql-1", "logical-replication-offer", "postgresql-2", "logical-replication")]
             database_replicator = extension.database_replicator
@@ -218,7 +235,9 @@ class TestPostgreSQLDatabaseReplicationExtension:
             assert "public.users" in subscription_request["testdb"]
             assert "public.orders" in subscription_request["testdb"]
 
-        def test_skips_when_consumer_has_no_units(self, extension, juju):
+        def test_skips_when_consumer_has_no_units(
+            self, extension: GenericDatabaseReplicationExtension, juju: JujuBackend
+        ) -> None:
             # GIVEN an application where consumer has no units
             juju.units["postgresql-2"] = 0
             database_replicator = extension.database_replicator
@@ -233,7 +252,9 @@ class TestPostgreSQLDatabaseReplicationExtension:
             assert ("test-model", "postgresql-2", "0:10:00") in juju.waited_scaled
             assert len(juju.configured_applications) == 0
 
-        def test_skips_when_no_common_databases(self, extension, juju, database_client):
+        def test_skips_when_no_common_databases(
+            self, extension: GenericDatabaseReplicationExtension, juju: JujuBackend, database_client: DatabaseClient
+        ) -> None:
             # GIVEN applications where database queries return different databases
             database_replicator = extension.database_replicator
 
@@ -248,7 +269,9 @@ class TestPostgreSQLDatabaseReplicationExtension:
             # THEN no configuration is applied
             assert len(juju.configured_applications) == 0
 
-        def test_skips_when_no_tables_in_common_databases(self, extension, juju, database_client):
+        def test_skips_when_no_tables_in_common_databases(
+            self, extension: GenericDatabaseReplicationExtension, juju: JujuBackend, database_client: DatabaseClient
+        ) -> None:
             # GIVEN applications with common databases but no tables
             database_replicator = extension.database_replicator
 

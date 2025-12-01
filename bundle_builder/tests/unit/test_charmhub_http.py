@@ -14,6 +14,8 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
+from typing import Any
+
 import pytest
 import yaml
 from pydantic import Field
@@ -53,7 +55,7 @@ class ResponseStub:
 
 @dataclass
 class SessionStub:
-    def mount(self, *args, **kwargs):
+    def mount(self, *args: Any, **kwargs: Any) -> None:
         pass
 
     get_url: str | None = None

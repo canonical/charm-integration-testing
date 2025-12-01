@@ -4,6 +4,7 @@
 from dataclasses import dataclass, field
 from datetime import timedelta
 
+from extensions.unseal_vault.vault_client import VaultStatus
 from extensions.unseal_vault.vault_unsealer import CharmInfo, VaultTokenSecret, VaultUnsealer
 
 
@@ -25,35 +26,35 @@ class JujuStub:
     def application_charm(self, model: str, application: str) -> str:
         return self.charm_name
 
-    def wait_application_scaled(self, model, app, timeout) -> None:
+    def wait_application_scaled(self, model: str, app: str, timeout: timedelta) -> None:
         self.scaled_apps.append(app)
 
-    def wait_application_settled(self, model, app, timeout) -> None:
+    def wait_application_settled(self, model: str, app: str, timeout: timedelta) -> None:
         self.settled_apps.append(app)
 
-    def application_units(self, model, app) -> list[str]:
+    def application_units(self, model: str, app: str) -> list[str]:
         return self.units.get(app, [])
 
-    def num_units(self, model, app) -> int:
+    def num_units(self, model: str, app: str) -> int:
         return len(self.units.get(app, []))
 
-    def wait_for_unit_message(self, model, unit, message, timeout) -> None:
+    def wait_for_unit_message(self, model: str, unit: str, message: str, timeout: timedelta) -> None:
         self.messages.append((unit, message, timeout))
 
-    def add_secret(self, model, name, content) -> str:
+    def add_secret(self, model: str, name: str, content: dict) -> str:
         self.secrets[name] = content
         return "secret-id"
 
-    def grant_secret(self, model, name, app) -> None:
+    def grant_secret(self, model: str, name: str, app: str) -> None:
         self.secrets_granted.append((name, app))
 
-    def run_action(self, model, unit, action, params) -> None:
+    def run_action(self, model: str, unit: str, action: str, params: dict) -> None:
         self.actions_run.append((unit, action, params))
 
-    def remove_secret(self, model, name) -> None:
+    def remove_secret(self, model: str, name: str) -> None:
         del self.secrets[name]
 
-    def read_secret(self, model, name) -> dict:
+    def read_secret(self, model: str, name: str) -> dict:
         return self.secrets[name]
 
 
@@ -65,7 +66,7 @@ class VaultStub:
     unseals: list[str] = field(default_factory=list)
     tokens: VaultTokenSecret = field(default_factory=lambda: VaultTokenSecret(root_token="root", unseal_key="key"))
 
-    def status(self, model, unit):
+    def status(self, model: str, unit: str) -> VaultStatus:
         return type(
             "Status",
             (),
@@ -75,11 +76,11 @@ class VaultStub:
             },
         )()
 
-    def init(self, model, unit):
+    def init(self, model: str, unit: str) -> VaultTokenSecret:
         self.inits.append(unit)
         return self.tokens
 
-    def unseal(self, model, unit, tokens):
+    def unseal(self, model: str, unit: str, tokens: VaultTokenSecret) -> None:
         self.unseals.append(unit)
 
 
@@ -87,7 +88,7 @@ class LoggerStub:
     def __init__(self) -> None:
         self.messages = []
 
-    def info(self, message) -> None:
+    def info(self, message: str) -> None:
         self.messages.append(message)
 
 

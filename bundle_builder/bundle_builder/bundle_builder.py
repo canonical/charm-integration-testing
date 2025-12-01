@@ -20,7 +20,7 @@ import logging
 import random
 
 from .bundle import Application, ApplicationEndpoint, Bundle, Integration
-from .charm import ENDPOINT_PROVIDES, ENDPOINT_REQUIRES, CharmConfig
+from .charm import ENDPOINT_PROVIDES, ENDPOINT_REQUIRES, Charm, CharmConfig
 from .charmhub import CharmhubClient
 from .immutable_dataclass import computed_property, immutable_dataclass
 
@@ -51,7 +51,7 @@ class Node:
     def stats(self) -> str:
         return f"{len(self.bundle.applications)} applications ({len(self.bundle.unfulfilled_endpoints)} unfulfilled endpoints, {len(self.bundle.saturated_endpoints)} saturated endpoints)"
 
-    def __lt__(self, other):
+    def __lt__(self, other: "Node") -> bool:
         return self.score < other.score
 
 
@@ -304,7 +304,7 @@ class BundleBuilder:
         return child_nodes
 
     @staticmethod
-    def random_test_config(charm) -> CharmConfig:
+    def random_test_config(charm: Charm) -> CharmConfig:
         # If there are not test configs defined return empty
         if len(charm.test_configs) == 0:
             return CharmConfig()

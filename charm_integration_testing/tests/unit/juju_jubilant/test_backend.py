@@ -440,7 +440,7 @@ class TestJubilantBackend:
                 self.leader = leader
 
         class AppStatus:
-            def __init__(self, units) -> None:
+            def __init__(self, units: list["TestJubilantBackend.TestUnitIp.Unit"]) -> None:
                 self.units = units
 
         class ModelStatus:

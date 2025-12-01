@@ -28,7 +28,7 @@ class Application:
     charm: Charm
     config: CharmConfig = Field(default_factory=CharmConfig)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         if self.name == self.charm.name:
             return f"{self.name}"
         else:
@@ -40,10 +40,10 @@ class ApplicationEndpoint:
     application: str
     endpoint: str
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.application}:{self.endpoint}"
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return self.__str__()
 
 

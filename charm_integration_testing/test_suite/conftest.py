@@ -54,7 +54,7 @@ def juju_client(juju_backend: JujuBackend, logger: logging.Logger, minio_client_
     )
 
 
-def pytest_addoption(parser) -> None:
+def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption("--model", type=str, required=True, help="Juju model to test in")
     parser.addoption(
         "--minio-client-file",
@@ -81,7 +81,7 @@ failure_exception = StashKey[CollectReport]()
 
 # Get failure message for logging
 @pytest.hookimpl(tryfirst=True, hookwrapper=True)
-def pytest_runtest_makereport(item, call) -> None:
+def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo) -> None:
     result = yield
     report = result.get_result()
 

@@ -99,7 +99,7 @@ class TestLimitApplication:
 
         # Mock HTTP client that returns mock charm data
         class MockHttpClient:
-            def refresh(self, action) -> None:
+            def refresh(self, action: object) -> None:
                 class MockResponse:
                     def __init__(self) -> None:
                         # Mock error for default base lookup (when base is "NA")
@@ -130,7 +130,7 @@ class TestLimitApplication:
                                 class MockMetadata:
                                     def __init__(self) -> None:
                                         class MockEndpoint:
-                                            def __init__(self, interface, optional=None) -> None:
+                                            def __init__(self, interface: str, optional: bool | None = None) -> None:
                                                 self.interface = interface
                                                 self.optional = optional
 

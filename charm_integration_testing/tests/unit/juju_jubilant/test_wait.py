@@ -286,7 +286,9 @@ class TestWaitConditions:
         assert wait.noncompliant_applications == {}
         assert wait.noncompliant_units == {}
 
-    def test_all_statuses_are_in_application_not_in_status(self, sample_database_webapp_status: jubilant.Status) -> None:
+    def test_all_statuses_are_in_application_not_in_status(
+        self, sample_database_webapp_status: jubilant.Status
+    ) -> None:
         # GIVEN / WHEN
         result, wait = all_statuses_are_in({"active"}, sample_database_webapp_status, "missing")
 
@@ -311,7 +313,9 @@ class TestWaitConditions:
         assert wait.noncompliant_applications == {}
         assert wait.noncompliant_units == {}
 
-    def test_applications_are_scaled_application_not_in_status(self, sample_database_webapp_status: jubilant.Status) -> None:
+    def test_applications_are_scaled_application_not_in_status(
+        self, sample_database_webapp_status: jubilant.Status
+    ) -> None:
         # GIVEN / WHEN
         result, wait = applications_are_scaled(sample_database_webapp_status, "missing")
 

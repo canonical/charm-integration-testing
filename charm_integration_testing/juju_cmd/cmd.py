@@ -15,7 +15,7 @@ class CmdArg:
 
     @field_validator("value", "name", mode="before")
     @staticmethod
-    def to_string(value):
+    def to_string(value: object) -> str:
         return str(value)
 
 

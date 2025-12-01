@@ -38,7 +38,7 @@ class JubilantBackend(JujuCmdBackend):
         timeout: timedelta | None = None,
         period: timedelta | None = None,
         delay: int = 1,
-        **kwargs,
+        **kwargs: dict,
     ) -> jubilant.Status | None:
         wait_monitor = WaitMonitor(ready=ready, error=error)
         try:

@@ -5,7 +5,7 @@
 import pytest
 
 
-def pytest_addoption(parser) -> None:
+def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption(
         "--bundles",
         nargs="*",

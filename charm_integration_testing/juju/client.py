@@ -121,7 +121,9 @@ class JujuClient:
         )
         self.backend.wait_for_removal_of_integration(model, target_1, target_2, timeout)
 
-    def wait_for_removal_of_units(self, *applications: str, model: str = "default", timeout: timedelta | None = None) -> None:
+    def wait_for_removal_of_units(
+        self, *applications: str, model: str = "default", timeout: timedelta | None = None
+    ) -> None:
         self.logger.info(
             f"{self._waiting_timeout_log(timeout)} for removal of all units of application(s) {', '.join(applications)}."
         )
