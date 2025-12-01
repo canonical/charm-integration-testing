@@ -18,6 +18,6 @@ poetry run bandit \
         charm_integration_testing/test_suite \
         bundle_builder/bundle_builder \
         scripts
-poetry run mypy bundle_builder
-poetry run mypy charm_integration_testing 
+poetry run mypy bundle_builder --follow-untyped-imports
+poetry run mypy charm_integration_testing --follow-untyped-imports
 markdownlint-cli2 --config docs/.sphinx/.markdownlint.json "#docs/_build" "*.md"
