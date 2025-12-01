@@ -67,14 +67,10 @@ class VaultStub:
     tokens: VaultTokenSecret = field(default_factory=lambda: VaultTokenSecret(root_token="root", unseal_key="key"))
 
     def status(self, model: str, unit: str) -> VaultStatus:
-        return type(
-            "Status",
-            (),
-            {
-                "initialized": self.initialized_units.get(unit, False),
-                "sealed": self.sealed_units.get(unit, True),
-            },
-        )()
+        return VaultStatus(
+            initialized=self.initialized_units.get(unit, False),
+            sealed=self.sealed_units.get(unit, True),
+        )
 
     def init(self, model: str, unit: str) -> VaultTokenSecret:
         self.inits.append(unit)

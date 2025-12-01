@@ -99,7 +99,7 @@ class JubilantBackend(JujuCmdBackend):
 
     def read_secret(self, model: str, name_or_id: str) -> dict[str, str]:
         # Call show secret
-        result = self.client.model(model).cli(
+        show_secret_result = self.client.model(model).cli(
             "show-secret",
             name_or_id,
             "--reveal",
@@ -108,7 +108,10 @@ class JubilantBackend(JujuCmdBackend):
 
         # There will only ever be one secret in the Juju result, and it is keyed by ID
         # We have `name_or_id`, but don't know which it might be, so we instead just get the first value
-        return next(iter(yaml.safe_load(result).values()))["content"]
+        return_value = next(iter(yaml.safe_load(show_secret_result).values()))["content"]
+        if not isinstance(return_value, dict[str, str]):
+            raise TypeError(f"Expected secret content to be dict[str, str], got {type(return_value)}")
+        return return_value
 
     def grant_secret(self, model: str, name_or_id: str, application: str) -> None:
         # Call grant secret

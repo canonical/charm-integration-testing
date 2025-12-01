@@ -24,8 +24,8 @@ class JujuStub:
     scp_calls: list = field(default_factory=list)
     ssh_calls: list = field(default_factory=list)
     actions: list = field(default_factory=list)
-    applications: dict = field(default_factory=lambda: {"s3-app": "s3-integrator"})
-    unit_ips: dict = field(default_factory=lambda: {"s3-app-minio/leader": "10.0.0.1"})
+    applications: dict[str, str] = field(default_factory=lambda: {"s3-app": "s3-integrator"})
+    unit_ips: dict[str, str] = field(default_factory=lambda: {"s3-app-minio/leader": "10.0.0.1"})
 
     def list_applications(self, model: str) -> list[str]:
         return self.applications.keys()

@@ -66,12 +66,16 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 
 @pytest.fixture
 def model(request: pytest.FixtureRequest) -> str:
-    return request.config.getoption("--model")
+    option = request.config.getoption("--model")
+    assert isinstance(option, str)
+    return option
 
 
 @pytest.fixture
 def minio_client_file(request: pytest.FixtureRequest) -> Path | None:
-    return request.config.getoption("--minio-client-file")
+    option = request.config.getoption("--minio-client-file")
+    assert option is None or isinstance(option, Path)
+    return option
 
 
 failure_message = StashKey[CollectReport]()
@@ -213,20 +217,21 @@ def record_charms_and_revisions_execution_metadata(
 def normalize_message(message: Any) -> str:
     # Convert to string if needed
     if isinstance(message, bytes):
-        message = message.decode("utf-8", errors="replace")
+        message_as_str = message.decode("utf-8", errors="replace")
     else:
-        message = str(message)
+        message_as_str = str(message)
 
     # Replace all numeric sequences with "XXX"
     # Should normalize timestamps, IP addresses, and other variable data
-    message = re.sub(r"\d+", "XXX", message)
-
+    message_without_numeric_sequences = re.sub(r"\d+", "XXX", message_as_str)
     # Limit character count
     max_character_count = 150
-    if len(message) > max_character_count:
-        message = f"{message[:max_character_count - 3]}..."
+    if len(message_without_numeric_sequences) > max_character_count:
+        message_limited_length = f"{message_without_numeric_sequences[:max_character_count - 3]}..."
+    else:
+        message_limited_length = message_without_numeric_sequences
 
-    return message
+    return message_limited_length
 
 
 @pytest.fixture

@@ -16,8 +16,8 @@ from juju.backend import JujuBackend
 class DatabaseClientStub(DatabaseClient):
     """Stub implementation of DatabaseClient for testing"""
 
-    databases_by_app: dict = field(default_factory=lambda: {"postgresql-1": ["testdb"], "postgresql-2": ["testdb"]})
-    tables_by_db: dict = field(default_factory=lambda: {"testdb": ["public.users", "public.orders"]})
+    databases_by_app: dict[str, list[str]] = field(default_factory=lambda: {"postgresql-1": ["testdb"], "postgresql-2": ["testdb"]})
+    tables_by_db: dict[str, list[str]] = field(default_factory=lambda: {"testdb": ["public.users", "public.orders"]})
 
     def get_databases(self, model: str, application: str) -> list[str]:
         """Return databases for an application"""
@@ -36,11 +36,11 @@ class DatabaseClientStub(DatabaseClient):
 class JujuStub:
     """Stub implementation of JujuBackend for testing DatabaseReplicator"""
 
-    applications: dict = field(default_factory=lambda: {"postgresql-1": "postgresql", "postgresql-2": "postgresql"})
+    applications: dict[str, str] = field(default_factory=lambda: {"postgresql-1": "postgresql", "postgresql-2": "postgresql"})
     integrations: list = field(default_factory=list)
     waited_scaled: list = field(default_factory=list)
     waited_settled: list = field(default_factory=list)
-    units: dict = field(default_factory=lambda: {"postgresql-1": 3, "postgresql-2": 3})
+    units: dict[str, int] = field(default_factory=lambda: {"postgresql-1": 3, "postgresql-2": 3})
     configured_applications: list = field(default_factory=list)
 
     def list_applications(self, model: str) -> list[str]:

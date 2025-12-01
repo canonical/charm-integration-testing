@@ -35,22 +35,30 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 
 @pytest.fixture
 def target_application(request: pytest.FixtureRequest) -> str:
-    return request.config.getoption("--target-application")
+    option = request.config.getoption("--target-application")
+    assert isinstance(option, str)
+    return option
 
 
 @pytest.fixture
 def target_endpoint(request: pytest.FixtureRequest) -> str:
-    return request.config.getoption("--target-endpoint")
+    option = request.config.getoption("--target-endpoint")
+    assert isinstance(option, str)
+    return option
 
 
 @pytest.fixture
 def neighbor_application(request: pytest.FixtureRequest) -> str:
-    return request.config.getoption("--neighbor-application")
+    option = request.config.getoption("--neighbor-application")
+    assert isinstance(option, str)
+    return option
 
 
 @pytest.fixture
 def neighbor_endpoint(request: pytest.FixtureRequest) -> str:
-    return request.config.getoption("--neighbor-endpoint")
+    option = request.config.getoption("--neighbor-endpoint")
+    assert isinstance(option, str)
+    return option
 
 
 @pytest.fixture(autouse=True)
