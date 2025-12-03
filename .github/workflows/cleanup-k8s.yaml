@@ -86,25 +86,48 @@ jobs:
       - name: Find all juju-credential service accounts older than an hour
         shell: bash
         run: |
-          kubectl get serviceaccounts --namespace kube-system --output json | jq --raw-output '
+          kubectl get serviceaccounts --all-namespaces --output json | jq --raw-output '
             .items[] |
             select(.metadata.name | test("^juju-credential-")) |
             select((now - (.metadata.creationTimestamp | fromdateiso8601)) > 3600) |
-            .kind + "/" + .metadata.name
+            .metadata.namespace + ":" + .kind + "/" + .metadata.name
           ' >> resources_to_remove.txt
 
       - name: Find all juju-credential secrets older than an hour
         shell: bash
         run: |
-          kubectl get secrets --namespace kube-system --output json | jq --raw-output '
+          kubectl get secrets --all-namespaces --output json | jq --raw-output '
             .items[] |
             select(.type == "kubernetes.io/service-account-token") |
             select(.metadata.name | test("^juju-credential-")) |
             select((now - (.metadata.creationTimestamp | fromdateiso8601)) > 3600) |
-            .kind + "/" + .metadata.name
+            .metadata.namespace + ":" + .kind + "/" + .metadata.name
           ' >> resources_to_remove.txt
 
       - name: Remove all resources
         shell: bash
         run: |
-          cat resources_to_remove.txt | xargs --no-run-if-empty kubectl delete --timeout=25m --namespace=kube-system
+          # Group resources by namespace
+          declare -A namespaced_resources
+          cluster_resources=()
+          while IFS= read -r line; do 
+            if [[ "$line" == *:* ]]; then
+              namespace="${line%%:*}"
+              resource="${line#*:}"
+              namespaced_resources["$namespace"]+="$resource "
+            else
+              cluster_resources+=("$line")
+            fi
+          done < resources_to_remove.txt
+          
+          # Delete cluster-scoped resources
+          if [ ${#cluster_resources[@]} -gt 0 ]; then
+            kubectl delete "${cluster_resources[@]}" --timeout=25m &
+          fi
+          
+          # Delete namespaced resources (one command per namespace)
+          for namespace in "${!namespaced_resources[@]}"; do
+            kubectl delete ${namespaced_resources[$namespace]} --namespace="$namespace" --timeout=25m &
+          done
+          
+          wait
