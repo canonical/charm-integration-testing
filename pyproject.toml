@@ -22,6 +22,8 @@ ruff = "^0.5.5"
 bandit = "^1.7.9"
 pytest-cov = "^6.2.1"
 mypy = "^1.19.0"
+types-pyyaml = "^6.0.12.20250915"
+types-requests = "^2.32.4.20250913"
 
 [tool.ruff]
 line-length = 120
