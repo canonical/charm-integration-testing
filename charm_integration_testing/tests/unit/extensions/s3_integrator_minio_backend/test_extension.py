@@ -28,7 +28,7 @@ class JujuStub:
     unit_ips: dict[str, str] = field(default_factory=lambda: {"s3-app-minio/leader": "10.0.0.1"})
 
     def list_applications(self, model: str) -> list[str]:
-        return self.applications.keys()
+        return list(self.applications.keys())
 
     def application_charm(self, model: str, application: str) -> str:
         return self.applications[application]

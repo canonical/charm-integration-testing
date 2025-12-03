@@ -45,7 +45,7 @@ class JujuStub:
 
     def list_applications(self, model: str) -> list[str]:
         """Return list of application names in the model"""
-        return self.applications.keys()
+        return list(self.applications.keys())
 
     def application_charm(self, model: str, application: str) -> str:
         """Return the charm name for a given application"""

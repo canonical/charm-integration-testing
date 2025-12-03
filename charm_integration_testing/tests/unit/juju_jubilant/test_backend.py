@@ -18,7 +18,7 @@ class JubilantClientStub:
     def __init__(self, client: Any) -> None:
         self.client = client
 
-    def model(self, model: str) -> any:
+    def model(self, model: str) -> Any:
         return self.client
 
 

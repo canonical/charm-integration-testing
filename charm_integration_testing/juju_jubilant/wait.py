@@ -100,8 +100,8 @@ def get_unit_state(status: jubilant.Status, unit: str) -> JujuUnitState:
     return JujuUnitState(
         charm=application_info.charm,
         revision=application_info.charm_rev,
-        status=unit_info.workload_status.current,
-        message=unit_info.workload_status.message,
+        status=unit_info.workload_status.current if unit_info is not None else "",
+        message=unit_info.workload_status.message if unit_info is not None else "",
     )
 
 

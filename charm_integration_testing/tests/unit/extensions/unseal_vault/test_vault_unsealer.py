@@ -83,7 +83,7 @@ class VaultStub:
 
 class LoggerStub:
     def __init__(self) -> None:
-        self.messages = []
+        self.messages: list[str] = []
 
     def info(self, message: str) -> None:
         self.messages.append(message)

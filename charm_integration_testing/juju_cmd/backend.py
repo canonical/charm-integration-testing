@@ -283,7 +283,7 @@ class JujuCmdBackend(JujuBackend):
             model, "model", model, f"len(applications) == 0 || forEach(units, unit => {name_checks})", timeout
         )
 
-    def application_charm(self, model: str, application: str) -> str:
+    def application_charm(self, model: str, application: str) -> str | None:
         return self._status(model).applications[application].charm
 
     def application_units(self, model: str, application: str) -> list[str]:
@@ -340,7 +340,10 @@ class JujuCmdBackend(JujuBackend):
         )
 
         # Parse response
-        return JujuSecretInfo(**next(iter(yaml.safe_load(result).values()))).content
+        content_dict = JujuSecretInfo(**next(iter(yaml.safe_load(result).values()))).content
+        if content_dict is None:
+            return {}
+        return content_dict
 
     def grant_secret(self, model: str, name_or_id: str, application: str) -> None:
         # Authorize the application

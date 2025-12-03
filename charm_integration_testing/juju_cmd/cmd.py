@@ -43,8 +43,8 @@ class CmdClient:
         # Check for error
         if result.returncode != 0:
             raise CmdError(" ".join(parsed_args), result.returncode, stdout=result.stdout, stderr=result.stderr)
-
-        return result.stdout
+        
+        return str(result.stdout)
 
     def parse_args(self, *args: CmdArg) -> list[str]:
         results = []
