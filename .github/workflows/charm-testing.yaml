@@ -396,7 +396,7 @@ jobs:
       - name: Call Juju K8s Crashdump
         id: juju_k8s_crashdump
         if: ${{ !cancelled() && inputs.substrate == 'kubernetes'}}
-        uses: canonical/juju-k8s-crashdump/actions/juju-k8s-crashdump@254b5cf981da8615b7b4ec4cd02ac01ab4270c8a
+        uses: canonical/juju-k8s-crashdump/actions/juju-k8s-crashdump@4c8fd051e87450e1aea76f2e85eb2c52a0965f8a
         with:
           kubeconf: ${{ steps.kubeconfig.outputs.full_path }}
           controller: ${{ steps.juju_resources.outputs.controller }}
