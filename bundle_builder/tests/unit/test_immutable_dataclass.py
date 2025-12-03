@@ -77,7 +77,7 @@ def test_frozen_enforcement() -> None:
     # WHEN attempting to mutate an attribute
     # THEN it should raise FrozenInstanceError
     with pytest.raises(FrozenInstanceError):
-        u.first = "Charles"
+        u.first = "Charles"  # type: ignore[misc]
 
 
 @immutable_dataclass()

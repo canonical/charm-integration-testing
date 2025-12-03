@@ -3,7 +3,7 @@
 
 
 from datetime import timedelta
-from typing import Callable
+from typing import Any, Callable
 
 import jubilant
 import yaml
@@ -38,7 +38,7 @@ class JubilantBackend(JujuCmdBackend):
         timeout: timedelta | None = None,
         period: timedelta | None = None,
         delay: int = 1,
-        **kwargs: dict,
+        **kwargs: Any,
     ) -> jubilant.Status | None:
         wait_monitor = WaitMonitor(ready=ready, error=error)
         try:

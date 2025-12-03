@@ -16,7 +16,8 @@
 
 from dataclasses import field
 from functools import wraps
-from typing import Any, Callable, Dict, TypeVar, get_type_hints, Optional
+from typing import Any, Callable, Dict, Optional, TypeVar, get_type_hints
+from typing_extensions import dataclass_transform
 
 from pydantic.dataclasses import dataclass
 
@@ -45,7 +46,7 @@ _UNINITIALIZED = object()
 
 
 # Create a lazy property that computes its value once
-def make_lazy_property(private_name: str, method: Callable) -> Any:
+def make_lazy_property(private_name: str, method: Callable[..., Any]) -> Any:
     def prop(self: object) -> Any:
         value = getattr(self, private_name)
         if value is _UNINITIALIZED:
@@ -72,9 +73,9 @@ def cached_method(func: _F) -> _F:
 
 
 # Wraps the method to cache results in the given field in the instance
-def make_cached_method(cached_field_name: str, method: Callable) -> Callable:
+def make_cached_method(cached_field_name: str, method: Callable[..., Any]) -> Callable[..., Any]:
     @wraps(method)
-    def wrapped(*args: str, **kwargs: dict) -> Any:
+    def wrapped(*args: str, **kwargs: Any) -> Any:
         cache = getattr(args[0], cached_field_name)
         cache_key = tuple(args[1:]) + tuple(kwargs.items())
         result = cache.get(cache_key, _CACHE_MISS)
@@ -88,8 +89,9 @@ def make_cached_method(cached_field_name: str, method: Callable) -> Callable:
 
 # Create an immutable dataclass using frozen=True
 # and defaults slots=True
-def immutable_dataclass(_cls: Optional[type] = None, **dataclass_kwargs: dict) -> dataclass:
-    def wrap(cls: type) -> dataclass:
+@dataclass_transform(frozen_default=True, field_specifiers=(field,))
+def immutable_dataclass(_cls: Optional[type] = None, **dataclass_kwargs: Any) -> Any:
+    def wrap(cls: type) -> Any:
         # Collect methods decorated as computed fields
         computed_fields = {}
         cached_methods = {}
@@ -107,13 +109,14 @@ def immutable_dataclass(_cls: Optional[type] = None, **dataclass_kwargs: dict) -
             # Modify the class in place to add the private field
             private_name = f"_{name}"
             annotations[private_name] = get_type_hints(method).get("return", Any)
+            assert method is Callable[[Any], Any]
             setattr(cls, name, make_lazy_property(private_name, method))
             setattr(cls, private_name, field(init=False, repr=False, hash=False, compare=False, default=_UNINITIALIZED))
 
         # Create a private slot for the cache of each computed field, similar to above
         for name, method in cached_methods.items():
             cached_field_name = f"_cached_{name}"
-            annotations[cached_field_name] = Dict[tuple, Any]
+            annotations[cached_field_name] = Dict[tuple[Any, ...], Any]
             setattr(cls, name, make_cached_method(cached_field_name, method))
             setattr(
                 cls, cached_field_name, field(init=False, repr=False, hash=False, compare=False, default_factory=dict)

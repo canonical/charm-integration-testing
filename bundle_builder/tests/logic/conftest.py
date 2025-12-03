@@ -23,7 +23,7 @@ class CharmhubClientStub(CharmhubClient):
     def __init__(self, *charms: Charm):
         self.charms = set(charms)
 
-    def find_charms(self, **kwargs: dict[str, str]) -> set[str]:
+    def find_charms(self, **kwargs: str) -> set[str]:
         if "provides" in kwargs:
             return {
                 charm.name
@@ -44,7 +44,7 @@ class CharmhubClientStub(CharmhubClient):
             }
         return set()
 
-    def charm_from_store(self, **kwargs: dict[str, str]) -> Charm | None:
+    def charm_from_store(self, **kwargs: str) -> Charm | None:
         for charm in self.charms:
             if charm.name == kwargs.get("charm_name"):
                 return charm
