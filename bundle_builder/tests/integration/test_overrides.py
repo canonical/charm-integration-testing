@@ -93,5 +93,5 @@ def test_charm_config(tmp_path: Path, sample_independent_charm: str) -> None:
     assert all(
         (("config-option", "config-value"),) == application.config
         for application in minimal_bundle.applications
-        if application.charm == sample_independent_charm
+        if application.charm.name == sample_independent_charm
     )

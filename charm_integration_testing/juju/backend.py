@@ -4,6 +4,7 @@
 from abc import ABC, abstractmethod
 from dataclasses import field
 from datetime import timedelta
+from typing import Optional
 
 from pydantic.dataclasses import dataclass
 
@@ -156,7 +157,7 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def application_charm(self, model: str, application: str) -> str:
+    def application_charm(self, model: str, application: str) -> Optional[str]:
         raise NotImplementedError
 
     @abstractmethod

@@ -20,7 +20,8 @@ from pathlib import Path
 from .bundle import Application, ApplicationEndpoint, Bundle, Integration
 from .bundle_builder import BundleBuilder
 from .charm import Charm
-from .charmhub import CharmhubClient, CharmReleaseNotFoundException
+from .charmhub import CharmhubClient
+from .charmhub_http import CharmReleaseNotFoundException
 from .overrides import OverridesClient
 
 

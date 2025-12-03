@@ -14,6 +14,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import dataclasses
+from linecache import cache
 from typing import Optional
 
 import pytest
@@ -93,32 +94,30 @@ class TestLimitApplication:
     def test_charmhub_client_applies_limit_overrides(self) -> None:
         # Mock overrides client that returns limit overrides
         class MockOverridesClient(OverridesClient):
-            def get_charm_metadata_overrides(self, charm: str) -> None:
+            @cache
+            def get_charm_metadata_overrides(self, charm: str) -> CharmMetadataOverride:
                 if charm == "test-charm":
                     return CharmMetadataOverride(provides={"database": CharmEndpointOverride(limit=2)})
                 return CharmMetadataOverride()
 
         # Mock HTTP client that returns mock charm data
         class MockHttpClient:
-            def refresh(self, action: object) -> None:
+            def refresh(self, action: object) -> "MockResponse":
                 class MockResponse:
                     def __init__(self) -> None:
+                        class MockError:
+                            def __init__(self) -> None:
+                                self.code = "invalid-charm-base"
+
+                                class MockExtra:
+                                    def __init__(self) -> None:
+                                        self.default_bases = [MockBase()]
+
+                                self.extra = MockExtra()
                         # Mock error for default base lookup (when base is "NA")
+                        self.error: Optional[MockError] = None
                         if hasattr(action, "base") and action.base.name == "NA":
-
-                            class MockError:
-                                def __init__(self) -> None:
-                                    self.code = "invalid-charm-base"
-
-                                    class MockExtra:
-                                        def __init__(self) -> None:
-                                            self.default_bases = [MockBase()]
-
-                                    self.extra = MockExtra()
-    
-                            self.error: Optional[MockError] = MockError()
-                        else:
-                            self.error: Optional[MockError] = None
+                            self.error = MockError()
 
                         self.name = "test-charm"
                         self.effective_channel = "stable"
@@ -136,8 +135,8 @@ class TestLimitApplication:
                                                 self.optional = optional
 
                                         self.provides = {"database": MockEndpoint("postgresql")}
-                                        self.requires = {}
-                                        self.peers = {}
+                                        self.requires: dict[str, MockEndpoint] = {}
+                                        self.peers: dict[str, MockEndpoint] = {}
 
                                 self.metadata = MockMetadata()
 

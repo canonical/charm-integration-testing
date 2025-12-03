@@ -85,8 +85,6 @@ def sample_node_postgresql_k8s_kratos() -> Node:
                 }
             ),
         ),
-        application_endpoint_to_possible_charm=frozenset(),
-        balance=1.0,
         aggression=0.0,
     )
 
@@ -102,11 +100,6 @@ def sample_node_kratos(charm_priority: float = 1.0) -> Node:
                 }
             ),
             integrations=frozenset(),
-        ),
-        application_endpoint_to_possible_charm=frozenset(
-            {
-                (ApplicationEndpoint("kratos", "pg-database"), "postgresql-k8s"),
-            }
         ),
         aggression=0.0,
     )
@@ -557,8 +550,8 @@ class TestDuplicateCharms:
         )
 
         # WHEN creating nodes from these bundles
-        node1 = Node(bundle=bundle1, application_endpoint_to_possible_charm=frozenset(), balance=1.0, aggression=0.0)
-        node2 = Node(bundle=bundle2, application_endpoint_to_possible_charm=frozenset(), balance=1.0, aggression=0.0)
+        node1 = Node(bundle=bundle1, aggression=0.0)
+        node2 = Node(bundle=bundle2, aggression=0.0)
 
         # THEN the fingerprints should match the bundle integrations
         assert node1.fingerprint == bundle1.integrations

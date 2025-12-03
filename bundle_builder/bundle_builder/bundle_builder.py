@@ -52,7 +52,7 @@ class Node:
         return f"{len(self.bundle.applications)} applications ({len(self.bundle.unfulfilled_endpoints)} unfulfilled endpoints, {len(self.bundle.saturated_endpoints)} saturated endpoints)"
 
     def __lt__(self, other: "Node") -> bool:
-        return self.score < other.score
+        return self.score < other.score  # type: ignore[no-any-return]
 
 
 class BundleBuilder:

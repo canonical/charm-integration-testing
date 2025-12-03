@@ -13,6 +13,8 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+from functools import cache
+from typing import Optional
 from bundle_builder.charm import ENDPOINT_PROVIDES, ENDPOINT_REQUIRES, Charm
 from bundle_builder.charmhub import CharmhubClient
 
@@ -23,29 +25,40 @@ class CharmhubClientStub(CharmhubClient):
     def __init__(self, *charms: Charm):
         self.charms = set(charms)
 
-    def find_charms(self, **kwargs: str) -> set[str]:
-        if "provides" in kwargs:
-            return {
+    @cache
+    def find_charms(
+        self, provides: str | None = None, requires: str | None = None, platform: str | None = None
+    ) -> frozenset[str]:
+        if provides is not None:
+            return frozenset({
                 charm.name
                 for charm in self.charms
                 if any(
-                    (endpoint.type == ENDPOINT_PROVIDES and endpoint.interface == kwargs["provides"])
+                    (endpoint.type == ENDPOINT_PROVIDES and endpoint.interface == provides)
                     for endpoint in charm.endpoints
                 )
-            }
-        if "requires" in kwargs:
-            return {
+            })
+        if requires is not None:
+            return frozenset({
                 charm.name
                 for charm in self.charms
                 if any(
-                    (endpoint.type == ENDPOINT_REQUIRES and endpoint.interface == kwargs["requires"])
+                    (endpoint.type == ENDPOINT_REQUIRES and endpoint.interface == requires)
                     for endpoint in charm.endpoints
                 )
-            }
-        return set()
+            })
+        return frozenset()
 
-    def charm_from_store(self, **kwargs: str) -> Charm | None:
+    @cache
+    def charm_from_store(
+        self,
+        charm_name: str,
+        ubuntu_arch: str,
+        charm_channel: str | None = None,
+        charm_revision: int | None = None,
+        ubuntu_version: str | None = None,
+    ) -> Optional[Charm]:
         for charm in self.charms:
-            if charm.name == kwargs.get("charm_name"):
+            if charm.name == charm_name:
                 return charm
         return None

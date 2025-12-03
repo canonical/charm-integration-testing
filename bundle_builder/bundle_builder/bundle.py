@@ -123,7 +123,7 @@ class Bundle:
 
     @computed_property
     def endpoint_connection_counts(self) -> dict[ApplicationEndpoint, int]:
-        counts = {}
+        counts: dict[ApplicationEndpoint, int] = {}
         for integration in self.integrations:
             for endpoint in integration:
                 if endpoint in counts:

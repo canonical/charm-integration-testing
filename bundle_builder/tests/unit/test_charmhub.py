@@ -250,7 +250,7 @@ class TestCharmhubClient:
                     RefreshAction(
                         charm_name="my-charm",
                         base=matching_base,
-                        channel="stable",
+                        charm_channel="stable",
                     ): RefreshResponse(
                         name="my-charm",
                         effective_channel="stable",

@@ -16,6 +16,7 @@
 import dataclasses
 import logging
 from functools import cache
+from typing import Optional
 
 from .charm import (
     ENDPOINT_PEERS,
@@ -61,7 +62,7 @@ class CharmhubClient:
         charm_channel: str | None = None,
         charm_revision: int | None = None,
         ubuntu_version: str | None = None,
-    ) -> Charm:
+    ) -> Optional[Charm]:
         # Figure out how to look up charm information
         if charm_channel and charm_revision:
             self.logger.error(

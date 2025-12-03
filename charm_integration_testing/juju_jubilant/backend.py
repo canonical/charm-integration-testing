@@ -53,7 +53,7 @@ class JubilantBackend(JujuCmdBackend):
         except TimeoutError:
             raise JujuWaitTimeoutError(wait_state=wait_monitor.last_noncompliant_wait_state)
 
-    def wait_idle(self, model: str, timeout: timedelta | None, period: timedelta | None) -> None:
+    def wait_idle(self, model: str, timeout: timedelta | None, period: timedelta | None = None) -> None:
         self.wait(
             model,
             lambda status: all_statuses_are_in({"active"}, status),

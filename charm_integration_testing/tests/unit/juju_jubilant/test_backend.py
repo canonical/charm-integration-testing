@@ -48,7 +48,7 @@ class TestJubilantClient:
 class WaitStub:
     raise_exception: bool = False
 
-    def wait(self, ready: any, timeout: float, delay: float, **kwargs: any) -> None:
+    def wait(self, ready: Any, timeout: float, delay: float, **kwargs: Any) -> None:
         self.ready = ready
         self.timeout = timeout
         self.delay = delay

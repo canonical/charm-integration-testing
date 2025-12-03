@@ -129,8 +129,8 @@ class JujuCmdBackend(JujuBackend):
                 raise JujuWaitTimeoutError
             else:
                 raise e
-
-    def wait_idle(self, model: str, timeout: timedelta | None) -> None:
+            
+    def wait_idle(self, model: str, timeout: timedelta | None, period: timedelta | None = None) -> None:
         self._wait_for(
             model,
             "model",
@@ -230,7 +230,7 @@ class JujuCmdBackend(JujuBackend):
             CmdArg(value=bundle),
         )
 
-    def remove_applications(self, model: str, *applications: list[str]) -> None:
+    def remove_applications(self, model: str, *applications: str) -> None:
         self._call_juju(
             CmdArg(value="remove-application"),
             CmdArg(name="model", value=model),
@@ -283,7 +283,7 @@ class JujuCmdBackend(JujuBackend):
             model, "model", model, f"len(applications) == 0 || forEach(units, unit => {name_checks})", timeout
         )
 
-    def application_charm(self, model: str, application: str) -> str | None:
+    def application_charm(self, model: str, application: str) -> Optional[str]:
         return self._status(model).applications[application].charm
 
     def application_units(self, model: str, application: str) -> list[str]:

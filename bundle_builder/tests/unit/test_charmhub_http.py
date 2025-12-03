@@ -73,6 +73,7 @@ class SessionStub:
             assert headers == self.get_headers
         if self.get_timeout is not None:
             assert timeout == self.get_timeout
+        assert self.get_result is not None
         return self.get_result
 
     post_url: str | None = None
@@ -90,6 +91,7 @@ class SessionStub:
             assert headers == self.post_headers
         if self.post_timeout is not None:
             assert timeout == self.post_timeout
+        assert self.post_result is not None
         return self.post_result
 
 
