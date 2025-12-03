@@ -223,7 +223,8 @@ jobs:
               "neighbor::${neighbor}::default::default" \
             --integrations "target:${charm_endpoint}::neighbor:${neighbor_endpoint}" \
             --substrate "${substrate}" \
-            --output-file generated-bundle.yaml
+            --output-file generated-bundle.yaml \
+            --output-mermaid generated-bundle.mmd
           rc=$?
           set -e
 
@@ -235,6 +236,11 @@ jobs:
             exit $rc
           else
             echo "bundle=$(realpath generated-bundle.yaml)" >> $GITHUB_OUTPUT
+
+            echo '### Generated Bundle Mermaid Diagram' >> $GITHUB_STEP_SUMMARY
+            echo '```mermaid' >> $GITHUB_STEP_SUMMARY
+            cat generated-bundle.mmd >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
 
             echo '### Generated Juju Bundle' >> $GITHUB_STEP_SUMMARY
             echo '```yaml' >> $GITHUB_STEP_SUMMARY
