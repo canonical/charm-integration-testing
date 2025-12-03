@@ -1088,3 +1088,21 @@ class TestBundle:
 
                 assert k8s_scale == machine_units == 1
                 assert k8s_app == machine_app
+
+    def test_export_mermaid(self):
+        # GIVEN a bundle
+        bundle = sample_bundle_postgresql_k8s_kratos()
+
+        # WHEN bundle is exported to mermaid
+        mermaid = bundle.export_mermaid()
+
+        # THEN mermaid output contains expected structure
+        assert mermaid.startswith("graph TB\n")
+        assert mermaid.endswith("\n")
+
+        # AND contains application nodes with channel and revision info
+        assert 'neighbor["neighbor<br/>(kratos)<br/>edge rev:123"]' in mermaid
+        assert 'target["target<br/>(postgresql-k8s)<br/>stable rev:1"]' in mermaid
+
+        # AND contains integration with escaped angle brackets
+        assert "target -->|database&lt;db&gt;pg-database| neighbor" in mermaid
