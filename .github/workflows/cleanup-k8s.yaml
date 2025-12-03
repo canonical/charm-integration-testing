@@ -86,25 +86,25 @@ jobs:
       - name: Find all juju-credential service accounts older than an hour
         shell: bash
         run: |
-          kubectl get serviceaccounts --all-namespaces --output json | jq --raw-output '
+          kubectl get serviceaccounts --namespace kube-system --output json | jq --raw-output '
             .items[] |
             select(.metadata.name | test("^juju-credential-")) |
             select((now - (.metadata.creationTimestamp | fromdateiso8601)) > 3600) |
-            .kind + "/" + .metadata.name + " -n " + .metadata.namespace
+            .kind + "/" + .metadata.name
           ' >> resources_to_remove.txt
 
       - name: Find all juju-credential secrets older than an hour
         shell: bash
         run: |
-          kubectl get secrets --all-namespaces --output json | jq --raw-output '
+          kubectl get secrets --namespace kube-system --output json | jq --raw-output '
             .items[] |
             select(.type == "kubernetes.io/service-account-token") |
             select(.metadata.name | test("^juju-credential-")) |
             select((now - (.metadata.creationTimestamp | fromdateiso8601)) > 3600) |
-            .kind + "/" + .metadata.name + " -n " + .metadata.namespace
+            .kind + "/" + .metadata.name
           ' >> resources_to_remove.txt
 
       - name: Remove all resources
         shell: bash
         run: |
-          cat resources_to_remove.txt | xargs --no-run-if-empty kubectl delete --timeout=25m
+          cat resources_to_remove.txt | xargs --no-run-if-empty kubectl delete --timeout=25m --namespace=kube-system
