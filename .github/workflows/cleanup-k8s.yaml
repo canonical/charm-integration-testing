@@ -18,12 +18,20 @@ on:
         options:
           - staging
           - production
+      age_threshold:
+        description: "Age threshold in minutes (resources older than this will be deleted)"
+        type: number
+        default: 240
   workflow_call:
     inputs:
       environment:
         description: "Environment to clean."
         type: string
         required: true
+      age_threshold:
+        description: "Age threshold in minutes (resources older than this will be deleted)"
+        type: number
+        default: 240
     secrets:
       PROD_SQA_KUBECONFIG:
         required: true
@@ -35,6 +43,8 @@ jobs:
     runs-on:
       - self-hosted
       - charm_qa
+    env:
+      AGE_THRESHOLD: ${{ inputs.age_threshold * 60 }}
     steps:
       - name: Install kubectl
         shell: bash
@@ -67,40 +77,40 @@ jobs:
       - name: Find all model and controller namespaces older than an hour
         shell: bash
         run: |
-          kubectl get namespaces --output json | jq --raw-output '
+          kubectl get namespaces --output json | jq --raw-output --argjson age "$AGE_THRESHOLD" '
             .items[] |
             select(.metadata.name | test("^(controller|model)-[0-9]+-[0-9]+$")) |
-            select((now - (.metadata.creationTimestamp | fromdateiso8601)) > 3600) |
+            select((now - (.metadata.creationTimestamp | fromdateiso8601)) > $age) |
             .kind + "/" + .metadata.name
           ' >> resources_to_remove.txt
 
       - name: Find all webhook configurations older than an hour
         shell: bash
         run: |
-          kubectl get validatingwebhookconfigurations,mutatingwebhookconfigurations --output json | jq --raw-output '
+          kubectl get validatingwebhookconfigurations,mutatingwebhookconfigurations --output json | jq --raw-output --argjson age "$AGE_THRESHOLD" '
             .items[] |
-            select((now - (.metadata.creationTimestamp | fromdateiso8601)) > 3600) |
+            select((now - (.metadata.creationTimestamp | fromdateiso8601)) > $age) |
             .kind + "/" + .metadata.name
           ' >> resources_to_remove.txt
 
       - name: Find all juju-credential service accounts older than an hour
         shell: bash
         run: |
-          kubectl get serviceaccounts --all-namespaces --output json | jq --raw-output '
+          kubectl get serviceaccounts --all-namespaces --output json | jq --raw-output --argjson age "$AGE_THRESHOLD" '
             .items[] |
             select(.metadata.name | test("^juju-credentials-[a-zA-Z0-9]{8}$")) |
-            select((now - (.metadata.creationTimestamp | fromdateiso8601)) > 3600) |
+            select((now - (.metadata.creationTimestamp | fromdateiso8601)) > $age) |
             .metadata.namespace + ":" + .kind + "/" + .metadata.name
           ' >> resources_to_remove.txt
 
       - name: Find all juju-credential secrets older than an hour
         shell: bash
         run: |
-          kubectl get secrets --all-namespaces --output json | jq --raw-output '
+          kubectl get secrets --all-namespaces --output json | jq --raw-output --argjson age "$AGE_THRESHOLD" '
             .items[] |
             select(.type == "kubernetes.io/service-account-token") |
             select(.metadata.name | test("^juju-credentials-[a-zA-Z0-9]{8}$")) |
-            select((now - (.metadata.creationTimestamp | fromdateiso8601)) > 3600) |
+            select((now - (.metadata.creationTimestamp | fromdateiso8601)) > $age) |
             .metadata.namespace + ":" + .kind + "/" + .metadata.name
           ' >> resources_to_remove.txt
 
