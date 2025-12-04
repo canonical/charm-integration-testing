@@ -41,12 +41,13 @@ runs:
   - name: Add K8s
     env: 
       environment: ${{ inputs.environment }}
+      kubeconfig_path: ${{ inputs.kubeconfig_path }}
     shell: bash
     id: cloud
     run: |
       export CLOUD="k8s-${environment}"
       for ((attempt = 1; ; attempt++)); do
-        if KUBECONFIG="$HOME/.kube/config" juju add-k8s $CLOUD --client; then
+        if KUBECONFIG="${kubeconfig_path}" juju add-k8s $CLOUD --client; then
           break
         elif [ "$attempt" -lt 3 ]; then
           echo "Failed, retrying..."
