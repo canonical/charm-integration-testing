@@ -11,11 +11,17 @@ inputs:
   model:
     description: "Name of the model to create"
     required: True
-
+  kubeconfig_path:
+    description: "Path to kubeconfig file"
+    required: False
+    default: "/home/ubuntu/.kube/config"
 outputs:
   cloud-name:
     description: "Name of the cloud created and bootstrapped to"
     value:  ${{ steps.cloud.outputs.cloud }}
+  kubeconfig_path:
+    description: "Path to kubeconfig file"
+    value: ${{ inputs.kubeconfig_path }}
 
 runs:
   using: "composite"
@@ -23,13 +29,14 @@ runs:
   - name: Setup Kubeconfig
     env: 
       environment: ${{ inputs.environment }}
+      kubeconfig_path: ${{ inputs.kubeconfig_path }}
     shell: bash
     run: |
       mkdir -p $HOME/.kube
       if [ "${environment}" = "production" ]; then
-        echo "${k8sprod}" > $HOME/.kube/config
+        echo "${k8sprod}" > ${kubeconfig_path}
       else        
-        echo "${k8sstg}" > $HOME/.kube/config
+        echo "${k8sstg}" > ${kubeconfig_path}
       fi
   - name: Add K8s
     env: 
