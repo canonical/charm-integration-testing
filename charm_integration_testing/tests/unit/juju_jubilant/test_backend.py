@@ -276,7 +276,7 @@ class TestJubilantBackend:
     class TestAddSecret:
         @dataclass
         class AddSecretStub:
-            secrets: dict = field(default_factory=dict)
+            secrets: dict[str, dict[str, str]] = field(default_factory=dict)
             secret_uri: str = "secret:test-secret-id"
 
             def add_secret(self, name: str, content: dict[str, str]) -> jubilant.SecretURI:

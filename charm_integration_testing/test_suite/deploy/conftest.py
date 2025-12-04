@@ -25,7 +25,7 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 @pytest.fixture
 def bundles(request: pytest.FixtureRequest) -> list[str]:
     option = request.config.getoption("--bundles")
-    assert isinstance(option, list[str])
+    assert isinstance(option, list)
     return option
 
 

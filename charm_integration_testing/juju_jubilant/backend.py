@@ -109,7 +109,7 @@ class JubilantBackend(JujuCmdBackend):
         # There will only ever be one secret in the Juju result, and it is keyed by ID
         # We have `name_or_id`, but don't know which it might be, so we instead just get the first value
         return_value = next(iter(yaml.safe_load(show_secret_result).values()))["content"]
-        if not isinstance(return_value, dict[str, str]):
+        if not isinstance(return_value, dict):
             raise TypeError(f"Expected secret content to be dict[str, str], got {type(return_value)}")
         return return_value
 

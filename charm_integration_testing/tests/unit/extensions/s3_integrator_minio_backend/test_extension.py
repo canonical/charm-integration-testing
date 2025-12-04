@@ -17,13 +17,13 @@ from extensions.s3_integrator_minio_backend.extension import (
 
 @dataclass
 class JujuStub:
-    deployed: list = field(default_factory=list)
-    configured: list = field(default_factory=list)
-    waited_scaled: list = field(default_factory=list)
-    waited_settled: list = field(default_factory=list)
-    scp_calls: list = field(default_factory=list)
-    ssh_calls: list = field(default_factory=list)
-    actions: list = field(default_factory=list)
+    deployed: list[tuple[str, str, str]] = field(default_factory=list)
+    configured: list[tuple[str, str, dict[str, str]]] = field(default_factory=list)
+    waited_scaled: list[tuple[str, str, str]] = field(default_factory=list)
+    waited_settled: list[tuple[str, str, str]] = field(default_factory=list)
+    scp_calls: list[tuple[str, str, str]] = field(default_factory=list)
+    ssh_calls: list[tuple[str, str, str]] = field(default_factory=list)
+    actions: list[tuple[str, str, str, dict[str, str]]] = field(default_factory=list)
     applications: dict[str, str] = field(default_factory=lambda: {"s3-app": "s3-integrator"})
     unit_ips: dict[str, str] = field(default_factory=lambda: {"s3-app-minio/leader": "10.0.0.1"})
 
@@ -36,7 +36,7 @@ class JujuStub:
     def deploy_application(self, model: str, charm: str, application: str) -> None:
         self.deployed.append((model, charm, application))
 
-    def configure_application(self, model: str, application: str, values: dict) -> None:
+    def configure_application(self, model: str, application: str, values: dict[str, str]) -> None:
         self.configured.append((model, application, values))
 
     def wait_application_scaled(self, model: str, application: str, timeout: timedelta) -> None:
@@ -51,7 +51,7 @@ class JujuStub:
     def ssh(self, model: str, target: str, command: str) -> None:
         self.ssh_calls.append((model, target, command))
 
-    def run_action(self, model: str, unit: str, action: str, params: dict) -> None:
+    def run_action(self, model: str, unit: str, action: str, params: dict[str, str]) -> None:
         self.actions.append((model, unit, action, params))
 
     def unit_ip(self, model: str, unit: str) -> str:

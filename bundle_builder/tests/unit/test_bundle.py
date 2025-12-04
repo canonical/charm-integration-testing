@@ -152,6 +152,7 @@ class TestLimitApplication:
 
         # WHEN getting charm from store
         charm = client.charm_from_store("test-charm", "amd64")
+        assert charm is not None
 
         # THEN the endpoint has the correct limit
         database_endpoint = next(e for e in charm.endpoints if e.name == "database")

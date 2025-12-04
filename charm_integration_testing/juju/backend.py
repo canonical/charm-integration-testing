@@ -169,7 +169,7 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def run_action(self, model: str, unit: str, action: str, arguments: dict) -> None:
+    def run_action(self, model: str, unit: str, action: str, arguments: dict[str, str]) -> None:
         raise NotImplementedError
 
     @abstractmethod

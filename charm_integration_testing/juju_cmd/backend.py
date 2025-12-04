@@ -354,7 +354,7 @@ class JujuCmdBackend(JujuBackend):
             CmdArg(value=application),
         )
 
-    def run_action(self, model: str, unit: str, action: str, arguments: dict) -> None:
+    def run_action(self, model: str, unit: str, action: str, arguments: dict[str, str]) -> None:
         # Run the action on the unit
         self._call_juju(
             CmdArg(value="run"),

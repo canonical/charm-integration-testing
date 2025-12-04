@@ -17,9 +17,9 @@ class JujuStub:
     settled_apps: list[str] = field(default_factory=list)
     units: dict[str, list[str]] = field(default_factory=dict)
     messages: list[tuple[str, str, str, timedelta]] = field(default_factory=list)
-    secrets: dict[str, dict] = field(default_factory=dict)
+    secrets: dict[str, dict[str, str]] = field(default_factory=dict)
     secrets_granted: list[tuple[str, str]] = field(default_factory=list)
-    actions_run: list[tuple[str, str, dict]] = field(default_factory=list)
+    actions_run: list[tuple[str, str, dict[str, str]]] = field(default_factory=list)
 
     def list_applications(self, model: str) -> list[str]:
         return self.apps
@@ -42,20 +42,20 @@ class JujuStub:
     def wait_for_unit_message(self, model: str, unit: str, message: str, timeout: timedelta) -> None:
         self.messages.append((unit, message, timeout))
 
-    def add_secret(self, model: str, name: str, content: dict) -> str:
+    def add_secret(self, model: str, name: str, content: dict[str, str]) -> str:
         self.secrets[name] = content
         return "secret-id"
 
     def grant_secret(self, model: str, name: str, app: str) -> None:
         self.secrets_granted.append((name, app))
 
-    def run_action(self, model: str, unit: str, action: str, params: dict) -> None:
+    def run_action(self, model: str, unit: str, action: str, params: dict[str, str]) -> None:
         self.actions_run.append((unit, action, params))
 
     def remove_secret(self, model: str, name: str) -> None:
         del self.secrets[name]
 
-    def read_secret(self, model: str, name: str) -> dict:
+    def read_secret(self, model: str, name: str) -> dict[str, str]:
         return self.secrets[name]
 
 

@@ -37,11 +37,11 @@ class JujuStub:
     """Stub implementation of JujuBackend for testing DatabaseReplicator"""
 
     applications: dict[str, str] = field(default_factory=lambda: {"postgresql-1": "postgresql", "postgresql-2": "postgresql"})
-    integrations: list = field(default_factory=list)
-    waited_scaled: list = field(default_factory=list)
-    waited_settled: list = field(default_factory=list)
+    integrations: list[tuple[str, str, str, str]] = field(default_factory=list)
+    waited_scaled: list[tuple[str, str, str]] = field(default_factory=list)
+    waited_settled: list[tuple[str, str, str]] = field(default_factory=list)
     units: dict[str, int] = field(default_factory=lambda: {"postgresql-1": 3, "postgresql-2": 3})
-    configured_applications: list = field(default_factory=list)
+    configured_applications: list[tuple[str, str, dict[str, str]]] = field(default_factory=list)
 
     def list_applications(self, model: str) -> list[str]:
         """Return list of application names in the model"""
@@ -69,7 +69,7 @@ class JujuStub:
         """Return the number of units for an application"""
         return self.units.get(application, 0)
 
-    def configure_application(self, model: str, application: str, values: dict) -> None:
+    def configure_application(self, model: str, application: str, values: dict[str, str]) -> None:
         """Mock configuring an application (captures call for verification)"""
         self.configured_applications.append((model, application, values))
 

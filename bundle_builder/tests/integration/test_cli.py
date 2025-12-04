@@ -33,6 +33,9 @@ def test_cli_write_output(
     # AND the bundle doesn't exist
     assert not output_bundle.exists()
 
+    # AND the overrides_client has charm metadata overrides
+    assert overrides_client.charm_metadata_overrides is not None
+
     # WHEN the bundle builder is run from cli
     result = subprocess.run(
         [

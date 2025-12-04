@@ -8,7 +8,7 @@ import re
 from datetime import timedelta
 from pathlib import Path
 from subprocess import CalledProcessError  # nosec
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 
 import pytest
 from extensions import (
@@ -85,7 +85,7 @@ failure_exception = StashKey[CollectReport]()
 
 # Get failure message for logging
 @pytest.hookimpl(tryfirst=True, hookwrapper=True)
-def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo) -> None:
+def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[Any]) -> Iterator[None]:
     result = yield
     report = result.get_result()
 
@@ -122,7 +122,7 @@ def print_setup_and_teardown_info(
     juju_client: JujuClient,
     model: str,
     record_execution_metadata: None,
-) -> None:
+) -> Iterator[None]:
     # Enforce fixture execution order
     _ = record_execution_metadata
 
@@ -158,7 +158,7 @@ def assert_idle(juju_client: JujuClient, model: str, print_setup_and_teardown_in
 
 
 @pytest.fixture
-def execution_metadata(record_property: Callable[[str, object], None]) -> Callable[[str, str], None]:
+def execution_metadata(record_property: Callable[[str, object], None]) -> Iterator[Callable[[str, str], None]]:
     # Create a function for adding and deduplicating metadata
     metadata: dict[str, set[str]] = {}
 
@@ -203,7 +203,7 @@ def record_charms_and_revisions_execution_metadata_instantaneous(
 @pytest.fixture
 def record_charms_and_revisions_execution_metadata(
     juju_client: JujuClient, model: str, execution_metadata: Callable[[str, str | int], None]
-) -> None:
+) -> Iterator[None]:
     # Save all charms and revisions at start of test
     record_charms_and_revisions_execution_metadata_instantaneous(juju_client, model, execution_metadata)
 
@@ -237,7 +237,7 @@ def normalize_message(message: Any) -> str:
 @pytest.fixture
 def record_failure_execution_metadata(
     request: pytest.FixtureRequest, execution_metadata: Callable[[str, str | int], None]
-) -> None:
+) -> Iterator[None]:
     # Let the test run
     yield
 

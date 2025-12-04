@@ -359,7 +359,7 @@ class CharmhubClient:
         return refresh_info
 
     def _all_charm_endpoints(self, refresh_info: RefreshResponse) -> frozenset:
-        metadata = refresh_info.charm.metadata
+        metadata = refresh_info.charm.metadata if refresh_info.charm is not None else CharmMetadata()
 
         # Get edge refresh info if any requires or provides endpoints don't have optional flag
         edge_metadata = CharmMetadata()
@@ -370,10 +370,10 @@ class CharmhubClient:
                 RefreshAction(
                     charm_name=refresh_info.name,
                     charm_channel="edge",
-                    base=next(iter(refresh_info.charm.bases)),
+                    base=next(iter(refresh_info.charm.bases)) if refresh_info.charm is not None else None,
                 ),
             )
-            if edge_refresh_info.error is None:
+            if edge_refresh_info.error is None and edge_refresh_info.charm is not None:
                 edge_metadata = edge_refresh_info.charm.metadata
 
         # Get endpoint optionality overrides
