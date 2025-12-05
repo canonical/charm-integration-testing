@@ -70,6 +70,7 @@ def add_args_to_parser(parser: argparse.ArgumentParser) -> None:
         help="Which substrate is the charm going to be deployed on.",
     )
     parser.add_argument("--output-file", type=str, help="Where to save the generated bundle.")
+    parser.add_argument("--output-mermaid", type=str, help="Where to save the generated mermaid diagram.")
     parser.add_argument(
         "--charm-metadata-overrides", type=Path, help="Path to folder containing charm metadata overrides", default=None
     )
@@ -165,14 +166,14 @@ def platform_from_args(parser: argparse.ArgumentParser, substrate: str) -> str:
 
 
 # Dump the bundle to file
-def export_bundle_to_file(filename: str, bundle: Bundle, logger: logging.Logger) -> None:
+def write_to_file(filename: str, content: Bundle, logger: logging.Logger) -> None:
     # Get proper file path
     path = Path(filename).absolute().resolve()
-    logger.info(f"Saving bundle to '{path}'")
+    logger.info(f"Writing to '{path}'")
 
     # Write to file
-    path.write_text(bundle.export(), encoding="utf-8")
-    logger.info("Saved bundle")
+    path.write_text(content, encoding="utf-8")
+    logger.info("Saved file")
 
 
 def main() -> None:
@@ -226,7 +227,11 @@ def main() -> None:
 
     # Export the bundle to file
     if args.output_file:
-        export_bundle_to_file(args.output_file, built_bundle, logger)
+        write_to_file(args.output_file, built_bundle.export(), logger)
+
+    # Export the bundle to mermaid diagram
+    if args.output_mermaid:
+        write_to_file(args.output_mermaid, built_bundle.export_mermaid(), logger)
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -314,3 +314,41 @@ class Bundle:
             default_flow_style=False,
             sort_keys=True,
         )
+
+    def export_mermaid(self) -> str:
+        """Export bundle to mermaid graph string."""
+        lines = ["graph TB"]
+
+        # Add application nodes with detailed information
+        for application in sorted(self.applications, key=lambda a: a.name):
+            charm_info = f"{application.charm.channel} rev:{application.charm.revision}"
+            if application.name == application.charm.name:
+                # Application name matches charm name
+                lines.append(f'    {application.name}["{application.name}<br/>{charm_info}"]')
+            else:
+                # Application has custom name
+                lines.append(
+                    f'    {application.name}["{application.name}<br/>({application.charm.name})<br/>{charm_info}"]'
+                )
+
+        lines.append("")  # Blank line for readability
+
+        # Add integrations with endpoint names as labels
+        for integration in sorted(self.integrations):
+            ep1, ep2 = sorted(integration)
+            charm_ep1 = self.application_endpoints[ep1]
+            interface = charm_ep1.interface
+
+            # Determine which endpoint is requirers
+            if charm_ep1.type == ENDPOINT_REQUIRES:
+                requirer_ep = ep1
+                provider_ep = ep2
+            else:
+                requirer_ep = ep2
+                provider_ep = ep1
+
+            # Escape angle brackets for Mermaid
+            label = f"{provider_ep.endpoint}&lt;{interface}&gt;{requirer_ep.endpoint}"
+            lines.append(f"    {provider_ep.application} -->|{label}| {requirer_ep.application}")
+
+        return "\n".join(lines) + "\n"

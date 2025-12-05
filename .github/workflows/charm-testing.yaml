@@ -171,6 +171,7 @@ jobs:
 
       - name: Setup K8s Cloud
         if: ${{ inputs.substrate == 'kubernetes'}}
+        id: setup_k8s
         uses: ./.github/actions/setup-environment/setup-k8s
         env:
           k8sprod: ${{ secrets.PROD_SQA_KUBECONFIG }}
@@ -223,7 +224,8 @@ jobs:
               "neighbor::${neighbor}::default::default" \
             --integrations "target:${charm_endpoint}::neighbor:${neighbor_endpoint}" \
             --substrate "${substrate}" \
-            --output-file generated-bundle.yaml
+            --output-file generated-bundle.yaml \
+            --output-mermaid generated-bundle.mmd
           rc=$?
           set -e
 
@@ -235,6 +237,11 @@ jobs:
             exit $rc
           else
             echo "bundle=$(realpath generated-bundle.yaml)" >> $GITHUB_OUTPUT
+
+            echo '### Generated Bundle Mermaid Diagram' >> $GITHUB_STEP_SUMMARY
+            echo '```mermaid' >> $GITHUB_STEP_SUMMARY
+            cat generated-bundle.mmd >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
 
             echo '### Generated Juju Bundle' >> $GITHUB_STEP_SUMMARY
             echo '```yaml' >> $GITHUB_STEP_SUMMARY
@@ -390,9 +397,9 @@ jobs:
       - name: Call Juju K8s Crashdump
         id: juju_k8s_crashdump
         if: ${{ !cancelled() && inputs.substrate == 'kubernetes'}}
-        uses: canonical/juju-k8s-crashdump/actions/juju-k8s-crashdump@254b5cf981da8615b7b4ec4cd02ac01ab4270c8a
+        uses: canonical/juju-k8s-crashdump/actions/juju-k8s-crashdump@1c72aa0cc3d0606b6d97916aa9aa28d4a3b30a97
         with:
-          kubeconf: ${{ steps.kubeconfig.outputs.full_path }}
+          kubeconf: ${{ steps.setup_k8s.outputs.kubeconfig_path }}
           controller: ${{ steps.juju_resources.outputs.controller }}
           proxy: http://squid.internal:3128
 

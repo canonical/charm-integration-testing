@@ -27,10 +27,10 @@ from bundle_builder.charmhub_http import CharmReleaseNotFoundException
 from bundle_builder.entrypoint import (
     add_args_to_parser,
     applications_from_args,
-    export_bundle_to_file,
     integrations_from_args,
     platform_from_args,
     setup_logging,
+    write_to_file,
 )
 
 from .test_charm import sample_charm_postgresql_k8s, sample_charm_self_signed_certificates
@@ -319,19 +319,15 @@ class TestPlatformFromArgs:
             assert platform == params.platform
 
 
-class TestExportBundleToFile:
-    class BundleStub:
-        def export(self) -> str:
-            return "my bundle string"
-
-    def test_write(self, tmp_path: Path) -> None:
-        # GIVEN stubbed bundle
-        bundle = self.BundleStub()
+class TestWriteToFile:
+    def test_write(self, tmp_path: Path):
+        # GIVEN content to write
+        content = "my bundle string"
         # AND a file to write to
         file_path = tmp_path / "generated-bundle.yaml"
 
-        # WHEN called to export
-        export_bundle_to_file(file_path.absolute().resolve(), bundle, logging.getLogger())
+        # WHEN called to write to file
+        write_to_file(str(file_path.absolute().resolve()), content, logging.getLogger())
 
-        # THEN bundle is written
+        # THEN content is written
         assert file_path.read_text() == "my bundle string"
