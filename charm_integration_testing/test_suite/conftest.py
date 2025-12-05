@@ -20,7 +20,7 @@ from extensions import (
 )
 from juju import JujuBackend, JujuClient, JujuWaitTimeoutError
 from juju_jubilant import JubilantBackend
-from pytest import CollectReport, StashKey
+from pytest import StashKey
 
 
 @pytest.fixture
@@ -78,15 +78,16 @@ def minio_client_file(request: pytest.FixtureRequest) -> Path | None:
     return option
 
 
-failure_message = StashKey[CollectReport]()
-skipped_message = StashKey[CollectReport]()
-failure_exception = StashKey[CollectReport]()
+failure_message = StashKey[str]()
+skipped_message = StashKey[str]()
+failure_exception = StashKey[BaseException]()
 
 
 # Get failure message for logging
 @pytest.hookimpl(tryfirst=True, hookwrapper=True)
 def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[Any]) -> Iterator[None]:
     result = yield
+    assert result is not None
     report = result.get_result()
 
     # Save failure message
