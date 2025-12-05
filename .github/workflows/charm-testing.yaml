@@ -1,5 +1,5 @@
 name: Execute tests against two charms and their integrations
-run-name: "Testing ${{ inputs.charm_under_test }}:${{ inputs.charm_endpoint }} against ${{ inputs.neighbor }}:${{ inputs.neighbor_endpoint }}. (environment: ${{ inputs.environment }}${{ inputs.execution_id != '' && ', test execution: ' || '' }}${{ inputs.execution_id }}${{ inputs.substrate != '' && ', substrate: ' || '' }}${{ inputs.substrate }})"
+run-name: "Testing ${{ inputs.charm_under_test }}:${{ inputs.charm_endpoint }} against ${{ inputs.neighbor }}:${{ inputs.neighbor_endpoint }}. (environment: ${{ inputs.environment }}${{ inputs.execution_id != '' && ', test execution: ' || '' }}${{ inputs.execution_id }}, substrate: ${{ inputs.substrate }})"
 
 concurrency:
   group: ${{ github.workflow }}-${{ inputs.environment }}-${{ inputs.execution_id || github.run_id }}
@@ -62,7 +62,7 @@ on:
           - "24.04"
         default: "24.04"
       substrate:
-        description: "Queue/substrate identifier for tracking."
+        description: "Substrate to run the tests on"
         required: false
         type: choice
         options:
