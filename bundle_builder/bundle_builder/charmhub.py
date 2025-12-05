@@ -198,7 +198,8 @@ class CharmhubClient:
         # Find suitable ubuntu version for revision
         if not ubuntu_version:
             # Return first ubuntu version with matching base
-            for base in refresh_info.charm.bases:
+            bases = refresh_info.charm.bases if refresh_info.charm is not None else []
+            for base in bases or []:
                 if base.name == "ubuntu" and base.architecture == ubuntu_arch:
                     ubuntu_version = base.channel
                     break
@@ -260,7 +261,7 @@ class CharmhubClient:
         return Charm(
             name=charm_name,
             channel=charm_channel,
-            revision=refresh_info.charm.revision,
+            revision=refresh_info.charm.revision if refresh_info.charm is not None else None,
             ubuntu_version=ubuntu_version,
             ubuntu_arch=ubuntu_arch,
             endpoints=self._all_charm_endpoints(refresh_info),
@@ -291,7 +292,7 @@ class CharmhubClient:
         return Charm(
             name=charm_name,
             channel=refresh_info.effective_channel,
-            revision=refresh_info.charm.revision,
+            revision=refresh_info.charm.revision if refresh_info.charm is not None else None,
             ubuntu_version=ubuntu_version,
             ubuntu_arch=ubuntu_arch,
             endpoints=self._all_charm_endpoints(refresh_info),
@@ -314,12 +315,16 @@ class CharmhubClient:
         )
 
         # Check the error code to get the bases
-        if refresh_info.error.code == "invalid-charm-base":
-            bases = refresh_info.error.extra.default_bases
-        elif refresh_info.error.code == "revision-not-found":
-            bases = [release.base for release in refresh_info.error.extra.releases]
-        else:
+        expected_error_codes = ["invalid-charm-base", "revision-not-found"]
+        if refresh_info.error is None or refresh_info.error.code not in expected_error_codes:
             raise CharmReleaseNotFoundException(f"Failed to find default bases for charm {charm_name}")
+        else:
+            if refresh_info.error.extra is None:
+                raise CharmReleaseNotFoundException(f"No extra information for default bases of {charm_name}")
+            if refresh_info.error.code == "invalid-charm-base":
+                bases = refresh_info.error.extra.default_bases
+            elif refresh_info.error.code == "revision-not-found":
+                bases = [release.base for release in refresh_info.error.extra.releases]
 
         # Ensure a base was found
         if len(bases) == 0:
@@ -337,7 +342,10 @@ class CharmhubClient:
         # If error check extra releases for base
         if refresh_info.error and refresh_info.error.code == "revision-not-found":
             # Gather channels with matching base
-            channels = {release.channel for release in refresh_info.error.extra.releases if release.base == base}
+            if refresh_info.error.extra is None:
+                channels = set()
+            else:
+                channels = {release.channel for release in refresh_info.error.extra.releases if release.base == base}
 
             # Try channels with default track as well
             channels |= {f"latest/{channel}" for channel in channels if "/" not in channel}

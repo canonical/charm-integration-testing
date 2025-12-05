@@ -116,7 +116,7 @@ class OverridesClient:
         return CharmListingOverrides(**self._read_yaml_file(self.charm_listing_overrides, None)).unlisted_charms
 
     @cache
-    def get_charm_test_configs(self, charm: str) -> list[dict]:
+    def get_charm_test_configs(self, charm: str) -> list[dict[Any, Any]]:
         return CharmTestConfigs(**self._read_yaml_file(self.charm_test_configs, f"{charm}.yaml")).configs
 
     @cache

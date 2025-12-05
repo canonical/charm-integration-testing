@@ -47,9 +47,9 @@ class ResponseStub:
         if self.raise_for_status_error:
             raise CustomError
 
-    json_result: list | dict | None = None
+    json_result: list[str] | dict[str, Any] | None = None
 
-    def json(self) -> list | dict | None:
+    def json(self) -> list[str] | dict[str, Any] | None:
         return self.json_result
 
 
