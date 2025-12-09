@@ -19,7 +19,6 @@ from pathlib import Path
 
 from .bundle import Application, ApplicationEndpoint, Bundle, Integration
 from .bundle_builder import BundleBuilder
-from .charm import Charm
 from .charmhub import CharmhubClient
 from .charmhub_http import CharmReleaseNotFoundException
 from .overrides import OverridesClient
@@ -92,7 +91,7 @@ def add_args_to_parser(parser: argparse.ArgumentParser) -> None:
 # Get charms from args
 def applications_from_args(
     parser: argparse.ArgumentParser, charmhub_client: CharmhubClient, specs: list[str], arch: str
-) -> frozenset[Charm]:
+) -> frozenset[Application]:
     applications = set()
     for spec in specs:
         # Get charm specs
@@ -129,7 +128,7 @@ def applications_from_args(
                 config=BundleBuilder.random_test_config(charm),
             )
         )
-    return frozenset(applications)
+    return frozenset(*applications)
 
 
 # Get integrations from args
@@ -166,7 +165,7 @@ def platform_from_args(parser: argparse.ArgumentParser, substrate: str) -> str:
 
 
 # Dump the bundle to file
-def write_to_file(filename: str, content: Bundle, logger: logging.Logger) -> None:
+def write_to_file(filename: str, content: str, logger: logging.Logger) -> None:
     # Get proper file path
     path = Path(filename).absolute().resolve()
     logger.info(f"Writing to '{path}'")

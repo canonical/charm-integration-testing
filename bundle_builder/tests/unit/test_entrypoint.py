@@ -208,7 +208,7 @@ class TestApplicationFromArgs:
 
         # WHEN called with the specs
         try:
-            applications = applications_from_args(parser, charmhub_client, params.specs, params.arch)
+            applications = applications_from_args(parser, charmhub_client, params.specs, params.arch)  # type: ignore[arg-type]
         except RuntimeError:
             threw = True
         else:
@@ -218,6 +218,7 @@ class TestApplicationFromArgs:
         assert threw == params.fail
         # AND expected applications match if not thrown
         if not threw:
+            assert params.applications is not None
             assert applications == frozenset(params.applications)
 
 
@@ -265,7 +266,7 @@ class TestIntegrationFromArgs:
 
         # WHEN called with the specs
         try:
-            integrations = integrations_from_args(parser, params.specs)
+            integrations = integrations_from_args(parser, params.specs)  # type: ignore[arg-type]
         except RuntimeError:
             threw = True
         else:
@@ -275,6 +276,7 @@ class TestIntegrationFromArgs:
         assert threw == params.fail
         # AND expected integrations match if not thrown
         if not threw:
+            assert params.integrations is not None
             assert integrations == frozenset(params.integrations)
 
 
@@ -306,7 +308,7 @@ class TestPlatformFromArgs:
 
         # WHEN called with the specs
         try:
-            platform = platform_from_args(parser, params.substrate)
+            platform = platform_from_args(parser, params.substrate)  # type: ignore[arg-type]
         except RuntimeError:
             threw = True
         else:
@@ -320,7 +322,7 @@ class TestPlatformFromArgs:
 
 
 class TestWriteToFile:
-    def test_write(self, tmp_path: Path):
+    def test_write(self, tmp_path: Path) -> None:
         # GIVEN content to write
         content = "my bundle string"
         # AND a file to write to

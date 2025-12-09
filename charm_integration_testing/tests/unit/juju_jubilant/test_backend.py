@@ -66,7 +66,7 @@ class TestJubilantBackend:
             client = JubilantClientStub(client=stub)
 
             # WHEN
-            JubilantBackend(client).wait_idle("test-model", timedelta(seconds=10), timedelta(seconds=5))
+            JubilantBackend(client).wait_idle("test-model", timedelta(seconds=10), timedelta(seconds=5))  # type: ignore[arg-type]
 
             # THEN the timeout and delay are set correctly
             assert stub.timeout == 10
@@ -79,7 +79,7 @@ class TestJubilantBackend:
 
             # WHEN
             try:
-                JubilantBackend(client).wait_idle("test-model", timedelta(seconds=10), timedelta(seconds=5))
+                JubilantBackend(client).wait_idle("test-model", timedelta(seconds=10), timedelta(seconds=5))  # type: ignore[arg-type]
             except TimeoutError:
                 # THEN
                 pass
@@ -94,7 +94,7 @@ class TestJubilantBackend:
             client = JubilantClientStub(client=stub)
 
             # WHEN
-            JubilantBackend(client).wait_application_settled("test-model", "my-app", timeout=timedelta(seconds=10))
+            JubilantBackend(client).wait_application_settled("test-model", "my-app", timeout=timedelta(seconds=10))  # type: ignore[arg-type]
 
             # THEN the timeout and delay are set correctly
             assert stub.timeout == 10
@@ -107,7 +107,7 @@ class TestJubilantBackend:
 
             # WHEN
             try:
-                JubilantBackend(client).wait_application_settled("test-model", "my-app", timeout=timedelta(seconds=10))
+                JubilantBackend(client).wait_application_settled("test-model", "my-app", timeout=timedelta(seconds=10))  # type: ignore[arg-type]
             except TimeoutError:
                 # THEN
                 pass
@@ -122,7 +122,7 @@ class TestJubilantBackend:
             client = JubilantClientStub(client=stub)
 
             # WHEN
-            JubilantBackend(client).wait_application_scaled("test-model", "my-app", timeout=timedelta(seconds=10))
+            JubilantBackend(client).wait_application_scaled("test-model", "my-app", timeout=timedelta(seconds=10))  # type: ignore[arg-type]
 
             # THEN the timeout and delay are set correctly
             assert stub.timeout == 10
@@ -135,7 +135,7 @@ class TestJubilantBackend:
 
             # WHEN
             try:
-                JubilantBackend(client).wait_application_scaled("test-model", "my-app", timeout=timedelta(seconds=10))
+                JubilantBackend(client).wait_application_scaled("test-model", "my-app", timeout=timedelta(seconds=10))  # type: ignore[arg-type]
             except TimeoutError:
                 # THEN
                 pass
@@ -150,7 +150,7 @@ class TestJubilantBackend:
             client = JubilantClientStub(client=stub)
 
             # WHEN
-            JubilantBackend(client).wait_for_unit_message(
+            JubilantBackend(client).wait_for_unit_message(  # type: ignore[arg-type]
                 "test-model", "my-unit", "my-message", timeout=timedelta(seconds=10)
             )
 
@@ -165,7 +165,7 @@ class TestJubilantBackend:
 
             # WHEN
             try:
-                JubilantBackend(client).wait_for_unit_message(
+                JubilantBackend(client).wait_for_unit_message(  # type: ignore[arg-type]
                     "test-model", "my-unit", "my-message", timeout=timedelta(seconds=10)
                 )
             except TimeoutError:
@@ -182,7 +182,7 @@ class TestJubilantBackend:
             client = JubilantClientStub(client=stub)
 
             # WHEN
-            JubilantBackend(client).wait_for_removal("test-model", ["my-app"], timeout=timedelta(seconds=10))
+            JubilantBackend(client).wait_for_removal("test-model", ["my-app"], timeout=timedelta(seconds=10))  # type: ignore[arg-type]
 
             # THEN the timeout and delay are set correctly
             assert stub.timeout == 10
@@ -195,7 +195,7 @@ class TestJubilantBackend:
 
             # WHEN
             try:
-                JubilantBackend(client).wait_for_removal("test-model", ["my-app"], timeout=timedelta(seconds=10))
+                JubilantBackend(client).wait_for_removal("test-model", ["my-app"], timeout=timedelta(seconds=10))  # type: ignore[arg-type]
             except TimeoutError:
                 # THEN
                 pass
@@ -214,7 +214,7 @@ class TestJubilantBackend:
 
             endpoint_1 = JujuIntegrationApplication("app1", "endpoint1")
             endpoint_2 = JujuIntegrationApplication("app2", "endpoint2")
-            JubilantBackend(client).wait_for_removal_of_integration(
+            JubilantBackend(client).wait_for_removal_of_integration(  # type: ignore[arg-type]
                 "test-model", endpoint_1, endpoint_2, timeout=timedelta(seconds=10)
             )
 
@@ -233,7 +233,7 @@ class TestJubilantBackend:
             endpoint_1 = JujuIntegrationApplication("app1", "endpoint1")
             endpoint_2 = JujuIntegrationApplication("app2", "endpoint2")
             try:
-                JubilantBackend(client).wait_for_removal_of_integration(
+                JubilantBackend(client).wait_for_removal_of_integration(  # type: ignore[arg-type]
                     "test-model", endpoint_1, endpoint_2, timeout=timedelta(seconds=10)
                 )
             except TimeoutError:
@@ -250,7 +250,7 @@ class TestJubilantBackend:
             client = JubilantClientStub(client=stub)
 
             # WHEN
-            JubilantBackend(client).wait_for_removal_of_units("test-model", ["my-app"], timeout=timedelta(seconds=10))
+            JubilantBackend(client).wait_for_removal_of_units("test-model", ["my-app"], timeout=timedelta(seconds=10))  # type: ignore[arg-type]
 
             # THEN the timeout and delay are set correctly
             assert stub.timeout == 10
@@ -263,7 +263,7 @@ class TestJubilantBackend:
 
             # WHEN
             try:
-                JubilantBackend(client).wait_for_removal_of_units(
+                JubilantBackend(client).wait_for_removal_of_units(  # type: ignore[arg-type]
                     "test-model", ["my-app"], timeout=timedelta(seconds=10)
                 )
             except TimeoutError:
@@ -288,7 +288,7 @@ class TestJubilantBackend:
             client = JubilantClientStub(client=self.AddSecretStub())
 
             # WHEN
-            secret_id = JubilantBackend(client).add_secret("test-model", "my-secret", {"key": "value"})
+            secret_id = JubilantBackend(client).add_secret("test-model", "my-secret", {"key": "value"})  # type: ignore[arg-type]
 
             # THEN
             assert secret_id == "test-secret-id"
@@ -320,7 +320,7 @@ class TestJubilantBackend:
             )
 
             # WHEN
-            content = JubilantBackend(client).read_secret("test-model", "my-secret")
+            content = JubilantBackend(client).read_secret("test-model", "my-secret")  # type: ignore[arg-type]
 
             # THEN
             assert content == {"my-key": "my-value"}
@@ -331,7 +331,7 @@ class TestJubilantBackend:
             client = JubilantClientStub(client=JubilantCliStub())
 
             # WHEN
-            JubilantBackend(client).grant_secret("test-model", "my-secret", "my-application")
+            JubilantBackend(client).grant_secret("test-model", "my-secret", "my-application")  # type: ignore[arg-type]
 
             # THEN
             assert ("grant-secret", "my-secret", "my-application") in client.client.executions
@@ -342,7 +342,7 @@ class TestJubilantBackend:
             client = JubilantClientStub(client=JubilantCliStub())
 
             # WHEN
-            JubilantBackend(client).remove_secret("test-model", "my-secret")
+            JubilantBackend(client).remove_secret("test-model", "my-secret")  # type: ignore[arg-type]
 
             # THEN
             assert ("remove-secret", "my-secret") in client.client.executions
@@ -363,7 +363,7 @@ class TestJubilantBackend:
             client = JubilantClientStub(client=stub)
 
             # WHEN
-            JubilantBackend(client).deploy_application("test-model", charm="my-charm", application="my-app")
+            JubilantBackend(client).deploy_application("test-model", charm="my-charm", application="my-app")  # type: ignore[arg-type]
 
             # THEN
             assert stub.charm == "my-charm"
@@ -385,7 +385,7 @@ class TestJubilantBackend:
             client = JubilantClientStub(client=stub)
 
             # WHEN
-            JubilantBackend(client).configure_application("test-model", "my-app", {"k": "v"})
+            JubilantBackend(client).configure_application("test-model", "my-app", {"k": "v"})  # type: ignore[arg-type]
 
             # THEN
             assert stub.app == "my-app"
@@ -407,7 +407,7 @@ class TestJubilantBackend:
             client = JubilantClientStub(client=stub)
 
             # WHEN
-            JubilantBackend(client).scp("test-model", source="a", destination="b")
+            JubilantBackend(client).scp("test-model", source="a", destination="b")  # type: ignore[arg-type]
 
             # THEN
             assert stub.source == "a"
@@ -429,7 +429,7 @@ class TestJubilantBackend:
             client = JubilantClientStub(client=stub)
 
             # WHEN
-            JubilantBackend(client).ssh("test-model", application="my-app", command="ls -l")
+            JubilantBackend(client).ssh("test-model", application="my-app", command="ls -l")  # type: ignore[arg-type]
 
             # THEN
             assert stub.target == "my-app"
@@ -442,7 +442,7 @@ class TestJubilantBackend:
                 self.leader = leader
 
         class AppStatus:
-            def __init__(self, units: list["TestJubilantBackend.TestUnitIp.Unit"]) -> None:
+            def __init__(self, units: dict[str, "TestJubilantBackend.TestUnitIp.Unit"]) -> None:
                 self.units = units
 
         class ModelStatus:
@@ -466,7 +466,7 @@ class TestJubilantBackend:
             client = JubilantClientStub(client=stub)
 
             # WHEN
-            ip = JubilantBackend(client).unit_ip("test-model", "my-app/0")
+            ip = JubilantBackend(client).unit_ip("test-model", "my-app/0")  # type: ignore[arg-type]
 
             # THEN
             assert ip == "10.0.0.1"
@@ -477,7 +477,7 @@ class TestJubilantBackend:
             client = JubilantClientStub(client=stub)
 
             # WHEN
-            ip = JubilantBackend(client).unit_ip("test-model", "my-app/leader")
+            ip = JubilantBackend(client).unit_ip("test-model", "my-app/leader")  # type: ignore[arg-type]
 
             # THEN
             assert ip == "10.0.0.2"
@@ -489,7 +489,7 @@ class TestJubilantBackend:
 
             # WHEN / THEN
             try:
-                JubilantBackend(client).unit_ip("test-model", "my-app/99")
+                JubilantBackend(client).unit_ip("test-model", "my-app/99")  # type: ignore[arg-type]
             except KeyError as e:
                 assert "my-app/99" in str(e)
             else:
@@ -530,7 +530,7 @@ class TestJubilantBackend:
             client = JubilantClientStub(client=self.ModelStub(client=self.StatusStubClient()))
 
             # WHEN
-            charm_revisions = JubilantBackend(client).get_charm_revisions("test-model")
+            charm_revisions = JubilantBackend(client).get_charm_revisions("test-model")  # type: ignore[arg-type]
 
             # THEN
             assert charm_revisions == {("my-charm", 1)}

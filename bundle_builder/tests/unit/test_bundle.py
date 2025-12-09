@@ -14,8 +14,8 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import dataclasses
-from linecache import cache
-from typing import Optional
+from functools import cache
+from typing import Any, Optional
 
 import pytest
 import yaml
@@ -102,7 +102,7 @@ class TestLimitApplication:
 
         # Mock HTTP client that returns mock charm data
         class MockHttpClient:
-            def refresh(self, action: object) -> "MockResponse":
+            def refresh(self, action: object) -> Any:
                 class MockResponse:
                     def __init__(self) -> None:
                         class MockError:
@@ -114,6 +114,7 @@ class TestLimitApplication:
                                         self.default_bases = [MockBase()]
 
                                 self.extra = MockExtra()
+
                         # Mock error for default base lookup (when base is "NA")
                         self.error: Optional[MockError] = None
                         if hasattr(action, "base") and action.base.name == "NA":
@@ -130,7 +131,7 @@ class TestLimitApplication:
                                 class MockMetadata:
                                     def __init__(self) -> None:
                                         class MockEndpoint:
-                                            def __init__(self, interface, optional=None) -> None:
+                                            def __init__(self, interface: Any, optional: Any = None) -> None:
                                                 self.interface = interface
                                                 self.optional = optional
 
@@ -148,11 +149,10 @@ class TestLimitApplication:
             return CharmhubBase(name="ubuntu", architecture="amd64", channel="22.04")
 
         # Create CharmhubClient with mock dependencies
-        client = CharmhubClient(http_client=MockHttpClient(), overrides_client=MockOverridesClient())
+        client = CharmhubClient(http_client=MockHttpClient(), overrides_client=MockOverridesClient())  # type: ignore[arg-type]
 
         # WHEN getting charm from store
         charm = client.charm_from_store("test-charm", "amd64")
-        assert charm is not None
 
         # THEN the endpoint has the correct limit
         database_endpoint = next(e for e in charm.endpoints if e.name == "database")
@@ -406,7 +406,7 @@ class TestBundle:
         class Params:
             label: str
             bundle: Bundle
-            charms: set[str]
+            charms: frozenset[str]
 
         test_cases = [
             Params(
@@ -453,7 +453,7 @@ class TestBundle:
         class Params:
             label: str
             bundle: Bundle
-            unfulfilled_endpoints: set[ApplicationEndpoint]
+            unfulfilled_endpoints: frozenset[ApplicationEndpoint]
 
         test_cases = [
             Params(
@@ -1090,7 +1090,7 @@ class TestBundle:
                 assert k8s_scale == machine_units == 1
                 assert k8s_app == machine_app
 
-    def test_export_mermaid(self):
+    def test_export_mermaid(self) -> None:
         # GIVEN a bundle
         bundle = sample_bundle_postgresql_k8s_kratos()
 

@@ -15,6 +15,7 @@
 
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -48,10 +49,12 @@ class TestCharmEndpointOverride:
                     ]
                 ),
                 optionality=CharmEndpointOptionality(
-                    all_of=[
-                        CharmEndpointOptionality.from_bool(True),
-                        CharmEndpointOptionality.from_bool(False),
-                    ]
+                    all_of=frozenset(
+                        [
+                            CharmEndpointOptionality.from_bool(True),
+                            CharmEndpointOptionality.from_bool(False),
+                        ]
+                    )
                 ),
             ),
             Params(
@@ -104,7 +107,7 @@ class TestOverridesClient:
         class Params:
             label: str
             charm: str = "postgresql-k8s"
-            overrides: dict = Field(default_factory=dict)
+            overrides: dict[str, Any] = Field(default_factory=dict)
             expected_override: CharmMetadataOverride = Field(default_factory=CharmMetadataOverride)
             overrides_directory: bool = True
 
@@ -172,7 +175,7 @@ class TestOverridesClient:
         class Params:
             label: str
             charm: str = "postgresql-k8s"
-            overrides: dict = Field(default_factory=dict)
+            overrides: dict[str, Any] = Field(default_factory=dict)
             expected_override: set[str] = Field(default_factory=set)
             overrides_directory: bool = True
 
@@ -210,7 +213,7 @@ class TestOverridesClient:
         @dataclass
         class Params:
             label: str
-            overrides: dict = Field(default_factory=dict)
+            overrides: dict[str, Any] = Field(default_factory=dict)
             expected_overrides: set[str] = Field(default_factory=set)
             supply_file: bool = True
 
@@ -246,8 +249,8 @@ class TestOverridesClient:
         class Params:
             label: str
             charm: str = "charm-a"
-            overrides: dict = Field(default_factory=dict)
-            expected: list[dict] = Field(default_factory=list)
+            overrides: dict[str, Any] = Field(default_factory=dict)
+            expected: list[dict[str, Any]] = Field(default_factory=list)
             overrides_directory: bool = True
 
         test_cases = [
@@ -290,7 +293,7 @@ class TestOverridesClient:
         @dataclass
         class Params:
             label: str
-            overrides: dict = Field(default_factory=dict)
+            overrides: dict[str, Any] = Field(default_factory=dict)
             expected_priorities: dict[str, float] = Field(default_factory=dict)
             supply_file: bool = True
 

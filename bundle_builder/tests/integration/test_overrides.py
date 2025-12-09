@@ -40,13 +40,14 @@ def test_overrides_metadata_make_optional(
     charmhub_client = CharmhubClient(overrides_client=OverridesClient(charm_metadata_overrides=tmp_path))
 
     # WHEN a bundle is built with that charm
+    charm_from_store = charmhub_client.charm_from_store(sample_dependent_charm, "amd64")
     minimal_bundle = BundleBuilder(charmhub_client).build(
         Bundle(
             applications=frozenset(
                 {
                     Application(
                         name=sample_dependent_charm,
-                        charm=charmhub_client.charm_from_store(sample_dependent_charm, "amd64"),
+                        charm=charm_from_store,
                     )
                 }
             ),
@@ -73,13 +74,14 @@ def test_charm_config(tmp_path: Path, sample_independent_charm: str) -> None:
     charmhub_client = CharmhubClient(overrides_client=OverridesClient(charm_test_configs=tmp_path))
 
     # WHEN a bundle is built with that charm
+    charm_from_store = charmhub_client.charm_from_store(sample_independent_charm, "amd64")
     minimal_bundle = BundleBuilder(charmhub_client).build(
         Bundle(
             applications=frozenset(
                 {
                     Application(
                         name=sample_independent_charm,
-                        charm=charmhub_client.charm_from_store(sample_independent_charm, "amd64"),
+                        charm=charm_from_store,
                     )
                 }
             ),

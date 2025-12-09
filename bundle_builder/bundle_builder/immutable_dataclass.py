@@ -17,9 +17,9 @@
 from dataclasses import field
 from functools import wraps
 from typing import Any, Callable, Dict, Optional, TypeVar, get_type_hints
-from typing_extensions import dataclass_transform
 
 from pydantic.dataclasses import dataclass
+from typing_extensions import dataclass_transform
 
 _F = TypeVar("_F", bound=Callable[..., Any])
 
@@ -27,7 +27,7 @@ _F = TypeVar("_F", bound=Callable[..., Any])
 # Custom property subclass that allows marking for computed properties
 class _ComputedProperty(property):
     _is_computed_property = True
-    
+
     def __init__(self, func: Callable[..., Any]) -> None:
         super().__init__(func)
         self._original_func = func
@@ -109,7 +109,6 @@ def immutable_dataclass(_cls: Optional[type] = None, **dataclass_kwargs: Any) ->
             # Modify the class in place to add the private field
             private_name = f"_{name}"
             annotations[private_name] = get_type_hints(method).get("return", Any)
-            assert method is Callable[[Any], Any]
             setattr(cls, name, make_lazy_property(private_name, method))
             setattr(cls, private_name, field(init=False, repr=False, hash=False, compare=False, default=_UNINITIALIZED))
 

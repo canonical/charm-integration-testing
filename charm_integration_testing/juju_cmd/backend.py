@@ -12,7 +12,7 @@ from juju import JujuBackend, JujuExecOutput, JujuIntegration, JujuIntegrationAp
 
 from .cmd import CmdArg, CmdClient, CmdError
 from .structures import JujuExecTask, JujuModel, JujuSecretInfo, JujuStatus
-    
+
 
 class JujuCmdBackend(JujuBackend):
     cmd_client: CmdClient
@@ -20,7 +20,7 @@ class JujuCmdBackend(JujuBackend):
     def __init__(self, cmd_client: Optional[CmdClient] = None):
         self.cmd_client = cmd_client if cmd_client is not None else CmdClient()
 
-    def _call_juju(self, *args: list[CmdArg]) -> str:
+    def _call_juju(self, *args: CmdArg) -> str:
         return self.cmd_client.call(CmdArg(value="juju"), *args)
 
     def _status(self, model: str, *selectors: str) -> JujuStatus:
@@ -58,7 +58,7 @@ class JujuCmdBackend(JujuBackend):
                 CmdArg(value="scale-application"),
                 CmdArg(name="model", value=model),
                 CmdArg(value=application),
-                CmdArg(value=num),
+                CmdArg(value=str(num)),
             )
         else:
             # Get current juju units
@@ -72,7 +72,7 @@ class JujuCmdBackend(JujuBackend):
                     CmdArg(value="add-unit"),
                     CmdArg(name="model", value=model),
                     CmdArg(value=application),
-                    CmdArg(value=num - len(units), name="num-units"),
+                    CmdArg(value=str(num - len(units)), name="num-units"),
                 )
             elif len(units) > num:
                 self._call_juju(
@@ -129,7 +129,7 @@ class JujuCmdBackend(JujuBackend):
                 raise JujuWaitTimeoutError
             else:
                 raise e
-            
+
     def wait_idle(self, model: str, timeout: timedelta | None, period: timedelta | None = None) -> None:
         self._wait_for(
             model,

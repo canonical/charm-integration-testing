@@ -59,12 +59,12 @@ class SessionStub:
         pass
 
     get_url: str | None = None
-    get_params: dict | None = None
-    get_headers: dict | None = None
+    get_params: dict[str, str] | None = None
+    get_headers: dict[str, str] | None = None
     get_timeout: int | None = None
     get_result: ResponseStub | None = None
 
-    def get(self, url: str, params: dict, headers: dict, timeout: int) -> ResponseStub:
+    def get(self, url: str, params: dict[str, str], headers: dict[str, str], timeout: int) -> ResponseStub:
         if self.get_url is not None:
             assert url == self.get_url
         if self.get_params is not None:
@@ -77,12 +77,12 @@ class SessionStub:
         return self.get_result
 
     post_url: str | None = None
-    post_json: dict | list | None = None
-    post_headers: dict | None = None
+    post_json: dict[str, Any] | list[Any] | None = None
+    post_headers: dict[str, str] | None = None
     post_timeout: int | None = None
     post_result: ResponseStub | None = None
 
-    def post(self, url: str, json: dict | list, headers: dict, timeout: int) -> ResponseStub:
+    def post(self, url: str, json: dict[str, Any] | list[Any], headers: dict[str, str], timeout: int) -> ResponseStub:
         if self.post_url is not None:
             assert url == self.post_url
         if self.post_json is not None:
@@ -95,7 +95,7 @@ class SessionStub:
         return self.post_result
 
 
-def sample_find_json() -> dict:
+def sample_find_json() -> dict[str, Any]:
     return {
         "results": [
             {
@@ -112,7 +112,7 @@ def sample_find_response() -> list[FindResponse]:
     return [FindResponse(**result) for result in sample_find_json()["results"]]
 
 
-def sample_refresh_json() -> dict:
+def sample_refresh_json() -> dict[str, Any]:
     return {
         "results": [
             {
@@ -144,7 +144,7 @@ def sample_refresh_response() -> RefreshResponse:
     return RefreshResponse(**sample_refresh_json()["results"][0])
 
 
-def sample_info_json() -> dict:
+def sample_info_json() -> dict[str, dict[str, Any]]:
     return {
         "default-release": {
             "revision": {
@@ -167,7 +167,7 @@ def sample_info_json() -> dict:
 
 
 def sample_info_response() -> InfoResponse:
-    return InfoResponse(**sample_info_json())
+    return InfoResponse(**sample_info_json())  # type: ignore[arg-type]
 
 
 class TestRefreshResponse:
@@ -251,7 +251,7 @@ class TestCharmhubHttpClient:
 
             # WHEN find is called
             try:
-                result = CharmhubHttpClient(session=params.session).find(provides=provides, requires=requires)
+                result = CharmhubHttpClient(session=params.session).find(provides=provides, requires=requires)  # type: ignore[arg-type]
             except CustomError:
                 # THEN an exception was expected to be raised
                 assert params.raise_exception
@@ -386,7 +386,7 @@ class TestCharmhubHttpClient:
 
             # WHEN refresh is called
             try:
-                response = CharmhubHttpClient(session=params.session).refresh(action)
+                response = CharmhubHttpClient(session=params.session).refresh(action)  # type: ignore[arg-type]
             except CustomError:
                 # THEN an exception was expected to be raised
                 assert params.raise_exception
@@ -438,7 +438,7 @@ class TestCharmhubHttpClient:
 
             # WHEN info is called
             try:
-                response = CharmhubHttpClient(session=params.session).info(charm)
+                response = CharmhubHttpClient(session=params.session).info(charm)  # type: ignore[arg-type]
             except CustomError:
                 # THEN an exception was expected to be raised
                 assert params.raise_exception

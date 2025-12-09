@@ -9,14 +9,15 @@ import pytest
 from extensions.database_replication.database_client import DatabaseClient
 from extensions.database_replication.database_replicator import CharmInfo
 from extensions.database_replication.extension import GenericDatabaseReplicationExtension
-from juju.backend import JujuBackend
 
 
 @dataclass
 class DatabaseClientStub(DatabaseClient):
     """Stub implementation of DatabaseClient for testing"""
 
-    databases_by_app: dict[str, list[str]] = field(default_factory=lambda: {"postgresql-1": ["testdb"], "postgresql-2": ["testdb"]})
+    databases_by_app: dict[str, list[str]] = field(
+        default_factory=lambda: {"postgresql-1": ["testdb"], "postgresql-2": ["testdb"]}
+    )
     tables_by_db: dict[str, list[str]] = field(default_factory=lambda: {"testdb": ["public.users", "public.orders"]})
 
     def get_databases(self, model: str, application: str) -> list[str]:
@@ -36,7 +37,9 @@ class DatabaseClientStub(DatabaseClient):
 class JujuStub:
     """Stub implementation of JujuBackend for testing DatabaseReplicator"""
 
-    applications: dict[str, str] = field(default_factory=lambda: {"postgresql-1": "postgresql", "postgresql-2": "postgresql"})
+    applications: dict[str, str] = field(
+        default_factory=lambda: {"postgresql-1": "postgresql", "postgresql-2": "postgresql"}
+    )
     integrations: list[tuple[str, str, str, str]] = field(default_factory=list)
     waited_scaled: list[tuple[str, str, str]] = field(default_factory=list)
     waited_settled: list[tuple[str, str, str]] = field(default_factory=list)
@@ -93,7 +96,7 @@ class TestPostgreSQLDatabaseReplicationExtension:
         charm_info = CharmInfo(
             name="postgresql", offer_endpoint="logical-replication-offer", consumer_endpoint="logical-replication"
         )
-        replicator = DatabaseReplicator(charm_info, juju, logging.getLogger("test"), database_client)
+        replicator = DatabaseReplicator(charm_info, juju, logging.getLogger("test"), database_client)  # type: ignore[arg-type]
 
         ext = GenericDatabaseReplicationExtension(replicator)
         return ext
@@ -110,7 +113,7 @@ class TestPostgreSQLDatabaseReplicationExtension:
             charm_info = CharmInfo(
                 name="postgresql", offer_endpoint="logical-replication-offer", consumer_endpoint="logical-replication"
             )
-            replicator = DatabaseReplicator(charm_info, juju, logging.getLogger("test"), database_client)
+            replicator = DatabaseReplicator(charm_info, juju, logging.getLogger("test"), database_client)  # type: ignore[arg-type]
             extension = GenericDatabaseReplicationExtension(replicator)
 
             # WHEN post_deploy is called
@@ -131,7 +134,7 @@ class TestPostgreSQLDatabaseReplicationExtension:
             charm_info = CharmInfo(
                 name="postgresql", offer_endpoint="logical-replication-offer", consumer_endpoint="logical-replication"
             )
-            replicator = DatabaseReplicator(charm_info, juju, logging.getLogger("test"), database_client)
+            replicator = DatabaseReplicator(charm_info, juju, logging.getLogger("test"), database_client)  # type: ignore[arg-type]
             extension = GenericDatabaseReplicationExtension(replicator)
 
             # WHEN post_deploy is called

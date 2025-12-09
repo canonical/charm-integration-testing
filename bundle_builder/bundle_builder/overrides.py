@@ -35,7 +35,7 @@ class CharmEndpointOverride:
         if self.optional is not None:
             return CharmEndpointOptionality.from_bool(self.optional)
         if self.optional_if is not None:
-            return CharmEndpointOptionality(all_of=self.optional_if)
+            return CharmEndpointOptionality(all_of=frozenset(self.optional_if))
         return None
 
 

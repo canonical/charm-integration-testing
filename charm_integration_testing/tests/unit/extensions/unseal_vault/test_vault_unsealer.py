@@ -4,9 +4,8 @@
 from dataclasses import dataclass, field
 from datetime import timedelta
 
-from extensions.unseal_vault.vault_client import VaultStatus
+from extensions.unseal_vault.vault_client import VaultStatus, VaultTokenSecret
 from extensions.unseal_vault.vault_unsealer import CharmInfo, VaultUnsealer
-from extensions.unseal_vault.vault_client import VaultTokenSecret
 
 
 @dataclass
@@ -16,7 +15,7 @@ class JujuStub:
     scaled_apps: list[str] = field(default_factory=list)
     settled_apps: list[str] = field(default_factory=list)
     units: dict[str, list[str]] = field(default_factory=dict)
-    messages: list[tuple[str, str, str, timedelta]] = field(default_factory=list)
+    messages: list[tuple[str, str, timedelta]] = field(default_factory=list)
     secrets: dict[str, dict[str, str]] = field(default_factory=dict)
     secrets_granted: list[tuple[str, str]] = field(default_factory=list)
     actions_run: list[tuple[str, str, dict[str, str]]] = field(default_factory=list)
@@ -98,7 +97,7 @@ class TestVaultUnsealer:
         charm = CharmInfo(name="vault")
 
         # WHEN
-        VaultUnsealer(charm, vault, juju, logger).try_init_or_unseal_all_vaults("test-model")
+        VaultUnsealer(charm, vault, juju, logger).try_init_or_unseal_all_vaults("test-model")  # type: ignore[arg-type]
 
         # THEN
         assert "vault" in juju.scaled_apps
@@ -112,7 +111,7 @@ class TestVaultUnsealer:
         charm = CharmInfo(name="vault")
 
         # WHEN
-        VaultUnsealer(charm, vault, juju, logger).try_init_vault("test-model", "vault")
+        VaultUnsealer(charm, vault, juju, logger).try_init_vault("test-model", "vault")  # type: ignore[arg-type]
 
         # THEN
         assert vault.inits == []
@@ -133,7 +132,7 @@ class TestVaultUnsealer:
         charm = CharmInfo(name="vault")
 
         # WHEN
-        VaultUnsealer(charm, vault, juju, logger).try_unseal_vault("test-model", "vault")
+        VaultUnsealer(charm, vault, juju, logger).try_unseal_vault("test-model", "vault")  # type: ignore[arg-type]
 
         # THEN
         assert "vault/0" in vault.unseals
@@ -148,7 +147,7 @@ class TestVaultUnsealer:
         tokens = VaultTokenSecret(root_token="abc", unseal_key="xyz")
 
         # WHEN
-        VaultUnsealer(charm, vault, juju, logger).authorize_vault_charm("test-model", "vault", tokens)
+        VaultUnsealer(charm, vault, juju, logger).authorize_vault_charm("test-model", "vault", tokens)  # type: ignore[arg-type]
 
         # THEN
         assert ("vault-secret-application-vault-one-time-token", "vault") in juju.secrets_granted
@@ -162,7 +161,7 @@ class TestVaultUnsealer:
         logger = LoggerStub()
         charm = CharmInfo(name="vault")
         tokens = VaultTokenSecret(root_token="abc", unseal_key="xyz")
-        unsealer = VaultUnsealer(charm, vault, juju, logger)
+        unsealer = VaultUnsealer(charm, vault, juju, logger)  # type: ignore[arg-type]
 
         # WHEN
         unsealer.save_vault_tokens("test-model", "vault", tokens)

@@ -2,6 +2,7 @@
 # See LICENSE file for licensing details.
 
 from typing import Optional
+
 from pydantic import Field
 from serializeable_dataclass import serializeable_dataclass
 

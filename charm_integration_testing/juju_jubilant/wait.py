@@ -105,11 +105,13 @@ def get_unit_state(status: jubilant.Status, unit: str) -> JujuUnitState:
     )
 
 
-def all_statuses_are_in(expected: set[str], status: jubilant.Status, *application_args: str) -> tuple[bool, JujuWaitState]:
+def all_statuses_are_in(
+    expected: set[str], status: jubilant.Status, *application_args: str
+) -> tuple[bool, JujuWaitState]:
     applications = set(application_args if application_args else status.apps.keys())
 
     noncompliant_applications: dict[str, None | JujuApplicationState] = {}
-    noncompliant_units = {}
+    noncompliant_units: dict[str, Optional[JujuUnitState]] = {}
     for application in applications:
         if application not in status.apps:
             noncompliant_applications[application] = None
@@ -135,7 +137,7 @@ def applications_are_scaled(status: jubilant.Status, *application_args: str) -> 
     applications = set(application_args if application_args else status.apps.keys())
 
     noncompliant_applications: dict[str, Optional[JujuApplicationState]] = {}
-    noncompliant_units = {}
+    noncompliant_units: dict[str, Optional[JujuUnitState]] = {}
     for application in applications:
         # Get application from juju status
         if application not in status.apps:
@@ -165,9 +167,7 @@ def applications_are_scaled(status: jubilant.Status, *application_args: str) -> 
 
 def units_have_message(message: str, status: jubilant.Status, *unit_args: str) -> tuple[bool, JujuWaitState]:
     units = set(
-        (unit for application in status.apps for unit in status.get_units(application))
-        if not unit_args
-        else unit_args
+        (unit for application in status.apps for unit in status.get_units(application)) if not unit_args else unit_args
     )
 
     noncompliant_units: dict[str, Optional[JujuUnitState]] = {}
@@ -188,7 +188,7 @@ def units_have_message(message: str, status: jubilant.Status, *unit_args: str) -
 def applications_are_removed(status: jubilant.Status, *application_args: str) -> tuple[bool, JujuWaitState]:
     applications = set(application_args if application_args else status.apps.keys())
 
-    noncompliant_applications = {}
+    noncompliant_applications: dict[str, Optional[JujuApplicationState]] = {}
     for application in applications:
         if application in status.apps:
             noncompliant_applications[application] = get_application_state(status, application)
@@ -205,7 +205,7 @@ def integrations_are_removed(
     existing_integrations = {integration.applications for integration in get_integrations(status)}
     integrations = integrations_args if integrations_args else existing_integrations
 
-    noncompliant_applications = {}
+    noncompliant_applications: dict[str, Optional[JujuApplicationState]] = {}
     for integration in integrations:
         if set(integration) in existing_integrations:
             for endpoint in integration:
@@ -221,7 +221,7 @@ def applications_have_no_units(status: jubilant.Status, *application_args: str) 
     applications = set(application_args if application_args else status.apps.keys())
 
     noncompliant_applications: dict[str, Optional[JujuApplicationState]] = {}
-    noncompliant_units = {}
+    noncompliant_units: dict[str, Optional[JujuUnitState]] = {}
     for application in applications:
         if application not in status.apps:
             noncompliant_applications[application] = None

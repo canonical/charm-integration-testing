@@ -65,7 +65,7 @@ class TestS3IntegratorMinIOBackendExtension:
 
     @pytest.fixture
     def extension(self, juju: JujuStub) -> S3IntegratorMinIOBackendExtension:
-        return S3IntegratorMinIOBackendExtension(juju, logging.getLogger("test"))
+        return S3IntegratorMinIOBackendExtension(juju, logging.getLogger("test"))  # type: ignore[arg-type]
 
     class TestPostDeploy:
         def test_deploys_minio_if_s3_integrator_present(
@@ -81,7 +81,7 @@ class TestS3IntegratorMinIOBackendExtension:
         def test_ignores_non_s3_integrator_apps(self, juju: JujuStub) -> None:
             # GIVEN a model with no s3-integrator applications
             juju.applications = {"non-s3": "not-s3"}
-            extension = S3IntegratorMinIOBackendExtension(juju, logging.getLogger("test"))
+            extension = S3IntegratorMinIOBackendExtension(juju, logging.getLogger("test"))  # type: ignore[arg-type]
 
             # WHEN post_deploy is called
             extension.post_deploy("test-model")

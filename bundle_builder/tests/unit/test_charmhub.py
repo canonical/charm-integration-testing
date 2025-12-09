@@ -14,6 +14,8 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
+from typing import Any
+
 import pytest
 import yaml
 from pydantic import Field
@@ -23,11 +25,11 @@ from bundle_builder.charm import CharmConfig
 from bundle_builder.charmhub import CharmhubClient
 from bundle_builder.charmhub_http import (
     CharmhubBase,
+    CharmReleaseNotFoundException,
     FindResponse,
     InfoResponse,
     RefreshAction,
     RefreshResponse,
-    CharmReleaseNotFoundException,
 )
 
 
@@ -61,9 +63,9 @@ class OverridesStub:
     def get_charm_listing_overrides(self) -> set[str]:
         return self.charm_listing_overrides
 
-    charm_test_configs: dict[str, list[dict]] = Field(default_factory=dict)
+    charm_test_configs: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
 
-    def get_charm_test_configs(self, charm: str) -> list[dict]:
+    def get_charm_test_configs(self, charm: str) -> list[dict[str, Any]]:
         return self.charm_test_configs[charm]
 
 
@@ -165,7 +167,7 @@ class TestCharmhubClient:
 
             # WHEN
             try:
-                version = CharmhubClient(http_client=http_client)._default_ubuntu_version(
+                version = CharmhubClient(http_client=http_client)._default_ubuntu_version(  # type: ignore[arg-type]
                     charm_name=params.charm,
                     ubuntu_arch=params.arch,
                     charm_channel=params.channel,
@@ -343,7 +345,7 @@ class TestCharmhubClient:
 
             # WHEN
             try:
-                actual_refresh_info = CharmhubClient(http_client=http_client)._default_refresh_info(
+                actual_refresh_info = CharmhubClient(http_client=http_client)._default_refresh_info(  # type: ignore[arg-type]
                     params.charm, base=params.base
                 )
             except CharmReleaseNotFoundException:
@@ -440,8 +442,8 @@ class TestCharmhubClient:
 
             # WHEN
             actual = CharmhubClient(
-                http_client=http_client,
-                overrides_client=overrides_client,
+                http_client=http_client,  # type: ignore[arg-type]
+                overrides_client=overrides_client,  # type: ignore[arg-type]
             ).find_charms(
                 provides=params.provides,
                 requires=params.requires,
@@ -484,7 +486,7 @@ class TestCharmhubClient:
                     "charm-a": InfoResponse(
                         default_release=InfoResponse.DefaultRelease(
                             revision=InfoResponse.DefaultRelease.Revision(
-                                metadata=yaml.dump(
+                                metadata=yaml.dump(  # type: ignore[arg-type]
                                     {
                                         "provides": {
                                             "endpoint-a": {
@@ -513,7 +515,7 @@ class TestCharmhubClient:
                     "charm-a": InfoResponse(
                         default_release=InfoResponse.DefaultRelease(
                             revision=InfoResponse.DefaultRelease.Revision(
-                                metadata=yaml.dump(
+                                metadata=yaml.dump(  # type: ignore[arg-type]
                                     {
                                         "requires": {
                                             "endpoint-a": {
@@ -544,8 +546,8 @@ class TestCharmhubClient:
 
             # WHEN
             actual = CharmhubClient(
-                http_client=http_client,
-                overrides_client=overrides_client,
+                http_client=http_client,  # type: ignore[arg-type]
+                overrides_client=overrides_client,  # type: ignore[arg-type]
             )._find_charms_get_listing_overrides(
                 provides=params.provides,
                 requires=params.requires,
@@ -592,7 +594,7 @@ class TestCharmhubClient:
             overrides_client = OverridesStub(charm_platform_overrides=params.platform_overrides)
 
             # WHEN
-            actual = CharmhubClient(overrides_client=overrides_client)._find_charms_add_platform_overrides(params.given)
+            actual = CharmhubClient(overrides_client=overrides_client)._find_charms_add_platform_overrides(params.given)  # type: ignore[arg-type]
 
             # THEN
             assert actual == params.expected
@@ -661,7 +663,7 @@ class TestCharmhubClient:
         class Params:
             label: str
             charm: str
-            charm_test_configs: dict[str, list[dict]]
+            charm_test_configs: dict[str, list[dict[str, Any]]]
             expected: tuple[CharmConfig, ...]
 
         test_cases = [
@@ -689,7 +691,7 @@ class TestCharmhubClient:
         def test(self, params: Params) -> None:
             # GIVEN
             overrides_client = OverridesStub(charm_test_configs=params.charm_test_configs)
-            client = CharmhubClient(overrides_client=overrides_client)
+            client = CharmhubClient(overrides_client=overrides_client)  # type: ignore[arg-type]
 
             # WHEN
             actual = client._charm_test_configs(params.charm)

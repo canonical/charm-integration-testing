@@ -35,7 +35,7 @@ class CmdError(subprocess.CalledProcessError):
 
 
 class CmdClient:
-    def call(self, *args: list[CmdArg]) -> str:
+    def call(self, *args: CmdArg) -> str:
         # Run the command
         parsed_args = self.parse_args(*args)
         result = subprocess.run(self.parse_args(*args), capture_output=True, text=True)  # nosec
@@ -43,7 +43,7 @@ class CmdClient:
         # Check for error
         if result.returncode != 0:
             raise CmdError(" ".join(parsed_args), result.returncode, stdout=result.stdout, stderr=result.stderr)
-        
+
         return str(result.stdout)
 
     def parse_args(self, *args: CmdArg) -> list[str]:

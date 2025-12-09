@@ -156,7 +156,7 @@ class TestNode:
 class TestBundleBuilder:
     def test_build_returns_best_node_bundle(self) -> None:
         stub = CharmhubClientStub()
-        builder = BundleBuilder(charmhub_client=stub, logger=logging.getLogger("test"))
+        builder = BundleBuilder(charmhub_client=stub, logger=logging.getLogger("test"))  # type: ignore[arg-type]
         base = sample_node_kratos().bundle
         result = builder.build(base)
         assert isinstance(result, Bundle)
@@ -165,14 +165,14 @@ class TestBundleBuilder:
 
     def test_build_stops_on_max_nodes_visited(self) -> None:
         stub = CharmhubClientStub()
-        builder = BundleBuilder(charmhub_client=stub, logger=logging.getLogger("test"), max_nodes_visited=1)
+        builder = BundleBuilder(charmhub_client=stub, logger=logging.getLogger("test"), max_nodes_visited=1)  # type: ignore[arg-type]
         base = sample_node_kratos().bundle
         result = builder.build(base)
         assert isinstance(result, Bundle)
 
     def test_child_nodes_returns_possible_children(self) -> None:
         stub = CharmhubClientStub()
-        builder = BundleBuilder(charmhub_client=stub)
+        builder = BundleBuilder(charmhub_client=stub)  # type: ignore[arg-type]
         node = sample_node_kratos()
         children = builder.child_nodes(node)
         assert isinstance(children, set)
@@ -181,7 +181,7 @@ class TestBundleBuilder:
 
     def test_child_nodes_existing_applications_filters_cycles_and_limits(self) -> None:
         stub = CharmhubClientStub()
-        builder = BundleBuilder(charmhub_client=stub, avoid_application_dependency_cycles=True)
+        builder = BundleBuilder(charmhub_client=stub, avoid_application_dependency_cycles=True)  # type: ignore[arg-type]
         node = sample_node_kratos()
         # Should not create cycles
         children = builder.child_nodes_existing_applications(node, ApplicationEndpoint("kratos", "pg-database"))
@@ -190,7 +190,7 @@ class TestBundleBuilder:
 
     def test_child_nodes_new_applications_adds_valid_children(self) -> None:
         stub = CharmhubClientStub()
-        builder = BundleBuilder(charmhub_client=stub)
+        builder = BundleBuilder(charmhub_client=stub)  # type: ignore[arg-type]
         node = sample_node_kratos()
         children = builder.child_nodes_new_applications(node, ApplicationEndpoint("kratos", "pg-database"))
         for child in children:

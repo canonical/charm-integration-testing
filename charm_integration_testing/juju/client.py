@@ -103,7 +103,7 @@ class JujuClient:
         self.logger.info(
             f"{self._waiting_timeout_log(timeout)} for removal of application(s) {', '.join(applications)}."
         )
-        self.backend.wait_for_removal(model, applications, timeout)
+        self.backend.wait_for_removal(model, list(applications), timeout)
 
     def wait_for_removal_of_integration(
         self,
@@ -127,7 +127,7 @@ class JujuClient:
         self.logger.info(
             f"{self._waiting_timeout_log(timeout)} for removal of all units of application(s) {', '.join(applications)}."
         )
-        self.backend.wait_for_removal_of_units(model, applications, timeout)
+        self.backend.wait_for_removal_of_units(model, list(applications), timeout)
 
     def application_exists(self, application: str, model: str = "default") -> bool:
         self.logger.info(f"Checking that application exists: {application}.")

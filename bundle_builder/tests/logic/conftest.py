@@ -14,7 +14,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from functools import cache
-from typing import Optional
+
 from bundle_builder.charm import ENDPOINT_PROVIDES, ENDPOINT_REQUIRES, Charm
 from bundle_builder.charmhub import CharmhubClient
 
@@ -30,23 +30,27 @@ class CharmhubClientStub(CharmhubClient):
         self, provides: str | None = None, requires: str | None = None, platform: str | None = None
     ) -> frozenset[str]:
         if provides is not None:
-            return frozenset({
-                charm.name
-                for charm in self.charms
-                if any(
-                    (endpoint.type == ENDPOINT_PROVIDES and endpoint.interface == provides)
-                    for endpoint in charm.endpoints
-                )
-            })
+            return frozenset(
+                {
+                    charm.name
+                    for charm in self.charms
+                    if any(
+                        (endpoint.type == ENDPOINT_PROVIDES and endpoint.interface == provides)
+                        for endpoint in charm.endpoints
+                    )
+                }
+            )
         if requires is not None:
-            return frozenset({
-                charm.name
-                for charm in self.charms
-                if any(
-                    (endpoint.type == ENDPOINT_REQUIRES and endpoint.interface == requires)
-                    for endpoint in charm.endpoints
-                )
-            })
+            return frozenset(
+                {
+                    charm.name
+                    for charm in self.charms
+                    if any(
+                        (endpoint.type == ENDPOINT_REQUIRES and endpoint.interface == requires)
+                        for endpoint in charm.endpoints
+                    )
+                }
+            )
         return frozenset()
 
     @cache
@@ -57,8 +61,8 @@ class CharmhubClientStub(CharmhubClient):
         charm_channel: str | None = None,
         charm_revision: int | None = None,
         ubuntu_version: str | None = None,
-    ) -> Optional[Charm]:
+    ) -> Charm:
         for charm in self.charms:
             if charm.name == charm_name:
                 return charm
-        return None
+        raise KeyError(f"Charm {charm_name} not found in stub client")

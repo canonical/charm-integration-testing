@@ -16,7 +16,6 @@
 import dataclasses
 import logging
 from functools import cache
-from typing import Optional
 
 from .charm import (
     ENDPOINT_PEERS,
@@ -62,7 +61,7 @@ class CharmhubClient:
         charm_channel: str | None = None,
         charm_revision: int | None = None,
         ubuntu_version: str | None = None,
-    ) -> Optional[Charm]:
+    ) -> Charm:
         # Figure out how to look up charm information
         if charm_channel and charm_revision:
             self.logger.error(
@@ -219,6 +218,11 @@ class CharmhubClient:
         )
 
         # Return Charm from refresh info
+        if default_refresh_info.effective_channel is None:
+            raise CharmReleaseNotFoundException(
+                f"Failed to find suitable channel for charm {charm_name} revision {charm_revision} with ubuntu version {ubuntu_version} and arch {ubuntu_arch}"
+            )
+
         return Charm(
             name=charm_name,
             channel=default_refresh_info.effective_channel,
@@ -257,11 +261,17 @@ class CharmhubClient:
                 f"Failed to find release for charm {charm_name} in channel {charm_channel} with ubuntu version {ubuntu_version}: {refresh_info.error.message}"
             )
 
-        # Return Charm
+        if refresh_info.charm is None:
+            raise ValueError(
+                f"Refresh info for charm {charm_name} in channel {charm_channel} returned no charm and no error"
+            )
+        if refresh_info.charm.revision is None:
+            raise ValueError(f"Refresh info for charm {charm_name} in channel {charm_channel} returned no revision")
+
         return Charm(
             name=charm_name,
             channel=charm_channel,
-            revision=refresh_info.charm.revision if refresh_info.charm is not None else None,
+            revision=refresh_info.charm.revision,
             ubuntu_version=ubuntu_version,
             ubuntu_arch=ubuntu_arch,
             endpoints=self._all_charm_endpoints(refresh_info),
@@ -289,10 +299,18 @@ class CharmhubClient:
         )
 
         # Return Charm
+        if refresh_info.effective_channel is None:
+            raise CharmReleaseNotFoundException(
+                f"Failed to find suitable channel for charm {charm_name} with ubuntu version {ubuntu_version} and arch {ubuntu_arch}"
+            )
+        if refresh_info.charm is None:
+            raise ValueError(f"Refresh info for charm {charm_name} returned no charm and no error")
+        if refresh_info.charm.revision is None:
+            raise ValueError(f"Refresh info for charm {charm_name} returned no revision")
         return Charm(
             name=charm_name,
             channel=refresh_info.effective_channel,
-            revision=refresh_info.charm.revision if refresh_info.charm is not None else None,
+            revision=refresh_info.charm.revision,
             ubuntu_version=ubuntu_version,
             ubuntu_arch=ubuntu_arch,
             endpoints=self._all_charm_endpoints(refresh_info),
@@ -366,7 +384,7 @@ class CharmhubClient:
 
         return refresh_info
 
-    def _all_charm_endpoints(self, refresh_info: RefreshResponse) -> frozenset:
+    def _all_charm_endpoints(self, refresh_info: RefreshResponse) -> frozenset[CharmEndpoint]:
         metadata = refresh_info.charm.metadata if refresh_info.charm is not None else CharmMetadata()
 
         # Get edge refresh info if any requires or provides endpoints don't have optional flag
@@ -378,7 +396,9 @@ class CharmhubClient:
                 RefreshAction(
                     charm_name=refresh_info.name,
                     charm_channel="edge",
-                    base=next(iter(refresh_info.charm.bases)) if refresh_info.charm is not None else None,
+                    base=next(iter(refresh_info.charm.bases))
+                    if refresh_info.charm is not None and refresh_info.charm.bases is not None
+                    else None,
                 ),
             )
             if edge_refresh_info.error is None and edge_refresh_info.charm is not None:
@@ -403,10 +423,13 @@ class CharmhubClient:
                     and metadata_overrides_map[endpoint_name].optionality is not None
                 ):
                     optionality = metadata_overrides_map[endpoint_name].optionality
+                    # mypy doesn't understand optionality will not be None in this case
+                    if optionality is None:
+                        raise RuntimeError("Unexpected None optionality after check")
                 elif endpoint.optional is not None:
                     optionality = CharmEndpointOptionality.from_bool(endpoint.optional)
                 elif endpoint_name in edge_endpoint_map and edge_endpoint_map[endpoint_name].optional is not None:
-                    optionality = CharmEndpointOptionality.from_bool(edge_endpoint_map[endpoint_name].optional)
+                    optionality = CharmEndpointOptionality.from_bool(edge_endpoint_map[endpoint_name].optional or False)
                 elif endpoint_type in {ENDPOINT_PROVIDES, ENDPOINT_REQUIRES}:
                     optionality = CharmEndpointOptionality.from_bool(False)
                 else:
