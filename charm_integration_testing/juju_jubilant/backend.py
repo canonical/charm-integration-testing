@@ -2,7 +2,8 @@
 # See LICENSE file for licensing details.
 
 
-from datetime import timedelta
+import time
+from datetime import datetime, timedelta
 from typing import Callable
 
 import jubilant
@@ -12,7 +13,6 @@ from juju_cmd import JujuCmdBackend
 
 from .client import JubilantClient
 from .wait import (
-    WaitMonitor,
     all_statuses_are_in,
     applications_are_removed,
     applications_are_scaled,
@@ -26,6 +26,10 @@ from .wait import (
 class JubilantBackend(JujuCmdBackend):
     client: JubilantClient
 
+    default_timeout = timedelta(minutes=5)
+    default_successes = 3
+    default_delay = timedelta(seconds=1)
+
     def __init__(self, client: JubilantClient | None = None):
         super().__init__()
         self.client = client or JubilantClient()
@@ -36,29 +40,46 @@ class JubilantBackend(JujuCmdBackend):
         ready: Callable[[jubilant.Status], tuple[bool, JujuWaitState]],
         error: Callable[[jubilant.Status], tuple[bool, JujuWaitState]] | None = None,
         timeout: timedelta | None = None,
-        period: timedelta | None = None,
-        delay: int = 1,
-        **kwargs,
+        successes: int | None = None,
+        delay: timedelta | None = None,
     ):
-        wait_monitor = WaitMonitor(ready=ready, error=error)
-        try:
-            return self.client.model(model).wait(
-                ready=wait_monitor.ready,
-                error=wait_monitor.error,
-                timeout=timeout.total_seconds() if timeout else None,
-                successes=int(period.total_seconds()) if period else 1,
-                delay=delay,
-                **kwargs,
-            )
-        except TimeoutError:
-            raise JujuWaitTimeoutError(wait_state=wait_monitor.last_noncompliant_wait_state)
+        if timeout is None:
+            timeout = self.default_timeout
+        if successes is None:
+            successes = self.default_successes
+        if delay is None:
+            delay = self.default_delay
 
-    def wait_idle(self, model: str, timeout: timedelta | None, period: timedelta | None):
+        wait_state = None
+        success_count = 0
+        start = datetime.now()
+
+        while (datetime.now() - start) < timeout:
+            status = self.client.model(model).status()
+
+            if error is not None:
+                is_error, wait_state = error(status)
+                if is_error:
+                    raise JujuWaitTimeoutError(wait_state=wait_state)
+
+            is_ready, wait_state = ready(status)
+            if is_ready:
+                success_count += 1
+                if success_count >= successes:
+                    return
+            else:
+                success_count = 0
+
+            time.sleep(delay.total_seconds())
+
+        raise JujuWaitTimeoutError(wait_state=wait_state)
+
+    def wait_idle(self, model: str, timeout: timedelta | None, count: int):
         self.wait(
             model,
             lambda status: all_statuses_are_in({"active"}, status),
             timeout=timeout,
-            period=period,
+            successes=count,
         )
 
     def wait_application_settled(self, model: str, application: str, timeout: timedelta | None):

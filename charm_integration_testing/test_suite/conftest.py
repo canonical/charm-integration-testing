@@ -148,7 +148,7 @@ def assert_idle(juju_client: JujuClient, model: str, print_setup_and_teardown_in
     _ = print_setup_and_teardown_info
 
     try:
-        juju_client.idle_for_period(model=model, timeout=timedelta(seconds=15), idle_period=timedelta(seconds=5))
+        juju_client.idle_for_period(model=model, timeout=timedelta(seconds=15), count=5)
     except JujuWaitTimeoutError:
         pytest.skip("Model is not idle before test start")
 
