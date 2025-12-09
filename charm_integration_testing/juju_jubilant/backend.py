@@ -8,7 +8,7 @@ from typing import Callable
 
 import jubilant
 import yaml
-from juju import JujuIntegrationApplication, JujuWaitState, JujuWaitTimeoutError
+from juju import JujuIntegrationApplication, JujuStatusSlowWarning, JujuWaitState, JujuWaitTimeoutError, warn_slow
 from juju_cmd import JujuCmdBackend
 
 from .client import JubilantClient
@@ -34,6 +34,14 @@ class JubilantBackend(JujuCmdBackend):
         super().__init__()
         self.client = client or JubilantClient()
 
+    @warn_slow(category=JujuStatusSlowWarning)
+    def status(self, model: str) -> jubilant.Status:
+        return self.client.model(model).status()
+
+    @warn_slow(category=JujuStatusSlowWarning)
+    def juju_status_text(self, model: str) -> str:
+        return self.client.model(model).cli("status",  "integrations")
+
     def wait(
         self,
         model: str,
@@ -55,7 +63,7 @@ class JubilantBackend(JujuCmdBackend):
         start = datetime.now()
 
         while (datetime.now() - start) < timeout:
-            status = self.client.model(model).status()
+            status = self.status(model)
 
             if error is not None:
                 is_error, wait_state = error(status)
@@ -172,19 +180,19 @@ class JubilantBackend(JujuCmdBackend):
 
     def unit_ip(self, model: str, unit: str) -> str:
         application, unit_id = unit.split("/")
-        for possible_unit, unit_status in self.client.model(model).status().apps[application].units.items():
+        for possible_unit, unit_status in self.status(model).apps[application].units.items():
             _, possible_unit_id = possible_unit.split("/")
             if possible_unit_id == unit_id or (unit_id == "leader" and unit_status.leader):
                 return unit_status.address
         raise KeyError(f"Unit '{unit}' not found")
 
     def get_charm_revisions(self, model: str) -> set[tuple[str, int]]:
-        return {(app_info.charm, app_info.charm_rev) for app_info in self.client.model(model).status().apps.values()}
+        return {(app_info.charm, app_info.charm_rev) for app_info in self.status(model).apps.values()}
 
     def integration_exists(
         self, application_1: str, endpoint_1: str, application_2: str, endpoint_2: str, model: str
     ) -> bool:
-        status = self.client.model(model).status()
+        status = self.status(model)
         integrations = get_integrations(status)
 
         target_applications = {

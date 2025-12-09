@@ -1,11 +1,55 @@
 # Copyright 2024-2025 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import warnings
 from abc import ABC, abstractmethod
 from dataclasses import field
-from datetime import timedelta
+from datetime import datetime, timedelta
+from functools import wraps
 
 from pydantic.dataclasses import dataclass
+
+
+class JujuPerformanceWarning(UserWarning):
+    """Base warning for Juju performance issues."""
+    threshold: timedelta = timedelta(seconds=3)
+
+
+class JujuStatusSlowWarning(JujuPerformanceWarning):
+    """Warning when juju status operations are slow."""
+    threshold: timedelta = timedelta(seconds=3)
+
+
+def warn_slow(threshold: timedelta | None = None, category: type[Warning] = JujuPerformanceWarning):
+    """Decorator that emits a warning if a function takes longer than threshold.
+    
+    Args:
+        threshold: Time threshold as timedelta. If None, uses category.threshold if available.
+        category: Warning class to emit
+    """
+    # Determine the threshold to use
+    if threshold is None:
+        threshold = getattr(category, "threshold", timedelta(seconds=3))
+    
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            start_time = datetime.now()
+            try:
+                result = func(*args, **kwargs)
+            except Exception:
+                raise
+            else:
+                return result
+            finally:
+                if (datetime.now() - start_time) > threshold:
+                    warnings.warn(
+                        f"Exceeded threshold of {threshold.total_seconds():.1f}s",
+                        category,
+                        stacklevel=2
+                    )
+        return wrapper
+    return decorator
 
 
 @dataclass(frozen=True)

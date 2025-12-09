@@ -7,9 +7,12 @@ from .backend import (
     JujuExecOutput,
     JujuIntegration,
     JujuIntegrationApplication,
+    JujuPerformanceWarning,
+    JujuStatusSlowWarning,
     JujuUnitState,
     JujuWaitState,
     JujuWaitTimeoutError,
+    warn_slow,
 )
 from .client import JujuClient
 from .extension import JujuExtension
@@ -22,7 +25,10 @@ __all__ = [
     "JujuExtension",
     "JujuIntegration",
     "JujuIntegrationApplication",
+    "JujuPerformanceWarning",
+    "JujuStatusSlowWarning",
     "JujuUnitState",
     "JujuWaitState",
     "JujuWaitTimeoutError",
+    "warn_slow",
 ]
