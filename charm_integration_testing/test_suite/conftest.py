@@ -4,7 +4,9 @@
 
 import json
 import logging
+import random
 import re
+import warnings
 from datetime import timedelta
 from pathlib import Path
 from subprocess import CalledProcessError  # nosec
@@ -177,12 +179,38 @@ def execution_metadata(record_property: Callable[[str, object], None]):
 
 @pytest.fixture(autouse=True)
 def record_execution_metadata(
+    record_warning_execution_metadata: None,
     record_failure_execution_metadata: None,
     record_charms_and_revisions_execution_metadata: None,
 ):
     # Save various execution metadata
+    _ = record_warning_execution_metadata
     _ = record_failure_execution_metadata
     _ = record_charms_and_revisions_execution_metadata
+
+
+@pytest.fixture
+def record_warning_execution_metadata(execution_metadata: Callable[[str, str | int], None]):
+    # Captured all warnings
+    # Pytest normally captures warnings, but does not expose them until after the test report is made
+    with warnings.catch_warnings(record=True) as warnings_list:
+        # Let the test run
+        yield
+
+        # Save all warnings
+        for warning in warnings_list:
+            execution_metadata("testing", random.randint(1, 100000))
+            execution_metadata("warning:message", normalize_message(f"{warning.category.__name__}: {warning.message}"))
+
+    # Re-emit all warnings so they show up in the test summary
+    for warning in warnings_list:
+        warnings.warn_explicit(
+            message=warning.message,
+            category=warning.category,
+            filename=warning.filename,
+            lineno=warning.lineno,
+            source=warning.source,
+        )
 
 
 def record_charms_and_revisions_execution_metadata_instantaneous(

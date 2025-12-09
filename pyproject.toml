@@ -30,7 +30,6 @@ extend-select = ["I"]
 
 [tool.pytest.ini_options]
 timeout = 1800
-filterwarnings = ["once::Warning"]
 
 log_cli = true
 log_cli_level = "INFO"

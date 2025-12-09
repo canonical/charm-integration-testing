@@ -12,17 +12,19 @@ from pydantic.dataclasses import dataclass
 
 class JujuPerformanceWarning(UserWarning):
     """Base warning for Juju performance issues."""
+
     threshold: timedelta = timedelta(seconds=3)
 
 
 class JujuStatusSlowWarning(JujuPerformanceWarning):
     """Warning when juju status operations are slow."""
+
     threshold: timedelta = timedelta(seconds=3)
 
 
 def warn_slow(threshold: timedelta | None = None, category: type[Warning] = JujuPerformanceWarning):
     """Decorator that emits a warning if a function takes longer than threshold.
-    
+
     Args:
         threshold: Time threshold as timedelta. If None, uses category.threshold if available.
         category: Warning class to emit
@@ -30,7 +32,7 @@ def warn_slow(threshold: timedelta | None = None, category: type[Warning] = Juju
     # Determine the threshold to use
     if threshold is None:
         threshold = getattr(category, "threshold", timedelta(seconds=3))
-    
+
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
@@ -43,12 +45,10 @@ def warn_slow(threshold: timedelta | None = None, category: type[Warning] = Juju
                 return result
             finally:
                 if (datetime.now() - start_time) > threshold:
-                    warnings.warn(
-                        f"Exceeded threshold of {threshold.total_seconds():.1f}s",
-                        category,
-                        stacklevel=2
-                    )
+                    warnings.warn(f"Exceeded threshold of {threshold.total_seconds():.1f}s", category, stacklevel=2)
+
         return wrapper
+
     return decorator
 
 

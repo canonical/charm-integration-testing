@@ -40,7 +40,7 @@ class JubilantBackend(JujuCmdBackend):
 
     @warn_slow(category=JujuStatusSlowWarning)
     def juju_status_text(self, model: str) -> str:
-        return self.client.model(model).cli("status",  "integrations")
+        return self.client.model(model).cli("status", "integrations", "--format", "tabular")
 
     def wait(
         self,
