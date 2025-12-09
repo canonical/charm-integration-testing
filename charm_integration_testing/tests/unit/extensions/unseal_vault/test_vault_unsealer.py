@@ -173,3 +173,20 @@ class TestVaultUnsealer:
         # THEN
         assert juju.secrets["vault-secret-application-vault-tokens"] == {"root-token": "abc", "unseal-key": "xyz"}
         assert result == tokens
+
+    def test_vault_status_retries_on_failure(self):
+        # GIVEN
+        juju = JujuStub(units={"vault": ["vault/leader"]})
+        vault = VaultStub()
+        vault.status = lambda model, unit: (_ for _ in (range(6))).throw(RuntimeError("Simulated failure"))
+        logger = LoggerStub()
+        charm = CharmInfo(name="vault")
+
+        # WHEN 
+        try:
+            VaultUnsealer(charm, vault, juju, logger).try_init_vault("test-model", "vault")
+        # THEN
+        except RuntimeError as e:
+            assert str(e) == "Simulated failure"
+        else:
+            assert False, "Expected RuntimeError was not raised"

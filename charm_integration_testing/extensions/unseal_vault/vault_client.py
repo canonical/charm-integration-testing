@@ -3,6 +3,9 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import asdict
+from functools import wraps
+from time import sleep
+from typing import Callable, TypeVar
 
 import yaml
 from juju import JujuBackend
@@ -25,6 +28,44 @@ class VaultTokenSecret:
 class VaultStatus:
     initialized: bool
     sealed: bool
+
+
+T = TypeVar('T')
+
+
+def retry_on_failure(max_retries: int = 3, delay: float = 1.0, backoff: float = 2.0):
+    """Retry decorator for vault operations that may fail transiently.
+    
+    Args:
+        max_retries: Maximum number of retry attempts
+        delay: Initial delay between retries in seconds
+        backoff: Multiplier for delay on each retry
+    """
+    def decorator(func: Callable[..., T]) -> Callable[..., T]:
+        @wraps(func)
+        def wrapper(*args, **kwargs) -> T:
+            last_exception = None
+            current_delay = delay
+            
+            for attempt in range(max_retries + 1):
+                try:
+                    return func(*args, **kwargs)
+                except RuntimeError as e:
+                    last_exception = e
+                    if attempt < max_retries:
+                        sleep(current_delay)
+                        current_delay *= backoff
+                    else:
+                        # Re-raise the last exception after all retries exhausted
+                        raise
+                except Exception as e:
+                    # Don't retry on non-RuntimeError exceptions (e.g., programming errors)
+                    raise
+            
+            # This should never be reached, but satisfy type checker
+            raise last_exception
+        return wrapper
+    return decorator
 
 
 class VaultClient(ABC):
@@ -51,6 +92,7 @@ class VaultClientJujuExec(VaultClient):
     def __init__(self, juju: JujuBackend):
         self.juju = juju
 
+    @retry_on_failure(max_retries=5, delay=1.0)
     def status(self, model: str, unit: str) -> VaultStatus:
         # Unseal the vault
         result = self.juju.exec_unit(model, unit, self.JUJU_EXEC_VAULT_STATUS)
@@ -63,6 +105,7 @@ class VaultClientJujuExec(VaultClient):
         # Parse response
         return VaultStatus(**yaml.safe_load(result.stdout))
 
+    @retry_on_failure(max_retries=5, delay=1.0)
     def init(self, model: str, unit: str) -> VaultTokenSecret:
         # Initialize vault
         init_result = self.juju.exec_unit(model, unit, self.JUJU_EXEC_VAULT_INIT)
@@ -77,6 +120,7 @@ class VaultClientJujuExec(VaultClient):
         # Return tokens
         return VaultTokenSecret(root_token=init_response.root_token, unseal_key=init_response.unseal_keys_b64[0])
 
+    @retry_on_failure(max_retries=5, delay=1.0)
     def unseal(self, model: str, unit: str, tokens: VaultTokenSecret):
         # Unseal the vault
         unseal_result = self.juju.exec_unit(model, unit, self.JUJU_EXEC_VAULT_UNSEAL.format(**asdict(tokens)))
