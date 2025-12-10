@@ -8,7 +8,13 @@ from typing import Callable
 
 import jubilant
 import yaml
-from juju import JujuIntegrationApplication, JujuStatusSlowWarning, JujuWaitState, JujuWaitTimeoutError, warn_slow
+from juju import (
+    JujuIntegrationApplication,
+    JujuStatusPerformanceWarning,
+    JujuWaitState,
+    JujuWaitTimeoutError,
+    warn_slow,
+)
 from juju_cmd import JujuCmdBackend
 
 from .client import JubilantClient
@@ -34,11 +40,11 @@ class JubilantBackend(JujuCmdBackend):
         super().__init__()
         self.client = client or JubilantClient()
 
-    @warn_slow(category=JujuStatusSlowWarning)
+    @warn_slow(category=JujuStatusPerformanceWarning, threshold=timedelta(seconds=3))
     def status(self, model: str) -> jubilant.Status:
         return self.client.model(model).status()
 
-    @warn_slow(category=JujuStatusSlowWarning)
+    @warn_slow(category=JujuStatusPerformanceWarning, threshold=timedelta(seconds=3))
     def juju_status_text(self, model: str) -> str:
         return self.client.model(model).cli("status", "integrations", "--format", "tabular")
 

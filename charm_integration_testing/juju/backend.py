@@ -13,25 +13,21 @@ from pydantic.dataclasses import dataclass
 class JujuPerformanceWarning(UserWarning):
     """Base warning for Juju performance issues."""
 
-    threshold: timedelta = timedelta(seconds=3)
 
-
-class JujuStatusSlowWarning(JujuPerformanceWarning):
+class JujuStatusPerformanceWarning(JujuPerformanceWarning):
     """Warning when juju status operations are slow."""
-
-    threshold: timedelta = timedelta(seconds=3)
 
 
 def warn_slow(threshold: timedelta | None = None, category: type[Warning] = JujuPerformanceWarning):
     """Decorator that emits a warning if a function takes longer than threshold.
 
     Args:
-        threshold: Time threshold as timedelta. If None, uses category.threshold if available.
+        threshold: Time threshold as timedelta. Defaults to 5 seconds if None.
         category: Warning class to emit
     """
     # Determine the threshold to use
     if threshold is None:
-        threshold = getattr(category, "threshold", timedelta(seconds=3))
+        threshold = timedelta(seconds=5)
 
     def decorator(func):
         @wraps(func)
