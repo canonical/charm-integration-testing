@@ -68,6 +68,7 @@ class JujuUnitState(JujuApplicationState):
 @dataclass(frozen=True)
 class JujuWaitState:
     message: str = "waiting"
+    insufficient_status_checks: bool = False
     noncompliant_applications: dict[str, JujuApplicationState | None] = field(default_factory=dict)
     noncompliant_units: dict[str, JujuUnitState | None] = field(default_factory=dict)
 
@@ -90,6 +91,8 @@ class JujuWaitTimeoutError(TimeoutError):
         if len(self.wait_state.noncompliant_units) > 0:
             units = [f"'{v}'" for v in sorted(self.wait_state.noncompliant_units)]
             addendums.append(f"units: [{', '.join(units)}]")
+        if self.wait_state.insufficient_status_checks:
+            addendums.append("insufficient status checks")
         if len(addendums) > 0:
             message = f"{message} ({', '.join(sorted(addendums))})"
         return message

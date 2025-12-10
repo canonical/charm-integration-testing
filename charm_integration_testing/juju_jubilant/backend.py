@@ -58,7 +58,8 @@ class JubilantBackend(JujuCmdBackend):
         if delay is None:
             delay = self.default_delay
 
-        wait_state = None
+        last_wait_state = JujuWaitState()
+        noncompliant_wait_state = None
         success_count = 0
         start = datetime.now()
 
@@ -66,21 +67,28 @@ class JubilantBackend(JujuCmdBackend):
             status = self.status(model)
 
             if error is not None:
-                is_error, wait_state = error(status)
+                is_error, last_wait_state = error(status)
                 if is_error:
-                    raise JujuWaitTimeoutError(wait_state=wait_state)
+                    raise JujuWaitTimeoutError(wait_state=last_wait_state)
 
-            is_ready, wait_state = ready(status)
+            is_ready, last_wait_state = ready(status)
             if is_ready:
                 success_count += 1
                 if success_count >= successes:
                     return
             else:
+                noncompliant_wait_state = last_wait_state
                 success_count = 0
 
             time.sleep(delay.total_seconds())
 
-        raise JujuWaitTimeoutError(wait_state=wait_state)
+        if noncompliant_wait_state is None:
+            noncompliant_wait_state = JujuWaitState(
+                message=last_wait_state.message,
+                insufficient_status_checks=True,
+            )
+
+        raise JujuWaitTimeoutError(wait_state=noncompliant_wait_state)
 
     def wait_idle(self, model: str, timeout: timedelta | None, count: int):
         self.wait(
