@@ -6,7 +6,13 @@ import warnings
 from datetime import timedelta
 
 import pytest
-from juju import JujuPerformanceWarning, JujuStatusPerformanceWarning, JujuWaitState, JujuWaitTimeoutError, warn_slow
+from juju import (
+    JujuPerformanceWarning,
+    JujuStatusPerformanceWarning,
+    JujuWaitState,
+    JujuWaitTimeoutError,
+    warn_performance,
+)
 from pydantic.dataclasses import dataclass
 
 
@@ -77,8 +83,8 @@ class TestJujuWaitTimeoutError:
 
 class TestWarnSlow:
     def test_no_warning_when_fast(self):
-        # GIVEN a function decorated with warn_slow
-        @warn_slow(threshold=timedelta(seconds=1))
+        # GIVEN a function decorated with warn_performance
+        @warn_performance(threshold=timedelta(seconds=1))
         def fast_function():
             return "done"
 
@@ -92,8 +98,8 @@ class TestWarnSlow:
             assert result == "done"
 
     def test_warning_when_slow(self):
-        # GIVEN a function decorated with warn_slow
-        @warn_slow(threshold=timedelta(milliseconds=50))
+        # GIVEN a function decorated with warn_performance
+        @warn_performance(threshold=timedelta(milliseconds=50))
         def slow_function():
             time.sleep(0.1)  # Sleep for 100ms
             return "done"
@@ -110,8 +116,8 @@ class TestWarnSlow:
             assert result == "done"
 
     def test_custom_warning_category(self):
-        # GIVEN a function decorated with warn_slow and a custom category
-        @warn_slow(threshold=timedelta(milliseconds=50), category=JujuStatusPerformanceWarning)
+        # GIVEN a function decorated with warn_performance and a custom category
+        @warn_performance(threshold=timedelta(milliseconds=50), category=JujuStatusPerformanceWarning)
         def slow_function():
             time.sleep(0.1)
             return "done"
@@ -127,8 +133,8 @@ class TestWarnSlow:
             assert result == "done"
 
     def test_warning_on_exception(self):
-        # GIVEN a function decorated with warn_slow that raises an exception
-        @warn_slow(threshold=timedelta(milliseconds=50))
+        # GIVEN a function decorated with warn_performance that raises an exception
+        @warn_performance(threshold=timedelta(milliseconds=50))
         def error_function():
             time.sleep(0.1)
             raise ValueError("test error")
@@ -144,8 +150,8 @@ class TestWarnSlow:
             assert issubclass(w[0].category, JujuPerformanceWarning)
 
     def test_default_threshold(self):
-        # GIVEN a function decorated with warn_slow without explicit threshold
-        @warn_slow()
+        # GIVEN a function decorated with warn_performance without explicit threshold
+        @warn_performance()
         def function():
             return "done"
 

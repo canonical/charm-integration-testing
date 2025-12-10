@@ -12,7 +12,7 @@ from .backend import (
     JujuUnitState,
     JujuWaitState,
     JujuWaitTimeoutError,
-    warn_slow,
+    warn_performance,
 )
 from .client import JujuClient
 from .extension import JujuExtension
@@ -30,5 +30,5 @@ __all__ = [
     "JujuUnitState",
     "JujuWaitState",
     "JujuWaitTimeoutError",
-    "warn_slow",
+    "warn_performance",
 ]

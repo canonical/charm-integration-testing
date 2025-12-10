@@ -14,7 +14,7 @@ from juju import (
     JujuStatusPerformanceWarning,
     JujuWaitState,
     JujuWaitTimeoutError,
-    warn_slow,
+    warn_performance,
 )
 from juju_cmd import JujuCmdBackend
 
@@ -41,11 +41,11 @@ class JubilantBackend(JujuCmdBackend):
         super().__init__()
         self.client = client or JubilantClient()
 
-    @warn_slow(category=JujuStatusPerformanceWarning, threshold=timedelta(seconds=3))
+    @warn_performance(category=JujuStatusPerformanceWarning, threshold=timedelta(seconds=3))
     def status(self, model: str) -> jubilant.Status:
         return self.client.model(model).status()
 
-    @warn_slow(category=JujuStatusPerformanceWarning, threshold=timedelta(seconds=3))
+    @warn_performance(category=JujuStatusPerformanceWarning, threshold=timedelta(seconds=3))
     def juju_status_text(self, model: str) -> str:
         return self.client.model(model).cli("status", "integrations", "--format", "tabular")
 
