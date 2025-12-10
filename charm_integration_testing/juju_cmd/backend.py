@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 
 import yaml
 from juju import JujuBackend, JujuExecOutput, JujuIntegration, JujuIntegrationApplication, JujuWaitTimeoutError
+from juju.backend import JujuStatusPerformanceWarning, warn_slow
 
 from .cmd import CmdArg, CmdClient, CmdError
 from .structures import JujuExecTask, JujuModel, JujuSecretInfo, JujuStatus
@@ -22,6 +23,7 @@ class JujuCmdBackend(JujuBackend):
     def _call_juju(self, *args: list[CmdArg]) -> str:
         return self.cmd_client.call(CmdArg(value="juju"), *args)
 
+    @warn_slow(category=JujuStatusPerformanceWarning, threshold=timedelta(seconds=3))
     def _status(self, model: str, *selectors: str) -> JujuStatus:
         return JujuStatus(
             **yaml.safe_load(
