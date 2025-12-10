@@ -4,7 +4,6 @@
 
 import json
 import logging
-import random
 import re
 import warnings
 from datetime import timedelta
@@ -193,17 +192,18 @@ def record_execution_metadata(
 def record_warning_execution_metadata(execution_metadata: Callable[[str, str | int], None]):
     # Capture all warnings
     # Pytest normally captures warnings, but does not expose them until after the test report is made
+    captured_warnings = []
     with warnings.catch_warnings(record=True) as warnings_list:
         # Let the test run
         yield
 
         # Save all warnings
         for warning in warnings_list:
-            execution_metadata("testing", random.randint(1, 100000))
             execution_metadata("warning:message", normalize_message(f"{warning.category.__name__}: {warning.message}"))
+            captured_warnings.append(warning)
 
     # Re-emit all warnings so they show up in the test summary
-    for warning in warnings_list:
+    for warning in captured_warnings:
         warnings.warn_explicit(
             message=warning.message,
             category=warning.category,
