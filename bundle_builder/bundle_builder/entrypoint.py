@@ -128,7 +128,7 @@ def applications_from_args(
                 config=BundleBuilder.random_test_config(charm),
             )
         )
-    return frozenset(*applications)
+    return frozenset(applications)
 
 
 # Get integrations from args

@@ -109,7 +109,7 @@ def immutable_dataclass(_cls: Optional[type] = None, **dataclass_kwargs: Any) ->
             # Modify the class in place to add the private field
             private_name = f"_{name}"
             annotations[private_name] = get_type_hints(method).get("return", Any)
-            setattr(cls, name, make_lazy_property(private_name, method))
+            setattr(cls, name, make_lazy_property(private_name, method))  # type: ignore[arg-type]
             setattr(cls, private_name, field(init=False, repr=False, hash=False, compare=False, default=_UNINITIALIZED))
 
         # Create a private slot for the cache of each computed field, similar to above

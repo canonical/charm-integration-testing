@@ -82,6 +82,7 @@ def test_charm_config(tmp_path: Path, sample_independent_charm: str) -> None:
                     Application(
                         name=sample_independent_charm,
                         charm=charm_from_store,
+                        config=charm_from_store.test_configs[0],
                     )
                 }
             ),
