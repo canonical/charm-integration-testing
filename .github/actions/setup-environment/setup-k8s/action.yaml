@@ -91,7 +91,7 @@ runs:
       do
         if juju add-model ${model} \
             --config "logging-config=DEBUG" \
-            --config="update-status-hook-interval=30s" \
+            --config="update-status-hook-interval=2m" \
             --config="juju-http-proxy=http://squid.internal:3128" \
             --config="juju-https-proxy=http://squid.internal:3128" \
             --config="juju-no-proxy=127.0.0.1,localhost,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.canonical.com,.launchpad.net,.internal,.jujucharms.com"; then

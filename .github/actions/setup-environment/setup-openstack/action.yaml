@@ -95,4 +95,4 @@ runs:
       run: |
         juju add-model ${model} \
           --config "logging-config=DEBUG" \
-          --config="update-status-hook-interval=30s"
+          --config="update-status-hook-interval=2m"

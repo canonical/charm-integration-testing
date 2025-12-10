@@ -68,7 +68,7 @@ It is also needed to setup the k8s cloud in juju. Do this with the following com
    juju bootstrap k8s ${K8S-CONTROLLER} --bootstrap-constraints root-disk=5G
    juju add-model ${MODEL_NAME} \
     --config "logging-config=DEBUG" \
-    --config="update-status-hook-interval=30s"
+    --config="update-status-hook-interval=2m"
 
 Install the repository dependencies
 -----------------------------------

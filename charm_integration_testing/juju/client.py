@@ -42,7 +42,7 @@ class JujuClient:
         self,
         model: str = "default",
         timeout: timedelta | None = None,
-        count: int = 30,
+        count: int = 20,
     ):
         self.logger.info(f"{self._waiting_timeout_log(timeout)} to be idle.")
         self.backend.wait_idle(model=model, timeout=timeout, count=count)
