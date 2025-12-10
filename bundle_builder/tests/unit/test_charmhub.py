@@ -257,6 +257,30 @@ class TestCharmhubClient:
                         name="my-charm",
                         effective_channel="stable",
                     ),
+                    RefreshAction(
+                        charm_name="my-charm",
+                        base=matching_base,
+                        charm_channel="latest/stable",
+                    ): RefreshResponse(
+                        name="my-charm",
+                        error=RefreshResponse.Error(message="Error Message", code="error-code"),
+                    ),
+                    RefreshAction(
+                        charm_name="my-charm",
+                        base=matching_base,
+                        charm_channel="latest/edge",
+                    ): RefreshResponse(
+                        name="my-charm",
+                        error=RefreshResponse.Error(message="Error Message", code="error-code"),
+                    ),
+                                        RefreshAction(
+                        charm_name="my-charm",
+                        base=matching_base,
+                        charm_channel="edge",
+                    ): RefreshResponse(
+                        name="my-charm",
+                        error=RefreshResponse.Error(message="Error Message", code="error-code"),
+                    ),
                 },
                 expected_refresh_info=RefreshResponse(
                     name="my-charm",
