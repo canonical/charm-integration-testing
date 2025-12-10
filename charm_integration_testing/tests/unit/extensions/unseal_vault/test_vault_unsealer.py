@@ -174,11 +174,14 @@ class TestVaultUnsealer:
         assert juju.secrets["vault-secret-application-vault-tokens"] == {"root-token": "abc", "unseal-key": "xyz"}
         assert result == tokens
 
-    def test_vault_status_retries_on_failure(self):
+    def test_vault_status_retries_on_connection_refused(self):
         # GIVEN
         juju = JujuStub(units={"vault": ["vault/leader"]})
         vault = VaultStub()
-        vault.status = lambda model, unit: (_ for _ in (range(6))).throw(RuntimeError("Simulated failure"))
+        vault.status = lambda model, unit: (_ for _ in (range(6))).throw(\
+            RuntimeError('ERROR Failure in test_deploy: RuntimeError: Failed to query vault status: \
+                         Error checking seal status: Get "https://127.0.0.1:8200/v1/sys/seal-status": dial tcp 127.0.0.1:8200: connect: connection refused')
+        )
         logger = LoggerStub()
         charm = CharmInfo(name="vault")
 
@@ -187,6 +190,25 @@ class TestVaultUnsealer:
             VaultUnsealer(charm, vault, juju, logger).try_init_vault("test-model", "vault")
         # THEN
         except RuntimeError as e:
-            assert str(e) == "Simulated failure"
+            assert 'connection refused' in str(e).lower()
+        else:
+            assert False, "Expected RuntimeError was not raised"
+    
+    def test_vault_status_does_not_retry_on_other_errors(self):
+        # GIVEN
+        juju = JujuStub(units={"vault": ["vault/leader"]})
+        vault = VaultStub()
+        vault.status = lambda model, unit: (_ for _ in (range(1))).throw(\
+            RuntimeError('ERROR Failure in test_deploy: RuntimeError: Failed to query vault status: Some other error occurred')
+        )
+        logger = LoggerStub()
+        charm = CharmInfo(name="vault")
+
+        # WHEN 
+        try:
+            VaultUnsealer(charm, vault, juju, logger).try_init_vault("test-model", "vault")
+        # THEN
+        except RuntimeError as e:
+            assert 'some other error occurred' in str(e).lower()
         else:
             assert False, "Expected RuntimeError was not raised"

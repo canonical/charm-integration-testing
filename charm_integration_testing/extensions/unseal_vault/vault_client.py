@@ -52,7 +52,7 @@ def retry_on_failure(max_retries: int = 3, delay: float = 1.0, backoff: float = 
                     return func(*args, **kwargs)
                 except RuntimeError as e:
                     last_exception = e
-                    if attempt < max_retries:
+                    if attempt < max_retries and 'connection refused' in str(e).lower():
                         sleep(current_delay)
                         current_delay *= backoff
                     else:
