@@ -40,6 +40,7 @@ def warn_slow(threshold: timedelta | None = None, category: type[Warning] = Juju
                 if (datetime.now() - start_time) > threshold:
                     warnings.warn(f"Exceeded threshold of {threshold.total_seconds():.1f}s", category, stacklevel=2)
             return result
+
         return wrapper
 
     return decorator
