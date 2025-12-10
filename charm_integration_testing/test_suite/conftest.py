@@ -191,7 +191,7 @@ def record_execution_metadata(
 
 @pytest.fixture
 def record_warning_execution_metadata(execution_metadata: Callable[[str, str | int], None]):
-    # Captured all warnings
+    # Capture all warnings
     # Pytest normally captures warnings, but does not expose them until after the test report is made
     with warnings.catch_warnings(record=True) as warnings_list:
         # Let the test run
