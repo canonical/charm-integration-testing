@@ -2,6 +2,7 @@
 # See LICENSE file for licensing details.
 
 
+import dataclasses
 import time
 from datetime import datetime, timedelta
 from typing import Callable
@@ -89,8 +90,8 @@ class JubilantBackend(JujuCmdBackend):
             time.sleep(delay.total_seconds())
 
         if noncompliant_wait_state is None:
-            noncompliant_wait_state = JujuWaitState(
-                message=last_wait_state.message,
+            noncompliant_wait_state = dataclasses.replace(
+                last_wait_state,
                 insufficient_status_checks=True,
             )
 
