@@ -273,7 +273,7 @@ class TestCharmhubClient:
                         name="my-charm",
                         error=RefreshResponse.Error(message="Error Message", code="error-code"),
                     ),
-                                        RefreshAction(
+                    RefreshAction(
                         charm_name="my-charm",
                         base=matching_base,
                         charm_channel="edge",
