@@ -33,16 +33,13 @@ def warn_slow(threshold: timedelta | None = None, category: type[Warning] = Juju
         @wraps(func)
         def wrapper(*args, **kwargs):
             start_time = datetime.now()
+            result = None
             try:
                 result = func(*args, **kwargs)
-            except Exception:
-                raise
-            else:
-                return result
             finally:
                 if (datetime.now() - start_time) > threshold:
                     warnings.warn(f"Exceeded threshold of {threshold.total_seconds():.1f}s", category, stacklevel=2)
-
+            return result
         return wrapper
 
     return decorator
