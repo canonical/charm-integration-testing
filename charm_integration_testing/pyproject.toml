@@ -27,6 +27,7 @@ packages = [
     { include = "juju_jubilant" },
     { include = "serializeable_dataclass" },
     { include = "test_suite" },
+    { include = "utils" },
 ]
 
 [build-system]
