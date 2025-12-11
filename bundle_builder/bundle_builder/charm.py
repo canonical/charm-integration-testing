@@ -157,6 +157,15 @@ class CharmConfigCriteria:
 
     @classmethod
     def from_bool(cls, value: bool) -> "CharmConfigCriteria":
+        """Create a CharmConfigCriteria from a boolean value.
+
+        Args:
+            value: If True, creates criteria that's always valid (satisfied by empty all_of).
+                   If False, creates criteria that's never valid (unsatisfied by empty any_of).
+
+        Returns:
+            CharmConfigCriteria instance representing the boolean validity.
+        """
         if value:
             return cls(all_of=frozenset())
         else:
