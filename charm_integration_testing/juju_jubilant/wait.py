@@ -2,45 +2,10 @@
 # See LICENSE file for licensing details.
 
 
-from typing import Callable, Iterator
+from typing import Iterator
 
 import jubilant
 from juju import JujuApplicationState, JujuIntegration, JujuIntegrationApplication, JujuUnitState, JujuWaitState
-
-
-class WaitMonitor:
-    # There are cases where charms have errors, then go active idle, then go to error again.
-    # If the test times out when the charm is active idle, it's hard to tell what the error was.
-    # This works by saving the last state where the wait condition wasn't met.
-    last_noncompliant_wait_state: JujuWaitState
-
-    call_ready: Callable[[jubilant.Status], tuple[bool, JujuWaitState]]
-    call_error: Callable[[jubilant.Status], tuple[bool, JujuWaitState]] | None
-
-    def __init__(
-        self,
-        ready: Callable[[jubilant.Status], tuple[bool, JujuWaitState]],
-        error: Callable[[jubilant.Status], tuple[bool, JujuWaitState]] | None = None,
-    ):
-        self.last_noncompliant_wait_state = JujuWaitState()
-        self.call_ready = ready
-        self.call_error = error
-
-    def ready(self, status: jubilant.Status) -> bool:
-        # Check ready and save application state
-        ready, wait_state = self.call_ready(status)
-        if not ready:
-            self.last_noncompliant_wait_state = wait_state
-        return ready
-
-    def error(self, status: jubilant.Status) -> bool:
-        # Check error and save application state
-        if self.call_error is None:
-            return False
-        error, wait_state = self.call_error(status)
-        if error:
-            self.last_noncompliant_wait_state = wait_state
-        return error
 
 
 def get_unit_info(status: jubilant.Status, unit: str) -> jubilant.statustypes.UnitStatus | None:

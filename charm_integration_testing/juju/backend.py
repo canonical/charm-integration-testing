@@ -1,11 +1,46 @@
 # Copyright 2024-2025 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import warnings
 from abc import ABC, abstractmethod
 from dataclasses import field
-from datetime import timedelta
+from datetime import datetime, timedelta
+from functools import wraps
 
 from pydantic.dataclasses import dataclass
+
+
+class JujuPerformanceWarning(UserWarning):
+    """Base warning for Juju performance issues."""
+
+
+class JujuStatusPerformanceWarning(JujuPerformanceWarning):
+    """Warning when juju status operations are slow."""
+
+
+def warn_performance(threshold: timedelta, category: type[Warning] = JujuPerformanceWarning):
+    """Decorator that emits a warning if a function takes longer than threshold.
+
+    Args:
+        threshold: Time threshold as timedelta.
+        category: Warning class to emit
+    """
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            start_time = datetime.now()
+            result = None
+            try:
+                result = func(*args, **kwargs)
+            finally:
+                if (datetime.now() - start_time) > threshold:
+                    warnings.warn(f"Exceeded threshold of {threshold.total_seconds():.1f}s", category, stacklevel=2)
+            return result
+
+        return wrapper
+
+    return decorator
 
 
 @dataclass(frozen=True)
@@ -24,6 +59,7 @@ class JujuUnitState(JujuApplicationState):
 @dataclass(frozen=True)
 class JujuWaitState:
     message: str = "waiting"
+    insufficient_status_checks: bool = False
     noncompliant_applications: dict[str, JujuApplicationState | None] = field(default_factory=dict)
     noncompliant_units: dict[str, JujuUnitState | None] = field(default_factory=dict)
 
@@ -46,6 +82,8 @@ class JujuWaitTimeoutError(TimeoutError):
         if len(self.wait_state.noncompliant_units) > 0:
             units = [f"'{v}'" for v in sorted(self.wait_state.noncompliant_units)]
             addendums.append(f"units: [{', '.join(units)}]")
+        if self.wait_state.insufficient_status_checks:
+            addendums.append("insufficient status checks")
         if len(addendums) > 0:
             message = f"{message} ({', '.join(sorted(addendums))})"
         return message
@@ -100,7 +138,7 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def wait_idle(self, model: str, timeout: timedelta | None, period: timedelta | None):
+    def wait_idle(self, model: str, timeout: timedelta | None, count: int | None):
         raise NotImplementedError
 
     @abstractmethod
