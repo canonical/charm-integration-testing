@@ -149,21 +149,6 @@ class TestWarnSlow:
             assert len(w) == 1
             assert issubclass(w[0].category, JujuPerformanceWarning)
 
-    def test_default_threshold(self):
-        # GIVEN a function decorated with warn_performance without explicit threshold
-        @warn_performance()
-        def function():
-            return "done"
-
-        # WHEN the function executes
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            result = function()
-
-            # THEN no warning for fast execution (default is 5 seconds)
-            assert len(w) == 0
-            assert result == "done"
-
 
 class TestPerformanceWarnings:
     def test_juju_performance_warning_is_user_warning(self):

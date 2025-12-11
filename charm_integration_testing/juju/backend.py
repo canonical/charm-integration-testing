@@ -18,16 +18,13 @@ class JujuStatusPerformanceWarning(JujuPerformanceWarning):
     """Warning when juju status operations are slow."""
 
 
-def warn_performance(threshold: timedelta | None = None, category: type[Warning] = JujuPerformanceWarning):
+def warn_performance(threshold: timedelta, category: type[Warning] = JujuPerformanceWarning):
     """Decorator that emits a warning if a function takes longer than threshold.
 
     Args:
-        threshold: Time threshold as timedelta. Defaults to 5 seconds if None.
+        threshold: Time threshold as timedelta.
         category: Warning class to emit
     """
-    # Determine the threshold to use
-    if threshold is None:
-        threshold = timedelta(seconds=5)
 
     def decorator(func):
         @wraps(func)
