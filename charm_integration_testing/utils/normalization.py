@@ -33,6 +33,81 @@ def _normalize_numeric_sequences(text: str) -> str:
     return re.sub(r"\d+", "XXX", text)
 
 
+def _normalize_ip_addresses(text: str) -> str:
+    """Replace IPv4 and IPv6 addresses with '<IP>'.
+
+    Matches both IPv4 (e.g., 192.168.1.1) and IPv6 (e.g., 2001:db8::1) addresses.
+    IPv6 addresses can be in full or compressed form.
+
+    Args:
+        text: The text containing IP addresses
+
+    Returns:
+        Text with IP addresses replaced
+    """
+    # IPv6 pattern from https://stackoverflow.com/questions/53497/regular-expression-that-matches-valid-ipv6-addresses
+    # The pattern needs to be bounded to match complete addresses, not partial matches
+    ipv6_pattern = (
+        r"(?:^|(?<=\s)|(?<=\[))"  # Start of string, after whitespace, or after [
+        r"("
+        r"([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|"  # 1:2:3:4:5:6:7:8
+        r"([0-9a-fA-F]{1,4}:){1,7}:|"  # 1::                              1:2:3:4:5:6:7::
+        r"([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|"  # 1::8             1:2:3:4:5:6::8  1:2:3:4:5:6::8
+        r"([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|"  # 1::7:8           1:2:3:4:5::7:8  1:2:3:4:5::8
+        r"([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|"  # 1::6:7:8         1:2:3:4::6:7:8  1:2:3:4::8
+        r"([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|"  # 1::5:6:7:8       1:2:3::5:6:7:8  1:2:3::8
+        r"([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|"  # 1::4:5:6:7:8     1:2::4:5:6:7:8  1:2::8
+        r"[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|"  # 1::3:4:5:6:7:8   1::3:4:5:6:7:8  1::8
+        r":((:[0-9a-fA-F]{1,4}){1,7}|:)|"  # ::2:3:4:5:6:7:8  ::2:3:4:5:6:7:8 ::8       ::
+        r"fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|"  # fe80::7:8%eth0   fe80::7:8%1     (link-local IPv6 addresses with zone index)
+        r"::(ffff(:0{1,4}){0,1}:){0,1}"
+        r"((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}"
+        r"(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|"  # ::255.255.255.255   ::ffff:255.255.255.255  ::ffff:0:255.255.255.255  (IPv4-mapped IPv6 addresses and IPv4-translated addresses)
+        r"([0-9a-fA-F]{1,4}:){1,4}:"
+        r"((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}"
+        r"(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])"  # 2001:db8:3:4::192.0.2.33  64:ff9b::192.0.2.33 (IPv4-Embedded IPv6 Address)
+        r")"
+        r"(?=\]|:|/|\s|$)"  # Followed by ], :, /, whitespace, or end of string
+    )
+    text = re.sub(ipv6_pattern, "<IP>", text)
+
+    # IPv4 pattern: four groups of 1-3 digits separated by dots
+    text = re.sub(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", "<IP>", text)
+
+    return text
+
+
+def _normalize_timestamps(text: str) -> str:
+    """Replace timestamps with '<TIMESTAMP>'.
+
+    Matches common timestamp formats:
+    - ISO 8601: 2024-12-11T10:30:45, 2024-12-11T10:30:45Z, 2024-12-11T10:30:45.123Z
+    - Date only: 2024-12-11
+    - Time with microseconds: 10:30:45.123456
+    - Unix timestamps are handled by numeric normalization
+
+    Args:
+        text: The text containing timestamps
+
+    Returns:
+        Text with timestamps replaced
+    """
+    # ISO 8601 with optional timezone and microseconds
+    text = re.sub(
+        r"\b\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?\b",
+        "<TIMESTAMP>",
+        text,
+    )
+
+    # Date only (YYYY-MM-DD)
+    text = re.sub(r"\b\d{4}-\d{2}-\d{2}\b", "<TIMESTAMP>", text)
+
+    # Time with optional microseconds (HH:MM:SS or HH:MM:SS.ffffff)
+    text = re.sub(r"\b\d{2}:\d{2}:\d{2}(?:\.\d+)?\b", "<TIMESTAMP>", text)
+
+    return text
+
+
 def _normalize_pod_names(text: str) -> str:
     """Normalize Kubernetes pod names to remove dynamic suffixes.
 
@@ -147,6 +222,8 @@ def normalize_string(message: Any, max_length: int = 150) -> str:
     - Normalizes temporary file paths
     - Normalizes MinIO probe URLs
     - Normalizes OCI image digests
+    - Normalizes IP addresses (IPv4 and IPv6)
+    - Normalizes timestamps
     - Replaces all numeric sequences
     - Truncates to maximum length
 
@@ -162,6 +239,8 @@ def normalize_string(message: Any, max_length: int = 150) -> str:
     text = _normalize_temp_files(text)
     text = _normalize_minio_probe_urls(text)
     text = _normalize_oci_image_digests(text)
+    text = _normalize_ip_addresses(text)
+    text = _normalize_timestamps(text)
     text = _normalize_numeric_sequences(text)
     text = _truncate_string(text, max_length)
     return text

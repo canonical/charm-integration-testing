@@ -4,11 +4,13 @@
 import pytest
 from pydantic.dataclasses import dataclass
 from utils.normalization import (
+    _normalize_ip_addresses,
     _normalize_minio_probe_urls,
     _normalize_numeric_sequences,
     _normalize_oci_image_digests,
     _normalize_pod_names,
     _normalize_temp_files,
+    _normalize_timestamps,
     _normalize_uuids,
     normalize_string,
 )
@@ -67,6 +69,138 @@ class TestNormalizeNumericSequences:
     @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
     def test(self, params: Params):
         result = _normalize_numeric_sequences(params.input)
+        assert result == params.expected
+
+
+class TestNormalizeIpAddresses:
+    @dataclass
+    class Params:
+        label: str
+        input: str
+        expected: str
+
+    test_cases = [
+        Params(
+            label="ipv4_simple",
+            input="192.168.1.1",
+            expected="<IP>",
+        ),
+        Params(
+            label="ipv4_in_text",
+            input="connecting to 10.152.183.123:9000",
+            expected="connecting to <IP>:9000",
+        ),
+        Params(
+            label="ipv4_multiple",
+            input="from 192.168.1.1 to 10.0.0.1",
+            expected="from <IP> to <IP>",
+        ),
+        Params(
+            label="ipv4_with_port",
+            input="http://10.1.1.1:8080/path",
+            expected="http://<IP>:8080/path",
+        ),
+        Params(
+            label="ipv6_full_form",
+            input="2001:0db8:0000:0000:0000:0000:0000:0001",
+            expected="<IP>",
+        ),
+        Params(
+            label="ipv6_compressed",
+            input="2001:db8::1",
+            expected="<IP>",
+        ),
+        Params(
+            label="ipv6_loopback",
+            input="connecting to ::1",
+            expected="connecting to <IP>",
+        ),
+        Params(
+            label="ipv6_in_url",
+            input="http://[fe80::1]:8080/path",
+            expected="http://[<IP>]:8080/path",
+        ),
+        Params(
+            label="mixed_ips",
+            input="192.168.1.1 and 2001:db8::1",
+            expected="<IP> and <IP>",
+        ),
+        Params(
+            label="no_ip",
+            input="hello world",
+            expected="hello world",
+        ),
+    ]
+
+    @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
+    def test(self, params: Params):
+        result = _normalize_ip_addresses(params.input)
+        assert result == params.expected
+
+
+class TestNormalizeTimestamps:
+    @dataclass
+    class Params:
+        label: str
+        input: str
+        expected: str
+
+    test_cases = [
+        Params(
+            label="iso8601_basic",
+            input="2024-12-11T10:30:45",
+            expected="<TIMESTAMP>",
+        ),
+        Params(
+            label="iso8601_with_z",
+            input="2024-12-11T10:30:45Z",
+            expected="<TIMESTAMP>",
+        ),
+        Params(
+            label="iso8601_with_microseconds",
+            input="2024-12-11T10:30:45.123456Z",
+            expected="<TIMESTAMP>",
+        ),
+        Params(
+            label="iso8601_with_timezone",
+            input="2024-12-11T10:30:45+00:00",
+            expected="<TIMESTAMP>",
+        ),
+        Params(
+            label="date_only",
+            input="2024-12-11",
+            expected="<TIMESTAMP>",
+        ),
+        Params(
+            label="time_only",
+            input="10:30:45",
+            expected="<TIMESTAMP>",
+        ),
+        Params(
+            label="time_with_microseconds",
+            input="10:30:45.123456",
+            expected="<TIMESTAMP>",
+        ),
+        Params(
+            label="timestamp_in_text",
+            input="error occurred at 2024-12-11T10:30:45Z",
+            expected="error occurred at <TIMESTAMP>",
+        ),
+        Params(
+            label="multiple_timestamps",
+            input="from 2024-12-11T10:30:45 to 2024-12-11T11:30:45",
+            expected="from <TIMESTAMP> to <TIMESTAMP>",
+        ),
+        Params(
+            label="no_timestamp",
+            input="hello world",
+            expected="hello world",
+        ),
+    ]
+
+    @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
+    def test(self, params: Params):
+        result = _normalize_timestamps(params.input)
         assert result == params.expected
 
 
@@ -400,7 +534,7 @@ class TestNormalizeString:
         Params(
             label="minio_connection_error",
             input='mc: <ERROR> Get "http://10.152.183.123:9000/probe-bsign-rhudephrbcvytabcxipksqdefwjve"',
-            expected='mc: <ERROR> Get "http://XXX.XXX.XXX.XXX:XXX/probe-bsign-<NONCE>"',
+            expected='mc: <ERROR> Get "http://<IP>:XXX/probe-bsign-<NONCE>"',
         ),
         Params(
             label="image_pull_with_oci_digest",
