@@ -21,7 +21,7 @@ import yaml
 from pydantic import Field
 from pydantic.dataclasses import dataclass
 
-from bundle_builder.charm import CharmEndpointOptionality
+from bundle_builder.charm import CharmConfigCriteria, CharmEndpointOptionality, CharmTestConfig
 from bundle_builder.overrides import CharmEndpointOverride, CharmMetadataOverride, OverridesClient
 
 
@@ -247,7 +247,7 @@ class TestOverridesClient:
             label: str
             charm: str = "charm-a"
             overrides: dict = Field(default_factory=dict)
-            expected: list[dict] = Field(default_factory=list)
+            expected: list[CharmTestConfig] = Field(default_factory=list)
             overrides_directory: bool = True
 
         test_cases = [
@@ -258,14 +258,20 @@ class TestOverridesClient:
                 overrides={
                     "charm-a": {
                         "configs": [
-                            {"a": 1, "b": "x"},
-                            {"c": 2},
+                            {"config": {"a": 1, "b": "x"}},
+                            {"config": {"c": 2}},
                         ]
                     }
                 },
                 expected=[
-                    {"a": 1, "b": "x"},
-                    {"c": 2},
+                    CharmTestConfig(
+                        criteria=CharmConfigCriteria.from_bool(True),
+                        config=(("a", 1), ("b", "x")),
+                    ),
+                    CharmTestConfig(
+                        criteria=CharmConfigCriteria.from_bool(True),
+                        config=(("c", 2),),
+                    ),
                 ],
             ),
         ]

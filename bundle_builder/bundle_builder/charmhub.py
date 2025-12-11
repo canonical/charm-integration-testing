@@ -22,9 +22,9 @@ from .charm import (
     ENDPOINT_PROVIDES,
     ENDPOINT_REQUIRES,
     Charm,
-    CharmConfig,
     CharmEndpoint,
     CharmEndpointOptionality,
+    CharmTestConfig,
 )
 from .charmhub_http import (
     CharmhubBase,
@@ -426,16 +426,9 @@ class CharmhubClient:
 
         return frozenset(endpoints)
 
-    def _charm_test_configs(self, charm: str) -> tuple[CharmConfig, ...]:
+    def _charm_test_configs(self, charm: str) -> tuple[CharmTestConfig, ...]:
         # Get test configs from overrides client
-        test_configs = self.overrides_client.get_charm_test_configs(charm)
-
-        # Add an empty config if empty
-        if len(test_configs) == 0:
-            test_configs = [{}]
-
-        # Return configs as hashable tuples
-        return tuple(tuple((key, value) for key, value in config.items()) for config in test_configs)
+        return tuple(self.overrides_client.get_charm_test_configs(charm))
 
     def _get_charm_priority(self, charm_name: str) -> float:
         return self.overrides_client.get_charm_priorities_mapping().get(charm_name, 1.0)
