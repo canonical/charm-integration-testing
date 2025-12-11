@@ -2,3 +2,4 @@ priorities:
   pgbouncer-k8s: 2.0
   mysql-router-k8s: 2.0
   self-signed-certificates: 2.0
+  graylog-k8s: .00001
