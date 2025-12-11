@@ -87,6 +87,15 @@ class CharmEndpointOptionality:
 
     @classmethod
     def from_bool(cls, value: bool) -> "CharmEndpointOptionality":
+        """Create a CharmEndpointOptionality from a boolean value.
+
+        Args:
+            value: If True, creates an always-optional endpoint (satisfied by empty all_of).
+                   If False, creates a never-optional endpoint (unsatisfied by empty any_of).
+
+        Returns:
+            CharmEndpointOptionality instance representing the boolean optionality.
+        """
         if value:
             return cls(all_of=frozenset())
         else:
