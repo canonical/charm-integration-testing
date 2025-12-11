@@ -3,6 +3,7 @@ priorities:
   mysql-router-k8s: 2.0
   self-signed-certificates: 2.0
 
+  # https://warthogs.atlassian.net/browse/IQA-3315
   # Charms pending delisting
   graylog-k8s: 0.25
   hello-kubecon: 0.25
