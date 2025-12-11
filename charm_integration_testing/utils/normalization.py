@@ -37,7 +37,7 @@ def _normalize_pod_names(text: str) -> str:
     """Normalize Kubernetes pod names to remove dynamic suffixes.
 
     Pod names in Kubernetes logs often appear as pod=<podName>_<namespace>(<uid>)
-    This function replaces the entire pod reference with pod=XXX.
+    This function replaces the entire pod reference with pod=<POD>.
     See: https://github.com/canonical/kubernetes-dqlite/blob/136e88e2c4309776ff735a990003ecb5e541dc94/pkg/kubelet/kuberuntime/kuberuntime_manager.go#L925
     See: https://github.com/kubernetes/kubernetes/blob/df11db1c0f08fab3c0baee1e5ce6efbf816af7f1/pkg/kubelet/util/format/pod.go#L36
 
@@ -49,13 +49,13 @@ def _normalize_pod_names(text: str) -> str:
     """
     return re.sub(
         r"pod=[a-z0-9.-]+_[a-z0-9.-]+\([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\)",
-        "pod=XXX",
+        "pod=<POD>",
         text,
     )
 
 
 def _normalize_uuids(text: str) -> str:
-    """Replace UUIDs with 'XXX'.
+    """Replace UUIDs with '<UUID>'.
 
     Matches standard UUID format: 8-4-4-4-12 hex digits.
 
@@ -65,7 +65,7 @@ def _normalize_uuids(text: str) -> str:
     Returns:
         Text with UUIDs replaced
     """
-    return re.sub(r"[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}", "XXX", text)
+    return re.sub(r"[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}", "<UUID>", text)
 
 
 def _normalize_temp_files(text: str) -> str:
@@ -80,7 +80,7 @@ def _normalize_temp_files(text: str) -> str:
     Returns:
         Text with temp file suffixes normalized
     """
-    return re.sub(r"/tmp[a-zA-Z0-9_]+", "/tmpXXX", text)
+    return re.sub(r"/tmp[a-zA-Z0-9_]+", "/tmp<TEMP>", text)
 
 
 def _normalize_minio_probe_urls(text: str) -> str:
@@ -95,7 +95,7 @@ def _normalize_minio_probe_urls(text: str) -> str:
     Returns:
         Text with probe-bsign nonces normalized
     """
-    return re.sub(r"probe-bsign-[a-z0-9]+", "probe-bsign-XXX", text)
+    return re.sub(r"probe-bsign-[a-z0-9]+", "probe-bsign-<NONCE>", text)
 
 
 def _normalize_oci_image_digests(text: str) -> str:
@@ -119,7 +119,7 @@ def _normalize_oci_image_digests(text: str) -> str:
     Returns:
         Text with image digests normalized
     """
-    return re.sub(r"((?:sha256|sha512|blake3)(?:[+._-][a-z0-9]+)*):[a-zA-Z0-9=_-]+", r"\1:XXX", text)
+    return re.sub(r"((?:sha256|sha512|blake3)(?:[+._-][a-z0-9]+)*):[a-zA-Z0-9=_-]+", r"\1:<DIGEST>", text)
 
 
 def _truncate_string(text: str, max_length: int) -> str:
