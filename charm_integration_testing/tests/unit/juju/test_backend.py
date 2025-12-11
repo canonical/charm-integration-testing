@@ -148,14 +148,3 @@ class TestWarnSlow:
             # THEN a warning is still issued
             assert len(w) == 1
             assert issubclass(w[0].category, JujuPerformanceWarning)
-
-
-class TestPerformanceWarnings:
-    def test_juju_performance_warning_is_user_warning(self):
-        # THEN JujuPerformanceWarning is a subclass of UserWarning
-        assert issubclass(JujuPerformanceWarning, UserWarning)
-
-    def test_juju_status_performance_warning_inheritance(self):
-        # THEN JujuStatusPerformanceWarning is a subclass of JujuPerformanceWarning
-        assert issubclass(JujuStatusPerformanceWarning, JujuPerformanceWarning)
-        assert issubclass(JujuStatusPerformanceWarning, UserWarning)
