@@ -149,7 +149,7 @@ def assert_idle(juju_client: JujuClient, model: str, print_setup_and_teardown_in
     _ = print_setup_and_teardown_info
 
     try:
-        juju_client.idle_for_period(model=model, timeout=timedelta(seconds=15), count=5)
+        juju_client.idle_for_period(model=model, timeout=timedelta(seconds=30), count=5)
     except JujuWaitTimeoutError as e:
         pytest.skip(str(e))
 

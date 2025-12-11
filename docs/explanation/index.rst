@@ -11,3 +11,4 @@ Contents
 
    bundle-builder-algorithm
    charm-priorities
+   wait-conditions
