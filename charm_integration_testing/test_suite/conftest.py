@@ -4,12 +4,11 @@
 
 import json
 import logging
-import re
 import warnings
 from datetime import timedelta
 from pathlib import Path
 from subprocess import CalledProcessError  # nosec
-from typing import Any, Callable
+from typing import Callable
 
 import pytest
 from extensions import (
@@ -22,6 +21,7 @@ from extensions import (
 from juju import JujuBackend, JujuClient, JujuWaitTimeoutError
 from juju_jubilant import JubilantBackend
 from pytest import CollectReport, StashKey
+from utils import normalize_string
 
 
 @pytest.fixture
@@ -199,7 +199,7 @@ def record_warning_execution_metadata(execution_metadata: Callable[[str, str | i
 
         # Save all warnings
         for warning in warnings_list:
-            execution_metadata("warning:message", normalize_message(f"{warning.category.__name__}: {warning.message}"))
+            execution_metadata("warning:message", normalize_string(f"{warning.category.__name__}: {warning.message}"))
             captured_warnings.append(warning)
 
     # Re-emit all warnings so they show up in the test summary
@@ -238,25 +238,6 @@ def record_charms_and_revisions_execution_metadata(
     record_charms_and_revisions_execution_metadata_instantaneous(juju_client, model, execution_metadata)
 
 
-def normalize_message(message: Any) -> str:
-    # Convert to string if needed
-    if isinstance(message, bytes):
-        message = message.decode("utf-8", errors="replace")
-    else:
-        message = str(message)
-
-    # Replace all numeric sequences with "XXX"
-    # Should normalize timestamps, IP addresses, and other variable data
-    message = re.sub(r"\d+", "XXX", message)
-
-    # Limit character count
-    max_character_count = 150
-    if len(message) > max_character_count:
-        message = f"{message[:max_character_count - 3]}..."
-
-    return message
-
-
 @pytest.fixture
 def record_failure_execution_metadata(
     request: pytest.FixtureRequest, execution_metadata: Callable[[str, str | int], None]
@@ -266,11 +247,11 @@ def record_failure_execution_metadata(
 
     # Save the failure message
     if failure_message in request.node.stash:
-        execution_metadata("failure:message", normalize_message(request.node.stash[failure_message]))
+        execution_metadata("failure:message", normalize_string(request.node.stash[failure_message]))
 
     # Save the skip message
     if skipped_message in request.node.stash:
-        execution_metadata("skipped:message", normalize_message(request.node.stash[skipped_message]))
+        execution_metadata("skipped:message", normalize_string(request.node.stash[skipped_message]))
 
     # Save extra metadata from exception
     if failure_exception in request.node.stash:
@@ -283,20 +264,20 @@ def record_failure_execution_metadata(
                     continue
                 execution_metadata(
                     f"failure:charm:{application.charm}:status",
-                    f"application:{application.status}:{normalize_message(application.message)}",
+                    f"application:{application.status}:{normalize_string(application.message)}",
                 )
             for unit in exc.wait_state.noncompliant_units.values():
                 if unit is None:
                     continue
                 execution_metadata(
                     f"failure:charm:{unit.charm}:status",
-                    f"unit:{unit.status}:{normalize_message(unit.message)}",
+                    f"unit:{unit.status}:{normalize_string(unit.message)}",
                 )
         elif isinstance(exc, CalledProcessError):
             cmd = " ".join(exc.cmd) if isinstance(exc.cmd, (list, tuple)) else exc.cmd
-            execution_metadata("failure:cli:cmd", normalize_message(cmd))
+            execution_metadata("failure:cli:cmd", normalize_string(cmd))
             execution_metadata("failure:cli:return_code", str(exc.returncode))
             if exc.stdout:
-                execution_metadata("failure:cli:stdout", normalize_message(exc.stdout))
+                execution_metadata("failure:cli:stdout", normalize_string(exc.stdout))
             if exc.stderr:
-                execution_metadata("failure:cli:stderr", normalize_message(exc.stderr))
+                execution_metadata("failure:cli:stderr", normalize_string(exc.stderr))
