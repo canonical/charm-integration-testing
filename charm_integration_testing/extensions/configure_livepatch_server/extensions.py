@@ -51,6 +51,7 @@ class ConfigureLivepatchServerExtension(JujuExtension, ABC):
         self.juju.wait_for_unit_message(model, f"{application}/leader", LIVEPATCH_SERVER_CONFIGURE_MESSAGE, timedelta(minutes=10))
 
         # Configure ubuntu pro token
+        self.logger.info(f"Running action 'get-resource-token' on application '{application}'")
         self.juju.run_action(
             model,
             f"{application}/leader",
@@ -62,6 +63,7 @@ class ConfigureLivepatchServerExtension(JujuExtension, ABC):
         unit_ip = self.juju.unit_ip(model, f"{application}/leader")
 
         # Configure server URL template
+        self.logger.info(f"Configuring server URL template for application '{application}'")
         self.juju.configure_application(
             model,
             application,
