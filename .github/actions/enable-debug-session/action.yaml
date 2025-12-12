@@ -35,6 +35,8 @@ runs:
         mkdir -p ~/.ssh/
         echo "${IDS}" >> ~/.ssh/authorized_keys
 
+        echo "IP: $(hostname -I | cut -d ' ' - f 1)"
+
     - name: Install tmate
       shell: bash
       run: |
