@@ -202,7 +202,7 @@ def _truncate_string(text: str, max_length: int) -> str:
 
     Args:
         text: The text to truncate
-        max_length: Maximum character count (default: 150)
+        max_length: Maximum character count
 
     Returns:
         Truncated text with ellipsis if needed
