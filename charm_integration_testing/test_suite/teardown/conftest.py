@@ -18,9 +18,9 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 
 
 @pytest.fixture
-def applications(request: pytest.FixtureRequest) -> str:
+def applications(request: pytest.FixtureRequest) -> list[str]:
     option = request.config.getoption("--applications")
-    assert isinstance(option, str)
+    assert isinstance(option, list)
     return option
 
 
