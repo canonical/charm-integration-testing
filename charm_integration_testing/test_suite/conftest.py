@@ -12,6 +12,7 @@ from typing import Callable
 
 import pytest
 from extensions import (
+    ConfigureLivepatchServerExtension,
     PostgresqlDatabaseReplicationExtension,
     PostgresqlK8sDatabaseReplicationExtension,
     S3IntegratorMinIOBackendExtension,
@@ -41,16 +42,19 @@ def juju_backend() -> JujuBackend:
 
 
 @pytest.fixture
-def juju_client(juju_backend: JujuBackend, logger: logging.Logger, minio_client_file: Path | None) -> JujuClient:
+def juju_client(
+    juju_backend: JujuBackend, logger: logging.Logger, minio_client_file: Path | None, ubuntu_pro_token: str | None
+) -> JujuClient:
     return JujuClient(
         juju_backend,
         logger,
         extensions=[
-            UnsealVaultJujuExtension(juju_backend, logger),
-            UnsealVaultK8sJujuExtension(juju_backend, logger),
-            S3IntegratorMinIOBackendExtension(juju_backend, logger, minio_client_file),
+            ConfigureLivepatchServerExtension(juju_backend, logger, ubuntu_pro_token),
             PostgresqlDatabaseReplicationExtension(juju_backend, logger),
             PostgresqlK8sDatabaseReplicationExtension(juju_backend, logger),
+            S3IntegratorMinIOBackendExtension(juju_backend, logger, minio_client_file),
+            UnsealVaultJujuExtension(juju_backend, logger),
+            UnsealVaultK8sJujuExtension(juju_backend, logger),
         ],
     )
 
@@ -63,6 +67,12 @@ def pytest_addoption(parser):
         help="MinIO client file used to create a bucket (for s3-integrator)",
         default=None,
     )
+    parser.addoption(
+        "--ubuntu-pro-token",
+        type=str,
+        help="Ubuntu Pro token file used to configure livepatch server",
+        default=None,
+    )
 
 
 @pytest.fixture
@@ -73,6 +83,11 @@ def model(request: pytest.FixtureRequest) -> str:
 @pytest.fixture
 def minio_client_file(request: pytest.FixtureRequest) -> Path | None:
     return request.config.getoption("--minio-client-file")
+
+
+@pytest.fixture
+def ubuntu_pro_token(request: pytest.FixtureRequest) -> str | None:
+    return request.config.getoption("--ubuntu-pro-token")
 
 
 failure_message = StashKey[CollectReport]()
