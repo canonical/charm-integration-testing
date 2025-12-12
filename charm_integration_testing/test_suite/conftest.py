@@ -76,12 +76,13 @@ def model(request: pytest.FixtureRequest) -> str:
 @pytest.fixture
 def minio_client_file() -> Path | None:
     file_path = os.environ.get(MINIO_CLIENT_FILE_ENV)
-    return Path(file_path) if file_path else None
+    return Path(file_path) if file_path and file_path.strip() else None
 
 
 @pytest.fixture
 def ubuntu_pro_token() -> str | None:
-    return os.environ.get(UBUNTU_PRO_TOKEN_ENV)
+    token = os.environ.get(UBUNTU_PRO_TOKEN_ENV)
+    return token if token and token.strip() else None
 
 
 failure_message = StashKey[CollectReport]()
