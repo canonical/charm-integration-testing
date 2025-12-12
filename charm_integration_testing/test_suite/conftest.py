@@ -4,6 +4,7 @@
 
 import json
 import logging
+import os
 import warnings
 from datetime import timedelta
 from pathlib import Path
@@ -23,6 +24,10 @@ from juju import JujuBackend, JujuClient, JujuWaitTimeoutError
 from juju_jubilant import JubilantBackend
 from pytest import CollectReport, StashKey
 from utils import normalize_string
+
+# Environment variable names for optional test configurations
+MINIO_CLIENT_FILE_ENV = "MINIO_CLIENT_FILE"
+UBUNTU_PRO_TOKEN_ENV = "UBUNTU_PRO_TOKEN"
 
 
 @pytest.fixture
@@ -61,18 +66,6 @@ def juju_client(
 
 def pytest_addoption(parser):
     parser.addoption("--model", type=str, required=True, help="Juju model to test in")
-    parser.addoption(
-        "--minio-client-file",
-        type=Path,
-        help="MinIO client file used to create a bucket (for s3-integrator)",
-        default=None,
-    )
-    parser.addoption(
-        "--ubuntu-pro-token",
-        type=str,
-        help="Ubuntu Pro token file used to configure livepatch server",
-        default=None,
-    )
 
 
 @pytest.fixture
@@ -81,13 +74,14 @@ def model(request: pytest.FixtureRequest) -> str:
 
 
 @pytest.fixture
-def minio_client_file(request: pytest.FixtureRequest) -> Path | None:
-    return request.config.getoption("--minio-client-file")
+def minio_client_file() -> Path | None:
+    file_path = os.environ.get(MINIO_CLIENT_FILE_ENV)
+    return Path(file_path) if file_path else None
 
 
 @pytest.fixture
-def ubuntu_pro_token(request: pytest.FixtureRequest) -> str | None:
-    return request.config.getoption("--ubuntu-pro-token")
+def ubuntu_pro_token() -> str | None:
+    return os.environ.get(UBUNTU_PRO_TOKEN_ENV)
 
 
 failure_message = StashKey[CollectReport]()
