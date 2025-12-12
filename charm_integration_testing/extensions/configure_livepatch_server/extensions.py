@@ -48,7 +48,9 @@ class ConfigureLivepatchServerExtension(JujuExtension, ABC):
 
         # Wait for message
         self.logger.info(f"Waiting for application '{application}' to ask for token configuration")
-        self.juju.wait_for_unit_message(model, f"{application}/leader", LIVEPATCH_SERVER_CONFIGURE_MESSAGE, timedelta(minutes=10))
+        self.juju.wait_for_unit_message(
+            model, f"{application}/leader", LIVEPATCH_SERVER_CONFIGURE_MESSAGE, timedelta(minutes=10)
+        )
 
         # Configure ubuntu pro token
         self.logger.info(f"Running action 'get-resource-token' on application '{application}'")
