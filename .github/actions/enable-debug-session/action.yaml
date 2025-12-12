@@ -29,6 +29,7 @@ runs:
         IDS="${IDS},gh:${GITHUB_ACTOR}"
 
         IDS=$(echo "${IDS}" | tr ',' ' ')
+        echo "IDs: ${IDS}"
         ssh-import-id "${IDS}"
 
     - name: Install tmate

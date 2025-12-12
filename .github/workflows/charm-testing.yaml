@@ -78,11 +78,10 @@ on:
           - false
         default: "false"
       debug_ssh_identifiers:
-        description: >
-          A comma-separated list of IDs to use with ssh-import-id.
-          The IDs take the form of lp:<value> for Launchpad and gh:<value> for GitHub.
-          The GitHub Actor's key is always included.
-          Only used if `ssh_enable` is true.
+        # The IDs take the form of lp:<value> for Launchpad and gh:<value> for GitHub.
+        # The GitHub Actor's key is always included.
+        # Only used if `ssh_enable` is true.
+        description: A comma-separated list of IDs to use with ssh-import-id.
         required: false
         default: ""
 
@@ -425,7 +424,7 @@ jobs:
 
       - name: Call Juju K8s Crashdump
         id: juju_k8s_crashdump
-        if: ${{ !cancelled() && inputs.substrate == 'kubernetes'}}
+        if: ${{ !cancelled() && inputs.substrate == 'kubernetes' && inputs.execution_id != '' }}
         uses: canonical/juju-k8s-crashdump/actions/juju-k8s-crashdump@1c72aa0cc3d0606b6d97916aa9aa28d4a3b30a97
         with:
           kubeconf: ${{ steps.setup_k8s.outputs.kubeconfig_path }}
@@ -450,7 +449,7 @@ jobs:
 
       - name: Collect logs
         id: collect_logs
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && inputs.execution_id != '' }}
         shell: bash
         env:
           crashdump: ${{ steps.juju_k8s_crashdump.outputs.crashdump_path }}
