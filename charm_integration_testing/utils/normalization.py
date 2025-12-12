@@ -229,6 +229,7 @@ def normalize_string(message: Any, max_length: int = 150) -> str:
 
     Args:
         message: The value to normalize (can be bytes, str, or any object)
+        max_length: Maximum length of the resulting string (default: 150)
 
     Returns:
         Normalized string suitable for execution metadata
