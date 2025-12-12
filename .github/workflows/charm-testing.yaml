@@ -78,6 +78,8 @@ jobs:
     env:
       test_observer_api: ${{ inputs.environment == 'production' && vars.PROD_TEST_OBSERVER_API || (inputs.environment == 'staging' && vars.STG_TEST_OBSERVER_API || '') }}
       test_observer_token: ${{ inputs.environment == 'production' && secrets.PROD_TEST_OBSERVER_TOKEN || (inputs.environment == 'staging' && secrets.STG_TEST_OBSERVER_TOKEN || '') }}
+      MINIO_CLIENT_FILE: ${{ github.workspace }}/static/mc
+      UBUNTU_PRO_TOKEN: ${{ secrets.UBUNTU_PRO_TOKEN }}
     steps:
       - name: Clone Repo
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683

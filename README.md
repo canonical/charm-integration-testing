@@ -26,6 +26,13 @@ best practices.
     --provider {application}:{endpoint}
 ```
 
+### Optional Environment Variables
+
+The following environment variables can be set for specific test scenarios:
+
+- `MINIO_CLIENT_FILE`: Path to MinIO client (will be used when deploying minio with s3-integrator, otherwise will be downloaded)
+- `UBUNTU_PRO_TOKEN`: Ubuntu Pro token (required for testing canonical-livepatch-server charms)
+
 ## Documentation
 
 Run the documentation locally from the `docs` directory:

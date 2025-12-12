@@ -69,4 +69,7 @@ stabilize
 initialization
 noncompliant
 Reconciler
-
+livepatch
+Livepatch
+MinIO
+minio
