@@ -1,0 +1,55 @@
+name: Create SSH Session
+descripton: >
+  Create an SSH session on the runner using tmate. 
+  Based on canonical/action-tmate.
+
+inputs:
+  ssh_identifiers:
+    description: >
+      A comma-separated list of IDs to use with ssh-import-id. 
+      The IDs take the form of lp:<value> for Launchpad and gh:<value> for GitHub. 
+      The GitHub Actor's key is always included. 
+      Only used if `ssh_enable` is true. 
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  # Each step begins with `# Step: <step_name>` for clarity in the GitHub output,
+  # which displays Run: # Step: <step_name>
+  steps:
+    - name: Import SSH Keys
+      shell: bash
+      env:
+        IDS: ${{ inputs.debug_ssh_identifiers }}
+      run: |
+        # Step: Import SSH Keys
+
+        # Always include the GitHub Actor
+        IDS="${IDS},gh:${GITHUB_ACTOR}"
+
+        IDS=$(echo "${IDS}" | tr ',' ' ')
+        ssh-import-id "${IDS}"
+
+    - name: Install tmate
+      shell: bash
+      run: |
+        # Step: Install tmate
+
+        if ! command -v tmate &> /dev/null; then
+          sudo apt-get update
+          sudo apt-get install -y tmate
+        fi
+
+        echo ""
+
+    - name: Start tmate Session
+      shell: bash
+      run: |
+        # Step: Start tmate Session
+
+        tmate -S /tmp/tmate.sock new-session -d
+        tmate -S /tmp/tmate.sock wait tmate-ready
+        
+        echo "Command to connect:"
+        tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}'

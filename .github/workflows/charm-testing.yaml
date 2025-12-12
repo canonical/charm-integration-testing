@@ -60,7 +60,7 @@ on:
           - "20.04"
           - "22.04"
           - "24.04"
-        default: 24.04
+        default: "24.04"
       substrate:
         description: "Substrate to run the tests on."
         required: false
@@ -69,6 +69,23 @@ on:
           - kubernetes
           - openstack
         default: kubernetes
+      debug_ssh_enable:
+        description: If true, enable SSH access.
+        required: false
+        type: choice
+        options:
+          - true
+          - false
+        default: "false"
+      debug_ssh_identifiers:
+        description: >
+          A comma-separated list of IDs to use with ssh-import-id.
+          The IDs take the form of lp:<value> for Launchpad and gh:<value> for GitHub.
+          The GitHub Actor's key is always included.
+          Only used if `ssh_enable` is true.
+        required: false
+        default: ""
+
 jobs:
   execute-charm-test:
     name: Execute integration tests against the charms
@@ -83,6 +100,18 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
+
+      - name: Enable Debug Session
+        if: ${{ inputs.debug_ssh_enable == 'true' }}
+        uses: ./.github/actions/enable-debug-session
+        with:
+          ssh_identifiers: ${{ inputs.debug_ssh_identifiers }}
+
+      - name: Sleep
+        if: ${{ inputs.debug_ssh_enable == 'true' }}
+        run: |
+          echo "Debug session enabled. Sleeping for 1 hour to allow for SSH connections."
+          sleep 3600
 
       - name: Generate Juju Model and Controller Name
         id: juju_resources
