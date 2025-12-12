@@ -47,7 +47,7 @@ class JubilantBackend(JujuCmdBackend):
 
     @warn_performance(category=JujuStatusPerformanceWarning, threshold=timedelta(seconds=3))
     def juju_status_text(self, model: str) -> str:
-        return self.client.model(model).cli("status", "integrations", "--format", "tabular")
+        return self.client.model(model).cli("status", "--integrations", "--format", "tabular")
 
     def wait(
         self,
