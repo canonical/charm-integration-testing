@@ -74,8 +74,8 @@ on:
         required: false
         type: choice
         options:
-          - true
-          - false
+          - "true"
+          - "false"
         default: "false"
       debug_ssh_identifiers:
         # The IDs take the form of lp:<value> for Launchpad and gh:<value> for GitHub.
@@ -100,11 +100,14 @@ jobs:
         with:
           persist-credentials: false
 
+      # - name: Enable Debug Session
+      #   if: ${{ inputs.debug_ssh_enable == 'true' }}
+      #   uses: ./.github/actions/enable-debug-session
+      #   with:
+      #     ssh_identifiers: ${{ inputs.debug_ssh_identifiers }}
+
       - name: Enable Debug Session
-        if: ${{ inputs.debug_ssh_enable == 'true' }}
-        uses: ./.github/actions/enable-debug-session
-        with:
-          ssh_identifiers: ${{ inputs.debug_ssh_identifiers }}
+        uses: canonical/action-tmate@main
 
       - name: Sleep
         if: ${{ inputs.debug_ssh_enable == 'true' }}
