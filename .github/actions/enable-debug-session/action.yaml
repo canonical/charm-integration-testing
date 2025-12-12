@@ -1,5 +1,5 @@
 name: Create SSH Session
-descripton: >
+description: >
   Create an SSH session on the runner using tmate. 
   Based on canonical/action-tmate.
 
@@ -26,11 +26,14 @@ runs:
         # Step: Import SSH Keys
 
         # Always include the GitHub Actor
-        IDS="${IDS},gh:${GITHUB_ACTOR}"
+        # IDS="${IDS},gh:${GITHUB_ACTOR}"
 
-        IDS=$(echo "${IDS}" | tr ',' ' ')
-        echo "IDs: ${IDS}"
-        ssh-import-id "${IDS}"
+        # IDS=$(echo "${IDS}" | tr ',' ' ')
+        # echo "IDs: ${IDS}"
+        # ssh-import-id "${IDS}"
+
+        mkdir -p ~/.ssh/
+        echo "${IDS}" >> ~/.ssh/authorized_keys
 
     - name: Install tmate
       shell: bash
