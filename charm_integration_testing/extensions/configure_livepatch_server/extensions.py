@@ -36,6 +36,7 @@ class ConfigureLivepatchServerExtension(JujuExtension, ABC):
                 f"No Ubuntu Pro token provided, skipping livepatch server configuration for application '{application}'"
             )
             return
+        self.logger.info(f"Configuring livepatch server application '{application}'")
 
         # Wait for application to be scaled
         self.logger.info(f"Waiting for application '{application}' to be scaled")
@@ -47,7 +48,7 @@ class ConfigureLivepatchServerExtension(JujuExtension, ABC):
 
         # Wait for message
         self.logger.info(f"Waiting for application '{application}' to ask for token configuration")
-        self.juju.wait_for_unit_message(model, application, LIVEPATCH_SERVER_CONFIGURE_MESSAGE, timedelta(minutes=10))
+        self.juju.wait_for_unit_message(model, f"{application}/leader", LIVEPATCH_SERVER_CONFIGURE_MESSAGE, timedelta(minutes=10))
 
         # Configure ubuntu pro token
         self.juju.run_action(
