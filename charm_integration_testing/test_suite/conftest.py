@@ -25,10 +25,6 @@ from juju_jubilant import JubilantBackend
 from pytest import CollectReport, StashKey
 from utils import normalize_string
 
-# Environment variable names for optional test configurations
-MINIO_CLIENT_FILE_ENV = "MINIO_CLIENT_FILE"
-UBUNTU_PRO_TOKEN_ENV = "UBUNTU_PRO_TOKEN"
-
 
 @pytest.fixture
 def logger() -> logging.Logger:
@@ -75,7 +71,7 @@ def model(request: pytest.FixtureRequest) -> str:
 
 @pytest.fixture
 def minio_client_file() -> Path | None:
-    file_path = os.environ.get(MINIO_CLIENT_FILE_ENV)
+    file_path = os.environ.get("MINIO_CLIENT_FILE")
     if file_path:
         file_path = file_path.strip()
     return Path(file_path) if file_path else None
@@ -83,7 +79,7 @@ def minio_client_file() -> Path | None:
 
 @pytest.fixture
 def ubuntu_pro_token() -> str | None:
-    token = os.environ.get(UBUNTU_PRO_TOKEN_ENV)
+    token = os.environ.get("UBUNTU_PRO_TOKEN")
     if token:
         token = token.strip()
     return token if token else None
