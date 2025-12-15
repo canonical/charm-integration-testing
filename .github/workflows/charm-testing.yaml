@@ -109,6 +109,8 @@ jobs:
       - name: Sleep
         id: sleep
         if: ${{ inputs.debug_ssh_enable == 'true' }}
+        env:
+          IDS: ${{ inputs.debug_ssh_identifiers }}
         run: |
           echo "Debug session enabled. Sleeping for 1 hour to allow for SSH connections."
           sleep 3600
