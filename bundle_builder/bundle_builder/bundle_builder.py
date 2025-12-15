@@ -20,7 +20,7 @@ import logging
 import random
 
 from .bundle import Application, ApplicationEndpoint, Bundle, Integration
-from .charm import ENDPOINT_PROVIDES, ENDPOINT_REQUIRES, Charm, CharmConfig
+from .charm import ENDPOINT_PROVIDES, ENDPOINT_REQUIRES, CharmConfig
 from .charmhub import CharmhubClient
 from .immutable_dataclass import computed_property, immutable_dataclass
 

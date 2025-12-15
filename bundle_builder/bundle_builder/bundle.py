@@ -152,7 +152,7 @@ class Bundle:
 
     @computed_property
     def application_to_integrated_endpoints(self) -> dict[str, frozenset[str]]:
-        map = {application.name: set() for application in self.applications}
+        map: dict[str, set[str]] = {application.name: set() for application in self.applications}
         for integration in self.integrations:
             for endpoint in integration:
                 map[endpoint.application].add(endpoint.endpoint)

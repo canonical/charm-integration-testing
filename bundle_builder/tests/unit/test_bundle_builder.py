@@ -22,6 +22,7 @@ from pydantic.dataclasses import dataclass
 from bundle_builder.bundle import Application, ApplicationEndpoint, Bundle, Integration
 from bundle_builder.bundle_builder import BundleBuilder, Node
 from bundle_builder.charm import (
+    Charm,
     CharmConfigCriteria,
     CharmEndpointOptionality,
     CharmTestConfig,
@@ -552,7 +553,7 @@ class TestDuplicateCharms:
 
 class TestAddTestConfigs:
     class TestConfigSelection:
-        def test_selects_config_matching_channel_track(self):
+        def test_selects_config_matching_channel_track(self) -> None:
             # GIVEN a charm with test configs for different tracks
             charm = dataclasses.replace(
                 sample_charm_postgresql_k8s(),
@@ -583,7 +584,7 @@ class TestAddTestConfigs:
             app = next(a for a in result.applications if a.name == "app")
             assert app.config == (("option1", "value1"),)
 
-        def test_selects_config_matching_integrated_endpoint(self):
+        def test_selects_config_matching_integrated_endpoint(self) -> None:
             # GIVEN a charm with test configs based on endpoint integration
             charm = dataclasses.replace(
                 sample_charm_kratos(),
@@ -651,7 +652,7 @@ class TestAddTestConfigs:
             app = next(a for a in result.applications if a.name == "app")
             assert app.config == (("with_db", "true"),)
 
-        def test_returns_empty_config_when_no_test_configs(self):
+        def test_returns_empty_config_when_no_test_configs(self) -> None:
             # GIVEN a charm with no test configs
             charm = dataclasses.replace(
                 sample_charm_postgresql_k8s(),
@@ -672,7 +673,7 @@ class TestAddTestConfigs:
             app = next(a for a in result.applications if a.name == "app")
             assert app.config == ()
 
-        def test_returns_empty_config_when_no_matching_criteria(self):
+        def test_returns_empty_config_when_no_matching_criteria(self) -> None:
             # GIVEN a charm with test configs that don't match
             charm = dataclasses.replace(
                 sample_charm_postgresql_k8s(),
@@ -698,7 +699,7 @@ class TestAddTestConfigs:
             app = next(a for a in result.applications if a.name == "app")
             assert app.config == ()
 
-        def test_handles_multiple_applications(self):
+        def test_handles_multiple_applications(self) -> None:
             # GIVEN multiple applications with different configs
             charm1 = dataclasses.replace(
                 sample_charm_postgresql_k8s(),
@@ -743,7 +744,7 @@ class TestAddTestConfigs:
             assert app1.config == (("option1", "value1"),)
             assert app2.config == (("option2", "value2"),)
 
-        def test_selects_from_multiple_valid_configs(self):
+        def test_selects_from_multiple_valid_configs(self) -> None:
             # GIVEN a charm with multiple valid test configs
             charm = dataclasses.replace(
                 sample_charm_postgresql_k8s(),
@@ -773,7 +774,7 @@ class TestAddTestConfigs:
             app = next(a for a in result.applications if a.name == "app")
             assert app.config in ((("option1", "value1"),), (("option2", "value2"),))
 
-        def test_complex_criteria_all_of_and_endpoint(self):
+        def test_complex_criteria_all_of_and_endpoint(self) -> None:
             # GIVEN a charm with complex criteria (all_of with track and endpoint)
             charm = dataclasses.replace(
                 sample_charm_kratos(),

@@ -20,6 +20,7 @@ from bundle_builder.charm import (
     ENDPOINT_PROVIDES,
     ENDPOINT_REQUIRES,
     Charm,
+    CharmChannel,
     CharmEndpoint,
     CharmEndpointOptionality,
 )
@@ -33,7 +34,7 @@ class TestEndpointLimits:
             # GIVEN a charm with limit 0
             zero_limit_charm = Charm(
                 name="zero-limit-charm",
-                channel="stable",
+                channel=CharmChannel("stable"),
                 revision=1,
                 ubuntu_version="22.04",
                 ubuntu_arch="amd64",
