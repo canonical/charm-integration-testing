@@ -4,7 +4,7 @@
 
 import json
 import logging
-import re
+import os
 import warnings
 from datetime import timedelta
 from pathlib import Path
@@ -13,6 +13,7 @@ from typing import Any, Callable, Iterator
 
 import pytest
 from extensions import (
+    ConfigureLivepatchServerExtension,
     PostgresqlDatabaseReplicationExtension,
     PostgresqlK8sDatabaseReplicationExtension,
     S3IntegratorMinIOBackendExtension,
@@ -22,6 +23,7 @@ from extensions import (
 from juju import JujuBackend, JujuClient, JujuWaitTimeoutError
 from juju_jubilant import JubilantBackend
 from pytest import StashKey
+from utils import normalize_string
 
 
 @pytest.fixture
@@ -41,28 +43,25 @@ def juju_backend() -> JujuBackend:
 
 
 @pytest.fixture
-def juju_client(juju_backend: JujuBackend, logger: logging.Logger, minio_client_file: Path | None) -> JujuClient:
+def juju_client(
+    juju_backend: JujuBackend, logger: logging.Logger, minio_client_file: Path | None, ubuntu_pro_token: str | None
+) -> JujuClient:
     return JujuClient(
         juju_backend,
         logger,
         extensions=[
-            UnsealVaultJujuExtension(juju_backend, logger),
-            UnsealVaultK8sJujuExtension(juju_backend, logger),
-            S3IntegratorMinIOBackendExtension(juju_backend, logger, minio_client_file),
+            ConfigureLivepatchServerExtension(juju_backend, logger, ubuntu_pro_token),
             PostgresqlDatabaseReplicationExtension(juju_backend, logger),
             PostgresqlK8sDatabaseReplicationExtension(juju_backend, logger),
+            S3IntegratorMinIOBackendExtension(juju_backend, logger, minio_client_file),
+            UnsealVaultJujuExtension(juju_backend, logger),
+            UnsealVaultK8sJujuExtension(juju_backend, logger),
         ],
     )
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption("--model", type=str, required=True, help="Juju model to test in")
-    parser.addoption(
-        "--minio-client-file",
-        type=Path,
-        help="MinIO client file used to create a bucket (for s3-integrator)",
-        default=None,
-    )
 
 
 @pytest.fixture
@@ -73,10 +72,19 @@ def model(request: pytest.FixtureRequest) -> str:
 
 
 @pytest.fixture
-def minio_client_file(request: pytest.FixtureRequest) -> Path | None:
-    option = request.config.getoption("--minio-client-file")
-    assert option is None or isinstance(option, Path)
-    return option
+def minio_client_file() -> Path | None:
+    file_path = os.environ.get("MINIO_CLIENT_FILE")
+    if file_path:
+        file_path = file_path.strip()
+    return Path(file_path) if file_path else None
+
+
+@pytest.fixture
+def ubuntu_pro_token() -> str | None:
+    token = os.environ.get("UBUNTU_PRO_TOKEN")
+    if token:
+        token = token.strip()
+    return token if token else None
 
 
 failure_message = StashKey[str]()
@@ -204,7 +212,7 @@ def record_warning_execution_metadata(execution_metadata: Callable[[str, str | i
 
         # Save all warnings
         for warning in warnings_list:
-            execution_metadata("warning:message", normalize_message(f"{warning.category.__name__}: {warning.message}"))
+            execution_metadata("warning:message", normalize_string(f"{warning.category.__name__}: {warning.message}"))
             captured_warnings.append(warning)
 
     # Re-emit all warnings so they show up in the test summary
@@ -243,26 +251,6 @@ def record_charms_and_revisions_execution_metadata(
     record_charms_and_revisions_execution_metadata_instantaneous(juju_client, model, execution_metadata)
 
 
-def normalize_message(message: Any) -> str:
-    # Convert to string if needed
-    if isinstance(message, bytes):
-        message_as_str = message.decode("utf-8", errors="replace")
-    else:
-        message_as_str = str(message)
-
-    # Replace all numeric sequences with "XXX"
-    # Should normalize timestamps, IP addresses, and other variable data
-    message_without_numeric_sequences = re.sub(r"\d+", "XXX", message_as_str)
-    # Limit character count
-    max_character_count = 150
-    if len(message_without_numeric_sequences) > max_character_count:
-        message_limited_length = f"{message_without_numeric_sequences[:max_character_count - 3]}..."
-    else:
-        message_limited_length = message_without_numeric_sequences
-
-    return message_limited_length
-
-
 @pytest.fixture
 def record_failure_execution_metadata(
     request: pytest.FixtureRequest, execution_metadata: Callable[[str, str | int], None]
@@ -272,11 +260,11 @@ def record_failure_execution_metadata(
 
     # Save the failure message
     if failure_message in request.node.stash:
-        execution_metadata("failure:message", normalize_message(request.node.stash[failure_message]))
+        execution_metadata("failure:message", normalize_string(request.node.stash[failure_message]))
 
     # Save the skip message
     if skipped_message in request.node.stash:
-        execution_metadata("skipped:message", normalize_message(request.node.stash[skipped_message]))
+        execution_metadata("skipped:message", normalize_string(request.node.stash[skipped_message]))
 
     # Save extra metadata from exception
     if failure_exception in request.node.stash:
@@ -289,20 +277,20 @@ def record_failure_execution_metadata(
                     continue
                 execution_metadata(
                     f"failure:charm:{application.charm}:status",
-                    f"application:{application.status}:{normalize_message(application.message)}",
+                    f"application:{application.status}:{normalize_string(application.message)}",
                 )
             for unit in exc.wait_state.noncompliant_units.values():
                 if unit is None:
                     continue
                 execution_metadata(
                     f"failure:charm:{unit.charm}:status",
-                    f"unit:{unit.status}:{normalize_message(unit.message)}",
+                    f"unit:{unit.status}:{normalize_string(unit.message)}",
                 )
         elif isinstance(exc, CalledProcessError):
             cmd = " ".join(exc.cmd) if isinstance(exc.cmd, (list, tuple)) else exc.cmd
-            execution_metadata("failure:cli:cmd", normalize_message(cmd))
+            execution_metadata("failure:cli:cmd", normalize_string(cmd))
             execution_metadata("failure:cli:return_code", str(exc.returncode))
             if exc.stdout:
-                execution_metadata("failure:cli:stdout", normalize_message(exc.stdout))
+                execution_metadata("failure:cli:stdout", normalize_string(exc.stdout))
             if exc.stderr:
-                execution_metadata("failure:cli:stderr", normalize_message(exc.stderr))
+                execution_metadata("failure:cli:stderr", normalize_string(exc.stderr))

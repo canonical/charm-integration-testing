@@ -33,6 +33,16 @@ This guide will reference variables that need to contain values specific to your
 ``OUTPUT_FILE``:
   A filename to use for for the charm bundle output produced by the ``build-bundle.sh`` script. For example, ``generated-bundle.yaml``.
 
+Optional environment variables
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The following environment variables are optional and only needed when testing specific charms that require them:
+
+``MINIO_CLIENT_FILE``:
+  Path to the MinIO client configuration file. Will be downloaded automatically by the test scripts if not provided. Used when deploying the `minio-k8s` charm with `s3-integrator`.
+``UBUNTU_PRO_TOKEN``:
+  Ubuntu Pro token for configuring the livepatch server. Required when testing the `canonical-livepatch-server-k8s`` charms.
+
 Set up Juju and k8s
 -------------------
 Juju and k8s will be needed to run the tests.
