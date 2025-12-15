@@ -6,9 +6,10 @@ from datetime import timedelta
 from typing import Any
 
 import jubilant
+import pytest
 import yaml
-from juju_jubilant.backend import JubilantBackend
-from juju_jubilant.client import JubilantClient
+from juju import JujuWaitState, JujuWaitTimeoutError
+from juju_jubilant.backend import JubilantBackend, JubilantClient
 from pydantic.dataclasses import dataclass
 
 
@@ -45,233 +46,336 @@ class TestJubilantClient:
 
 
 @dataclass
+class StatusStub:
+    """Stub for status() method"""
+
+    call_count: int = 0
+
+    def status(self):
+        self.call_count += 1
+        return jubilant.Status(
+            model=jubilant.statustypes.ModelStatus(
+                name="test-model",
+                type="caas",
+                controller="test",
+                cloud="test",
+                version="3.0.0",
+            ),
+            machines={},
+            apps={},
+        )
+
+
+@dataclass
 class WaitStub:
-    raise_exception: bool = False
+    """Stub for wait() method that can be configured to succeed or fail"""
 
-    def wait(self, ready: Any, timeout: float, delay: float, **kwargs: Any) -> None:
-        self.ready = ready
-        self.timeout = timeout
-        self.delay = delay
-        self.kwargs = kwargs
+    raise_timeout: bool = False
+    call_count: int = 0
 
-        if self.raise_exception:
-            raise TimeoutError
+    def wait(
+        self,
+        model: str,
+        ready,
+        error=None,
+        timeout=None,
+        successes=None,
+        delay=None,
+    ):
+        self.call_count += 1
+        if self.raise_timeout:
+            raise JujuWaitTimeoutError()
 
 
 class TestJubilantBackend:
+    class TestWait:
+        def test_wait_success(self):
+            # GIVEN a backend with mocked status
+            stub = StatusStub()
+            client = JubilantClientStub(client=stub)
+            backend = JubilantBackend(client)
+
+            # WHEN wait is called with a ready condition that is immediately true
+            backend.wait(
+                "test-model",
+                ready=lambda status: (True, JujuWaitState(message="ready")),
+                timeout=timedelta(seconds=10),
+                successes=3,
+                delay=timedelta(milliseconds=10),
+            )
+
+            # THEN status was called 3 times (for 3 successes)
+            assert stub.call_count == 3
+
+        def test_wait_timeout_with_failures(self):
+            # GIVEN a backend with mocked status
+            stub = StatusStub()
+            client = JubilantClientStub(client=stub)
+            backend = JubilantBackend(client)
+
+            # WHEN wait is called with a ready condition that is never true
+            with pytest.raises(JujuWaitTimeoutError) as exc_info:
+                backend.wait(
+                    "test-model",
+                    ready=lambda status: (False, JujuWaitState(message="not ready")),
+                    timeout=timedelta(milliseconds=100),
+                    successes=3,
+                    delay=timedelta(milliseconds=10),
+                )
+
+            # THEN the wait state has the correct message
+            assert exc_info.value.wait_state.message == "not ready"
+            assert not exc_info.value.wait_state.insufficient_status_checks
+
+        def test_wait_timeout_insufficient_checks(self):
+            # GIVEN a backend with mocked status
+            stub = StatusStub()
+            client = JubilantClientStub(client=stub)
+            backend = JubilantBackend(client)
+
+            # Track call count
+            call_count = 0
+
+            def ready_func(status):
+                nonlocal call_count
+                call_count += 1
+                # Always ready but timeout before getting 100 successes
+                return (True, JujuWaitState(message="always ready"))
+
+            # WHEN wait times out while always being ready
+            with pytest.raises(JujuWaitTimeoutError) as exc_info:
+                backend.wait(
+                    "test-model",
+                    ready=ready_func,
+                    timeout=timedelta(milliseconds=100),
+                    successes=100,  # Need 100 successes but will timeout
+                    delay=timedelta(milliseconds=10),
+                )
+
+            # THEN insufficient_status_checks is set
+            assert exc_info.value.wait_state.insufficient_status_checks
+            assert call_count < 100
+
+        def test_wait_with_error_callback(self):
+            # GIVEN a backend with mocked status
+            stub = StatusStub()
+            client = JubilantClientStub(client=stub)
+            backend = JubilantBackend(client)
+
+            # WHEN wait is called with an error condition that triggers
+            with pytest.raises(JujuWaitTimeoutError) as exc_info:
+                backend.wait(
+                    "test-model",
+                    ready=lambda status: (False, JujuWaitState(message="not ready")),
+                    error=lambda status: (True, JujuWaitState(message="error occurred")),
+                    timeout=timedelta(seconds=10),
+                    successes=3,
+                    delay=timedelta(milliseconds=10),
+                )
+
+            # THEN the error message is in the wait state
+            assert exc_info.value.wait_state.message == "error occurred"
+
+        def test_wait_success_resets_on_failure(self):
+            # GIVEN a backend with mocked status
+            stub = StatusStub()
+            client = JubilantClientStub(client=stub)
+            backend = JubilantBackend(client)
+
+            # Track ready states: ready, ready, not ready, ready, ready, ready
+            ready_states = [True, True, False, True, True, True]
+            call_count = 0
+
+            def ready_func(status):
+                nonlocal call_count
+                is_ready = ready_states[min(call_count, len(ready_states) - 1)]
+                call_count += 1
+                return (is_ready, JujuWaitState(message="test"))
+
+            # WHEN wait is called needing 3 successes
+            backend.wait(
+                "test-model",
+                ready=ready_func,
+                timeout=timedelta(seconds=10),
+                successes=3,
+                delay=timedelta(milliseconds=10),
+            )
+
+            # THEN we needed 6 calls (2 ready, 1 fail resets count, 3 ready to succeed)
+            assert call_count == 6
+
     class TestWaitIdle:
         def test_wait_idle(self) -> None:
             # GIVEN
-            stub = WaitStub()
+            stub = StatusStub()
             client = JubilantClientStub(client=stub)
+            backend = JubilantBackend(client)
 
             # WHEN
-            JubilantBackend(client).wait_idle("test-model", timedelta(seconds=10), timedelta(seconds=5))  # type: ignore[arg-type]
+            backend.wait_idle("test-model", timedelta(seconds=10), count=3)
 
-            # THEN the timeout and delay are set correctly
-            assert stub.timeout == 10
-            assert stub.delay == 1
+            # THEN status was called 3 times
+            assert stub.call_count == 3
 
         def test_timeout(self) -> None:
-            # GIVEN
-            stub = WaitStub(raise_exception=True)
-            client = JubilantClientStub(client=stub)
+            # GIVEN a backend with stubbed wait that raises timeout
+            wait_stub = WaitStub(raise_timeout=True)
+            backend = JubilantBackend()
+            backend.wait = wait_stub.wait
 
-            # WHEN
-            try:
-                JubilantBackend(client).wait_idle("test-model", timedelta(seconds=10), timedelta(seconds=5))  # type: ignore[arg-type]
-            except TimeoutError:
-                # THEN
-                pass
-            else:
-                # AND
-                assert False
+            # WHEN / THEN
+            with pytest.raises(JujuWaitTimeoutError):
+                backend.wait_idle("test-model", timedelta(milliseconds=100), count=5)
 
     class TestWaitApplicationSettled:
         def test_application_settled(self) -> None:
             # GIVEN
-            stub = WaitStub()
-            client = JubilantClientStub(client=stub)
+            wait_stub = WaitStub()
+            backend = JubilantBackend()
+            backend.wait = wait_stub.wait
 
             # WHEN
-            JubilantBackend(client).wait_application_settled("test-model", "my-app", timeout=timedelta(seconds=10))  # type: ignore[arg-type]
+            backend.wait_application_settled("test-model", "my-app", timeout=timedelta(seconds=10))
 
-            # THEN the timeout and delay are set correctly
-            assert stub.timeout == 10
-            assert stub.delay == 1
+            # THEN wait was called
+            assert wait_stub.call_count == 1
 
         def test_timeout(self) -> None:
             # GIVEN
-            stub = WaitStub(raise_exception=True)
-            client = JubilantClientStub(client=stub)
+            wait_stub = WaitStub(raise_timeout=True)
+            backend = JubilantBackend()
+            backend.wait = wait_stub.wait
 
-            # WHEN
-            try:
-                JubilantBackend(client).wait_application_settled("test-model", "my-app", timeout=timedelta(seconds=10))  # type: ignore[arg-type]
-            except TimeoutError:
-                # THEN
-                pass
-            else:
-                # AND
-                assert False
+            # WHEN / THEN
+            with pytest.raises(JujuWaitTimeoutError):
+                backend.wait_application_settled("test-model", "my-app", timeout=timedelta(milliseconds=100))
 
     class TestWaitApplicationScaled:
         def test_application_scaled(self) -> None:
             # GIVEN
-            stub = WaitStub()
-            client = JubilantClientStub(client=stub)
+            wait_stub = WaitStub()
+            backend = JubilantBackend()
+            backend.wait = wait_stub.wait
 
             # WHEN
-            JubilantBackend(client).wait_application_scaled("test-model", "my-app", timeout=timedelta(seconds=10))  # type: ignore[arg-type]
+            backend.wait_application_scaled("test-model", "my-app", timeout=timedelta(seconds=10))
 
-            # THEN the timeout and delay are set correctly
-            assert stub.timeout == 10
-            assert stub.delay == 1
+            # THEN wait was called
+            assert wait_stub.call_count == 1
 
         def test_timeout(self) -> None:
             # GIVEN
-            stub = WaitStub(raise_exception=True)
-            client = JubilantClientStub(client=stub)
+            wait_stub = WaitStub(raise_timeout=True)
+            backend = JubilantBackend()
+            backend.wait = wait_stub.wait
 
-            # WHEN
-            try:
-                JubilantBackend(client).wait_application_scaled("test-model", "my-app", timeout=timedelta(seconds=10))  # type: ignore[arg-type]
-            except TimeoutError:
-                # THEN
-                pass
-            else:
-                # AND
-                assert False
+            # WHEN / THEN
+            with pytest.raises(JujuWaitTimeoutError):
+                backend.wait_application_scaled("test-model", "my-app", timeout=timedelta(milliseconds=100))
 
     class TestWaitForUnitMessage:
         def test_unit_message(self) -> None:
             # GIVEN
-            stub = WaitStub()
-            client = JubilantClientStub(client=stub)
+            wait_stub = WaitStub()
+            backend = JubilantBackend()
+            backend.wait = wait_stub.wait
 
             # WHEN
-            JubilantBackend(client).wait_for_unit_message(  # type: ignore[arg-type]
-                "test-model", "my-unit", "my-message", timeout=timedelta(seconds=10)
-            )
+            backend.wait_for_unit_message("test-model", "my-app/0", "my-message", timeout=timedelta(seconds=10))
 
-            # THEN the timeout and delay are set correctly
-            assert stub.timeout == 10
-            assert stub.delay == 1
+            # THEN wait was called
+            assert wait_stub.call_count == 1
 
         def test_timeout(self) -> None:
             # GIVEN
-            stub = WaitStub(raise_exception=True)
-            client = JubilantClientStub(client=stub)
+            wait_stub = WaitStub(raise_timeout=True)
+            backend = JubilantBackend()
+            backend.wait = wait_stub.wait
 
-            # WHEN
-            try:
-                JubilantBackend(client).wait_for_unit_message(  # type: ignore[arg-type]
-                    "test-model", "my-unit", "my-message", timeout=timedelta(seconds=10)
+            # WHEN / THEN
+            with pytest.raises(JujuWaitTimeoutError):
+                backend.wait_for_unit_message(
+                    "test-model", "my-unit", "my-message", timeout=timedelta(milliseconds=100)
                 )
-            except TimeoutError:
-                # THEN
-                pass
-            else:
-                # AND
-                assert False
 
     class TestWaitForRemoval:
         def test_removal(self) -> None:
             # GIVEN
-            stub = WaitStub()
+            stub = StatusStub()
             client = JubilantClientStub(client=stub)
+            backend = JubilantBackend(client)
 
             # WHEN
-            JubilantBackend(client).wait_for_removal("test-model", ["my-app"], timeout=timedelta(seconds=10))  # type: ignore[arg-type]
+            backend.wait_for_removal("test-model", ["my-app"], timeout=timedelta(seconds=10))
 
-            # THEN the timeout and delay are set correctly
-            assert stub.timeout == 10
-            assert stub.delay == 1
+            # THEN status was called
+            assert stub.call_count >= 1
 
         def test_timeout(self) -> None:
             # GIVEN
-            stub = WaitStub(raise_exception=True)
-            client = JubilantClientStub(client=stub)
+            wait_stub = WaitStub(raise_timeout=True)
+            backend = JubilantBackend()
+            backend.wait = wait_stub.wait
 
-            # WHEN
-            try:
-                JubilantBackend(client).wait_for_removal("test-model", ["my-app"], timeout=timedelta(seconds=10))  # type: ignore[arg-type]
-            except TimeoutError:
-                # THEN
-                pass
-            else:
-                # AND
-                assert False
+            # WHEN / THEN
+            with pytest.raises(JujuWaitTimeoutError):
+                backend.wait_for_removal("test-model", ["my-app"], timeout=timedelta(milliseconds=100))
 
     class TestWaitForRemovalOfIntegration:
         def test_removal_of_integration(self) -> None:
             # GIVEN
-            stub = WaitStub()
+            stub = StatusStub()
             client = JubilantClientStub(client=stub)
+            backend = JubilantBackend(client)
 
             # WHEN
             from juju import JujuIntegrationApplication
 
             endpoint_1 = JujuIntegrationApplication("app1", "endpoint1")
             endpoint_2 = JujuIntegrationApplication("app2", "endpoint2")
-            JubilantBackend(client).wait_for_removal_of_integration(  # type: ignore[arg-type]
-                "test-model", endpoint_1, endpoint_2, timeout=timedelta(seconds=10)
-            )
+            backend.wait_for_removal_of_integration("test-model", endpoint_1, endpoint_2, timeout=timedelta(seconds=10))
 
-            # THEN the timeout and delay are set correctly
-            assert stub.timeout == 10
-            assert stub.delay == 1
+            # THEN status was called
+            assert stub.call_count >= 1
 
         def test_timeout(self) -> None:
             # GIVEN
-            stub = WaitStub(raise_exception=True)
-            client = JubilantClientStub(client=stub)
+            wait_stub = WaitStub(raise_timeout=True)
+            backend = JubilantBackend()
+            backend.wait = wait_stub.wait
 
-            # WHEN
+            # WHEN / THEN
             from juju import JujuIntegrationApplication
 
             endpoint_1 = JujuIntegrationApplication("app1", "endpoint1")
             endpoint_2 = JujuIntegrationApplication("app2", "endpoint2")
-            try:
-                JubilantBackend(client).wait_for_removal_of_integration(  # type: ignore[arg-type]
-                    "test-model", endpoint_1, endpoint_2, timeout=timedelta(seconds=10)
+            with pytest.raises(JujuWaitTimeoutError):
+                backend.wait_for_removal_of_integration(
+                    "test-model", endpoint_1, endpoint_2, timeout=timedelta(milliseconds=100)
                 )
-            except TimeoutError:
-                # THEN
-                pass
-            else:
-                # AND
-                assert False
 
     class TestWaitForRemovalOfUnits:
         def test_removal_of_units(self) -> None:
             # GIVEN
-            stub = WaitStub()
-            client = JubilantClientStub(client=stub)
+            wait_stub = WaitStub()
+            backend = JubilantBackend()
+            backend.wait = wait_stub.wait
 
             # WHEN
-            JubilantBackend(client).wait_for_removal_of_units("test-model", ["my-app"], timeout=timedelta(seconds=10))  # type: ignore[arg-type]
+            backend.wait_for_removal_of_units("test-model", ["my-app"], timeout=timedelta(seconds=10))
 
-            # THEN the timeout and delay are set correctly
-            assert stub.timeout == 10
-            assert stub.delay == 1
+            # THEN wait was called
+            assert wait_stub.call_count == 1
 
         def test_timeout(self) -> None:
             # GIVEN
-            stub = WaitStub(raise_exception=True)
-            client = JubilantClientStub(client=stub)
+            wait_stub = WaitStub(raise_timeout=True)
+            backend = JubilantBackend()
+            backend.wait = wait_stub.wait
 
-            # WHEN
-            try:
-                JubilantBackend(client).wait_for_removal_of_units(  # type: ignore[arg-type]
-                    "test-model", ["my-app"], timeout=timedelta(seconds=10)
-                )
-            except TimeoutError:
-                # THEN
-                pass
-            else:
-                # AND
-                assert False
+            # WHEN / THEN
+            with pytest.raises(JujuWaitTimeoutError):
+                backend.wait_for_removal_of_units("test-model", ["my-app"], timeout=timedelta(milliseconds=100))
 
     class TestAddSecret:
         @dataclass

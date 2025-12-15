@@ -1,3 +1,5 @@
 configs:
-  - kind: ingress
-  - kind: egress
+  - config:
+      kind: ingress
+  - config:
+      kind: egress

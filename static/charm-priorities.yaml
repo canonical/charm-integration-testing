@@ -1,3 +1,20 @@
 priorities:
   pgbouncer-k8s: 2.0
   mysql-router-k8s: 2.0
+  self-signed-certificates: 2.0
+
+  # https://warthogs.atlassian.net/browse/IQA-3315
+  # Charms pending delisting
+  graylog-k8s: 0.25
+  hello-kubecon: 0.25
+  osm-keystone: 0.25
+  osm-lcm: 0.25
+  osm-mon: 0.25
+  osm-pol: 0.25
+  osm-ro: 0.25
+  osm-nbi: 0.25
+  osm-ng-ui: 0.25
+  osm-pla: 0.25
+  osm-mariadb: 0.25
+  charmed-osm-mariadb-k8s: 0.25
+  osm-grafana: 0.25

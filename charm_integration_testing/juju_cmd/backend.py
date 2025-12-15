@@ -9,6 +9,7 @@ from typing import Optional
 
 import yaml
 from juju import JujuBackend, JujuExecOutput, JujuIntegration, JujuIntegrationApplication, JujuWaitTimeoutError
+from juju.backend import JujuStatusPerformanceWarning, warn_performance
 
 from .cmd import CmdArg, CmdClient, CmdError
 from .structures import JujuExecTask, JujuModel, JujuSecretInfo, JujuStatus
@@ -23,6 +24,7 @@ class JujuCmdBackend(JujuBackend):
     def _call_juju(self, *args: CmdArg) -> str:
         return self.cmd_client.call(CmdArg(value="juju"), *args)
 
+    @warn_performance(category=JujuStatusPerformanceWarning, threshold=timedelta(seconds=3))
     def _status(self, model: str, *selectors: str) -> JujuStatus:
         return JujuStatus(
             **yaml.safe_load(

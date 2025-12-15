@@ -2,17 +2,24 @@
 # See LICENSE file for licensing details.
 
 
-from datetime import timedelta
-from typing import Any, Callable
+import dataclasses
+import time
+from datetime import datetime, timedelta
+from typing import Callable
 
 import jubilant
 import yaml
-from juju import JujuIntegrationApplication, JujuWaitState, JujuWaitTimeoutError
+from juju import (
+    JujuIntegrationApplication,
+    JujuStatusPerformanceWarning,
+    JujuWaitState,
+    JujuWaitTimeoutError,
+    warn_performance,
+)
 from juju_cmd import JujuCmdBackend
 
 from .client import JubilantClient
 from .wait import (
-    WaitMonitor,
     all_statuses_are_in,
     applications_are_removed,
     applications_are_scaled,
@@ -26,9 +33,21 @@ from .wait import (
 class JubilantBackend(JujuCmdBackend):
     client: JubilantClient
 
+    default_timeout = timedelta(minutes=5)
+    default_successes = 3
+    default_delay = timedelta(seconds=1)
+
     def __init__(self, client: JubilantClient | None = None):
         super().__init__()
         self.client = client or JubilantClient()
+
+    @warn_performance(category=JujuStatusPerformanceWarning, threshold=timedelta(seconds=3))
+    def status(self, model: str) -> jubilant.Status:
+        return self.client.model(model).status()
+
+    @warn_performance(category=JujuStatusPerformanceWarning, threshold=timedelta(seconds=3))
+    def juju_status_text(self, model: str) -> str:
+        return self.client.model(model).cli("status", "integrations", "--format", "tabular")
 
     def wait(
         self,
@@ -36,29 +55,66 @@ class JubilantBackend(JujuCmdBackend):
         ready: Callable[[jubilant.Status], tuple[bool, JujuWaitState]],
         error: Callable[[jubilant.Status], tuple[bool, JujuWaitState]] | None = None,
         timeout: timedelta | None = None,
-        period: timedelta | None = None,
-        delay: int = 1,
-        **kwargs: Any,
-    ) -> jubilant.Status | None:
-        wait_monitor = WaitMonitor(ready=ready, error=error)
-        try:
-            return self.client.model(model).wait(
-                ready=wait_monitor.ready,
-                error=wait_monitor.error,
-                timeout=timeout.total_seconds() if timeout else None,
-                successes=int(period.total_seconds()) if period else 1,
-                delay=delay,
-                **kwargs,
-            )
-        except TimeoutError:
-            raise JujuWaitTimeoutError(wait_state=wait_monitor.last_noncompliant_wait_state)
+        successes: int | None = None,
+        delay: timedelta | None = None,
+    ):
+        # Set default parameters
+        if timeout is None:
+            timeout = self.default_timeout
+        if successes is None:
+            successes = self.default_successes
+        if delay is None:
+            delay = self.default_delay
 
-    def wait_idle(self, model: str, timeout: timedelta | None, period: timedelta | None = None) -> None:
+        # Initialize wait state
+        last_wait_state = JujuWaitState()
+        noncompliant_wait_state = None
+        success_count = 0
+        start = datetime.now()
+
+        # Begin wait loop
+        while True:
+            iteration_start = datetime.now()
+            if iteration_start - start > timeout:
+                break
+
+            # Get current status
+            status = self.status(model)
+
+            # Check for error condition
+            if error is not None:
+                is_error, last_wait_state = error(status)
+                if is_error:
+                    raise JujuWaitTimeoutError(wait_state=last_wait_state)
+
+            # Check for ready condition
+            is_ready, last_wait_state = ready(status)
+            if is_ready:
+                success_count += 1
+                if success_count >= successes:
+                    return
+            else:
+                noncompliant_wait_state = last_wait_state
+                success_count = 0
+
+            # Wait before next iteration
+            elapsed = datetime.now() - iteration_start
+            time.sleep(max(0, (delay - elapsed).total_seconds()))
+
+        # Timeout reached
+        if noncompliant_wait_state is None:
+            noncompliant_wait_state = dataclasses.replace(
+                last_wait_state,
+                insufficient_status_checks=True,
+            )
+        raise JujuWaitTimeoutError(wait_state=noncompliant_wait_state)
+
+    def wait_idle(self, model: str, timeout: timedelta | None, count: int):
         self.wait(
             model,
             lambda status: all_statuses_are_in({"active"}, status),
             timeout=timeout,
-            period=period,
+            successes=count,
         )
 
     def wait_application_settled(self, model: str, application: str, timeout: timedelta | None) -> None:
@@ -154,19 +210,19 @@ class JubilantBackend(JujuCmdBackend):
 
     def unit_ip(self, model: str, unit: str) -> str:
         application, unit_id = unit.split("/")
-        for possible_unit, unit_status in self.client.model(model).status().apps[application].units.items():
+        for possible_unit, unit_status in self.status(model).apps[application].units.items():
             _, possible_unit_id = possible_unit.split("/")
             if possible_unit_id == unit_id or (unit_id == "leader" and unit_status.leader):
                 return unit_status.address
         raise KeyError(f"Unit '{unit}' not found")
 
     def get_charm_revisions(self, model: str) -> set[tuple[str, int]]:
-        return {(app_info.charm, app_info.charm_rev) for app_info in self.client.model(model).status().apps.values()}
+        return {(app_info.charm, app_info.charm_rev) for app_info in self.status(model).apps.values()}
 
     def integration_exists(
         self, application_1: str, endpoint_1: str, application_2: str, endpoint_2: str, model: str
     ) -> bool:
-        status = self.client.model(model).status()
+        status = self.status(model)
         integrations = get_integrations(status)
 
         target_applications = {

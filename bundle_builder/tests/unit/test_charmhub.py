@@ -21,8 +21,8 @@ import yaml
 from pydantic import Field
 from pydantic.dataclasses import dataclass
 
-from bundle_builder.charm import CharmConfig
-from bundle_builder.charmhub import CharmhubClient
+from bundle_builder.charm import CharmConfigCriteria, CharmTestConfig
+from bundle_builder.charmhub import CharmhubClient, CharmReleaseNotFoundException
 from bundle_builder.charmhub_http import (
     CharmhubBase,
     CharmReleaseNotFoundException,
@@ -31,6 +31,7 @@ from bundle_builder.charmhub_http import (
     RefreshAction,
     RefreshResponse,
 )
+from bundle_builder.overrides import CharmTestConfigs
 
 
 @dataclass
@@ -65,8 +66,10 @@ class OverridesStub:
 
     charm_test_configs: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
 
-    def get_charm_test_configs(self, charm: str) -> list[dict[str, Any]]:
-        return self.charm_test_configs[charm]
+    def get_charm_test_configs(self, charm: str) -> list[CharmTestConfig]:
+        configs = self.charm_test_configs.get(charm, [])
+        # Use CharmTestConfigs wrapper to let Pydantic validate the list properly
+        return CharmTestConfigs(configs=configs).configs
 
 
 matching_base = CharmhubBase(name="ubuntu", architecture="amd64", channel="20.04")
@@ -688,26 +691,40 @@ class TestCharmhubClient:
             label: str
             charm: str
             charm_test_configs: dict[str, list[dict[str, Any]]]
-            expected: tuple[CharmConfig, ...]
+            expected: tuple[CharmTestConfig, ...]
 
         test_cases = [
             Params(
                 label="no_configs",
                 charm="charm-a",
                 charm_test_configs={"charm-a": []},
-                expected=((),),
+                expected=(),
             ),
             Params(
                 label="single_config",
                 charm="charm-a",
-                charm_test_configs={"charm-a": [{"key1": "val1", "key2": 2}]},
-                expected=((("key1", "val1"), ("key2", 2)),),
+                charm_test_configs={"charm-a": [{"config": {"key1": "val1", "key2": 2}}]},
+                expected=(
+                    CharmTestConfig(
+                        criteria=CharmConfigCriteria.from_bool(True),
+                        config=(("key1", "val1"), ("key2", 2)),
+                    ),
+                ),
             ),
             Params(
                 label="multiple_configs",
                 charm="charm-b",
-                charm_test_configs={"charm-b": [{"a": "x"}, {"b": "y"}]},
-                expected=((("a", "x"),), (("b", "y"),)),
+                charm_test_configs={"charm-b": [{"config": {"a": "x"}}, {"config": {"b": "y"}}]},
+                expected=(
+                    CharmTestConfig(
+                        criteria=CharmConfigCriteria.from_bool(True),
+                        config=(("a", "x"),),
+                    ),
+                    CharmTestConfig(
+                        criteria=CharmConfigCriteria.from_bool(True),
+                        config=(("b", "y"),),
+                    ),
+                ),
             ),
         ]
 
@@ -721,4 +738,4 @@ class TestCharmhubClient:
             actual = client._charm_test_configs(params.charm)
 
             # THEN
-            assert tuple(map(tuple, actual)) == params.expected
+            assert actual == params.expected

@@ -5,6 +5,7 @@
 import json
 import logging
 import re
+import warnings
 from datetime import timedelta
 from pathlib import Path
 from subprocess import CalledProcessError  # nosec
@@ -153,9 +154,9 @@ def assert_idle(juju_client: JujuClient, model: str, print_setup_and_teardown_in
     _ = print_setup_and_teardown_info
 
     try:
-        juju_client.idle_for_period(model=model, timeout=timedelta(seconds=15), idle_period=timedelta(seconds=5))
-    except JujuWaitTimeoutError:
-        pytest.skip("Model is not idle before test start")
+        juju_client.idle_for_period(model=model, timeout=timedelta(seconds=30), count=5)
+    except JujuWaitTimeoutError as e:
+        pytest.skip(str(e))
 
 
 @pytest.fixture
@@ -182,12 +183,39 @@ def execution_metadata(record_property: Callable[[str, object], None]) -> Iterat
 
 @pytest.fixture(autouse=True)
 def record_execution_metadata(
+    record_warning_execution_metadata: None,
     record_failure_execution_metadata: None,
     record_charms_and_revisions_execution_metadata: None,
 ) -> None:
     # Save various execution metadata
+    _ = record_warning_execution_metadata
     _ = record_failure_execution_metadata
     _ = record_charms_and_revisions_execution_metadata
+
+
+@pytest.fixture
+def record_warning_execution_metadata(execution_metadata: Callable[[str, str | int], None]):
+    # Capture all warnings
+    # Pytest normally captures warnings, but does not expose them until after the test report is made
+    captured_warnings = []
+    with warnings.catch_warnings(record=True) as warnings_list:
+        # Let the test run
+        yield
+
+        # Save all warnings
+        for warning in warnings_list:
+            execution_metadata("warning:message", normalize_message(f"{warning.category.__name__}: {warning.message}"))
+            captured_warnings.append(warning)
+
+    # Re-emit all warnings so they show up in the test summary
+    for warning in captured_warnings:
+        warnings.warn_explicit(
+            message=warning.message,
+            category=warning.category,
+            filename=warning.filename,
+            lineno=warning.lineno,
+            source=warning.source,
+        )
 
 
 def record_charms_and_revisions_execution_metadata_instantaneous(

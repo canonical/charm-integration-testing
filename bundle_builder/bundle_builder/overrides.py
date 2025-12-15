@@ -20,7 +20,7 @@ from typing import Any, Optional
 import yaml
 from pydantic import Field
 
-from .charm import CharmEndpointOptionality
+from .charm import CharmEndpointOptionality, CharmTestConfig
 from .immutable_dataclass import immutable_dataclass
 
 
@@ -58,7 +58,7 @@ class CharmListingOverrides:
 
 @immutable_dataclass
 class CharmTestConfigs:
-    configs: list[dict[str, str | int]] = Field(default_factory=list)
+    configs: list[CharmTestConfig] = Field(default_factory=list)
 
 
 @immutable_dataclass
@@ -116,7 +116,7 @@ class OverridesClient:
         return CharmListingOverrides(**self._read_yaml_file(self.charm_listing_overrides, None)).unlisted_charms
 
     @cache
-    def get_charm_test_configs(self, charm: str) -> list[dict[Any, Any]]:
+    def get_charm_test_configs(self, charm: str) -> list[CharmTestConfig]:
         return CharmTestConfigs(**self._read_yaml_file(self.charm_test_configs, f"{charm}.yaml")).configs
 
     @cache

@@ -4,9 +4,8 @@
 
 import jubilant
 import pytest
-from juju import JujuIntegrationApplication, JujuWaitState
+from juju import JujuIntegrationApplication
 from juju_jubilant.wait import (
-    WaitMonitor,
     all_statuses_are_in,
     applications_are_removed,
     applications_are_scaled,
@@ -132,101 +131,6 @@ def sample_database_webapp_status() -> jubilant.Status:
             "controller": {"timestamp": "17:00:33+13:00"},
         }
     )
-
-
-class TestWaitMonitor:
-    def test_ready(self, sample_minimal_status: jubilant.Status) -> None:
-        # GIVEN
-        def ready_func(status: jubilant.Status) -> tuple[bool, JujuWaitState]:
-            return True, JujuWaitState(message="ready")
-
-        wait_monitor = WaitMonitor(ready=ready_func, error=None)
-
-        # WHEN
-        result = wait_monitor.ready(sample_minimal_status)
-
-        # THEN
-        assert result is True
-        assert wait_monitor.last_noncompliant_wait_state == JujuWaitState()
-
-    def test_ready_not_compliant(self, sample_minimal_status: jubilant.Status) -> None:
-        # GIVEN
-        def ready_func(status: jubilant.Status) -> tuple[bool, JujuWaitState]:
-            return False, JujuWaitState(message="not ready")
-
-        wait_monitor = WaitMonitor(ready=ready_func, error=None)
-
-        # WHEN
-        result = wait_monitor.ready(sample_minimal_status)
-
-        # THEN
-        assert result is False
-        assert wait_monitor.last_noncompliant_wait_state == JujuWaitState(message="not ready")
-
-    def test_error(self, sample_minimal_status: jubilant.Status) -> None:
-        # GIVEN
-        def ready_func(status: jubilant.Status) -> tuple[bool, JujuWaitState]:
-            return True, JujuWaitState(message="ready")
-
-        def error_func(status: jubilant.Status) -> tuple[bool, JujuWaitState]:
-            return True, JujuWaitState(message="error")
-
-        wait_monitor = WaitMonitor(ready=ready_func, error=error_func)
-
-        # WHEN
-        result = wait_monitor.error(sample_minimal_status)
-
-        # THEN
-        assert result is True
-        assert wait_monitor.last_noncompliant_wait_state == JujuWaitState(message="error")
-
-    def test_error_not_compliant(self, sample_minimal_status: jubilant.Status) -> None:
-        # GIVEN
-        def ready_func(status: jubilant.Status) -> tuple[bool, JujuWaitState]:
-            return True, JujuWaitState(message="ready")
-
-        def error_func(status: jubilant.Status) -> tuple[bool, JujuWaitState]:
-            return False, JujuWaitState(message="not error")
-
-        wait_monitor = WaitMonitor(ready=ready_func, error=error_func)
-
-        # WHEN
-        result = wait_monitor.error(sample_minimal_status)
-
-        # THEN
-        assert result is False
-        assert wait_monitor.last_noncompliant_wait_state == JujuWaitState()
-
-    def test_error_not_compliant_true(self, sample_minimal_status: jubilant.Status) -> None:
-        # GIVEN
-        def ready_func(status: jubilant.Status) -> tuple[bool, JujuWaitState]:
-            return True, JujuWaitState(message="ready")
-
-        def error_func(status: jubilant.Status) -> tuple[bool, JujuWaitState]:
-            return True, JujuWaitState(message="not error")
-
-        wait_monitor = WaitMonitor(ready=ready_func, error=error_func)
-
-        # WHEN
-        result = wait_monitor.error(sample_minimal_status)
-
-        # THEN
-        assert result is True
-        assert wait_monitor.last_noncompliant_wait_state == JujuWaitState(message="not error")
-
-    def test_error_none(self, sample_minimal_status: jubilant.Status) -> None:
-        # GIVEN
-        def ready_func(status: jubilant.Status) -> tuple[bool, JujuWaitState]:
-            return True, JujuWaitState(message="ready")
-
-        wait_monitor = WaitMonitor(ready=ready_func, error=None)
-
-        # WHEN
-        result = wait_monitor.error(sample_minimal_status)
-
-        # THEN
-        assert result is False
-        assert wait_monitor.last_noncompliant_wait_state == JujuWaitState()
 
 
 class TestWaitConditions:
