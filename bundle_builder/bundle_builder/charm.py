@@ -14,11 +14,12 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
-from typing import overload
+from typing import Any, overload
 
 from pydantic import Field, model_serializer, model_validator
 
 from .immutable_dataclass import cached_method, immutable_dataclass
+from typing import TypeAlias
 
 ENDPOINT_PEERS = "peers"
 ENDPOINT_REQUIRES = "requires"
@@ -39,7 +40,7 @@ class CharmChannel:
 
     @model_validator(mode="before")
     @classmethod
-    def validate_from_string(cls, value):
+    def validate_from_string(cls, value: Any) -> Any:
         if isinstance(value, str):
             parts = value.split("/")
             match len(parts):
@@ -119,7 +120,7 @@ class CharmEndpoint:
     limit: int | None
 
 
-CharmConfig = tuple[tuple[str, str | int], ...]
+CharmConfig: TypeAlias = tuple[tuple[str, str | int], ...]
 
 
 @immutable_dataclass
@@ -130,9 +131,26 @@ class CharmConfigCriteria:
     track: str | None = None
     endpoint_integrated: str | None = None
 
+    @overload  # type: ignore[no-overload-impl]
+    def __init__(self, value: list["CharmConfigCriteria"]) -> None: ...
+
+    @overload
+    def __init__(self, value: list[dict[str, str]]) -> None: ...
+
+    @overload
+    def __init__(
+        self,
+        *,
+        all_of: frozenset["CharmConfigCriteria"] | None = None,
+        any_of: frozenset["CharmConfigCriteria"] | None = None,
+        none_of: frozenset["CharmConfigCriteria"] | None = None,
+        track: str | None = None,
+        endpoint_integrated: str | None = None,
+    ) -> None: ...
+
     @model_validator(mode="before")
     @classmethod
-    def validate_config_from_dict(cls, value):
+    def validate_config_from_dict(cls, value: Any) -> Any:
         if isinstance(value, list):
             return {"all_of": value}
         return value
@@ -185,9 +203,20 @@ class CharmTestConfig:
     criteria: CharmConfigCriteria = Field(default=CharmConfigCriteria.from_bool(True))
     config: CharmConfig = Field(default_factory=CharmConfig)
 
+    @overload  # type: ignore[no-overload-impl]
+    def __init__(self, value: dict[str, Any]) -> None: ...
+
+    @overload
+    def __init__(
+        self,
+        *,
+        criteria: CharmConfigCriteria = CharmConfigCriteria.from_bool(True),
+        config: CharmConfig = tuple(),
+    ) -> None: ...
+
     @model_validator(mode="before")
     @classmethod
-    def validate_config_from_dict(cls, value):
+    def validate_config_from_dict(cls, value: Any) -> Any:
         if isinstance(value, dict) and "config" in value:
             if isinstance(value["config"], dict):
                 # Convert dict to tuple of tuples
