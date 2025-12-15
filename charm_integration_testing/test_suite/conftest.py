@@ -202,7 +202,7 @@ def record_execution_metadata(
 
 
 @pytest.fixture
-def record_warning_execution_metadata(execution_metadata: Callable[[str, str | int], None]):
+def record_warning_execution_metadata(execution_metadata: Callable[[str, str | int], None]) -> Iterator[None]:
     # Capture all warnings
     # Pytest normally captures warnings, but does not expose them until after the test report is made
     captured_warnings = []

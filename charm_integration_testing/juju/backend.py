@@ -138,7 +138,7 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def wait_idle(self, model: str, timeout: timedelta | None, count: int | None):
+    def wait_idle(self, model: str, timeout: timedelta | None, count: int | None) -> None:
         raise NotImplementedError
 
     @abstractmethod

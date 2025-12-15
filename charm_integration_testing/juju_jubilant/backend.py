@@ -57,7 +57,7 @@ class JubilantBackend(JujuCmdBackend):
         timeout: timedelta | None = None,
         successes: int | None = None,
         delay: timedelta | None = None,
-    ):
+    ) -> None:
         # Set default parameters
         if timeout is None:
             timeout = self.default_timeout
@@ -109,7 +109,7 @@ class JubilantBackend(JujuCmdBackend):
             )
         raise JujuWaitTimeoutError(wait_state=noncompliant_wait_state)
 
-    def wait_idle(self, model: str, timeout: timedelta | None, count: int):
+    def wait_idle(self, model: str, timeout: timedelta | None, count: int) -> None:
         self.wait(
             model,
             lambda status: all_statuses_are_in({"active"}, status),

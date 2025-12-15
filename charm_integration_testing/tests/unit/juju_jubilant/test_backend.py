@@ -3,7 +3,7 @@
 
 from dataclasses import field
 from datetime import timedelta
-from typing import Any
+from typing import Any, Callable
 
 import jubilant
 import pytest
@@ -52,7 +52,7 @@ class StatusStub:
 
     call_count: int = 0
 
-    def status(self):
+    def status(self) -> jubilant.Status:
         self.call_count += 1
         return jubilant.Status(
             model=jubilant.statustypes.ModelStatus(
@@ -77,12 +77,12 @@ class WaitStub:
     def wait(
         self,
         model: str,
-        ready,
-        error=None,
-        timeout=None,
-        successes=None,
-        delay=None,
-    ):
+        ready: Callable[[jubilant.Status], tuple[bool, JujuWaitState]],
+        error: Callable[[jubilant.Status], tuple[bool, JujuWaitState]] | None = None,
+        timeout: timedelta | None = None,
+        successes: int | None = None,
+        delay: timedelta | None = None,
+    ) -> None:
         self.call_count += 1
         if self.raise_timeout:
             raise JujuWaitTimeoutError()
@@ -90,7 +90,7 @@ class WaitStub:
 
 class TestJubilantBackend:
     class TestWait:
-        def test_wait_success(self):
+        def test_wait_success(self) -> None:
             # GIVEN a backend with mocked status
             stub = StatusStub()
             client = JubilantClientStub(client=stub)
@@ -108,7 +108,7 @@ class TestJubilantBackend:
             # THEN status was called 3 times (for 3 successes)
             assert stub.call_count == 3
 
-        def test_wait_timeout_with_failures(self):
+        def test_wait_timeout_with_failures(self) -> None:
             # GIVEN a backend with mocked status
             stub = StatusStub()
             client = JubilantClientStub(client=stub)
@@ -128,7 +128,7 @@ class TestJubilantBackend:
             assert exc_info.value.wait_state.message == "not ready"
             assert not exc_info.value.wait_state.insufficient_status_checks
 
-        def test_wait_timeout_insufficient_checks(self):
+        def test_wait_timeout_insufficient_checks(self) -> None:
             # GIVEN a backend with mocked status
             stub = StatusStub()
             client = JubilantClientStub(client=stub)
@@ -137,7 +137,7 @@ class TestJubilantBackend:
             # Track call count
             call_count = 0
 
-            def ready_func(status):
+            def ready_func(status: jubilant.Status) -> tuple[bool, JujuWaitState]:
                 nonlocal call_count
                 call_count += 1
                 # Always ready but timeout before getting 100 successes
@@ -157,7 +157,7 @@ class TestJubilantBackend:
             assert exc_info.value.wait_state.insufficient_status_checks
             assert call_count < 100
 
-        def test_wait_with_error_callback(self):
+        def test_wait_with_error_callback(self) -> None:
             # GIVEN a backend with mocked status
             stub = StatusStub()
             client = JubilantClientStub(client=stub)
@@ -177,7 +177,7 @@ class TestJubilantBackend:
             # THEN the error message is in the wait state
             assert exc_info.value.wait_state.message == "error occurred"
 
-        def test_wait_success_resets_on_failure(self):
+        def test_wait_success_resets_on_failure(self) -> None:
             # GIVEN a backend with mocked status
             stub = StatusStub()
             client = JubilantClientStub(client=stub)
@@ -187,7 +187,7 @@ class TestJubilantBackend:
             ready_states = [True, True, False, True, True, True]
             call_count = 0
 
-            def ready_func(status):
+            def ready_func(status: jubilant.Status) -> tuple[bool, JujuWaitState]:
                 nonlocal call_count
                 is_ready = ready_states[min(call_count, len(ready_states) - 1)]
                 call_count += 1

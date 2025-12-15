@@ -82,7 +82,7 @@ class TestJujuWaitTimeoutError:
 
 
 class TestWarnSlow:
-    def test_no_warning_when_fast(self):
+    def test_no_warning_when_fast(self) -> None:
         # GIVEN a function decorated with warn_performance
         @warn_performance(threshold=timedelta(seconds=1))
         def fast_function():
@@ -97,7 +97,7 @@ class TestWarnSlow:
             assert len(w) == 0
             assert result == "done"
 
-    def test_warning_when_slow(self):
+    def test_warning_when_slow(self) -> None:
         # GIVEN a function decorated with warn_performance
         @warn_performance(threshold=timedelta(milliseconds=50))
         def slow_function():
@@ -115,7 +115,7 @@ class TestWarnSlow:
             assert "Exceeded threshold" in str(w[0].message)
             assert result == "done"
 
-    def test_custom_warning_category(self):
+    def test_custom_warning_category(self) -> None:
         # GIVEN a function decorated with warn_performance and a custom category
         @warn_performance(threshold=timedelta(milliseconds=50), category=JujuStatusPerformanceWarning)
         def slow_function():
@@ -132,7 +132,7 @@ class TestWarnSlow:
             assert issubclass(w[0].category, JujuStatusPerformanceWarning)
             assert result == "done"
 
-    def test_warning_on_exception(self):
+    def test_warning_on_exception(self) -> None:
         # GIVEN a function decorated with warn_performance that raises an exception
         @warn_performance(threshold=timedelta(milliseconds=50))
         def error_function():
