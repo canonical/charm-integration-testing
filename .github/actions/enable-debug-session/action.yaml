@@ -33,8 +33,17 @@ runs:
         # ssh-import-id "${IDS}"
 
         mkdir -p ~/.ssh/
+
+        echo "Echoing"
         echo "${IDS}" >> ~/.ssh/authorized_keys
 
+        echo "Importing from Launchpad"
+        ssh-import-id-lp wctaylor || true
+
+        echo "Importing from GitHub"
+        ssh-import-id-gh wctaylor || true
+
+        echo "User: $(whoami)"
         echo "IP: $(hostname -I | cut -d ' ' -f 1)"
 
     # - name: Install tmate
