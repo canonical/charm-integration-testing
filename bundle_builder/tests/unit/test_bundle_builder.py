@@ -23,6 +23,7 @@ from bundle_builder.bundle import Application, ApplicationEndpoint, Bundle, Inte
 from bundle_builder.bundle_builder import BundleBuilder, Node
 from bundle_builder.charm import (
     Charm,
+    CharmChannel,
     CharmConfigCriteria,
     CharmEndpointOptionality,
     CharmTestConfig,
@@ -558,7 +559,7 @@ class TestAddTestConfigs:
             charm = dataclasses.replace(
                 sample_charm_postgresql_k8s(),
                 name="test-charm",
-                channel="1.0/stable",
+                channel=CharmChannel("1.0/stable"),
                 test_configs=(
                     CharmTestConfig(
                         criteria=CharmConfigCriteria(track="1.0"),
@@ -704,7 +705,7 @@ class TestAddTestConfigs:
             charm1 = dataclasses.replace(
                 sample_charm_postgresql_k8s(),
                 name="charm1",
-                channel="1.0/stable",
+                channel=CharmChannel("1.0/stable"),
                 test_configs=(
                     CharmTestConfig(
                         criteria=CharmConfigCriteria(track="1.0"),
@@ -715,7 +716,7 @@ class TestAddTestConfigs:
             charm2 = dataclasses.replace(
                 sample_charm_kratos(),
                 name="charm2",
-                channel="2.0/stable",
+                channel=CharmChannel("2.0/stable"),
                 test_configs=(
                     CharmTestConfig(
                         criteria=CharmConfigCriteria(track="2.0"),
@@ -779,7 +780,7 @@ class TestAddTestConfigs:
             charm = dataclasses.replace(
                 sample_charm_kratos(),
                 name="test-charm",
-                channel="1.0/stable",
+                channel=CharmChannel("1.0/stable"),
                 endpoints=frozenset(
                     {
                         dataclasses.replace(

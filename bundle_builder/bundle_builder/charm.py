@@ -14,6 +14,8 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
+from typing import overload
+
 from pydantic import Field, model_serializer, model_validator
 
 from .immutable_dataclass import cached_method, immutable_dataclass
@@ -28,6 +30,12 @@ class CharmChannel:
     track: str
     risk: str
     branch: str
+
+    @overload  # type: ignore[no-overload-impl]
+    def __init__(self, channel: str) -> None: ...
+
+    @overload
+    def __init__(self, track: str, risk: str, branch: str) -> None: ...
 
     @model_validator(mode="before")
     @classmethod

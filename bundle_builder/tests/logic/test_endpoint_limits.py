@@ -54,7 +54,7 @@ class TestEndpointLimits:
 
             requiring_charm = Charm(
                 name="app",
-                channel="stable",
+                channel=CharmChannel("stable"),
                 revision=1,
                 ubuntu_version="22.04",
                 ubuntu_arch="amd64",
@@ -102,7 +102,7 @@ class TestEndpointLimits:
             # GIVEN two charms both with limits
             charm1 = Charm(
                 name="charm1",
-                channel="stable",
+                channel=CharmChannel("stable"),
                 revision=1,
                 ubuntu_version="22.04",
                 ubuntu_arch="amd64",
@@ -122,7 +122,7 @@ class TestEndpointLimits:
 
             charm2 = Charm(
                 name="charm2",
-                channel="stable",
+                channel=CharmChannel("stable"),
                 revision=1,
                 ubuntu_version="22.04",
                 ubuntu_arch="amd64",
@@ -192,7 +192,7 @@ class TestEndpointLimits:
             # GIVEN postgresql-k8s with limit=1 (can only connect to one app)
             postgresql_charm = Charm(
                 name="postgresql-k8s",
-                channel="stable",
+                channel=CharmChannel("stable"),
                 revision=1,
                 ubuntu_version="22.04",
                 ubuntu_arch="amd64",
@@ -212,7 +212,7 @@ class TestEndpointLimits:
             # AND indico that needs database and juju-info connection
             indico_charm = Charm(
                 name="indico",
-                channel="stable",
+                channel=CharmChannel("stable"),
                 revision=1,
                 ubuntu_version="22.04",
                 ubuntu_arch="amd64",
@@ -239,7 +239,7 @@ class TestEndpointLimits:
             # AND some-dependency-k8s that provides juju-info but also needs its own database
             dependency_charm = Charm(
                 name="some-dependency-k8s",
-                channel="stable",
+                channel=CharmChannel("stable"),
                 revision=1,
                 ubuntu_version="22.04",
                 ubuntu_arch="amd64",
@@ -329,7 +329,7 @@ class TestEndpointLimits:
             # GIVEN a charm that both provides and requires the same interface (like grafana-agent-k8s)
             self_ref_charm = Charm(
                 name="grafana-agent-k8s",
-                channel="stable",
+                channel=CharmChannel("stable"),
                 revision=1,
                 ubuntu_version="22.04",
                 ubuntu_arch="amd64",
@@ -356,7 +356,7 @@ class TestEndpointLimits:
             # AND an app that needs tracing
             app_charm = Charm(
                 name="mattermost-k8s",
-                channel="stable",
+                channel=CharmChannel("stable"),
                 revision=1,
                 ubuntu_version="22.04",
                 ubuntu_arch="amd64",

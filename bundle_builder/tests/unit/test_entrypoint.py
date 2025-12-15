@@ -22,7 +22,7 @@ import pytest
 from pydantic.dataclasses import dataclass
 
 from bundle_builder.bundle import Application, ApplicationEndpoint, Integration
-from bundle_builder.charm import Charm
+from bundle_builder.charm import Charm, CharmChannel
 from bundle_builder.charmhub_http import CharmReleaseNotFoundException
 from bundle_builder.entrypoint import (
     add_args_to_parser,
@@ -134,7 +134,7 @@ class TestApplicationFromArgs:
             return dataclasses.replace(
                 charm,
                 ubuntu_arch=ubuntu_arch,
-                channel=charm_channel or charm.channel,
+                channel=CharmChannel(charm_channel) if charm_channel is not None else charm.channel,
                 revision=charm_revision or charm.revision,
                 ubuntu_version=ubuntu_version or charm.ubuntu_version,
             )
@@ -164,7 +164,7 @@ class TestApplicationFromArgs:
             label="parse_revision",
             specs=["target::postgresql-k8s::edge::default"],
             applications={
-                Application(name="target", charm=dataclasses.replace(sample_charm_postgresql_k8s(), channel="edge"))
+                Application(name="target", charm=dataclasses.replace(sample_charm_postgresql_k8s(), channel=CharmChannel("edge")))
             },
         ),
         Params(

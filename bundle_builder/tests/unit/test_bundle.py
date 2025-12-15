@@ -22,7 +22,7 @@ import yaml
 from pydantic.dataclasses import dataclass
 
 from bundle_builder.bundle import Application, ApplicationEndpoint, Bundle, Integration
-from bundle_builder.charm import ENDPOINT_PROVIDES, ENDPOINT_REQUIRES, Charm, CharmEndpoint, CharmEndpointOptionality
+from bundle_builder.charm import ENDPOINT_PROVIDES, ENDPOINT_REQUIRES, Charm, CharmChannel, CharmEndpoint, CharmEndpointOptionality
 from bundle_builder.charmhub import CharmhubClient
 from bundle_builder.charmhub_http import CharmhubBase
 from bundle_builder.overrides import CharmEndpointOverride, CharmMetadataOverride, OverridesClient
@@ -506,7 +506,7 @@ class TestBundle:
             # GIVEN a charm with limit 1
             limited_charm = Charm(
                 name="limited-charm",
-                channel="stable",
+                channel=CharmChannel("stable"),
                 revision=1,
                 ubuntu_version="22.04",
                 ubuntu_arch="amd64",
@@ -526,7 +526,7 @@ class TestBundle:
 
             requiring_charm = Charm(
                 name="app",
-                channel="stable",
+                channel=CharmChannel("stable"),
                 revision=1,
                 ubuntu_version="22.04",
                 ubuntu_arch="amd64",
@@ -574,7 +574,7 @@ class TestBundle:
             # GIVEN a charm with limit 2
             limited_charm = Charm(
                 name="limited-charm",
-                channel="stable",
+                channel=CharmChannel("stable"),
                 revision=1,
                 ubuntu_version="22.04",
                 ubuntu_arch="amd64",
@@ -594,7 +594,7 @@ class TestBundle:
 
             requiring_charm = Charm(
                 name="app",
-                channel="stable",
+                channel=CharmChannel("stable"),
                 revision=1,
                 ubuntu_version="22.04",
                 ubuntu_arch="amd64",
