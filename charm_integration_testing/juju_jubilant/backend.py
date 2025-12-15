@@ -109,7 +109,7 @@ class JubilantBackend(JujuCmdBackend):
             )
         raise JujuWaitTimeoutError(wait_state=noncompliant_wait_state)
 
-    def wait_idle(self, model: str, timeout: timedelta | None, count: int) -> None:
+    def wait_idle(self, model: str, timeout: timedelta | None, count: int | None) -> None:
         self.wait(
             model,
             lambda status: all_statuses_are_in({"active"}, status),
@@ -213,7 +213,7 @@ class JubilantBackend(JujuCmdBackend):
         for possible_unit, unit_status in self.status(model).apps[application].units.items():
             _, possible_unit_id = possible_unit.split("/")
             if possible_unit_id == unit_id or (unit_id == "leader" and unit_status.leader):
-                return unit_status.address  # type: ignore[no-any-return]
+                return unit_status.address
         raise KeyError(f"Unit '{unit}' not found")
 
     def get_charm_revisions(self, model: str) -> set[tuple[str, int]]:

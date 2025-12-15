@@ -3,11 +3,15 @@
 
 import warnings
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import field
 from datetime import datetime, timedelta
 from functools import wraps
+from typing import Any, TypeVar
 
 from pydantic.dataclasses import dataclass
+
+_F = TypeVar("_F", bound=Callable[..., Any])
 
 
 class JujuPerformanceWarning(UserWarning):
@@ -18,7 +22,7 @@ class JujuStatusPerformanceWarning(JujuPerformanceWarning):
     """Warning when juju status operations are slow."""
 
 
-def warn_performance(threshold: timedelta, category: type[Warning] = JujuPerformanceWarning):
+def warn_performance(threshold: timedelta, category: type[Warning] = JujuPerformanceWarning) -> Callable[[_F], _F]:
     """Decorator that emits a warning if a function takes longer than threshold.
 
     Args:
@@ -26,9 +30,9 @@ def warn_performance(threshold: timedelta, category: type[Warning] = JujuPerform
         category: Warning class to emit
     """
 
-    def decorator(func):
+    def decorator(func: _F) -> _F:
         @wraps(func)
-        def wrapper(*args, **kwargs):
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
             start_time = datetime.now()
             result = None
             try:
@@ -38,7 +42,7 @@ def warn_performance(threshold: timedelta, category: type[Warning] = JujuPerform
                     warnings.warn(f"Exceeded threshold of {threshold.total_seconds():.1f}s", category, stacklevel=2)
             return result
 
-        return wrapper
+        return wrapper  # type: ignore[return-value]
 
     return decorator
 

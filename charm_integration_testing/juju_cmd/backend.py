@@ -132,7 +132,7 @@ class JujuCmdBackend(JujuBackend):
             else:
                 raise e
 
-    def wait_idle(self, model: str, timeout: timedelta | None, period: timedelta | None = None) -> None:
+    def wait_idle(self, model: str, timeout: timedelta | None, count: int | None) -> None:
         self._wait_for(
             model,
             "model",
@@ -286,7 +286,7 @@ class JujuCmdBackend(JujuBackend):
         )
 
     def application_charm(self, model: str, application: str) -> str | None:
-        return self._status(model).applications[application].charm  # type: ignore[no-any-return]
+        return self._status(model).applications[application].charm
 
     def application_units(self, model: str, application: str) -> list[str]:
         return list(self._status(model).applications[application].units.keys())
