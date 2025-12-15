@@ -35,35 +35,54 @@ runs:
         echo "User: $(whoami)"
         echo "IP: $(hostname -I | cut -d ' ' -f 1)"
 
-    - name: Install tmate
+    - name: Install Dependencies
       shell: bash
       run: |
-        # Step: Install tmate
+        # Step: Install Dependencies
 
         if ! command -v tmate &> /dev/null; then
           sudo apt-get update
           sudo apt-get install -y tmate
         fi
 
+        if ! command -v yq &> /dev/null; then
+          sudo snap install yq
+        fi
+
+    - name: Test Insert
+      shell: bash
+      run: |
+        # Step: Test Insert
+
+        # GITHUB_WORKFLOW is the `name` of the workflow
+        # This assumes that only one workflow will have the given name
+        WORKFLOW_FILE=$(grep --recursive --files-with-matches "${GITHUB_WORKFLOW}" ${GITHUB_WORKSPACE})
+        yq '(.jobs[].steps[] | select(.id == "start-tmate").run) \
+          |= . + "\nsleep 3600\n"' ${WORKFLOW_FILE}
+
     - name: Start tmate Session
+      id: start-tmate
       shell: bash
       run: |
         # Step: Start tmate Session
 
-        TMATE="tmate -S /tmp/tmate.sock"
+        echo "Will there be a sleep?"
 
-        # The TMATE environment variables are passed to the runner
-        # by the tmate-ssh-server charm that is integrated with the github-runner charm
-        # Multiple tmate commands need to be separated by semicolons,
-        # which need to be escaped from the shell
-        ${TMATE} -a ${HOME}/.ssh/authorized_keys \
-          set-option -g tmate-server-host "${TMATE_SERVER_HOST}"\; \
-          set-option -g tmate-server-port "${TMATE_SERVER_PORT}"\; \
-          set-option -g tmate-server-rsa-fingerprint "${TMATE_SERVER_RSA_FINGERPRINT}"\; \
-          set-option -g tmate-server-ed25519-fingerprint "${TMATE_SERVER_ED25519_FINGERPRINT}"\; \
-          new-session -d
+        # TMATE="tmate -S /tmp/tmate.sock"
+        # echo "Creating tmate session"
 
-        ${TMATE} wait tmate-ready
+        # # The TMATE environment variables are passed to the runner
+        # # by the tmate-ssh-server charm that is integrated with the github-runner charm
+        # # Multiple tmate commands need to be separated by semicolons,
+        # # which need to be escaped from the shell
+        # ${TMATE} -a ${HOME}/.ssh/authorized_keys \
+        #   set-option -g tmate-server-host "${TMATE_SERVER_HOST}"\; \
+        #   set-option -g tmate-server-port "${TMATE_SERVER_PORT}"\; \
+        #   set-option -g tmate-server-rsa-fingerprint "${TMATE_SERVER_RSA_FINGERPRINT}"\; \
+        #   set-option -g tmate-server-ed25519-fingerprint "${TMATE_SERVER_ED25519_FINGERPRINT}"\; \
+        #   new-session -d
+
+        # ${TMATE} wait tmate-ready
         
-        echo "Command to connect:"
-        ${TMATE} display -p '#{tmate_ssh}'
+        # echo "Command to connect:"
+        # ${TMATE} display -p '#{tmate_ssh}'
