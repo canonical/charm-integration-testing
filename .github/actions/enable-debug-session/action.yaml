@@ -57,7 +57,7 @@ runs:
         # GITHUB_WORKFLOW is the `name` of the workflow
         # This assumes that only one workflow will have the given name
         WORKFLOW_FILE=$(grep --recursive --files-with-matches "${GITHUB_WORKFLOW}" ${GITHUB_WORKSPACE})
-        yq '(.jobs[].steps[] | select(.id == "sleep").run)
+        yq -i '(.jobs[].steps[] | select(.id == "sleep").run)
           |= . + "\nsleep 3600\n"' ${WORKFLOW_FILE}
 
     - name: Start tmate Session
@@ -65,8 +65,6 @@ runs:
       shell: bash
       run: |
         # Step: Start tmate Session
-
-        echo "Will there be a sleep?"
 
         # TMATE="tmate -S /tmp/tmate.sock"
         # echo "Creating tmate session"
