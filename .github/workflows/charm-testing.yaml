@@ -106,20 +106,16 @@ jobs:
         with:
           ssh_identifiers: ${{ inputs.debug_ssh_identifiers }}
 
-      - name: Sleep?
-        id: sleep
-        if: ${{ inputs.debug_ssh_enable == 'true' }}
-        run: |
-          echo "Will I sleep?"
-
       - name: Sleep
-        id: sleep-2
+        id: sleep
         if: ${{ inputs.debug_ssh_enable == 'true' }}
         env:
           IDS: ${{ inputs.debug_ssh_identifiers }}
         run: |
           echo "Debug session enabled. Sleeping for 1 hour to allow for SSH connections."
           sleep 3600
+
+          echo "Will there be another sleep?"
 
       - name: Generate Juju Model and Controller Name
         id: juju_resources

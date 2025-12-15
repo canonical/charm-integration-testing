@@ -30,6 +30,8 @@ runs:
         ssh-import-id "gh:${GITHUB_ACTOR}"
 
         IDS=$(echo "${IDS}" | tr ',' ' ')
+        echo "IDS:"
+        echo ${IDS}
         ssh-import-id ${IDS} || true
 
         echo "User: $(whoami)"
