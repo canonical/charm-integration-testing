@@ -80,6 +80,7 @@ class WaitStub:
         timeout=None,
         successes=None,
         delay=None,
+        strict_timeout=False,
     ):
         self.call_count += 1
         if self.raise_timeout:
@@ -203,6 +204,94 @@ class TestJubilantBackend:
             # THEN we needed 6 calls (2 ready, 1 fail resets count, 3 ready to succeed)
             assert call_count == 6
 
+        def test_wait_extends_timeout_when_making_progress(self):
+            # GIVEN a backend with mocked status
+            stub = StatusStub()
+            client = JubilantClientStub(client=stub)
+            backend = JubilantBackend(client)
+
+            # Track call count - we need 10 successes but timeout after 5 checks
+            call_count = 0
+
+            def ready_func(status):
+                nonlocal call_count
+                call_count += 1
+                # Always ready
+                return (True, JujuWaitState(message="ready"))
+
+            # WHEN wait is called with strict_timeout=False (default) and making progress
+            backend.wait(
+                "test-model",
+                ready=ready_func,
+                timeout=timedelta(milliseconds=50),  # Very short timeout
+                successes=10,  # Need 10 successes
+                delay=timedelta(milliseconds=10),
+                strict_timeout=False,
+            )
+
+            # THEN we got all 10 successes despite timeout being exceeded
+            assert call_count == 10
+
+        def test_wait_enforces_strict_timeout(self):
+            # GIVEN a backend with mocked status
+            stub = StatusStub()
+            client = JubilantClientStub(client=stub)
+            backend = JubilantBackend(client)
+
+            # Track call count
+            call_count = 0
+
+            def ready_func(status):
+                nonlocal call_count
+                call_count += 1
+                # Always ready
+                return (True, JujuWaitState(message="ready"))
+
+            # WHEN wait is called with strict_timeout=True
+            with pytest.raises(JujuWaitTimeoutError) as exc_info:
+                backend.wait(
+                    "test-model",
+                    ready=ready_func,
+                    timeout=timedelta(milliseconds=50),  # Very short timeout
+                    successes=100,  # Need 100 successes (impossible in time)
+                    delay=timedelta(milliseconds=10),
+                    strict_timeout=True,
+                )
+
+            # THEN timeout was enforced even though making progress
+            assert call_count < 100
+            assert exc_info.value.wait_state.insufficient_status_checks
+
+        def test_wait_timeout_when_not_making_progress(self):
+            # GIVEN a backend with mocked status
+            stub = StatusStub()
+            client = JubilantClientStub(client=stub)
+            backend = JubilantBackend(client)
+
+            # Track call count
+            call_count = 0
+
+            def ready_func(status):
+                nonlocal call_count
+                call_count += 1
+                # Never ready
+                return (False, JujuWaitState(message="not ready"))
+
+            # WHEN wait is called with strict_timeout=False but not making progress
+            with pytest.raises(JujuWaitTimeoutError) as exc_info:
+                backend.wait(
+                    "test-model",
+                    ready=ready_func,
+                    timeout=timedelta(milliseconds=50),
+                    successes=10,
+                    delay=timedelta(milliseconds=10),
+                    strict_timeout=False,
+                )
+
+            # THEN timeout was enforced because success_count stayed at 0
+            assert exc_info.value.wait_state.message == "not ready"
+            assert not exc_info.value.wait_state.insufficient_status_checks
+
     class TestWaitIdle:
         def test_wait_idle(self):
             # GIVEN
@@ -225,6 +314,30 @@ class TestJubilantBackend:
             # WHEN / THEN
             with pytest.raises(JujuWaitTimeoutError):
                 backend.wait_idle("test-model", timedelta(milliseconds=100), count=5)
+
+        def test_wait_idle_with_strict_timeout(self):
+            # GIVEN
+            stub = StatusStub()
+            client = JubilantClientStub(client=stub)
+            backend = JubilantBackend(client)
+
+            # WHEN wait_idle is called with strict_timeout=True
+            backend.wait_idle("test-model", timedelta(seconds=10), count=3, strict_timeout=True)
+
+            # THEN status was called 3 times
+            assert stub.call_count == 3
+
+        def test_wait_idle_extends_timeout_by_default(self):
+            # GIVEN
+            stub = StatusStub()
+            client = JubilantClientStub(client=stub)
+            backend = JubilantBackend(client)
+
+            # WHEN wait_idle is called (strict_timeout defaults to False)
+            backend.wait_idle("test-model", timedelta(milliseconds=50), count=10)
+
+            # THEN it completed all 10 checks despite short timeout
+            assert stub.call_count == 10
 
     class TestWaitApplicationSettled:
         def test_application_settled(self):

@@ -41,11 +41,11 @@ class JubilantBackend(JujuCmdBackend):
         super().__init__()
         self.client = client or JubilantClient()
 
-    @warn_performance(category=JujuStatusPerformanceWarning, threshold=timedelta(seconds=3))
+    @warn_performance(category=JujuStatusPerformanceWarning, threshold=timedelta(seconds=5))
     def status(self, model: str) -> jubilant.Status:
         return self.client.model(model).status()
 
-    @warn_performance(category=JujuStatusPerformanceWarning, threshold=timedelta(seconds=3))
+    @warn_performance(category=JujuStatusPerformanceWarning, threshold=timedelta(seconds=5))
     def juju_status_text(self, model: str) -> str:
         return self.client.model(model).cli("status", "--integrations", "--format", "tabular")
 
@@ -57,6 +57,7 @@ class JubilantBackend(JujuCmdBackend):
         timeout: timedelta | None = None,
         successes: int | None = None,
         delay: timedelta | None = None,
+        strict_timeout: bool = False,
     ):
         # Set default parameters
         if timeout is None:
@@ -75,7 +76,10 @@ class JubilantBackend(JujuCmdBackend):
         # Begin wait loop
         while True:
             iteration_start = datetime.now()
-            if iteration_start - start > timeout:
+            # With strict_timeout=False, allow continuation if we're making progress (ready=True)
+            # With strict_timeout=True, always enforce timeout
+            timeout_reached = iteration_start - start > timeout
+            if timeout_reached and (strict_timeout or success_count == 0):
                 break
 
             # Get current status
@@ -109,12 +113,13 @@ class JubilantBackend(JujuCmdBackend):
             )
         raise JujuWaitTimeoutError(wait_state=noncompliant_wait_state)
 
-    def wait_idle(self, model: str, timeout: timedelta | None, count: int):
+    def wait_idle(self, model: str, timeout: timedelta | None, count: int, strict_timeout: bool = False):
         self.wait(
             model,
             lambda status: all_statuses_are_in({"active"}, status),
             timeout=timeout,
             successes=count,
+            strict_timeout=strict_timeout,
         )
 
     def wait_application_settled(self, model: str, application: str, timeout: timedelta | None):
