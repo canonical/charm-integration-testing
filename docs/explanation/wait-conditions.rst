@@ -11,12 +11,12 @@ The wait mechanism uses consecutive success counting to ensure stability:
 1. **Poll Loop**: Fetches Juju status at fixed intervals
 2. **Condition Evaluation**: Each status is evaluated against a predicate function
 3. **Success Counting**: Counter increments on success, resets to zero on failure, exits when reaching threshold
-4. **Timeout**: Exits with failure if maximum time exceeded (see Timeout Behavior below)
+4. **Timeout**: Exits with failure if maximum time exceeded (see Timeout Behaviour below)
 5. **Timing Compensation**: Sleep duration accounts for status fetch time, maintaining consistent polling intervals
 
 A model must remain in the desired state for multiple consecutive checks before signaling success.
 
-Timeout Behavior
+Timeout Behaviour
 ^^^^^^^^^^^^^^^^
 
 The wait mechanism supports two timeout modes controlled by the ``strict_timeout`` parameter:
@@ -27,7 +27,7 @@ The wait mechanism supports two timeout modes controlled by the ``strict_timeout
 **Strict Timeout (strict_timeout=True)**
   Enforces the timeout absolutely, regardless of whether the model is making progress. Even if the model is in the desired state, if the required consecutive successes haven't been achieved within the timeout period, the wait will fail with an "insufficient status checks" error.
 
-This design addresses scenarios where tests timeout despite the model being idle, simply because insufficient time remained to complete all required consecutive stability checks. With the default non-strict behavior, as long as the model reaches the idle state, it will be given additional time to confirm stability.
+This design addresses scenarios where tests timeout despite the model being idle, simply because insufficient time remained to complete all required consecutive stability checks. With the default non-strict behaviour, as long as the model reaches the idle state, it will be given additional time to confirm stability.
 
 The ``assert_idle`` Fixture
 ----------------------------
