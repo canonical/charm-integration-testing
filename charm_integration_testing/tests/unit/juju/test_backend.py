@@ -85,7 +85,7 @@ class TestWarnSlow:
     def test_no_warning_when_fast(self) -> None:
         # GIVEN a function decorated with warn_performance
         @warn_performance(threshold=timedelta(seconds=1))
-        def fast_function():
+        def fast_function() -> str:
             return "done"
 
         # WHEN the function executes quickly
@@ -100,7 +100,7 @@ class TestWarnSlow:
     def test_warning_when_slow(self) -> None:
         # GIVEN a function decorated with warn_performance
         @warn_performance(threshold=timedelta(milliseconds=50))
-        def slow_function():
+        def slow_function() -> str:
             time.sleep(0.1)  # Sleep for 100ms
             return "done"
 
@@ -118,7 +118,7 @@ class TestWarnSlow:
     def test_custom_warning_category(self) -> None:
         # GIVEN a function decorated with warn_performance and a custom category
         @warn_performance(threshold=timedelta(milliseconds=50), category=JujuStatusPerformanceWarning)
-        def slow_function():
+        def slow_function() -> str:
             time.sleep(0.1)
             return "done"
 
@@ -135,7 +135,7 @@ class TestWarnSlow:
     def test_warning_on_exception(self) -> None:
         # GIVEN a function decorated with warn_performance that raises an exception
         @warn_performance(threshold=timedelta(milliseconds=50))
-        def error_function():
+        def error_function() -> None:
             time.sleep(0.1)
             raise ValueError("test error")
 
