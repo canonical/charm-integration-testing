@@ -26,16 +26,13 @@ runs:
         # Step: Import SSH Keys
 
         # Always include the GitHub Actor
-        # IDS="${IDS},gh:${GITHUB_ACTOR}"
+        IDS="${IDS},gh:${GITHUB_ACTOR}"
 
-        # IDS=$(echo "${IDS}" | tr ',' ' ')
-        # echo "IDs: ${IDS}"
-        # ssh-import-id "${IDS}"
+        IDS=$(echo "${IDS}" | tr ',' ' ')
+        echo "IDs: ${IDS}"
 
         mkdir -p ~/.ssh/
-
-        echo "Echoing"
-        echo "${IDS}" >> ~/.ssh/authorized_keys
+        ssh-import-id "${IDS}"
 
         echo "Importing from Launchpad"
         ssh-import-id-lp wctaylor || true
