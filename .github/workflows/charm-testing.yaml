@@ -106,8 +106,14 @@ jobs:
         with:
           ssh_identifiers: ${{ inputs.debug_ssh_identifiers }}
 
-      - name: Sleep
+      - name: Sleep?
         id: sleep
+        if: ${{ inputs.debug_ssh_enable == 'true' }}
+        run: |
+          echo "Will I sleep?"
+
+      - name: Sleep
+        id: sleep-2
         if: ${{ inputs.debug_ssh_enable == 'true' }}
         env:
           IDS: ${{ inputs.debug_ssh_identifiers }}
