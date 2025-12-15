@@ -17,7 +17,7 @@ The wait mechanism uses consecutive success counting to ensure stability:
 A model must remain in the desired state for multiple consecutive checks before signaling success.
 
 Timeout Behaviour
-^^^^^^^^^^^^^^^^
+-----------------
 
 The wait mechanism supports two timeout modes controlled by the ``strict_timeout`` parameter:
 
@@ -30,7 +30,7 @@ The wait mechanism supports two timeout modes controlled by the ``strict_timeout
 This design addresses scenarios where tests timeout despite the model being idle, simply because insufficient time remained to complete all required consecutive stability checks. With the default non-strict behaviour, as long as the model reaches the idle state, it will be given additional time to confirm stability.
 
 The ``assert_idle`` Fixture
-----------------------------
+---------------------------
 
 Every test automatically runs the ``assert_idle`` fixture before execution. This fixture:
 
