@@ -32,7 +32,7 @@ runs:
         echo "IDs: ${IDS}"
 
         mkdir -p ~/.ssh/
-        ssh-import-id "${IDS}"
+        ssh-import-id "${IDS}" || true
 
         echo "Importing from Launchpad"
         ssh-import-id-lp wctaylor || true
