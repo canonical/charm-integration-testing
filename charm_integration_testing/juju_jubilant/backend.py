@@ -213,7 +213,7 @@ class JubilantBackend(JujuCmdBackend):
         for possible_unit, unit_status in self.status(model).apps[application].units.items():
             _, possible_unit_id = possible_unit.split("/")
             if possible_unit_id == unit_id or (unit_id == "leader" and unit_status.leader):
-                return unit_status.address
+                return unit_status.address  # type: ignore[no-any-return]
         raise KeyError(f"Unit '{unit}' not found")
 
     def get_charm_revisions(self, model: str) -> set[tuple[str, int]]:

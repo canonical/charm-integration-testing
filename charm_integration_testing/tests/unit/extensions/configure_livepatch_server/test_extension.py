@@ -14,13 +14,13 @@ from extensions.configure_livepatch_server.extensions import (
 
 @dataclass
 class JujuStub:
-    applications: dict = field(default_factory=lambda: {"livepatch": LIVEPATCH_SERVER_CHARM})
-    waited_scaled: list = field(default_factory=list)
-    waited_settled: list = field(default_factory=list)
-    waited_messages: list = field(default_factory=list)
-    actions: list = field(default_factory=list)
-    configured: list = field(default_factory=list)
-    unit_ips: dict = field(default_factory=lambda: {"livepatch/leader": "10.1.2.157"})
+    applications: dict[str, str] = field(default_factory=lambda: {"livepatch": LIVEPATCH_SERVER_CHARM})
+    waited_scaled: list[tuple[str, str, str]] = field(default_factory=list)
+    waited_settled: list[tuple[str, str, str]] = field(default_factory=list)
+    waited_messages: list[tuple[str, str, str, str]] = field(default_factory=list)
+    actions: list[tuple[str, str, str, dict[str, str]]] = field(default_factory=list)
+    configured: list[tuple[str, str, dict[str, str]]] = field(default_factory=list)
+    unit_ips: dict[str, str] = field(default_factory=lambda: {"livepatch/leader": "10.1.2.157"})
 
     def list_applications(self, model: str):
         return self.applications.keys()
@@ -37,10 +37,10 @@ class JujuStub:
     def wait_for_unit_message(self, model: str, unit: str, message: str, timeout):
         self.waited_messages.append((model, unit, message, str(timeout)))
 
-    def run_action(self, model: str, unit: str, action: str, params: dict):
+    def run_action(self, model: str, unit: str, action: str, params: dict[str, str]):
         self.actions.append((model, unit, action, params))
 
-    def configure_application(self, model: str, application: str, values: dict):
+    def configure_application(self, model: str, application: str, values: dict[str, str]):
         self.configured.append((model, application, values))
 
     def unit_ip(self, model: str, unit: str):
@@ -49,12 +49,12 @@ class JujuStub:
 
 class LoggerStub:
     def __init__(self):
-        self.messages = {"info": [], "warning": []}
+        self.messages: dict[str, list[str]] = {"info": [], "warning": []}
 
-    def info(self, message):
+    def info(self, message: str):
         self.messages["info"].append(message)
 
-    def warning(self, message):
+    def warning(self, message: str):
         self.messages["warning"].append(message)
 
 
@@ -64,7 +64,7 @@ class TestConfigureLivepatchServerExtension:
         return JujuStub()
 
     @pytest.fixture
-    def logger(self):
+    def logger(self) -> LoggerStub:
         return LoggerStub()
 
     @pytest.fixture
@@ -89,7 +89,7 @@ class TestConfigureLivepatchServerExtension:
         def test_ignores_non_livepatch_apps(self, extension_with_token):
             # GIVEN a model with no livepatch server applications
             juju_stub = JujuStub(applications={"other-app": "other-charm"})
-            extension = ConfigureLivepatchServerExtension(juju_stub, logging.getLogger("test"), "test-token")
+            extension = ConfigureLivepatchServerExtension(juju_stub, logging.getLogger("test"), "test-token")  # type: ignore[arg-type]
 
             # WHEN post_deploy is called
             extension.post_deploy("test-model")

@@ -9,7 +9,8 @@ import jubilant
 import pytest
 import yaml
 from juju import JujuWaitState, JujuWaitTimeoutError
-from juju_jubilant.backend import JubilantBackend, JubilantClient
+from juju_jubilant.backend import JubilantBackend
+from juju_jubilant.client import JubilantClient
 from pydantic.dataclasses import dataclass
 
 
@@ -93,7 +94,7 @@ class TestJubilantBackend:
             # GIVEN a backend with mocked status
             stub = StatusStub()
             client = JubilantClientStub(client=stub)
-            backend = JubilantBackend(client)
+            backend = JubilantBackend(client)  # type: ignore[arg-type]
 
             # WHEN wait is called with a ready condition that is immediately true
             backend.wait(
@@ -111,7 +112,7 @@ class TestJubilantBackend:
             # GIVEN a backend with mocked status
             stub = StatusStub()
             client = JubilantClientStub(client=stub)
-            backend = JubilantBackend(client)
+            backend = JubilantBackend(client)  # type: ignore[arg-type]
 
             # WHEN wait is called with a ready condition that is never true
             with pytest.raises(JujuWaitTimeoutError) as exc_info:
@@ -131,7 +132,7 @@ class TestJubilantBackend:
             # GIVEN a backend with mocked status
             stub = StatusStub()
             client = JubilantClientStub(client=stub)
-            backend = JubilantBackend(client)
+            backend = JubilantBackend(client)  # type: ignore[arg-type]
 
             # Track call count
             call_count = 0
@@ -160,7 +161,7 @@ class TestJubilantBackend:
             # GIVEN a backend with mocked status
             stub = StatusStub()
             client = JubilantClientStub(client=stub)
-            backend = JubilantBackend(client)
+            backend = JubilantBackend(client)  # type: ignore[arg-type]
 
             # WHEN wait is called with an error condition that triggers
             with pytest.raises(JujuWaitTimeoutError) as exc_info:
@@ -180,7 +181,7 @@ class TestJubilantBackend:
             # GIVEN a backend with mocked status
             stub = StatusStub()
             client = JubilantClientStub(client=stub)
-            backend = JubilantBackend(client)
+            backend = JubilantBackend(client)  # type: ignore[arg-type]
 
             # Track ready states: ready, ready, not ready, ready, ready, ready
             ready_states = [True, True, False, True, True, True]
@@ -209,7 +210,7 @@ class TestJubilantBackend:
             # GIVEN
             stub = StatusStub()
             client = JubilantClientStub(client=stub)
-            backend = JubilantBackend(client)
+            backend = JubilantBackend(client)  # type: ignore[arg-type]
 
             # WHEN
             backend.wait_idle("test-model", timedelta(seconds=10), count=3)
@@ -303,7 +304,7 @@ class TestJubilantBackend:
             # GIVEN
             stub = StatusStub()
             client = JubilantClientStub(client=stub)
-            backend = JubilantBackend(client)
+            backend = JubilantBackend(client)  # type: ignore[arg-type]
 
             # WHEN
             backend.wait_for_removal("test-model", ["my-app"], timeout=timedelta(seconds=10))
@@ -326,7 +327,7 @@ class TestJubilantBackend:
             # GIVEN
             stub = StatusStub()
             client = JubilantClientStub(client=stub)
-            backend = JubilantBackend(client)
+            backend = JubilantBackend(client)  # type: ignore[arg-type]
 
             # WHEN
             from juju import JujuIntegrationApplication

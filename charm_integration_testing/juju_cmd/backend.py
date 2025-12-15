@@ -285,8 +285,8 @@ class JujuCmdBackend(JujuBackend):
             model, "model", model, f"len(applications) == 0 || forEach(units, unit => {name_checks})", timeout
         )
 
-    def application_charm(self, model: str, application: str) -> Optional[str]:
-        return self._status(model).applications[application].charm
+    def application_charm(self, model: str, application: str) -> str | None:
+        return self._status(model).applications[application].charm  # type: ignore[no-any-return]
 
     def application_units(self, model: str, application: str) -> list[str]:
         return list(self._status(model).applications[application].units.keys())
