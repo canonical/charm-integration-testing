@@ -26,17 +26,11 @@ runs:
         # Step: Import SSH Keys
 
         # Always include the GitHub Actor
-        IDS="${IDS},gh:${GITHUB_ACTOR}"
-        IDS=$(echo "${IDS}" | tr ',' ' ')
-
         mkdir --parents ~/.ssh/
+        ssh-import-id "gh:${GITHUB_ACTOR}"
+
+        IDS=$(echo "${IDS}" | tr ',' ' ')
         ssh-import-id ${IDS} || true
-
-        echo "Importing from Launchpad"
-        ssh-import-id-lp wctaylor || true
-
-        echo "Importing from GitHub"
-        ssh-import-id-gh wctaylor || true
 
         echo "User: $(whoami)"
         echo "IP: $(hostname -I | cut -d ' ' -f 1)"
@@ -56,8 +50,20 @@ runs:
       run: |
         # Step: Start tmate Session
 
-        tmate -S /tmp/tmate.sock new-session -d
-        tmate -S /tmp/tmate.sock wait tmate-ready
+        TMATE="tmate -S /tmp/tmate.sock"
+
+        # The TMATE environment variables are passed to the runner
+        # by the tmate-ssh-server charm that is integrated with the github-runner charm
+        # Multiple tmate commands need to be separated by semicolons,
+        # which need to be escaped from the shell
+        ${TMATE} -a ${HOME}/.ssh/authorized_keys \
+          set-option -g tmate-server-host "${TMATE_SERVER_HOST}"\; \
+          set-option -g tmate-server-port "${TMATE_SERVER_PORT}"\; \
+          set-option -g tmate-server-rsa-fingerprint "${TMATE_SERVER_RSA_FINGERPRINT}"\; \
+          set-option -g tmate-server-ed25519-fingerprint "${TMATE_SERVER_ED25519_FINGERPRINT}"\; \
+          new-session -d
+
+        ${TMATE} wait tmate-ready
         
         echo "Command to connect:"
-        tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}'
+        ${TMATE} display -p '#{tmate_ssh}'
