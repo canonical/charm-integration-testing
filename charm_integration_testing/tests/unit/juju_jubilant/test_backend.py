@@ -142,7 +142,7 @@ class TestJubilantBackend:
                 # Always ready but timeout before getting 100 successes
                 return (True, JujuWaitState(message="always ready"))
 
-            # WHEN wait times out while always being ready
+            # WHEN wait times out while always being ready with strict_timeout=True
             with pytest.raises(JujuWaitTimeoutError) as exc_info:
                 backend.wait(
                     "test-model",
@@ -150,6 +150,7 @@ class TestJubilantBackend:
                     timeout=timedelta(milliseconds=100),
                     successes=100,  # Need 100 successes but will timeout
                     delay=timedelta(milliseconds=10),
+                    strict_timeout=True,  # Enforce timeout even when making progress
                 )
 
             # THEN insufficient_status_checks is set
