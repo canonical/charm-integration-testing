@@ -27,12 +27,10 @@ runs:
 
         # Always include the GitHub Actor
         IDS="${IDS},gh:${GITHUB_ACTOR}"
-
         IDS=$(echo "${IDS}" | tr ',' ' ')
-        echo "IDs: ${IDS}"
 
-        mkdir -p ~/.ssh/
-        ssh-import-id "${IDS}" || true
+        mkdir --parents ~/.ssh/
+        ssh-import-id ${IDS} || true
 
         echo "Importing from Launchpad"
         ssh-import-id-lp wctaylor || true
@@ -43,25 +41,23 @@ runs:
         echo "User: $(whoami)"
         echo "IP: $(hostname -I | cut -d ' ' -f 1)"
 
-    # - name: Install tmate
-    #   shell: bash
-    #   run: |
-    #     # Step: Install tmate
+    - name: Install tmate
+      shell: bash
+      run: |
+        # Step: Install tmate
 
-    #     if ! command -v tmate &> /dev/null; then
-    #       sudo apt-get update
-    #       sudo apt-get install -y tmate
-    #     fi
+        if ! command -v tmate &> /dev/null; then
+          sudo apt-get update
+          sudo apt-get install -y tmate
+        fi
 
-    #     echo ""
+    - name: Start tmate Session
+      shell: bash
+      run: |
+        # Step: Start tmate Session
 
-    # - name: Start tmate Session
-    #   shell: bash
-    #   run: |
-    #     # Step: Start tmate Session
-
-    #     tmate -S /tmp/tmate.sock new-session -d
-    #     tmate -S /tmp/tmate.sock wait tmate-ready
+        tmate -S /tmp/tmate.sock new-session -d
+        tmate -S /tmp/tmate.sock wait tmate-ready
         
-    #     echo "Command to connect:"
-    #     tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}'
+        echo "Command to connect:"
+        tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}'
