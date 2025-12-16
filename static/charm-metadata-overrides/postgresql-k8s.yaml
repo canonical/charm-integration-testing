@@ -4,12 +4,30 @@ provides:
     optional: true
   database:
     optional: true
+    limit_if:
+      - criteria: 
+          - any_of:
+              - endpoint_integrated: db
+              - endpoint_integrated: db-admin
+        limit: 0
     limit: 1
   db:
     optional: true
+    limit_if:
+      - criteria: 
+          - any_of:
+              - endpoint_integrated: database
+              - endpoint_integrated: db-admin
+        limit: 0
     limit: 1
   db-admin:
     optional: true
+    limit_if:
+      - criteria: 
+          - any_of:
+              - endpoint_integrated: database
+              - endpoint_integrated: db
+        limit: 0
     limit: 1
   metrics-endpoint:
     optional: true
