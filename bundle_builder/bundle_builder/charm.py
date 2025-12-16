@@ -17,6 +17,7 @@
 from typing import Any, overload
 
 from pydantic import Field, model_serializer, model_validator
+from pydantic_core import ArgsKwargs
 
 from .immutable_dataclass import cached_method, immutable_dataclass
 from typing import TypeAlias
@@ -33,26 +34,41 @@ class CharmChannel:
     branch: str
 
     @overload  # type: ignore[no-overload-impl]
-    def __init__(self, channel: str) -> None: ...
+    def __init__(self, value: str) -> None: ...
 
     @overload
     def __init__(self, track: str, risk: str, branch: str) -> None: ...
 
-    @model_validator(mode="before")
+    @model_validator(mode="wrap")
     @classmethod
-    def validate_from_string(cls, value: Any) -> Any:
+    def validate_from_string(cls, value: Any, handler: Any) -> Any:
+        # Handle ArgsKwargs for positional arguments
+        if isinstance(value, ArgsKwargs):
+            if len(value.args) == 1 and isinstance(value.args[0], str):
+                # Single string argument: parse it
+                value = value.args[0]
+            elif len(value.args) == 3:
+                # Three positional arguments: convert to dict
+                return handler({"track": value.args[0], "risk": value.args[1], "branch": value.args[2]})
+            else:
+                # Let Pydantic handle it normally
+                return handler(value)
+        
+        # Handle string input
         if isinstance(value, str):
             parts = value.split("/")
             match len(parts):
                 case 1:
-                    return {"track": "", "risk": parts[0], "branch": ""}
+                    return handler({"track": "", "risk": parts[0], "branch": ""})
                 case 2:
-                    return {"track": parts[0], "risk": parts[1], "branch": ""}
+                    return handler({"track": parts[0], "risk": parts[1], "branch": ""})
                 case 3:
-                    return {"track": parts[0], "risk": parts[1], "branch": parts[2]}
+                    return handler({"track": parts[0], "risk": parts[1], "branch": parts[2]})
                 case _:
                     raise ValueError(f"Invalid channel string: {value}")
-        return value
+        
+        # Let Pydantic handle dict/other inputs normally
+        return handler(value)
 
     @model_serializer(mode="plain")
     def serialize_model(self) -> str:
