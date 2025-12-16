@@ -230,15 +230,22 @@ class CharmTestConfig:
         config: CharmConfig = tuple(),
     ) -> None: ...
 
-    @model_validator(mode="before")
+    @model_validator(mode="wrap")
     @classmethod
-    def validate_config_from_dict(cls, value: Any) -> Any:
+    def validate_config_from_dict(cls, value: Any, handler: Any) -> Any:
+        # Handle ArgsKwargs for positional arguments
+        if isinstance(value, ArgsKwargs):
+            if len(value.args) == 1 and isinstance(value.args[0], dict):
+                value = value.args[0]
+            else:
+                return handler(value)
+        
         if isinstance(value, dict) and "config" in value:
             if isinstance(value["config"], dict):
                 # Convert dict to tuple of tuples
                 value = value.copy()
                 value["config"] = tuple(sorted(value["config"].items()))
-        return value
+        return handler(value)
 
 
 @immutable_dataclass
