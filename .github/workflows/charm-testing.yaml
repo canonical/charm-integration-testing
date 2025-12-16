@@ -209,6 +209,7 @@ jobs:
           fi
           
       - name: Report Test Execution Start To Test Observer
+        id: report-test-start
         if: ${{ !cancelled() && env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/patch-test-execution
         with:

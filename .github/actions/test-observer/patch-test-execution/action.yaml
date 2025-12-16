@@ -65,6 +65,13 @@ runs:
         method_type: "PATCH"
         request_body: "@${{ steps.request-body.outputs.file }}"
 
+    - name: Echo Action
+      shell: bash
+      env:
+        GITHUB_ACTION: ${{ github.action }}
+      run: |
+        echo "GITHUB_ACTION: ${GITHUB_ACTION}"
+
     - name: Debug Sleep
       if: ${{ env.DEBUG_ENABLED == 'true' && github.action == env.DEBUG_SLEEP_AFTER_STEP_ID }}
       shell: bash
