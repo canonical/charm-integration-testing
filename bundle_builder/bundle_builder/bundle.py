@@ -100,9 +100,10 @@ class Bundle:
         # Ensure endpoints are not integrated more than their limit
         for endpoint, count in self.endpoint_connection_counts.items():
             charm_endpoint = self.application_endpoints[endpoint]
-            if charm_endpoint.limit is not None and count > charm_endpoint.limit:
+            endpoint_limit = charm_endpoint.limit(self.application_to_integrated_endpoints[endpoint.application])
+            if endpoint_limit is not None and count > endpoint_limit:
                 raise ValueError(
-                    f"Endpoint '{endpoint}' is connected {count} times, exceeding its limit of {charm_endpoint.limit}"
+                    f"Endpoint '{endpoint}' is connected {count} times, exceeding its limit of {endpoint_limit}"
                 )
 
     @computed_property
@@ -141,10 +142,11 @@ class Bundle:
         # Check if they are saturated
         for app in self.applications:
             for endpoint in app.charm.endpoints:
-                if endpoint.limit is not None:
+                endpoint_limit = endpoint.limit(self.application_to_integrated_endpoints[app.name])
+                if endpoint_limit is not None:
                     # Get the current connection count (default to 0 if not in counts)
                     current_count = counts.get((app.name, endpoint.name), 0)
-                    if current_count >= endpoint.limit:
+                    if current_count >= endpoint_limit:
                         application_endpoint = ApplicationEndpoint(application=app.name, endpoint=endpoint.name)
                         saturated_endpoints.add(application_endpoint)
 

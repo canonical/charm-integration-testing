@@ -19,7 +19,7 @@ from pathlib import Path
 import yaml
 from pydantic import Field
 
-from .charm import CharmEndpointOptionality, CharmTestConfig
+from .charm import CharmEndpointOptionality, CharmLimit, CharmTestConfig
 from .immutable_dataclass import immutable_dataclass
 
 
@@ -28,6 +28,7 @@ class CharmEndpointOverride:
     optional: bool | None = None
     optional_if: list[CharmEndpointOptionality] | None = None
     limit: int | None = None
+    limit_if: list[CharmLimit] | None = None
 
     @property
     def optionality(self) -> CharmEndpointOptionality | None:
@@ -36,6 +37,17 @@ class CharmEndpointOverride:
         if self.optional_if is not None:
             return CharmEndpointOptionality(all_of=self.optional_if)
         return None
+
+    @property
+    def limits(self) -> tuple[CharmLimit, ...] | None:
+        if self.limit is None and self.limit_if is None:
+            return None
+        limits = []
+        if self.limit_if is not None:
+            limits.extend(self.limit_if)
+        if self.limit is not None:
+            limits.append(CharmLimit(limit=self.limit))
+        return tuple(limits)
 
 
 @immutable_dataclass
