@@ -73,3 +73,15 @@ livepatch
 Livepatch
 MinIO
 minio
+JUnit
+serialized
+Normalized
+normalized
+normalization
+stdout
+stderr
+xfail
+pytest
+deduplicate
+serialization
+
