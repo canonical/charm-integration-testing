@@ -69,8 +69,8 @@ on:
           - kubernetes
           - openstack
         default: kubernetes
-      debug_ssh_enable:
-        description: If true, enable SSH access.
+      debug_enable:
+        description: If true, enable SSH access and allow sleeping after a step to debug.
         required: false
         type: choice
         options:
@@ -81,7 +81,11 @@ on:
         # The IDs take the form of lp:<value> for Launchpad and gh:<value> for GitHub.
         # The GitHub Actor's key is always included.
         # Only used if `ssh_enable` is true.
-        description: A comma-separated list of IDs to use with ssh-import-id.
+        description: A comma-separated list of IDs to use with ssh-import-id in debug mode.
+        required: false
+        default: ""
+      debug_sleep_after_step:
+        description: The name of the step in the workflow to sleep after in debug mode.
         required: false
         default: ""
 
@@ -105,17 +109,21 @@ jobs:
         uses: ./.github/actions/enable-debug-session
         with:
           ssh_identifiers: ${{ inputs.debug_ssh_identifiers }}
+          sleep_after_step: "Sleep"
 
       - name: Sleep
         id: sleep
+        shell: bash
+        run: |
+          sleep 5
+          echo "Will I sleep for an hour after this?"
+
+      - name: Sleep 2
+        id: sleep-2
         if: ${{ inputs.debug_ssh_enable == 'true' }}
-        env:
-          IDS: ${{ inputs.debug_ssh_identifiers }}
         run: |
           echo "Debug session enabled. Sleeping for 1 hour to allow for SSH connections."
           sleep 3600
-
-          echo "Will there be another sleep?"
 
       - name: Generate Juju Model and Controller Name
         id: juju_resources

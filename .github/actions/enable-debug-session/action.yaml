@@ -5,11 +5,14 @@ description: >
 
 inputs:
   ssh_identifiers:
-    description: >
-      A comma-separated list of IDs to use with ssh-import-id. 
-      The IDs take the form of lp:<value> for Launchpad and gh:<value> for GitHub. 
-      The GitHub Actor's key is always included. 
-      Only used if `ssh_enable` is true. 
+    # The IDs take the form of lp:<value> for Launchpad and gh:<value> for GitHub.
+    # The GitHub Actor's key is always included.
+    # Only used if `ssh_enable` is true.
+    description: A comma-separated list of IDs to use with ssh-import-id in debug mode.
+    required: false
+    default: ""
+  sleep_after_step:
+    description: The name of the step in the workflow to sleep after in debug mode.
     required: false
     default: ""
 
@@ -21,7 +24,7 @@ runs:
     - name: Import SSH Keys
       shell: bash
       env:
-        IDS: ${{ inputs.debug_ssh_identifiers }}
+        IDS: ${{ inputs.ssh_identifiers }}
       run: |
         # Step: Import SSH Keys
 
@@ -51,16 +54,40 @@ runs:
           sudo snap install yq
         fi
 
-    - name: Test Insert
+    - name: Inject sleep
       shell: bash
+      env:
+        STEP_NAME: ${{ inputs.sleep_after_step }}
       run: |
-        # Step: Test Insert
+        # Step: Inject sleep
 
-        # GITHUB_WORKFLOW is the `name` of the workflow
-        # This assumes that only one workflow will have the given name
-        WORKFLOW_FILE=$(grep --recursive --files-with-matches "${GITHUB_WORKFLOW}" ${GITHUB_WORKSPACE})
-        yq -i '(.jobs[].steps[] | select(.id == "sleep").run)
-          |= . + "\nsleep 3600\n"' ${WORKFLOW_FILE}
+        if [[ -z "${STEP_NAME}" ]]; then
+            echo "No step name provided, skipping sleep injection."
+            exit 0
+        fi
+
+        # GITHUB_WORKFLOW is the name of the workflow. 
+        # If the workflow file doesn't specify a name,
+        # the value of this property is the full path of the workflow file in the repository.
+        # https://docs.github.com/en/actions/reference/workflows-and-actions/contexts#github-context
+
+        # If GITHUB_WORKFLOW is not a file, then it's a name, so we find the file
+        if [[ ! -e "${GITHUB_WORKFLOW}" ]]; then
+            # This assumes that only one workflow will have the given name
+            WORKFLOW_FILE=$(grep --recursive --files-with-matches "${GITHUB_WORKFLOW}" ${GITHUB_WORKSPACE})
+        else
+            WORKFLOW_FILE="${GITHUB_WORKFLOW}"
+        fi
+
+        # The scripts that execute each step are written here
+        SCAN_DIRECTORY="${RUNNER_TEMP}"
+
+        echo "Workflow File: ${WORKFLOW_FILE}"
+        echo "Scan Directory: ${SCAN_DIRECTORY}"
+        echo "Step Name: ${STEP_NAME}"
+
+        bash "${ACTION_PATH}"/inject-sleep-to-step.sh \
+          "${WORKFLOW_FILE}" "${SCAN_DIRECTORY}" "${STEP_NAME}"
 
     - name: Start tmate Session
       id: start-tmate
