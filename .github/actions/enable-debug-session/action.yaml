@@ -57,6 +57,7 @@ runs:
     - name: Inject sleep
       shell: bash
       env:
+        ACTION_PATH: ${{ github.action_path }}
         STEP_NAME: ${{ inputs.sleep_after_step }}
       run: |
         # Step: Inject sleep
