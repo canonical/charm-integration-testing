@@ -91,6 +91,11 @@ on:
 
 env:
   DEBUG_ENABLED: ${{ inputs.debug_enabled }}
+
+  # We use the ID, because it becomes available as the GITHUB_ACTION environment variable
+  # According to the GitHub docs, github.action is: The name of the action currently running, or the id of a step.
+  # https://docs.github.com/en/actions/reference/workflows-and-actions/contexts#github-context
+  # And in my testing, if an ID is set in a workflow step that calls an action, github.action is set to that ID.
   DEBUG_SLEEP_AFTER_STEP_ID: ${{ inputs.debug_sleep_after_step_id }}
 
 jobs:
@@ -111,7 +116,7 @@ jobs:
           persist-credentials: false
 
       - name: Enable Debug Session
-        id: enable-debug-session
+        id: enable_debug_session
         if: ${{ inputs.debug_enabled == 'true' }}
         shell: bash
         env:
@@ -134,7 +139,7 @@ jobs:
           fi
 
       - name: Create swap file
-        id: create-swap
+        id: create_swap
         shell: bash
         run: |
           sudo fallocate -l 8G /swapfile
@@ -166,7 +171,7 @@ jobs:
           fi
 
       - name: Log job information
-        id: log-job-info
+        id: log_job_info
         shell: bash
         env:
           environment: ${{ inputs.environment }}
@@ -209,7 +214,7 @@ jobs:
           fi
           
       - name: Report Test Execution Start To Test Observer
-        id: report-test-start
+        id: report_test_start
         if: ${{ !cancelled() && env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/patch-test-execution
         with:
@@ -220,6 +225,7 @@ jobs:
           ci_link: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
       - name: Post 'job_start' event
+        id: post_job_start
         if: ${{ !cancelled() && env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-events
         with:
@@ -231,7 +237,7 @@ jobs:
           detail: "Charm integration test job started."
 
       - name: Install Juju
-        id: install-juju
+        id: install_juju
         shell: bash
         env:
           juju_channel: ${{ inputs.juju_channel }}
@@ -256,8 +262,8 @@ jobs:
           fi
 
       - name: Setup K8s Cloud
-        if: ${{ inputs.substrate == 'kubernetes'}}
         id: setup_k8s
+        if: ${{ inputs.substrate == 'kubernetes'}}
         uses: ./.github/actions/setup-environment/setup-k8s
         env:
           k8sprod: ${{ secrets.PROD_SQA_KUBECONFIG }}
@@ -268,6 +274,7 @@ jobs:
           model: ${{ steps.juju_resources.outputs.model }}
 
       - name: Setup O7k Cloud
+        id: setup_openstack
         if: ${{ inputs.substrate == 'openstack'}}
         uses: ./.github/actions/setup-environment/setup-openstack
         env:
@@ -279,7 +286,7 @@ jobs:
           model: ${{ steps.juju_resources.outputs.model }}
 
       - name: Install Repository
-        id: install-repository
+        id: install_repository
         shell: bash
         run: |
           sudo apt-get update --quiet
@@ -349,6 +356,7 @@ jobs:
           fi
 
       - name: Post 'test_deploy_start' event
+        id: post_test_deploy_start
         if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-events
         with:
@@ -380,6 +388,7 @@ jobs:
           fi
 
       - name: Post 'test_deploy_end' event
+        id: post_test_deploy_end
         if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-events
         with:
@@ -391,6 +400,7 @@ jobs:
           detail: "Test deployment finished."
 
       - name: Post 'test_integration_start' event
+        id: post_test_integration_start
         if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-events
         with:
@@ -426,6 +436,7 @@ jobs:
           fi
 
       - name: Post 'test_integration_end' event
+        id: post_test_integration_end
         if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-events
         with:
@@ -437,6 +448,7 @@ jobs:
           detail: "Test integration ended."
 
       - name: Post 'test_teardown_start' event
+        id: post_test_teardown_start
         if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-events
         with:
@@ -467,6 +479,7 @@ jobs:
           fi
 
       - name: Post 'test_teardown_end' event
+        id: post_test_teardown_end
         if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-events
         with:
@@ -500,6 +513,7 @@ jobs:
           fi
 
       - name: Post execution metadata to Test Observer
+        id: post_execution_metadata
         if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-execution-metadata
         with:
@@ -509,6 +523,7 @@ jobs:
           junit_xml: ${{ steps.junit_results.outputs.junit_xml }}
 
       - name: Post results to Test Observer
+        id: post_results
         if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-results
         with:
@@ -590,6 +605,7 @@ jobs:
           SWIFT_OS_PROJECT_DOMAIN_NAME: ${{ secrets.SWIFT_OS_PROJECT_DOMAIN_NAME }}
 
       - name: Post 'log_collection_finished' event
+        id: post_log_collection_finished
         if: ${{ !cancelled() && steps.post_logs_to_swift.outcome == 'success' && env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-events
         with:
@@ -601,6 +617,7 @@ jobs:
           detail: "Log collection has completed."
 
       - name: Post links to Test Observer
+        id: post_links
         if: ${{ !cancelled() && steps.post_logs_to_swift.outcome == 'success' && env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-links
         with:
@@ -610,6 +627,7 @@ jobs:
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
 
       - name: Post 'job_end' event
+        id: post_job_end
         if: ${{ !cancelled() && env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-events
         with:
@@ -664,6 +682,7 @@ jobs:
           fi
 
       - name: Mark Test Execution completed on Test Observer with the correct status
+        id: mark_test_execution_completed
         if: ${{ always() && env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/patch-test-execution
         with:
@@ -673,6 +692,7 @@ jobs:
           status: ${{ steps.calculate_job_status.outputs.test_status != '' && steps.calculate_job_status.outputs.test_status || 'ENDED_PREMATURELY' }}
 
       - name: Trigger rerun on Test Observer if failure
+        id: trigger_rerun
         if: ${{ failure() && env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/trigger-rerun
         with:

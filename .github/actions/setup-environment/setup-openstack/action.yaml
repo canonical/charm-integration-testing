@@ -96,3 +96,10 @@ runs:
         juju add-model ${model} \
           --config "logging-config=DEBUG" \
           --config="update-status-hook-interval=2m"
+
+    - name: Debug Sleep
+      if: ${{ env.DEBUG_ENABLED == 'true' && github.action == env.DEBUG_SLEEP_AFTER_STEP_ID }}
+      shell: bash
+      run: |
+        echo "Sleeping to assist with debugging."
+        sleep $((60*60*4)) # Sleep for 4 hours
