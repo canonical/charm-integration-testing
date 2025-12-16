@@ -103,3 +103,17 @@ runs:
           exit 1
         fi
       done
+
+  - name: Echo Action
+    shell: bash
+    env:
+      GITHUB_ACTION: ${{ github.action }}
+    run: |
+      echo "GITHUB_ACTION: ${GITHUB_ACTION}"
+
+  - name: Debug Sleep
+    if: ${{ env.DEBUG_ENABLED == 'true' && github.action == env.DEBUG_SLEEP_AFTER_STEP_ID }}
+    shell: bash
+    run: |
+      echo "Sleeping to assist with debugging."
+      sleep $((60*60*4)) # Sleep for 4 hours
