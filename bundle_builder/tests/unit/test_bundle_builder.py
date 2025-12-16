@@ -24,6 +24,7 @@ from bundle_builder.bundle_builder import BundleBuilder, Node
 from bundle_builder.charm import (
     CharmConfigCriteria,
     CharmEndpointOptionality,
+    CharmLimit,
     CharmTestConfig,
 )
 
@@ -211,7 +212,7 @@ class TestBundleBuilder:
                         dataclasses.replace(
                             sample_charm_endpoint_postgresql_k8s_database(),
                             interface="postgresql",
-                            limit=1,
+                            limits=(CharmLimit(limit=1),),
                         )
                     }
                 ),
@@ -285,7 +286,7 @@ class TestBundleBuilder:
                         dataclasses.replace(
                             sample_charm_endpoint_postgresql_k8s_database(),
                             interface="postgresql",
-                            limit=2,
+                            limits=(CharmLimit(limit=2),),
                         )
                     }
                 ),
@@ -493,7 +494,7 @@ class TestDuplicateCharms:
                     dataclasses.replace(
                         sample_charm_endpoint_postgresql_k8s_database(),
                         interface="postgresql",
-                        limit=1,
+                        limits=(CharmLimit(limit=1),),
                     )
                 }
             ),

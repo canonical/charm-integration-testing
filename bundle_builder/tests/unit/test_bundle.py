@@ -20,7 +20,14 @@ import yaml
 from pydantic.dataclasses import dataclass
 
 from bundle_builder.bundle import Application, ApplicationEndpoint, Bundle, Integration
-from bundle_builder.charm import ENDPOINT_PROVIDES, ENDPOINT_REQUIRES, Charm, CharmEndpoint, CharmEndpointOptionality
+from bundle_builder.charm import (
+    ENDPOINT_PROVIDES,
+    ENDPOINT_REQUIRES,
+    Charm,
+    CharmEndpoint,
+    CharmEndpointOptionality,
+    CharmLimit,
+)
 from bundle_builder.charmhub import CharmhubClient
 from bundle_builder.charmhub_http import CharmhubBase
 from bundle_builder.overrides import CharmEndpointOverride, CharmMetadataOverride, OverridesClient
@@ -153,9 +160,9 @@ class TestLimitApplication:
         # WHEN getting charm from store
         charm = client.charm_from_store("test-charm", "amd64")
 
-        # THEN the endpoint has the correct limit
+        # THEN the endpoint has the correct limits
         database_endpoint = next(e for e in charm.endpoints if e.name == "database")
-        assert database_endpoint.limit == 2
+        assert database_endpoint.limits == (CharmLimit(limit=2),)
 
 
 class TestApplicationEndpoint:
@@ -339,7 +346,12 @@ class TestBundle:
                                 charm=dataclasses.replace(
                                     sample_charm_postgresql_k8s(),
                                     endpoints=frozenset(
-                                        {dataclasses.replace(sample_charm_endpoint_postgresql_k8s_database(), limit=1)}
+                                        {
+                                            dataclasses.replace(
+                                                sample_charm_endpoint_postgresql_k8s_database(),
+                                                limits=(CharmLimit(limit=1),),
+                                            )
+                                        }
                                     ),
                                 ),
                             ),
@@ -516,7 +528,7 @@ class TestBundle:
                             name="database",
                             interface="postgresql",
                             optionality=CharmEndpointOptionality.from_bool(False),
-                            limit=1,
+                            limits=(CharmLimit(limit=1),),
                         )
                     }
                 ),
@@ -536,7 +548,7 @@ class TestBundle:
                             name="database",
                             interface="postgresql",
                             optionality=CharmEndpointOptionality.from_bool(False),
-                            limit=None,
+                            limits=(),
                         )
                     }
                 ),
@@ -584,7 +596,7 @@ class TestBundle:
                             name="database",
                             interface="postgresql",
                             optionality=CharmEndpointOptionality.from_bool(False),
-                            limit=2,
+                            limits=(CharmLimit(limit=2),),
                         )
                     }
                 ),
@@ -604,7 +616,7 @@ class TestBundle:
                             name="database",
                             interface="postgresql",
                             optionality=CharmEndpointOptionality.from_bool(False),
-                            limit=None,
+                            limits=(),
                         )
                     }
                 ),

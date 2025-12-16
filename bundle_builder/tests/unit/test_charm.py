@@ -27,6 +27,8 @@ from bundle_builder.charm import (
     CharmConfigCriteria,
     CharmEndpoint,
     CharmEndpointOptionality,
+    CharmLimit,
+    CharmLimitCriteria,
     CharmTestConfig,
 )
 
@@ -43,7 +45,7 @@ def sample_charm_endpoint_postgresql_k8s_certificates() -> CharmEndpoint:
         name="certificates",
         interface="tls-certificates",
         optionality=CharmEndpointOptionality.from_bool(True),
-        limit=None,
+        limits=(),
     )
 
 
@@ -53,7 +55,7 @@ def sample_charm_endpoint_postgresql_k8s_database() -> CharmEndpoint:
         name="database",
         interface="db",
         optionality=CharmEndpointOptionality.from_bool(True),
-        limit=None,
+        limits=(),
     )
 
 
@@ -80,7 +82,7 @@ def sample_charm_endpoint_pgbouncer_k8s_database() -> CharmEndpoint:
         name="database",
         interface="db",
         optionality=CharmEndpointOptionality.from_bool(True),
-        limit=None,
+        limits=(),
     )
 
 
@@ -90,7 +92,7 @@ def sample_charm_endpoint_pgbouncer_k8s_backend_database() -> CharmEndpoint:
         name="backend-database",
         interface="db",
         optionality=CharmEndpointOptionality.from_bool(False),
-        limit=None,
+        limits=(),
     )
 
 
@@ -117,7 +119,7 @@ def sample_charm_endpoint_kratos_pg_database() -> CharmEndpoint:
         name="pg-database",
         interface="db",
         optionality=CharmEndpointOptionality.from_bool(False),
-        limit=None,
+        limits=(),
     )
 
 
@@ -143,7 +145,7 @@ def sample_charm_endpoint_self_signed_certificates_certificates() -> CharmEndpoi
         name="certificates",
         interface="tls-certificates",
         optionality=CharmEndpointOptionality.from_bool(True),
-        limit=None,
+        limits=(),
     )
 
 
@@ -321,6 +323,323 @@ class TestCharmEndpointOptionality:
             assert is_optional == params.value
 
 
+class TestCharmLimitCriteria:
+    class TestValid:
+        @dataclass
+        class Params:
+            label: str
+            criteria: "CharmLimitCriteria"
+            endpoints: frozenset[str]
+            is_valid: bool
+
+        criteria_endpoint_integrated = CharmLimitCriteria(endpoint_integrated="db")
+        criteria_all_of = CharmLimitCriteria(all_of=frozenset({criteria_endpoint_integrated}))
+        criteria_any_of = CharmLimitCriteria(any_of=frozenset({criteria_endpoint_integrated}))
+        criteria_none_of = CharmLimitCriteria(none_of=frozenset({criteria_endpoint_integrated}))
+
+        test_cases = [
+            Params(
+                label="no_conditions_is_always_valid",
+                criteria=CharmLimitCriteria(),
+                endpoints=frozenset(),
+                is_valid=True,
+            ),
+            Params(
+                label="endpoint_integrated_true",
+                criteria=criteria_endpoint_integrated,
+                endpoints=frozenset({"db"}),
+                is_valid=True,
+            ),
+            Params(
+                label="endpoint_integrated_false",
+                criteria=criteria_endpoint_integrated,
+                endpoints=frozenset({"api"}),
+                is_valid=False,
+            ),
+            Params(
+                label="all_of_true",
+                criteria=criteria_all_of,
+                endpoints=frozenset({"db"}),
+                is_valid=True,
+            ),
+            Params(
+                label="all_of_false",
+                criteria=criteria_all_of,
+                endpoints=frozenset({"api"}),
+                is_valid=False,
+            ),
+            Params(
+                label="any_of_true",
+                criteria=criteria_any_of,
+                endpoints=frozenset({"db"}),
+                is_valid=True,
+            ),
+            Params(
+                label="any_of_false",
+                criteria=criteria_any_of,
+                endpoints=frozenset({"api"}),
+                is_valid=False,
+            ),
+            Params(
+                label="none_of_true",
+                criteria=criteria_none_of,
+                endpoints=frozenset({"api"}),
+                is_valid=True,
+            ),
+            Params(
+                label="none_of_false",
+                criteria=criteria_none_of,
+                endpoints=frozenset({"db"}),
+                is_valid=False,
+            ),
+            Params(
+                label="complex_all_true",
+                criteria=CharmLimitCriteria(
+                    all_of=frozenset(
+                        {
+                            criteria_endpoint_integrated,
+                            CharmLimitCriteria(endpoint_integrated="api"),
+                        }
+                    )
+                ),
+                endpoints=frozenset({"db", "api"}),
+                is_valid=True,
+            ),
+            Params(
+                label="complex_all_false",
+                criteria=CharmLimitCriteria(
+                    all_of=frozenset(
+                        {
+                            criteria_endpoint_integrated,
+                            CharmLimitCriteria(endpoint_integrated="other"),
+                        }
+                    )
+                ),
+                endpoints=frozenset({"db", "api"}),
+                is_valid=False,
+            ),
+            Params(
+                label="combined_all_conditions_true",
+                criteria=CharmLimitCriteria(
+                    all_of=frozenset({criteria_endpoint_integrated}),
+                    any_of=frozenset({criteria_endpoint_integrated}),
+                    none_of=frozenset({CharmLimitCriteria(endpoint_integrated="api")}),
+                    endpoint_integrated="db",
+                ),
+                endpoints=frozenset({"db"}),
+                is_valid=True,
+            ),
+            Params(
+                label="combined_all_conditions_false_due_to_none_of",
+                criteria=CharmLimitCriteria(
+                    all_of=frozenset({criteria_endpoint_integrated}),
+                    any_of=frozenset({criteria_endpoint_integrated}),
+                    none_of=frozenset({CharmLimitCriteria(endpoint_integrated="db")}),
+                    endpoint_integrated="db",
+                ),
+                endpoints=frozenset({"db"}),
+                is_valid=False,
+            ),
+        ]
+
+        @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
+        def test(self, params: Params):
+            # GIVEN the criteria and endpoints
+            criteria = params.criteria
+            endpoints = params.endpoints
+
+            # WHEN valid is called
+            is_valid = criteria.valid(endpoints)
+
+            # THEN matches expected
+            assert is_valid == params.is_valid
+
+    class TestFromBool:
+        @dataclass
+        class Params:
+            label: str
+            value: bool
+            endpoints: frozenset[str] = Field(default_factory=frozenset)
+
+        test_cases = [
+            Params(label="true_without_endpoints", value=True),
+            Params(label="false_without_endpoints", value=False),
+            Params(label="true_with_endpoints", value=True, endpoints=frozenset({"endpoint_1", "endpoint_2"})),
+            Params(label="false_with_endpoints", value=False, endpoints=frozenset({"endpoint_1", "endpoint_2"})),
+        ]
+
+        @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
+        def test(self, params: Params):
+            # GIVEN the criteria for the value
+            criteria = CharmLimitCriteria.from_bool(params.value)
+
+            # WHEN valid is called
+            is_valid = criteria.valid(params.endpoints)
+
+            # THEN matches expected
+            assert is_valid == params.value
+
+
+class TestCharmLimit:
+    class TestCriteriaValidation:
+        @dataclass
+        class Params:
+            label: str
+            limit: "CharmLimit"
+            endpoints: frozenset[str]
+            expected_valid: bool
+
+        test_cases = [
+            Params(
+                label="always_valid_criteria",
+                limit=CharmLimit(criteria=CharmLimitCriteria.from_bool(True), limit=5),
+                endpoints=frozenset(),
+                expected_valid=True,
+            ),
+            Params(
+                label="never_valid_criteria",
+                limit=CharmLimit(criteria=CharmLimitCriteria.from_bool(False), limit=5),
+                endpoints=frozenset(),
+                expected_valid=False,
+            ),
+            Params(
+                label="conditional_criteria_met",
+                limit=CharmLimit(criteria=CharmLimitCriteria(endpoint_integrated="grafana-cloud-config"), limit=10),
+                endpoints=frozenset({"grafana-cloud-config"}),
+                expected_valid=True,
+            ),
+            Params(
+                label="conditional_criteria_not_met",
+                limit=CharmLimit(criteria=CharmLimitCriteria(endpoint_integrated="grafana-cloud-config"), limit=10),
+                endpoints=frozenset({"send-remote-write"}),
+                expected_valid=False,
+            ),
+        ]
+
+        @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
+        def test(self, params: Params):
+            # GIVEN a limit with criteria
+            limit = params.limit
+
+            # WHEN checking if criteria is valid
+            is_valid = limit.criteria.valid(params.endpoints)
+
+            # THEN matches expected
+            assert is_valid == params.expected_valid
+
+
+class TestCharmEndpoint:
+    class TestLimitMethod:
+        @dataclass
+        class Params:
+            label: str
+            endpoint: CharmEndpoint
+            integrated_endpoints: frozenset[str]
+            expected_limit: int | None
+
+        test_cases = [
+            Params(
+                label="no_limits_returns_none",
+                endpoint=CharmEndpoint(
+                    type=ENDPOINT_PROVIDES,
+                    name="database",
+                    interface="postgresql",
+                    optionality=CharmEndpointOptionality.from_bool(False),
+                    limits=(),
+                ),
+                integrated_endpoints=frozenset(),
+                expected_limit=None,
+            ),
+            Params(
+                label="single_unconditional_limit",
+                endpoint=CharmEndpoint(
+                    type=ENDPOINT_PROVIDES,
+                    name="database",
+                    interface="postgresql",
+                    optionality=CharmEndpointOptionality.from_bool(False),
+                    limits=(CharmLimit(limit=5),),
+                ),
+                integrated_endpoints=frozenset(),
+                expected_limit=5,
+            ),
+            Params(
+                label="conditional_limit_criteria_met",
+                endpoint=CharmEndpoint(
+                    type=ENDPOINT_PROVIDES,
+                    name="database",
+                    interface="postgresql",
+                    optionality=CharmEndpointOptionality.from_bool(False),
+                    limits=(
+                        CharmLimit(criteria=CharmLimitCriteria(endpoint_integrated="grafana-cloud-config"), limit=10),
+                        CharmLimit(limit=1),
+                    ),
+                ),
+                integrated_endpoints=frozenset({"grafana-cloud-config"}),
+                expected_limit=10,
+            ),
+            Params(
+                label="conditional_limit_criteria_not_met_fallback_to_default",
+                endpoint=CharmEndpoint(
+                    type=ENDPOINT_PROVIDES,
+                    name="database",
+                    interface="postgresql",
+                    optionality=CharmEndpointOptionality.from_bool(False),
+                    limits=(
+                        CharmLimit(criteria=CharmLimitCriteria(endpoint_integrated="grafana-cloud-config"), limit=10),
+                        CharmLimit(limit=1),
+                    ),
+                ),
+                integrated_endpoints=frozenset({"send-remote-write"}),
+                expected_limit=1,
+            ),
+            Params(
+                label="multiple_conditional_limits_first_match_wins",
+                endpoint=CharmEndpoint(
+                    type=ENDPOINT_PROVIDES,
+                    name="metrics",
+                    interface="prometheus",
+                    optionality=CharmEndpointOptionality.from_bool(False),
+                    limits=(
+                        CharmLimit(
+                            criteria=CharmLimitCriteria(endpoint_integrated="grafana-cloud-config"),
+                            limit=100,
+                        ),
+                        CharmLimit(criteria=CharmLimitCriteria(endpoint_integrated="send-remote-write"), limit=50),
+                        CharmLimit(limit=5),
+                    ),
+                ),
+                integrated_endpoints=frozenset({"send-remote-write"}),
+                expected_limit=50,
+            ),
+            Params(
+                label="no_matching_criteria_returns_none",
+                endpoint=CharmEndpoint(
+                    type=ENDPOINT_PROVIDES,
+                    name="metrics",
+                    interface="prometheus",
+                    optionality=CharmEndpointOptionality.from_bool(False),
+                    limits=(
+                        CharmLimit(criteria=CharmLimitCriteria(endpoint_integrated="grafana-cloud-config"), limit=100),
+                        CharmLimit(criteria=CharmLimitCriteria(endpoint_integrated="send-remote-write"), limit=50),
+                    ),
+                ),
+                integrated_endpoints=frozenset({"other-endpoint"}),
+                expected_limit=None,
+            ),
+        ]
+
+        @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
+        def test(self, params: Params):
+            # GIVEN an endpoint with limits
+            endpoint = params.endpoint
+
+            # WHEN getting the limit for specific integrated endpoints
+            limit = endpoint.limit(params.integrated_endpoints)
+
+            # THEN matches expected
+            assert limit == params.expected_limit
+
+
 class TestCharmChannel:
     class TestValidateFromString:
         @dataclass
@@ -491,7 +810,7 @@ class TestCharmConfigCriteria:
             channel = channel_from_string("stable")
 
             # WHEN valid is called
-            is_valid = criteria.valid(channel, set())
+            is_valid = criteria.valid(channel, frozenset())
 
             # THEN it's always valid
             assert is_valid is True
@@ -502,7 +821,7 @@ class TestCharmConfigCriteria:
             channel = channel_from_string("1.0/stable")
 
             # WHEN valid is called
-            is_valid = criteria.valid(channel, set())
+            is_valid = criteria.valid(channel, frozenset())
 
             # THEN it's valid
             assert is_valid is True
@@ -513,7 +832,7 @@ class TestCharmConfigCriteria:
             channel = channel_from_string("2.0/stable")
 
             # WHEN valid is called
-            is_valid = criteria.valid(channel, set())
+            is_valid = criteria.valid(channel, frozenset())
 
             # THEN it's not valid
             assert is_valid is False
@@ -524,7 +843,7 @@ class TestCharmConfigCriteria:
             channel = channel_from_string("stable")
 
             # WHEN valid is called
-            is_valid = criteria.valid(channel, set())
+            is_valid = criteria.valid(channel, frozenset())
 
             # THEN it's valid (empty track = latest)
             assert is_valid is True
@@ -535,7 +854,7 @@ class TestCharmConfigCriteria:
             channel = channel_from_string("stable")
 
             # WHEN valid is called with db endpoint integrated
-            is_valid = criteria.valid(channel, {"db"})
+            is_valid = criteria.valid(channel, frozenset({"db"}))
 
             # THEN it's valid
             assert is_valid is True
@@ -546,7 +865,7 @@ class TestCharmConfigCriteria:
             channel = channel_from_string("stable")
 
             # WHEN valid is called without db endpoint
-            is_valid = criteria.valid(channel, {"api"})
+            is_valid = criteria.valid(channel, frozenset({"api"}))
 
             # THEN it's not valid
             assert is_valid is False
@@ -564,7 +883,7 @@ class TestCharmConfigCriteria:
             channel = channel_from_string("1.0/stable")
 
             # WHEN valid is called with all conditions true
-            is_valid = criteria.valid(channel, {"db"})
+            is_valid = criteria.valid(channel, frozenset({"db"}))
 
             # THEN it's valid
             assert is_valid is True
@@ -582,7 +901,7 @@ class TestCharmConfigCriteria:
             channel = channel_from_string("1.0/stable")
 
             # WHEN valid is called with one condition false
-            is_valid = criteria.valid(channel, {"api"})
+            is_valid = criteria.valid(channel, frozenset({"api"}))
 
             # THEN it's not valid
             assert is_valid is False
@@ -600,7 +919,7 @@ class TestCharmConfigCriteria:
             channel = channel_from_string("2.0/stable")
 
             # WHEN valid is called with one condition true
-            is_valid = criteria.valid(channel, {"db"})
+            is_valid = criteria.valid(channel, frozenset({"db"}))
 
             # THEN it's valid
             assert is_valid is True
@@ -618,7 +937,7 @@ class TestCharmConfigCriteria:
             channel = channel_from_string("2.0/stable")
 
             # WHEN valid is called with all conditions false
-            is_valid = criteria.valid(channel, {"api"})
+            is_valid = criteria.valid(channel, frozenset({"api"}))
 
             # THEN it's not valid
             assert is_valid is False
@@ -629,7 +948,7 @@ class TestCharmConfigCriteria:
             channel = channel_from_string("stable")
 
             # WHEN valid is called with condition not met
-            is_valid = criteria.valid(channel, {"api"})
+            is_valid = criteria.valid(channel, frozenset({"api"}))
 
             # THEN it's valid
             assert is_valid is True
@@ -640,7 +959,7 @@ class TestCharmConfigCriteria:
             channel = channel_from_string("stable")
 
             # WHEN valid is called with condition met
-            is_valid = criteria.valid(channel, {"db"})
+            is_valid = criteria.valid(channel, frozenset({"db"}))
 
             # THEN it's not valid
             assert is_valid is False
@@ -656,7 +975,7 @@ class TestCharmConfigCriteria:
             channel = channel_from_string("1.0/stable")
 
             # WHEN valid is called with all conditions true
-            is_valid = criteria.valid(channel, {"db"})
+            is_valid = criteria.valid(channel, frozenset({"db"}))
 
             # THEN it's valid
             assert is_valid is True
@@ -672,7 +991,7 @@ class TestCharmConfigCriteria:
             channel = channel_from_string("1.0/stable")
 
             # WHEN valid is called with none_of condition failing
-            is_valid = criteria.valid(channel, {"db"})
+            is_valid = criteria.valid(channel, frozenset({"db"}))
 
             # THEN it's not valid
             assert is_valid is False
@@ -683,7 +1002,7 @@ class TestCharmConfigCriteria:
             label: str
             value: bool
             channel_str: str = "stable"
-            endpoints: set[str] = Field(default_factory=set)
+            endpoints: frozenset[str] = Field(default_factory=frozenset)
 
         test_cases = [
             Params(label="true_is_always_valid", value=True),
@@ -692,13 +1011,13 @@ class TestCharmConfigCriteria:
                 label="true_with_channel_and_endpoints",
                 value=True,
                 channel_str="1.0/stable",
-                endpoints={"db", "api"},
+                endpoints=frozenset({"db", "api"}),
             ),
             Params(
                 label="false_with_channel_and_endpoints",
                 value=False,
                 channel_str="1.0/stable",
-                endpoints={"db", "api"},
+                endpoints=frozenset({"db", "api"}),
             ),
         ]
 
@@ -787,7 +1106,7 @@ class TestCharmTestConfig:
         channel = channel_from_string("stable")
 
         # WHEN checking if criteria is valid
-        is_valid = test_config.criteria.valid(channel, set())
+        is_valid = test_config.criteria.valid(channel, frozenset())
 
         # THEN it's always valid
         assert is_valid is True
@@ -800,9 +1119,9 @@ class TestCharmTestConfig:
         channel_no_match = channel_from_string("2.0/stable")
 
         # WHEN checking validity for matching channel
-        is_valid_match = test_config.criteria.valid(channel_match, set())
+        is_valid_match = test_config.criteria.valid(channel_match, frozenset())
         # AND checking validity for non-matching channel
-        is_valid_no_match = test_config.criteria.valid(channel_no_match, set())
+        is_valid_no_match = test_config.criteria.valid(channel_no_match, frozenset())
 
         # THEN it validates correctly
         assert is_valid_match is True
