@@ -105,7 +105,7 @@ jobs:
           persist-credentials: false
 
       - name: Enable Debug Session
-        if: ${{ inputs.debug_ssh_enable == 'true' }}
+        if: ${{ inputs.debug_enable == 'true' }}
         uses: ./.github/actions/enable-debug-session
         with:
           ssh_identifiers: ${{ inputs.debug_ssh_identifiers }}
