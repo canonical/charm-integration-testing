@@ -69,6 +69,30 @@ on:
           - kubernetes
           - openstack
         default: kubernetes
+      debug_enabled:
+        description: If true, enable SSH access and allow sleeping after a step to debug.
+        required: false
+        type: choice
+        options:
+          - "true"
+          - "false"
+        default: "false"
+      debug_ssh_identifiers:
+        # The IDs take the form of lp:<value> for Launchpad and gh:<value> for GitHub.
+        # The GitHub Actor's key is always included.
+        # Only used if `ssh_enable` is true.
+        description: A comma-separated list of IDs to use with ssh-import-id in debug mode.
+        required: false
+        default: ""
+      debug_sleep_after_step_id:
+        description: The ID of the step in the workflow to sleep after in debug mode.
+        required: false
+        default: ""
+
+env:
+  DEBUG_ENABLED: ${{ inputs.debug_enabled }}
+  DEBUG_SLEEP_AFTER_STEP_ID: ${{ inputs.debug_sleep_after_step_id }}
+
 jobs:
   execute-charm-test:
     name: Execute integration tests against the charms
@@ -86,7 +110,31 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Enable Debug Session
+        id: enable-debug-session
+        if: ${{ inputs.debug_enabled == 'true' }}
+        shell: bash
+        env:
+          SSH_IDS: ${{ inputs.debug_ssh_identifiers }}
+        run: |
+          # Always include the GitHub Actor
+          mkdir --parents ~/.ssh/
+          ssh-import-id "gh:${GITHUB_ACTOR}"
+
+          SSH_IDS=$(echo "${SSH_IDS}" | tr ',' ' ')
+          ssh-import-id ${SSH_IDS} || true
+
+          echo "Debug mode enabled. SSH connection details:"
+          echo "ssh $(whoami)@$(hostname -I | cut -d ' ' -f 1)"
+
+          if [ "${DEBUG_ENABLED}" == "true" ] \
+              && [ "${GITHUB_ACTION}" == "${DEBUG_SLEEP_AFTER_STEP_ID}" ]; then
+            echo "Sleeping to assist with debugging."
+            sleep $((60*60*4)) # Sleep for 4 hours
+          fi
+
       - name: Create swap file
+        id: create-swap
         shell: bash
         run: |
           sudo fallocate -l 8G /swapfile
@@ -94,6 +142,12 @@ jobs:
           sudo mkswap /swapfile
           sudo swapon /swapfile
           sudo swapon --show
+
+          if [ "${DEBUG_ENABLED}" == "true" ] \
+              && [ "${GITHUB_ACTION}" == "${DEBUG_SLEEP_AFTER_STEP_ID}" ]; then
+            echo "Sleeping to assist with debugging."
+            sleep $((60*60*4)) # Sleep for 4 hours
+          fi
 
       - name: Generate Juju Model and Controller Name
         id: juju_resources
@@ -105,7 +159,14 @@ jobs:
           echo "model=model-$name" >> $GITHUB_OUTPUT
           echo "controller=$name" >> $GITHUB_OUTPUT
 
+          if [ "${DEBUG_ENABLED}" == "true" ] \
+              && [ "${GITHUB_ACTION}" == "${DEBUG_SLEEP_AFTER_STEP_ID}" ]; then
+            echo "Sleeping to assist with debugging."
+            sleep $((60*60*4)) # Sleep for 4 hours
+          fi
+
       - name: Log job information
+        id: log-job-info
         shell: bash
         env:
           environment: ${{ inputs.environment }}
@@ -141,6 +202,12 @@ jobs:
           echo "| Juju model | \`${model}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Juju controller | \`${controller}\` |" >> $GITHUB_STEP_SUMMARY
 
+          if [ "${DEBUG_ENABLED}" == "true" ] \
+              && [ "${GITHUB_ACTION}" == "${DEBUG_SLEEP_AFTER_STEP_ID}" ]; then
+            echo "Sleeping to assist with debugging."
+            sleep $((60*60*4)) # Sleep for 4 hours
+          fi
+          
       - name: Report Test Execution Start To Test Observer
         if: ${{ !cancelled() && env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/patch-test-execution
@@ -163,6 +230,7 @@ jobs:
           detail: "Charm integration test job started."
 
       - name: Install Juju
+        id: install-juju
         shell: bash
         env:
           juju_channel: ${{ inputs.juju_channel }}
@@ -179,6 +247,12 @@ jobs:
           done
           # Ensure the juju home directory exists
           mkdir -p $HOME/.local/share/juju
+
+          if [ "${DEBUG_ENABLED}" == "true" ] \
+              && [ "${GITHUB_ACTION}" == "${DEBUG_SLEEP_AFTER_STEP_ID}" ]; then
+            echo "Sleeping to assist with debugging."
+            sleep $((60*60*4)) # Sleep for 4 hours
+          fi
 
       - name: Setup K8s Cloud
         if: ${{ inputs.substrate == 'kubernetes'}}
@@ -204,6 +278,7 @@ jobs:
           model: ${{ steps.juju_resources.outputs.model }}
 
       - name: Install Repository
+        id: install-repository
         shell: bash
         run: |
           sudo apt-get update --quiet
@@ -214,6 +289,12 @@ jobs:
           EOF
           pipx install poetry==2.0
           HTTPS_PROXY="http://squid.internal:3128" poetry install
+
+          if [ "${DEBUG_ENABLED}" == "true" ] \
+              && [ "${GITHUB_ACTION}" == "${DEBUG_SLEEP_AFTER_STEP_ID}" ]; then
+            echo "Sleeping to assist with debugging."
+            sleep $((60*60*4)) # Sleep for 4 hours
+          fi
 
       - name: Generate dynamic bundles
         id: build_bundle
@@ -260,6 +341,12 @@ jobs:
             echo '```' >> $GITHUB_STEP_SUMMARY
           fi
 
+          if [ "${DEBUG_ENABLED}" == "true" ] \
+              && [ "${GITHUB_ACTION}" == "${DEBUG_SLEEP_AFTER_STEP_ID}" ]; then
+            echo "Sleeping to assist with debugging."
+            sleep $((60*60*4)) # Sleep for 4 hours
+          fi
+
       - name: Post 'test_deploy_start' event
         if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-events
@@ -284,6 +371,12 @@ jobs:
             --model "${model}" \
             --bundles "${bundle}" \
             --junit-xml=junit-deploy.xml
+
+          if [ "${DEBUG_ENABLED}" == "true" ] \
+              && [ "${GITHUB_ACTION}" == "${DEBUG_SLEEP_AFTER_STEP_ID}" ]; then
+            echo "Sleeping to assist with debugging."
+            sleep $((60*60*4)) # Sleep for 4 hours
+          fi
 
       - name: Post 'test_deploy_end' event
         if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
@@ -325,6 +418,12 @@ jobs:
             --neighbor-endpoint "${neighbor_endpoint}" \
             --junit-xml=junit-integration.xml
 
+          if [ "${DEBUG_ENABLED}" == "true" ] \
+              && [ "${GITHUB_ACTION}" == "${DEBUG_SLEEP_AFTER_STEP_ID}" ]; then
+            echo "Sleeping to assist with debugging."
+            sleep $((60*60*4)) # Sleep for 4 hours
+          fi
+
       - name: Post 'test_integration_end' event
         if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-events
@@ -360,6 +459,12 @@ jobs:
             --applications "target" \
             --junit-xml=junit-teardown.xml
 
+          if [ "${DEBUG_ENABLED}" == "true" ] \
+              && [ "${GITHUB_ACTION}" == "${DEBUG_SLEEP_AFTER_STEP_ID}" ]; then
+            echo "Sleeping to assist with debugging."
+            sleep $((60*60*4)) # Sleep for 4 hours
+          fi
+
       - name: Post 'test_teardown_end' event
         if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-events
@@ -386,6 +491,12 @@ jobs:
             junit.xml
           echo "junit_xml=$(realpath junit.xml)" >> $GITHUB_OUTPUT
           cat junit.xml
+
+          if [ "${DEBUG_ENABLED}" == "true" ] \
+              && [ "${GITHUB_ACTION}" == "${DEBUG_SLEEP_AFTER_STEP_ID}" ]; then
+            echo "Sleeping to assist with debugging."
+            sleep $((60*60*4)) # Sleep for 4 hours
+          fi
 
       - name: Post execution metadata to Test Observer
         if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
@@ -430,6 +541,12 @@ jobs:
           echo "OS_MODEL_CRASHDUMP=$(realpath ${MODEL_CRASHDUMP})" >> $GITHUB_OUTPUT
           echo "OS_CONTROLLER_CRASHDUMP=$(realpath ${CONTROLLER_CRASHDUMP})" >> $GITHUB_OUTPUT
 
+          if [ "${DEBUG_ENABLED}" == "true" ] \
+              && [ "${GITHUB_ACTION}" == "${DEBUG_SLEEP_AFTER_STEP_ID}" ]; then
+            echo "Sleeping to assist with debugging."
+            sleep $((60*60*4)) # Sleep for 4 hours
+          fi
+
       - name: Collect logs
         id: collect_logs
         if: ${{ !cancelled() }}
@@ -448,6 +565,12 @@ jobs:
           [ -f "${openstack_model_crashdump}" ] && cp "${openstack_model_crashdump}" "logs/model-logs.tar.gz"
           [ -f "${openstack_controller_crashdump}" ] && cp "${openstack_controller_crashdump}" "logs/controller-logs.tar.gz"
           echo "directory_path=$(realpath "logs")" >> $GITHUB_OUTPUT
+
+          if [ "${DEBUG_ENABLED}" == "true" ] \
+              && [ "${GITHUB_ACTION}" == "${DEBUG_SLEEP_AFTER_STEP_ID}" ]; then
+            echo "Sleeping to assist with debugging."
+            sleep $((60*60*4)) # Sleep for 4 hours
+          fi
 
       - name: Post Logs To Swift
         id: post_logs_to_swift
@@ -533,6 +656,12 @@ jobs:
           echo "Summary: #tests: $tests | Failed: $failures | Errors: $errors | Skipped: $skipped"
           echo "test_status=$TEST_STATUS" >> $GITHUB_OUTPUT
 
+          if [ "${DEBUG_ENABLED}" == "true" ] \
+              && [ "${GITHUB_ACTION}" == "${DEBUG_SLEEP_AFTER_STEP_ID}" ]; then
+            echo "Sleeping to assist with debugging."
+            sleep $((60*60*4)) # Sleep for 4 hours
+          fi
+
       - name: Mark Test Execution completed on Test Observer with the correct status
         if: ${{ always() && env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/patch-test-execution
@@ -551,8 +680,16 @@ jobs:
           test_execution_id: ${{ inputs.execution_id }}
 
       - name: Teardown Controller
+        id: teardown-controller
         if: ${{ always() }}
         shell: bash
         env:
           controller: ${{ steps.juju_resources.outputs.controller }}
-        run: timeout 15m juju kill-controller "${controller}" --no-prompt --timeout 2m
+        run: |
+          timeout 15m juju kill-controller "${controller}" --no-prompt --timeout 2m
+
+          if [ "${DEBUG_ENABLED}" == "true" ] \
+              && [ "${GITHUB_ACTION}" == "${DEBUG_SLEEP_AFTER_STEP_ID}" ]; then
+            echo "Sleeping to assist with debugging."
+            sleep $((60*60*4)) # Sleep for 4 hours
+          fi

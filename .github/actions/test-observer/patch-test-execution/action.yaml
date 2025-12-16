@@ -64,3 +64,10 @@ runs:
         test_observer_token: "${{ inputs.test_observer_token }}"
         method_type: "PATCH"
         request_body: "@${{ steps.request-body.outputs.file }}"
+
+    - name: Debug Sleep
+      if: ${{ env.DEBUG_ENABLED == 'true' && github.action == env.DEBUG_SLEEP_AFTER_STEP_ID }}
+      shell: bash
+      run: |
+        echo "Sleeping to assist with debugging."
+        sleep $((60*60*4)) # Sleep for 4 hours
