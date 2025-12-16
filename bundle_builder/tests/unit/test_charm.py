@@ -737,7 +737,7 @@ class TestCharmConfigCriteria:
             criteria_dict = {"track": "1.0", "endpoint_integrated": "db"}
 
             # WHEN creating CharmConfigCriteria from the dict
-            criteria = CharmConfigCriteria([criteria_dict])
+            criteria = CharmConfigCriteria(**criteria_dict)
 
             # THEN it's created with the dict values
             assert criteria.track == "1.0"
