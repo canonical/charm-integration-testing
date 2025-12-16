@@ -5,3 +5,12 @@ requires:
   database:
     optional_if:
       - endpoint_integrated: database-legacy
+
+# Remove after: https://github.com/canonical/livepatch-k8s-operator/pull/76
+provides:
+  grafana-dashboard:
+    interface: grafana_dashboard
+    optional: true
+  metrics-endpoint:
+    interface: prometheus_scrape
+    optional: true
