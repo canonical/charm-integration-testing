@@ -1,18 +1,18 @@
 # Copyright 2025 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-from datetime import timedelta
 import logging
 from collections.abc import KeysView
 from dataclasses import dataclass, field
+from datetime import timedelta
 
-from juju.backend import JujuBackend
 import pytest
 from extensions.configure_livepatch_server.extensions import (
     LIVEPATCH_SERVER_CHARM,
     LIVEPATCH_SERVER_CONFIGURE_MESSAGE,
     ConfigureLivepatchServerExtension,
 )
+from juju.backend import JujuBackend
 
 
 @dataclass
@@ -24,6 +24,7 @@ class JujuStub:
     actions: list[tuple[str, str, str, dict[str, str]]] = field(default_factory=list)
     configured: list[tuple[str, str, dict[str, str]]] = field(default_factory=list)
     unit_ips: dict[str, str] = field(default_factory=lambda: {"livepatch/leader": "10.1.2.157"})
+
     def list_applications(self, model: str) -> KeysView[str]:
         return self.applications.keys()
         return self.applications.keys()
@@ -79,7 +80,9 @@ class TestConfigureLivepatchServerExtension:
         return ConfigureLivepatchServerExtension(juju, logger, None)
 
     class TestPostDeploy:
-        def test_configures_livepatch_server_when_present(self, extension_with_token: ConfigureLivepatchServerExtension, juju: JujuStub) -> None:
+        def test_configures_livepatch_server_when_present(
+            self, extension_with_token: ConfigureLivepatchServerExtension, juju: JujuStub
+        ) -> None:
             # GIVEN a model with a livepatch server application
             # WHEN post_deploy is called
             extension_with_token.post_deploy("test-model")
@@ -102,7 +105,9 @@ class TestConfigureLivepatchServerExtension:
             assert juju_stub.actions == []
             assert juju_stub.configured == []
 
-        def test_skips_configuration_without_token(self, extension_without_token: ConfigureLivepatchServerExtension, juju: JujuStub, logger: LoggerStub) -> None:
+        def test_skips_configuration_without_token(
+            self, extension_without_token: ConfigureLivepatchServerExtension, juju: JujuStub, logger: LoggerStub
+        ) -> None:
             # GIVEN an extension without a token
             # WHEN post_deploy is called
             extension_without_token.post_deploy("test-model")
@@ -114,7 +119,9 @@ class TestConfigureLivepatchServerExtension:
             assert juju.configured == []
 
     class TestConfigureLivepatchServer:
-        def test_complete_configuration_flow(self, extension_with_token: ConfigureLivepatchServerExtension, juju: JujuStub) -> None:
+        def test_complete_configuration_flow(
+            self, extension_with_token: ConfigureLivepatchServerExtension, juju: JujuStub
+        ) -> None:
             # GIVEN a ready extension with a token
             # WHEN configure_livepatch_server is called
             extension_with_token.configure_livepatch_server("test-model", "livepatch")
@@ -149,7 +156,9 @@ class TestConfigureLivepatchServerExtension:
                 {"server.url-template": "http://10.1.2.157:8080/v1/patches/{filename}"},
             ) in juju.configured
 
-        def test_skips_when_no_token(self, extension_without_token: ConfigureLivepatchServerExtension, juju: JujuStub, logger: LoggerStub) -> None:
+        def test_skips_when_no_token(
+            self, extension_without_token: ConfigureLivepatchServerExtension, juju: JujuStub, logger: LoggerStub
+        ) -> None:
             # GIVEN an extension without a token
             # WHEN configure_livepatch_server is called
             extension_without_token.configure_livepatch_server("test-model", "livepatch")
@@ -200,5 +209,5 @@ class TestConfigureLivepatchServerExtension:
             extension = ConfigureLivepatchServerExtension(juju, logger, "token")  # type: ignore[arg-type]
 
             # THEN they are stored
-            assert extension.juju is juju  #type: ignore[comparison-overlap]
-            assert extension.logger is logger  #type: ignore[comparison-overlap]
+            assert extension.juju is juju  # type: ignore[comparison-overlap]
+            assert extension.logger is logger  # type: ignore[comparison-overlap]

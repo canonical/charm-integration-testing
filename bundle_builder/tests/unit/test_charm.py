@@ -15,6 +15,7 @@
 
 
 from typing import Any
+
 import pytest
 from pydantic import Field, TypeAdapter
 from pydantic.dataclasses import dataclass

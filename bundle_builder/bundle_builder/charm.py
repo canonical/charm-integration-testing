@@ -14,13 +14,12 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
-from typing import Any, overload
+from typing import Any, TypeAlias, overload
 
 from pydantic import Field, model_serializer, model_validator
 from pydantic_core import ArgsKwargs
 
 from .immutable_dataclass import cached_method, immutable_dataclass
-from typing import TypeAlias
 
 ENDPOINT_PEERS = "peers"
 ENDPOINT_REQUIRES = "requires"
@@ -53,7 +52,7 @@ class CharmChannel:
             else:
                 # Let Pydantic handle it normally
                 return handler(value)
-        
+
         # Handle string input
         if isinstance(value, str):
             parts = value.split("/")
@@ -66,7 +65,7 @@ class CharmChannel:
                     return handler({"track": parts[0], "risk": parts[1], "branch": parts[2]})
                 case _:
                     raise ValueError(f"Invalid channel string: {value}")
-        
+
         # Let Pydantic handle dict/other inputs normally
         return handler(value)
 
@@ -239,7 +238,7 @@ class CharmTestConfig:
                 value = value.args[0]
             else:
                 return handler(value)
-        
+
         if isinstance(value, dict) and "config" in value:
             if isinstance(value["config"], dict):
                 # Convert dict to tuple of tuples

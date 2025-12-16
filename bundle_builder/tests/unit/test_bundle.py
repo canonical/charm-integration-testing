@@ -22,7 +22,14 @@ import yaml
 from pydantic.dataclasses import dataclass
 
 from bundle_builder.bundle import Application, ApplicationEndpoint, Bundle, Integration
-from bundle_builder.charm import ENDPOINT_PROVIDES, ENDPOINT_REQUIRES, Charm, CharmChannel, CharmEndpoint, CharmEndpointOptionality
+from bundle_builder.charm import (
+    ENDPOINT_PROVIDES,
+    ENDPOINT_REQUIRES,
+    Charm,
+    CharmChannel,
+    CharmEndpoint,
+    CharmEndpointOptionality,
+)
 from bundle_builder.charmhub import CharmhubClient
 from bundle_builder.charmhub_http import CharmhubBase
 from bundle_builder.overrides import CharmEndpointOverride, CharmMetadataOverride, OverridesClient

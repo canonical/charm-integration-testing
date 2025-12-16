@@ -164,7 +164,10 @@ class TestApplicationFromArgs:
             label="parse_revision",
             specs=["target::postgresql-k8s::edge::default"],
             applications={
-                Application(name="target", charm=dataclasses.replace(sample_charm_postgresql_k8s(), channel=CharmChannel("edge")))
+                Application(
+                    name="target",
+                    charm=dataclasses.replace(sample_charm_postgresql_k8s(), channel=CharmChannel("edge")),
+                )
             },
         ),
         Params(
