@@ -42,4 +42,4 @@ runs:
       shell: bash
       run: |
         echo "Sleeping to assist with debugging."
-        sleep $((60*60*4)) # Sleep for 4 hours
+        sleep ${DEBUG_SLEEP_SECONDS}

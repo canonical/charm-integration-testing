@@ -97,6 +97,7 @@ env:
   # https://docs.github.com/en/actions/reference/workflows-and-actions/contexts#github-context
   # And in my testing, if an ID is set in a workflow step that calls an action, github.action is set to that ID.
   DEBUG_SLEEP_AFTER_STEP_ID: ${{ inputs.debug_sleep_after_step_id }}
+  DEBUG_SLEEP_SECONDS: 14400 # 4 hours
 
 jobs:
   execute-charm-test:
@@ -135,7 +136,7 @@ jobs:
           if [ "${DEBUG_ENABLED}" == "true" ] \
               && [ "${GITHUB_ACTION}" == "${DEBUG_SLEEP_AFTER_STEP_ID}" ]; then
             echo "Sleeping to assist with debugging."
-            sleep $((60*60*4)) # Sleep for 4 hours
+            sleep ${DEBUG_SLEEP_SECONDS}
           fi
 
       - name: Create swap file
@@ -151,7 +152,7 @@ jobs:
           if [ "${DEBUG_ENABLED}" == "true" ] \
               && [ "${GITHUB_ACTION}" == "${DEBUG_SLEEP_AFTER_STEP_ID}" ]; then
             echo "Sleeping to assist with debugging."
-            sleep $((60*60*4)) # Sleep for 4 hours
+            sleep ${DEBUG_SLEEP_SECONDS}
           fi
 
       - name: Generate Juju Model and Controller Name
@@ -167,7 +168,7 @@ jobs:
           if [ "${DEBUG_ENABLED}" == "true" ] \
               && [ "${GITHUB_ACTION}" == "${DEBUG_SLEEP_AFTER_STEP_ID}" ]; then
             echo "Sleeping to assist with debugging."
-            sleep $((60*60*4)) # Sleep for 4 hours
+            sleep ${DEBUG_SLEEP_SECONDS}
           fi
 
       - name: Log job information
@@ -210,7 +211,7 @@ jobs:
           if [ "${DEBUG_ENABLED}" == "true" ] \
               && [ "${GITHUB_ACTION}" == "${DEBUG_SLEEP_AFTER_STEP_ID}" ]; then
             echo "Sleeping to assist with debugging."
-            sleep $((60*60*4)) # Sleep for 4 hours
+            sleep ${DEBUG_SLEEP_SECONDS}
           fi
           
       - name: Report Test Execution Start To Test Observer
@@ -258,7 +259,7 @@ jobs:
           if [ "${DEBUG_ENABLED}" == "true" ] \
               && [ "${GITHUB_ACTION}" == "${DEBUG_SLEEP_AFTER_STEP_ID}" ]; then
             echo "Sleeping to assist with debugging."
-            sleep $((60*60*4)) # Sleep for 4 hours
+            sleep ${DEBUG_SLEEP_SECONDS}
           fi
 
       - name: Setup K8s Cloud
@@ -301,7 +302,7 @@ jobs:
           if [ "${DEBUG_ENABLED}" == "true" ] \
               && [ "${GITHUB_ACTION}" == "${DEBUG_SLEEP_AFTER_STEP_ID}" ]; then
             echo "Sleeping to assist with debugging."
-            sleep $((60*60*4)) # Sleep for 4 hours
+            sleep ${DEBUG_SLEEP_SECONDS}
           fi
 
       - name: Generate dynamic bundles
@@ -352,7 +353,7 @@ jobs:
           if [ "${DEBUG_ENABLED}" == "true" ] \
               && [ "${GITHUB_ACTION}" == "${DEBUG_SLEEP_AFTER_STEP_ID}" ]; then
             echo "Sleeping to assist with debugging."
-            sleep $((60*60*4)) # Sleep for 4 hours
+            sleep ${DEBUG_SLEEP_SECONDS}
           fi
 
       - name: Post 'test_deploy_start' event
@@ -384,7 +385,7 @@ jobs:
           if [ "${DEBUG_ENABLED}" == "true" ] \
               && [ "${GITHUB_ACTION}" == "${DEBUG_SLEEP_AFTER_STEP_ID}" ]; then
             echo "Sleeping to assist with debugging."
-            sleep $((60*60*4)) # Sleep for 4 hours
+            sleep ${DEBUG_SLEEP_SECONDS}
           fi
 
       - name: Post 'test_deploy_end' event
@@ -432,7 +433,7 @@ jobs:
           if [ "${DEBUG_ENABLED}" == "true" ] \
               && [ "${GITHUB_ACTION}" == "${DEBUG_SLEEP_AFTER_STEP_ID}" ]; then
             echo "Sleeping to assist with debugging."
-            sleep $((60*60*4)) # Sleep for 4 hours
+            sleep ${DEBUG_SLEEP_SECONDS}
           fi
 
       - name: Post 'test_integration_end' event
@@ -475,7 +476,7 @@ jobs:
           if [ "${DEBUG_ENABLED}" == "true" ] \
               && [ "${GITHUB_ACTION}" == "${DEBUG_SLEEP_AFTER_STEP_ID}" ]; then
             echo "Sleeping to assist with debugging."
-            sleep $((60*60*4)) # Sleep for 4 hours
+            sleep ${DEBUG_SLEEP_SECONDS}
           fi
 
       - name: Post 'test_teardown_end' event
@@ -509,7 +510,7 @@ jobs:
           if [ "${DEBUG_ENABLED}" == "true" ] \
               && [ "${GITHUB_ACTION}" == "${DEBUG_SLEEP_AFTER_STEP_ID}" ]; then
             echo "Sleeping to assist with debugging."
-            sleep $((60*60*4)) # Sleep for 4 hours
+            sleep ${DEBUG_SLEEP_SECONDS}
           fi
 
       - name: Post execution metadata to Test Observer
@@ -560,7 +561,7 @@ jobs:
           if [ "${DEBUG_ENABLED}" == "true" ] \
               && [ "${GITHUB_ACTION}" == "${DEBUG_SLEEP_AFTER_STEP_ID}" ]; then
             echo "Sleeping to assist with debugging."
-            sleep $((60*60*4)) # Sleep for 4 hours
+            sleep ${DEBUG_SLEEP_SECONDS}
           fi
 
       - name: Collect logs
@@ -585,7 +586,7 @@ jobs:
           if [ "${DEBUG_ENABLED}" == "true" ] \
               && [ "${GITHUB_ACTION}" == "${DEBUG_SLEEP_AFTER_STEP_ID}" ]; then
             echo "Sleeping to assist with debugging."
-            sleep $((60*60*4)) # Sleep for 4 hours
+            sleep ${DEBUG_SLEEP_SECONDS}
           fi
 
       - name: Post Logs To Swift
@@ -678,7 +679,7 @@ jobs:
           if [ "${DEBUG_ENABLED}" == "true" ] \
               && [ "${GITHUB_ACTION}" == "${DEBUG_SLEEP_AFTER_STEP_ID}" ]; then
             echo "Sleeping to assist with debugging."
-            sleep $((60*60*4)) # Sleep for 4 hours
+            sleep ${DEBUG_SLEEP_SECONDS}
           fi
 
       - name: Mark Test Execution completed on Test Observer with the correct status
@@ -712,5 +713,5 @@ jobs:
           if [ "${DEBUG_ENABLED}" == "true" ] \
               && [ "${GITHUB_ACTION}" == "${DEBUG_SLEEP_AFTER_STEP_ID}" ]; then
             echo "Sleeping to assist with debugging."
-            sleep $((60*60*4)) # Sleep for 4 hours
+            sleep ${DEBUG_SLEEP_SECONDS}
           fi
