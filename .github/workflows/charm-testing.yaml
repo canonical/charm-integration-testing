@@ -349,7 +349,7 @@ jobs:
           detail: "Test deployment finished."
 
       - name: Debug Deployment Tests
-        if: ${{ inputs.debug_enabled == 'true' && (failure() || inputs.debug_sleep_after == 'test_deploy') }}
+        if: ${{ inputs.debug_enabled == 'true' && (failure() || inputs.debug_sleep_after == 'deployment') }}
         shell: bash
         run: |
           echo "Sleeping to debug deployment tests"
@@ -396,7 +396,7 @@ jobs:
           detail: "Test integration ended."
 
       - name: Debug Integration Tests
-        if: ${{ inputs.debug_enabled == 'true' && (failure() || inputs.debug_sleep_after == 'test_integration') }}
+        if: ${{ inputs.debug_enabled == 'true' && (failure() || inputs.debug_sleep_after == 'integration') }}
         shell: bash
         run: |
           echo "Sleeping to debug integration tests"
