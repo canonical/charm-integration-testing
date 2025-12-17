@@ -2,12 +2,14 @@
 # See LICENSE file for licensing details.
 
 import logging
+import time
 import urllib.request
 from abc import ABC
 from datetime import timedelta
 from pathlib import Path
 
 from juju import JujuBackend, JujuExtension
+from jubilant._juju import CLIError as JujuCLIError
 
 MINIO_CHARM = "minio"
 S3_INTEGRATOR_CHARM = "s3-integrator"
@@ -21,6 +23,8 @@ MINIO_CLIENT_PATH = "/usr/local/bin/mc"
 MINIO_CLIENT_MAKE_EXECUTABLE = "chmod +x {client_path}"
 MINIO_CLIENT_AUTHENTICATE = "{client_path} alias set local {address} {access_key} {secret_key}"
 MINIO_CLIENT_MAKE_BUCKET = "{client_path} mb local/{bucket}"
+MAX_ATTEMPTS = 3
+RETRY_SLEEP_SECONDS = 10
 
 
 class S3IntegratorMinIOBackendExtension(JujuExtension, ABC):
@@ -107,16 +111,26 @@ class S3IntegratorMinIOBackendExtension(JujuExtension, ABC):
 
         # Authenticate client with MinIO
         self.logger.info(f"Authenticating MinIO client in '{self.minio_application(s3_integrator_application)}'")
-        self.juju.ssh(
-            model,
-            self.minio_unit(s3_integrator_application),
-            MINIO_CLIENT_AUTHENTICATE.format(
-                client_path=MINIO_CLIENT_PATH,
-                address=self.minio_address(model, s3_integrator_application),
-                access_key=MINIO_ACCESS_KEY,
-                secret_key=MINIO_SECRET_KEY,
-            ),
-        )
+        for attempt in range(MAX_ATTEMPTS):
+            self.logger.info(f"Authentication attempt {attempt + 1} of {MAX_ATTEMPTS}")
+            try:
+                self.juju.ssh(
+                    model,
+                    self.minio_unit(s3_integrator_application),
+                    MINIO_CLIENT_AUTHENTICATE.format(
+                        client_path=MINIO_CLIENT_PATH,
+                        address=self.minio_address(model, s3_integrator_application),
+                        access_key=MINIO_ACCESS_KEY,
+                        secret_key=MINIO_SECRET_KEY,
+                    ),
+                )
+            except JujuCLIError as error:
+                self.logger.warning(
+                    f"Authentication attempt failed with error: {error}."
+                )
+                if attempt + 1 == MAX_ATTEMPTS:
+                    raise
+                time.sleep(RETRY_SLEEP_SECONDS)
 
     def get_minio_client_file(self) -> Path:
         # Only download if not downloaded
