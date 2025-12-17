@@ -1,5 +1,19 @@
-# If an incoming observability integration exists, grafana-agent-k8s must be integrated with grafana-k8s on the outgoing integration.
-# Additionally, at least one incoming integration must be fulfilled, otherwise grafana-agent-k8s is blocked.
+# Grafana Agent K8s acts as an observability aggregator with the following constraints:
+#
+# 1. At least ONE incoming observability integration must be present (otherwise the charm is blocked):
+#    - metrics-endpoint (scrapes metrics from applications)
+#    - logging-provider (receives logs from applications)
+#    - tracing-provider (receives traces from applications)
+#    - grafana-dashboards-consumer (receives dashboards from applications)
+#
+# 2. For EACH incoming integration that is present, a corresponding outgoing integration must also be present:
+#    - metrics-endpoint requires: send-remote-write OR grafana-cloud-config
+#    - logging-provider requires: logging-consumer OR grafana-cloud-config
+#    - tracing-provider requires: tracing OR grafana-cloud-config
+#    - grafana-dashboards-consumer requires: grafana-dashboards-provider OR grafana-cloud-config
+#
+# 3. grafana-cloud-config acts as a universal outgoing integration that satisfies any incoming integration's requirement
+#
 # Logic sourced from https://github.com/canonical/grafana-agent-k8s-operator/blob/6705b4483c0498ab6913e79d340388ca165e5524/src/charm.py#L42
 provides:
   grafana-dashboards-provider:
@@ -12,14 +26,16 @@ provides:
               - endpoint_integrated: grafana-cloud-config
   logging-provider:
     optional_if:
-      - endpoint_integrated: metrics-endpoint
-      - endpoint_integrated: tracing-provider
-      - endpoint_integrated: grafana-dashboards-consumer
+      - any_of:
+          - endpoint_integrated: metrics-endpoint
+          - endpoint_integrated: tracing-provider
+          - endpoint_integrated: grafana-dashboards-consumer
   tracing-provider:
     optional_if:
-      - endpoint_integrated: metrics-endpoint
-      - endpoint_integrated: logging-provider
-      - endpoint_integrated: grafana-dashboards-consumer
+      - any_of:
+          - endpoint_integrated: metrics-endpoint
+          - endpoint_integrated: logging-provider
+          - endpoint_integrated: grafana-dashboards-consumer
 
 requires:
   send-remote-write:
@@ -68,11 +84,13 @@ requires:
                       - endpoint_integrated: grafana-dashboards-provider
   metrics-endpoint:
     optional_if:
-      - endpoint_integrated: logging-provider
-      - endpoint_integrated: tracing-provider
-      - endpoint_integrated: grafana-dashboards-consumer
+      - any_of:
+        - endpoint_integrated: logging-provider
+        - endpoint_integrated: tracing-provider
+        - endpoint_integrated: grafana-dashboards-consumer
   grafana-dashboards-consumer:
     optional_if:
-      - endpoint_integrated: metrics-endpoint
-      - endpoint_integrated: logging-provider
-      - endpoint_integrated: tracing-provider
+      - any_of:
+          - endpoint_integrated: metrics-endpoint
+          - endpoint_integrated: logging-provider
+          - endpoint_integrated: tracing-provider

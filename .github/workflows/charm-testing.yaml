@@ -86,6 +86,15 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Create swap file
+        shell: bash
+        run: |
+          sudo fallocate -l 8G /swapfile
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          sudo swapon --show
+
       - name: Generate Juju Model and Controller Name
         id: juju_resources
         shell: bash
@@ -399,7 +408,7 @@ jobs:
       - name: Call Juju K8s Crashdump
         id: juju_k8s_crashdump
         if: ${{ !cancelled() && inputs.substrate == 'kubernetes'}}
-        uses: canonical/juju-k8s-crashdump/actions/juju-k8s-crashdump@1c72aa0cc3d0606b6d97916aa9aa28d4a3b30a97
+        uses: canonical/juju-k8s-crashdump/actions/juju-k8s-crashdump@5e961799a4fa95030acc32465257ac86c2939c3f
         with:
           kubeconf: ${{ steps.setup_k8s.outputs.kubeconfig_path }}
           controller: ${{ steps.juju_resources.outputs.controller }}

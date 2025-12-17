@@ -43,9 +43,10 @@ class JujuClient:
         model: str = "default",
         timeout: timedelta | None = None,
         count: int = 30,
+        strict_timeout: bool = False,
     ) -> None:
         self.logger.info(f"{self._waiting_timeout_log(timeout)} to be idle.")
-        self.backend.wait_idle(model=model, timeout=timeout, count=count)
+        self.backend.wait_idle(model=model, timeout=timeout, count=count, strict_timeout=strict_timeout)
 
     def print_status(self, model: str = "default") -> None:
         separator = "-" * 80

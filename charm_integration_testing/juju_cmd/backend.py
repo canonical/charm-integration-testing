@@ -24,7 +24,7 @@ class JujuCmdBackend(JujuBackend):
     def _call_juju(self, *args: CmdArg) -> str:
         return self.cmd_client.call(CmdArg(value="juju"), *args)
 
-    @warn_performance(category=JujuStatusPerformanceWarning, threshold=timedelta(seconds=3))
+    @warn_performance(category=JujuStatusPerformanceWarning, threshold=timedelta(seconds=5))
     def _status(self, model: str, *selectors: str) -> JujuStatus:
         return JujuStatus(
             **yaml.safe_load(
@@ -131,15 +131,6 @@ class JujuCmdBackend(JujuBackend):
                 raise JujuWaitTimeoutError
             else:
                 raise e
-
-    def wait_idle(self, model: str, timeout: timedelta | None, count: int | None) -> None:
-        self._wait_for(
-            model,
-            "model",
-            model,
-            "len(applications) == 0 || (forEach(applications, app => app.status == 'active') && forEach(units, unit => unit.workload-status == 'active' && unit.agent-status == 'idle'))",
-            timeout,
-        )
 
     def wait_application_settled(self, model: str, application: str, timeout: timedelta | None) -> None:
         unit_workload_status_settled = " || ".join(
