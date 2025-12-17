@@ -151,7 +151,6 @@ jobs:
           echo "controller=$name" >> $GITHUB_OUTPUT
 
       - name: Log job information
-        id: log-job-info
         shell: bash
         env:
           environment: ${{ inputs.environment }}
@@ -186,7 +185,7 @@ jobs:
           echo "|---|---|" >> $GITHUB_STEP_SUMMARY
           echo "| Juju model | \`${model}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Juju controller | \`${controller}\` |" >> $GITHUB_STEP_SUMMARY
-          
+
       - name: Report Test Execution Start To Test Observer
         if: ${{ !cancelled() && env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/patch-test-execution
@@ -311,12 +310,6 @@ jobs:
             echo '```yaml' >> $GITHUB_STEP_SUMMARY
             cat generated-bundle.yaml >> $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY
-          fi
-
-          if [ "${DEBUG_ENABLED}" == "true" ] \
-              && [ "${GITHUB_ACTION}" == "${DEBUG_SLEEP_AFTER_STEP_ID}" ]; then
-            echo "Sleeping to assist with debugging."
-            sleep ${DEBUG_SLEEP_SECONDS}
           fi
 
       - name: Post 'test_deploy_start' event
@@ -630,10 +623,8 @@ jobs:
           test_execution_id: ${{ inputs.execution_id }}
 
       - name: Teardown Controller
-        id: teardown-controller
         if: ${{ always() }}
         shell: bash
         env:
           controller: ${{ steps.juju_resources.outputs.controller }}
-        run: |
-          timeout 15m juju kill-controller "${controller}" --no-prompt --timeout 2m
+        run: timeout 15m juju kill-controller "${controller}" --no-prompt --timeout 2m
