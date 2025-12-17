@@ -69,33 +69,24 @@ on:
           - kubernetes
           - openstack
         default: kubernetes
-      debug_enabled:
-        description: If true, enable SSH access and allow sleeping after a step to debug.
+      debug_sleep_after:
+        description: The stage of the workflow to sleep after. Enables SSH access.
         required: false
         type: choice
         options:
-          - "true"
-          - "false"
-        default: "false"
-      debug_ssh_identifiers:
+          - none
+          - setup
+          - deployment
+          - integration
+        default: none
+      debug_extra_ssh_imports:
         # The IDs take the form of lp:<value> for Launchpad and gh:<value> for GitHub.
         # The GitHub Actor's key is always included.
-        # Only used if `ssh_enable` is true.
         description: A comma-separated list of IDs to use with ssh-import-id in debug mode.
         required: false
         default: ""
-      debug_sleep_after:
-        description: The stage of the workflow to sleep after in debug mode.
-        required: false
-        type: choice
-        options:
-          - setup
-          - test_deploy
-          - test_integration
-        default: "setup"
 
 env:
-  DEBUG_ENABLED: ${{ inputs.debug_enabled }}
   DEBUG_SLEEP_SECONDS: 7200 # 2 hours
 
 jobs:
@@ -116,10 +107,10 @@ jobs:
           persist-credentials: false
 
       - name: Enable Debug Session
-        if: ${{ inputs.debug_enabled == 'true' }}
+        if: ${{ inputs.debug_sleep_after != 'none' }}
         shell: bash
         env:
-          SSH_IDS: ${{ inputs.debug_ssh_identifiers }}
+          SSH_IDS: ${{ inputs.debug_extra_ssh_imports }}
         run: |
           # Always include the GitHub Actor
           mkdir --parents ~/.ssh/
@@ -249,7 +240,7 @@ jobs:
           model: ${{ steps.juju_resources.outputs.model }}
 
       - name: Debug Setup
-        if: ${{ inputs.debug_enabled == 'true' && (failure() || inputs.debug_sleep_after == 'setup') }}
+        if: ${{ !cancelled() && inputs.debug_sleep_after == 'setup' }}
         shell: bash
         run: |
           echo "Sleeping to debug setup"
@@ -349,7 +340,7 @@ jobs:
           detail: "Test deployment finished."
 
       - name: Debug Deployment Tests
-        if: ${{ inputs.debug_enabled == 'true' && (steps.test_deploy.outcome == 'failure' || inputs.debug_sleep_after == 'test_deploy') }}
+        if: ${{ !cancelled() && inputs.debug_sleep_after == 'deployment' }}
         shell: bash
         run: |
           echo "Sleeping to debug deployment tests"
@@ -396,7 +387,7 @@ jobs:
           detail: "Test integration ended."
 
       - name: Debug Integration Tests
-        if: ${{ inputs.debug_enabled == 'true' && (steps.test_integration.outcome == 'failure' || inputs.debug_sleep_after == 'test_integration') }}
+        if: ${{  !cancelled() && inputs.debug_sleep_after == 'integration' }}
         shell: bash
         run: |
           echo "Sleeping to debug integration tests"
