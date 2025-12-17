@@ -1,0 +1,3 @@
+configs:
+  - config:
+      host: charmqa.canonical.com
