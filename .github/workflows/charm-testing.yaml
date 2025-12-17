@@ -337,12 +337,6 @@ jobs:
             --bundles "${bundle}" \
             --junit-xml=junit-deploy.xml
 
-          if [ "${DEBUG_ENABLED}" == "true" ] \
-              && [ "${GITHUB_ACTION}" == "${DEBUG_SLEEP_AFTER_STEP_ID}" ]; then
-            echo "Sleeping to assist with debugging."
-            sleep ${DEBUG_SLEEP_SECONDS}
-          fi
-
       - name: Post 'test_deploy_end' event
         if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-events
