@@ -2,7 +2,6 @@
 # See LICENSE file for licensing details.
 
 import subprocess  # nosec
-from typing import Optional
 
 from pydantic import field_validator
 from pydantic.dataclasses import dataclass
@@ -10,8 +9,8 @@ from pydantic.dataclasses import dataclass
 
 @dataclass
 class CmdArg:
-    value: Optional[str] = None
-    name: Optional[str] = None
+    value: str | None = None
+    name: str | None = None
 
     @field_validator("value", "name", mode="before")
     @staticmethod

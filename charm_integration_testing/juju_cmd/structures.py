@@ -1,8 +1,6 @@
 # Copyright 2024-2025 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-from typing import Optional
-
 from pydantic import Field
 from serializeable_dataclass import serializeable_dataclass
 
@@ -64,4 +62,4 @@ class JujuExecTask:
 @serializeable_dataclass
 class JujuSecretInfo:
     name: str | None = None
-    content: Optional[dict[str, str]] = None
+    content: dict[str, str] | None = None

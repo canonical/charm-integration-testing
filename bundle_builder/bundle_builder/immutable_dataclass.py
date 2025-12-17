@@ -16,7 +16,7 @@
 
 from dataclasses import field
 from functools import wraps
-from typing import Any, Callable, Dict, Optional, TypeVar, get_type_hints
+from typing import Any, Callable, Dict, TypeVar, get_type_hints
 
 from pydantic.dataclasses import dataclass
 from typing_extensions import dataclass_transform
@@ -90,7 +90,7 @@ def make_cached_method(cached_field_name: str, method: Callable[..., Any]) -> Ca
 # Create an immutable dataclass using frozen=True
 # and defaults slots=True
 @dataclass_transform(frozen_default=True, field_specifiers=(field,))
-def immutable_dataclass(_cls: Optional[type] = None, **dataclass_kwargs: Any) -> Any:
+def immutable_dataclass(_cls: type | None = None, **dataclass_kwargs: Any) -> Any:
     def wrap(cls: type) -> Any:
         # Collect methods decorated as computed fields
         computed_fields = {}

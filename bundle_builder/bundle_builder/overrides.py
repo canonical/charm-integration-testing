@@ -15,7 +15,7 @@
 
 from functools import cache
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import yaml
 from pydantic import Field
@@ -88,7 +88,7 @@ class OverridesClient:
         self.charm_priorities_config = charm_priorities_config
 
     @cache
-    def _read_yaml_file(self, path: Path | None, file_name: Optional[str]) -> Any:
+    def _read_yaml_file(self, path: Path | None, file_name: str | None) -> Any:
         # Return empty if no path given
         if path is None:
             return {}

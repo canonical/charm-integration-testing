@@ -15,7 +15,7 @@
 
 import dataclasses
 from functools import cache
-from typing import Any, Optional
+from typing import Any
 
 import pytest
 import yaml
@@ -123,7 +123,7 @@ class TestLimitApplication:
                                 self.extra = MockExtra()
 
                         # Mock error for default base lookup (when base is "NA")
-                        self.error: Optional[MockError] = None
+                        self.error: MockError | None = None
                         if hasattr(action, "base") and action.base.name == "NA":
                             self.error = MockError()
 
