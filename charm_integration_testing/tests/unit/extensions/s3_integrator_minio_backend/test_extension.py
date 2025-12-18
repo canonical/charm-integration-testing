@@ -117,8 +117,8 @@ class TestS3IntegratorMinIOBackendExtension:
 
             assert any("/usr/local/bin/mc alias set local" in cmd for _, _, cmd in juju.ssh_calls)
             assert any("/usr/local/bin/mc mb" in cmd for _, _, cmd in juju.ssh_calls)
-            assert any("touch some-s3-path" in cmd for _, _, cmd in juju.ssh_calls)
-            assert any("/usr/local/bin/mc cp some-s3-path" in cmd for _, _, cmd in juju.ssh_calls)
+            assert any("touch empty && /usr/local/bin/mc cp empty" in cmd for _, _, cmd in juju.ssh_calls)
+            assert any("&& rm empty" in cmd for _, _, cmd in juju.ssh_calls)
 
             assert (
                 "test-model",
@@ -187,10 +187,10 @@ class TestS3IntegratorMinIOBackendExtension:
             # THEN bucket is created
             assert any("/usr/local/bin/mc mb local/minio-bucket-for-testing" in cmd for _, _, cmd in juju.ssh_calls)
 
-            # AND path is created via touch and mc cp
-            assert any("touch some-s3-path" in cmd for _, _, cmd in juju.ssh_calls)
+            # AND path is created in a single command
             assert any(
-                "/usr/local/bin/mc cp some-s3-path local/minio-bucket-for-testing/some-s3-path" in cmd
+                "touch empty && /usr/local/bin/mc cp empty local/minio-bucket-for-testing/some-s3-path/ && rm empty"
+                in cmd
                 for _, _, cmd in juju.ssh_calls
             )
 
