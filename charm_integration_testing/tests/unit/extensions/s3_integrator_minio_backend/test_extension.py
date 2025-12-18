@@ -12,6 +12,7 @@ from extensions.s3_integrator_minio_backend.extension import (
     MINIO_SECRET_KEY,
     S3IntegratorMinIOBackendExtension,
 )
+from jubilant._juju import CLIError as JujuCLIError
 
 
 @dataclass
@@ -134,6 +135,52 @@ class TestS3IntegratorMinIOBackendExtension:
                     "bucket": MINIO_BUCKET,
                 },
             ) in juju.configured
+
+        def test_alias_retries_on_failure(self, extension, juju, monkeypatch):
+            def generate_results():
+                yield JujuCLIError(1, "bad-command")
+                yield "Success"
+
+            results = generate_results()
+
+            def ssh_errors_once(model: str, target: str, command: str):
+                result = next(results)
+                if isinstance(result, JujuCLIError):
+                    raise result
+                juju.ssh_calls.append((model, target, command))
+
+            monkeypatch.setattr(juju, "ssh", ssh_errors_once)
+
+            # GIVEN a ready extension with the client downloaded
+            extension.minio_client_file = Path("mc")
+
+            # WHEN set_minio_alias is called
+            extension.set_minio_alias("test-model", "s3-app", max_attempts=3, retry_sleep_seconds=0)
+
+            # THEN the alias command runs successfully
+            assert any("/usr/local/bin/mc alias set local" in cmd for _, _, cmd in juju.ssh_calls)
+
+        def test_alias_max_retries(self, extension, juju, monkeypatch):
+            def generate_results():
+                yield JujuCLIError(1, "bad-command")
+                yield "Success"
+
+            results = generate_results()
+
+            def ssh_errors_once(model: str, target: str, command: str):
+                result = next(results)
+                if isinstance(result, JujuCLIError):
+                    raise result
+                juju.ssh_calls.append((model, target, command))
+
+            monkeypatch.setattr(juju, "ssh", ssh_errors_once)
+
+            # GIVEN a ready extension with the client downloaded
+            extension.minio_client_file = Path("mc")
+
+            # WHEN set_minio_alias is called with few attempts, THEN it errors
+            with pytest.raises(JujuCLIError):
+                extension.set_minio_alias("test-model", "s3-app", max_attempts=1, retry_sleep_seconds=0)
 
     class TestGetMinioClientFile:
         def test_downloads_only_once(self, extension):
