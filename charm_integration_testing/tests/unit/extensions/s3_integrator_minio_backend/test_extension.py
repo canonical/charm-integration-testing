@@ -4,6 +4,7 @@
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
+from subprocess import CalledProcessError  # nosec
 
 import pytest
 from extensions.s3_integrator_minio_backend.extension import (
@@ -12,7 +13,6 @@ from extensions.s3_integrator_minio_backend.extension import (
     MINIO_SECRET_KEY,
     S3IntegratorMinIOBackendExtension,
 )
-from jubilant._juju import CLIError as JujuCLIError
 
 
 @dataclass
@@ -138,14 +138,14 @@ class TestS3IntegratorMinIOBackendExtension:
 
         def test_alias_retries_on_failure(self, extension, juju, monkeypatch):
             def generate_results():
-                yield JujuCLIError(1, "bad-command")
+                yield CalledProcessError(1, "bad-command")
                 yield "Success"
 
             results = generate_results()
 
             def ssh_errors_once(model: str, target: str, command: str):
                 result = next(results)
-                if isinstance(result, JujuCLIError):
+                if isinstance(result, CalledProcessError):
                     raise result
                 juju.ssh_calls.append((model, target, command))
 
@@ -162,7 +162,7 @@ class TestS3IntegratorMinIOBackendExtension:
 
         def test_alias_max_attempts_exceeded(self, extension, juju, monkeypatch):
             def ssh_errors(model: str, target: str, command: str):
-                raise JujuCLIError(1, "bad-command")
+                raise CalledProcessError(1, "bad-command")
 
             monkeypatch.setattr(juju, "ssh", ssh_errors)
 
@@ -170,7 +170,7 @@ class TestS3IntegratorMinIOBackendExtension:
             extension.minio_client_file = Path("mc")
 
             # WHEN set_minio_alias fails every attempt, THEN it errors
-            with pytest.raises(JujuCLIError):
+            with pytest.raises(CalledProcessError):
                 extension.set_minio_alias("test-model", "s3-app", max_attempts=3, retry_sleep_seconds=0)
 
     class TestGetMinioClientFile:

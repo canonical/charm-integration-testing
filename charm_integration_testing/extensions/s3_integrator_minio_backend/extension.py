@@ -7,8 +7,8 @@ import urllib.request
 from abc import ABC
 from datetime import timedelta
 from pathlib import Path
+from subprocess import CalledProcessError  # nosec
 
-from jubilant._juju import CLIError as JujuCLIError
 from juju import JujuBackend, JujuExtension
 
 MINIO_CHARM = "minio"
@@ -180,8 +180,8 @@ class S3IntegratorMinIOBackendExtension(JujuExtension, ABC):
                     ),
                 )
                 return
-            except JujuCLIError as error:
-                self.logger.warning(f"Alias attempt failed with error: {error}.")
+            except CalledProcessError as error:
+                self.logger.warning(f"Alias attempt {attempt + 1} of {max_attempts} failed with error: {error}.")
                 if attempt + 1 == max_attempts:
                     raise
                 time.sleep(retry_sleep_seconds)
