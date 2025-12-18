@@ -27,7 +27,6 @@ class JujuStub:
 
     def list_applications(self, model: str) -> KeysView[str]:
         return self.applications.keys()
-        return self.applications.keys()
 
     def application_charm(self, model: str, application: str) -> str:
         return self.applications[application]
