@@ -22,7 +22,6 @@ from .charm import (
     ENDPOINT_PROVIDES,
     ENDPOINT_REQUIRES,
     Charm,
-    CharmChannel,
     CharmEndpoint,
     CharmEndpointOptionality,
     CharmTestConfig,
@@ -230,7 +229,7 @@ class CharmhubClient:
 
         return Charm(
             name=charm_name,
-            channel=CharmChannel(default_refresh_info.effective_channel),
+            channel=default_refresh_info.effective_channel,
             revision=charm_revision,
             ubuntu_version=ubuntu_version,
             ubuntu_arch=ubuntu_arch,
@@ -275,7 +274,7 @@ class CharmhubClient:
 
         return Charm(
             name=charm_name,
-            channel=CharmChannel(charm_channel),
+            channel=charm_channel,
             revision=refresh_info.charm.revision,
             ubuntu_version=ubuntu_version,
             ubuntu_arch=ubuntu_arch,
@@ -314,7 +313,7 @@ class CharmhubClient:
             raise ValueError(f"Refresh info for charm {charm_name} returned no revision")
         return Charm(
             name=charm_name,
-            channel=CharmChannel(refresh_info.effective_channel),
+            channel=refresh_info.effective_channel,
             revision=refresh_info.charm.revision,
             ubuntu_version=ubuntu_version,
             ubuntu_arch=ubuntu_arch,

@@ -26,7 +26,6 @@ from bundle_builder.charm import (
     ENDPOINT_PROVIDES,
     ENDPOINT_REQUIRES,
     Charm,
-    CharmChannel,
     CharmEndpoint,
     CharmEndpointOptionality,
 )
@@ -527,7 +526,7 @@ class TestBundle:
             # GIVEN a charm with limit 1
             limited_charm = Charm(
                 name="limited-charm",
-                channel=CharmChannel("stable"),
+                channel="stable",
                 revision=1,
                 ubuntu_version="22.04",
                 ubuntu_arch="amd64",
@@ -547,7 +546,7 @@ class TestBundle:
 
             requiring_charm = Charm(
                 name="app",
-                channel=CharmChannel("stable"),
+                channel="stable",
                 revision=1,
                 ubuntu_version="22.04",
                 ubuntu_arch="amd64",
@@ -596,7 +595,7 @@ class TestBundle:
             # GIVEN a charm with limit 2
             limited_charm = Charm(
                 name="limited-charm",
-                channel=CharmChannel("stable"),
+                channel="stable",
                 revision=1,
                 ubuntu_version="22.04",
                 ubuntu_arch="amd64",
@@ -616,7 +615,7 @@ class TestBundle:
 
             requiring_charm = Charm(
                 name="app",
-                channel=CharmChannel("stable"),
+                channel="stable",
                 revision=1,
                 ubuntu_version="22.04",
                 ubuntu_arch="amd64",

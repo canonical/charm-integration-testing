@@ -23,7 +23,6 @@ from bundle_builder.bundle import Application, ApplicationEndpoint, Bundle, Inte
 from bundle_builder.bundle_builder import BundleBuilder, Node
 from bundle_builder.charm import (
     Charm,
-    CharmChannel,
     CharmConfigCriteria,
     CharmEndpointOptionality,
     CharmTestConfig,
@@ -598,7 +597,7 @@ class TestAddTestConfigs:
             charm = dataclasses.replace(  # type: ignore
                 sample_charm_postgresql_k8s(),
                 name="test-charm",
-                channel=CharmChannel("1.0/stable"),
+                channel="1.0/stable",
                 test_configs=(
                     CharmTestConfig(
                         criteria=CharmConfigCriteria(track="1.0"),
@@ -751,7 +750,7 @@ class TestAddTestConfigs:
             charm1 = dataclasses.replace(  # type: ignore
                 sample_charm_postgresql_k8s(),
                 name="charm1",
-                channel=CharmChannel("1.0/stable"),
+                channel="1.0/stable",
                 test_configs=(
                     CharmTestConfig(
                         criteria=CharmConfigCriteria(track="1.0"),
@@ -763,7 +762,7 @@ class TestAddTestConfigs:
             charm2 = dataclasses.replace(  # type: ignore
                 sample_charm_kratos(),
                 name="charm2",
-                channel=CharmChannel("2.0/stable"),
+                channel="2.0/stable",
                 test_configs=(
                     CharmTestConfig(
                         criteria=CharmConfigCriteria(track="2.0"),
@@ -829,7 +828,7 @@ class TestAddTestConfigs:
             charm = dataclasses.replace(  # type: ignore
                 sample_charm_kratos(),
                 name="test-charm",
-                channel=CharmChannel("1.0/stable"),
+                channel="1.0/stable",
                 endpoints=frozenset(
                     {
                         # TODO(raul): remove type ignore in subsequent type checker PRs

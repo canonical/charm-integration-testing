@@ -48,6 +48,7 @@ skips = ['charm_integration_testing/test_suite/*']
 
 [tool.mypy]
 python_version = "3.10"
+plugins = ['pydantic.mypy']
 strict = true
 warn_return_any = true
 warn_unused_configs = true
