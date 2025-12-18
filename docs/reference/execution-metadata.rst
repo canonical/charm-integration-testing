@@ -8,6 +8,25 @@ Overview
 
 The ``execution_metadata`` fixture is available in all tests and provides an ``add(category, value)`` function. Metadata is collected throughout test execution and serialized as JSON arrays in JUnit properties, with one property per category containing all unique values.
 
+Normalization
+-------------
+
+Many metadata values are automatically normalized to ensure consistency across test runs. Normalization removes variable data like timestamps, IP addresses, UUIDs, and numeric sequences, replacing them with placeholder tokens. This makes metadata suitable for aggregation and analysis across multiple test executions.
+
+The ``normalize_string()`` function applies these transformations:
+
+- **Kubernetes pod names**: ``pod=<podName>_<namespace>(<uid>)`` → ``pod=<POD>``
+- **UUIDs**: ``a1b2c3d4-e5f6-...`` → ``<UUID>``
+- **Temporary file paths**: ``/tmp5d7rg3qj`` → ``/tmp<TEMP>``
+- **MinIO probe URLs**: ``probe-bsign-a1b2c3`` → ``probe-bsign-<NONCE>``
+- **OCI image digests**: ``sha256:a1b2c3...`` → ``sha256:<DIGEST>``
+- **IP addresses**: IPv4 (``192.168.1.1``) and IPv6 (``2001:db8::1``) → ``<IP>``
+- **Timestamps**: ISO 8601, dates, times → ``<TIMESTAMP>``
+- **All numeric sequences**: ``12345`` → ``XXX``
+- **Truncation**: Values longer than 150 characters are truncated with ``...``
+
+See ``charm_integration_testing/utils/normalization.py`` for implementation details.
+
 Collected Metadata Categories
 ------------------------------
 
@@ -18,16 +37,19 @@ Charm Information
 
 .. list-table::
    :header-rows: 1
-   :widths: 30 50 20
+   :widths: 25 40 15 20
 
    * - Category
      - Description
+     - Normalized
      - Example Value
    * - ``charm``
      - Name of each charm deployed in the test model. Collected at start and end of test.
+     - No
      - ``postgresql``
    * - ``charm:<name>:revision``
      - Revision number for a specific charm. Dynamic category based on charm name (e.g., ``charm:postgresql:revision``). Collected at start and end of test.
+     - No
      - ``123``
 
 Warning Information
@@ -35,13 +57,15 @@ Warning Information
 
 .. list-table::
    :header-rows: 1
-   :widths: 30 50 20
+   :widths: 25 40 15 20
 
    * - Category
      - Description
+     - Normalized
      - Example Value
    * - ``warning:message``
-     - Normalized warning messages emitted during test execution. Captures all Python warnings. Format: ``<WarningCategory>: <message>``
+     - Warning messages emitted during test execution. Captures all Python warnings. Format: ``<WarningCategory>: <message>``
+     - Yes
      - ``UserWarning: Deprecated function``
 
 Failure Information
@@ -49,28 +73,35 @@ Failure Information
 
 .. list-table::
    :header-rows: 1
-   :widths: 30 50 20
+   :widths: 25 40 15 20
 
    * - Category
      - Description
+     - Normalized
      - Example Value
    * - ``failure:message``
-     - Normalized failure message when a test fails. Contains the error message from failed tests.
+     - Failure message when a test fails. Contains the error message from failed tests.
+     - Yes
      - ``AssertionError: Expected 'active'``
    * - ``failure:charm:<name>:status``
-     - Status information for a specific charm when test fails due to ``JujuWaitTimeoutError``. Format: ``application:<status>:<message>`` or ``unit:<status>:<message>``
+     - Status information for a specific charm when test fails due to ``JujuWaitTimeoutError``. Format: ``application:<status>:<message>`` or ``unit:<status>:<message>``. The message portion is normalized.
+     - Partial
      - ``application:blocked:Init failed``
    * - ``failure:cli:cmd``
-     - The command that failed when test fails due to ``CalledProcessError``. Contains the normalized command string.
+     - The command that failed when test fails due to ``CalledProcessError``. Contains the command string.
+     - Yes
      - ``juju deploy postgresql``
    * - ``failure:cli:return_code``
      - The return code from a failed command. Only recorded for ``CalledProcessError`` exceptions.
+     - No
      - ``1``
    * - ``failure:cli:stdout``
      - Standard output from a failed command. Only recorded for ``CalledProcessError`` with stdout.
+     - Yes
      - ``Error: unit not found``
    * - ``failure:cli:stderr``
      - Standard error from a failed command. Only recorded for ``CalledProcessError`` with stderr.
+     - Yes
      - ``ERROR connection refused``
 
 Skip Information
@@ -78,14 +109,16 @@ Skip Information
 
 .. list-table::
    :header-rows: 1
-   :widths: 30 50 20
+   :widths: 25 40 15 20
 
    * - Category
      - Description
+     - Normalized
      - Example Value
    * - ``skipped:message``
-     - Normalized message explaining why a test was skipped. Captured when tests are skipped or marked as xfail.
-     - ``Model not idle after 30s``
+     - Message explaining why a test was skipped. Captured when tests are skipped or marked as xfail.
+     - Yes
+     - ``Model not idle after XXXs``
 
 Using Execution Metadata
 -------------------------
