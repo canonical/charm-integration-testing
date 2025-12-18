@@ -168,7 +168,7 @@ def sample_info_json() -> dict[str, dict[str, Any]]:
 
 
 def sample_info_response() -> InfoResponse:
-    return InfoResponse(**sample_info_json())
+    return InfoResponse(**sample_info_json())  # type: ignore[arg-type]
 
 
 class TestRefreshResponse:

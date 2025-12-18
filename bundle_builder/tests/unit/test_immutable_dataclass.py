@@ -77,7 +77,7 @@ def test_frozen_enforcement() -> None:
     # WHEN attempting to mutate an attribute
     # THEN it should raise FrozenInstanceError
     with pytest.raises(FrozenInstanceError):
-        u.first = "Charles"
+        u.first = "Charles"  # type: ignore[misc]
 
 
 @immutable_dataclass()
@@ -187,6 +187,7 @@ def test_cannot_overwrite_frozen() -> None:
     # WHEN class attempts to overwrite frozen
     # THEN raise exception
     with pytest.raises(TypeError):
+
         @immutable_dataclass(frozen=True)
         class A:
             pass
@@ -196,6 +197,7 @@ def test_cannot_overwrite_slots() -> None:
     # WHEN class attempts to overwrite slots
     # THEN raise exception
     with pytest.raises(TypeError):
+
         @immutable_dataclass(slots=False)
         class A:
             pass

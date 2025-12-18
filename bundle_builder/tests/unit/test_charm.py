@@ -1073,7 +1073,7 @@ class TestCharmConfigCriteria:
             ]
 
             # WHEN creating CharmConfigCriteria from the list
-            criteria = CharmConfigCriteria(criteria_list)
+            criteria = CharmConfigCriteria(criteria_list)  # type: ignore[arg-type]
 
             # THEN it's converted to all_of
             assert criteria.all_of is not None
@@ -1086,7 +1086,7 @@ class TestCharmConfigCriteria:
             criteria_dict = {"track": "1.0", "endpoint_integrated": "db"}
 
             # WHEN creating CharmConfigCriteria from the dict
-            criteria = CharmConfigCriteria(**criteria_dict)
+            criteria = CharmConfigCriteria(**criteria_dict)  # type: ignore[arg-type]
 
             # THEN it's created with the dict values
             assert criteria.track == "1.0"

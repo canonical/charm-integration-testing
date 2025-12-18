@@ -514,7 +514,7 @@ class TestCharmhubClient:
                     "charm-a": InfoResponse(
                         default_release=InfoResponse.DefaultRelease(
                             revision=InfoResponse.DefaultRelease.Revision(
-                                metadata=yaml.dump(
+                                metadata=yaml.dump(  # type: ignore[arg-type]
                                     {
                                         "provides": {
                                             "endpoint-a": {
@@ -543,7 +543,7 @@ class TestCharmhubClient:
                     "charm-a": InfoResponse(
                         default_release=InfoResponse.DefaultRelease(
                             revision=InfoResponse.DefaultRelease.Revision(
-                                metadata=yaml.dump(
+                                metadata=yaml.dump(  # type: ignore[arg-type]
                                     {
                                         "requires": {
                                             "endpoint-a": {
