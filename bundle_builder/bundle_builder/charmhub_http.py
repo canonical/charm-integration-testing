@@ -73,7 +73,8 @@ class CharmMetadata:
     provides: dict[str, Endpoint] = Field(default_factory=dict)
 
 
-@immutable_dataclass(config=dict(validate_by_name=True))
+# TODO(raul): remove type ignore in subsequent type checker PRs
+@immutable_dataclass(config=dict(validate_by_name=True))  # type: ignore
 class RefreshResponse:
     @immutable_dataclass
     class Charm:
@@ -88,7 +89,8 @@ class RefreshResponse:
 
     @immutable_dataclass
     class Error:
-        @immutable_dataclass(config=dict(validate_by_name=True))
+        # TODO(raul): remove type ignore in subsequent type checker PRs
+        @immutable_dataclass(config=dict(validate_by_name=True))  # type: ignore
         class Extra:
             @immutable_dataclass
             class Release:
@@ -110,7 +112,8 @@ class RefreshResponse:
 
 @immutable_dataclass
 class FindResponse:
-    @immutable_dataclass(config=dict(validate_by_name=True))
+    # TODO(raul): remove type ignore in subsequent type checker PRs
+    @immutable_dataclass(config=dict(validate_by_name=True))  # type: ignore
     class Result:
         deployable_on: frozenset[str] = Field(default_factory=frozenset, alias="deployable-on")
 
@@ -118,11 +121,13 @@ class FindResponse:
     result: Result
 
 
-@immutable_dataclass(config=dict(validate_by_name=True))
+# TODO(raul): remove type ignore in subsequent type checker PRs
+@immutable_dataclass(config=dict(validate_by_name=True))  # type: ignore
 class InfoResponse:
     @immutable_dataclass
     class DefaultRelease:
-        @immutable_dataclass(config=dict(validate_by_name=True))
+        # TODO(raul): remove type ignore in subsequent type checker PRs
+        @immutable_dataclass(config=dict(validate_by_name=True))  # type: ignore
         class Revision:
             metadata: CharmMetadata = Field(default_factory=CharmMetadata, alias="metadata-yaml")
 
@@ -133,7 +138,8 @@ class InfoResponse:
 
         revision: Revision = Field(default_factory=Revision)
 
-    @immutable_dataclass(config=dict(validate_by_name=True))
+    # TODO(raul): remove type ignore in subsequent type checker PRs
+    @immutable_dataclass(config=dict(validate_by_name=True))  # type: ignore
     class Result:
         deployable_on: frozenset[str] = Field(default_factory=frozenset, alias="deployable-on")
 

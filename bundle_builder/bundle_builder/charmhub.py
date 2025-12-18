@@ -148,9 +148,11 @@ class CharmhubClient:
 
     def _find_charms_add_platform_overrides(self, response: set[FindResponse]) -> set[FindResponse]:
         return {
-            dataclasses.replace(
+            # TODO(raul): remove type ignore in subsequent type checker PRs
+            dataclasses.replace(  # type: ignore
                 charm,
-                result=dataclasses.replace(
+                # TODO(raul): remove type ignore in subsequent type checker PRs
+                result=dataclasses.replace(  # type: ignore
                     charm.result,
                     deployable_on=frozenset(
                         charm.result.deployable_on | self.overrides_client.get_charm_platform_overrides(charm.name)
@@ -163,9 +165,11 @@ class CharmhubClient:
     def _find_charms_add_deployable_on_overrides(self, response: set[FindResponse]) -> set[FindResponse]:
         # If response[n].charm.result.deployable_on is empty, then it is deployable on machine environments by default.
         return {
-            dataclasses.replace(
+            # TODO(raul): remove type ignore in subsequent type checker PRs
+            dataclasses.replace(  # type: ignore
                 charm,
-                result=dataclasses.replace(
+                # TODO(raul): remove type ignore in subsequent type checker PRs
+                result=dataclasses.replace(  # type: ignore
                     charm.result,
                     deployable_on=frozenset(["machine"])
                     if len(charm.result.deployable_on) == 0

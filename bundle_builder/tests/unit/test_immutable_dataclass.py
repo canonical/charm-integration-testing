@@ -40,7 +40,8 @@ def test_computed_property_value() -> None:
     # WHEN a user with first and last names
     u = User(first="Ada", last="Lovelace")
     # THEN the computed full_name should concatenate them
-    assert u.full_name == "Ada Lovelace"
+    # TODO(raul): remove type ignore in subsequent type checker PRs
+    assert u.full_name == "Ada Lovelace"  # type: ignore
 
 
 def test_computed_property_type() -> None:
@@ -77,10 +78,11 @@ def test_frozen_enforcement() -> None:
     # WHEN attempting to mutate an attribute
     # THEN it should raise FrozenInstanceError
     with pytest.raises(FrozenInstanceError):
-        u.first = "Charles"  # type: ignore[misc]
+        u.first = "Charles"
 
 
-@immutable_dataclass()
+# TODO(raul): remove type ignore in subsequent type checker PRs
+@immutable_dataclass()  # type: ignore
 class Measurement:
     meters: float
 
@@ -105,8 +107,10 @@ def test_multiple_computed_fields() -> None:
     # WHEN a measurement in meters
     m = Measurement(meters=1.5)
     # THEN computed centimeters and inches should be correct
-    assert m.centimeters == 150.0
-    assert round(m.inches, 2) == 59.06
+    # TODO(raul): remove type ignore in subsequent type checker PRs
+    assert m.centimeters == 150.0  # type: ignore
+    # TODO(raul): remove type ignore in subsequent type checker PRs
+    assert round(m.inches, 2) == 59.06  # type: ignore
 
 
 def test_multiple_cached_methods() -> None:
@@ -134,7 +138,8 @@ def test_preserves_original_post_init() -> None:
     # WHEN a class with a custom __post_init__ and a computed field
     t = Thing(name="Widget")
     # THEN both the original __post_init__ and computed field should apply
-    assert t.name_len == 6
+    # TODO(raul): remove type ignore in subsequent type checker PRs
+    assert t.name_len == 6  # type: ignore
     assert t.initialized is True
 
 
@@ -151,13 +156,15 @@ def test_missing_type_hint_fallbacks_to_any() -> None:
     # WHEN a computed property without a return type annotation
     loose = Loose(foo=3)
     # THEN it should compute correctly and default to Any
-    assert loose.bar == 6
+    # TODO(raul): remove type ignore in subsequent type checker PRs
+    assert loose.bar == 6  # type: ignore
     assert isinstance(loose.bar, int)
 
 
 def test_decorator_usage_forms() -> None:
     # WHEN a class using @immutable_dataclass() with parentheses
-    @immutable_dataclass(order=True)
+    # TODO(raul): remove type ignore in subsequent type checker PRs
+    @immutable_dataclass(order=True)  # type: ignore
     class A:
         x: int
 
@@ -167,7 +174,8 @@ def test_decorator_usage_forms() -> None:
 
     # THEN the computed field should work
     a = A(x=10)
-    assert a.double == 20
+    # TODO(raul): remove type ignore in subsequent type checker PRs
+    assert a.double == 20  # type: ignore
 
     # WHEN a class using @immutable_dataclass without parentheses
     @immutable_dataclass
@@ -180,15 +188,16 @@ def test_decorator_usage_forms() -> None:
 
     # THEN the computed field should also work
     b = B(y=5)
-    assert b.square == 25
+    # TODO(raul): remove type ignore in subsequent type checker PRs
+    assert b.square == 25  # type: ignore
 
 
 def test_cannot_overwrite_frozen() -> None:
     # WHEN class attempts to overwrite frozen
     # THEN raise exception
     with pytest.raises(TypeError):
-
-        @immutable_dataclass(frozen=True)
+        # TODO(raul): remove type ignore in subsequent type checker PRs
+        @immutable_dataclass(frozen=True)  # type: ignore
         class A:
             pass
 
@@ -197,7 +206,7 @@ def test_cannot_overwrite_slots() -> None:
     # WHEN class attempts to overwrite slots
     # THEN raise exception
     with pytest.raises(TypeError):
-
-        @immutable_dataclass(slots=False)
+        # TODO(raul): remove type ignore in subsequent type checker PRs
+        @immutable_dataclass(slots=False)  # type: ignore
         class A:
             pass

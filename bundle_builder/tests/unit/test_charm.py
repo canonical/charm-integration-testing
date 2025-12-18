@@ -738,7 +738,7 @@ class TestCharmConfigCriteria:
             criteria_dict = {"track": "1.0", "endpoint_integrated": "db"}
 
             # WHEN creating CharmConfigCriteria from the dict
-            criteria = CharmConfigCriteria(**criteria_dict)  # type: ignore[call-overload]
+            criteria = CharmConfigCriteria(**criteria_dict)
 
             # THEN it's created with the dict values
             assert criteria.track == "1.0"
@@ -817,7 +817,8 @@ class TestCharm:
         charm = sample_charm_postgresql_k8s()
 
         # WHEN repr is called
-        repr = charm.__repr__()
+        # TODO(raul): remove type ignore in subsequent type checker PRs
+        repr = charm.__repr__()  # type: ignore
 
         # THEN repr is charm name
         assert repr == charm.name
