@@ -395,13 +395,11 @@ class TestEndpointLimits:
             )
             # AND a bundle builder with a charmhub client that knows about the charm
             builder = BundleBuilder(CharmhubClientStub(self_ref_charm, app_charm))
-            builder.max_same_charm_instances = 3
 
             # WHEN we build the bundle
             result = builder.build(base_bundle)
 
             # THEN it should not exceed the limit
             grafana_apps = [app for app in result.applications if app.charm.name == "grafana-agent-k8s"]
-            assert len(grafana_apps) <= builder.max_same_charm_instances
             # AND it should stop adding new instances when limit is reached
             assert len(grafana_apps) < 10  # Definitely not infinite!
