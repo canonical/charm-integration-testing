@@ -14,10 +14,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
-from typing import Any, TypeAlias, overload
-
 from pydantic import Field, model_serializer, model_validator
-from pydantic_core import ArgsKwargs
 
 from .immutable_dataclass import cached_method, immutable_dataclass
 
@@ -32,42 +29,21 @@ class CharmChannel:
     risk: str
     branch: str
 
-    @overload  # type: ignore[no-overload-impl]
-    def __init__(self, value: str) -> None: ...
-
-    @overload
-    def __init__(self, track: str, risk: str, branch: str) -> None: ...
-
-    @model_validator(mode="wrap")
+    @model_validator(mode="before")
     @classmethod
-    def validate_from_string(cls, value: Any, handler: Any) -> Any:
-        # Handle ArgsKwargs for positional arguments
-        if isinstance(value, ArgsKwargs):
-            if len(value.args) == 1 and isinstance(value.args[0], str):
-                # Single string argument: parse it
-                value = value.args[0]
-            elif len(value.args) == 3:
-                # Three positional arguments: convert to dict
-                return handler({"track": value.args[0], "risk": value.args[1], "branch": value.args[2]})
-            else:
-                # Let Pydantic handle it normally
-                return handler(value)
-
-        # Handle string input
+    def validate_from_string(cls, value):
         if isinstance(value, str):
             parts = value.split("/")
             match len(parts):
                 case 1:
-                    return handler({"track": "", "risk": parts[0], "branch": ""})
+                    return {"track": "", "risk": parts[0], "branch": ""}
                 case 2:
-                    return handler({"track": parts[0], "risk": parts[1], "branch": ""})
+                    return {"track": parts[0], "risk": parts[1], "branch": ""}
                 case 3:
-                    return handler({"track": parts[0], "risk": parts[1], "branch": parts[2]})
+                    return {"track": parts[0], "risk": parts[1], "branch": parts[2]}
                 case _:
                     raise ValueError(f"Invalid channel string: {value}")
-
-        # Let Pydantic handle dict/other inputs normally
-        return handler(value)
+        return value
 
     @model_serializer(mode="plain")
     def serialize_model(self) -> str:
@@ -135,7 +111,7 @@ class CharmEndpoint:
     limit: int | None
 
 
-CharmConfig: TypeAlias = tuple[tuple[str, str | int], ...]
+CharmConfig = tuple[tuple[str, str | int], ...]
 
 
 @immutable_dataclass
@@ -146,26 +122,9 @@ class CharmConfigCriteria:
     track: str | None = None
     endpoint_integrated: str | None = None
 
-    @overload  # type: ignore[no-overload-impl]
-    def __init__(self, value: list["CharmConfigCriteria"]) -> None: ...
-
-    @overload
-    def __init__(self, value: list[dict[str, str]]) -> None: ...
-
-    @overload
-    def __init__(
-        self,
-        *,
-        all_of: frozenset["CharmConfigCriteria"] | None = None,
-        any_of: frozenset["CharmConfigCriteria"] | None = None,
-        none_of: frozenset["CharmConfigCriteria"] | None = None,
-        track: str | None = None,
-        endpoint_integrated: str | None = None,
-    ) -> None: ...
-
     @model_validator(mode="before")
     @classmethod
-    def validate_config_from_dict(cls, value: Any) -> Any:
+    def validate_config_from_dict(cls, value):
         if isinstance(value, list):
             return {"all_of": value}
         return value
@@ -218,33 +177,15 @@ class CharmTestConfig:
     criteria: CharmConfigCriteria = Field(default=CharmConfigCriteria.from_bool(True))
     config: CharmConfig = Field(default_factory=CharmConfig)
 
-    @overload  # type: ignore[no-overload-impl]
-    def __init__(self, value: dict[str, Any]) -> None: ...
-
-    @overload
-    def __init__(
-        self,
-        *,
-        criteria: CharmConfigCriteria = CharmConfigCriteria.from_bool(True),
-        config: CharmConfig = tuple(),
-    ) -> None: ...
-
-    @model_validator(mode="wrap")
+    @model_validator(mode="before")
     @classmethod
-    def validate_config_from_dict(cls, value: Any, handler: Any) -> Any:
-        # Handle ArgsKwargs for positional arguments
-        if isinstance(value, ArgsKwargs):
-            if len(value.args) == 1 and isinstance(value.args[0], dict):
-                value = value.args[0]
-            else:
-                return handler(value)
-
+    def validate_config_from_dict(cls, value):
         if isinstance(value, dict) and "config" in value:
             if isinstance(value["config"], dict):
                 # Convert dict to tuple of tuples
                 value = value.copy()
                 value["config"] = tuple(sorted(value["config"].items()))
-        return handler(value)
+        return value
 
 
 @immutable_dataclass
@@ -258,5 +199,5 @@ class Charm:
     priority: float  # greater priority values mean a node with this charm is prioritized
     test_configs: tuple[CharmTestConfig, ...] = Field(default_factory=tuple)
 
-    def __repr__(self) -> str:
+    def __repr__(self):
         return self.name

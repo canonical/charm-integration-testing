@@ -16,29 +16,17 @@
 
 from dataclasses import field
 from functools import wraps
-from typing import Any, Callable, Dict, TypeVar, get_type_hints
+from typing import Any, Callable, Dict, get_type_hints
 
 from pydantic.dataclasses import dataclass
-from typing_extensions import dataclass_transform
-
-_F = TypeVar("_F", bound=Callable[..., Any])
-
-
-# Custom property subclass that allows marking for computed properties
-class _ComputedProperty(property):
-    _is_computed_property = True
-
-    def __init__(self, func: Callable[..., Any]) -> None:
-        super().__init__(func)
-        self._original_func = func
 
 
 # Computed property attribute
 # Meant for use with @immutable_dataclass
 # Computed at initialization once
-def computed_property(func: _F) -> Any:
-    # Return a custom property that mypy understands as a property
-    return _ComputedProperty(func)
+def computed_property(func: Callable) -> Callable:
+    func._is_computed_property = True
+    return func
 
 
 # Sentinel value for uninitialized computed fields
@@ -46,8 +34,8 @@ _UNINITIALIZED = object()
 
 
 # Create a lazy property that computes its value once
-def make_lazy_property(private_name: str, method: Callable[..., Any]) -> Any:
-    def prop(self: object) -> Any:
+def make_lazy_property(private_name, method):
+    def prop(self):
         value = getattr(self, private_name)
         if value is _UNINITIALIZED:
             value = method(self)
@@ -67,15 +55,15 @@ _CACHE_MISS = object()
 # Cached method backed by instance-level cache
 # Meant for use with @immutable_dataclass
 # Much like functools.cache, but at the instance level instead of global
-def cached_method(func: _F) -> _F:
+def cached_method(func):
     setattr(func, _MARKED_AS_CACHED_METHOD, True)
     return func
 
 
 # Wraps the method to cache results in the given field in the instance
-def make_cached_method(cached_field_name: str, method: Callable[..., Any]) -> Callable[..., Any]:
+def make_cached_method(cached_field_name, method):
     @wraps(method)
-    def wrapped(*args: str, **kwargs: Any) -> Any:
+    def wrapped(*args, **kwargs):
         cache = getattr(args[0], cached_field_name)
         cache_key = tuple(args[1:]) + tuple(kwargs.items())
         result = cache.get(cache_key, _CACHE_MISS)
@@ -89,17 +77,14 @@ def make_cached_method(cached_field_name: str, method: Callable[..., Any]) -> Ca
 
 # Create an immutable dataclass using frozen=True
 # and defaults slots=True
-@dataclass_transform(frozen_default=True, field_specifiers=(field,))
-def immutable_dataclass(_cls: type | None = None, **dataclass_kwargs: Any) -> Any:
-    def wrap(cls: type) -> Any:
+def immutable_dataclass(_cls=None, **dataclass_kwargs):
+    def wrap(cls):
         # Collect methods decorated as computed fields
         computed_fields = {}
         cached_methods = {}
         for name, val in cls.__dict__.items():
             if getattr(val, "_is_computed_property", False):
-                # Extract the original function from the property
-                original_func = getattr(val, "_original_func", val.fget if isinstance(val, property) else val)
-                computed_fields[name] = original_func
+                computed_fields[name] = val
             elif getattr(val, _MARKED_AS_CACHED_METHOD, False):
                 cached_methods[name] = val
 
@@ -109,13 +94,13 @@ def immutable_dataclass(_cls: type | None = None, **dataclass_kwargs: Any) -> An
             # Modify the class in place to add the private field
             private_name = f"_{name}"
             annotations[private_name] = get_type_hints(method).get("return", Any)
-            setattr(cls, name, make_lazy_property(private_name, method))  # type: ignore[arg-type]
+            setattr(cls, name, make_lazy_property(private_name, method))
             setattr(cls, private_name, field(init=False, repr=False, hash=False, compare=False, default=_UNINITIALIZED))
 
         # Create a private slot for the cache of each computed field, similar to above
         for name, method in cached_methods.items():
             cached_field_name = f"_cached_{name}"
-            annotations[cached_field_name] = Dict[tuple[Any, ...], Any]
+            annotations[cached_field_name] = Dict[tuple, Any]
             setattr(cls, name, make_cached_method(cached_field_name, method))
             setattr(
                 cls, cached_field_name, field(init=False, repr=False, hash=False, compare=False, default_factory=dict)

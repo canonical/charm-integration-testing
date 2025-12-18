@@ -13,8 +13,6 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from functools import cache
-
 from bundle_builder.charm import ENDPOINT_PROVIDES, ENDPOINT_REQUIRES, Charm
 from bundle_builder.charmhub import CharmhubClient
 
@@ -25,44 +23,29 @@ class CharmhubClientStub(CharmhubClient):
     def __init__(self, *charms: Charm):
         self.charms = set(charms)
 
-    @cache
-    def find_charms(
-        self, provides: str | None = None, requires: str | None = None, platform: str | None = None
-    ) -> frozenset[str]:
-        if provides is not None:
-            return frozenset(
-                {
-                    charm.name
-                    for charm in self.charms
-                    if any(
-                        (endpoint.type == ENDPOINT_PROVIDES and endpoint.interface == provides)
-                        for endpoint in charm.endpoints
-                    )
-                }
-            )
-        if requires is not None:
-            return frozenset(
-                {
-                    charm.name
-                    for charm in self.charms
-                    if any(
-                        (endpoint.type == ENDPOINT_REQUIRES and endpoint.interface == requires)
-                        for endpoint in charm.endpoints
-                    )
-                }
-            )
-        return frozenset()
+    def find_charms(self, *args, **kwargs):
+        if "provides" in kwargs:
+            return {
+                charm.name
+                for charm in self.charms
+                if any(
+                    (endpoint.type == ENDPOINT_PROVIDES and endpoint.interface == kwargs["provides"])
+                    for endpoint in charm.endpoints
+                )
+            }
+        if "requires" in kwargs:
+            return {
+                charm.name
+                for charm in self.charms
+                if any(
+                    (endpoint.type == ENDPOINT_REQUIRES and endpoint.interface == kwargs["requires"])
+                    for endpoint in charm.endpoints
+                )
+            }
+        return set()
 
-    @cache
-    def charm_from_store(
-        self,
-        charm_name: str,
-        ubuntu_arch: str,
-        charm_channel: str | None = None,
-        charm_revision: int | None = None,
-        ubuntu_version: str | None = None,
-    ) -> Charm:
+    def charm_from_store(self, *args, **kwargs):
         for charm in self.charms:
-            if charm.name == charm_name:
+            if charm.name == kwargs.get("charm_name"):
                 return charm
-        raise KeyError(f"Charm {charm_name} not found in stub client")
+        return None
