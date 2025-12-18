@@ -4,7 +4,6 @@
 """Unit tests for retry_decorator module."""
 
 import pytest
-
 from utils.retry_decorator import retry_on_failure
 
 

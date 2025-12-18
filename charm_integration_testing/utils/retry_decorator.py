@@ -29,7 +29,7 @@ def retry_on_failure(message, max_retries: int = 3, delay: float = 1.0, backoff:
                     else:
                         # Re-raise the last exception after all retries exhausted
                         raise
-                except Exception as e:
+                except Exception:
                     # Don't retry on non-RuntimeError exceptions (e.g., programming errors)
                     raise
             

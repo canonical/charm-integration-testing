@@ -5,9 +5,9 @@ from abc import ABC, abstractmethod
 from dataclasses import asdict
 
 import yaml
-from utils import retry_on_failure
 from juju import JujuBackend
 from pydantic.dataclasses import dataclass
+from utils import retry_on_failure
 
 
 @dataclass
