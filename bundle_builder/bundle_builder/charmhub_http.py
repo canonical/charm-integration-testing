@@ -79,8 +79,7 @@ class CharmMetadata:
     provides: dict[str, Endpoint] = Field(default_factory=dict)
 
 
-# TODO(raul): remove type ignore in subsequent type checker PRs
-@immutable_dataclass(config=dict(validate_by_name=True))  # type: ignore
+@immutable_dataclass(config=dict(validate_by_name=True))
 class RefreshResponse:
     @immutable_dataclass
     class Charm:
@@ -95,8 +94,7 @@ class RefreshResponse:
 
     @immutable_dataclass
     class Error:
-        # TODO(raul): remove type ignore in subsequent type checker PRs
-        @immutable_dataclass(config=dict(validate_by_name=True))  # type: ignore
+        @immutable_dataclass(config=dict(validate_by_name=True))
         class Extra:
             @immutable_dataclass
             class Release:
@@ -118,8 +116,7 @@ class RefreshResponse:
 
 @immutable_dataclass
 class FindResponse:
-    # TODO(raul): remove type ignore in subsequent type checker PRs
-    @immutable_dataclass(config=dict(validate_by_name=True))  # type: ignore
+    @immutable_dataclass(config=dict(validate_by_name=True))
     class Result:
         deployable_on: frozenset[str] = Field(default_factory=frozenset, alias="deployable-on")
 
@@ -127,13 +124,11 @@ class FindResponse:
     result: Result
 
 
-# TODO(raul): remove type ignore in subsequent type checker PRs
-@immutable_dataclass(config=dict(validate_by_name=True))  # type: ignore
+@immutable_dataclass(config=dict(validate_by_name=True))
 class InfoResponse:
     @immutable_dataclass
     class DefaultRelease:
-        # TODO(raul): remove type ignore in subsequent type checker PRs
-        @immutable_dataclass(config=dict(validate_by_name=True))  # type: ignore
+        @immutable_dataclass(config=dict(validate_by_name=True))
         class Revision:
             metadata: CharmMetadata = Field(default_factory=CharmMetadata, alias="metadata-yaml")
 
@@ -144,8 +139,7 @@ class InfoResponse:
 
         revision: Revision = Field(default_factory=Revision)
 
-    # TODO(raul): remove type ignore in subsequent type checker PRs
-    @immutable_dataclass(config=dict(validate_by_name=True))  # type: ignore
+    @immutable_dataclass(config=dict(validate_by_name=True))
     class Result:
         deployable_on: frozenset[str] = Field(default_factory=frozenset, alias="deployable-on")
 

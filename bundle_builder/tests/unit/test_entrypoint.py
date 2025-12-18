@@ -131,8 +131,7 @@ class TestApplicationFromArgs:
             else:
                 raise CharmReleaseNotFoundException(f"Charm release not found: {charm_name}")
 
-            # TODO(raul): remove type ignore in subsequent type checker PRs
-            return dataclasses.replace(  # type: ignore
+            return dataclasses.replace(
                 charm,
                 ubuntu_arch=ubuntu_arch,
                 channel=charm_channel if charm_channel is not None else charm.channel,
@@ -158,8 +157,7 @@ class TestApplicationFromArgs:
             label="parse_revision",
             specs=["target::postgresql-k8s::111::default"],
             applications={
-                # TODO(raul): remove type ignore in subsequent type checker PRs
-                Application(name="target", charm=dataclasses.replace(sample_charm_postgresql_k8s(), revision=111))  # type: ignore
+                Application(name="target", charm=dataclasses.replace(sample_charm_postgresql_k8s(), revision=111))
             },
         ),
         Params(
@@ -168,8 +166,7 @@ class TestApplicationFromArgs:
             applications={
                 Application(
                     name="target",
-                    # TODO(raul): remove type ignore in subsequent type checker PRs
-                    charm=dataclasses.replace(sample_charm_postgresql_k8s(), channel="edge"),  # type: ignore
+                    charm=dataclasses.replace(sample_charm_postgresql_k8s(), channel="edge"),
                 )
             },
         ),
@@ -178,9 +175,8 @@ class TestApplicationFromArgs:
             specs=["target::postgresql-k8s::default::24.04"],
             applications={
                 Application(
-                    # TODO(raul): remove type ignore in subsequent type checker PRs
                     name="target",
-                    charm=dataclasses.replace(sample_charm_postgresql_k8s(), ubuntu_version="24.04"),  # type: ignore
+                    charm=dataclasses.replace(sample_charm_postgresql_k8s(), ubuntu_version="24.04"),
                 )
             },
         ),

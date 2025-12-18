@@ -35,8 +35,7 @@ class Application:
             return f"{self.name}({self.charm.name})"
 
 
-# TODO(raul): remove type ignore in subsequent type checker PRs
-@immutable_dataclass(order=True)  # type: ignore
+@immutable_dataclass(order=True)
 class ApplicationEndpoint:
     application: str
     endpoint: str
@@ -60,8 +59,7 @@ class Bundle:
 
     def validate(self) -> None:
         # Ensure all applications have unique names
-        # TODO(raul): remove type ignore in subsequent type checker PRs
-        if len(self.application_lookup) != len(self.applications):  # type: ignore[arg-type]
+        if len(self.application_lookup) != len(self.applications):
             raise ValueError("Application names must be unique in the bundle.")
 
         # Validate integrations
@@ -72,16 +70,13 @@ class Bundle:
 
             # Ensure all integrations reference valid applications and endpoints
             for app_endpoint in integration:
-                # TODO(raul): remove type ignore in subsequent type checker PRs
-                if app_endpoint not in self.application_endpoints:  # type: ignore[operator]
+                if app_endpoint not in self.application_endpoints:
                     raise ValueError(f"Integration references unknown endpoint '{app_endpoint}'")
 
             # Ensure integration does not connect endpoints with different interfaces
             ep1, ep2 = list(integration)
-            # TODO(raul): remove type ignore in subsequent type checker PRs
-            charm_ep1 = self.application_endpoints[ep1]  # type: ignore[index]
-            # TODO(raul): remove type ignore in subsequent type checker PRs
-            charm_ep2 = self.application_endpoints[ep2]  # type: ignore[index]
+            charm_ep1 = self.application_endpoints[ep1]
+            charm_ep2 = self.application_endpoints[ep2]
             if charm_ep1.interface != charm_ep2.interface:
                 raise ValueError(
                     f"Integration connects endpoints with different interfaces: '{ep1}' ({charm_ep1.interface}) "
@@ -113,11 +108,8 @@ class Bundle:
                 )
 
         # Ensure endpoints are not integrated more than their limit
-        # TODO(raul): remove type ignore in subsequent type checker PRs
         for endpoint, count in self.endpoint_connection_counts.items():  # type: ignore[attr-defined]
-            # TODO(raul): remove type ignore in subsequent type checker PRs
             charm_endpoint = self.application_endpoints[endpoint]  # type: ignore[index]
-            # TODO(raul): remove type ignore in subsequent type checker PRs
             endpoint_limit = charm_endpoint.limit(self.application_to_integrated_endpoints[endpoint.application])  # type: ignore[index]
             if endpoint_limit is not None and count > endpoint_limit:
                 raise ValueError(
@@ -155,8 +147,7 @@ class Bundle:
     def saturated_endpoints(self) -> frozenset[ApplicationEndpoint]:
         saturated_endpoints = set()
         # PERF: It is faster to create tuple keys than ApplicationEndpoint in queries below
-        # TODO(raul): remove type ignore in subsequent type checker PRs
-        counts = {(k.application, k.endpoint): v for k, v in self.endpoint_connection_counts.items()}  # type: ignore[attr-defined]
+        counts = {(k.application, k.endpoint): v for k, v in self.endpoint_connection_counts.items()}
 
         # Check if they are saturated
         for app in self.applications:
@@ -255,16 +246,14 @@ class Bundle:
         non_optional_endpoints = set()
         for application in self.applications:
             for endpoint in application.charm.endpoints:
-                # TODO(raul): remove type ignore in subsequent type checker PRs
                 if endpoint.optionality.is_optional(
-                    self.application_to_integrated_endpoints[application.name],  # type: ignore[index]
-                    self.application_endpoint_features[application.name],  # type: ignore[index]
+                    self.application_to_integrated_endpoints[application.name],
+                    self.application_endpoint_features[application.name],
                 ):
                     continue
                 non_optional_endpoints.add(ApplicationEndpoint(application=application.name, endpoint=endpoint.name))
 
-        # TODO(raul): remove type ignore in subsequent type checker PRs
-        return frozenset(non_optional_endpoints - fulfilled_endpoints - saturated_endpoints)  # type: ignore
+        return frozenset(non_optional_endpoints - fulfilled_endpoints - saturated_endpoints)
 
     @immutable_dataclass
     class EndpointDependency:
@@ -282,10 +271,8 @@ class Bundle:
         graph = {app.name: Bundle.EndpointDependencies() for app in self.applications}
         for integration in self.integrations:
             ep1, ep2 = list(integration)
-            # TODO(raul): remove type ignore in subsequent type checker PRs
-            charm_ep1 = self.application_endpoints[ep1]  # type: ignore
-            # TODO(raul): remove type ignore in subsequent type checker PRs
-            charm_ep2 = self.application_endpoints[ep2]  # type: ignore
+            charm_ep1 = self.application_endpoints[ep1]
+            charm_ep2 = self.application_endpoints[ep2]
             if charm_ep1.type == ENDPOINT_REQUIRES and charm_ep2.type == ENDPOINT_PROVIDES:
                 graph[ep1.application].requires.add(
                     Bundle.EndpointDependency(application=ep2.application, dependent_endpoint=charm_ep1.name)
@@ -313,8 +300,7 @@ class Bundle:
             if application in visited:
                 continue
             visited.add(application)
-            # TODO(raul): remove type ignore in subsequent type checker PRs
-            for dependency in self.dependency_graph[application].requires:  # type: ignore
+            for dependency in self.dependency_graph[application].requires:
                 stack.append(dependency.application)
         return False
 
@@ -330,15 +316,12 @@ class Bundle:
                 continue
             visited.add(current_app)
             if endpoint_type == ENDPOINT_PROVIDES:
-                # TODO(raul): remove type ignore in subsequent type checker PRs
-                dependencies = self.dependency_graph[current_app].provides  # type: ignore
+                dependencies = self.dependency_graph[current_app].provides
             else:
-                # TODO(raul): remove type ignore in subsequent type checker PRs
-                dependencies = self.dependency_graph[current_app].requires  # type: ignore
+                dependencies = self.dependency_graph[current_app].requires
             for dependency in dependencies:
                 if (
-                    # TODO(raul): remove type ignore in subsequent type checker PRs
-                    self.application_lookup[current_app].charm.name == charm_name  # type: ignore
+                    self.application_lookup[current_app].charm.name == charm_name
                     and dependency.dependent_endpoint == charm_endpoint
                 ):
                     return True
@@ -349,8 +332,7 @@ class Bundle:
         """Generate a unique application name for a charm, adding suffix if needed."""
 
         # Gather existing application names
-        # TODO(raul): remove type ignore in subsequent type checker PRs
-        existing_names = self.application_lookup.keys()  # type: ignore
+        existing_names = self.application_lookup.keys()
 
         # If the base charm name is not taken, use it
         if charm_name not in existing_names:
@@ -404,8 +386,7 @@ class Bundle:
                         sorted(
                             [
                                 f"{application_endpoint.application}:{application_endpoint.endpoint}"
-                                # TODO(raul): remove type ignore in subsequent type checker PRs
-                                for application_endpoint in sorted(integration)  # type: ignore
+                                for application_endpoint in sorted(integration)
                             ]
                         )
                         for integration in sorted(self.integrations)
@@ -436,10 +417,8 @@ class Bundle:
 
         # Add integrations with endpoint names as labels
         for integration in sorted(self.integrations):
-            # TODO(raul): remove type ignore in subsequent type checker PRs
-            ep1, ep2 = sorted(integration)  # type: ignore
-            # TODO(raul): remove type ignore in subsequent type checker PRs
-            charm_ep1 = self.application_endpoints[ep1]  # type: ignore
+            ep1, ep2 = sorted(integration)
+            charm_ep1 = self.application_endpoints[ep1]
             interface = charm_ep1.interface
 
             # Determine which endpoint is requirers
