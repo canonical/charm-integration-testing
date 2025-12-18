@@ -24,8 +24,7 @@ MINIO_CLIENT_PATH = "/usr/local/bin/mc"
 MINIO_CLIENT_MAKE_EXECUTABLE = "chmod +x {client_path}"
 MINIO_CLIENT_SET_ALIAS = "{client_path} alias set local {address} {access_key} {secret_key}"
 MINIO_CLIENT_MAKE_BUCKET = "{client_path} mb local/{bucket}"
-MINIO_CLIENT_MAKE_EMPTY_FILE = "touch {file}"
-MINIO_CLIENT_COPY_FILE = "{client_path} cp {file} local/{bucket}/{path}"
+MINIO_CLIENT_MAKE_PATH = "touch empty && {client_path} cp empty local/{bucket}/{path}/ && rm empty"
 
 
 class S3IntegratorMinIOBackendExtension(JujuExtension, ABC):
@@ -147,16 +146,8 @@ class S3IntegratorMinIOBackendExtension(JujuExtension, ABC):
         self.juju.ssh(
             model,
             self.minio_unit(s3_integrator_application),
-            MINIO_CLIENT_MAKE_EMPTY_FILE.format(
-                file=MINIO_PATH,
-            ),
-        )
-        self.juju.ssh(
-            model,
-            self.minio_unit(s3_integrator_application),
-            MINIO_CLIENT_COPY_FILE.format(
+            MINIO_CLIENT_MAKE_PATH.format(
                 client_path=MINIO_CLIENT_PATH,
-                file=MINIO_PATH,
                 bucket=MINIO_BUCKET,
                 path=MINIO_PATH,
             ),
