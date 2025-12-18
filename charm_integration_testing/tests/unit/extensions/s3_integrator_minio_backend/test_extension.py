@@ -10,6 +10,7 @@ import pytest
 from extensions.s3_integrator_minio_backend.extension import (
     MINIO_ACCESS_KEY,
     MINIO_BUCKET,
+    MINIO_PATH,
     MINIO_SECRET_KEY,
     S3IntegratorMinIOBackendExtension,
 )
@@ -116,6 +117,18 @@ class TestS3IntegratorMinIOBackendExtension:
 
             assert any("/usr/local/bin/mc alias set local" in cmd for _, _, cmd in juju.ssh_calls)
             assert any("/usr/local/bin/mc mb" in cmd for _, _, cmd in juju.ssh_calls)
+            assert any("touch some-s3-path" in cmd for _, _, cmd in juju.ssh_calls)
+            assert any("/usr/local/bin/mc cp some-s3-path" in cmd for _, _, cmd in juju.ssh_calls)
+
+            assert (
+                "test-model",
+                "s3-app",
+                {
+                    "path": MINIO_PATH,
+                    "endpoint": "http://10.0.0.1:9000",
+                    "bucket": MINIO_BUCKET,
+                },
+            ) in juju.configured
 
             assert (
                 "test-model",
@@ -126,15 +139,6 @@ class TestS3IntegratorMinIOBackendExtension:
                     "secret-key": MINIO_SECRET_KEY,
                 },
             ) in juju.actions
-
-            assert (
-                "test-model",
-                "s3-app",
-                {
-                    "endpoint": "http://10.0.0.1:9000",
-                    "bucket": MINIO_BUCKET,
-                },
-            ) in juju.configured
 
         def test_alias_retries_on_failure(self, extension, juju, monkeypatch):
             def generate_results():
@@ -172,6 +176,50 @@ class TestS3IntegratorMinIOBackendExtension:
             # WHEN set_minio_alias fails every attempt, THEN it errors
             with pytest.raises(CalledProcessError):
                 extension.set_minio_alias("test-model", "s3-app", max_attempts=3, retry_sleep_seconds=0)
+
+        def test_create_minio_bucket_creates_path(self, extension, juju):
+            # GIVEN a ready extension with the client downloaded
+            extension.minio_client_file = Path("mc")
+
+            # WHEN create_minio_bucket is called
+            extension.create_minio_bucket("test-model", "s3-app")
+
+            # THEN bucket is created
+            assert any("/usr/local/bin/mc mb local/minio-bucket-for-testing" in cmd for _, _, cmd in juju.ssh_calls)
+
+            # AND path is created via touch and mc cp
+            assert any("touch some-s3-path" in cmd for _, _, cmd in juju.ssh_calls)
+            assert any(
+                "/usr/local/bin/mc cp some-s3-path local/minio-bucket-for-testing/some-s3-path" in cmd
+                for _, _, cmd in juju.ssh_calls
+            )
+
+        def test_authenticate_s3_integrator_includes_path(self, extension, juju):
+            # GIVEN a ready extension
+            # WHEN authenticate_s3_integrator is called
+            extension.authenticate_s3_integrator("test-model", "s3-app")
+
+            # THEN s3-integrator is configured with path, endpoint, and bucket
+            assert (
+                "test-model",
+                "s3-app",
+                {
+                    "path": MINIO_PATH,
+                    "endpoint": "http://10.0.0.1:9000",
+                    "bucket": MINIO_BUCKET,
+                },
+            ) in juju.configured
+
+            # AND credentials are synced
+            assert (
+                "test-model",
+                "s3-app/leader",
+                "sync-s3-credentials",
+                {
+                    "access-key": MINIO_ACCESS_KEY,
+                    "secret-key": MINIO_SECRET_KEY,
+                },
+            ) in juju.actions
 
     class TestGetMinioClientFile:
         def test_downloads_only_once(self, extension):
