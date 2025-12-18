@@ -1,3 +1,7 @@
 configs:
   - config:
       host: charmqa.canonical.com
+  - config:
+      namespace: charm-test
+  - config:
+      queue: test-queue
