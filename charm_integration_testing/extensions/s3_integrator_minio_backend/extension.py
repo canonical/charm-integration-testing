@@ -16,6 +16,7 @@ S3_INTEGRATOR_CHARM = "s3-integrator"
 MINIO_APPLICATION_NAME = "{s3_integrator_application}-minio"
 MINIO_ACCESS_KEY = "minio-access-key-for-testing"  # nosec B105
 MINIO_SECRET_KEY = "minio-secret-key-for-testing"  # nosec B105
+MINIO_PATH = "some-s3-path"
 MINIO_BUCKET = "minio-bucket-for-testing"
 MINIO_ADDRESS = "http://{unit_ip}:9000"
 MINIO_CLIENT_DOWNLOAD = "https://dl.min.io/client/mc/release/linux-amd64/mc"
@@ -23,6 +24,8 @@ MINIO_CLIENT_PATH = "/usr/local/bin/mc"
 MINIO_CLIENT_MAKE_EXECUTABLE = "chmod +x {client_path}"
 MINIO_CLIENT_SET_ALIAS = "{client_path} alias set local {address} {access_key} {secret_key}"
 MINIO_CLIENT_MAKE_BUCKET = "{client_path} mb local/{bucket}"
+MINIO_CLIENT_MAKE_EMPTY_FILE = "touch {file}"
+MINIO_CLIENT_COPY_FILE = "{client_path} cp {file} local/{bucket}/{path}"
 
 
 class S3IntegratorMinIOBackendExtension(JujuExtension, ABC):
@@ -136,9 +139,43 @@ class S3IntegratorMinIOBackendExtension(JujuExtension, ABC):
             ),
         )
 
+        # This is a workaround to ensure the path exists for spark-history-server-k8s
+        # See: <TODO>
+        self.logger.info(
+            f"Creating the MinIO path '{MINIO_BUCKET}/{MINIO_PATH}' in '{self.minio_application(s3_integrator_application)}'"
+        )
+        self.juju.ssh(
+            model,
+            self.minio_unit(s3_integrator_application),
+            MINIO_CLIENT_MAKE_EMPTY_FILE.format(
+                file=MINIO_PATH,
+            ),
+        )
+        self.juju.ssh(
+            model,
+            self.minio_unit(s3_integrator_application),
+            MINIO_CLIENT_COPY_FILE.format(
+                client_path=MINIO_CLIENT_PATH,
+                file=MINIO_PATH,
+                bucket=MINIO_BUCKET,
+                path=MINIO_PATH,
+            ),
+        )
+
     def authenticate_s3_integrator(self, model: str, s3_integrator_application: str):
         self.logger.info(
             f"Configuring s3 integrator '{s3_integrator_application}' to use '{self.minio_application(s3_integrator_application)}'"
+        )
+
+        # Point s3 integrator at MinIO bucket
+        self.juju.configure_application(
+            model,
+            s3_integrator_application,
+            {
+                "path": MINIO_PATH,
+                "endpoint": self.minio_address(model, s3_integrator_application),
+                "bucket": MINIO_BUCKET,
+            },
         )
 
         # Sync MinIO credentials to s3 integrator
@@ -149,16 +186,6 @@ class S3IntegratorMinIOBackendExtension(JujuExtension, ABC):
             {
                 "access-key": MINIO_ACCESS_KEY,
                 "secret-key": MINIO_SECRET_KEY,
-            },
-        )
-
-        # Point s3 integrator at MinIO bucket
-        self.juju.configure_application(
-            model,
-            s3_integrator_application,
-            {
-                "endpoint": self.minio_address(model, s3_integrator_application),
-                "bucket": MINIO_BUCKET,
             },
         )
 
