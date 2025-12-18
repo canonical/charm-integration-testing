@@ -7,7 +7,7 @@ from datetime import timedelta
 from juju import JujuClient
 
 
-def test_scale_down_scale_up_charm(juju_client: JujuClient, model: str, target_application: str) -> None:
+def test_scale_in_and_scale_out_charm(juju_client: JujuClient, model: str, target_application: str) -> None:
     # Get units
     num_units = juju_client.num_units(target_application, model=model)
 
