@@ -60,7 +60,7 @@ on:
           - "20.04"
           - "22.04"
           - "24.04"
-        default: 24.04
+        default: "24.04"
       substrate:
         description: "Substrate to run the tests on."
         required: false
@@ -69,6 +69,26 @@ on:
           - kubernetes
           - openstack
         default: kubernetes
+      debug_sleep_after:
+        description: The stage of the workflow to sleep after. Enables SSH access.
+        required: false
+        type: choice
+        options:
+          - none
+          - setup
+          - deployment
+          - integration
+        default: none
+      debug_extra_ssh_imports:
+        # The IDs take the form of lp:<value> for Launchpad and gh:<value> for GitHub.
+        # The GitHub Actor's key is always included.
+        description: A comma-separated list of IDs to use with ssh-import-id in debug mode.
+        required: false
+        default: ""
+
+env:
+  DEBUG_SLEEP_SECONDS: 7200 # 2 hours
+
 jobs:
   execute-charm-test:
     name: Execute integration tests against the charms
@@ -85,6 +105,22 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
+
+      - name: Enable Debug Session
+        if: ${{ inputs.debug_sleep_after != 'none' }}
+        shell: bash
+        env:
+          SSH_IDS: ${{ inputs.debug_extra_ssh_imports }}
+        run: |
+          # Always include the GitHub Actor
+          mkdir --parents ~/.ssh/
+          ssh-import-id "gh:${GITHUB_ACTOR}"
+
+          SSH_IDS=$(echo "${SSH_IDS}" | tr ',' ' ')
+          ssh-import-id ${SSH_IDS} || true
+
+          echo "Debug mode enabled. SSH connection details:"
+          echo "ssh $(whoami)@$(hostname -I | cut -d ' ' -f 1)"
 
       - name: Create swap file
         shell: bash
@@ -203,6 +239,13 @@ jobs:
           controller: ${{ steps.juju_resources.outputs.controller }}
           model: ${{ steps.juju_resources.outputs.model }}
 
+      - name: Debug Setup
+        if: ${{ !cancelled() && inputs.debug_sleep_after == 'setup' }}
+        shell: bash
+        run: |
+          echo "Sleeping to debug setup"
+          sleep ${DEBUG_SLEEP_SECONDS}
+
       - name: Install Repository
         shell: bash
         run: |
@@ -296,6 +339,13 @@ jobs:
           event_name: "test_deploy_end"
           detail: "Test deployment finished."
 
+      - name: Debug Deployment Tests
+        if: ${{ !cancelled() && inputs.debug_sleep_after == 'deployment' }}
+        shell: bash
+        run: |
+          echo "Sleeping to debug deployment tests"
+          sleep ${DEBUG_SLEEP_SECONDS}
+
       - name: Post 'test_integration_start' event
         if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-events
@@ -335,6 +385,13 @@ jobs:
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
           event_name: "test_integration_end"
           detail: "Test integration ended."
+
+      - name: Debug Integration Tests
+        if: ${{  !cancelled() && inputs.debug_sleep_after == 'integration' }}
+        shell: bash
+        run: |
+          echo "Sleeping to debug integration tests"
+          sleep ${DEBUG_SLEEP_SECONDS}
 
       - name: Post 'test_teardown_start' event
         if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
