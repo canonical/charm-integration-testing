@@ -73,4 +73,3 @@ livepatch
 Livepatch
 MinIO
 minio
-UUIDs
