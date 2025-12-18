@@ -7,7 +7,7 @@ from datetime import timedelta
 from juju import JujuClient
 
 
-def test_break_readd_integration(
+def test_remove_and_restore_integration(
     juju_client: JujuClient,
     model: str,
     target_application: str,
