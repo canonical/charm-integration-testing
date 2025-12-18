@@ -5,7 +5,8 @@ import logging
 from dataclasses import dataclass, field
 from datetime import timedelta
 from pathlib import Path
-from subprocess import CalledProcessError  # nosec
+from subprocess import CalledProcessError
+from typing import Generator  # nosec
 
 import pytest
 from extensions.s3_integrator_minio_backend.extension import (
@@ -141,14 +142,16 @@ class TestS3IntegratorMinIOBackendExtension:
                 },
             ) in juju.configured
 
-        def test_alias_retries_on_failure(self, extension, juju, monkeypatch):
-            def generate_results():
+        def test_alias_retries_on_failure(
+            self, extension: S3IntegratorMinIOBackendExtension, juju: JujuStub, monkeypatch: pytest.MonkeyPatch
+        ) -> None:
+            def generate_results() -> Generator[CalledProcessError | str, None, None]:
                 yield CalledProcessError(1, "bad-command")
                 yield "Success"
 
             results = generate_results()
 
-            def ssh_errors_once(model: str, target: str, command: str):
+            def ssh_errors_once(model: str, target: str, command: str) -> None:
                 result = next(results)
                 if isinstance(result, CalledProcessError):
                     raise result
@@ -165,8 +168,10 @@ class TestS3IntegratorMinIOBackendExtension:
             # THEN the alias command runs successfully
             assert any("/usr/local/bin/mc alias set local" in cmd for _, _, cmd in juju.ssh_calls)
 
-        def test_alias_max_attempts_exceeded(self, extension, juju, monkeypatch):
-            def ssh_errors(model: str, target: str, command: str):
+        def test_alias_max_attempts_exceeded(
+            self, extension: S3IntegratorMinIOBackendExtension, juju: JujuStub, monkeypatch: pytest.MonkeyPatch
+        ) -> None:
+            def ssh_errors(model: str, target: str, command: str) -> None:
                 raise CalledProcessError(1, "bad-command")
 
             monkeypatch.setattr(juju, "ssh", ssh_errors)
