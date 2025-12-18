@@ -2,10 +2,12 @@
 # See LICENSE file for licensing details.
 
 import logging
+import time
 import urllib.request
 from abc import ABC
 from datetime import timedelta
 from pathlib import Path
+from subprocess import CalledProcessError  # nosec
 
 from juju import JujuBackend, JujuExtension
 
@@ -19,7 +21,7 @@ MINIO_ADDRESS = "http://{unit_ip}:9000"
 MINIO_CLIENT_DOWNLOAD = "https://dl.min.io/client/mc/release/linux-amd64/mc"
 MINIO_CLIENT_PATH = "/usr/local/bin/mc"
 MINIO_CLIENT_MAKE_EXECUTABLE = "chmod +x {client_path}"
-MINIO_CLIENT_AUTHENTICATE = "{client_path} alias set local {address} {access_key} {secret_key}"
+MINIO_CLIENT_SET_ALIAS = "{client_path} alias set local {address} {access_key} {secret_key}"
 MINIO_CLIENT_MAKE_BUCKET = "{client_path} mb local/{bucket}"
 
 
@@ -105,18 +107,8 @@ class S3IntegratorMinIOBackendExtension(JujuExtension, ABC):
             MINIO_CLIENT_MAKE_EXECUTABLE.format(client_path=MINIO_CLIENT_PATH),
         )
 
-        # Authenticate client with MinIO
-        self.logger.info(f"Authenticating MinIO client in '{self.minio_application(s3_integrator_application)}'")
-        self.juju.ssh(
-            model,
-            self.minio_unit(s3_integrator_application),
-            MINIO_CLIENT_AUTHENTICATE.format(
-                client_path=MINIO_CLIENT_PATH,
-                address=self.minio_address(model, s3_integrator_application),
-                access_key=MINIO_ACCESS_KEY,
-                secret_key=MINIO_SECRET_KEY,
-            ),
-        )
+        # Set MinIO alias
+        self.set_minio_alias(model, s3_integrator_application, max_attempts=3, retry_sleep_seconds=10)
 
     def get_minio_client_file(self) -> Path:
         # Only download if not downloaded
@@ -169,3 +161,27 @@ class S3IntegratorMinIOBackendExtension(JujuExtension, ABC):
                 "bucket": MINIO_BUCKET,
             },
         )
+
+    def set_minio_alias(
+        self, model: str, s3_integrator_application: str, max_attempts: int = 3, retry_sleep_seconds: int = 10
+    ) -> None:
+        self.logger.info(f"Setting MinIO alias in '{self.minio_application(s3_integrator_application)}'")
+        for attempt in range(max_attempts):
+            self.logger.info(f"Alias attempt {attempt + 1} of {max_attempts}")
+            try:
+                self.juju.ssh(
+                    model,
+                    self.minio_unit(s3_integrator_application),
+                    MINIO_CLIENT_SET_ALIAS.format(
+                        client_path=MINIO_CLIENT_PATH,
+                        address=self.minio_address(model, s3_integrator_application),
+                        access_key=MINIO_ACCESS_KEY,
+                        secret_key=MINIO_SECRET_KEY,
+                    ),
+                )
+                return
+            except CalledProcessError as error:
+                self.logger.warning(f"Alias attempt {attempt + 1} of {max_attempts} failed with error: {error}.")
+                if attempt + 1 == max_attempts:
+                    raise
+                time.sleep(retry_sleep_seconds)

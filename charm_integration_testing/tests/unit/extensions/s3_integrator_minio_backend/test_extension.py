@@ -4,6 +4,7 @@
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
+from subprocess import CalledProcessError  # nosec
 
 import pytest
 from extensions.s3_integrator_minio_backend.extension import (
@@ -134,6 +135,43 @@ class TestS3IntegratorMinIOBackendExtension:
                     "bucket": MINIO_BUCKET,
                 },
             ) in juju.configured
+
+        def test_alias_retries_on_failure(self, extension, juju, monkeypatch):
+            def generate_results():
+                yield CalledProcessError(1, "bad-command")
+                yield "Success"
+
+            results = generate_results()
+
+            def ssh_errors_once(model: str, target: str, command: str):
+                result = next(results)
+                if isinstance(result, CalledProcessError):
+                    raise result
+                juju.ssh_calls.append((model, target, command))
+
+            monkeypatch.setattr(juju, "ssh", ssh_errors_once)
+
+            # GIVEN a ready extension with the client downloaded
+            extension.minio_client_file = Path("mc")
+
+            # WHEN set_minio_alias is called
+            extension.set_minio_alias("test-model", "s3-app", max_attempts=3, retry_sleep_seconds=0)
+
+            # THEN the alias command runs successfully
+            assert any("/usr/local/bin/mc alias set local" in cmd for _, _, cmd in juju.ssh_calls)
+
+        def test_alias_max_attempts_exceeded(self, extension, juju, monkeypatch):
+            def ssh_errors(model: str, target: str, command: str):
+                raise CalledProcessError(1, "bad-command")
+
+            monkeypatch.setattr(juju, "ssh", ssh_errors)
+
+            # GIVEN a ready extension with the client downloaded
+            extension.minio_client_file = Path("mc")
+
+            # WHEN set_minio_alias fails every attempt, THEN it errors
+            with pytest.raises(CalledProcessError):
+                extension.set_minio_alias("test-model", "s3-app", max_attempts=3, retry_sleep_seconds=0)
 
     class TestGetMinioClientFile:
         def test_downloads_only_once(self, extension):
