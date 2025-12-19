@@ -173,3 +173,50 @@ class TestVaultUnsealer:
         # THEN
         assert juju.secrets["vault-secret-application-vault-tokens"] == {"root-token": "abc", "unseal-key": "xyz"}
         assert result == tokens
+
+    def test_vault_status_retries_on_connection_refused(self):
+        # GIVEN
+        juju = JujuStub(units={"vault": ["vault/leader"]})
+        vault = VaultStub()
+
+        def raise_connection_refused(model, unit):
+            raise RuntimeError(
+                'ERROR Failure in test_deploy: RuntimeError: Failed to query vault status: \
+                         Error checking seal status: Get "https://127.0.0.1:8200/v1/sys/seal-status": dial tcp 127.0.0.1:8200: connect: connection refused'
+            )
+
+        vault.status = raise_connection_refused
+        logger = LoggerStub()
+        charm = CharmInfo(name="vault")
+
+        # WHEN
+        try:
+            VaultUnsealer(charm, vault, juju, logger).try_init_vault("test-model", "vault")
+        # THEN
+        except RuntimeError as e:
+            assert "connection refused" in str(e).lower()
+        else:
+            assert False, "Expected RuntimeError was not raised"
+
+    def test_vault_status_does_not_retry_on_other_errors(self):
+        # GIVEN
+        juju = JujuStub(units={"vault": ["vault/leader"]})
+        vault = VaultStub()
+
+        def raise_other_error(model, unit):
+            raise RuntimeError(
+                "ERROR Failure in test_deploy: RuntimeError: Failed to query vault status: Some other error occurred"
+            )
+
+        vault.status = raise_other_error
+        logger = LoggerStub()
+        charm = CharmInfo(name="vault")
+
+        # WHEN
+        try:
+            VaultUnsealer(charm, vault, juju, logger).try_init_vault("test-model", "vault")
+        # THEN
+        except RuntimeError as e:
+            assert "some other error occurred" in str(e).lower()
+        else:
+            assert False, "Expected RuntimeError was not raised"
