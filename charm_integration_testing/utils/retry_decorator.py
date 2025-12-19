@@ -5,7 +5,7 @@ from typing import Callable, TypeVar
 T = TypeVar("T")
 
 
-def retry_on_failure(message, max_retries: int = 3, delay: float = 1.0, backoff: float = 2.0):
+def retry_on_failure(message: str, max_retries: int = 3, delay: float = 1.0, backoff: float = 2.0):
     """Retry decorator for vault operations that may fail transiently.
 
     Args:
