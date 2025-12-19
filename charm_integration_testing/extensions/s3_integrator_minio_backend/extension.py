@@ -139,7 +139,11 @@ class S3IntegratorMinIOBackendExtension(JujuExtension, ABC):
         )
 
         # This is a workaround to ensure the path exists for spark-history-server-k8s
-        # See: <TODO>
+        # See:
+        # - issue: Path must be provided
+        #   link: https://github.com/canonical/spark-history-server-k8s-operator/issues/126
+        # - issue: Something must exist at the path
+        #   link: https://github.com/canonical/spark-history-server-k8s-operator/issues/127
         self.logger.info(
             f"Creating the MinIO path '{MINIO_BUCKET}/{MINIO_PATH}' in '{self.minio_application(s3_integrator_application)}'"
         )
