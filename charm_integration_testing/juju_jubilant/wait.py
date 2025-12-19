@@ -5,7 +5,14 @@
 from typing import Iterator
 
 import jubilant
-from juju import JujuApplicationState, JujuIntegration, JujuIntegrationApplication, JujuUnitState, JujuWaitState
+from juju import (
+    JujuApplicationState,
+    JujuIntegration,
+    JujuIntegrationApplication,
+    JujuUnitAgentState,
+    JujuUnitState,
+    JujuWaitState,
+)
 
 
 def get_unit_info(status: jubilant.Status, unit: str) -> jubilant.statustypes.UnitStatus | None:
@@ -69,28 +76,67 @@ def get_unit_state(status: jubilant.Status, unit: str) -> JujuUnitState:
     )
 
 
-def all_statuses_are_in(expected: set[str], status: jubilant.Status, *applications: str) -> tuple[bool, JujuWaitState]:
+def get_unit_agent_state(status: jubilant.Status, unit: str) -> JujuUnitAgentState:
+    application, _ = unit.split("/")
+    application_info = status.apps[application]
+    unit_info = get_unit_info(status, unit)
+    return JujuUnitAgentState(
+        charm=application_info.charm,
+        revision=application_info.charm_rev,
+        status=unit_info.juju_status.current,
+        message=unit_info.juju_status.message,
+    )
+
+
+def all_statuses_are_in(
+    status: jubilant.Status,
+    *applications: str,
+    application_statuses: set[str] | None = None,
+    unit_statuses: set[str] | None = None,
+    unit_agent_statuses: set[str] | None = None,
+) -> tuple[bool, JujuWaitState]:
     if not applications:
         applications = status.apps.keys()
 
     noncompliant_applications = {}
     noncompliant_units = {}
+    noncompliant_unit_agents = {}
+
     for application in applications:
         if application not in status.apps:
             noncompliant_applications[application] = None
             continue
         application_info = status.apps[application]
-        if application_info.app_status.current not in expected:
-            noncompliant_applications[application] = get_application_state(status, application)
-        for unit, unit_info in status.get_units(application).items():
-            if unit_info.workload_status.current not in expected:
-                noncompliant_units[unit] = get_unit_state(status, unit)
 
-    is_compliant = (len(noncompliant_applications) == 0) and (len(noncompliant_units) == 0)
+        # Check application status if specified
+        if application_statuses is not None and application_info.app_status.current not in application_statuses:
+            noncompliant_applications[application] = get_application_state(status, application)
+
+        # Check unit and unit agent statuses
+        for unit, unit_info in status.get_units(application).items():
+            if unit_statuses is not None and unit_info.workload_status.current not in unit_statuses:
+                noncompliant_units[unit] = get_unit_state(status, unit)
+            if unit_agent_statuses is not None and unit_info.juju_status.current not in unit_agent_statuses:
+                noncompliant_unit_agents[unit] = get_unit_agent_state(status, unit)
+
+    is_compliant = (
+        len(noncompliant_applications) == 0 and len(noncompliant_units) == 0 and len(noncompliant_unit_agents) == 0
+    )
+
+    status_parts = []
+    if application_statuses is not None:
+        status_parts.append(f"applications: [{', '.join(sorted(application_statuses))}]")
+    if unit_statuses is not None:
+        status_parts.append(f"units: [{', '.join(sorted(unit_statuses))}]")
+    if unit_agent_statuses is not None:
+        status_parts.append(f"unit agents: [{', '.join(sorted(unit_agent_statuses))}]")
+    message = f"waiting for {', '.join(status_parts)}" if status_parts else "waiting"
+
     return is_compliant, JujuWaitState(
-        message=f"waiting for application to reach [{', '.join(sorted(expected))}]",
+        message=message,
         noncompliant_applications=noncompliant_applications,
         noncompliant_units=noncompliant_units,
+        noncompliant_unit_agents=noncompliant_unit_agents,
     )
 
 

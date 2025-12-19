@@ -116,7 +116,7 @@ class JubilantBackend(JujuCmdBackend):
     def wait_idle(self, model: str, timeout: timedelta | None, count: int, strict_timeout: bool = False):
         self.wait(
             model,
-            lambda status: all_statuses_are_in({"active"}, status),
+            lambda status: all_statuses_are_in(status, application_statuses={"active"}, unit_statuses={"active"}),
             timeout=timeout,
             successes=count,
             strict_timeout=strict_timeout,
@@ -124,7 +124,15 @@ class JubilantBackend(JujuCmdBackend):
 
     def wait_application_settled(self, model: str, application: str, timeout: timedelta | None):
         self.wait(
-            model, lambda status: all_statuses_are_in({"blocked", "active"}, status, application), timeout=timeout
+            model,
+            lambda status: all_statuses_are_in(
+                status,
+                application,
+                application_statuses={"blocked", "active"},
+                unit_statuses={"blocked", "active"},
+                unit_agent_statuses={"idle"},
+            ),
+            timeout=timeout,
         )
 
     def wait_application_scaled(self, model: str, application: str, timeout: timedelta | None):

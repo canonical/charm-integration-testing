@@ -46,6 +46,11 @@ class TestJujuWaitTimeoutError:
                 expected="Timed out while waiting (units: ['unit-1', 'unit-2'])",
             ),
             Params(
+                label="with_unit_agents",
+                wait_state=JujuWaitState(noncompliant_unit_agents={"unit-1": None, "unit-2": None}),
+                expected="Timed out while waiting (unit agents: ['unit-1', 'unit-2'])",
+            ),
+            Params(
                 label="with_applications_and_units",
                 wait_state=JujuWaitState(
                     noncompliant_applications={"application-1": None}, noncompliant_units={"unit-1": None}
@@ -64,8 +69,9 @@ class TestJujuWaitTimeoutError:
                     insufficient_status_checks=True,
                     noncompliant_applications={"app-1": None},
                     noncompliant_units={"unit-1": None},
+                    noncompliant_unit_agents={"unit-2": None},
                 ),
-                expected="Timed out while custom message (applications: ['app-1'], insufficient status checks, units: ['unit-1'])",
+                expected="Timed out while custom message (applications: ['app-1'], insufficient status checks, unit agents: ['unit-2'], units: ['unit-1'])",
             ),
         ]
 
