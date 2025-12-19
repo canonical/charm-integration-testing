@@ -9,6 +9,7 @@ def retry_on_failure(message: str, max_retries: int = 3, delay: float = 1.0, bac
     """Retry decorator for vault operations that may fail transiently.
 
     Args:
+        message: Substring to look for in exception messages to trigger a retry
         max_retries: Maximum number of retry attempts
         delay: Initial delay between retries in seconds
         backoff: Multiplier for delay on each retry
