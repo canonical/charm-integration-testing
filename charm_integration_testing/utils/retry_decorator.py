@@ -36,9 +36,10 @@ def retry_on_failure(message: str, max_retries: int = 3, delay: float = 1.0, bac
                     # Don't retry on non-RuntimeError exceptions (e.g., programming errors)
                     raise
 
-            # This should never be reached, but satisfy type checker
-            raise last_exception
-
+            if last_exception is not None:
+                raise last_exception
+            raise RuntimeError("retry_on_failure: reached unreachable code")
+        
         return wrapper
 
     return decorator
