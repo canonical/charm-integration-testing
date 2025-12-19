@@ -39,7 +39,7 @@ def retry_on_failure(message: str, max_retries: int = 3, delay: float = 1.0, bac
             if last_exception is not None:
                 raise last_exception
             raise RuntimeError("retry_on_failure: reached unreachable code")
-        
+
         return wrapper
 
     return decorator
