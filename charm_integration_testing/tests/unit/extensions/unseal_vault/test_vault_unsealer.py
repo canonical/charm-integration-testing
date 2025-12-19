@@ -178,12 +178,12 @@ class TestVaultUnsealer:
         # GIVEN
         juju = JujuStub(units={"vault": ["vault/leader"]})
         vault = VaultStub()
-        vault.status = lambda model, unit: (_ for _ in (range(6))).throw(
-            RuntimeError(
+        def raise_connection_refused(model, unit):
+            raise RuntimeError(
                 'ERROR Failure in test_deploy: RuntimeError: Failed to query vault status: \
                          Error checking seal status: Get "https://127.0.0.1:8200/v1/sys/seal-status": dial tcp 127.0.0.1:8200: connect: connection refused'
             )
-        )
+        vault.status = raise_connection_refused
         logger = LoggerStub()
         charm = CharmInfo(name="vault")
 
@@ -200,11 +200,11 @@ class TestVaultUnsealer:
         # GIVEN
         juju = JujuStub(units={"vault": ["vault/leader"]})
         vault = VaultStub()
-        vault.status = lambda model, unit: (_ for _ in (range(1))).throw(
-            RuntimeError(
+        def raise_other_error(model, unit):
+            raise RuntimeError(
                 "ERROR Failure in test_deploy: RuntimeError: Failed to query vault status: Some other error occurred"
             )
-        )
+        vault.status = raise_other_error
         logger = LoggerStub()
         charm = CharmInfo(name="vault")
 
