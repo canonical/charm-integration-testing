@@ -7,6 +7,7 @@ from dataclasses import asdict
 import yaml
 from juju import JujuBackend
 from pydantic.dataclasses import dataclass
+from utils import retry_on_failure
 
 
 @dataclass
@@ -51,6 +52,7 @@ class VaultClientJujuExec(VaultClient):
     def __init__(self, juju: JujuBackend):
         self.juju = juju
 
+    @retry_on_failure(message="connection refused", max_retries=5, delay=1.0)
     def status(self, model: str, unit: str) -> VaultStatus:
         # Unseal the vault
         result = self.juju.exec_unit(model, unit, self.JUJU_EXEC_VAULT_STATUS)
@@ -63,6 +65,7 @@ class VaultClientJujuExec(VaultClient):
         # Parse response
         return VaultStatus(**yaml.safe_load(result.stdout))
 
+    @retry_on_failure(message="connection refused", max_retries=5, delay=1.0)
     def init(self, model: str, unit: str) -> VaultTokenSecret:
         # Initialize vault
         init_result = self.juju.exec_unit(model, unit, self.JUJU_EXEC_VAULT_INIT)
@@ -77,6 +80,7 @@ class VaultClientJujuExec(VaultClient):
         # Return tokens
         return VaultTokenSecret(root_token=init_response.root_token, unseal_key=init_response.unseal_keys_b64[0])
 
+    @retry_on_failure(message="connection refused", max_retries=5, delay=1.0)
     def unseal(self, model: str, unit: str, tokens: VaultTokenSecret) -> None:
         # Unseal the vault
         unseal_result = self.juju.exec_unit(model, unit, self.JUJU_EXEC_VAULT_UNSEAL.format(**asdict(tokens)))
