@@ -146,8 +146,10 @@ class TestS3IntegratorMinIOBackendExtension:
                 },
             ) in juju.actions
 
-        def test_alias_retries_on_failure(self, extension: S3IntegratorMinIOBackendExtension, juju: JujuStub, monkeypatch: pytest.MonkeyPatch) -> None:
-            def generate_results():
+        def test_alias_retries_on_failure(
+            self, extension: S3IntegratorMinIOBackendExtension, juju: JujuStub, monkeypatch: pytest.MonkeyPatch
+        ) -> None:
+            def generate_results() -> Generator[CalledProcessError | str, None, None]:
                 yield CalledProcessError(1, "bad-command")
                 yield "Success"
 
@@ -185,7 +187,9 @@ class TestS3IntegratorMinIOBackendExtension:
             with pytest.raises(CalledProcessError):
                 extension.set_minio_alias("test-model", "s3-app", max_attempts=3, retry_sleep_seconds=0)
 
-        def test_create_minio_bucket_creates_path(self, extension, juju):
+        def test_create_minio_bucket_creates_path(
+            self, extension: S3IntegratorMinIOBackendExtension, juju: JujuStub
+        ) -> None:
             # GIVEN a ready extension with the client downloaded
             extension.minio_client_file = Path("mc")
 
@@ -202,7 +206,9 @@ class TestS3IntegratorMinIOBackendExtension:
                 for _, _, cmd in juju.ssh_calls
             )
 
-        def test_authenticate_s3_integrator_includes_path(self, extension, juju):
+        def test_authenticate_s3_integrator_includes_path(
+            self, extension: S3IntegratorMinIOBackendExtension, juju: JujuStub
+        ) -> None:
             # GIVEN a ready extension
             # WHEN authenticate_s3_integrator is called
             extension.authenticate_s3_integrator("test-model", "s3-app")

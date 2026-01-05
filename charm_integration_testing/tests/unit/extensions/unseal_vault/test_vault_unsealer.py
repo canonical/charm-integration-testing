@@ -171,12 +171,12 @@ class TestVaultUnsealer:
         assert juju.secrets["vault-secret-application-vault-tokens"] == {"root-token": "abc", "unseal-key": "xyz"}
         assert result == tokens
 
-    def test_vault_status_retries_on_connection_refused(self):
+    def test_vault_status_retries_on_connection_refused(self) -> None:
         # GIVEN
         juju = JujuStub(units={"vault": ["vault/leader"]})
         vault = VaultStub()
 
-        def raise_connection_refused(model, unit):
+        def raise_connection_refused(model: str, unit: str) -> VaultStatus:
             raise RuntimeError(
                 'ERROR Failure in test_deploy: RuntimeError: Failed to query vault status: \
                          Error checking seal status: Get "https://127.0.0.1:8200/v1/sys/seal-status": dial tcp 127.0.0.1:8200: connect: connection refused'
@@ -188,19 +188,19 @@ class TestVaultUnsealer:
 
         # WHEN
         try:
-            VaultUnsealer(charm, vault, juju, logger).try_init_vault("test-model", "vault")
+            VaultUnsealer(charm, vault, juju, logger).try_init_vault("test-model", "vault")  # type: ignore[arg-type]
         # THEN
         except RuntimeError as e:
             assert "connection refused" in str(e).lower()
         else:
             assert False, "Expected RuntimeError was not raised"
 
-    def test_vault_status_does_not_retry_on_other_errors(self):
+    def test_vault_status_does_not_retry_on_other_errors(self) -> None:
         # GIVEN
         juju = JujuStub(units={"vault": ["vault/leader"]})
         vault = VaultStub()
 
-        def raise_other_error(model, unit):
+        def raise_other_error(model: str, unit: str) -> VaultStatus:
             raise RuntimeError(
                 "ERROR Failure in test_deploy: RuntimeError: Failed to query vault status: Some other error occurred"
             )
@@ -211,7 +211,7 @@ class TestVaultUnsealer:
 
         # WHEN
         try:
-            VaultUnsealer(charm, vault, juju, logger).try_init_vault("test-model", "vault")
+            VaultUnsealer(charm, vault, juju, logger).try_init_vault("test-model", "vault")  # type: ignore[arg-type]
         # THEN
         except RuntimeError as e:
             assert "some other error occurred" in str(e).lower()
