@@ -1,0 +1,18 @@
+configs:
+  - criteria:
+      track: "1.16"
+      endpoint_integrated: "vault-pki"
+    config:
+      # NOTE: "charmqa" is just random value
+      common_name: charmqa
+  - criteria:
+      track: "1.17"
+      endpoint_integrated: "vault-pki"
+    config:
+      common_name: charmqa
+  - criteria:
+      track: "1.18"
+      endpoint_integrated: "vault-pki"
+    config:
+      # NOTE: the config key changed in 1.18
+      pki_ca_common_name: charmqa
