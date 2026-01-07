@@ -355,3 +355,9 @@ class JujuCmdBackend(JujuBackend):
 
     def remove_secret(self, model: str, name_or_id: str):
         raise NotImplementedError
+
+    def version(self, model: str) -> str:
+        return self._call_juju(
+            CmdArg(value="version"),
+            CmdArg(name="model", value=model),
+        )
