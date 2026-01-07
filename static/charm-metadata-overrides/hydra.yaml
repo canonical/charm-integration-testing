@@ -8,3 +8,7 @@ provides:
     optional: true
   grafana-dashboard:
     optional: true
+
+requires:
+  public-route:
+    features: [tls]

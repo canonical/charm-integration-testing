@@ -3,7 +3,10 @@
 # And appears in limbo due to being handed off to IS
 requires:
   certificates:
-    optional: true
+    optional_if:
+      - none_of:
+          - endpoint_integrated: traefik-route
+          - endpoint_feature: traefik-route:tls
   experimental-forward-auth:
     optional: true
   logging:
@@ -13,4 +16,17 @@ requires:
   workload-tracing:
     optional: true
   receive-ca-cert:
+    optional: true
+
+provides:
+  ingress:
+    optional: true
+  ingress-per-unit:
+    optional: true
+  metrics-endpoint:
+    optional: true
+  traefik-route:
+    optional: true
+    features: [tls]
+  grafana-dashboard:
     optional: true
