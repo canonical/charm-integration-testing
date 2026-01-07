@@ -8,7 +8,7 @@ import os
 import warnings
 from datetime import timedelta
 from pathlib import Path
-from subprocess import CalledProcessError  # nosec
+from subprocess import CalledProcessError, run  # nosec
 from typing import Callable
 
 import pytest
@@ -192,12 +192,14 @@ def record_execution_metadata(
     record_failure_execution_metadata: None,
     record_juju_execution_metadata: None,
     record_charms_and_revisions_execution_metadata: None,
+    record_pipeline_version_execution_metadata: None,
 ):
     # Save various execution metadata
     _ = record_warning_execution_metadata
     _ = record_failure_execution_metadata
     _ = record_juju_execution_metadata
     _ = record_charms_and_revisions_execution_metadata
+    _ = record_pipeline_version_execution_metadata
 
 
 @pytest.fixture
@@ -305,3 +307,38 @@ def record_juju_execution_metadata(
     # Save Juju version
     juju_version = juju_client.version(model)
     execution_metadata("juju:version", juju_version)
+
+def record_pipeline_version_execution_metadata(
+    execution_metadata: Callable[[str, str | int], None], request: pytest.FixtureRequest
+):
+    pipeline_path: Path = Path(request.config.rootpath).parent / ".github" / "workflows" / "charm-testing.yaml"
+
+    if not pipeline_path.exists():
+        execution_metadata("warning:message", normalize_string(f"Pipeline file not found: {pipeline_path}"))
+        yield
+        return
+
+    try:
+        repository_version_command = ["git", "--no-pager", "log", "-n", "1", "--pretty=format:%h"]
+        pipeline_version_command = [
+            "git",
+            "--no-pager",
+            "log",
+            "-n",
+            "1",
+            "--pretty=format:%h",
+            "--",
+            str(pipeline_path.resolve()),
+        ]
+
+        repository_result = run(repository_version_command, capture_output=True, text=True, check=True)
+        pipeline_result = run(pipeline_version_command, capture_output=True, text=True, check=True)
+
+        # Add version metadata before test
+        execution_metadata("versions:pipeline_version", pipeline_result.stdout.strip())
+        execution_metadata("versions:repository_version", repository_result.stdout.strip())
+
+    except CalledProcessError as e:
+        execution_metadata("warning:message", normalize_string(f"Failed to get version information from git: {e}."))
+
+    yield
