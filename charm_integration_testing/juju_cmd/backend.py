@@ -357,7 +357,4 @@ class JujuCmdBackend(JujuBackend):
         raise NotImplementedError
 
     def version(self, model: str) -> str:
-        return self._call_juju(
-            CmdArg(value="version"),
-            CmdArg(name="model", value=model),
-        )
+        return self._call_juju(CmdArg(value="version"))
