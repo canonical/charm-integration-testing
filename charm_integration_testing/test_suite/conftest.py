@@ -190,11 +190,13 @@ def execution_metadata(record_property: Callable[[str, object], None]):
 def record_execution_metadata(
     record_warning_execution_metadata: None,
     record_failure_execution_metadata: None,
+    record_juju_execution_metadata: None,
     record_charms_and_revisions_execution_metadata: None,
 ):
     # Save various execution metadata
     _ = record_warning_execution_metadata
     _ = record_failure_execution_metadata
+    _ = record_juju_execution_metadata
     _ = record_charms_and_revisions_execution_metadata
 
 
@@ -291,3 +293,15 @@ def record_failure_execution_metadata(
                 execution_metadata("failure:cli:stdout", normalize_string(exc.stdout))
             if exc.stderr:
                 execution_metadata("failure:cli:stderr", normalize_string(exc.stderr))
+
+
+@pytest.fixture
+def record_juju_execution_metadata(
+    juju_client: JujuClient, model: str, execution_metadata: Callable[[str, str | int], None]
+):
+    # Let the test run
+    yield
+
+    # Save Juju version
+    juju_version = juju_client.version(model)
+    execution_metadata("juju:version", juju_version)
