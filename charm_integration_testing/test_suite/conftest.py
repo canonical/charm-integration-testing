@@ -308,6 +308,7 @@ def record_juju_execution_metadata(
     juju_version = juju_client.version(model)
     execution_metadata("juju:version", juju_version)
 
+@pytest.fixture
 def record_pipeline_version_execution_metadata(
     execution_metadata: Callable[[str, str | int], None], request: pytest.FixtureRequest
 ):
