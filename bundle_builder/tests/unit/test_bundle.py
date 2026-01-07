@@ -1201,8 +1201,8 @@ class TestBundle:
             # GIVEN a bundle
             bundle = params.bundle
 
-            # WHEN application_endpoint_features is called
-            features = bundle.application_endpoint_features
+            # WHEN application_endpoint_features is called for each application
+            features = {app.name: bundle.application_endpoint_features(app.name) for app in bundle.applications}
 
             # THEN features match expected
             assert features == params.expected_features

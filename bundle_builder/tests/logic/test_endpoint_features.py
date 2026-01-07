@@ -351,18 +351,18 @@ class TestEndpointFeatures:
         new_bundle = builder.build(bundle)
 
         # THEN the provider should have all features from both requirers
-        features = new_bundle.application_endpoint_features["db"]
+        features = new_bundle.application_endpoint_features("db")
         assert "database:ssl" in features
         assert "database:compression" in features
         assert "database:replication" in features
 
         # AND requirer1 should have only its features
-        features1 = new_bundle.application_endpoint_features["app1"]
+        features1 = new_bundle.application_endpoint_features("app1")
         assert "database:ssl" in features1
         assert "database:compression" not in features1
 
         # AND requirer2 should have only its features
-        features2 = new_bundle.application_endpoint_features["app2"]
+        features2 = new_bundle.application_endpoint_features("app2")
         assert "database:compression" in features2
         assert "database:replication" in features2
         assert "database:ssl" not in features2
