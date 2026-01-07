@@ -172,47 +172,62 @@ class Bundle:
 
     @computed_property
     def application_endpoint_features(self) -> dict[str, frozenset[str]]:
-        map = {application.name: set() for application in self.applications}
-
-        # Build provider-to-requirers mapping once (optimization)
-        provider_to_requirers: dict[ApplicationEndpoint, list[ApplicationEndpoint]] = {}
+        # Build provider-to-requirers mapping, but only for endpoints with features
+        # PERF: It is faster to create tuple keys than ApplicationEndpoint in queries below
+        provider_to_requirers: dict[tuple[str, str], set[tuple[str, str]]] = {}
         for integration in self.integrations:
-            ep1, ep2 = list(integration)
+            ep1, ep2 = tuple(integration)
             charm_ep1 = self.application_endpoints[ep1]
             charm_ep2 = self.application_endpoints[ep2]
 
-            if charm_ep1.type == ENDPOINT_REQUIRES and charm_ep2.type == ENDPOINT_PROVIDES:
-                requirer_ep, provider_ep = ep1, ep2
-            else:  # charm_ep1.type == ENDPOINT_PROVIDES and charm_ep2.type == ENDPOINT_REQUIRES
-                requirer_ep, provider_ep = ep2, ep1
+            # Skip if neither endpoint has features
+            if not charm_ep1.features and not charm_ep2.features:
+                continue
+
+            if charm_ep1.type == ENDPOINT_REQUIRES:
+                requirer_ep, provider_ep = (ep1.application, ep1.endpoint), (ep2.application, ep2.endpoint)
+            else:
+                requirer_ep, provider_ep = (ep2.application, ep2.endpoint), (ep1.application, ep1.endpoint)
 
             if provider_ep not in provider_to_requirers:
-                provider_to_requirers[provider_ep] = []
-            provider_to_requirers[provider_ep].append(requirer_ep)
+                provider_to_requirers[provider_ep] = set()
+            provider_to_requirers[provider_ep].add(requirer_ep)
 
+        # Only iterate through applications that have endpoints with features
+        map: dict[str, set[str]] = {}
         for application in self.applications:
+            app_features: set[str] = set()
+
             for endpoint in application.charm.endpoints:
-                app_endpoint = ApplicationEndpoint(application=application.name, endpoint=endpoint.name)
+                # Skip endpoints without features immediately
+                if not endpoint.features:
+                    continue
 
                 # Check if this endpoint is integrated
                 if endpoint.name not in self.application_to_integrated_endpoints[application.name]:
-                    # Not integrated - no features used
                     continue
 
                 if endpoint.type == ENDPOINT_REQUIRES:
                     # For requiring endpoints: return all its features if integrated
                     for feature in endpoint.features:
-                        map[application.name].add(f"{endpoint.name}:{feature}")
+                        app_features.add(f"{endpoint.name}:{feature}")
                 elif endpoint.type == ENDPOINT_PROVIDES:
                     # For providing endpoints: return union of features required by all connected requirers
-                    requirers = provider_to_requirers.get(app_endpoint, [])
+                    app_endpoint_tuple = (application.name, endpoint.name)
+                    requirers = provider_to_requirers.get(app_endpoint_tuple, [])
                     if requirers:
-                        connected_features = [self.application_endpoints[req].features for req in requirers]
+                        connected_features = [
+                            self.application_endpoints[ApplicationEndpoint(req[0], req[1])].features
+                            for req in requirers
+                        ]
                         used_features = frozenset().union(*connected_features)
                         for feature in used_features:
-                            map[application.name].add(f"{endpoint.name}:{feature}")
+                            app_features.add(f"{endpoint.name}:{feature}")
 
-        return {app: frozenset(features) for app, features in map.items()}
+            map[application.name] = app_features
+
+        # Ensure all applications are in the result, even if they have no features
+        return {app.name: frozenset(map.get(app.name, set())) for app in self.applications}
 
     @computed_property
     def unfulfilled_endpoints(self) -> frozenset[ApplicationEndpoint]:
@@ -223,12 +238,14 @@ class Bundle:
         saturated_endpoints = self.saturated_endpoints
 
         # Collect all non-optional endpoints
+        # Compute application_endpoint_features once to avoid repeated computation
+        app_endpoint_features = self.application_endpoint_features
         non_optional_endpoints = set()
         for application in self.applications:
             for endpoint in application.charm.endpoints:
                 if endpoint.optionality.is_optional(
                     self.application_to_integrated_endpoints[application.name],
-                    self.application_endpoint_features[application.name],
+                    app_endpoint_features[application.name],
                 ):
                     continue
                 non_optional_endpoints.add(ApplicationEndpoint(application=application.name, endpoint=endpoint.name))
