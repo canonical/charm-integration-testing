@@ -279,7 +279,7 @@ class BundleBuilder:
                     continue
 
                 # Will not integrate require with provide that does not provide features
-                if not provide_endpoint.features.issuperset(require_endpoint.features):
+                if not provide_endpoint.features >= require_endpoint.features:
                     continue
 
                 # Will not integrate if it creates a recursive dependency chain

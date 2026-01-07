@@ -101,7 +101,7 @@ class Bundle:
                 )
 
             # Ensure provider provides all features of the requirer
-            if not provider_charm_ep.features.issuperset(requirer_charm_ep.features):
+            if not provider_charm_ep.features >= requirer_charm_ep.features:
                 raise ValueError(
                     f"Provider endpoint '{provider_ep}' does not provide all "
                     f"features required by '{requirer_ep}': {requirer_charm_ep.features - provider_charm_ep.features}"
