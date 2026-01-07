@@ -414,6 +414,15 @@ class CharmhubClient:
                 else:
                     limits = []
 
+                # Determine endpoint features from overrides
+                if (
+                    endpoint_name in metadata_overrides_map
+                    and metadata_overrides_map[endpoint_name].features is not None
+                ):
+                    features = frozenset(metadata_overrides_map[endpoint_name].features)
+                else:
+                    features = frozenset()
+
                 # Add endpoint
                 endpoints.add(
                     CharmEndpoint(
@@ -422,6 +431,7 @@ class CharmhubClient:
                         interface=endpoint.interface,
                         optionality=optionality,
                         limits=limits,
+                        features=features,
                     )
                 )
 

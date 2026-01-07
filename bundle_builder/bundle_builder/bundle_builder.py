@@ -263,16 +263,23 @@ class BundleBuilder:
                     continue
 
                 # Will not integrate wrong endpoint types
-                if not (
-                    (
-                        possible_charm_endpoint.type == ENDPOINT_REQUIRES
-                        and unfulfilled_charm_endpoint.type == ENDPOINT_PROVIDES
-                    )
-                    or (
-                        possible_charm_endpoint.type == ENDPOINT_PROVIDES
-                        and unfulfilled_charm_endpoint.type == ENDPOINT_REQUIRES
-                    )
+                if (
+                    possible_charm_endpoint.type == ENDPOINT_REQUIRES
+                    and unfulfilled_charm_endpoint.type == ENDPOINT_PROVIDES
                 ):
+                    require_endpoint = possible_charm_endpoint
+                    provide_endpoint = unfulfilled_charm_endpoint
+                elif (
+                    possible_charm_endpoint.type == ENDPOINT_PROVIDES
+                    and unfulfilled_charm_endpoint.type == ENDPOINT_REQUIRES
+                ):
+                    require_endpoint = unfulfilled_charm_endpoint
+                    provide_endpoint = possible_charm_endpoint
+                else:
+                    continue
+
+                # Will not integrate require with provide that does not provide features
+                if not provide_endpoint.features.issuperset(require_endpoint.features):
                     continue
 
                 # Will not integrate if it creates a recursive dependency chain
