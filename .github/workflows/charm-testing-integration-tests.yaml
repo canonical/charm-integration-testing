@@ -19,6 +19,7 @@ jobs:
             target_base: "22.04"
             neighbor_charm: self-signed-certificates
             neighbor_endpoint: certificates
+            substrate: kubernetes
     uses: ./.github/workflows/charm-testing-integration-test-assert-pass.yaml
     permissions:
       contents: read
@@ -30,5 +31,6 @@ jobs:
       target_base: ${{ matrix.params.target_base }}
       neighbor_charm: ${{ matrix.params.neighbor_charm }}
       neighbor_endpoint: ${{ matrix.params.neighbor_endpoint }}
+      substrate: ${{ matrix.params.substrate }}
     secrets:
       STG_TEST_OBSERVER_TOKEN: ${{ secrets.STG_TEST_OBSERVER_TOKEN }}
