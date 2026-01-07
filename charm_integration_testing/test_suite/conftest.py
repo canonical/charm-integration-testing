@@ -310,7 +310,7 @@ def record_juju_execution_metadata(
 
 @pytest.fixture
 def record_pipeline_version_execution_metadata(
-    execution_metadata: Callable[[str, str | int], None], request: pytest.FixtureRequest
+    execution_metadata: Callable[[str, str | int], None], request: pytest.FixtureRequest, logger: logging.Logger,
 ):
     pipeline_path: Path = Path(request.config.rootpath) / ".github" / "workflows" / "charm-testing.yaml"
 
@@ -331,6 +331,7 @@ def record_pipeline_version_execution_metadata(
             "--",
             str(pipeline_path.resolve()),
         ]
+        logger.info(f"Executed command: {pipeline_version_command}")
 
         repository_result = run(repository_version_command, capture_output=True, text=True, check=True)
         pipeline_result = run(pipeline_version_command, capture_output=True, text=True, check=True)
