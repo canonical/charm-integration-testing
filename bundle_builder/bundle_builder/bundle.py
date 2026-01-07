@@ -238,14 +238,12 @@ class Bundle:
         saturated_endpoints = self.saturated_endpoints
 
         # Collect all non-optional endpoints
-        # Compute application_endpoint_features once to avoid repeated computation
-        app_endpoint_features = self.application_endpoint_features
         non_optional_endpoints = set()
         for application in self.applications:
             for endpoint in application.charm.endpoints:
                 if endpoint.optionality.is_optional(
                     self.application_to_integrated_endpoints[application.name],
-                    app_endpoint_features[application.name],
+                    self.application_endpoint_features[application.name],
                 ):
                     continue
                 non_optional_endpoints.add(ApplicationEndpoint(application=application.name, endpoint=endpoint.name))
