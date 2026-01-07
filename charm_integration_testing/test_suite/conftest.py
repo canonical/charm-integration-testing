@@ -311,7 +311,7 @@ def record_juju_execution_metadata(
 def record_pipeline_version_execution_metadata(
     execution_metadata: Callable[[str, str | int], None], request: pytest.FixtureRequest
 ):
-    pipeline_path: Path = Path(request.config.rootpath).parent / ".github" / "workflows" / "charm-testing.yaml"
+    pipeline_path: Path = Path(request.config.rootpath) / ".github" / "workflows" / "charm-testing.yaml"
 
     if not pipeline_path.exists():
         execution_metadata("warning:message", normalize_string(f"Pipeline file not found: {pipeline_path}"))
