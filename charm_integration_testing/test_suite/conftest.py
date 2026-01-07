@@ -296,7 +296,9 @@ def record_failure_execution_metadata(
 
 
 @pytest.fixture
-def record_juju_execution_metadata(juju_client: JujuClient, model: str, execution_metadata: Callable[[str, str | int], None]):
+def record_juju_execution_metadata(
+    juju_client: JujuClient, model: str, execution_metadata: Callable[[str, str | int], None]
+):
     # Let the test run
     yield
 
