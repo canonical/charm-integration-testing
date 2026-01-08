@@ -201,6 +201,219 @@ class TestBundleBuilder:
         for child in children:
             assert any(app.name.startswith("postgresql-k8s") for app in child.bundle.applications)
 
+    def test_child_nodes_existing_applications_validates_endpoint_features(self):
+        # GIVEN a provider charm with limited features (only compression, not SSL)
+        provider_charm = dataclasses.replace(
+            sample_charm_postgresql_k8s(),
+            name="database",
+            endpoints=frozenset(
+                {
+                    dataclasses.replace(
+                        sample_charm_endpoint_postgresql_k8s_database(),
+                        features=frozenset({"compression"}),
+                    )
+                }
+            ),
+        )
+
+        # AND a requirer charm that requires SSL feature
+        requirer_with_ssl = dataclasses.replace(
+            sample_charm_kratos(),
+            name="app-ssl",
+            endpoints=frozenset(
+                {
+                    dataclasses.replace(
+                        sample_charm_endpoint_kratos_pg_database(),
+                        name="database",
+                        features=frozenset({"ssl"}),
+                    )
+                }
+            ),
+        )
+
+        # AND a requirer charm that requires compression feature
+        requirer_with_compression = dataclasses.replace(
+            sample_charm_kratos(),
+            name="app-compression",
+            endpoints=frozenset(
+                {
+                    dataclasses.replace(
+                        sample_charm_endpoint_kratos_pg_database(),
+                        name="database",
+                        features=frozenset({"compression"}),
+                    )
+                }
+            ),
+        )
+
+        # AND a bundle with the provider and both requirers
+        bundle = Bundle(
+            applications=frozenset(
+                {
+                    Application(name="db", charm=provider_charm),
+                    Application(name="app-ssl", charm=requirer_with_ssl),
+                    Application(name="app-compression", charm=requirer_with_compression),
+                }
+            ),
+            integrations=frozenset(),
+            platform="machine",
+            arch="amd64",
+        )
+
+        stub = CharmhubClientStub()
+        builder = BundleBuilder(charmhub_client=stub)
+        node = Node(bundle=bundle, aggression=0.0)
+
+        # WHEN checking child nodes for the SSL requirer endpoint
+        children_ssl = builder.child_nodes_existing_applications(node, ApplicationEndpoint("app-ssl", "database"))
+
+        # THEN no children should be created (provider doesn't have SSL feature)
+        assert len(children_ssl) == 0
+
+        # WHEN checking child nodes for the compression requirer endpoint
+        children_compression = builder.child_nodes_existing_applications(
+            node, ApplicationEndpoint("app-compression", "database")
+        )
+
+        # THEN one child should be created (provider has compression feature)
+        assert len(children_compression) == 1
+        child = next(iter(children_compression))
+        assert (
+            Integration(
+                {
+                    ApplicationEndpoint("db", "database"),
+                    ApplicationEndpoint("app-compression", "database"),
+                }
+            )
+            in child.bundle.integrations
+        )
+
+    def test_child_nodes_existing_applications_allows_superset_features(self):
+        # GIVEN a provider charm with multiple features
+        provider_charm = dataclasses.replace(
+            sample_charm_postgresql_k8s(),
+            name="database",
+            endpoints=frozenset(
+                {
+                    dataclasses.replace(
+                        sample_charm_endpoint_postgresql_k8s_database(),
+                        features=frozenset({"ssl", "compression", "replication"}),
+                    )
+                }
+            ),
+        )
+
+        # AND a requirer charm that only requires SSL
+        requirer_charm = dataclasses.replace(
+            sample_charm_kratos(),
+            name="app",
+            endpoints=frozenset(
+                {
+                    dataclasses.replace(
+                        sample_charm_endpoint_kratos_pg_database(),
+                        name="database",
+                        features=frozenset({"ssl"}),
+                    )
+                }
+            ),
+        )
+
+        # AND a bundle with both applications
+        bundle = Bundle(
+            applications=frozenset(
+                {
+                    Application(name="db", charm=provider_charm),
+                    Application(name="app", charm=requirer_charm),
+                }
+            ),
+            integrations=frozenset(),
+            platform="machine",
+            arch="amd64",
+        )
+
+        stub = CharmhubClientStub()
+        builder = BundleBuilder(charmhub_client=stub)
+        node = Node(bundle=bundle, aggression=0.0)
+
+        # WHEN checking child nodes for the requirer endpoint
+        children = builder.child_nodes_existing_applications(node, ApplicationEndpoint("app", "database"))
+
+        # THEN one child should be created (provider has all required features and more)
+        assert len(children) == 1
+        child = next(iter(children))
+        assert (
+            Integration(
+                {
+                    ApplicationEndpoint("db", "database"),
+                    ApplicationEndpoint("app", "database"),
+                }
+            )
+            in child.bundle.integrations
+        )
+
+    def test_child_nodes_existing_applications_allows_no_features(self):
+        # GIVEN a provider charm without features
+        provider_charm = dataclasses.replace(
+            sample_charm_postgresql_k8s(),
+            name="database",
+            endpoints=frozenset(
+                {
+                    dataclasses.replace(
+                        sample_charm_endpoint_postgresql_k8s_database(),
+                        features=frozenset(),
+                    )
+                }
+            ),
+        )
+
+        # AND a requirer charm without features
+        requirer_charm = dataclasses.replace(
+            sample_charm_kratos(),
+            name="app",
+            endpoints=frozenset(
+                {
+                    dataclasses.replace(
+                        sample_charm_endpoint_kratos_pg_database(),
+                        name="database",
+                        features=frozenset(),
+                    )
+                }
+            ),
+        )
+
+        # AND a bundle with both applications
+        bundle = Bundle(
+            applications=frozenset(
+                {
+                    Application(name="db", charm=provider_charm),
+                    Application(name="app", charm=requirer_charm),
+                }
+            ),
+            integrations=frozenset(),
+            platform="machine",
+            arch="amd64",
+        )
+
+        stub = CharmhubClientStub()
+        builder = BundleBuilder(charmhub_client=stub)
+        node = Node(bundle=bundle, aggression=0.0)
+
+        # WHEN checking child nodes for the requirer endpoint
+        children = builder.child_nodes_existing_applications(node, ApplicationEndpoint("app", "database"))
+
+        # THEN one child should be created (both have no features, which is compatible)
+        assert len(children) == 1
+        child = next(iter(children))
+        assert (
+            Integration(
+                {
+                    ApplicationEndpoint("db", "database"),
+                    ApplicationEndpoint("app", "database"),
+                }
+            )
+            in child.bundle.integrations
+        )
+
     class TestBundleBuilderLimitValidation:
         def test_can_add_integration_respects_limits(self):
             # GIVEN a charm with limited endpoint
