@@ -11,13 +11,26 @@ The wait mechanism uses consecutive success counting to ensure stability:
 1. **Poll Loop**: Fetches Juju status at fixed intervals
 2. **Condition Evaluation**: Each status is evaluated against a predicate function
 3. **Success Counting**: Counter increments on success, resets to zero on failure, exits when reaching threshold
-4. **Timeout**: Exits with failure if maximum time exceeded
+4. **Timeout**: Exits with failure if maximum time exceeded (see Timeout Behaviour below)
 5. **Timing Compensation**: Sleep duration accounts for status fetch time, maintaining consistent polling intervals
 
 A model must remain in the desired state for multiple consecutive checks before signaling success.
 
+Timeout Behaviour
+-----------------
+
+The wait mechanism supports two timeout modes controlled by the ``strict_timeout`` parameter:
+
+**Non-Strict Timeout (default, strict_timeout=False)**
+  When the timeout is reached, the wait continues if making progress toward stability (i.e., consecutive success count > 0). This prevents premature failures when the model is idle but hasn't yet accumulated enough consecutive success checks. The wait will only timeout if the model is not in the desired state (success count = 0).
+
+**Strict Timeout (strict_timeout=True)**
+  Enforces the timeout absolutely, regardless of whether the model is making progress. Even if the model is in the desired state, if the required consecutive successes haven't been achieved within the timeout period, the wait will fail with an "insufficient status checks" error.
+
+This design addresses scenarios where tests timeout despite the model being idle, simply because insufficient time remained to complete all required consecutive stability checks. With the default non-strict behaviour, as long as the model reaches the idle state, it will be given additional time to confirm stability.
+
 The ``assert_idle`` Fixture
-----------------------------
+---------------------------
 
 Every test automatically runs the ``assert_idle`` fixture before execution. This fixture:
 
@@ -104,3 +117,5 @@ Error State Tracking
 The wait mechanism tracks two states: **last_wait_state** (most recent) and **noncompliant_wait_state** (last failure). Timeout errors report the noncompliant state, not the last state.
 
 **Rationale**: A charm might error, recover to active, then timeout due to insufficient consecutive successes. Without tracking, the error shows "timed out while active" which hides the actual problem. With tracking, the error shows the last problematic state for debugging context.
+
+**Interaction with strict_timeout**: When ``strict_timeout=False`` and the model is in the desired state at timeout, the wait continues. If ``strict_timeout=True`` and consecutive successes haven't been achieved, the error will indicate "insufficient status checks" rather than reporting a noncompliant state, since the model was actually compliant but needed more time to confirm stability.

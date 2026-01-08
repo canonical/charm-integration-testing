@@ -8,3 +8,5 @@ Contents
 
 .. toctree::
    :maxdepth: 1
+
+   execution-metadata

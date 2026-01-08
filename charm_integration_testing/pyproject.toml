@@ -16,7 +16,7 @@ dependencies = [
     "pyyaml==6.0.2",
     "pytest-timeout==2.3.1",
     "junitparser==3.2.0",
-    "jubilant (>=1.2.0,<2.0.0)"
+    "jubilant (>=1.6.0,<2.0.0)"
 ]
 
 [tool.poetry]
@@ -27,6 +27,7 @@ packages = [
     { include = "juju_jubilant" },
     { include = "serializeable_dataclass" },
     { include = "test_suite" },
+    { include = "utils" },
 ]
 
 [build-system]

@@ -138,7 +138,7 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def wait_idle(self, model: str, timeout: timedelta | None, count: int | None):
+    def wait_idle(self, model: str, timeout: timedelta | None, count: int | None, strict_timeout: bool = False):
         raise NotImplementedError
 
     @abstractmethod
@@ -247,4 +247,8 @@ class JujuBackend(ABC):
 
     @abstractmethod
     def get_charm_revisions(self, model: str) -> set[tuple[str, int]]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def version(self, model: str) -> str:
         raise NotImplementedError
