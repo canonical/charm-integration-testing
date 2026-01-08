@@ -268,9 +268,6 @@ class BundleBuilder:
             charm = self.charmhub_client.charm_from_store(charm_name=charm_name, ubuntu_arch=node.bundle.arch)
 
             # Create the application
-            if charm is None:
-                raise ValueError(f"Could not find charm '{charm_name}' in Charmhub")
-
             application = Application(
                 name=node.bundle.generate_unique_application_name(charm_name),
                 charm=charm,

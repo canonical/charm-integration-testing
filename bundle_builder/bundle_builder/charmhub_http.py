@@ -38,6 +38,12 @@ class NoCharmMetadataException(UnparsableCharmException):
     pass
 
 
+class IncompleteCharmInfoException(UnparsableCharmException):
+    """Raised when the charm info from charmhub is incomplete or missing required fields."""
+
+    pass
+
+
 class CharmReleaseNotFoundException(Exception):
     """Raised when the release for a charm cannot be deduced."""
 

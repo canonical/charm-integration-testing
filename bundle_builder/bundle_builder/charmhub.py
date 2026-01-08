@@ -31,6 +31,7 @@ from .charmhub_http import (
     CharmhubHttpClient,
     CharmMetadata,
     CharmReleaseNotFoundException,
+    IncompleteCharmInfoException,
     FindResponse,
     RefreshAction,
     RefreshResponse,
@@ -193,16 +194,24 @@ class CharmhubClient:
                 always_include_base=True,
             )
         )
+        # Check for errors and incomplete data
         if refresh_info.error is not None:
             raise CharmReleaseNotFoundException(
                 f"Failed to find charm {charm_name} for revision {charm_revision}: {refresh_info.error.message}"
+            )
+        if refresh_info.charm is None:
+            raise IncompleteCharmInfoException(
+                f"Refresh info for charm {charm_name} revision {charm_revision} returned no charm and no error"
+            )
+        if refresh_info.charm.bases is None:
+            raise IncompleteCharmInfoException(
+                f"Refresh info for charm {charm_name} revision {charm_revision} returned no bases"
             )
 
         # Find suitable ubuntu version for revision
         if not ubuntu_version:
             # Return first ubuntu version with matching base
-            bases = refresh_info.charm.bases if refresh_info.charm is not None else []
-            for base in bases or []:
+            for base in refresh_info.charm.bases:
                 if base.name == "ubuntu" and base.architecture == ubuntu_arch:
                     ubuntu_version = base.channel
                     break
@@ -266,11 +275,13 @@ class CharmhubClient:
             )
 
         if refresh_info.charm is None:
-            raise ValueError(
+            raise IncompleteCharmInfoException(
                 f"Refresh info for charm {charm_name} in channel {charm_channel} returned no charm and no error"
             )
         if refresh_info.charm.revision is None:
-            raise ValueError(f"Refresh info for charm {charm_name} in channel {charm_channel} returned no revision")
+            raise IncompleteCharmInfoException(
+                f"Refresh info for charm {charm_name} in channel {charm_channel} returned no revision"
+            )
 
         return Charm(
             name=charm_name,
@@ -308,9 +319,14 @@ class CharmhubClient:
                 f"Failed to find suitable channel for charm {charm_name} with ubuntu version {ubuntu_version} and arch {ubuntu_arch}"
             )
         if refresh_info.charm is None:
-            raise ValueError(f"Refresh info for charm {charm_name} returned no charm and no error")
+            raise IncompleteCharmInfoException(
+                f"Refresh info for charm {charm_name} returned no charm and no error"
+            )
         if refresh_info.charm.revision is None:
-            raise ValueError(f"Refresh info for charm {charm_name} returned no revision")
+            raise IncompleteCharmInfoException(
+                f"Refresh info for charm {charm_name} returned no revision"
+            )
+
         return Charm(
             name=charm_name,
             channel=refresh_info.effective_channel,
@@ -336,18 +352,29 @@ class CharmhubClient:
             )
         )
 
-        # Check the error code to get the bases
-        expected_error_codes = ["invalid-charm-base", "revision-not-found"]
-        if refresh_info.error is None or refresh_info.error.code not in expected_error_codes:
-            raise CharmReleaseNotFoundException(f"Failed to find default bases for charm {charm_name}")
-        else:
+        # Extract bases from error response
+        if refresh_info.error is None:
+            raise CharmReleaseNotFoundException(
+                f"Failed to find default bases for charm {charm_name}: no error returned"
+            )
+        
+        if refresh_info.error.code == "invalid-charm-base":
             if refresh_info.error.extra is None:
-                raise CharmReleaseNotFoundException(f"No extra information for default bases of {charm_name}")
-            if refresh_info.error.code == "invalid-charm-base":
-                bases = refresh_info.error.extra.default_bases
-            elif refresh_info.error.code == "revision-not-found":
-                bases = [release.base for release in refresh_info.error.extra.releases]
-
+                raise IncompleteCharmInfoException(
+                    f"No extra information for default bases of {charm_name}"
+                )
+            bases = refresh_info.error.extra.default_bases
+        elif refresh_info.error.code == "revision-not-found":
+            if refresh_info.error.extra is None:
+                raise IncompleteCharmInfoException(
+                    f"No extra information for default bases of {charm_name}"
+                )
+            bases = [release.base for release in refresh_info.error.extra.releases]
+        else:
+            raise CharmReleaseNotFoundException(
+                f"Failed to find default bases for charm {charm_name}: unexpected error code {refresh_info.error.code}"
+            )
+        
         # Ensure a base was found
         if len(bases) == 0:
             raise CharmReleaseNotFoundException(f"No default bases found for {charm_name} in arch {ubuntu_arch}")
@@ -405,7 +432,11 @@ class CharmhubClient:
                     else None,
                 ),
             )
-            if edge_refresh_info.error is None and edge_refresh_info.charm is not None:
+            if edge_refresh_info.error is None:
+                if edge_refresh_info.charm is None:
+                    raise IncompleteCharmInfoException(
+                        f"Edge refresh info for charm {refresh_info.name} returned no error but no charm either"
+                    )
                 edge_metadata = edge_refresh_info.charm.metadata
 
         # Get endpoint optionality overrides
@@ -427,13 +458,10 @@ class CharmhubClient:
                     and metadata_overrides_map[endpoint_name].optionality is not None
                 ):
                     optionality = metadata_overrides_map[endpoint_name].optionality
-                    # mypy doesn't understand optionality will not be None in this case
-                    if optionality is None:
-                        raise RuntimeError("Unexpected None optionality after check")
                 elif endpoint.optional is not None:
                     optionality = CharmEndpointOptionality.from_bool(endpoint.optional)
                 elif endpoint_name in edge_endpoint_map and edge_endpoint_map[endpoint_name].optional is not None:
-                    optionality = CharmEndpointOptionality.from_bool(edge_endpoint_map[endpoint_name].optional or False)
+                    optionality = CharmEndpointOptionality.from_bool(edge_endpoint_map[endpoint_name].optional)  # type: ignore[arg-type]
                 elif endpoint_type in {ENDPOINT_PROVIDES, ENDPOINT_REQUIRES}:
                     optionality = CharmEndpointOptionality.from_bool(False)
                 else:
