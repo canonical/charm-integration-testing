@@ -22,7 +22,10 @@ from pydantic.dataclasses import dataclass
 from bundle_builder.bundle import Application, ApplicationEndpoint, Bundle, Integration
 from bundle_builder.bundle_builder import BundleBuilder, Node
 from bundle_builder.charm import (
+    ENDPOINT_PROVIDES,
+    Charm,
     CharmConfigCriteria,
+    CharmEndpoint,
     CharmEndpointOptionality,
     CharmLimit,
     CharmTestConfig,
@@ -200,6 +203,63 @@ class TestBundleBuilder:
         children = builder.child_nodes_new_applications(node, ApplicationEndpoint("kratos", "pg-database"))
         for child in children:
             assert any(app.name.startswith("postgresql-k8s") for app in child.bundle.applications)
+
+    def test_child_nodes_new_applications_rejects_limit_zero(self):
+        # GIVEN a stub that returns a charm with limit 0
+        class ZeroLimitStub:
+            def find_charms(self, *args, **kwargs):
+                return frozenset({"zero-limit-db"})
+
+            def charm_from_store(self, charm_name, ubuntu_arch, **kwargs):
+                return Charm(
+                    name="zero-limit-db",
+                    channel="stable",
+                    revision=1,
+                    ubuntu_version="22.04",
+                    ubuntu_arch="amd64",
+                    endpoints=frozenset(
+                        {
+                            CharmEndpoint(
+                                type=ENDPOINT_PROVIDES,
+                                name="database",
+                                interface="postgresql",
+                                optionality=CharmEndpointOptionality.from_bool(False),
+                                limits=(CharmLimit(limit=0),),
+                            )
+                        }
+                    ),
+                    priority=1.0,
+                )
+
+        # AND a requirer charm
+        requirer_charm = dataclasses.replace(
+            sample_charm_kratos(),
+            name="app",
+            endpoints=frozenset(
+                {
+                    dataclasses.replace(
+                        sample_charm_endpoint_kratos_pg_database(),
+                        name="database",
+                    )
+                }
+            ),
+        )
+
+        # AND a bundle with only the requirer
+        bundle = Bundle(
+            applications=frozenset({Application(name="app", charm=requirer_charm)}),
+            integrations=frozenset(),
+            platform="machine",
+            arch="amd64",
+        )
+
+        # WHEN checking for new application children
+        builder = BundleBuilder(charmhub_client=ZeroLimitStub())
+        node = Node(bundle=bundle, aggression=0.0)
+        children = builder.child_nodes_new_applications(node, ApplicationEndpoint("app", "database"))
+
+        # THEN no children should be created (provider has limit 0)
+        assert len(children) == 0
 
     class TestBundleBuilderLimitValidation:
         def test_can_add_integration_respects_limits(self):

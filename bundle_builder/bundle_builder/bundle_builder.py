@@ -275,6 +275,11 @@ class BundleBuilder:
                 ):
                     continue
 
+                # Will not integrate if it exceeds limit (handles limit 0)
+                endpoint_limit = possible_charm_endpoint.limit(frozenset())
+                if endpoint_limit is not None and endpoint_limit == 0:
+                    continue
+
                 # Will not integrate if it creates a recursive dependency chain
                 if node.bundle.has_endpoint_dependency(
                     unfulfilled_application_endpoint.application,
