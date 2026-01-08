@@ -178,6 +178,7 @@ class TestWaitConditions:
         result = get_unit_state(sample_database_webapp_status, "webapp/0")
 
         # THEN
+        assert result is not None
         assert result.status == "active"
         assert "web app" in result.message
 

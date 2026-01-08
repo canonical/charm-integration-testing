@@ -392,9 +392,8 @@ class CharmhubClient:
         if refresh_info.error and refresh_info.error.code == "revision-not-found":
             # Gather channels with matching base
             if refresh_info.error.extra is None:
-                channels = set()
-            else:
-                channels = {release.channel for release in refresh_info.error.extra.releases if release.base == base}
+                raise IncompleteCharmInfoException("No error information in refresh response")
+            channels = {release.channel for release in refresh_info.error.extra.releases if release.base == base}
 
             # Try channels with default track as well
             channels |= {f"latest/{channel}" for channel in channels if "/" not in channel}
@@ -415,8 +414,24 @@ class CharmhubClient:
 
         return refresh_info
 
+    def _extract_next_base_from_refresh_info(self, refresh_info: RefreshResponse) -> CharmhubBase | None:
+        if refresh_info.charm is None:
+            raise IncompleteCharmInfoException(
+                f"Refresh info for charm {refresh_info.name} returned no charm and no error"
+            )
+        elif refresh_info.charm.bases is None:
+            raise IncompleteCharmInfoException(
+                f"Refresh info for charm {refresh_info.name} returned no bases"
+            )
+        return next(iter(refresh_info.charm.bases))
+
     def _all_charm_endpoints(self, refresh_info: RefreshResponse) -> frozenset[CharmEndpoint]:
-        metadata = refresh_info.charm.metadata if refresh_info.charm is not None else CharmMetadata()
+        if refresh_info.charm is None:
+            raise IncompleteCharmInfoException(
+                f"Refresh info for charm {refresh_info.name} returned no charm and no error"
+            )
+        
+        metadata = refresh_info.charm.metadata
 
         # Get edge refresh info if any requires or provides endpoints don't have optional flag
         edge_metadata = CharmMetadata()
@@ -427,9 +442,7 @@ class CharmhubClient:
                 RefreshAction(
                     charm_name=refresh_info.name,
                     charm_channel="edge",
-                    base=next(iter(refresh_info.charm.bases))
-                    if refresh_info.charm is not None and refresh_info.charm.bases is not None
-                    else None,
+                    base=self._extract_next_base_from_refresh_info(refresh_info),
                 ),
             )
             if edge_refresh_info.error is None:

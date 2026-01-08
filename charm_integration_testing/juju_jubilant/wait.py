@@ -58,16 +58,20 @@ def get_application_state(status: jubilant.Status, application: str) -> JujuAppl
     )
 
 
-def get_unit_state(status: jubilant.Status, unit: str) -> JujuUnitState:
+def get_unit_state(status: jubilant.Status, unit: str) -> JujuUnitState | None:
     application, _ = unit.split("/")
     application_info = status.apps[application]
     unit_info = get_unit_info(status, unit)
-    return JujuUnitState(
-        charm=application_info.charm,
-        revision=application_info.charm_rev,
-        status=unit_info.workload_status.current if unit_info is not None else "",
-        message=unit_info.workload_status.message if unit_info is not None else "",
-    )
+    
+    if unit_info is None:
+        return None
+    else:
+        return JujuUnitState(
+            charm=application_info.charm,
+            revision=application_info.charm_rev,
+            status=unit_info.workload_status.current,
+            message=unit_info.workload_status.message,
+        )
 
 
 def all_statuses_are_in(
@@ -131,9 +135,12 @@ def applications_are_scaled(status: jubilant.Status, *application_args: str) -> 
 
 
 def units_have_message(message: str, status: jubilant.Status, *unit_args: str) -> tuple[bool, JujuWaitState]:
-    units = set(
-        (unit for application in status.apps for unit in status.get_units(application)) if not unit_args else unit_args
-    )
+    if unit_args:
+        units = set(unit_args)
+    else:  # default to all units when no unit is passed
+        units = set(
+            (unit for application in status.apps for unit in status.get_units(application))
+        )
 
     noncompliant_units: dict[str, JujuUnitState | None] = {}
     for unit in units:
@@ -151,7 +158,10 @@ def units_have_message(message: str, status: jubilant.Status, *unit_args: str) -
 
 
 def applications_are_removed(status: jubilant.Status, *application_args: str) -> tuple[bool, JujuWaitState]:
-    applications = set(application_args if application_args else status.apps.keys())
+    if application_args:
+        applications = set(application_args)
+    else:  # default to all applications when no application is passed
+        applications = set(status.apps.keys())
 
     noncompliant_applications: dict[str, JujuApplicationState | None] = {}
     for application in applications:

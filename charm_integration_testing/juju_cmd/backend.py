@@ -334,7 +334,7 @@ class JujuCmdBackend(JujuBackend):
         # Parse response
         content_dict = JujuSecretInfo(**next(iter(yaml.safe_load(result).values()))).content
         if content_dict is None:
-            return {}
+            raise ValueError(f"Secret '{name_or_id}' has no content.")
         return content_dict
 
     def grant_secret(self, model: str, name_or_id: str, application: str) -> None:
