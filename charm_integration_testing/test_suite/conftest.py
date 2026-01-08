@@ -8,7 +8,7 @@ import os
 import warnings
 from datetime import timedelta
 from pathlib import Path
-from subprocess import DEVNULL, CalledProcessError, run  # nosec
+from subprocess import PIPE, CalledProcessError, run  # nosec
 from typing import Callable
 
 import pytest
@@ -316,29 +316,36 @@ def record_pipeline_version_execution_metadata(
 ) -> None:
     pipeline_path: Path = Path(request.config.rootpath) / ".github" / "workflows" / "charm-testing.yaml"
 
-    try:
-        repository_version_command = ["git", "--no-pager", "log", "-n", "1", "--pretty=format:%h"]
-        repository_result = run(repository_version_command, capture_output=True, text=True, check=True)  # nosec B603
+    # Get repository commit hash
+    repository_version_command = ["git", "--no-pager", "log", "-n", "1", "--pretty=format:%h"]
+    repository_result = run(repository_version_command, stdout=PIPE, stderr=PIPE, text=True)  # nosec B603
+    if repository_result.returncode == 0:
         execution_metadata("pipeline:ref", repository_result.stdout.strip())
+    else:
+        warnings.warn(f"Failed to get git commit hash: {repository_result.stderr.strip()}")
 
-        repository_tag_command = ["git", "describe", "--tags", "--exact-match", repository_result.stdout.strip()]
-        repository_tag_result = run(repository_tag_command, capture_output=True, text=True, stderr=DEVNULL)  # nosec B603
-        if repository_tag_result.returncode == 0:
-            execution_metadata("pipeline:tag", repository_tag_result.stdout.strip())
-        else:
-            warnings.warn("No tag exists in git repo pointing to this commit.")
+    # Get repository tag if it exists
+    repository_tag_command = ["git", "describe", "--tags", "--exact-match", repository_result.stdout.strip()]
+    repository_tag_result = run(repository_tag_command, stdout=PIPE, stderr=PIPE, text=True)  # nosec B603
+    if repository_tag_result.returncode == 0:
+        execution_metadata("pipeline:tag", repository_tag_result.stdout.strip())
+    elif "no tag exactly matches" in repository_tag_result.stderr.lower():
+        warnings.warn("No tag exists in git repo pointing to this commit.")
+    else:
+        warnings.warn(f"Failed to get git tag: {repository_tag_result.stderr.strip()}")
 
-        if pipeline_path.exists():
-            pipeline_version_command = [
-                "git",
-                "hash-object",
-                "--",
-                str(pipeline_path.resolve()),
-            ]
-            pipeline_result = run(pipeline_version_command, capture_output=True, text=True, check=True)  # nosec B603
+    # Get pipeline workflow hash if file exists
+    if pipeline_path.exists():
+        pipeline_version_command = [
+            "git",
+            "hash-object",
+            "--",
+            str(pipeline_path.resolve()),
+        ]
+        pipeline_result = run(pipeline_version_command, stdout=PIPE, stderr=PIPE, text=True)  # nosec B603
+        if pipeline_result.returncode == 0:
             execution_metadata("pipeline:workflow_hash", pipeline_result.stdout.strip())
         else:
-            warnings.warn(f"Pipeline file not found: {pipeline_path}")
-
-    except CalledProcessError as e:
-        warnings.warn(f"Failed to get version information from git: {e}.")
+            warnings.warn(f"Failed to get pipeline workflow hash: {pipeline_result.stderr.strip()}")
+    else:
+        warnings.warn(f"Pipeline file not found: {pipeline_path}")
