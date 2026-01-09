@@ -200,7 +200,7 @@ class CharmEndpoint:
         return smallest_limit
 
 
-CharmConfig = tuple[tuple[str, str | int], ...]
+CharmConfig = tuple[tuple[str, str | int | bool], ...]
 
 
 @immutable_dataclass
