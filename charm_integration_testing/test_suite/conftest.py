@@ -8,7 +8,7 @@ import os
 import warnings
 from datetime import timedelta
 from pathlib import Path
-from subprocess import PIPE, CalledProcessError, run  # nosec
+from subprocess import CalledProcessError, run  # nosec
 from typing import Callable
 
 import pytest
@@ -318,7 +318,7 @@ def record_pipeline_version_execution_metadata(
 
     # Get repository commit hash
     repository_version_command = ["git", "--no-pager", "log", "-n", "1", "--pretty=format:%h"]
-    repository_result = run(repository_version_command, stdout=PIPE, stderr=PIPE, text=True)  # nosec B603
+    repository_result = run(repository_version_command, capture_output=True, text=True)  # nosec B603
     if repository_result.returncode == 0:
         execution_metadata("pipeline:ref", repository_result.stdout.strip())
     else:
@@ -326,7 +326,7 @@ def record_pipeline_version_execution_metadata(
 
     # Get repository tag if it exists
     repository_tag_command = ["git", "describe", "--tags", "--exact-match", repository_result.stdout.strip()]
-    repository_tag_result = run(repository_tag_command, stdout=PIPE, stderr=PIPE, text=True)  # nosec B603
+    repository_tag_result = run(repository_tag_command, capture_output=True, text=True)  # nosec B603
     if repository_tag_result.returncode == 0:
         execution_metadata("pipeline:tag", repository_tag_result.stdout.strip())
     elif "no tag exactly matches" in repository_tag_result.stderr.lower():
@@ -342,7 +342,7 @@ def record_pipeline_version_execution_metadata(
             "--",
             str(pipeline_path.resolve()),
         ]
-        pipeline_result = run(pipeline_version_command, stdout=PIPE, stderr=PIPE, text=True)  # nosec B603
+        pipeline_result = run(pipeline_version_command, capture_output=True, text=True)  # nosec B603
         if pipeline_result.returncode == 0:
             execution_metadata("pipeline:workflow_hash", pipeline_result.stdout.strip())
         else:
