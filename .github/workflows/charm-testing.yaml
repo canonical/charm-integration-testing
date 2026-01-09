@@ -282,8 +282,8 @@ jobs:
           set +e
           ./scripts/build-bundle.sh \
             --charms \
-              "target::${charm_under_test}::${channel}@${revision}::${series}" \
-              "neighbor::${neighbor}::default::default" \
+              "target::${charm_under_test}::${channel}::${revision}::${series}" \
+              "neighbor::${neighbor}::default::default::default" \
             --integrations "target:${charm_endpoint}::neighbor:${neighbor_endpoint}" \
             --substrate "${substrate}" \
             --output-file generated-bundle.yaml \

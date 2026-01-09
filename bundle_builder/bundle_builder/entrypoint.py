@@ -45,9 +45,9 @@ def add_args_to_parser(parser: argparse.ArgumentParser):
         "--charms",
         type=str,
         nargs="+",
-        help="Charms to include in the bundle, format <application_name>::<charm>::<channel_or_revision[@revision]>::<base>. "
+        help="Charms to include in the bundle, format <application_name>::<charm>::<channel>::<revision>::<base>. "
         "Channel format is '<track>/<risk>/<branch>' (track and branch optional), revision is an integer. "
-        "Use 'channel@revision' to specify both. Channel or revision, and base may be `default`.",
+        "Use 'default' for channel, revision, or base to use defaults.",
         required=True,
     )
     parser.add_argument(
@@ -98,24 +98,22 @@ def applications_from_args(
     for spec in specs:
         # Get charm specs
         try:
-            name, charm, channel_or_revision, base = spec.split("::")
+            name, charm, channel_str, revision_str, base = spec.split("::")
         except ValueError:
-            parser.error(f"Invalid charm format: '{spec}'")
-        channel = None
+            parser.error(f"Invalid charm format: '{spec}' - expected format <name>::<charm>::<channel>::<revision>::<base>")
+        
+        # Parse channel
+        channel = None if channel_str == "default" else channel_str
+        
+        # Parse revision
         revision = None
-        if channel_or_revision != "default":
-            # Check if both channel and revision are specified (format: channel@revision)
-            if "@" in channel_or_revision:
-                channel_part, revision_part = channel_or_revision.split("@", 1)
-                if not revision_part.isnumeric():
-                    parser.error(f"Invalid revision in '{spec}': revision must be numeric")
-                channel = channel_part if channel_part else None
-                revision = int(revision_part)
-            elif channel_or_revision.isnumeric():
-                revision = int(channel_or_revision)
-            else:
-                channel = channel_or_revision
-        base = base if base != "default" else None
+        if revision_str != "default":
+            if not revision_str.isnumeric():
+                parser.error(f"Invalid revision in '{spec}': revision must be numeric, got '{revision_str}'")
+            revision = int(revision_str)
+        
+        # Parse base
+        base = None if base == "default" else base
 
         # Get charm from store
         try:
