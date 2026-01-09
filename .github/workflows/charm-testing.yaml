@@ -78,6 +78,7 @@ on:
           - setup
           - deployment
           - integration
+          - log_collection
         default: none
       debug_extra_ssh_imports:
         # The IDs take the form of lp:<value> for Launchpad and gh:<value> for GitHub.
@@ -387,7 +388,7 @@ jobs:
           detail: "Test integration ended."
 
       - name: Debug Integration Tests
-        if: ${{  !cancelled() && inputs.debug_sleep_after == 'integration' }}
+        if: ${{ !cancelled() && inputs.debug_sleep_after == 'integration' }}
         shell: bash
         run: |
           echo "Sleeping to debug integration tests"
@@ -532,6 +533,13 @@ jobs:
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
           event_name: "log_collection_finished"
           detail: "Log collection has completed."
+
+      - name: Debug Post Log Collection
+        if: ${{ !cancelled() && inputs.debug_sleep_after == 'log_collection' }}
+        shell: bash
+        run: |
+          echo "Sleeping to debug post log collection"
+          sleep ${DEBUG_SLEEP_SECONDS}
 
       - name: Post links to Test Observer
         if: ${{ !cancelled() && steps.post_logs_to_swift.outcome == 'success' && env.test_observer_api != '' && inputs.execution_id != '' }}
