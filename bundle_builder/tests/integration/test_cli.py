@@ -38,7 +38,7 @@ def test_cli_write_output(
         [
             "bundle-builder",
             "--charms",
-            f"{sample_independent_charm}::{sample_independent_charm}::{sample_independent_charm_revision}::default",
+            f"{sample_independent_charm}::{sample_independent_charm}::default::{sample_independent_charm_revision}::default",
             "--charm-metadata-overrides",
             overrides_client.charm_metadata_overrides.resolve().absolute(),
             "--output-file",
@@ -60,7 +60,7 @@ def test_cli_write_output(
 
 def test_cli_unknown_charm():
     # GIVEN an unknown charm
-    app = "app::unknown::default::default"
+    app = "app::unknown::default::default::default"
 
     # WHEN the bundle builder is run from cli
     result = subprocess.run(
@@ -84,8 +84,8 @@ def test_cli_invalid_integration(
     sample_independent_charm_revision: int,
 ):
     # GIVEN two of the same charm
-    app_1 = f"app1::{sample_independent_charm}::{sample_independent_charm_revision}::default"
-    app_2 = f"app2::{sample_independent_charm}::{sample_independent_charm_revision}::default"
+    app_1 = f"app1::{sample_independent_charm}::default::{sample_independent_charm_revision}::default"
+    app_2 = f"app2::{sample_independent_charm}::default::{sample_independent_charm_revision}::default"
     # AND an invalid integration between them
     integration = f"app1:{sample_independent_charm_endpoint}::app2:{sample_independent_charm_endpoint}"
 

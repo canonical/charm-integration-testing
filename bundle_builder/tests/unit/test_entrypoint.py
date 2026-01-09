@@ -56,7 +56,7 @@ class TestAddArgsToParser:
         fail: bool
 
     good_args = {
-        "--charms": "target::postgresql-k8s::default::default",
+        "--charms": "target::postgresql-k8s::default::default::default",
         "--integrations": "target:certificates::neighbor:certificates",
         "--arch": "amd64",
         "--substrate": "kubernetes",
@@ -150,26 +150,26 @@ class TestApplicationFromArgs:
     test_cases = [
         Params(
             label="parse_charm",
-            specs=["target::postgresql-k8s::default::default"],
+            specs=["target::postgresql-k8s::default::default::default"],
             applications={Application(name="target", charm=sample_charm_postgresql_k8s())},
         ),
         Params(
             label="parse_revision",
-            specs=["target::postgresql-k8s::111::default"],
+            specs=["target::postgresql-k8s::default::111::default"],
             applications={
                 Application(name="target", charm=dataclasses.replace(sample_charm_postgresql_k8s(), revision=111))
             },
         ),
         Params(
-            label="parse_revision",
-            specs=["target::postgresql-k8s::edge::default"],
+            label="parse_channel",
+            specs=["target::postgresql-k8s::edge::default::default"],
             applications={
                 Application(name="target", charm=dataclasses.replace(sample_charm_postgresql_k8s(), channel="edge"))
             },
         ),
         Params(
             label="parse_base",
-            specs=["target::postgresql-k8s::default::24.04"],
+            specs=["target::postgresql-k8s::default::default::24.04"],
             applications={
                 Application(
                     name="target", charm=dataclasses.replace(sample_charm_postgresql_k8s(), ubuntu_version="24.04")
@@ -179,8 +179,8 @@ class TestApplicationFromArgs:
         Params(
             label="parse_multiple",
             specs=[
-                "target::postgresql-k8s::default::default",
-                "neighbor::self-signed-certificates::default::default",
+                "target::postgresql-k8s::default::default::default",
+                "neighbor::self-signed-certificates::default::default::default",
             ],
             applications={
                 Application(name="target", charm=sample_charm_postgresql_k8s()),
@@ -194,8 +194,40 @@ class TestApplicationFromArgs:
         ),
         Params(
             label="unknown_charm",
-            specs=["app::unknown::default::default"],
+            specs=["app::unknown::default::default::default"],
             fail=True,
+        ),
+        Params(
+            label="parse_channel_and_revision",
+            specs=["target::postgresql-k8s::edge::111::default"],
+            applications={
+                Application(
+                    name="target",
+                    charm=dataclasses.replace(sample_charm_postgresql_k8s(), channel="edge", revision=111),
+                )
+            },
+        ),
+        Params(
+            label="parse_channel_and_base",
+            specs=["target::postgresql-k8s::stable::default::24.04"],
+            applications={
+                Application(
+                    name="target",
+                    charm=dataclasses.replace(sample_charm_postgresql_k8s(), channel="stable", ubuntu_version="24.04"),
+                )
+            },
+        ),
+        Params(
+            label="parse_all_specified",
+            specs=["target::postgresql-k8s::edge::111::24.04"],
+            applications={
+                Application(
+                    name="target",
+                    charm=dataclasses.replace(
+                        sample_charm_postgresql_k8s(), channel="edge", revision=111, ubuntu_version="24.04"
+                    ),
+                )
+            },
         ),
     ]
 
