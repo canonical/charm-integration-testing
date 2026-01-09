@@ -143,10 +143,21 @@ class VaultUnsealer:
         self.juju.remove_secret(model, self.vault_one_time_token_secret_name(application))
 
     def save_vault_tokens(self, model: str, application: str, tokens: VaultTokenSecret):
+        # See if vault-token already exists
+        secret_name = self.vault_tokens_secret_name(application)
+        try:
+            self.juju.read_secret(model, secret_name)
+            # TODO(@motjuste): consider throwing KeyError on removing the secret too
+            #   This way we won't have to read the secret to determine if it exists,
+            #   and also avoid related race-conditions.
+            self.juju.remove_secret(model, secret_name)
+        except KeyError:
+            pass  # does not already exist
+
         # Add the vault tokens
         self.juju.add_secret(
             model,
-            self.vault_tokens_secret_name(application),
+            secret_name,
             {key.replace("_", "-"): value for key, value in asdict(tokens).items()},
         )
 

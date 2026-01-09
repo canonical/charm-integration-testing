@@ -160,12 +160,17 @@ class JubilantBackend(JujuCmdBackend):
 
     def read_secret(self, model: str, name_or_id: str) -> dict[str, str]:
         # Call show secret
-        result = self.client.model(model).cli(
-            "show-secret",
-            name_or_id,
-            "--reveal",
-            "--format=yaml",
-        )
+        try:
+            result = self.client.model(model).cli(
+                "show-secret",
+                name_or_id,
+                "--reveal",
+                "--format=yaml",
+            )
+        except jubilant.CLIError as err:
+            if f'secret "{name_or_id}" not found' in err.stderr:
+                raise KeyError(f"no secret '{name_or_id}' in model '{model}'")
+            raise
 
         # There will only ever be one secret in the Juju result, and it is keyed by ID
         # We have `name_or_id`, but don't know which it might be, so we instead just get the first value
