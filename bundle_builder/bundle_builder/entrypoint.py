@@ -45,7 +45,9 @@ def add_args_to_parser(parser: argparse.ArgumentParser):
         "--charms",
         type=str,
         nargs="+",
-        help="Charms to include in the bundle, format <application_name>::<charm>::<channel_or_revision>::<base>. Charm channel or revision, and base may be `default`.",
+        help="Charms to include in the bundle, format <application_name>::<charm>::<channel_or_revision[@revision]>::<base>. "
+        "Channel format is '<track>/<risk>/<branch>' (track and branch optional), revision is an integer. "
+        "Use 'channel@revision' to specify both. Channel or revision, and base may be `default`.",
         required=True,
     )
     parser.add_argument(
@@ -102,7 +104,14 @@ def applications_from_args(
         channel = None
         revision = None
         if channel_or_revision != "default":
-            if channel_or_revision.isnumeric():
+            # Check if both channel and revision are specified (format: channel@revision)
+            if "@" in channel_or_revision:
+                channel_part, revision_part = channel_or_revision.split("@", 1)
+                if not revision_part.isnumeric():
+                    parser.error(f"Invalid revision in '{spec}': revision must be numeric")
+                channel = channel_part if channel_part else None
+                revision = int(revision_part)
+            elif channel_or_revision.isnumeric():
                 revision = int(channel_or_revision)
             else:
                 channel = channel_or_revision
