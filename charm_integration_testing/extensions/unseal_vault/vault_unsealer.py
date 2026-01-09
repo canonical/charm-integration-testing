@@ -32,13 +32,13 @@ class VaultUnsealer:
         self.juju = juju
         self.logger = logger
 
-    def try_init_or_unseal_all_vaults(self, model: str):
+    def try_init_or_unseal_all_vaults(self, model: str, authorize_charm: bool = True):
         # Look for vault charms
         for application in self.juju.list_applications(model):
             if self.juju.application_charm(model, application) == self.charm.name:
-                self.try_init_or_unseal_vault(model, application)
+                self.try_init_or_unseal_vault(model, application, authorize_charm)
 
-    def try_init_or_unseal_vault(self, model: str, application: str):
+    def try_init_or_unseal_vault(self, model: str, application: str, authorize_charm: bool = True):
         # Wait for application to be scaled
         self.logger.info(f"Waiting for vault charm '{self.charm.name}' application '{application}' to be scaled")
         self.juju.wait_application_scaled(model, application, timedelta(minutes=10))
@@ -53,12 +53,12 @@ class VaultUnsealer:
         self.juju.wait_application_settled(model, application, timedelta(minutes=10))
 
         # Try to initialize vault
-        self.try_init_vault(model, application)
+        self.try_init_vault(model, application, authorize_charm)
 
         # Try to unseal any sealed units
         self.try_unseal_vault(model, application)
 
-    def try_init_vault(self, model: str, application: str):
+    def try_init_vault(self, model: str, application: str, authorize_charm: bool = True):
         # Get leader unit
         leader_unit = f"{application}/leader"
 
@@ -84,6 +84,10 @@ class VaultUnsealer:
         # Unseal the leader
         self.logger.info(f"Unsealing vault charm '{self.charm.name}' unit '{leader_unit}'")
         self.vault.unseal(model, leader_unit, tokens)
+
+        if not authorize_charm:
+            self.logger.info(f"Skipping authorizing vault charm '{self.charm.name}' unit '{leader_unit}'")
+            return
 
         # Wait for authorize message
         self.logger.info(f"Waiting for vault charm '{self.charm.name}' unit '{leader_unit}' authorize message")
