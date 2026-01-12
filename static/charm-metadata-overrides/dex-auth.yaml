@@ -1,0 +1,6 @@
+# Dex Auth - federated OpenID Connect provider
+provides:
+  metrics-endpoint:
+    optional: true
+  grafana-dashboard:
+    optional: true

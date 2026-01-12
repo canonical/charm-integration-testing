@@ -1,0 +1,4 @@
+# KServe Controller - model serving on Kubernetes
+provides:
+  metrics-endpoint:
+    optional: true

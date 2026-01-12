@@ -1,3 +1,17 @@
 unlisted_charms:
   # https://github.com/canonical/redis-k8s-operator/issues/115
   - redis-k8s
+  # Kubeflow charms not listed in Charmhub search
+  - envoy
+  - kfp-metadata-writer
+  - kfp-profile-controller
+  - knative-eventing
+  - knative-operator
+  - knative-serving
+  - kserve-controller
+  - kubeflow-roles
+  - metacontroller-operator
+  - pvcviewer-operator
+  - tensorboard-controller
+  - tensorboards-web-app
+  - training-operator

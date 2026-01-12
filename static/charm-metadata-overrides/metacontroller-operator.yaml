@@ -1,0 +1,6 @@
+# Metacontroller Operator - custom controller framework
+provides:
+  metrics-endpoint:
+    optional: true
+  grafana-dashboard:
+    optional: true

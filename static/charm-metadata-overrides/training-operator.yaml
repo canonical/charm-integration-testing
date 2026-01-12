@@ -1,0 +1,6 @@
+# Training Operator - distributed training on Kubernetes
+provides:
+  metrics-endpoint:
+    optional: true
+  grafana-dashboard:
+    optional: true

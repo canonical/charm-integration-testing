@@ -1,0 +1,6 @@
+# Jupyter Controller - manages Jupyter notebook instances
+provides:
+  metrics-endpoint:
+    optional: true
+  grafana-dashboard:
+    optional: true

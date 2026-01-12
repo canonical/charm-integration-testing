@@ -1,0 +1,4 @@
+# Tensorboard Controller - manages TensorBoard instances
+provides:
+  metrics-endpoint:
+    optional: true

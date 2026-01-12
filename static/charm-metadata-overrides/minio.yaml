@@ -1,0 +1,6 @@
+# MinIO - high-performance object storage
+provides:
+  metrics-endpoint:
+    optional: true
+  grafana-dashboard:
+    optional: true

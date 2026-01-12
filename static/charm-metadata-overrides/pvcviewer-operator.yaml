@@ -1,0 +1,6 @@
+# PVCViewer Operator - file browser for persistent volumes
+provides:
+  metrics-endpoint:
+    optional: true
+  grafana-dashboard:
+    optional: true

@@ -1,0 +1,4 @@
+# Knative Operator - manages Knative components
+provides:
+  metrics-endpoint:
+    optional: true

@@ -1,0 +1,6 @@
+# Argo Controller - workflow engine for Kubernetes
+provides:
+  metrics-endpoint:
+    optional: true
+  grafana-dashboard:
+    optional: true
