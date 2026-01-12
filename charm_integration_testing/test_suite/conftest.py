@@ -300,6 +300,7 @@ def record_failure_execution_metadata(
                 for line in normalize_string_multiline(exc.stderr):
                     execution_metadata("failure:cli:stderr", line)
 
+
 @pytest.fixture
 def record_juju_execution_metadata(
     juju_client: JujuClient, model: str, execution_metadata: Callable[[str, str | int], None]

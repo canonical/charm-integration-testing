@@ -577,6 +577,7 @@ class TestNormalizeString:
         # THEN the result matches expectations
         assert result == params.expected
 
+
 class TestNormalizeStringMultiline:
     """Tests for normalize_string function with multiline input."""
 
@@ -599,10 +600,11 @@ class TestNormalizeStringMultiline:
             ],
         ),
     ]
+
     @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
     def test(self, params: Params):
         # WHEN normalizing the input
         result_lines = normalize_string_multiline(params.input)
-        
+
         # THEN the result matches expectations
         assert result_lines == params.expected_lines

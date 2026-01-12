@@ -246,6 +246,7 @@ def normalize_string(message: Any, max_length: int = 150) -> str:
     text = _truncate_string(text, max_length)
     return text
 
+
 def normalize_string_multiline(message: Any, max_length: int = 150) -> list[str]:
     """Normalize a multi-line string for use as execution metadata.
     Splits the input into lines and normalizes each line individually.
