@@ -2,6 +2,7 @@ unlisted_charms:
   # https://github.com/canonical/redis-k8s-operator/issues/115
   - redis-k8s
   # Kubeflow charms not listed in Charmhub search
+  # Remove after: https://github.com/canonical/charm-integration-testing/issues/282
   - envoy
   - kfp-metadata-writer
   - kfp-profile-controller

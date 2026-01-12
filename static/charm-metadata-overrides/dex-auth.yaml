@@ -1,5 +1,6 @@
 # Dex Auth - federated OpenID Connect provider
 provides:
+  # Remove after: https://github.com/canonical/charm-integration-testing/issues/282
   metrics-endpoint:
     optional: true
   grafana-dashboard:
