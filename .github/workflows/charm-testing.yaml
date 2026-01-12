@@ -285,24 +285,61 @@ jobs:
           set -e
 
           # Handle the result
-          if [ "$rc" -eq 2 ]; then
-            echo "Bundle generation failed due to invalid input" >&2
-          elif [ "$rc" -ne 0 ]; then
-            echo "Bundle generation failed (exit code $rc)" >&2
-            exit $rc
-          else
-            echo "bundle=$(realpath generated-bundle.yaml)" >> $GITHUB_OUTPUT
-
-            echo '### Generated Bundle Mermaid Diagram' >> $GITHUB_STEP_SUMMARY
-            echo '```mermaid' >> $GITHUB_STEP_SUMMARY
-            cat generated-bundle.mmd >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-
-            echo '### Generated Juju Bundle' >> $GITHUB_STEP_SUMMARY
-            echo '```yaml' >> $GITHUB_STEP_SUMMARY
-            cat generated-bundle.yaml >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
+          if [ "$rc" -ne 0 ]; then
+            if [ "$rc" -eq 2 ]; then
+              echo "Bundle generation failed due to invalid input" >&2
+              echo "invalid_input=true" >> $GITHUB_OUTPUT
+            else
+              echo "Bundle generation failed (exit code $rc)" >&2
+            fi
+            exit "$rc"
           fi
+
+          # Note the generated bundles
+          echo "bundle=$(realpath generated-bundle.yaml)" >> $GITHUB_OUTPUT
+
+          echo '### Generated Bundle Mermaid Diagram' >> $GITHUB_STEP_SUMMARY
+          echo '```mermaid' >> $GITHUB_STEP_SUMMARY
+          cat generated-bundle.mmd >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+          echo '### Generated Juju Bundle' >> $GITHUB_STEP_SUMMARY
+          echo '```yaml' >> $GITHUB_STEP_SUMMARY
+          cat generated-bundle.yaml >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Post 'bundle_generated' event
+        if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
+        uses: ./.github/actions/test-observer/post-events
+        with:
+          test_observer_api: ${{ env.test_observer_api }}
+          test_observer_token: ${{ env.test_observer_token }}
+          test_execution_id: ${{ inputs.execution_id }}
+          job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
+          event_name: "bundle_generated"
+          detail: "Bundle generated."
+
+      - name: Post 'bundle_generation_failed' event
+        if: ${{ failure() && env.test_observer_api != '' && inputs.execution_id != '' && steps.build_bundle.conclusion == 'failure' && steps.build_bundle.outputs.invalid_input != 'true' }}
+        uses: ./.github/actions/test-observer/post-events
+        with:
+          test_observer_api: ${{ env.test_observer_api }}
+          test_observer_token: ${{ env.test_observer_token }}
+          test_execution_id: ${{ inputs.execution_id }}
+          job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
+          event_name: "bundle_generation_failed"
+          detail: "Bundle generation failed."
+
+      - name: Post 'bundle_generation_invalid_input' event
+        if: ${{ failure() && env.test_observer_api != '' && inputs.execution_id != '' && steps.build_bundle.conclusion == 'failure' && steps.build_bundle.outputs.invalid_input == 'true' }}
+        uses: ./.github/actions/test-observer/post-events
+        with:
+          test_observer_api: ${{ env.test_observer_api }}
+          test_observer_token: ${{ env.test_observer_token }}
+          test_execution_id: ${{ inputs.execution_id }}
+          job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
+          event_name: "bundle_generation_invalid_input"
+          detail: "Bundle generation failed due to invalid input."
 
       - name: Post 'test_deploy_start' event
         if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
@@ -608,7 +645,7 @@ jobs:
           status: ${{ steps.calculate_job_status.outputs.test_status != '' && steps.calculate_job_status.outputs.test_status || 'ENDED_PREMATURELY' }}
 
       - name: Trigger rerun on Test Observer if failure
-        if: ${{ failure() && env.test_observer_api != '' && inputs.execution_id != '' }}
+        if: ${{ failure() && env.test_observer_api != '' && inputs.execution_id != '' && !(steps.build_bundle.conclusion == 'failure' && steps.build_bundle.outputs.invalid_input == 'true') }}
         uses: ./.github/actions/test-observer/trigger-rerun
         with:
           test_observer_api: ${{ env.test_observer_api }}
