@@ -1,0 +1,4 @@
+# Katib DB Manager - manages database schema and migrations
+provides:
+  k8s-service-info:
+    features: [katib-service]

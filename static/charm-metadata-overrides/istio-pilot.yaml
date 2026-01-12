@@ -1,0 +1,8 @@
+# Istio Pilot - control plane for service mesh
+provides:
+  istio-pilot:
+    features: [istio-pilot]
+  metrics-endpoint:
+    optional: true
+  grafana-dashboard:
+    optional: true

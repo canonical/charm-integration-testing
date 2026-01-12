@@ -1,0 +1,10 @@
+# Envoy proxy - HTTP/gRPC access to ML Metadata
+requires:
+  grpc:
+    features: [mlmd-grpc]
+
+provides:
+  metrics-endpoint:
+    optional: true
+  grafana-dashboard:
+    optional: true

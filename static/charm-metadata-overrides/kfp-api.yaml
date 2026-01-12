@@ -1,0 +1,12 @@
+# Kubeflow Pipelines API server - core backend for pipeline management
+provides:
+  kfp-api:
+    features: [kfp-api]
+  metrics-endpoint:
+    optional: true
+  grafana-dashboard:
+    optional: true
+
+requires:
+  kfp-viz:
+    features: [kfp-viz]

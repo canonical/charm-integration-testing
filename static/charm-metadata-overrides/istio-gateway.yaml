@@ -1,0 +1,8 @@
+# Istio Ingress Gateway - entry point for external traffic
+provides:
+  metrics-endpoint:
+    optional: true
+
+requires:
+  istio-pilot:
+    features: [istio-pilot]

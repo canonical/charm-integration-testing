@@ -1,0 +1,10 @@
+# Katib Controller - orchestrates hyperparameter tuning experiments
+provides:
+  metrics-endpoint:
+    optional: true
+  grafana-dashboard:
+    optional: true
+
+requires:
+  k8s-service-info:
+    features: [katib-service]

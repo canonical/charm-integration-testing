@@ -1,0 +1,10 @@
+# Kubeflow Central Dashboard - main UI entry point
+provides:
+  metrics-endpoint:
+    optional: true
+  grafana-dashboard:
+    optional: true
+
+requires:
+  kubeflow-profiles:
+    features: [kubeflow-profiles]

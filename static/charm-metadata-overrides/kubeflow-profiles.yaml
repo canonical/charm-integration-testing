@@ -1,0 +1,6 @@
+# Kubeflow Profiles - manages user namespaces and access control
+provides:
+  kubeflow-profiles:
+    features: [kubeflow-profiles]
+  metrics-endpoint:
+    optional: true
