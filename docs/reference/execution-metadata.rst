@@ -25,6 +25,8 @@ The ``normalize_string()`` function applies these transformations:
 - **All numeric sequences**: ``12345`` → ``XXX``
 - **Truncation**: Values longer than 150 characters are truncated with ``...``
 
+The ``normalize_string_multiline()`` function extends this to multi-line strings by applying ``normalize_string()`` to each line individually, and returns a list of normalized strings.
+
 See ``charm_integration_testing/utils/normalization.py`` for implementation details.
 
 Collected Metadata Categories

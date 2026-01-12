@@ -289,9 +289,7 @@ def record_failure_execution_metadata(
                 )
         elif isinstance(exc, CalledProcessError):
             cmd = " ".join(exc.cmd) if isinstance(exc.cmd, (list, tuple)) else exc.cmd
-            for line in normalize_string_multiline(cmd):
-                execution_metadata("failure:cli:cmd", line)
-            # execution_metadata("failure:cli:cmd", normalize_string(cmd))
+            execution_metadata("failure:cli:cmd", normalize_string(cmd))
             execution_metadata("failure:cli:return_code", str(exc.returncode))
             if exc.stdout:
                 for line in normalize_string_multiline(exc.stdout):
@@ -299,7 +297,6 @@ def record_failure_execution_metadata(
             if exc.stderr:
                 for line in normalize_string_multiline(exc.stderr):
                     execution_metadata("failure:cli:stderr", line)
-
 
 @pytest.fixture
 def record_juju_execution_metadata(
