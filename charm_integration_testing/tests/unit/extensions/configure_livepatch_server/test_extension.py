@@ -16,7 +16,7 @@ from juju.backend import JujuBackend
 
 
 @dataclass
-class JujuStub:
+class JujuStub(JujuBackend):
     applications: dict[str, str] = field(default_factory=lambda: {"livepatch": LIVEPATCH_SERVER_CHARM})
     waited_scaled: list[tuple[str, str, str]] = field(default_factory=list)
     waited_settled: list[tuple[str, str, str]] = field(default_factory=list)
@@ -25,19 +25,19 @@ class JujuStub:
     configured: list[tuple[str, str, dict[str, str]]] = field(default_factory=list)
     unit_ips: dict[str, str] = field(default_factory=lambda: {"livepatch/leader": "10.1.2.157"})
 
-    def list_applications(self, model: str) -> KeysView[str]:
+    def list_applications(self, model: str) -> KeysView[str]:  # type: ignore[override]
         return self.applications.keys()
 
     def application_charm(self, model: str, application: str) -> str:
         return self.applications[application]
 
-    def wait_application_scaled(self, model: str, application: str, timeout: timedelta) -> None:
+    def wait_application_scaled(self, model: str, application: str, timeout: timedelta) -> None:  # type: ignore[override]
         self.waited_scaled.append((model, application, str(timeout)))
 
-    def wait_application_settled(self, model: str, application: str, timeout: timedelta) -> None:
+    def wait_application_settled(self, model: str, application: str, timeout: timedelta) -> None:  # type: ignore[override]
         self.waited_settled.append((model, application, str(timeout)))
 
-    def wait_for_unit_message(self, model: str, unit: str, message: str, timeout: timedelta) -> None:
+    def wait_for_unit_message(self, model: str, unit: str, message: str, timeout: timedelta) -> None:  # type: ignore[override]
         self.waited_messages.append((model, unit, message, str(timeout)))
 
     def run_action(self, model: str, unit: str, action: str, params: dict[str, str]) -> None:
@@ -49,15 +49,84 @@ class JujuStub:
     def unit_ip(self, model: str, unit: str) -> str:
         return self.unit_ips[unit]
 
+    def scale_application(self) -> None:  # type: ignore[override]
+        pass
 
-class LoggerStub:
+    def num_units(self) -> None:  # type: ignore[override]
+        pass
+
+    def list_integrations(self) -> None:  # type: ignore[override]
+        pass
+
+    def integration_exists(self) -> None:  # type: ignore[override]
+        pass
+
+    def wait_idle(self) -> None:  # type: ignore[override]
+        pass
+
+    def juju_status_text(self) -> None:  # type: ignore[override]
+        pass
+
+    def integrate(self) -> None:  # type: ignore[override]
+        pass
+
+    def remove_integration(self) -> None:  # type: ignore[override]
+        pass
+
+    def deploy_bundle_file(self) -> None:  # type: ignore[override]
+        pass
+
+    def remove_applications(self) -> None:  # type: ignore[override]
+        pass
+
+    def wait_for_removal(self) -> None:  # type: ignore[override]
+        pass
+
+    def wait_for_removal_of_integration(self) -> None:  # type: ignore[override]
+        pass
+
+    def wait_for_removal_of_units(self) -> None:  # type: ignore[override]
+        pass
+
+    def application_units(self) -> None:  # type: ignore[override]
+        pass
+
+    def exec_unit(self) -> None:  # type: ignore[override]
+        pass
+
+    def add_secret(self) -> None:  # type: ignore[override]
+        pass
+
+    def read_secret(self) -> None:  # type: ignore[override]
+        pass
+
+    def grant_secret(self) -> None:  # type: ignore[override]
+        pass
+
+    def remove_secret(self) -> None:  # type: ignore[override]
+        pass
+
+    def deploy_application(self) -> None:  # type: ignore[override]
+        pass
+
+    def scp(self) -> None:  # type: ignore[override]
+        pass
+
+    def ssh(self) -> None:  # type: ignore[override]
+        pass
+
+    def get_charm_revisions(self) -> None:  # type: ignore[override]
+        pass
+
+
+class LoggerStub(logging.Logger):
     def __init__(self) -> None:
         self.messages: dict[str, list[str]] = {"info": [], "warning": []}
 
-    def info(self, message: str) -> None:
+    def info(self, message: str) -> None:  # type: ignore[override]
         self.messages["info"].append(message)
 
-    def warning(self, message: str) -> None:
+    def warning(self, message: str) -> None:  # type: ignore[override]
         self.messages["warning"].append(message)
 
 
@@ -94,7 +163,7 @@ class TestConfigureLivepatchServerExtension:
         def test_ignores_non_livepatch_apps(self, extension_with_token: ConfigureLivepatchServerExtension) -> None:
             # GIVEN a model with no livepatch server applications
             juju_stub = JujuStub(applications={"other-app": "other-charm"})
-            extension = ConfigureLivepatchServerExtension(juju_stub, logging.getLogger("test"), "test-token")  # type: ignore[arg-type]
+            extension = ConfigureLivepatchServerExtension(juju_stub, logging.getLogger("test"), "test-token")
 
             # WHEN post_deploy is called
             extension.post_deploy("test-model")
@@ -171,8 +240,7 @@ class TestConfigureLivepatchServerExtension:
         def test_uses_correct_unit_ip(self, juju: JujuStub, logger: LoggerStub) -> None:
             # GIVEN an extension with a specific unit IP
             juju.unit_ips = {"livepatch/leader": "192.168.1.100"}
-            extension = ConfigureLivepatchServerExtension(juju, logger, "test-token")  # type: ignore[arg-type]
-
+            extension = ConfigureLivepatchServerExtension(juju, logger, "test-token")
             # WHEN configure_livepatch_server is called
             extension.configure_livepatch_server("test-model", "livepatch")
 
@@ -189,7 +257,7 @@ class TestConfigureLivepatchServerExtension:
             token = "my-ubuntu-pro-token"
 
             # WHEN creating the extension
-            extension = ConfigureLivepatchServerExtension(juju, logger, token)  # type: ignore[arg-type]
+            extension = ConfigureLivepatchServerExtension(juju, logger, token)
 
             # THEN the token is stored
             assert extension.ubuntu_pro_token == token
@@ -197,7 +265,7 @@ class TestConfigureLivepatchServerExtension:
         def test_stores_none_token(self, juju: JujuStub, logger: LoggerStub) -> None:
             # GIVEN no token
             # WHEN creating the extension
-            extension = ConfigureLivepatchServerExtension(juju, logger, None)  # type: ignore[arg-type]
+            extension = ConfigureLivepatchServerExtension(juju, logger, None)
 
             # THEN None is stored
             assert extension.ubuntu_pro_token is None
@@ -205,8 +273,8 @@ class TestConfigureLivepatchServerExtension:
         def test_stores_juju_and_logger(self, juju: JujuStub, logger: LoggerStub) -> None:
             # GIVEN juju and logger instances
             # WHEN creating the extension
-            extension = ConfigureLivepatchServerExtension(juju, logger, "token")  # type: ignore[arg-type]
+            extension = ConfigureLivepatchServerExtension(juju, logger, "token")
 
             # THEN they are stored
-            assert extension.juju is juju  # type: ignore[comparison-overlap]
-            assert extension.logger is logger  # type: ignore[comparison-overlap]
+            assert extension.juju is juju
+            assert extension.logger is logger

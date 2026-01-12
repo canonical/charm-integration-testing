@@ -31,8 +31,8 @@ from .charmhub_http import (
     CharmhubHttpClient,
     CharmMetadata,
     CharmReleaseNotFoundException,
-    IncompleteCharmInfoException,
     FindResponse,
+    IncompleteCharmInfoException,
     RefreshAction,
     RefreshResponse,
 )
@@ -319,13 +319,9 @@ class CharmhubClient:
                 f"Failed to find suitable channel for charm {charm_name} with ubuntu version {ubuntu_version} and arch {ubuntu_arch}"
             )
         if refresh_info.charm is None:
-            raise IncompleteCharmInfoException(
-                f"Refresh info for charm {charm_name} returned no charm and no error"
-            )
+            raise IncompleteCharmInfoException(f"Refresh info for charm {charm_name} returned no charm and no error")
         if refresh_info.charm.revision is None:
-            raise IncompleteCharmInfoException(
-                f"Refresh info for charm {charm_name} returned no revision"
-            )
+            raise IncompleteCharmInfoException(f"Refresh info for charm {charm_name} returned no revision")
 
         return Charm(
             name=charm_name,
@@ -357,24 +353,20 @@ class CharmhubClient:
             raise CharmReleaseNotFoundException(
                 f"Failed to find default bases for charm {charm_name}: no error returned"
             )
-        
+
         if refresh_info.error.code == "invalid-charm-base":
             if refresh_info.error.extra is None:
-                raise IncompleteCharmInfoException(
-                    f"No extra information for default bases of {charm_name}"
-                )
+                raise IncompleteCharmInfoException(f"No extra information for default bases of {charm_name}")
             bases = refresh_info.error.extra.default_bases
         elif refresh_info.error.code == "revision-not-found":
             if refresh_info.error.extra is None:
-                raise IncompleteCharmInfoException(
-                    f"No extra information for default bases of {charm_name}"
-                )
+                raise IncompleteCharmInfoException(f"No extra information for default bases of {charm_name}")
             bases = [release.base for release in refresh_info.error.extra.releases]
         else:
             raise CharmReleaseNotFoundException(
                 f"Failed to find default bases for charm {charm_name}: unexpected error code {refresh_info.error.code}"
             )
-        
+
         # Ensure a base was found
         if len(bases) == 0:
             raise CharmReleaseNotFoundException(f"No default bases found for {charm_name} in arch {ubuntu_arch}")
@@ -420,9 +412,7 @@ class CharmhubClient:
                 f"Refresh info for charm {refresh_info.name} returned no charm and no error"
             )
         elif refresh_info.charm.bases is None:
-            raise IncompleteCharmInfoException(
-                f"Refresh info for charm {refresh_info.name} returned no bases"
-            )
+            raise IncompleteCharmInfoException(f"Refresh info for charm {refresh_info.name} returned no bases")
         return next(iter(refresh_info.charm.bases))
 
     def _all_charm_endpoints(self, refresh_info: RefreshResponse) -> frozenset[CharmEndpoint]:
@@ -430,7 +420,7 @@ class CharmhubClient:
             raise IncompleteCharmInfoException(
                 f"Refresh info for charm {refresh_info.name} returned no charm and no error"
             )
-        
+
         metadata = refresh_info.charm.metadata
 
         # Get edge refresh info if any requires or provides endpoints don't have optional flag

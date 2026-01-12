@@ -14,7 +14,7 @@ from juju_jubilant.client import JubilantClient
 from pydantic.dataclasses import dataclass
 
 
-class JubilantClientStub:
+class JubilantClientStub(JubilantClient):
     client: Any
 
     def __init__(self, client: Any) -> None:
@@ -95,7 +95,7 @@ class TestJubilantBackend:
             # GIVEN a backend with mocked status
             stub = StatusStub()
             client = JubilantClientStub(client=stub)
-            backend = JubilantBackend(client)  # type: ignore[arg-type]
+            backend = JubilantBackend(client)
 
             # WHEN wait is called with a ready condition that is immediately true
             backend.wait(
@@ -113,7 +113,7 @@ class TestJubilantBackend:
             # GIVEN a backend with mocked status
             stub = StatusStub()
             client = JubilantClientStub(client=stub)
-            backend = JubilantBackend(client)  # type: ignore[arg-type]
+            backend = JubilantBackend(client)
 
             # WHEN wait is called with a ready condition that is never true
             with pytest.raises(JujuWaitTimeoutError) as exc_info:
@@ -133,7 +133,7 @@ class TestJubilantBackend:
             # GIVEN a backend with mocked status
             stub = StatusStub()
             client = JubilantClientStub(client=stub)
-            backend = JubilantBackend(client)  # type: ignore[arg-type]
+            backend = JubilantBackend(client)
 
             # Track call count
             call_count = 0
@@ -163,7 +163,7 @@ class TestJubilantBackend:
             # GIVEN a backend with mocked status
             stub = StatusStub()
             client = JubilantClientStub(client=stub)
-            backend = JubilantBackend(client)  # type: ignore[arg-type]
+            backend = JubilantBackend(client)
 
             # WHEN wait is called with an error condition that triggers
             with pytest.raises(JujuWaitTimeoutError) as exc_info:
@@ -183,7 +183,7 @@ class TestJubilantBackend:
             # GIVEN a backend with mocked status
             stub = StatusStub()
             client = JubilantClientStub(client=stub)
-            backend = JubilantBackend(client)  # type: ignore[arg-type]
+            backend = JubilantBackend(client)
 
             # Track ready states: ready, ready, not ready, ready, ready, ready
             ready_states = [True, True, False, True, True, True]
@@ -211,7 +211,7 @@ class TestJubilantBackend:
             # GIVEN a backend with mocked status
             stub = StatusStub()
             client = JubilantClientStub(client=stub)
-            backend = JubilantBackend(client)  # type: ignore[arg-type]
+            backend = JubilantBackend(client)
 
             # Track call count - we need 10 successes but timeout after 5 checks
             call_count = 0
@@ -239,7 +239,7 @@ class TestJubilantBackend:
             # GIVEN a backend with mocked status
             stub = StatusStub()
             client = JubilantClientStub(client=stub)
-            backend = JubilantBackend(client)  # type: ignore[arg-type]
+            backend = JubilantBackend(client)
 
             # Track call count
             call_count = 0
@@ -269,7 +269,7 @@ class TestJubilantBackend:
             # GIVEN a backend with mocked status
             stub = StatusStub()
             client = JubilantClientStub(client=stub)
-            backend = JubilantBackend(client)  # type: ignore[arg-type]
+            backend = JubilantBackend(client)
 
             # Track call count
             call_count = 0
@@ -300,7 +300,7 @@ class TestJubilantBackend:
             # GIVEN
             stub = StatusStub()
             client = JubilantClientStub(client=stub)
-            backend = JubilantBackend(client)  # type: ignore[arg-type]
+            backend = JubilantBackend(client)
 
             # WHEN
             backend.wait_idle("test-model", timedelta(seconds=10), count=3)
@@ -322,7 +322,7 @@ class TestJubilantBackend:
             # GIVEN
             stub = StatusStub()
             client = JubilantClientStub(client=stub)
-            backend = JubilantBackend(client)  # type: ignore[arg-type]
+            backend = JubilantBackend(client)
 
             # WHEN wait_idle is called with strict_timeout=True
             backend.wait_idle("test-model", timedelta(seconds=10), count=3, strict_timeout=True)
@@ -334,7 +334,7 @@ class TestJubilantBackend:
             # GIVEN
             stub = StatusStub()
             client = JubilantClientStub(client=stub)
-            backend = JubilantBackend(client)  # type: ignore[arg-type]
+            backend = JubilantBackend(client)
 
             # WHEN wait_idle is called (strict_timeout defaults to False)
             backend.wait_idle("test-model", timedelta(milliseconds=50), count=10)
@@ -418,7 +418,7 @@ class TestJubilantBackend:
             # GIVEN
             stub = StatusStub()
             client = JubilantClientStub(client=stub)
-            backend = JubilantBackend(client)  # type: ignore[arg-type]
+            backend = JubilantBackend(client)
 
             # WHEN
             backend.wait_for_removal("test-model", ["my-app"], timeout=timedelta(seconds=10))
@@ -441,7 +441,7 @@ class TestJubilantBackend:
             # GIVEN
             stub = StatusStub()
             client = JubilantClientStub(client=stub)
-            backend = JubilantBackend(client)  # type: ignore[arg-type]
+            backend = JubilantBackend(client)
 
             # WHEN
             from juju import JujuIntegrationApplication
@@ -507,7 +507,7 @@ class TestJubilantBackend:
             client = JubilantClientStub(client=self.AddSecretStub())
 
             # WHEN
-            secret_id = JubilantBackend(client).add_secret("test-model", "my-secret", {"key": "value"})  # type: ignore[arg-type]
+            secret_id = JubilantBackend(client).add_secret("test-model", "my-secret", {"key": "value"})
 
             # THEN
             assert secret_id == "test-secret-id"
@@ -539,7 +539,7 @@ class TestJubilantBackend:
             )
 
             # WHEN
-            content = JubilantBackend(client).read_secret("test-model", "my-secret")  # type: ignore[arg-type]
+            content = JubilantBackend(client).read_secret("test-model", "my-secret")
 
             # THEN
             assert content == {"my-key": "my-value"}
@@ -550,7 +550,7 @@ class TestJubilantBackend:
             client = JubilantClientStub(client=JubilantCliStub())
 
             # WHEN
-            JubilantBackend(client).grant_secret("test-model", "my-secret", "my-application")  # type: ignore[arg-type]
+            JubilantBackend(client).grant_secret("test-model", "my-secret", "my-application")
 
             # THEN
             assert ("grant-secret", "my-secret", "my-application") in client.client.executions
@@ -561,7 +561,7 @@ class TestJubilantBackend:
             client = JubilantClientStub(client=JubilantCliStub())
 
             # WHEN
-            JubilantBackend(client).remove_secret("test-model", "my-secret")  # type: ignore[arg-type]
+            JubilantBackend(client).remove_secret("test-model", "my-secret")
 
             # THEN
             assert ("remove-secret", "my-secret") in client.client.executions
@@ -582,7 +582,7 @@ class TestJubilantBackend:
             client = JubilantClientStub(client=stub)
 
             # WHEN
-            JubilantBackend(client).deploy_application("test-model", charm="my-charm", application="my-app")  # type: ignore[arg-type]
+            JubilantBackend(client).deploy_application("test-model", charm="my-charm", application="my-app")
 
             # THEN
             assert stub.charm == "my-charm"
@@ -604,7 +604,7 @@ class TestJubilantBackend:
             client = JubilantClientStub(client=stub)
 
             # WHEN
-            JubilantBackend(client).configure_application("test-model", "my-app", {"k": "v"})  # type: ignore[arg-type]
+            JubilantBackend(client).configure_application("test-model", "my-app", {"k": "v"})
 
             # THEN
             assert stub.app == "my-app"
@@ -626,7 +626,7 @@ class TestJubilantBackend:
             client = JubilantClientStub(client=stub)
 
             # WHEN
-            JubilantBackend(client).scp("test-model", source="a", destination="b")  # type: ignore[arg-type]
+            JubilantBackend(client).scp("test-model", source="a", destination="b")
 
             # THEN
             assert stub.source == "a"
@@ -648,7 +648,7 @@ class TestJubilantBackend:
             client = JubilantClientStub(client=stub)
 
             # WHEN
-            JubilantBackend(client).ssh("test-model", application="my-app", command="ls -l")  # type: ignore[arg-type]
+            JubilantBackend(client).ssh("test-model", application="my-app", command="ls -l")
 
             # THEN
             assert stub.target == "my-app"
@@ -685,7 +685,7 @@ class TestJubilantBackend:
             client = JubilantClientStub(client=stub)
 
             # WHEN
-            ip = JubilantBackend(client).unit_ip("test-model", "my-app/0")  # type: ignore[arg-type]
+            ip = JubilantBackend(client).unit_ip("test-model", "my-app/0")
 
             # THEN
             assert ip == "10.0.0.1"
@@ -696,7 +696,7 @@ class TestJubilantBackend:
             client = JubilantClientStub(client=stub)
 
             # WHEN
-            ip = JubilantBackend(client).unit_ip("test-model", "my-app/leader")  # type: ignore[arg-type]
+            ip = JubilantBackend(client).unit_ip("test-model", "my-app/leader")
 
             # THEN
             assert ip == "10.0.0.2"
@@ -708,7 +708,7 @@ class TestJubilantBackend:
 
             # WHEN / THEN
             try:
-                JubilantBackend(client).unit_ip("test-model", "my-app/99")  # type: ignore[arg-type]
+                JubilantBackend(client).unit_ip("test-model", "my-app/99")
             except KeyError as e:
                 assert "my-app/99" in str(e)
             else:
@@ -749,7 +749,7 @@ class TestJubilantBackend:
             client = JubilantClientStub(client=self.ModelStub(client=self.StatusStubClient()))
 
             # WHEN
-            charm_revisions = JubilantBackend(client).get_charm_revisions("test-model")  # type: ignore[arg-type]
+            charm_revisions = JubilantBackend(client).get_charm_revisions("test-model")
 
             # THEN
             assert charm_revisions == {("my-charm", 1)}

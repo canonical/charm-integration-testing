@@ -30,7 +30,7 @@ from bundle_builder.charm import (
     CharmEndpointOptionality,
 )
 from bundle_builder.charmhub import CharmhubClient
-from bundle_builder.charmhub_http import CharmhubBase
+from bundle_builder.charmhub_http import CharmhubBase, CharmhubHttpClient
 from bundle_builder.overrides import CharmEndpointOverride, CharmMetadataOverride, OverridesClient
 
 from .test_charm import (
@@ -107,8 +107,8 @@ class TestLimitApplication:
                 return CharmMetadataOverride()
 
         # Mock HTTP client that returns mock charm data
-        class MockHttpClient:
-            def refresh(self, action: object) -> Any:
+        class MockHttpClient(CharmhubHttpClient):
+            def refresh(self, action: object) -> Any:  # type: ignore[override]
                 class MockResponse:
                     def __init__(self) -> None:
                         class MockError:
@@ -155,7 +155,7 @@ class TestLimitApplication:
             return CharmhubBase(name="ubuntu", architecture="amd64", channel="22.04")
 
         # Create CharmhubClient with mock dependencies
-        client = CharmhubClient(http_client=MockHttpClient(), overrides_client=MockOverridesClient())  # type: ignore[arg-type]
+        client = CharmhubClient(http_client=MockHttpClient(), overrides_client=MockOverridesClient())
 
         # WHEN getting charm from store
         charm = client.charm_from_store("test-charm", "amd64")

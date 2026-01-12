@@ -25,48 +25,49 @@ from bundle_builder.charm import CharmConfigCriteria, CharmTestConfig
 from bundle_builder.charmhub import CharmhubClient
 from bundle_builder.charmhub_http import (
     CharmhubBase,
+    CharmhubHttpClient,
     CharmReleaseNotFoundException,
     FindResponse,
     InfoResponse,
     RefreshAction,
     RefreshResponse,
 )
-from bundle_builder.overrides import CharmTestConfigs
+from bundle_builder.overrides import CharmTestConfigs, OverridesClient
 
 
 @dataclass
-class CharmhubHttpStub:
+class CharmhubHttpStub(CharmhubHttpClient):
     refresh_response: dict[RefreshAction, RefreshResponse] = Field(default_factory=dict)
 
-    def refresh(self, action: RefreshAction) -> RefreshResponse:
+    def refresh(self, action: RefreshAction) -> RefreshResponse:  # type: ignore[override]
         return self.refresh_response[action]
 
     find_response: list[FindResponse] = Field(default_factory=list)
 
-    def find(self, provides: str | None = None, requires: str | None = None) -> list[FindResponse]:
+    def find(self, provides: str | None = None, requires: str | None = None) -> list[FindResponse]:  # type: ignore[override]
         return self.find_response
 
     info_response: dict[str, InfoResponse] = Field(default_factory=dict)
 
-    def info(self, charm: str) -> InfoResponse:
+    def info(self, charm: str) -> InfoResponse:  # type: ignore[override]
         return self.info_response[charm]
 
 
 @dataclass
-class OverridesStub:
-    charm_platform_overrides: dict[str, set[str]] = Field(default_factory=dict)
+class OverridesStub(OverridesClient):
+    charm_platform_overrides: dict[str, set[str]] = Field(default_factory=dict)  # type: ignore[assignment]
 
-    def get_charm_platform_overrides(self, charm: str) -> set[str]:
+    def get_charm_platform_overrides(self, charm: str) -> set[str]:  # type: ignore[override]
         return self.charm_platform_overrides.get(charm, set())
 
-    charm_listing_overrides: set[str] = Field(default_factory=set)
+    charm_listing_overrides: set[str] = Field(default_factory=set)  # type: ignore[assignment]
 
-    def get_charm_listing_overrides(self) -> set[str]:
+    def get_charm_listing_overrides(self) -> set[str]:  # type: ignore[override]
         return self.charm_listing_overrides
 
-    charm_test_configs: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
+    charm_test_configs: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)  # type: ignore[assignment]
 
-    def get_charm_test_configs(self, charm: str) -> list[CharmTestConfig]:
+    def get_charm_test_configs(self, charm: str) -> list[CharmTestConfig]:  # type: ignore[override]
         configs = self.charm_test_configs.get(charm, [])
         # Use CharmTestConfigs wrapper to let Pydantic validate the list properly
         return CharmTestConfigs(configs=configs).configs
@@ -170,7 +171,7 @@ class TestCharmhubClient:
 
             # WHEN
             try:
-                version = CharmhubClient(http_client=http_client)._default_ubuntu_version(  # type: ignore[arg-type]
+                version = CharmhubClient(http_client=http_client)._default_ubuntu_version(
                     charm_name=params.charm,
                     ubuntu_arch=params.arch,
                     charm_channel=params.channel,
@@ -372,7 +373,7 @@ class TestCharmhubClient:
 
             # WHEN
             try:
-                actual_refresh_info = CharmhubClient(http_client=http_client)._default_refresh_info(  # type: ignore[arg-type]
+                actual_refresh_info = CharmhubClient(http_client=http_client)._default_refresh_info(
                     params.charm, base=params.base
                 )
             except CharmReleaseNotFoundException:
@@ -469,8 +470,8 @@ class TestCharmhubClient:
 
             # WHEN
             actual = CharmhubClient(
-                http_client=http_client,  # type: ignore[arg-type]
-                overrides_client=overrides_client,  # type: ignore[arg-type]
+                http_client=http_client,
+                overrides_client=overrides_client,
             ).find_charms(
                 provides=params.provides,
                 requires=params.requires,
@@ -573,8 +574,8 @@ class TestCharmhubClient:
 
             # WHEN
             actual = CharmhubClient(
-                http_client=http_client,  # type: ignore[arg-type]
-                overrides_client=overrides_client,  # type: ignore[arg-type]
+                http_client=http_client,
+                overrides_client=overrides_client,
             )._find_charms_get_listing_overrides(
                 provides=params.provides,
                 requires=params.requires,
@@ -621,7 +622,7 @@ class TestCharmhubClient:
             overrides_client = OverridesStub(charm_platform_overrides=params.platform_overrides)
 
             # WHEN
-            actual = CharmhubClient(overrides_client=overrides_client)._find_charms_add_platform_overrides(params.given)  # type: ignore[arg-type]
+            actual = CharmhubClient(overrides_client=overrides_client)._find_charms_add_platform_overrides(params.given)
 
             # THEN
             assert actual == params.expected
@@ -732,7 +733,7 @@ class TestCharmhubClient:
         def test(self, params: Params) -> None:
             # GIVEN
             overrides_client = OverridesStub(charm_test_configs=params.charm_test_configs)
-            client = CharmhubClient(overrides_client=overrides_client)  # type: ignore[arg-type]
+            client = CharmhubClient(overrides_client=overrides_client)
 
             # WHEN
             actual = client._charm_test_configs(params.charm)

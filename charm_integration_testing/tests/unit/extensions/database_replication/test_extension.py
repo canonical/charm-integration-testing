@@ -9,6 +9,7 @@ import pytest
 from extensions.database_replication.database_client import DatabaseClient
 from extensions.database_replication.database_replicator import CharmInfo
 from extensions.database_replication.extension import GenericDatabaseReplicationExtension
+from juju.backend import JujuBackend
 
 
 @dataclass
@@ -34,7 +35,7 @@ class DatabaseClientStub(DatabaseClient):
 
 
 @dataclass
-class JujuStub:
+class JujuStub(JujuBackend):
     """Stub implementation of JujuBackend for testing DatabaseReplicator"""
 
     applications: dict[str, str] = field(
@@ -46,7 +47,79 @@ class JujuStub:
     units: dict[str, int] = field(default_factory=lambda: {"postgresql-1": 3, "postgresql-2": 3})
     configured_applications: list[tuple[str, str, dict[str, str]]] = field(default_factory=list)
 
-    def list_applications(self, model: str) -> list[str]:
+    def scale_application(self) -> None:  # type: ignore[override]
+        pass
+
+    def list_integrations(self) -> None:  # type: ignore[override]
+        pass
+
+    def wait_idle(self) -> None:  # type: ignore[override]
+        pass
+
+    def wait_for_unit_message(self) -> None:  # type: ignore[override]
+        pass
+
+    def juju_status_text(self) -> None:  # type: ignore[override]
+        pass
+
+    def integrate(self) -> None:  # type: ignore[override]
+        pass
+
+    def remove_integration(self) -> None:  # type: ignore[override]
+        pass
+
+    def deploy_bundle_file(self) -> None:  # type: ignore[override]
+        pass
+
+    def remove_applications(self) -> None:  # type: ignore[override]
+        pass
+
+    def wait_for_removal(self) -> None:  # type: ignore[override]
+        pass
+
+    def wait_for_removal_of_integration(self) -> None:  # type: ignore[override]
+        pass
+
+    def wait_for_removal_of_units(self) -> None:  # type: ignore[override]
+        pass
+
+    def application_units(self) -> None:  # type: ignore[override]
+        pass
+
+    def exec_unit(self) -> None:  # type: ignore[override]
+        pass
+
+    def run_action(self) -> None:  # type: ignore[override]
+        pass
+
+    def add_secret(self) -> None:  # type: ignore[override]
+        pass
+
+    def read_secret(self) -> None:  # type: ignore[override]
+        pass
+
+    def grant_secret(self) -> None:  # type: ignore[override]
+        pass
+
+    def remove_secret(self) -> None:  # type: ignore[override]
+        pass
+
+    def deploy_application(self) -> None:  # type: ignore[override]
+        pass
+
+    def scp(self) -> None:  # type: ignore[override]
+        pass
+
+    def ssh(self) -> None:  # type: ignore[override]
+        pass
+
+    def unit_ip(self) -> None:  # type: ignore[override]
+        pass
+
+    def get_charm_revisions(self) -> None:  # type: ignore[override]
+        pass
+
+    def list_applications(self, model: str) -> list[str]:  # type: ignore[override]
         """Return list of application names in the model"""
         return list(self.applications.keys())
 
@@ -60,11 +133,11 @@ class JujuStub:
         """Check if an integration exists between two applications"""
         return (application1, endpoint1, application2, endpoint2) in self.integrations
 
-    def wait_application_scaled(self, model: str, application: str, timeout: timedelta) -> None:
+    def wait_application_scaled(self, model: str, application: str, timeout: timedelta) -> None:  # type: ignore[override]
         """Wait for application to be scaled (captures call for verification)"""
         self.waited_scaled.append((model, application, str(timeout)))
 
-    def wait_application_settled(self, model: str, application: str, timeout: timedelta) -> None:
+    def wait_application_settled(self, model: str, application: str, timeout: timedelta) -> None:  # type: ignore[override]
         """Wait for application to settle (captures call for verification)"""
         self.waited_settled.append((model, application, str(timeout)))
 
@@ -96,7 +169,7 @@ class TestPostgreSQLDatabaseReplicationExtension:
         charm_info = CharmInfo(
             name="postgresql", offer_endpoint="logical-replication-offer", consumer_endpoint="logical-replication"
         )
-        replicator = DatabaseReplicator(charm_info, juju, logging.getLogger("test"), database_client)  # type: ignore[arg-type]
+        replicator = DatabaseReplicator(charm_info, juju, logging.getLogger("test"), database_client)
 
         ext = GenericDatabaseReplicationExtension(replicator)
         return ext
@@ -113,7 +186,7 @@ class TestPostgreSQLDatabaseReplicationExtension:
             charm_info = CharmInfo(
                 name="postgresql", offer_endpoint="logical-replication-offer", consumer_endpoint="logical-replication"
             )
-            replicator = DatabaseReplicator(charm_info, juju, logging.getLogger("test"), database_client)  # type: ignore[arg-type]
+            replicator = DatabaseReplicator(charm_info, juju, logging.getLogger("test"), database_client)
             extension = GenericDatabaseReplicationExtension(replicator)
 
             # WHEN post_deploy is called
@@ -134,7 +207,7 @@ class TestPostgreSQLDatabaseReplicationExtension:
             charm_info = CharmInfo(
                 name="postgresql", offer_endpoint="logical-replication-offer", consumer_endpoint="logical-replication"
             )
-            replicator = DatabaseReplicator(charm_info, juju, logging.getLogger("test"), database_client)  # type: ignore[arg-type]
+            replicator = DatabaseReplicator(charm_info, juju, logging.getLogger("test"), database_client)
             extension = GenericDatabaseReplicationExtension(replicator)
 
             # WHEN post_deploy is called

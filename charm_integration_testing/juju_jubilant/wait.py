@@ -62,7 +62,7 @@ def get_unit_state(status: jubilant.Status, unit: str) -> JujuUnitState | None:
     application, _ = unit.split("/")
     application_info = status.apps[application]
     unit_info = get_unit_info(status, unit)
-    
+
     if unit_info is None:
         return None
     else:
@@ -138,9 +138,7 @@ def units_have_message(message: str, status: jubilant.Status, *unit_args: str) -
     if unit_args:
         units = set(unit_args)
     else:  # default to all units when no unit is passed
-        units = set(
-            (unit for application in status.apps for unit in status.get_units(application))
-        )
+        units = set((unit for application in status.apps for unit in status.get_units(application)))
 
     noncompliant_units: dict[str, JujuUnitState | None] = {}
     for unit in units:

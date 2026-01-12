@@ -20,6 +20,7 @@ import pytest
 import yaml
 from pydantic import Field
 from pydantic.dataclasses import dataclass
+from requests import Session
 
 from bundle_builder.charmhub_http import (
     CHARM_FIND_ENDPOINT,
@@ -54,7 +55,7 @@ class ResponseStub:
 
 
 @dataclass
-class SessionStub:
+class SessionStub(Session):
     def mount(self, *args: Any, **kwargs: Any) -> None:
         pass
 
@@ -64,7 +65,7 @@ class SessionStub:
     get_timeout: int | None = None
     get_result: ResponseStub | None = None
 
-    def get(self, url: str, params: dict[str, str], headers: dict[str, str], timeout: int) -> ResponseStub:
+    def get(self, url: str, params: dict[str, str], headers: dict[str, str], timeout: int) -> ResponseStub:  # type: ignore[override]
         if self.get_url is not None:
             assert url == self.get_url
         if self.get_params is not None:
@@ -82,7 +83,7 @@ class SessionStub:
     post_timeout: int | None = None
     post_result: ResponseStub | None = None
 
-    def post(self, url: str, json: dict[str, Any] | list[Any], headers: dict[str, str], timeout: int) -> ResponseStub:
+    def post(self, url: str, json: dict[str, Any] | list[Any], headers: dict[str, str], timeout: int) -> ResponseStub:  # type: ignore[override]
         if self.post_url is not None:
             assert url == self.post_url
         if self.post_json is not None:
@@ -251,7 +252,7 @@ class TestCharmhubHttpClient:
 
             # WHEN find is called
             try:
-                result = CharmhubHttpClient(session=params.session).find(provides=provides, requires=requires)  # type: ignore[arg-type]
+                result = CharmhubHttpClient(session=params.session).find(provides=provides, requires=requires)
             except CustomError:
                 # THEN an exception was expected to be raised
                 assert params.raise_exception
@@ -386,7 +387,7 @@ class TestCharmhubHttpClient:
 
             # WHEN refresh is called
             try:
-                response = CharmhubHttpClient(session=params.session).refresh(action)  # type: ignore[arg-type]
+                response = CharmhubHttpClient(session=params.session).refresh(action)
             except CustomError:
                 # THEN an exception was expected to be raised
                 assert params.raise_exception
@@ -438,7 +439,7 @@ class TestCharmhubHttpClient:
 
             # WHEN info is called
             try:
-                response = CharmhubHttpClient(session=params.session).info(charm)  # type: ignore[arg-type]
+                response = CharmhubHttpClient(session=params.session).info(charm)
             except CustomError:
                 # THEN an exception was expected to be raised
                 assert params.raise_exception

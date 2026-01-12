@@ -1,15 +1,17 @@
 # Copyright 2025 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import logging
 from dataclasses import dataclass, field
 from datetime import timedelta
 
-from extensions.unseal_vault.vault_client import VaultStatus, VaultTokenSecret
+from extensions.unseal_vault.vault_client import VaultClient, VaultStatus, VaultTokenSecret
 from extensions.unseal_vault.vault_unsealer import CharmInfo, VaultUnsealer
+from juju.backend import JujuBackend
 
 
 @dataclass
-class JujuStub:
+class JujuStub(JujuBackend):
     apps: list[str] = field(default_factory=list)
     charm_name: str = ""
     scaled_apps: list[str] = field(default_factory=list)
@@ -20,16 +22,16 @@ class JujuStub:
     secrets_granted: list[tuple[str, str]] = field(default_factory=list)
     actions_run: list[tuple[str, str, dict[str, str]]] = field(default_factory=list)
 
-    def list_applications(self, model: str) -> list[str]:
+    def list_applications(self, model: str) -> list[str]:  # type: ignore[override]
         return self.apps
 
     def application_charm(self, model: str, application: str) -> str:
         return self.charm_name
 
-    def wait_application_scaled(self, model: str, app: str, timeout: timedelta) -> None:
+    def wait_application_scaled(self, model: str, app: str, timeout: timedelta) -> None:  # type: ignore[override]
         self.scaled_apps.append(app)
 
-    def wait_application_settled(self, model: str, app: str, timeout: timedelta) -> None:
+    def wait_application_settled(self, model: str, app: str, timeout: timedelta) -> None:  # type: ignore[override]
         self.settled_apps.append(app)
 
     def application_units(self, model: str, app: str) -> list[str]:
@@ -38,7 +40,7 @@ class JujuStub:
     def num_units(self, model: str, app: str) -> int:
         return len(self.units.get(app, []))
 
-    def wait_for_unit_message(self, model: str, unit: str, message: str, timeout: timedelta) -> None:
+    def wait_for_unit_message(self, model: str, unit: str, message: str, timeout: timedelta) -> None:  # type: ignore[override]
         self.messages.append((unit, message, timeout))
 
     def add_secret(self, model: str, name: str, content: dict[str, str]) -> str:
@@ -57,9 +59,66 @@ class JujuStub:
     def read_secret(self, model: str, name: str) -> dict[str, str]:
         return self.secrets[name]
 
+    def scale_application(self) -> None:  # type: ignore[override]
+        pass
+
+    def list_integrations(self) -> None:  # type: ignore[override]
+        pass
+
+    def integration_exists(self) -> None:  # type: ignore[override]
+        pass
+
+    def wait_idle(self) -> None:  # type: ignore[override]
+        pass
+
+    def juju_status_text(self) -> None:  # type: ignore[override]
+        pass
+
+    def integrate(self) -> None:  # type: ignore[override]
+        pass
+
+    def remove_integration(self) -> None:  # type: ignore[override]
+        pass
+
+    def deploy_bundle_file(self) -> None:  # type: ignore[override]
+        pass
+
+    def remove_applications(self) -> None:  # type: ignore[override]
+        pass
+
+    def wait_for_removal(self) -> None:  # type: ignore[override]
+        pass
+
+    def wait_for_removal_of_integration(self) -> None:  # type: ignore[override]
+        pass
+
+    def wait_for_removal_of_units(self) -> None:  # type: ignore[override]
+        pass
+
+    def exec_unit(self) -> None:  # type: ignore[override]
+        pass
+
+    def deploy_application(self) -> None:  # type: ignore[override]
+        pass
+
+    def configure_application(self) -> None:  # type: ignore[override]
+        pass
+
+    def scp(self) -> None:  # type: ignore[override]
+        pass
+
+    def ssh(self) -> None:  # type: ignore[override]
+        pass
+
+    def unit_ip(self) -> None:  # type: ignore[override]
+        pass
+
+    def get_charm_revisions(self) -> None:  # type: ignore[override]
+        pass
+
 
 @dataclass
-class VaultStub:
+class VaultStub(VaultClient):
     initialized_units: dict[str, bool] = field(default_factory=dict)
     sealed_units: dict[str, bool] = field(default_factory=dict)
     inits: list[str] = field(default_factory=list)
@@ -80,11 +139,11 @@ class VaultStub:
         self.unseals.append(unit)
 
 
-class LoggerStub:
+class LoggerStub(logging.Logger):
     def __init__(self) -> None:
         self.messages: list[str] = []
 
-    def info(self, message: str) -> None:
+    def info(self, message: str) -> None:  # type: ignore[override]
         self.messages.append(message)
 
 
@@ -97,7 +156,7 @@ class TestVaultUnsealer:
         charm = CharmInfo(name="vault")
 
         # WHEN
-        VaultUnsealer(charm, vault, juju, logger).try_init_or_unseal_all_vaults("test-model")  # type: ignore[arg-type]
+        VaultUnsealer(charm, vault, juju, logger).try_init_or_unseal_all_vaults("test-model")
 
         # THEN
         assert "vault" in juju.scaled_apps
@@ -111,7 +170,7 @@ class TestVaultUnsealer:
         charm = CharmInfo(name="vault")
 
         # WHEN
-        VaultUnsealer(charm, vault, juju, logger).try_init_vault("test-model", "vault")  # type: ignore[arg-type]
+        VaultUnsealer(charm, vault, juju, logger).try_init_vault("test-model", "vault")
 
         # THEN
         assert vault.inits == []
@@ -132,7 +191,7 @@ class TestVaultUnsealer:
         charm = CharmInfo(name="vault")
 
         # WHEN
-        VaultUnsealer(charm, vault, juju, logger).try_unseal_vault("test-model", "vault")  # type: ignore[arg-type]
+        VaultUnsealer(charm, vault, juju, logger).try_unseal_vault("test-model", "vault")
 
         # THEN
         assert "vault/0" in vault.unseals
@@ -147,7 +206,7 @@ class TestVaultUnsealer:
         tokens = VaultTokenSecret(root_token="abc", unseal_key="xyz")
 
         # WHEN
-        VaultUnsealer(charm, vault, juju, logger).authorize_vault_charm("test-model", "vault", tokens)  # type: ignore[arg-type]
+        VaultUnsealer(charm, vault, juju, logger).authorize_vault_charm("test-model", "vault", tokens)
 
         # THEN
         assert ("vault-secret-application-vault-one-time-token", "vault") in juju.secrets_granted
@@ -161,7 +220,7 @@ class TestVaultUnsealer:
         logger = LoggerStub()
         charm = CharmInfo(name="vault")
         tokens = VaultTokenSecret(root_token="abc", unseal_key="xyz")
-        unsealer = VaultUnsealer(charm, vault, juju, logger)  # type: ignore[arg-type]
+        unsealer = VaultUnsealer(charm, vault, juju, logger)
 
         # WHEN
         unsealer.save_vault_tokens("test-model", "vault", tokens)
@@ -188,7 +247,7 @@ class TestVaultUnsealer:
 
         # WHEN
         try:
-            VaultUnsealer(charm, vault, juju, logger).try_init_vault("test-model", "vault")  # type: ignore[arg-type]
+            VaultUnsealer(charm, vault, juju, logger).try_init_vault("test-model", "vault")
         # THEN
         except RuntimeError as e:
             assert "connection refused" in str(e).lower()
@@ -211,7 +270,7 @@ class TestVaultUnsealer:
 
         # WHEN
         try:
-            VaultUnsealer(charm, vault, juju, logger).try_init_vault("test-model", "vault")  # type: ignore[arg-type]
+            VaultUnsealer(charm, vault, juju, logger).try_init_vault("test-model", "vault")
         # THEN
         except RuntimeError as e:
             assert "some other error occurred" in str(e).lower()

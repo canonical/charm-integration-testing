@@ -16,10 +16,11 @@ from extensions.s3_integrator_minio_backend.extension import (
     MINIO_SECRET_KEY,
     S3IntegratorMinIOBackendExtension,
 )
+from juju.backend import JujuBackend
 
 
 @dataclass
-class JujuStub:
+class JujuStub(JujuBackend):
     deployed: list[tuple[str, str, str]] = field(default_factory=list)
     configured: list[tuple[str, str, dict[str, str]]] = field(default_factory=list)
     waited_scaled: list[tuple[str, str, str]] = field(default_factory=list)
@@ -30,22 +31,85 @@ class JujuStub:
     applications: dict[str, str] = field(default_factory=lambda: {"s3-app": "s3-integrator"})
     unit_ips: dict[str, str] = field(default_factory=lambda: {"s3-app-minio/leader": "10.0.0.1"})
 
-    def list_applications(self, model: str) -> list[str]:
+    def scale_application(self) -> None:  # type: ignore[override]
+        pass
+
+    def num_units(self) -> None:  # type: ignore[override]
+        pass
+
+    def list_applications(self, model: str) -> list[str]:  # type: ignore[override]
         return list(self.applications.keys())
+
+    def list_integrations(self) -> None:  # type: ignore[override]
+        pass
+
+    def integration_exists(self) -> None:  # type: ignore[override]
+        pass
+
+    def wait_idle(self) -> None:  # type: ignore[override]
+        pass
+
+    def wait_for_unit_message(self) -> None:  # type: ignore[override]
+        pass
+
+    def juju_status_text(self) -> None:  # type: ignore[override]
+        pass
+
+    def integrate(self) -> None:  # type: ignore[override]
+        pass
+
+    def remove_integration(self) -> None:  # type: ignore[override]
+        pass
+
+    def deploy_bundle_file(self) -> None:  # type: ignore[override]
+        pass
+
+    def remove_applications(self) -> None:  # type: ignore[override]
+        pass
+
+    def wait_for_removal(self) -> None:  # type: ignore[override]
+        pass
+
+    def wait_for_removal_of_integration(self) -> None:  # type: ignore[override]
+        pass
+
+    def wait_for_removal_of_units(self) -> None:  # type: ignore[override]
+        pass
+
+    def application_units(self) -> None:  # type: ignore[override]
+        pass
+
+    def exec_unit(self) -> None:  # type: ignore[override]
+        pass
+
+    def add_secret(self) -> None:  # type: ignore[override]
+        pass
+
+    def read_secret(self) -> None:  # type: ignore[override]
+        pass
+
+    def grant_secret(self) -> None:  # type: ignore[override]
+        pass
+
+    def remove_secret(self) -> None:  # type: ignore[override]
+        pass
+
+    def get_charm_revisions(self) -> None:  # type: ignore[override]
+        pass
 
     def application_charm(self, model: str, application: str) -> str:
         return self.applications[application]
 
-    def deploy_application(self, model: str, charm: str, application: str) -> None:
+    def deploy_application(self, model: str, charm: str, application: str) -> None:  # type: ignore[override]
         self.deployed.append((model, charm, application))
 
     def configure_application(self, model: str, application: str, values: dict[str, str]) -> None:
         self.configured.append((model, application, values))
 
-    def wait_application_scaled(self, model: str, application: str, timeout: timedelta) -> None:
+    def wait_application_scaled(self, model: str, application: str, timeout: timedelta) -> None:  # type: ignore[override]
         self.waited_scaled.append((model, application, str(timeout)))
 
-    def wait_application_settled(self, model: str, application: str, timeout: timedelta) -> None:
+    def wait_application_settled(self, model: str, application: str, timeout: timedelta) -> None:  # type: ignore[override]
         self.waited_settled.append((model, application, str(timeout)))
 
     def scp(self, model: str, source: str, destination: str) -> None:
@@ -68,7 +132,7 @@ class TestS3IntegratorMinIOBackendExtension:
 
     @pytest.fixture
     def extension(self, juju: JujuStub) -> S3IntegratorMinIOBackendExtension:
-        return S3IntegratorMinIOBackendExtension(juju, logging.getLogger("test"))  # type: ignore[arg-type]
+        return S3IntegratorMinIOBackendExtension(juju, logging.getLogger("test"))
 
     class TestPostDeploy:
         def test_deploys_minio_if_s3_integrator_present(
@@ -84,7 +148,7 @@ class TestS3IntegratorMinIOBackendExtension:
         def test_ignores_non_s3_integrator_apps(self, juju: JujuStub) -> None:
             # GIVEN a model with no s3-integrator applications
             juju.applications = {"non-s3": "not-s3"}
-            extension = S3IntegratorMinIOBackendExtension(juju, logging.getLogger("test"))  # type: ignore[arg-type]
+            extension = S3IntegratorMinIOBackendExtension(juju, logging.getLogger("test"))
 
             # WHEN post_deploy is called
             extension.post_deploy("test-model")
