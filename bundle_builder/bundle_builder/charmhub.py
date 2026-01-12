@@ -249,9 +249,8 @@ class CharmhubClient:
         charm_channel: str,
         ubuntu_version: str | None = None,
     ):
-        # Get default ubuntu version if not given
+        # Get default ubuntu version if not provided
         if not ubuntu_version:
-            # Pick first supported ubuntu version (like Juju)
             ubuntu_version = self._default_ubuntu_version(charm_name, ubuntu_arch, charm_channel=charm_channel)
 
         # Call refresh with channel and base
@@ -316,23 +315,23 @@ class CharmhubClient:
     def _get_ubuntu_version_from_bases(
         self, bases: list, ubuntu_arch: str, charm_name: str, charm_revision: int, ubuntu_version: str | None = None
     ) -> str:
-        """Get or validate ubuntu version from revision bases."""
-        if not ubuntu_version:
-            # Return first ubuntu version with matching base
-            for base in bases:
-                if base.name == "ubuntu" and base.architecture == ubuntu_arch:
-                    return base.channel
-            # No valid ubuntu version found
-            raise CharmReleaseNotFoundException(
-                f"Charm {charm_name} revision {charm_revision} does not appear to support arch {ubuntu_arch}"
-            )
-        else:
-            # Validate provided ubuntu_version is in bases
+        # Validate provided ubuntu_version is in bases
+        if ubuntu_version:
             if CharmhubBase(name="ubuntu", channel=ubuntu_version, architecture=ubuntu_arch) not in bases:
                 raise CharmReleaseNotFoundException(
                     f"Charm {charm_name} revision {charm_revision} does not support ubuntu version {ubuntu_version} for arch {ubuntu_arch}"
                 )
             return ubuntu_version
+
+        # Return first ubuntu version with matching base
+        for base in bases:
+            if base.name == "ubuntu" and base.architecture == ubuntu_arch:
+                return base.channel
+
+        # No valid ubuntu version found
+        raise CharmReleaseNotFoundException(
+            f"Charm {charm_name} revision {charm_revision} does not appear to support arch {ubuntu_arch}"
+        )
 
     def _get_revision_refresh_info(self, charm_name: str, charm_revision: int) -> RefreshResponse:
         """Get refresh info for a specific revision."""
@@ -384,7 +383,7 @@ class CharmhubClient:
         if len(versions) == 0:
             raise CharmReleaseNotFoundException(f"No default bases found for {charm_name} in arch {ubuntu_arch}")
 
-        # Return the first version (like Juju does)
+        # Return the first version (like Juju)
         return versions[0]
 
     def _default_refresh_info(self, charm_name: str, base: CharmhubBase) -> RefreshResponse:

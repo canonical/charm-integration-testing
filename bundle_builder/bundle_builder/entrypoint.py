@@ -100,18 +100,20 @@ def applications_from_args(
         try:
             name, charm, channel_str, revision_str, base = spec.split("::")
         except ValueError:
-            parser.error(f"Invalid charm format: '{spec}' - expected format <name>::<charm>::<channel>::<revision>::<base>")
-        
+            parser.error(
+                f"Invalid charm format: '{spec}' - expected format <name>::<charm>::<channel>::<revision>::<base>"
+            )
+
         # Parse channel
         channel = None if channel_str == "default" else channel_str
-        
+
         # Parse revision
         revision = None
         if revision_str != "default":
             if not revision_str.isnumeric():
                 parser.error(f"Invalid revision in '{spec}': revision must be numeric, got '{revision_str}'")
             revision = int(revision_str)
-        
+
         # Parse base
         base = None if base == "default" else base
 
