@@ -19,17 +19,13 @@ on:
           - testing
           - staging
           - production
-      # TODO SQT-452: GitHub workflow_dispatch is limited to 10 inputs
-      # But maybe by the time we need this that will have changed!
-      # https://github.com/orgs/community/discussions/8774
-      # If not, maybe pass in JSON and use fromJSON()
-      # arch:
-      #   description: "Architecture of the charms being tested."
-      #   required: false
-      #   type: choice
-      #   options:
-      #     - amd64
-      #   default: amd64
+      arch:
+        description: "Architecture of the charms being tested."
+        required: false
+        type: choice
+        options:
+          - amd64
+        default: amd64
       charm_under_test:
         description: "charmhub.io name of the primary charm under test"
         required: true
@@ -62,6 +58,7 @@ on:
         required: false
         type: choice
         options:
+          - "default"
           - "20.04"
           - "22.04"
           - "24.04"
