@@ -13,6 +13,7 @@ from utils.normalization import (
     _normalize_timestamps,
     _normalize_uuids,
     normalize_string,
+    normalize_string_multiline,
 )
 
 
@@ -575,3 +576,33 @@ class TestNormalizeString:
 
         # THEN the result matches expectations
         assert result == params.expected
+
+class TestNormalizeStringMultiline:
+    """Tests for normalize_string function with multiline input."""
+
+    @dataclass
+    class Params:
+        label: str
+        input: str
+        expected_lines: list[str]
+
+    test_cases = [
+        Params(
+            label="multiple_lines_with_ips_uuids_and_length_limit",
+            input="""line 1\nConnecting to 10.152.183.123\nabcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd nnnnn\nERROR: Session ID: 123e4567-e89b-12d3-a456-426614174000\nline 5""",
+            expected_lines=[
+                "line XXX",
+                "Connecting to <IP>",
+                "abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd ab...",
+                "ERROR: Session ID: <UUID>",
+                "line XXX",
+            ],
+        ),
+    ]
+    @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
+    def test(self, params: Params):
+        # WHEN normalizing the input
+        result_lines = normalize_string_multiline(params.input)
+        
+        # THEN the result matches expectations
+        assert result_lines == params.expected_lines

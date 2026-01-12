@@ -245,3 +245,19 @@ def normalize_string(message: Any, max_length: int = 150) -> str:
     text = _normalize_numeric_sequences(text)
     text = _truncate_string(text, max_length)
     return text
+
+def normalize_string_multiline(message: Any, max_length: int = 150) -> list[str]:
+    """Normalize a multi-line string for use as execution metadata.
+    Splits the input into lines and normalizes each line individually.
+
+    Args:
+        message: The value to normalize (can be bytes, str, or any object)
+        max_length: Maximum length of each resulting line (default: 150)
+
+    Returns:
+        List of normalized strings suitable for execution metadata
+    """
+    text = _convert_to_string(message)
+    lines = text.splitlines()
+    normalized_lines = [normalize_string(line, max_length) for line in lines]
+    return normalized_lines
