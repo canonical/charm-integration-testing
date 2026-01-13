@@ -149,7 +149,7 @@ class VaultUnsealer:
             self.juju.remove_secret(model, secret_name)
             self.logger.info(f"Removed existing secret '{secret_name}'")
         except Exception as err:  # TODO(@motjuste): or (juju.CliError | subprocess.CalledProcessError)
-            self.logger.info(f"Ignoring failure to remove secret '{secret_name}': {err}")
+            self.logger.info(f"Ignoring failure to remove secret '{secret_name}': {getattr(err, "stderr", err)}")
 
         # Add the vault tokens
         self.juju.add_secret(
