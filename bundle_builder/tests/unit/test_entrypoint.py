@@ -211,7 +211,8 @@ class TestApplicationFromArgs:
             applications={
                 Application(
                     name="target",
-                    charm=dataclasses.replace(sample_charm_postgresql_k8s(), channel="edge", revision=111),
+                    # TODO(raul): remove type ignore in subsequent type checker PRs
+                    charm=dataclasses.replace(sample_charm_postgresql_k8s(), channel="edge", revision=111),  # type: ignore
                 )
             },
         ),
@@ -221,7 +222,8 @@ class TestApplicationFromArgs:
             applications={
                 Application(
                     name="target",
-                    charm=dataclasses.replace(sample_charm_postgresql_k8s(), channel="stable", ubuntu_version="24.04"),
+                    # TODO(raul): remove type ignore in subsequent type checker PRs
+                    charm=dataclasses.replace(sample_charm_postgresql_k8s(), channel="stable", ubuntu_version="24.04"),  # type: ignore
                 )
             },
         ),
@@ -231,9 +233,10 @@ class TestApplicationFromArgs:
             applications={
                 Application(
                     name="target",
+                    # TODO(raul): remove type ignore in subsequent type checker PRs
                     charm=dataclasses.replace(
                         sample_charm_postgresql_k8s(), channel="edge", revision=111, ubuntu_version="24.04"
-                    ),
+                    ),  # type: ignore
                 )
             },
         ),

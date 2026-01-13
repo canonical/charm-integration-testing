@@ -802,7 +802,7 @@ class TestCharmhubClient:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test(self, params: Params):
+        def test(self, params: Params) -> None:
             # GIVEN
             client = CharmhubClient()
 
@@ -866,7 +866,7 @@ class TestCharmhubClient:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test(self, params: Params):
+        def test(self, params: Params) -> None:
             # GIVEN
             http_client = CharmhubHttpStub(
                 refresh_response={
@@ -959,7 +959,7 @@ class TestCharmhubClient:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test(self, params: Params):
+        def test(self, params: Params) -> None:
             # GIVEN
             http_client = CharmhubHttpStub(
                 refresh_response={
@@ -1085,7 +1085,7 @@ class TestCharmhubClient:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test(self, params: Params):
+        def test(self, params: Params) -> None:
             # GIVEN
             http_client = CharmhubHttpStub(
                 refresh_response={

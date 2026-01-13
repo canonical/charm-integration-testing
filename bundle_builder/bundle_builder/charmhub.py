@@ -189,6 +189,10 @@ class CharmhubClient:
         refresh_info = self._get_revision_refresh_info(charm_name, charm_revision)
 
         # Get or validate ubuntu version from bases
+        if refresh_info.charm is None or refresh_info.charm.bases is None:
+            raise CharmReleaseNotFoundException(
+                f"Charm {charm_name} revision {charm_revision} has no bases information"
+            )
         ubuntu_version = self._get_ubuntu_version_from_bases(
             refresh_info.charm.bases, ubuntu_arch, charm_name, charm_revision, ubuntu_version
         )
@@ -356,7 +360,12 @@ class CharmhubClient:
         )
 
     def _get_ubuntu_version_from_bases(
-        self, bases: list, ubuntu_arch: str, charm_name: str, charm_revision: int, ubuntu_version: str | None = None
+        self,
+        bases: list[CharmhubBase],
+        ubuntu_arch: str,
+        charm_name: str,
+        charm_revision: int,
+        ubuntu_version: str | None = None,
     ) -> str:
         # Validate provided ubuntu_version is in bases
         if ubuntu_version:
