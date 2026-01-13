@@ -6,7 +6,7 @@ import pytest
 from juju import JujuClient
 
 
-def pytest_addoption(parser):
+def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption(
         "--target-application",
         type=str,
@@ -35,22 +35,30 @@ def pytest_addoption(parser):
 
 @pytest.fixture
 def target_application(request: pytest.FixtureRequest) -> str:
-    return request.config.getoption("--target-application")
+    option = request.config.getoption("--target-application")
+    assert isinstance(option, str)
+    return option
 
 
 @pytest.fixture
 def target_endpoint(request: pytest.FixtureRequest) -> str:
-    return request.config.getoption("--target-endpoint")
+    option = request.config.getoption("--target-endpoint")
+    assert isinstance(option, str)
+    return option
 
 
 @pytest.fixture
 def neighbor_application(request: pytest.FixtureRequest) -> str:
-    return request.config.getoption("--neighbor-application")
+    option = request.config.getoption("--neighbor-application")
+    assert isinstance(option, str)
+    return option
 
 
 @pytest.fixture
 def neighbor_endpoint(request: pytest.FixtureRequest) -> str:
-    return request.config.getoption("--neighbor-endpoint")
+    option = request.config.getoption("--neighbor-endpoint")
+    assert isinstance(option, str)
+    return option
 
 
 @pytest.fixture(autouse=True)
@@ -60,7 +68,7 @@ def assert_applications_exist(
     model: str,
     target_application: str,
     neighbor_application: str,
-):
+) -> None:
     _ = assert_idle  # Enforce fixture execution order
 
     if not juju_client.application_exists(target_application, model=model):
@@ -78,7 +86,7 @@ def assert_applications_integrated(
     target_endpoint: str,
     neighbor_application: str,
     neighbor_endpoint: str,
-):
+) -> None:
     _ = assert_applications_exist  # Enforce fixture execution order
 
     if not juju_client.integration_exists(

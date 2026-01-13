@@ -27,11 +27,14 @@ def test_cli_write_output(
     sample_independent_charm: str,
     sample_independent_charm_revision: int,
     overrides_client: OverridesClient,
-):
+) -> None:
     # GIVEN an output file
     output_bundle = tmp_path / "output_bundle.yaml"
     # AND the bundle doesn't exist
     assert not output_bundle.exists()
+
+    # AND the overrides_client has charm metadata overrides
+    assert overrides_client.charm_metadata_overrides is not None
 
     # WHEN the bundle builder is run from cli
     result = subprocess.run(
@@ -58,7 +61,7 @@ def test_cli_write_output(
     assert {application for application in bundle_specs.get("applications", {})} == {sample_independent_charm}
 
 
-def test_cli_unknown_charm():
+def test_cli_unknown_charm() -> None:
     # GIVEN an unknown charm
     app = "app::unknown::default::default::default"
 
@@ -82,7 +85,7 @@ def test_cli_invalid_integration(
     sample_independent_charm: str,
     sample_independent_charm_endpoint: str,
     sample_independent_charm_revision: int,
-):
+) -> None:
     # GIVEN two of the same charm
     app_1 = f"app1::{sample_independent_charm}::default::{sample_independent_charm_revision}::default"
     app_2 = f"app2::{sample_independent_charm}::default::{sample_independent_charm_revision}::default"

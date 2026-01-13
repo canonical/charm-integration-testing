@@ -19,12 +19,12 @@ from pathlib import Path
 
 from .bundle import Application, ApplicationEndpoint, Bundle, Integration
 from .bundle_builder import BundleBuilder
-from .charm import Charm
-from .charmhub import CharmhubClient, CharmReleaseNotFoundException
+from .charmhub import CharmhubClient
+from .charmhub_http import CharmReleaseNotFoundException
 from .overrides import OverridesClient
 
 
-def setup_logging(log_level: str):
+def setup_logging(log_level: str) -> logging.Logger:
     logger = logging.getLogger("bundle_builder")
 
     logger.setLevel(logging.DEBUG)
@@ -40,7 +40,7 @@ def setup_logging(log_level: str):
     return logger
 
 
-def add_args_to_parser(parser: argparse.ArgumentParser):
+def add_args_to_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--charms",
         type=str,
@@ -93,12 +93,12 @@ def add_args_to_parser(parser: argparse.ArgumentParser):
 # Get charms from args
 def applications_from_args(
     parser: argparse.ArgumentParser, charmhub_client: CharmhubClient, specs: list[str], arch: str
-) -> frozenset[Charm]:
+) -> frozenset[Application]:
     applications = set()
     for spec in specs:
         # Get charm specs
         try:
-            name, charm, channel_str, revision_str, base = spec.split("::")
+            name, charm_str, channel_str, revision_str, base_str = spec.split("::")
         except ValueError:
             parser.error(
                 f"Invalid charm format: '{spec}' - expected format <name>::<charm>::<channel>::<revision>::<base>"
@@ -115,12 +115,12 @@ def applications_from_args(
             revision = int(revision_str)
 
         # Parse base
-        base = None if base == "default" else base
+        base = None if base_str == "default" else base_str
 
         # Get charm from store
         try:
             charm = charmhub_client.charm_from_store(
-                charm_name=charm,
+                charm_name=charm_str,
                 charm_channel=channel,
                 charm_revision=revision,
                 ubuntu_version=base,
@@ -167,8 +167,8 @@ def platform_from_args(parser: argparse.ArgumentParser, substrate: str) -> str:
         parser.error(f"Unknown substrate: '{substrate}'")
 
 
-# Dump to file
-def write_to_file(filename: str, content: str, logger: logging.Logger):
+# Dump the bundle to file
+def write_to_file(filename: str, content: str, logger: logging.Logger) -> None:
     # Get proper file path
     path = Path(filename).absolute().resolve()
     logger.info(f"Writing to '{path}'")
@@ -178,7 +178,7 @@ def write_to_file(filename: str, content: str, logger: logging.Logger):
     logger.info("Saved file")
 
 
-def main():
+def main() -> None:
     # Get CLI arguments
     parser = argparse.ArgumentParser()
     add_args_to_parser(parser)

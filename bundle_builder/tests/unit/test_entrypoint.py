@@ -37,7 +37,7 @@ from .test_charm import sample_charm_postgresql_k8s, sample_charm_self_signed_ce
 
 
 class TestSetupLogging:
-    def test_valid_level(self):
+    def test_valid_level(self) -> None:
         # GIVEN a valid log level
         log_level = "DEBUG"
 
@@ -93,7 +93,7 @@ class TestAddArgsToParser:
     ]
 
     @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-    def test(self, params: Params):
+    def test(self, params: Params) -> None:
         # GIVEN a new argument parser
         parser = argparse.ArgumentParser()
 
@@ -110,7 +110,7 @@ class TestAddArgsToParser:
 
 
 class ArgumentParserStub:
-    def error(self, message: str):
+    def error(self, message: str) -> None:
         raise RuntimeError
 
 
@@ -131,10 +131,11 @@ class TestApplicationFromArgs:
             else:
                 raise CharmReleaseNotFoundException(f"Charm release not found: {charm_name}")
 
-            return dataclasses.replace(
+            # TODO(raul): remove type ignore in subsequent type checker PRs
+            return dataclasses.replace(  # type: ignore
                 charm,
                 ubuntu_arch=ubuntu_arch,
-                channel=charm_channel or charm.channel,
+                channel=charm_channel if charm_channel is not None else charm.channel,
                 revision=charm_revision or charm.revision,
                 ubuntu_version=ubuntu_version or charm.ubuntu_version,
             )
@@ -157,14 +158,19 @@ class TestApplicationFromArgs:
             label="parse_revision",
             specs=["target::postgresql-k8s::default::111::default"],
             applications={
-                Application(name="target", charm=dataclasses.replace(sample_charm_postgresql_k8s(), revision=111))
+                # TODO(raul): remove type ignore in subsequent type checker PRs
+                Application(name="target", charm=dataclasses.replace(sample_charm_postgresql_k8s(), revision=111))  # type: ignore
             },
         ),
         Params(
             label="parse_channel",
             specs=["target::postgresql-k8s::edge::default::default"],
             applications={
-                Application(name="target", charm=dataclasses.replace(sample_charm_postgresql_k8s(), channel="edge"))
+                Application(
+                    name="target",
+                    # TODO(raul): remove type ignore in subsequent type checker PRs
+                    charm=dataclasses.replace(sample_charm_postgresql_k8s(), channel="edge"),  # type: ignore
+                )
             },
         ),
         Params(
@@ -172,7 +178,9 @@ class TestApplicationFromArgs:
             specs=["target::postgresql-k8s::default::default::24.04"],
             applications={
                 Application(
-                    name="target", charm=dataclasses.replace(sample_charm_postgresql_k8s(), ubuntu_version="24.04")
+                    # TODO(raul): remove type ignore in subsequent type checker PRs
+                    name="target",
+                    charm=dataclasses.replace(sample_charm_postgresql_k8s(), ubuntu_version="24.04"),  # type: ignore
                 )
             },
         ),
@@ -232,7 +240,7 @@ class TestApplicationFromArgs:
     ]
 
     @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-    def test(self, params: Params):
+    def test(self, params: Params) -> None:
         # GIVEN stubbed charmhub client
         charmhub_client = self.CharmhubClientStub()
         # AND stubbed argument parser
@@ -240,7 +248,7 @@ class TestApplicationFromArgs:
 
         # WHEN called with the specs
         try:
-            applications = applications_from_args(parser, charmhub_client, params.specs, params.arch)
+            applications = applications_from_args(parser, charmhub_client, params.specs, params.arch)  # type: ignore[arg-type]
         except RuntimeError:
             threw = True
         else:
@@ -250,6 +258,7 @@ class TestApplicationFromArgs:
         assert threw == params.fail
         # AND expected applications match if not thrown
         if not threw:
+            assert params.applications is not None
             assert applications == frozenset(params.applications)
 
 
@@ -291,13 +300,13 @@ class TestIntegrationFromArgs:
     ]
 
     @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-    def test(self, params: Params):
+    def test(self, params: Params) -> None:
         # GIVEN stubbed argument parser
         parser = ArgumentParserStub()
 
         # WHEN called with the specs
         try:
-            integrations = integrations_from_args(parser, params.specs)
+            integrations = integrations_from_args(parser, params.specs)  # type: ignore[arg-type]
         except RuntimeError:
             threw = True
         else:
@@ -307,6 +316,7 @@ class TestIntegrationFromArgs:
         assert threw == params.fail
         # AND expected integrations match if not thrown
         if not threw:
+            assert params.integrations is not None
             assert integrations == frozenset(params.integrations)
 
 
@@ -332,13 +342,13 @@ class TestPlatformFromArgs:
     ]
 
     @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-    def test(self, params: Params):
+    def test(self, params: Params) -> None:
         # GIVEN stubbed argument parser
         parser = ArgumentParserStub()
 
         # WHEN called with the specs
         try:
-            platform = platform_from_args(parser, params.substrate)
+            platform = platform_from_args(parser, params.substrate)  # type: ignore[arg-type]
         except RuntimeError:
             threw = True
         else:
@@ -352,7 +362,7 @@ class TestPlatformFromArgs:
 
 
 class TestWriteToFile:
-    def test_write(self, tmp_path: Path):
+    def test_write(self, tmp_path: Path) -> None:
         # GIVEN content to write
         content = "my bundle string"
         # AND a file to write to

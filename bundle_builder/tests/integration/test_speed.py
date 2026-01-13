@@ -53,7 +53,7 @@ class Params:
     ],
 )
 @pytest.mark.timeout(timedelta(minutes=20).total_seconds())
-def test_speed(charmhub_client: CharmhubClient, params: Params):
+def test_speed(charmhub_client: CharmhubClient, params: Params) -> None:
     # GIVEN a base bundle
     base_bundle = Bundle(
         applications=frozenset(
