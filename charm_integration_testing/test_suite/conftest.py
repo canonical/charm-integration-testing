@@ -23,7 +23,7 @@ from extensions import (
 from juju import JujuBackend, JujuClient, JujuWaitTimeoutError
 from juju_jubilant import JubilantBackend
 from pytest import StashKey
-from utils import normalize_string
+from utils import normalize_string, normalize_string_multiline
 
 
 @pytest.fixture
@@ -302,9 +302,11 @@ def record_failure_execution_metadata(
             execution_metadata("failure:cli:cmd", normalize_string(cmd))
             execution_metadata("failure:cli:return_code", str(exc.returncode))
             if exc.stdout:
-                execution_metadata("failure:cli:stdout", normalize_string(exc.stdout))
+                for line in normalize_string_multiline(exc.stdout):
+                    execution_metadata("failure:cli:stdout", line)
             if exc.stderr:
-                execution_metadata("failure:cli:stderr", normalize_string(exc.stderr))
+                for line in normalize_string_multiline(exc.stderr):
+                    execution_metadata("failure:cli:stderr", line)
 
 
 @pytest.fixture
