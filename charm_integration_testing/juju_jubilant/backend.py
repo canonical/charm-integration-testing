@@ -238,4 +238,4 @@ class JubilantBackend(JujuCmdBackend):
         return target_applications in {integration.applications for integration in integrations}
 
     def version(self, model: str) -> str:
-        return self.client.model(model).version()
+        return ".".join(map(str, self.client.model(model).version().tuple))
