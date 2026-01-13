@@ -2,10 +2,10 @@
 # See LICENSE file for licensing details.
 
 import logging
-import subprocess
 import time
 from dataclasses import asdict
 from datetime import timedelta
+from subprocess import CalledProcessError  # nosec
 
 from juju import JujuBackend
 from pydantic.dataclasses import dataclass
@@ -149,7 +149,7 @@ class VaultUnsealer:
         try:
             self.juju.remove_secret(model, secret_name)
             self.logger.info(f"Removed existing secret '{secret_name}'")
-        except subprocess.CalledProcessError as err:
+        except CalledProcessError as err:
             self.logger.info(f"Ignoring failure to remove secret '{secret_name}': {err.stderr}")
 
         # Add the vault tokens
