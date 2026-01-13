@@ -2,7 +2,9 @@
 # See LICENSE file for licensing details.
 
 import logging
+from collections.abc import KeysView
 from dataclasses import dataclass, field
+from datetime import timedelta
 
 import pytest
 from extensions.configure_livepatch_server.extensions import (
@@ -10,73 +12,148 @@ from extensions.configure_livepatch_server.extensions import (
     LIVEPATCH_SERVER_CONFIGURE_MESSAGE,
     ConfigureLivepatchServerExtension,
 )
+from juju.backend import JujuBackend
 
 
 @dataclass
-class JujuStub:
-    applications: dict = field(default_factory=lambda: {"livepatch": LIVEPATCH_SERVER_CHARM})
-    waited_scaled: list = field(default_factory=list)
-    waited_settled: list = field(default_factory=list)
-    waited_messages: list = field(default_factory=list)
-    actions: list = field(default_factory=list)
-    configured: list = field(default_factory=list)
-    unit_ips: dict = field(default_factory=lambda: {"livepatch/leader": "10.1.2.157"})
+class JujuStub(JujuBackend):
+    applications: dict[str, str] = field(default_factory=lambda: {"livepatch": LIVEPATCH_SERVER_CHARM})
+    waited_scaled: list[tuple[str, str, str]] = field(default_factory=list)
+    waited_settled: list[tuple[str, str, str]] = field(default_factory=list)
+    waited_messages: list[tuple[str, str, str, str]] = field(default_factory=list)
+    actions: list[tuple[str, str, str, dict[str, str]]] = field(default_factory=list)
+    configured: list[tuple[str, str, dict[str, str]]] = field(default_factory=list)
+    unit_ips: dict[str, str] = field(default_factory=lambda: {"livepatch/leader": "10.1.2.157"})
 
-    def list_applications(self, model: str):
+    def list_applications(self, model: str) -> KeysView[str]:  # type: ignore[override]
         return self.applications.keys()
 
-    def application_charm(self, model: str, application: str):
+    def application_charm(self, model: str, application: str) -> str:
         return self.applications[application]
 
-    def wait_application_scaled(self, model: str, application: str, timeout):
+    def wait_application_scaled(self, model: str, application: str, timeout: timedelta) -> None:  # type: ignore[override]
         self.waited_scaled.append((model, application, str(timeout)))
 
-    def wait_application_settled(self, model: str, application: str, timeout):
+    def wait_application_settled(self, model: str, application: str, timeout: timedelta) -> None:  # type: ignore[override]
         self.waited_settled.append((model, application, str(timeout)))
 
-    def wait_for_unit_message(self, model: str, unit: str, message: str, timeout):
+    def wait_for_unit_message(self, model: str, unit: str, message: str, timeout: timedelta) -> None:  # type: ignore[override]
         self.waited_messages.append((model, unit, message, str(timeout)))
 
-    def run_action(self, model: str, unit: str, action: str, params: dict):
+    def run_action(self, model: str, unit: str, action: str, params: dict[str, str]) -> None:
         self.actions.append((model, unit, action, params))
 
-    def configure_application(self, model: str, application: str, values: dict):
+    def configure_application(self, model: str, application: str, values: dict[str, str]) -> None:
         self.configured.append((model, application, values))
 
-    def unit_ip(self, model: str, unit: str):
+    def unit_ip(self, model: str, unit: str) -> str:
         return self.unit_ips[unit]
 
+    def scale_application(self) -> None:  # type: ignore[override]
+        pass
 
-class LoggerStub:
-    def __init__(self):
-        self.messages = {"info": [], "warning": []}
+    def num_units(self) -> None:  # type: ignore[override]
+        pass
 
-    def info(self, message):
+    def list_integrations(self) -> None:  # type: ignore[override]
+        pass
+
+    def integration_exists(self) -> None:  # type: ignore[override]
+        pass
+
+    def wait_idle(self) -> None:  # type: ignore[override]
+        pass
+
+    def juju_status_text(self) -> None:  # type: ignore[override]
+        pass
+
+    def integrate(self) -> None:  # type: ignore[override]
+        pass
+
+    def remove_integration(self) -> None:  # type: ignore[override]
+        pass
+
+    def deploy_bundle_file(self) -> None:  # type: ignore[override]
+        pass
+
+    def remove_applications(self) -> None:  # type: ignore[override]
+        pass
+
+    def wait_for_removal(self) -> None:  # type: ignore[override]
+        pass
+
+    def wait_for_removal_of_integration(self) -> None:  # type: ignore[override]
+        pass
+
+    def wait_for_removal_of_units(self) -> None:  # type: ignore[override]
+        pass
+
+    def application_units(self) -> None:  # type: ignore[override]
+        pass
+
+    def exec_unit(self) -> None:  # type: ignore[override]
+        pass
+
+    def add_secret(self) -> None:  # type: ignore[override]
+        pass
+
+    def read_secret(self) -> None:  # type: ignore[override]
+        pass
+
+    def grant_secret(self) -> None:  # type: ignore[override]
+        pass
+
+    def remove_secret(self) -> None:  # type: ignore[override]
+        pass
+
+    def deploy_application(self) -> None:  # type: ignore[override]
+        pass
+
+    def scp(self) -> None:  # type: ignore[override]
+        pass
+
+    def ssh(self) -> None:  # type: ignore[override]
+        pass
+
+    def get_charm_revisions(self) -> None:  # type: ignore[override]
+        pass
+
+    def version(self) -> None:  # type: ignore[override]
+        pass
+
+
+class LoggerStub(logging.Logger):
+    def __init__(self) -> None:
+        self.messages: dict[str, list[str]] = {"info": [], "warning": []}
+
+    def info(self, message: str) -> None:  # type: ignore[override]
         self.messages["info"].append(message)
 
-    def warning(self, message):
+    def warning(self, message: str) -> None:  # type: ignore[override]
         self.messages["warning"].append(message)
 
 
 class TestConfigureLivepatchServerExtension:
     @pytest.fixture
-    def juju(self):
+    def juju(self) -> JujuStub:
         return JujuStub()
 
     @pytest.fixture
-    def logger(self):
+    def logger(self) -> LoggerStub:
         return LoggerStub()
 
     @pytest.fixture
-    def extension_with_token(self, juju, logger):
+    def extension_with_token(self, juju: JujuBackend, logger: logging.Logger) -> ConfigureLivepatchServerExtension:
         return ConfigureLivepatchServerExtension(juju, logger, "test-token-123")
 
     @pytest.fixture
-    def extension_without_token(self, juju, logger):
+    def extension_without_token(self, juju: JujuBackend, logger: logging.Logger) -> ConfigureLivepatchServerExtension:
         return ConfigureLivepatchServerExtension(juju, logger, None)
 
     class TestPostDeploy:
-        def test_configures_livepatch_server_when_present(self, extension_with_token, juju):
+        def test_configures_livepatch_server_when_present(
+            self, extension_with_token: ConfigureLivepatchServerExtension, juju: JujuStub
+        ) -> None:
             # GIVEN a model with a livepatch server application
             # WHEN post_deploy is called
             extension_with_token.post_deploy("test-model")
@@ -86,7 +163,7 @@ class TestConfigureLivepatchServerExtension:
             assert len(juju.actions) > 0
             assert len(juju.configured) > 0
 
-        def test_ignores_non_livepatch_apps(self, extension_with_token):
+        def test_ignores_non_livepatch_apps(self, extension_with_token: ConfigureLivepatchServerExtension) -> None:
             # GIVEN a model with no livepatch server applications
             juju_stub = JujuStub(applications={"other-app": "other-charm"})
             extension = ConfigureLivepatchServerExtension(juju_stub, logging.getLogger("test"), "test-token")
@@ -99,7 +176,9 @@ class TestConfigureLivepatchServerExtension:
             assert juju_stub.actions == []
             assert juju_stub.configured == []
 
-        def test_skips_configuration_without_token(self, extension_without_token, juju, logger):
+        def test_skips_configuration_without_token(
+            self, extension_without_token: ConfigureLivepatchServerExtension, juju: JujuStub, logger: LoggerStub
+        ) -> None:
             # GIVEN an extension without a token
             # WHEN post_deploy is called
             extension_without_token.post_deploy("test-model")
@@ -111,7 +190,9 @@ class TestConfigureLivepatchServerExtension:
             assert juju.configured == []
 
     class TestConfigureLivepatchServer:
-        def test_complete_configuration_flow(self, extension_with_token, juju):
+        def test_complete_configuration_flow(
+            self, extension_with_token: ConfigureLivepatchServerExtension, juju: JujuStub
+        ) -> None:
             # GIVEN a ready extension with a token
             # WHEN configure_livepatch_server is called
             extension_with_token.configure_livepatch_server("test-model", "livepatch")
@@ -146,7 +227,9 @@ class TestConfigureLivepatchServerExtension:
                 {"server.url-template": "http://10.1.2.157:8080/v1/patches/{filename}"},
             ) in juju.configured
 
-        def test_skips_when_no_token(self, extension_without_token, juju, logger):
+        def test_skips_when_no_token(
+            self, extension_without_token: ConfigureLivepatchServerExtension, juju: JujuStub, logger: LoggerStub
+        ) -> None:
             # GIVEN an extension without a token
             # WHEN configure_livepatch_server is called
             extension_without_token.configure_livepatch_server("test-model", "livepatch")
@@ -157,11 +240,10 @@ class TestConfigureLivepatchServerExtension:
             assert juju.actions == []
             assert juju.configured == []
 
-        def test_uses_correct_unit_ip(self, juju, logger):
+        def test_uses_correct_unit_ip(self, juju: JujuStub, logger: LoggerStub) -> None:
             # GIVEN an extension with a specific unit IP
             juju.unit_ips = {"livepatch/leader": "192.168.1.100"}
             extension = ConfigureLivepatchServerExtension(juju, logger, "test-token")
-
             # WHEN configure_livepatch_server is called
             extension.configure_livepatch_server("test-model", "livepatch")
 
@@ -173,7 +255,7 @@ class TestConfigureLivepatchServerExtension:
             ) in juju.configured
 
     class TestInitialization:
-        def test_stores_token(self, juju, logger):
+        def test_stores_token(self, juju: JujuStub, logger: LoggerStub) -> None:
             # GIVEN a token
             token = "my-ubuntu-pro-token"
 
@@ -183,7 +265,7 @@ class TestConfigureLivepatchServerExtension:
             # THEN the token is stored
             assert extension.ubuntu_pro_token == token
 
-        def test_stores_none_token(self, juju, logger):
+        def test_stores_none_token(self, juju: JujuStub, logger: LoggerStub) -> None:
             # GIVEN no token
             # WHEN creating the extension
             extension = ConfigureLivepatchServerExtension(juju, logger, None)
@@ -191,7 +273,7 @@ class TestConfigureLivepatchServerExtension:
             # THEN None is stored
             assert extension.ubuntu_pro_token is None
 
-        def test_stores_juju_and_logger(self, juju, logger):
+        def test_stores_juju_and_logger(self, juju: JujuStub, logger: LoggerStub) -> None:
             # GIVEN juju and logger instances
             # WHEN creating the extension
             extension = ConfigureLivepatchServerExtension(juju, logger, "token")

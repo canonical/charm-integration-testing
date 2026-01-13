@@ -68,7 +68,7 @@ class TestNormalizeNumericSequences:
     ]
 
     @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-    def test(self, params: Params):
+    def test(self, params: Params) -> None:
         result = _normalize_numeric_sequences(params.input)
         assert result == params.expected
 
@@ -134,7 +134,7 @@ class TestNormalizeIpAddresses:
     ]
 
     @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-    def test(self, params: Params):
+    def test(self, params: Params) -> None:
         result = _normalize_ip_addresses(params.input)
         assert result == params.expected
 
@@ -200,7 +200,7 @@ class TestNormalizeTimestamps:
     ]
 
     @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-    def test(self, params: Params):
+    def test(self, params: Params) -> None:
         result = _normalize_timestamps(params.input)
         assert result == params.expected
 
@@ -246,7 +246,7 @@ class TestNormalizePodNames:
     ]
 
     @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-    def test(self, params: Params):
+    def test(self, params: Params) -> None:
         result = _normalize_pod_names(params.input)
         assert result == params.expected
 
@@ -292,7 +292,7 @@ class TestNormalizeUuids:
     ]
 
     @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-    def test(self, params: Params):
+    def test(self, params: Params) -> None:
         result = _normalize_uuids(params.input)
         assert result == params.expected
 
@@ -343,7 +343,7 @@ class TestNormalizeTempFiles:
     ]
 
     @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-    def test(self, params: Params):
+    def test(self, params: Params) -> None:
         result = _normalize_temp_files(params.input)
         assert result == params.expected
 
@@ -384,7 +384,7 @@ class TestNormalizeMinioProbeUrls:
     ]
 
     @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-    def test(self, params: Params):
+    def test(self, params: Params) -> None:
         result = _normalize_minio_probe_urls(params.input)
         assert result == params.expected
 
@@ -460,7 +460,7 @@ class TestNormalizeOciImageDigests:
     ]
 
     @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-    def test(self, params: Params):
+    def test(self, params: Params) -> None:
         result = _normalize_oci_image_digests(params.input)
         assert result == params.expected
 
@@ -570,7 +570,7 @@ class TestNormalizeString:
     ]
 
     @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-    def test(self, params: Params):
+    def test(self, params: Params) -> None:
         # WHEN normalizing the input
         result = normalize_string(params.input, max_length=params.max_length)
 

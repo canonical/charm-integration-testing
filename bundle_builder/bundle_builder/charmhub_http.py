@@ -15,6 +15,7 @@
 
 import logging
 from functools import cache
+from typing import Any
 
 import requests
 import yaml
@@ -33,6 +34,12 @@ class UnparsableCharmException(Exception):
 
 class NoCharmMetadataException(UnparsableCharmException):
     """Raised when there is no metadata-yaml exposed by the charmhub for this charm."""
+
+    pass
+
+
+class IncompleteCharmInfoException(UnparsableCharmException):
+    """Raised when the charm info from charmhub is incomplete or missing required fields."""
 
     pass
 
@@ -72,7 +79,8 @@ class CharmMetadata:
     provides: dict[str, Endpoint] = Field(default_factory=dict)
 
 
-@immutable_dataclass(config=dict(validate_by_name=True))
+# TODO(raul): remove type ignore in subsequent type checker PRs
+@immutable_dataclass(config=dict(validate_by_name=True))  # type: ignore
 class RefreshResponse:
     @immutable_dataclass
     class Charm:
@@ -82,12 +90,13 @@ class RefreshResponse:
 
         @field_validator("metadata", mode="before")
         @classmethod
-        def parse_yaml(cls, metadata_yaml):
+        def parse_yaml(cls, metadata_yaml: str) -> CharmMetadata:
             return CharmMetadata(**yaml.safe_load(metadata_yaml))
 
     @immutable_dataclass
     class Error:
-        @immutable_dataclass(config=dict(validate_by_name=True))
+        # TODO(raul): remove type ignore in subsequent type checker PRs
+        @immutable_dataclass(config=dict(validate_by_name=True))  # type: ignore
         class Extra:
             @immutable_dataclass
             class Release:
@@ -109,7 +118,8 @@ class RefreshResponse:
 
 @immutable_dataclass
 class FindResponse:
-    @immutable_dataclass(config=dict(validate_by_name=True))
+    # TODO(raul): remove type ignore in subsequent type checker PRs
+    @immutable_dataclass(config=dict(validate_by_name=True))  # type: ignore
     class Result:
         deployable_on: frozenset[str] = Field(default_factory=frozenset, alias="deployable-on")
 
@@ -117,22 +127,25 @@ class FindResponse:
     result: Result
 
 
-@immutable_dataclass(config=dict(validate_by_name=True))
+# TODO(raul): remove type ignore in subsequent type checker PRs
+@immutable_dataclass(config=dict(validate_by_name=True))  # type: ignore
 class InfoResponse:
     @immutable_dataclass
     class DefaultRelease:
-        @immutable_dataclass(config=dict(validate_by_name=True))
+        # TODO(raul): remove type ignore in subsequent type checker PRs
+        @immutable_dataclass(config=dict(validate_by_name=True))  # type: ignore
         class Revision:
             metadata: CharmMetadata = Field(default_factory=CharmMetadata, alias="metadata-yaml")
 
             @field_validator("metadata", mode="before")
             @classmethod
-            def parse_yaml(cls, metadata_yaml):
+            def parse_yaml(cls, metadata_yaml: str) -> CharmMetadata:
                 return CharmMetadata(**yaml.safe_load(metadata_yaml))
 
         revision: Revision = Field(default_factory=Revision)
 
-    @immutable_dataclass(config=dict(validate_by_name=True))
+    # TODO(raul): remove type ignore in subsequent type checker PRs
+    @immutable_dataclass(config=dict(validate_by_name=True))  # type: ignore
     class Result:
         deployable_on: frozenset[str] = Field(default_factory=frozenset, alias="deployable-on")
 
@@ -149,7 +162,9 @@ class CharmhubHttpClient:
     session: requests.Session
     logger: logging.Logger
 
-    def __init__(self, logger=logging.getLogger(__name__), session: requests.Session | None = None):
+    def __init__(
+        self, logger: logging.Logger = logging.getLogger(__name__), session: requests.Session | None = None
+    ) -> None:
         self.logger = logger
 
         # Setup requests session with retries
@@ -205,7 +220,7 @@ class CharmhubHttpClient:
         # Formulate request
         request_url = CHARM_REFRESH_ENDPOINT
         request_headers = {"Content-Type": "application/json"}
-        action_dict = {"name": action.charm_name}
+        action_dict: dict[str, Any] = {"name": action.charm_name}
         if action.charm_revision is not None:
             action_dict["revision"] = action.charm_revision
         if action.charm_channel is not None:

@@ -9,7 +9,7 @@ import warnings
 from datetime import timedelta
 from pathlib import Path
 from subprocess import CalledProcessError, run  # nosec
-from typing import Callable
+from typing import Any, Callable, Iterator
 
 import pytest
 from extensions import (
@@ -60,13 +60,15 @@ def juju_client(
     )
 
 
-def pytest_addoption(parser):
+def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption("--model", type=str, required=True, help="Juju model to test in")
 
 
 @pytest.fixture
 def model(request: pytest.FixtureRequest) -> str:
-    return request.config.getoption("--model")
+    option = request.config.getoption("--model")
+    assert isinstance(option, str)
+    return option
 
 
 @pytest.fixture
@@ -85,15 +87,16 @@ def ubuntu_pro_token() -> str | None:
     return token if token else None
 
 
-failure_message = StashKey[CollectReport]()
-skipped_message = StashKey[CollectReport]()
-failure_exception = StashKey[CollectReport]()
+failure_message = StashKey[str]()
+skipped_message = StashKey[str]()
+failure_exception = StashKey[BaseException]()
 
 
 # Get failure message for logging
 @pytest.hookimpl(tryfirst=True, hookwrapper=True)
-def pytest_runtest_makereport(item, call):
+def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[Any]) -> Iterator[None]:
     result = yield
+    assert result is not None
     report = result.get_result()
 
     # Save failure message
@@ -129,7 +132,7 @@ def print_setup_and_teardown_info(
     juju_client: JujuClient,
     model: str,
     record_execution_metadata: None,
-):
+) -> Iterator[None]:
     # Enforce fixture execution order
     _ = record_execution_metadata
 
@@ -154,7 +157,7 @@ def print_setup_and_teardown_info(
 
 
 @pytest.fixture(autouse=True)
-def assert_idle(juju_client: JujuClient, model: str, print_setup_and_teardown_info: None):
+def assert_idle(juju_client: JujuClient, model: str, print_setup_and_teardown_info: None) -> None:
     # Enforce fixture execution order
     _ = print_setup_and_teardown_info
 
@@ -165,11 +168,11 @@ def assert_idle(juju_client: JujuClient, model: str, print_setup_and_teardown_in
 
 
 @pytest.fixture
-def execution_metadata(record_property: Callable[[str, object], None]):
+def execution_metadata(record_property: Callable[[str, object], None]) -> Iterator[Callable[[str, str], None]]:
     # Create a function for adding and deduplicating metadata
     metadata: dict[str, set[str]] = {}
 
-    def add(category: str, value: str):
+    def add(category: str, value: str) -> None:
         if category not in metadata:
             metadata[category] = set()
         metadata[category].add(value)
@@ -193,7 +196,7 @@ def record_execution_metadata(
     record_juju_execution_metadata: None,
     record_charms_and_revisions_execution_metadata: None,
     record_pipeline_version_execution_metadata: None,
-):
+) -> None:
     # Save various execution metadata
     _ = record_warning_execution_metadata
     _ = record_failure_execution_metadata
@@ -203,7 +206,7 @@ def record_execution_metadata(
 
 
 @pytest.fixture
-def record_warning_execution_metadata(execution_metadata: Callable[[str, str | int], None]):
+def record_warning_execution_metadata(execution_metadata: Callable[[str, str | int], None]) -> Iterator[None]:
     # Capture all warnings
     # Pytest normally captures warnings, but does not expose them until after the test report is made
     captured_warnings = []
@@ -229,7 +232,7 @@ def record_warning_execution_metadata(execution_metadata: Callable[[str, str | i
 
 def record_charms_and_revisions_execution_metadata_instantaneous(
     juju_client: JujuClient, model: str, execution_metadata: Callable[[str, str | int], None]
-):
+) -> None:
     # Get all charm revisions
     for charm, revision in juju_client.get_charm_revisions(model=model):
         # Save the charm
@@ -241,7 +244,7 @@ def record_charms_and_revisions_execution_metadata_instantaneous(
 @pytest.fixture
 def record_charms_and_revisions_execution_metadata(
     juju_client: JujuClient, model: str, execution_metadata: Callable[[str, str | int], None]
-):
+) -> Iterator[None]:
     # Save all charms and revisions at start of test
     record_charms_and_revisions_execution_metadata_instantaneous(juju_client, model, execution_metadata)
 
@@ -255,7 +258,7 @@ def record_charms_and_revisions_execution_metadata(
 @pytest.fixture
 def record_failure_execution_metadata(
     request: pytest.FixtureRequest, execution_metadata: Callable[[str, str | int], None]
-):
+) -> Iterator[None]:
     # Let the test run
     yield
 
@@ -302,7 +305,7 @@ def record_failure_execution_metadata(
 @pytest.fixture
 def record_juju_execution_metadata(
     juju_client: JujuClient, model: str, execution_metadata: Callable[[str, str | int], None]
-):
+) -> Iterator[None]:
     # Let the test run
     yield
 
