@@ -1,0 +1,7 @@
+# Metacontroller Operator - custom controller framework
+provides:
+  # Remove after: https://github.com/canonical/charm-integration-testing/issues/282
+  metrics-endpoint:
+    optional: true
+  grafana-dashboard:
+    optional: true

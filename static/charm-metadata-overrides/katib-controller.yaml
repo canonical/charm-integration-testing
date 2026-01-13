@@ -1,0 +1,11 @@
+# Katib Controller - orchestrates hyperparameter tuning experiments
+provides:
+  # Remove after: https://github.com/canonical/charm-integration-testing/issues/282
+  metrics-endpoint:
+    optional: true
+  grafana-dashboard:
+    optional: true
+
+requires:
+  k8s-service-info:
+    features: [katib-service]

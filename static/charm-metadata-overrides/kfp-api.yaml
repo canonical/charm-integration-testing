@@ -1,0 +1,13 @@
+# Kubeflow Pipelines API server - core backend for pipeline management
+provides:
+  kfp-api:
+    features: [kfp-api]
+  # Remove after: https://github.com/canonical/charm-integration-testing/issues/282
+  metrics-endpoint:
+    optional: true
+  grafana-dashboard:
+    optional: true
+
+requires:
+  kfp-viz:
+    features: [kfp-viz]
