@@ -14,6 +14,8 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
+from typing import Any
+
 import pytest
 from pydantic import Field, TypeAdapter
 from pydantic.dataclasses import dataclass
@@ -316,7 +318,7 @@ class TestCharmEndpointOptionality:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test(self, params: Params):
+        def test(self, params: Params) -> None:
             # GIVEN the optionality
             optionality = params.optionality
 
@@ -341,7 +343,7 @@ class TestCharmEndpointOptionality:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test(self, params: Params):
+        def test(self, params: Params) -> None:
             # GIVEN the optionality for the value
             optionality = CharmEndpointOptionality.from_bool(params.value)
 
@@ -472,7 +474,7 @@ class TestCharmLimitCriteria:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test(self, params: Params):
+        def test(self, params: Params) -> None:
             # GIVEN the criteria and endpoints
             criteria = params.criteria
             endpoints = params.endpoints
@@ -498,7 +500,7 @@ class TestCharmLimitCriteria:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test(self, params: Params):
+        def test(self, params: Params) -> None:
             # GIVEN the criteria for the value
             criteria = CharmLimitCriteria.from_bool(params.value)
 
@@ -546,7 +548,7 @@ class TestCharmLimit:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test(self, params: Params):
+        def test(self, params: Params) -> None:
             # GIVEN a limit with criteria
             limit = params.limit
 
@@ -658,7 +660,7 @@ class TestCharmEndpoint:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test(self, params: Params):
+        def test(self, params: Params) -> None:
             # GIVEN an endpoint with limits
             endpoint = params.endpoint
 
@@ -711,7 +713,7 @@ class TestCharmChannel:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test(self, params: Params):
+        def test(self, params: Params) -> None:
             # GIVEN a channel string
             channel_str = params.input_value
 
@@ -723,7 +725,7 @@ class TestCharmChannel:
             assert channel.risk == params.expected_risk
             assert channel.branch == params.expected_branch
 
-        def test_invalid_channel_raises_error(self):
+        def test_invalid_channel_raises_error(self) -> None:
             # GIVEN an invalid channel string with too many parts
             invalid_channel = "track/risk/branch/extra"
 
@@ -773,7 +775,7 @@ class TestCharmChannel:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test_str(self, params: Params):
+        def test_str(self, params: Params) -> None:
             # GIVEN a CharmChannel
             channel = CharmChannel(track=params.track, risk=params.risk, branch=params.branch)
 
@@ -784,7 +786,7 @@ class TestCharmChannel:
             assert channel_str == params.expected_str
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test_serialize_model(self, params: Params):
+        def test_serialize_model(self, params: Params) -> None:
             # GIVEN a CharmChannel
             channel = CharmChannel(track=params.track, risk=params.risk, branch=params.branch)
 
@@ -820,7 +822,7 @@ class TestCharmChannel:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test(self, params: Params):
+        def test(self, params: Params) -> None:
             # GIVEN a CharmChannel
             channel = CharmChannel(track=params.track, risk="stable", branch="")
 
@@ -833,7 +835,7 @@ class TestCharmChannel:
 
 class TestCharmConfigCriteria:
     class TestValid:
-        def test_no_conditions_is_always_valid(self):
+        def test_no_conditions_is_always_valid(self) -> None:
             # GIVEN a criteria with no conditions
             criteria = CharmConfigCriteria()
             channel = channel_from_string("stable")
@@ -844,7 +846,7 @@ class TestCharmConfigCriteria:
             # THEN it's always valid
             assert is_valid is True
 
-        def test_track_matches_explicit_track(self):
+        def test_track_matches_explicit_track(self) -> None:
             # GIVEN a criteria for track 1.0
             criteria = CharmConfigCriteria(track="1.0")
             channel = channel_from_string("1.0/stable")
@@ -855,7 +857,7 @@ class TestCharmConfigCriteria:
             # THEN it's valid
             assert is_valid is True
 
-        def test_track_does_not_match(self):
+        def test_track_does_not_match(self) -> None:
             # GIVEN a criteria for track 1.0
             criteria = CharmConfigCriteria(track="1.0")
             channel = channel_from_string("2.0/stable")
@@ -866,7 +868,7 @@ class TestCharmConfigCriteria:
             # THEN it's not valid
             assert is_valid is False
 
-        def test_empty_track_matches_latest(self):
+        def test_empty_track_matches_latest(self) -> None:
             # GIVEN a criteria for latest track
             criteria = CharmConfigCriteria(track="latest")
             channel = channel_from_string("stable")
@@ -877,7 +879,7 @@ class TestCharmConfigCriteria:
             # THEN it's valid (empty track = latest)
             assert is_valid is True
 
-        def test_endpoint_integrated_true(self):
+        def test_endpoint_integrated_true(self) -> None:
             # GIVEN a criteria requiring database endpoint
             criteria = CharmConfigCriteria(endpoint_integrated="db")
             channel = channel_from_string("stable")
@@ -888,7 +890,7 @@ class TestCharmConfigCriteria:
             # THEN it's valid
             assert is_valid is True
 
-        def test_endpoint_integrated_false(self):
+        def test_endpoint_integrated_false(self) -> None:
             # GIVEN a criteria requiring database endpoint
             criteria = CharmConfigCriteria(endpoint_integrated="db")
             channel = channel_from_string("stable")
@@ -899,7 +901,7 @@ class TestCharmConfigCriteria:
             # THEN it's not valid
             assert is_valid is False
 
-        def test_all_of_all_true(self):
+        def test_all_of_all_true(self) -> None:
             # GIVEN a criteria with all_of conditions
             criteria = CharmConfigCriteria(
                 all_of=frozenset(
@@ -917,7 +919,7 @@ class TestCharmConfigCriteria:
             # THEN it's valid
             assert is_valid is True
 
-        def test_all_of_one_false(self):
+        def test_all_of_one_false(self) -> None:
             # GIVEN a criteria with all_of conditions
             criteria = CharmConfigCriteria(
                 all_of=frozenset(
@@ -935,7 +937,7 @@ class TestCharmConfigCriteria:
             # THEN it's not valid
             assert is_valid is False
 
-        def test_any_of_one_true(self):
+        def test_any_of_one_true(self) -> None:
             # GIVEN a criteria with any_of conditions
             criteria = CharmConfigCriteria(
                 any_of=frozenset(
@@ -953,7 +955,7 @@ class TestCharmConfigCriteria:
             # THEN it's valid
             assert is_valid is True
 
-        def test_any_of_all_false(self):
+        def test_any_of_all_false(self) -> None:
             # GIVEN a criteria with any_of conditions
             criteria = CharmConfigCriteria(
                 any_of=frozenset(
@@ -971,7 +973,7 @@ class TestCharmConfigCriteria:
             # THEN it's not valid
             assert is_valid is False
 
-        def test_none_of_condition_not_met(self):
+        def test_none_of_condition_not_met(self) -> None:
             # GIVEN a criteria with none_of conditions
             criteria = CharmConfigCriteria(none_of=frozenset({CharmConfigCriteria(endpoint_integrated="db")}))
             channel = channel_from_string("stable")
@@ -982,7 +984,7 @@ class TestCharmConfigCriteria:
             # THEN it's valid
             assert is_valid is True
 
-        def test_none_of_condition_met(self):
+        def test_none_of_condition_met(self) -> None:
             # GIVEN a criteria with none_of conditions
             criteria = CharmConfigCriteria(none_of=frozenset({CharmConfigCriteria(endpoint_integrated="db")}))
             channel = channel_from_string("stable")
@@ -993,7 +995,7 @@ class TestCharmConfigCriteria:
             # THEN it's not valid
             assert is_valid is False
 
-        def test_complex_combined_all_true(self):
+        def test_complex_combined_all_true(self) -> None:
             # GIVEN a criteria with all condition types
             criteria = CharmConfigCriteria(
                 all_of=frozenset({CharmConfigCriteria(track="1.0")}),
@@ -1009,7 +1011,7 @@ class TestCharmConfigCriteria:
             # THEN it's valid
             assert is_valid is True
 
-        def test_complex_combined_none_of_fails(self):
+        def test_complex_combined_none_of_fails(self) -> None:
             # GIVEN a criteria with all condition types including failing none_of
             criteria = CharmConfigCriteria(
                 all_of=frozenset({CharmConfigCriteria(track="1.0")}),
@@ -1051,7 +1053,7 @@ class TestCharmConfigCriteria:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test(self, params: Params):
+        def test(self, params: Params) -> None:
             # GIVEN a criteria from bool and channel
             criteria = CharmConfigCriteria.from_bool(params.value)
             channel = channel_from_string(params.channel_str)
@@ -1063,7 +1065,7 @@ class TestCharmConfigCriteria:
             assert is_valid == params.value
 
     class TestValidateConfigFromDict:
-        def test_list_converts_to_all_of(self):
+        def test_list_converts_to_all_of(self) -> None:
             # GIVEN a list of criteria
             criteria_list = [
                 {"track": "1.0"},
@@ -1079,7 +1081,7 @@ class TestCharmConfigCriteria:
             assert any(c.track == "1.0" for c in criteria.all_of)
             assert any(c.endpoint_integrated == "db" for c in criteria.all_of)
 
-        def test_dict_remains_dict(self):
+        def test_dict_remains_dict(self) -> None:
             # GIVEN a dict of criteria
             criteria_dict = {"track": "1.0", "endpoint_integrated": "db"}
 
@@ -1096,7 +1098,7 @@ class TestCharmTestConfig:
         @dataclass
         class Params:
             label: str
-            input_value: dict
+            input_value: dict[str, dict[str, Any]]
             expected_config: CharmConfig
 
         test_cases = [
@@ -1118,7 +1120,7 @@ class TestCharmTestConfig:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test(self, params: Params):
+        def test(self, params: Params) -> None:
             # GIVEN a dict with config
             input_data = params.input_value
 
@@ -1129,7 +1131,7 @@ class TestCharmTestConfig:
             # THEN the config is converted to tuple format
             assert test_config.config == params.expected_config
 
-    def test_default_criteria_is_always_valid(self):
+    def test_default_criteria_is_always_valid(self) -> None:
         # GIVEN a CharmTestConfig with default criteria
         test_config = CharmTestConfig(config=(("key", "value"),))
         channel = channel_from_string("stable")
@@ -1140,7 +1142,7 @@ class TestCharmTestConfig:
         # THEN it's always valid
         assert is_valid is True
 
-    def test_config_with_criteria(self):
+    def test_config_with_criteria(self) -> None:
         # GIVEN a CharmTestConfig with specific criteria
         criteria = CharmConfigCriteria(track="1.0")
         test_config = CharmTestConfig(criteria=criteria, config=(("key", "value"),))
@@ -1158,12 +1160,13 @@ class TestCharmTestConfig:
 
 
 class TestCharm:
-    def test_repr(self):
+    def test_repr(self) -> None:
         # GIVEN a charm
         charm = sample_charm_postgresql_k8s()
 
         # WHEN repr is called
-        repr = charm.__repr__()
+        # TODO(raul): remove type ignore in subsequent type checker PRs
+        repr = charm.__repr__()  # type: ignore
 
         # THEN repr is charm name
         assert repr == charm.name

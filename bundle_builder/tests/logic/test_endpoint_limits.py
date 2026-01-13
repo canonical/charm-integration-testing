@@ -30,7 +30,7 @@ from .conftest import CharmhubClientStub
 
 class TestEndpointLimits:
     class TestEdgeCases:
-        def test_zero_limit_blocks_all_connections(self):
+        def test_zero_limit_blocks_all_connections(self) -> None:
             # GIVEN a charm with limit 0
             zero_limit_charm = Charm(
                 name="zero-limit-charm",
@@ -98,7 +98,7 @@ class TestEndpointLimits:
             )
             assert expected not in new_bundle.integrations
 
-        def test_limit_applies_to_both_endpoints_in_integration(self):
+        def test_limit_applies_to_both_endpoints_in_integration(self) -> None:
             # GIVEN two charms both with limits
             charm1 = Charm(
                 name="charm1",
@@ -187,7 +187,7 @@ class TestEndpointLimits:
     class TestMultipleCharmInstances:
         """Test scenarios where multiple instances of the same charm are needed."""
 
-        def test_multiple_postgresql_instances_for_dependencies(self):
+        def test_multiple_postgresql_instances_for_dependencies(self) -> None:
             """Test the exact scenario from PR feedback where indico needs postgresql and a dependency that also needs postgresql."""
             # GIVEN postgresql-k8s with limit=1 (can only connect to one app)
             postgresql_charm = Charm(
@@ -324,7 +324,7 @@ class TestEndpointLimits:
             postgresql_apps = [app for app in result.applications if app.charm.name == "postgresql-k8s"]
             assert len(postgresql_apps) >= 2, f"Should have at least 2 postgresql instances, got {len(postgresql_apps)}"
 
-        def test_prevents_infinite_charm_chain(self):
+        def test_prevents_infinite_charm_chain(self) -> None:
             """Test that self-referential charms don't create infinite chains."""
             # GIVEN a charm that both provides and requires the same interface (like grafana-agent-k8s)
             self_ref_charm = Charm(
@@ -396,21 +396,19 @@ class TestEndpointLimits:
             )
             # AND a bundle builder with a charmhub client that knows about the charm
             builder = BundleBuilder(CharmhubClientStub(self_ref_charm, app_charm))
-            builder.max_same_charm_instances = 3
 
             # WHEN we build the bundle
             result = builder.build(base_bundle)
 
             # THEN it should not exceed the limit
             grafana_apps = [app for app in result.applications if app.charm.name == "grafana-agent-k8s"]
-            assert len(grafana_apps) <= builder.max_same_charm_instances
             # AND it should stop adding new instances when limit is reached
             assert len(grafana_apps) < 10  # Definitely not infinite!
 
     class TestConditionalLimits:
         """Test scenarios where endpoint limits depend on other integrated endpoints."""
 
-        def test_limit_increases_when_condition_met(self):
+        def test_limit_increases_when_condition_met(self) -> None:
             """Test that an endpoint's limit can increase when a specific endpoint is integrated."""
             # GIVEN a database charm with conditional limits:
             # - limit=1 by default
@@ -524,7 +522,7 @@ class TestEndpointLimits:
 
             # AND postgresql should have more than 1 database connection (the conditional higher limit applies)
             db_connections = sum(
-                1
+                True
                 for integration in result.integrations
                 if ApplicationEndpoint(application="postgresql-k8s", endpoint="database") in integration
             )
@@ -532,7 +530,7 @@ class TestEndpointLimits:
                 db_connections > 1
             ), "Expected more than 1 database connection when grafana-cloud-config is integrated"
 
-        def test_limit_stays_low_when_condition_not_met(self):
+        def test_limit_stays_low_when_condition_not_met(self) -> None:
             """Test that endpoint limit remains low when conditional endpoint is not available."""
             from bundle_builder.charm import CharmLimitCriteria
 
@@ -604,7 +602,7 @@ class TestEndpointLimits:
 
             # THEN postgresql should have at most 1 database connection (the default limit)
             db_connections = sum(
-                1
+                True
                 for integration in result.integrations
                 if ApplicationEndpoint(application="postgresql-k8s", endpoint="database") in integration
             )

@@ -32,13 +32,13 @@ class VaultUnsealer:
         self.juju = juju
         self.logger = logger
 
-    def try_init_or_unseal_all_vaults(self, model: str):
+    def try_init_or_unseal_all_vaults(self, model: str) -> None:
         # Look for vault charms
         for application in self.juju.list_applications(model):
             if self.juju.application_charm(model, application) == self.charm.name:
                 self.try_init_or_unseal_vault(model, application)
 
-    def try_init_or_unseal_vault(self, model: str, application: str):
+    def try_init_or_unseal_vault(self, model: str, application: str) -> None:
         # Wait for application to be scaled
         self.logger.info(f"Waiting for vault charm '{self.charm.name}' application '{application}' to be scaled")
         self.juju.wait_application_scaled(model, application, timedelta(minutes=10))
@@ -58,7 +58,7 @@ class VaultUnsealer:
         # Try to unseal any sealed units
         self.try_unseal_vault(model, application)
 
-    def try_init_vault(self, model: str, application: str):
+    def try_init_vault(self, model: str, application: str) -> None:
         # Get leader unit
         leader_unit = f"{application}/leader"
 
@@ -92,7 +92,7 @@ class VaultUnsealer:
         # Authorize the charm
         self.authorize_vault_charm(model, application, tokens)
 
-    def try_unseal_vault(self, model: str, application: str):
+    def try_unseal_vault(self, model: str, application: str) -> None:
         # Get vault tokens
         tokens = self.get_vault_tokens(model, application)
 
@@ -111,7 +111,7 @@ class VaultUnsealer:
             self.logger.info(f"Unsealing vault charm '{self.charm.name}' unit '{unit}'")
             self.vault.unseal(model, unit, tokens)
 
-    def authorize_vault_charm(self, model: str, application: str, tokens: VaultTokenSecret):
+    def authorize_vault_charm(self, model: str, application: str, tokens: VaultTokenSecret) -> None:
         # Log
         self.logger.info(f"Authorizing vault charm '{self.charm.name}' application '{application}'")
 
@@ -138,7 +138,7 @@ class VaultUnsealer:
         # Remove the one time secret
         self.juju.remove_secret(model, self.vault_one_time_token_secret_name(application))
 
-    def save_vault_tokens(self, model: str, application: str, tokens: VaultTokenSecret):
+    def save_vault_tokens(self, model: str, application: str, tokens: VaultTokenSecret) -> None:
         # Add the vault tokens
         self.juju.add_secret(
             model,

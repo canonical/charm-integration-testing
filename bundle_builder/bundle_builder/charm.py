@@ -31,7 +31,8 @@ class CharmChannel:
 
     @model_validator(mode="before")
     @classmethod
-    def validate_from_string(cls, value):
+    # TODO(raul): remove type ignore in subsequent type checker PRs
+    def validate_from_string(cls, value):  # type: ignore
         if isinstance(value, str):
             parts = value.split("/")
             match len(parts):
@@ -114,7 +115,7 @@ class CharmLimitCriteria:
 
     @model_validator(mode="before")
     @classmethod
-    def validate_config_from_dict(cls, value):
+    def validate_config_from_dict(cls, value: dict[str, object] | list[object]) -> dict[str, object]:
         if isinstance(value, list):
             return {"all_of": value}
         return value
@@ -196,7 +197,8 @@ class CharmConfigCriteria:
 
     @model_validator(mode="before")
     @classmethod
-    def validate_config_from_dict(cls, value):
+    # TODO(raul): remove type ignore in subsequent type checker PRs
+    def validate_config_from_dict(cls, value):  # type: ignore
         if isinstance(value, list):
             return {"all_of": value}
         return value
@@ -252,7 +254,8 @@ class CharmTestConfig:
 
     @model_validator(mode="before")
     @classmethod
-    def validate_config_from_dict(cls, value):
+    # TODO(raul): remove type ignore in subsequent type checker PRs
+    def validate_config_from_dict(cls, value):  # type: ignore
         if isinstance(value, dict) and "config" in value:
             if isinstance(value["config"], dict):
                 # Convert dict to tuple of tuples
@@ -272,5 +275,6 @@ class Charm:
     priority: float  # greater priority values mean a node with this charm is prioritized
     test_configs: tuple[CharmTestConfig, ...] = Field(default_factory=tuple)
 
-    def __repr__(self):
+    # TODO(raul): remove type ignore in subsequent type checker PRs
+    def __repr__(self):  # type: ignore
         return self.name

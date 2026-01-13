@@ -2,7 +2,6 @@
 # See LICENSE file for licensing details.
 
 import subprocess  # nosec
-from typing import Optional
 
 from pydantic import field_validator
 from pydantic.dataclasses import dataclass
@@ -10,12 +9,12 @@ from pydantic.dataclasses import dataclass
 
 @dataclass
 class CmdArg:
-    value: Optional[str] = None
-    name: Optional[str] = None
+    value: str | None = None
+    name: str | None = None
 
     @field_validator("value", "name", mode="before")
     @staticmethod
-    def to_string(value):
+    def to_string(value: object) -> str:
         return str(value)
 
 
@@ -35,7 +34,7 @@ class CmdError(subprocess.CalledProcessError):
 
 
 class CmdClient:
-    def call(self, *args: list[CmdArg]) -> str:
+    def call(self, *args: CmdArg) -> str:
         # Run the command
         parsed_args = self.parse_args(*args)
         result = subprocess.run(self.parse_args(*args), capture_output=True, text=True)  # nosec
@@ -44,9 +43,9 @@ class CmdClient:
         if result.returncode != 0:
             raise CmdError(" ".join(parsed_args), result.returncode, stdout=result.stdout, stderr=result.stderr)
 
-        return result.stdout
+        return str(result.stdout)
 
-    def parse_args(self, *args: list[CmdArg]) -> list[str]:
+    def parse_args(self, *args: CmdArg) -> list[str]:
         results = []
         for arg in args:
             if arg.name is not None:

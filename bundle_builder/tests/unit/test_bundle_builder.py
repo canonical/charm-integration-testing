@@ -22,6 +22,7 @@ from pydantic.dataclasses import dataclass
 from bundle_builder.bundle import Application, ApplicationEndpoint, Bundle, Integration
 from bundle_builder.bundle_builder import BundleBuilder, Node
 from bundle_builder.charm import (
+    Charm,
     CharmConfigCriteria,
     CharmEndpointOptionality,
     CharmLimit,
@@ -49,6 +50,7 @@ class CharmhubClientStub:
             return frozenset({"kratos"})
         if provides == "unknown":
             return frozenset()
+        return frozenset()
 
     def charm_from_store(
         self,
@@ -57,14 +59,16 @@ class CharmhubClientStub:
         charm_channel: str | None = None,
         charm_revision: int | None = None,
         ubuntu_version: str | None = None,
-    ):
+    ) -> Charm | None:
         if charm_name == "postgresql-k8s":
             return sample_charm_postgresql_k8s()
+        return None
 
 
 def sample_node_postgresql_k8s_kratos() -> Node:
     return Node(
-        bundle=dataclasses.replace(
+        # TODO(raul): remove type ignore in subsequent type checker PRs
+        bundle=dataclasses.replace(  # type: ignore
             sample_bundle_postgresql_k8s_kratos(),
             applications=frozenset(
                 {
@@ -83,37 +87,35 @@ def sample_node_postgresql_k8s_kratos() -> Node:
                 }
             ),
         ),
-        application_endpoint_to_possible_charm=frozenset(),
-        balance=1.0,
         aggression=0.0,
     )
 
 
 def sample_node_kratos(charm_priority: float = 1.0) -> Node:
-    return dataclasses.replace(
+    # TODO(raul): remove type ignore in subsequent type checker PRs
+    return dataclasses.replace(  # type: ignore
         sample_node_postgresql_k8s_kratos(),
-        bundle=dataclasses.replace(
+        # TODO(raul): remove type ignore in subsequent type checker PRs
+        bundle=dataclasses.replace(  # type: ignore
             sample_node_postgresql_k8s_kratos().bundle,
             applications=frozenset(
                 {
-                    Application("kratos", dataclasses.replace(sample_charm_kratos(), priority=charm_priority)),
+                    # TODO(raul): remove type ignore in subsequent type checker PRs
+                    Application("kratos", dataclasses.replace(sample_charm_kratos(), priority=charm_priority)),  # type: ignore
                 }
             ),
             integrations=frozenset(),
-        ),
-        application_endpoint_to_possible_charm=frozenset(
-            {
-                (ApplicationEndpoint("kratos", "pg-database"), "postgresql-k8s"),
-            }
         ),
         aggression=0.0,
     )
 
 
 def sample_node_kratos_self_signed_certificates() -> Node:
-    return dataclasses.replace(
+    # TODO(raul): remove type ignore in subsequent type checker PRs
+    return dataclasses.replace(  # type: ignore
         sample_node_kratos(),
-        bundle=dataclasses.replace(
+        # TODO(raul): remove type ignore in subsequent type checker PRs
+        bundle=dataclasses.replace(  # type: ignore
             sample_node_kratos().bundle,
             applications=frozenset(
                 {
@@ -127,7 +129,7 @@ def sample_node_kratos_self_signed_certificates() -> Node:
 
 
 class TestNode:
-    def test_score_prioritizes_fewer_applications_and_unfulfilled_endpoints(self):
+    def test_score_prioritizes_fewer_applications_and_unfulfilled_endpoints(self) -> None:
         node = sample_node_kratos_self_signed_certificates()
         # Score should increase with more applications and unfulfilled endpoints
         score = node.score
@@ -141,61 +143,67 @@ class TestNode:
         )
         assert node2.score < score
 
-    def test_fingerprint_is_bundle_integrations(self):
+    def test_fingerprint_is_bundle_integrations(self) -> None:
         node = sample_node_kratos_self_signed_certificates()
-        assert node.fingerprint == node.bundle.integrations
+        # TODO(raul): remove type ignore in subsequent type checker PRs
+        assert node.fingerprint == node.bundle.integrations  # type: ignore
 
-    def test_stats_string(self):
+    def test_stats_string(self) -> None:
         node = sample_node_kratos_self_signed_certificates()
         stats = node.stats
-        assert str(len(node.bundle.applications)) in stats
-        assert "unfulfilled endpoints" in stats
-        assert "saturated endpoints" in stats
+        # TODO(raul): remove type ignore in subsequent type checker PRs
+        assert str(len(node.bundle.applications)) in stats  # type: ignore
+        # TODO(raul): remove type ignore in subsequent type checker PRs
+        assert "unfulfilled endpoints" in stats  # type: ignore
+        # TODO(raul): remove type ignore in subsequent type checker PRs
+        assert "saturated endpoints" in stats  # type: ignore
 
-    def test_lt_compares_score(self):
+    def test_lt_compares_score(self) -> None:
         node = sample_node_kratos_self_signed_certificates()
-        node2 = dataclasses.replace(node, aggression=node.aggression + 0.1)
-        assert (node < node2) == (node.score < node2.score)
+        # TODO(raul): remove type ignore in subsequent type checker PRs
+        node2 = dataclasses.replace(node, aggression=node.aggression + 0.1)  # type: ignore
+        # TODO(raul): remove type ignore in subsequent type checker PRs
+        assert (node < node2) == (node.score < node2.score)  # type: ignore
 
 
 class TestBundleBuilder:
-    def test_build_returns_best_node_bundle(self):
+    def test_build_returns_best_node_bundle(self) -> None:
         stub = CharmhubClientStub()
-        builder = BundleBuilder(charmhub_client=stub, logger=logging.getLogger("test"))
+        builder = BundleBuilder(charmhub_client=stub, logger=logging.getLogger("test"))  # type: ignore[arg-type]
         base = sample_node_kratos().bundle
         result = builder.build(base)
         assert isinstance(result, Bundle)
         # Should resolve integrations if possible
         assert any(app.name == "postgresql-k8s" for app in result.applications)
 
-    def test_build_stops_on_max_nodes_visited(self):
+    def test_build_stops_on_max_nodes_visited(self) -> None:
         stub = CharmhubClientStub()
-        builder = BundleBuilder(charmhub_client=stub, logger=logging.getLogger("test"), max_nodes_visited=1)
+        builder = BundleBuilder(charmhub_client=stub, logger=logging.getLogger("test"), max_nodes_visited=1)  # type: ignore[arg-type]
         base = sample_node_kratos().bundle
         result = builder.build(base)
         assert isinstance(result, Bundle)
 
-    def test_child_nodes_returns_possible_children(self):
+    def test_child_nodes_returns_possible_children(self) -> None:
         stub = CharmhubClientStub()
-        builder = BundleBuilder(charmhub_client=stub)
+        builder = BundleBuilder(charmhub_client=stub)  # type: ignore[arg-type]
         node = sample_node_kratos()
         children = builder.child_nodes(node)
         assert isinstance(children, set)
         for child in children:
             assert isinstance(child, Node)
 
-    def test_child_nodes_existing_applications_filters_cycles_and_limits(self):
+    def test_child_nodes_existing_applications_filters_cycles_and_limits(self) -> None:
         stub = CharmhubClientStub()
-        builder = BundleBuilder(charmhub_client=stub, avoid_application_dependency_cycles=True)
+        builder = BundleBuilder(charmhub_client=stub, avoid_application_dependency_cycles=True)  # type: ignore[arg-type]
         node = sample_node_kratos()
         # Should not create cycles
         children = builder.child_nodes_existing_applications(node, ApplicationEndpoint("kratos", "pg-database"))
         for child in children:
             assert not child.bundle.has_application_dependency("kratos", "kratos")
 
-    def test_child_nodes_new_applications_adds_valid_children(self):
+    def test_child_nodes_new_applications_adds_valid_children(self) -> None:
         stub = CharmhubClientStub()
-        builder = BundleBuilder(charmhub_client=stub)
+        builder = BundleBuilder(charmhub_client=stub)  # type: ignore[arg-type]
         node = sample_node_kratos()
         children = builder.child_nodes_new_applications(node, ApplicationEndpoint("kratos", "pg-database"))
         for child in children:
@@ -415,14 +423,16 @@ class TestBundleBuilder:
         )
 
     class TestBundleBuilderLimitValidation:
-        def test_can_add_integration_respects_limits(self):
+        def test_can_add_integration_respects_limits(self) -> None:
             # GIVEN a charm with limited endpoint
-            limited_charm = dataclasses.replace(
+            # TODO(raul): remove type ignore in subsequent type checker PRs
+            limited_charm = dataclasses.replace(  # type: ignore
                 sample_charm_postgresql_k8s(),
                 name="limited-charm",
                 endpoints=frozenset(
                     {
-                        dataclasses.replace(
+                        # TODO(raul): remove type ignore in subsequent type checker PRs
+                        dataclasses.replace(  # type: ignore
                             sample_charm_endpoint_postgresql_k8s_database(),
                             interface="postgresql",
                             limits=(CharmLimit(limit=1),),
@@ -432,12 +442,14 @@ class TestBundleBuilder:
             )
 
             # AND charms that require database
-            requiring_charm1 = dataclasses.replace(
+            # TODO(raul): remove type ignore in subsequent type checker PRs
+            requiring_charm1 = dataclasses.replace(  # type: ignore
                 sample_charm_kratos(),
                 name="app1",
                 endpoints=frozenset(
                     {
-                        dataclasses.replace(
+                        # TODO(raul): remove type ignore in subsequent type checker PRs
+                        dataclasses.replace(  # type: ignore
                             sample_charm_endpoint_kratos_pg_database(),
                             name="database",
                             interface="postgresql",
@@ -446,12 +458,14 @@ class TestBundleBuilder:
                 ),
             )
 
-            requiring_charm2 = dataclasses.replace(
+            # TODO(raul): remove type ignore in subsequent type checker PRs
+            requiring_charm2 = dataclasses.replace(  # type: ignore
                 sample_charm_kratos(),
                 name="app2",
                 endpoints=frozenset(
                     {
-                        dataclasses.replace(
+                        # TODO(raul): remove type ignore in subsequent type checker PRs
+                        dataclasses.replace(  # type: ignore
                             sample_charm_endpoint_kratos_pg_database(),
                             name="database",
                             interface="postgresql",
@@ -487,16 +501,19 @@ class TestBundleBuilder:
             # The method _can_add_integration_within_charm_limits does not exist. Instead, check bundle.unfulfilled_endpoints
             # THEN the limited endpoint should not be unfulfilled (limit reached)
             db_endpoint = ApplicationEndpoint(application="db", endpoint="database")
-            assert db_endpoint not in bundle.unfulfilled_endpoints
+            # TODO(raul): remove type ignore in subsequent type checker PRs
+            assert db_endpoint not in bundle.unfulfilled_endpoints  # type: ignore
 
-        def test_can_add_integration_allows_when_under_limit(self):
+        def test_can_add_integration_allows_when_under_limit(self) -> None:
             # GIVEN a charm with higher limit
-            limited_charm = dataclasses.replace(
+            # TODO(raul): remove type ignore in subsequent type checker PRs
+            limited_charm = dataclasses.replace(  # type: ignore
                 sample_charm_postgresql_k8s(),
                 name="limited-charm",
                 endpoints=frozenset(
                     {
-                        dataclasses.replace(
+                        # TODO(raul): remove type ignore in subsequent type checker PRs
+                        dataclasses.replace(  # type: ignore
                             sample_charm_endpoint_postgresql_k8s_database(),
                             interface="postgresql",
                             limits=(CharmLimit(limit=2),),
@@ -510,7 +527,8 @@ class TestBundleBuilder:
                 name="app",
                 endpoints=frozenset(
                     {
-                        dataclasses.replace(
+                        # TODO(raul): remove type ignore in subsequent type checker PRs
+                        dataclasses.replace(  # type: ignore
                             sample_charm_endpoint_kratos_pg_database(),
                             name="database",
                             interface="postgresql",
@@ -545,16 +563,18 @@ class TestBundleBuilder:
             # WHEN checking if we can add another integration
             # The method _can_add_integration_within_charm_limits does not exist. Instead, check bundle.unfulfilled_endpoints
             app2_endpoint = ApplicationEndpoint(application="app2", endpoint="database")
-            assert app2_endpoint in bundle.unfulfilled_endpoints
+            # TODO(raul): remove type ignore in subsequent type checker PRs
+            assert app2_endpoint in bundle.unfulfilled_endpoints  # type: ignore
 
-        def test_can_add_integration_allows_unlimited_endpoints(self):
+        def test_can_add_integration_allows_unlimited_endpoints(self) -> None:
             # GIVEN charms with no limits
             unlimited_charm = dataclasses.replace(
                 sample_charm_postgresql_k8s(),
                 name="unlimited-charm",
                 endpoints=frozenset(
                     {
-                        dataclasses.replace(
+                        # TODO(raul): remove type ignore in subsequent type checker PRs
+                        dataclasses.replace(  # type: ignore
                             sample_charm_endpoint_postgresql_k8s_database(),
                             name="http",
                             interface="http",
@@ -563,12 +583,14 @@ class TestBundleBuilder:
                 ),
             )
 
-            requiring_charm = dataclasses.replace(
+            # TODO(raul): remove type ignore in subsequent type checker PRs
+            requiring_charm = dataclasses.replace(  # type: ignore
                 sample_charm_kratos(),
                 name="app",
                 endpoints=frozenset(
                     {
-                        dataclasses.replace(
+                        # TODO(raul): remove type ignore in subsequent type checker PRs
+                        dataclasses.replace(  # type: ignore
                             sample_charm_endpoint_kratos_pg_database(),
                             name="http",
                             interface="http",
@@ -603,17 +625,19 @@ class TestBundleBuilder:
             # WHEN checking if we can add another integration
             # The method _can_add_integration_within_charm_limits does not exist. Instead, check bundle.unfulfilled_endpoints
             client2_endpoint = ApplicationEndpoint(application="client2", endpoint="http")
-            assert client2_endpoint in bundle.unfulfilled_endpoints
+            # TODO(raul): remove type ignore in subsequent type checker PRs
+            assert client2_endpoint in bundle.unfulfilled_endpoints  # type: ignore
 
 
 class TestDuplicateCharms:
-    def test_charm_instance_limit_prevents_cycles(self):
+    def test_charm_instance_limit_prevents_cycles(self) -> None:
         """Test that the charm instance limit prevents infinite cycles."""
         # GIVEN a bundle builder with a low instance limit
         max_instances = 2
 
         # AND a charm
-        charm = dataclasses.replace(sample_charm_postgresql_k8s(), endpoints=frozenset())
+        # TODO(raul): remove type ignore in subsequent type checker PRs
+        charm = dataclasses.replace(sample_charm_postgresql_k8s(), endpoints=frozenset())  # type: ignore
 
         # AND a bundle with two instances of the charm (at the limit)
         bundle = Bundle(
@@ -635,12 +659,13 @@ class TestDuplicateCharms:
         # THEN it should return True
         assert would_exceed is True
 
-    def test_charm_instance_limit_allows_under_limit(self):
+    def test_charm_instance_limit_allows_under_limit(self) -> None:
         """Test that charms can be added when under the instance limit."""
         max_instances = 3
 
         # AND a charm
-        charm = dataclasses.replace(sample_charm_postgresql_k8s(), endpoints=frozenset())
+        # TODO(raul): remove type ignore in subsequent type checker PRs
+        charm = dataclasses.replace(sample_charm_postgresql_k8s(), endpoints=frozenset())  # type: ignore
 
         # AND a bundle with one instance of the charm
         bundle = Bundle(
@@ -661,10 +686,11 @@ class TestDuplicateCharms:
         # THEN it should return False
         assert would_exceed is False
 
-    def test_node_fingerprint_uses_application_names(self):
+    def test_node_fingerprint_uses_application_names(self) -> None:
         """Test that the node fingerprint is based on application names, not charm names."""
         # GIVEN a charm
-        charm = dataclasses.replace(sample_charm_postgresql_k8s(), endpoints=frozenset())
+        # TODO(raul): remove type ignore in subsequent type checker PRs
+        charm = dataclasses.replace(sample_charm_postgresql_k8s(), endpoints=frozenset())  # type: ignore
 
         # AND two bundles with the same charm but different application names
         bundle1 = Bundle(
@@ -690,21 +716,25 @@ class TestDuplicateCharms:
         )
 
         # WHEN creating nodes from these bundles
-        node1 = Node(bundle=bundle1, application_endpoint_to_possible_charm=frozenset(), balance=1.0, aggression=0.0)
-        node2 = Node(bundle=bundle2, application_endpoint_to_possible_charm=frozenset(), balance=1.0, aggression=0.0)
+        node1 = Node(bundle=bundle1, aggression=0.0)
+        node2 = Node(bundle=bundle2, aggression=0.0)
 
         # THEN the fingerprints should match the bundle integrations
-        assert node1.fingerprint == bundle1.integrations
-        assert node2.fingerprint == bundle2.integrations
+        # TODO(raul): remove type ignore in subsequent type checker PRs
+        assert node1.fingerprint == bundle1.integrations  # type: ignore
+        # TODO(raul): remove type ignore in subsequent type checker PRs
+        assert node2.fingerprint == bundle2.integrations  # type: ignore
 
-    def test_multiple_instances_with_integrations(self):
+    def test_multiple_instances_with_integrations(self) -> None:
         """Test that multiple instances of the same charm can have different integrations."""
         # GIVEN a database charm and an app charm
-        db_charm = dataclasses.replace(
+        # TODO(raul): remove type ignore in subsequent type checker PRs
+        db_charm = dataclasses.replace(  # type: ignore
             sample_charm_postgresql_k8s(),
             endpoints=frozenset(
                 {
-                    dataclasses.replace(
+                    # TODO(raul): remove type ignore in subsequent type checker PRs
+                    dataclasses.replace(  # type: ignore
                         sample_charm_endpoint_postgresql_k8s_database(),
                         interface="postgresql",
                         limits=(CharmLimit(limit=1),),
@@ -713,12 +743,14 @@ class TestDuplicateCharms:
             ),
         )
 
-        app_charm = dataclasses.replace(
+        # TODO(raul): remove type ignore in subsequent type checker PRs
+        app_charm = dataclasses.replace(  # type: ignore
             sample_charm_kratos(),
             name="app",
             endpoints=frozenset(
                 {
-                    dataclasses.replace(
+                    # TODO(raul): remove type ignore in subsequent type checker PRs
+                    dataclasses.replace(  # type: ignore
                         sample_charm_endpoint_kratos_pg_database(),
                         name="database",
                         interface="postgresql",
@@ -758,10 +790,12 @@ class TestDuplicateCharms:
         )
 
         # THEN each database should have exactly one connection (respecting the limit)
-        db1_connections = bundle.endpoint_connection_counts[
+        # TODO(raul): remove type ignore in subsequent type checker PRs
+        db1_connections = bundle.endpoint_connection_counts[  # type: ignore
             ApplicationEndpoint(application="postgresql-k8s", endpoint="database")
         ]
-        db2_connections = bundle.endpoint_connection_counts[
+        # TODO(raul): remove type ignore in subsequent type checker PRs
+        db2_connections = bundle.endpoint_connection_counts[  # type: ignore
             ApplicationEndpoint(application="postgresql-k8s-2", endpoint="database")
         ]
 
@@ -771,9 +805,10 @@ class TestDuplicateCharms:
 
 class TestAddTestConfigs:
     class TestConfigSelection:
-        def test_selects_config_matching_channel_track(self):
+        def test_selects_config_matching_channel_track(self) -> None:
             # GIVEN a charm with test configs for different tracks
-            charm = dataclasses.replace(
+            # TODO(raul): remove type ignore in subsequent type checker PRs
+            charm = dataclasses.replace(  # type: ignore
                 sample_charm_postgresql_k8s(),
                 name="test-charm",
                 channel="1.0/stable",
@@ -802,14 +837,16 @@ class TestAddTestConfigs:
             app = next(a for a in result.applications if a.name == "app")
             assert app.config == (("option1", "value1"),)
 
-        def test_selects_config_matching_integrated_endpoint(self):
+        def test_selects_config_matching_integrated_endpoint(self) -> None:
             # GIVEN a charm with test configs based on endpoint integration
-            charm = dataclasses.replace(
+            # TODO(raul): remove type ignore in subsequent type checker PRs
+            charm = dataclasses.replace(  # type: ignore
                 sample_charm_kratos(),
                 name="test-charm",
                 endpoints=frozenset(
                     {
-                        dataclasses.replace(
+                        # TODO(raul): remove type ignore in subsequent type checker PRs
+                        dataclasses.replace(  # type: ignore
                             sample_charm_endpoint_kratos_pg_database(),
                             name="database",
                             interface="db",
@@ -830,12 +867,14 @@ class TestAddTestConfigs:
                     ),
                 ),
             )
-            db_charm = dataclasses.replace(
+            # TODO(raul): remove type ignore in subsequent type checker PRs
+            db_charm = dataclasses.replace(  # type: ignore
                 sample_charm_postgresql_k8s(),
                 name="db-charm",
                 endpoints=frozenset(
                     {
-                        dataclasses.replace(
+                        # TODO(raul): remove type ignore in subsequent type checker PRs
+                        dataclasses.replace(  # type: ignore
                             sample_charm_endpoint_postgresql_k8s_database(),
                             interface="db",
                         ),
@@ -870,9 +909,10 @@ class TestAddTestConfigs:
             app = next(a for a in result.applications if a.name == "app")
             assert app.config == (("with_db", "true"),)
 
-        def test_returns_empty_config_when_no_test_configs(self):
+        def test_returns_empty_config_when_no_test_configs(self) -> None:
             # GIVEN a charm with no test configs
-            charm = dataclasses.replace(
+            # TODO(raul): remove type ignore in subsequent type checker PRs
+            charm = dataclasses.replace(  # type: ignore
                 sample_charm_postgresql_k8s(),
                 name="test-charm",
                 test_configs=(),
@@ -891,9 +931,10 @@ class TestAddTestConfigs:
             app = next(a for a in result.applications if a.name == "app")
             assert app.config == ()
 
-        def test_returns_empty_config_when_no_matching_criteria(self):
+        def test_returns_empty_config_when_no_matching_criteria(self) -> None:
             # GIVEN a charm with test configs that don't match
-            charm = dataclasses.replace(
+            # TODO(raul): remove type ignore in subsequent type checker PRs
+            charm = dataclasses.replace(  # type: ignore
                 sample_charm_postgresql_k8s(),
                 name="test-charm",
                 test_configs=(
@@ -917,9 +958,10 @@ class TestAddTestConfigs:
             app = next(a for a in result.applications if a.name == "app")
             assert app.config == ()
 
-        def test_handles_multiple_applications(self):
+        def test_handles_multiple_applications(self) -> None:
             # GIVEN multiple applications with different configs
-            charm1 = dataclasses.replace(
+            # TODO(raul): remove type ignore in subsequent type checker PRs
+            charm1 = dataclasses.replace(  # type: ignore
                 sample_charm_postgresql_k8s(),
                 name="charm1",
                 channel="1.0/stable",
@@ -930,7 +972,8 @@ class TestAddTestConfigs:
                     ),
                 ),
             )
-            charm2 = dataclasses.replace(
+            # TODO(raul): remove type ignore in subsequent type checker PRs
+            charm2 = dataclasses.replace(  # type: ignore
                 sample_charm_kratos(),
                 name="charm2",
                 channel="2.0/stable",
@@ -962,9 +1005,10 @@ class TestAddTestConfigs:
             assert app1.config == (("option1", "value1"),)
             assert app2.config == (("option2", "value2"),)
 
-        def test_selects_from_multiple_valid_configs(self):
+        def test_selects_from_multiple_valid_configs(self) -> None:
             # GIVEN a charm with multiple valid test configs
-            charm = dataclasses.replace(
+            # TODO(raul): remove type ignore in subsequent type checker PRs
+            charm = dataclasses.replace(  # type: ignore
                 sample_charm_postgresql_k8s(),
                 name="test-charm",
                 test_configs=(
@@ -992,15 +1036,17 @@ class TestAddTestConfigs:
             app = next(a for a in result.applications if a.name == "app")
             assert app.config in ((("option1", "value1"),), (("option2", "value2"),))
 
-        def test_complex_criteria_all_of_and_endpoint(self):
+        def test_complex_criteria_all_of_and_endpoint(self) -> None:
             # GIVEN a charm with complex criteria (all_of with track and endpoint)
-            charm = dataclasses.replace(
+            # TODO(raul): remove type ignore in subsequent type checker PRs
+            charm = dataclasses.replace(  # type: ignore
                 sample_charm_kratos(),
                 name="test-charm",
                 channel="1.0/stable",
                 endpoints=frozenset(
                     {
-                        dataclasses.replace(
+                        # TODO(raul): remove type ignore in subsequent type checker PRs
+                        dataclasses.replace(  # type: ignore
                             sample_charm_endpoint_kratos_pg_database(),
                             name="database",
                             interface="db",
@@ -1026,12 +1072,14 @@ class TestAddTestConfigs:
                     ),
                 ),
             )
-            db_charm = dataclasses.replace(
+            # TODO(raul): remove type ignore in subsequent type checker PRs
+            db_charm = dataclasses.replace(  # type: ignore
                 sample_charm_postgresql_k8s(),
                 name="db-charm",
                 endpoints=frozenset(
                     {
-                        dataclasses.replace(
+                        # TODO(raul): remove type ignore in subsequent type checker PRs
+                        dataclasses.replace(  # type: ignore
                             sample_charm_endpoint_postgresql_k8s_database(),
                             interface="db",
                         ),
