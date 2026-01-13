@@ -118,6 +118,9 @@ class JujuStub(JujuBackend):
     def get_charm_revisions(self) -> None:  # type: ignore[override]
         pass
 
+    def version(self) -> None:  # type: ignore[override]
+        pass
+
 
 class LoggerStub(logging.Logger):
     def __init__(self) -> None:

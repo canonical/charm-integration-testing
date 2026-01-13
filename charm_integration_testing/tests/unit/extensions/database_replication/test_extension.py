@@ -119,6 +119,9 @@ class JujuStub(JujuBackend):
     def get_charm_revisions(self) -> None:  # type: ignore[override]
         pass
 
+    def version(self) -> None:  # type: ignore[override]
+        pass
+
     def list_applications(self, model: str) -> list[str]:  # type: ignore[override]
         """Return list of application names in the model"""
         return list(self.applications.keys())

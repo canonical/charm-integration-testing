@@ -97,6 +97,9 @@ class JujuStub(JujuBackend):
     def get_charm_revisions(self) -> None:  # type: ignore[override]
         pass
 
+    def version(self) -> None:  # type: ignore[override]
+        pass
+
     def application_charm(self, model: str, application: str) -> str:
         return self.applications[application]
 
