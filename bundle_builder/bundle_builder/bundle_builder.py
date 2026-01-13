@@ -31,17 +31,20 @@ class Node:
     aggression: float
 
     @computed_property
-    def score(self):
+    def score(self) -> float:
         # Prioritize fewer applications, accounting for charm priorities
         weight_applications = sum(1.0 / app.charm.priority for app in self.bundle.applications)
         # Prioritize fewer unfulfilled endpoints
-        weight_unfulfilled_endpoints = self.aggression * len(self.bundle.unfulfilled_endpoints)
+        # TODO(raul): remove type ignore in subsequent type checker PRs
+        # TODO(raul): remove type ignore in subsequent type checker PRs # type: ignore
+        weight_unfulfilled_endpoints = self.aggression * len(self.bundle.unfulfilled_endpoints)  # type: ignore
         # Prioritize more integrations, scaled by aggression
         # As aggression increases (expected to be between 0 and 1) the weight of integrations increases
         # This forces the algorithm to explore deeper (DFS) rather than wider (BFS) into the graph in order to find a solution sooner as aggression is increased
         weight_integrations = self.aggression * len(self.bundle.integrations) * -1
         # Sum the weights to get the final score
-        return weight_applications + weight_unfulfilled_endpoints + weight_integrations
+        # TODO(raul): remove type ignore in subsequent type checker PRs
+        return weight_applications + weight_unfulfilled_endpoints + weight_integrations  # type: ignore
 
     @computed_property
     def fingerprint(self) -> frozenset[Integration]:
@@ -49,10 +52,13 @@ class Node:
 
     @computed_property
     def stats(self) -> str:
-        return f"{len(self.bundle.applications)} applications ({len(self.bundle.unfulfilled_endpoints)} unfulfilled endpoints, {len(self.bundle.saturated_endpoints)} saturated endpoints)"
+        # TODO(raul): remove type ignore in subsequent type checker PRs
+        return f"{len(self.bundle.applications)} applications ({len(self.bundle.unfulfilled_endpoints)} unfulfilled endpoints, {len(self.bundle.saturated_endpoints)} saturated endpoints)"  # type: ignore
 
-    def __lt__(self, other):
-        return self.score < other.score
+    def __lt__(self, other: "Node") -> bool:
+        # TODO(raul): add type: ignore[no-any-return]
+        # TODO(raul): remove type ignore in subsequent type checker PRs
+        return self.score < other.score  # type: ignore
 
 
 class BundleBuilder:
@@ -96,8 +102,10 @@ class BundleBuilder:
             num_visited_nodes = len(known_nodes) - len(queued_nodes)
             if num_visited_nodes % self.aggression_interval == 0 and num_visited_nodes <= self.aggression_limit:
                 aggression = 1.0 - max((self.aggression_limit - num_visited_nodes) / self.aggression_limit, 0.0)
-                best_node = dataclasses.replace(best_node, aggression=aggression)
-                queued_nodes = [dataclasses.replace(node, aggression=aggression) for node in queued_nodes]
+                # TODO(raul): remove type ignore in subsequent type checker PRs
+                best_node = dataclasses.replace(best_node, aggression=aggression)  # type: ignore
+                # TODO(raul): remove type ignore in subsequent type checker PRs
+                queued_nodes = [dataclasses.replace(node, aggression=aggression) for node in queued_nodes]  # type: ignore
                 heapq.heapify(queued_nodes)
 
             # Get node with with the best score from the sorted queue
@@ -137,7 +145,8 @@ class BundleBuilder:
         best_bundle = best_node.bundle
 
         # Note unresolved endpoints
-        for application_endpoint in best_bundle.unfulfilled_endpoints:
+        # TODO(raul): remove type ignore in subsequent type checker PRs
+        for application_endpoint in best_bundle.unfulfilled_endpoints:  # type: ignore
             self.logger.warning(f"Cannot resolve application endpoint: {application_endpoint}")
 
         # Resolve test configs
@@ -149,7 +158,8 @@ class BundleBuilder:
     def child_nodes(self, node: Node) -> set[Node]:
         # Check each unfulfilled endpoint
         child_nodes: set[Node] = set()
-        for unfulfilled_application_endpoint in node.bundle.unfulfilled_endpoints:
+        # TODO(raul): remove type ignore in subsequent type checker PRs
+        for unfulfilled_application_endpoint in node.bundle.unfulfilled_endpoints:  # type: ignore
             # Get all possible child nodes by integrating with existing_applications
             child_nodes |= self.child_nodes_existing_applications(node, unfulfilled_application_endpoint)
 
@@ -163,10 +173,13 @@ class BundleBuilder:
     ) -> set[Node]:
         # Check all potential application endpoints to see if they can fulfill the unfulfilled endpoint
         child_nodes: set[Node] = set()
-        for possible_application_endpoint in node.bundle.application_endpoints:
+        # TODO(raul): remove type ignore in subsequent type checker PRs
+        for possible_application_endpoint in node.bundle.application_endpoints:  # type: ignore
             # Get charm endpoints
-            unfulfilled_charm_endpoint = node.bundle.application_endpoints[unfulfilled_application_endpoint]
-            possible_charm_endpoint = node.bundle.application_endpoints[possible_application_endpoint]
+            # TODO(raul): remove type ignore in subsequent type checker PRs
+            unfulfilled_charm_endpoint = node.bundle.application_endpoints[unfulfilled_application_endpoint]  # type: ignore
+            # TODO(raul): remove type ignore in subsequent type checker PRs
+            possible_charm_endpoint = node.bundle.application_endpoints[possible_application_endpoint]  # type: ignore
 
             # Will not integrate same application
             if possible_application_endpoint.application == unfulfilled_application_endpoint.application:
@@ -190,7 +203,8 @@ class BundleBuilder:
                 continue
 
             # Will not integrate if it exceeds limit
-            if possible_application_endpoint in node.bundle.saturated_endpoints:
+            # TODO(raul): remove type ignore in subsequent type checker PRs
+            if possible_application_endpoint in node.bundle.saturated_endpoints:  # type: ignore
                 continue
 
             # Will not integrate applications that would create a cycle
@@ -207,7 +221,8 @@ class BundleBuilder:
             # Will not integrate if it creates a recursive dependency chain
             if node.bundle.has_endpoint_dependency(
                 unfulfilled_application_endpoint.application,
-                node.bundle.application_lookup[possible_application_endpoint.application].charm.name,
+                # TODO(raul): remove type ignore in subsequent type checker PRs
+                node.bundle.application_lookup[possible_application_endpoint.application].charm.name,  # type: ignore
                 possible_charm_endpoint.name,
                 possible_charm_endpoint.type,
             ):
@@ -216,7 +231,8 @@ class BundleBuilder:
             # Add this as a child node
             child_nodes.add(
                 Node(
-                    bundle=dataclasses.replace(
+                    # TODO(raul): remove type ignore in subsequent type checker PRs
+                    bundle=dataclasses.replace(  # type: ignore
                         node.bundle,
                         integrations=node.bundle.integrations
                         | {Integration({possible_application_endpoint, unfulfilled_application_endpoint})},
@@ -231,7 +247,8 @@ class BundleBuilder:
         self, node: Node, unfulfilled_application_endpoint: ApplicationEndpoint
     ) -> set[Node]:
         # Get the charm endpoint
-        unfulfilled_charm_endpoint = node.bundle.application_endpoints[unfulfilled_application_endpoint]
+        # TODO(raul): remove type ignore in subsequent type checker PRs
+        unfulfilled_charm_endpoint = node.bundle.application_endpoints[unfulfilled_application_endpoint]  # type: ignore
 
         # Find fulfilling charms
         fulfilling_charms: set[str] = set()
@@ -287,7 +304,8 @@ class BundleBuilder:
                 # Add as a valid child node
                 child_nodes.add(
                     Node(
-                        bundle=dataclasses.replace(
+                        # TODO(raul): remove type ignore in subsequent type checker PRs
+                        bundle=dataclasses.replace(  # type: ignore
                             node.bundle,
                             applications=node.bundle.applications | {application},
                             integrations=node.bundle.integrations
@@ -316,7 +334,8 @@ class BundleBuilder:
             for test_config in application.charm.test_configs:
                 if test_config.criteria.valid(
                     channel=application.charm.channel,
-                    integrated_endpoints=bundle.application_to_integrated_endpoints[application.name],
+                    # TODO(raul): remove type ignore in subsequent type checker PRs
+                    integrated_endpoints=bundle.application_to_integrated_endpoints[application.name],  # type: ignore
                 ):
                     possible_configs.append(test_config.config)
 
@@ -326,6 +345,13 @@ class BundleBuilder:
 
             # Pick a random config
             # This function is not secure in cryptography, but should be fine to use here
-            applications.add(dataclasses.replace(application, config=random.choice(possible_configs)))  # nosec B311
+            # TODO(raul): remove type ignore in subsequent type checker PRs
+            applications.add(
+                dataclasses.replace(
+                    application,  # type: ignore
+                    config=random.choice(possible_configs),  # nosec B311
+                )
+            )
 
-        return dataclasses.replace(bundle, applications=frozenset(applications))
+        # TODO(raul): remove type ignore in subsequent type checker PRs
+        return dataclasses.replace(bundle, applications=frozenset(applications))  # type: ignore

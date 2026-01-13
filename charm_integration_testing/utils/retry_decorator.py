@@ -1,11 +1,13 @@
 from functools import wraps
 from time import sleep
-from typing import Callable, TypeVar
+from typing import Any, Callable, TypeVar
 
 T = TypeVar("T")
 
 
-def retry_on_failure(message: str, max_retries: int = 3, delay: float = 1.0, backoff: float = 2.0):
+def retry_on_failure(
+    message: str, max_retries: int = 3, delay: float = 1.0, backoff: float = 2.0
+) -> Callable[[Callable[..., T]], Callable[..., T]]:
     """Retry decorator for vault operations that may fail transiently.
 
     Args:
@@ -17,7 +19,7 @@ def retry_on_failure(message: str, max_retries: int = 3, delay: float = 1.0, bac
 
     def decorator(func: Callable[..., T]) -> Callable[..., T]:
         @wraps(func)
-        def wrapper(*args, **kwargs) -> T:
+        def wrapper(*args: Any, **kwargs: Any) -> T:
             last_exception = None
             current_delay = delay
 

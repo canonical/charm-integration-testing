@@ -7,7 +7,7 @@ from datetime import timedelta
 from juju import JujuClient
 
 
-def test_teardown(juju_client: JujuClient, model: str, applications: list[str]):
+def test_teardown(juju_client: JujuClient, model: str, applications: list[str]) -> None:
     # Remove all requested applications
     juju_client.remove_applications(*applications, model=model)
 

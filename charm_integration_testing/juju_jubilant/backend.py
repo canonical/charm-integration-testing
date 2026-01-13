@@ -58,7 +58,7 @@ class JubilantBackend(JujuCmdBackend):
         successes: int | None = None,
         delay: timedelta | None = None,
         strict_timeout: bool = False,
-    ):
+    ) -> None:
         # Set default parameters
         if timeout is None:
             timeout = self.default_timeout
@@ -113,7 +113,7 @@ class JubilantBackend(JujuCmdBackend):
             )
         raise JujuWaitTimeoutError(wait_state=noncompliant_wait_state)
 
-    def wait_idle(self, model: str, timeout: timedelta | None, count: int, strict_timeout: bool = False):
+    def wait_idle(self, model: str, timeout: timedelta | None, count: int | None, strict_timeout: bool = False) -> None:
         self.wait(
             model,
             lambda status: all_statuses_are_in(status, application_statuses={"active"}, unit_statuses={"active"}),
@@ -122,7 +122,7 @@ class JubilantBackend(JujuCmdBackend):
             strict_timeout=strict_timeout,
         )
 
-    def wait_application_settled(self, model: str, application: str, timeout: timedelta | None):
+    def wait_application_settled(self, model: str, application: str, timeout: timedelta | None) -> None:
         self.wait(
             model,
             lambda status: all_statuses_are_in(
@@ -135,13 +135,13 @@ class JubilantBackend(JujuCmdBackend):
             timeout=timeout,
         )
 
-    def wait_application_scaled(self, model: str, application: str, timeout: timedelta | None):
+    def wait_application_scaled(self, model: str, application: str, timeout: timedelta | None) -> None:
         self.wait(model, lambda status: applications_are_scaled(status, application), timeout=timeout)
 
-    def wait_for_unit_message(self, model: str, unit: str, message: str, timeout: timedelta | None):
+    def wait_for_unit_message(self, model: str, unit: str, message: str, timeout: timedelta | None) -> None:
         self.wait(model, lambda status: units_have_message(message, status, unit), timeout=timeout)
 
-    def wait_for_removal(self, model: str, applications: list[str], timeout: timedelta | None):
+    def wait_for_removal(self, model: str, applications: list[str], timeout: timedelta | None) -> None:
         self.wait(model, lambda status: applications_are_removed(status, *applications), timeout=timeout)
 
     def wait_for_removal_of_integration(
@@ -150,10 +150,10 @@ class JubilantBackend(JujuCmdBackend):
         endpoint_1: JujuIntegrationApplication,
         endpoint_2: JujuIntegrationApplication,
         timeout: timedelta | None,
-    ):
+    ) -> None:
         self.wait(model, lambda status: integrations_are_removed(status, (endpoint_1, endpoint_2)), timeout=timeout)
 
-    def wait_for_removal_of_units(self, model: str, applications: list[str], timeout: timedelta | None):
+    def wait_for_removal_of_units(self, model: str, applications: list[str], timeout: timedelta | None) -> None:
         self.wait(model, lambda status: applications_have_no_units(status, *applications), timeout=timeout)
 
     def add_secret(self, model: str, name: str, values: dict[str, str]) -> str:
@@ -168,7 +168,7 @@ class JubilantBackend(JujuCmdBackend):
 
     def read_secret(self, model: str, name_or_id: str) -> dict[str, str]:
         # Call show secret
-        result = self.client.model(model).cli(
+        show_secret_result = self.client.model(model).cli(
             "show-secret",
             name_or_id,
             "--reveal",
@@ -177,9 +177,12 @@ class JubilantBackend(JujuCmdBackend):
 
         # There will only ever be one secret in the Juju result, and it is keyed by ID
         # We have `name_or_id`, but don't know which it might be, so we instead just get the first value
-        return next(iter(yaml.safe_load(result).values()))["content"]
+        return_value = next(iter(yaml.safe_load(show_secret_result).values()))["content"]
+        if not isinstance(return_value, dict):
+            raise TypeError(f"Expected secret content to be dict[str, str], got {type(return_value)}")
+        return return_value
 
-    def grant_secret(self, model: str, name_or_id: str, application: str):
+    def grant_secret(self, model: str, name_or_id: str, application: str) -> None:
         # Call grant secret
         self.client.model(model).cli(
             "grant-secret",
@@ -187,32 +190,32 @@ class JubilantBackend(JujuCmdBackend):
             application,
         )
 
-    def remove_secret(self, model: str, name_or_id: str):
+    def remove_secret(self, model: str, name_or_id: str) -> None:
         # Call remove secret
         self.client.model(model).cli(
             "remove-secret",
             name_or_id,
         )
 
-    def deploy_application(self, model: str, charm: str, application: str | None = None):
+    def deploy_application(self, model: str, charm: str, application: str | None = None) -> None:
         self.client.model(model).deploy(
             charm=charm,
             app=application,
         )
 
-    def configure_application(self, model: str, application: str, values: dict[str, str]):
+    def configure_application(self, model: str, application: str, values: dict[str, str]) -> None:
         self.client.model(model).config(
             app=application,
             values=values,
         )
 
-    def scp(self, model: str, source: str, destination: str):
+    def scp(self, model: str, source: str, destination: str) -> None:
         self.client.model(model).scp(
             source=source,
             destination=destination,
         )
 
-    def ssh(self, model: str, application: str, command: str):
+    def ssh(self, model: str, application: str, command: str) -> None:
         self.client.model(model).ssh(
             target=application,
             command=command,
@@ -241,3 +244,6 @@ class JubilantBackend(JujuCmdBackend):
         }
 
         return target_applications in {integration.applications for integration in integrations}
+
+    def version(self, model: str) -> str:
+        return str(self.client.model(model).version())

@@ -249,7 +249,7 @@ def find_bundle_pairings(charm_infos: set[CharmInfo]) -> Dict[str, Set[CharmInte
     return charm_to_integrations
 
 
-def analyze_stats(charm_infos: set[CharmInfo], description: str, interfaces_in_catalog: set[str]):
+def analyze_stats(charm_infos: set[CharmInfo], description: str, interfaces_in_catalog: set[str]) -> None:
     print("-------------------------")
     print(f"Statistics for {description}: (count: {len(charm_infos)})")
 
@@ -366,7 +366,7 @@ def analyze_stats(charm_infos: set[CharmInfo], description: str, interfaces_in_c
     print(f"Average bundle size: {average_bundle_charms}")
 
 
-def analyze_all_stats(charm_infos: set[CharmInfo], filter: str, interfaces_in_catalog: set[str]):
+def analyze_all_stats(charm_infos: set[CharmInfo], filter: str, interfaces_in_catalog: set[str]) -> None:
     analyze_stats(charm_infos, f"all charms in {filter}", interfaces_in_catalog)
     analyze_stats(
         {info for info in charm_infos if info.has_k8s_api}, f"charms with k8s-api in {filter}", interfaces_in_catalog
@@ -385,7 +385,7 @@ def get_interfaces_in_catalog() -> set[str]:
     }
 
 
-def main():
+def main() -> None:
     # Get defined interfaces
     interfaces_in_catalog = get_interfaces_in_catalog()
 

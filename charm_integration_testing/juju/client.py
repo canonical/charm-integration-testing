@@ -18,7 +18,7 @@ class JujuClient:
         self.logger = logger
         self.extensions = extensions or []
 
-    def scale_application(self, application: str, num: int, model: str = "default"):
+    def scale_application(self, application: str, num: int, model: str = "default") -> None:
         self.logger.info(f"Scaling application {application} to {num} units.")
         self.backend.scale_application(model, application, num)
 
@@ -44,11 +44,11 @@ class JujuClient:
         timeout: timedelta | None = None,
         count: int = 30,
         strict_timeout: bool = False,
-    ):
+    ) -> None:
         self.logger.info(f"{self._waiting_timeout_log(timeout)} to be idle.")
         self.backend.wait_idle(model=model, timeout=timeout, count=count, strict_timeout=strict_timeout)
 
-    def print_status(self, model: str = "default"):
+    def print_status(self, model: str = "default") -> None:
         separator = "-" * 80
         self.logger.info(f"Juju Status:\n{separator}\n{self.backend.juju_status_text(model)}{separator}")
 
@@ -59,7 +59,7 @@ class JujuClient:
         endpoint_1: str,
         endpoint_2: str,
         model: str = "default",
-    ):
+    ) -> None:
         # Get targets
         target_1 = JujuIntegrationApplication(application_1, endpoint_1)
         target_2 = JujuIntegrationApplication(application_2, endpoint_2)
@@ -75,7 +75,7 @@ class JujuClient:
         endpoint_1: str,
         endpoint_2: str,
         model: str = "default",
-    ):
+    ) -> None:
         # Get targets
         target_1 = JujuIntegrationApplication(application_1, endpoint_1)
         target_2 = JujuIntegrationApplication(application_2, endpoint_2)
@@ -88,7 +88,7 @@ class JujuClient:
         self,
         bundle: str,
         model: str = "default",
-    ):
+    ) -> None:
         self.logger.info(f"Deploying bundle file: '{bundle}'")
         self.backend.deploy_bundle_file(model, bundle)
 
@@ -96,15 +96,15 @@ class JujuClient:
         for extension in self.extensions:
             extension.post_deploy(model)
 
-    def remove_applications(self, *applications: str, model: str = "default"):
+    def remove_applications(self, *applications: str, model: str = "default") -> None:
         self.logger.info(f"Removing applications: {', '.join(applications)}.")
         self.backend.remove_applications(model, *applications)
 
-    def wait_for_removal(self, *applications: str, model: str = "default", timeout: timedelta | None = None):
+    def wait_for_removal(self, *applications: str, model: str = "default", timeout: timedelta | None = None) -> None:
         self.logger.info(
             f"{self._waiting_timeout_log(timeout)} for removal of application(s) {', '.join(applications)}."
         )
-        self.backend.wait_for_removal(model, applications, timeout)
+        self.backend.wait_for_removal(model, list(applications), timeout)
 
     def wait_for_removal_of_integration(
         self,
@@ -114,7 +114,7 @@ class JujuClient:
         endpoint_2: str,
         model: str = "default",
         timeout: timedelta | None = None,
-    ):
+    ) -> None:
         target_1 = JujuIntegrationApplication(application_1, endpoint_1)
         target_2 = JujuIntegrationApplication(application_2, endpoint_2)
         self.logger.info(
@@ -122,11 +122,13 @@ class JujuClient:
         )
         self.backend.wait_for_removal_of_integration(model, target_1, target_2, timeout)
 
-    def wait_for_removal_of_units(self, *applications: str, model: str = "default", timeout: timedelta | None = None):
+    def wait_for_removal_of_units(
+        self, *applications: str, model: str = "default", timeout: timedelta | None = None
+    ) -> None:
         self.logger.info(
             f"{self._waiting_timeout_log(timeout)} for removal of all units of application(s) {', '.join(applications)}."
         )
-        self.backend.wait_for_removal_of_units(model, applications, timeout)
+        self.backend.wait_for_removal_of_units(model, list(applications), timeout)
 
     def application_exists(self, application: str, model: str = "default") -> bool:
         self.logger.info(f"Checking that application exists: {application}.")
@@ -145,3 +147,6 @@ class JujuClient:
 
     def get_charm_revisions(self, model: str = "default") -> set[tuple[str, int]]:
         return self.backend.get_charm_revisions(model)
+
+    def version(self, model: str = "default") -> str:
+        return self.backend.version(model)
