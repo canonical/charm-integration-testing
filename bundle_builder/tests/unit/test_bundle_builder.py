@@ -217,7 +217,7 @@ class TestBundleBuilder:
             name="database",
             endpoints=frozenset(
                 {
-        # TODO(raul): remove type ignore in subsequent type checker PRs
+                    # TODO(raul): remove type ignore in subsequent type checker PRs
                     dataclasses.replace(  # type: ignore[type-var]
                         sample_charm_endpoint_postgresql_k8s_database(),
                         features=frozenset({"compression"}),
@@ -375,7 +375,7 @@ class TestBundleBuilder:
             name="database",
             endpoints=frozenset(
                 {
-        # TODO(raul): remove type ignore in subsequent type checker PRs
+                    # TODO(raul): remove type ignore in subsequent type checker PRs
                     dataclasses.replace(  # type: ignore[type-var]
                         sample_charm_endpoint_postgresql_k8s_database(),
                         features=frozenset(),
@@ -391,7 +391,7 @@ class TestBundleBuilder:
             name="app",
             endpoints=frozenset(
                 {
-        # TODO(raul): remove type ignore in subsequent type checker PRs
+                    # TODO(raul): remove type ignore in subsequent type checker PRs
                     dataclasses.replace(  # type: ignore[type-var]
                         sample_charm_endpoint_kratos_pg_database(),
                         name="database",
