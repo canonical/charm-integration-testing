@@ -184,18 +184,26 @@ class TestWaitConditions:
 
     def test_all_statuses_are_in_compliant(self, sample_database_webapp_status: jubilant.Status) -> None:
         # GIVEN / WHEN
-        result, wait = all_statuses_are_in({"active"}, sample_database_webapp_status)
+        result, wait = all_statuses_are_in(
+            sample_database_webapp_status,
+            application_statuses={"active"},
+            unit_statuses={"active"},
+            unit_agent_statuses={"idle"},
+        )
 
         # THEN
         assert result is True
         assert wait.noncompliant_applications == {}
         assert wait.noncompliant_units == {}
+        assert wait.noncompliant_unit_agents == {}
 
     def test_all_statuses_are_in_application_not_in_status(
         self, sample_database_webapp_status: jubilant.Status
     ) -> None:
         # GIVEN / WHEN
-        result, wait = all_statuses_are_in({"active"}, sample_database_webapp_status, "missing")
+        result, wait = all_statuses_are_in(
+            sample_database_webapp_status, "missing", application_statuses={"active"}, unit_statuses={"active"}
+        )
 
         # THEN
         assert result is False
@@ -203,7 +211,9 @@ class TestWaitConditions:
 
     def test_all_statuses_are_in_noncompliant(self, sample_database_webapp_status: jubilant.Status) -> None:
         # GIVEN / WHEN
-        result, wait = all_statuses_are_in({"waiting"}, sample_database_webapp_status)
+        result, wait = all_statuses_are_in(
+            sample_database_webapp_status, application_statuses={"waiting"}, unit_statuses={"waiting"}
+        )
 
         # THEN
         assert result is False

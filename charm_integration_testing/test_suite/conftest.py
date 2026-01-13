@@ -290,6 +290,13 @@ def record_failure_execution_metadata(
                     f"failure:charm:{unit.charm}:status",
                     f"unit:{unit.status}:{normalize_string(unit.message)}",
                 )
+            for unit_agent in exc.wait_state.noncompliant_unit_agents.values():
+                if unit_agent is None:
+                    continue
+                execution_metadata(
+                    f"failure:charm:{unit_agent.charm}:status",
+                    f"unit_agent:{unit_agent.status}:{normalize_string(unit_agent.message)}",
+                )
         elif isinstance(exc, CalledProcessError):
             cmd = " ".join(exc.cmd) if isinstance(exc.cmd, (list, tuple)) else exc.cmd
             execution_metadata("failure:cli:cmd", normalize_string(cmd))

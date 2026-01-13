@@ -60,10 +60,10 @@ Wait Condition Implementations
 Different wait conditions check for different stability criteria:
 
 **all_statuses_are_in (idle_for_period)**
-  Checks that all application and unit statuses match expected values (typically ``active``). Used as the baseline stability check.
+  Checks that application statuses, unit workload statuses, and unit agent statuses match expected values. By default, checks for ``active`` application and unit statuses, and ``idle`` unit agent statuses. The function accepts three optional parameters (``application_statuses``, ``unit_statuses``, and ``unit_agent_statuses``) allowing independent control over each category. If any parameter is ``None``, that check is skipped. Used as the baseline stability check.
 
 **all_statuses_are_in (wait_application_settled)**
-  Same algorithm but accepts multiple statuses (``active`` or ``blocked``), allowing for configurations where blocked is a valid stable state.
+  Same algorithm but accepts multiple statuses (``active`` or ``blocked``) for both applications and units, allowing for configurations where blocked is a valid stable state.
 
 **applications_are_scaled**
   Verifies application scale matches desired units by counting units with agent status ``idle`` or ``executing``. Distinguishes between units existing vs. units being ready.
@@ -116,6 +116,14 @@ Error State Tracking
 
 The wait mechanism tracks two states: **last_wait_state** (most recent) and **noncompliant_wait_state** (last failure). Timeout errors report the noncompliant state, not the last state.
 
-**Rationale**: A charm might error, recover to active, then timeout due to insufficient consecutive successes. Without tracking, the error shows "timed out while active" which hides the actual problem. With tracking, the error shows the last problematic state for debugging context.
+Each ``JujuWaitState`` tracks three types of noncompliant entities:
+
+- **noncompliant_applications**: Applications not matching expected status
+- **noncompliant_units**: Units whose workload status doesn't match expected values
+- **noncompliant_unit_agents**: Units whose agent (Juju) status doesn't match expected values
+
+This separation allows distinguishing between charm-level issues (workload status) and infrastructure-level issues (agent status).
+
+**Rationale**: A charm might error, recover to active, then timeout due to insufficient consecutive successes. Without tracking, the error shows "timed out while active" which hides the actual problem. With tracking, the error shows the last problematic state for debugging context, including whether the issue was with the application status, unit workload status, or unit agent status.
 
 **Interaction with strict_timeout**: When ``strict_timeout=False`` and the model is in the desired state at timeout, the wait continues. If ``strict_timeout=True`` and consecutive successes haven't been achieved, the error will indicate "insufficient status checks" rather than reporting a noncompliant state, since the model was actually compliant but needed more time to confirm stability.
