@@ -178,10 +178,26 @@ class CharmEndpoint:
 
     @cached_method
     def limit(self, integrated_endpoints: frozenset[str]) -> int | None:
+        """Get the endpoint limit based on currently integrated endpoints.
+
+        Returns the smallest (most restrictive) limit among all matching criteria.
+        When multiple limits match, the minimum is selected for conservative behavior.
+
+        Args:
+            integrated_endpoints: Set of endpoint names currently integrated for this application.
+
+        Returns:
+            The smallest limit among matching criteria, or None if no limits match.
+        """
+        smallest_limit: int | None = None
         for limit in self.limits:
-            if limit.criteria.valid(integrated_endpoints):
-                return limit.limit
-        return None
+            if not limit.criteria.valid(integrated_endpoints):
+                continue
+            if smallest_limit is None:
+                smallest_limit = limit.limit
+            elif limit.limit is not None:
+                smallest_limit = min(smallest_limit, limit.limit)
+        return smallest_limit
 
 
 CharmConfig = tuple[tuple[str, str | int], ...]

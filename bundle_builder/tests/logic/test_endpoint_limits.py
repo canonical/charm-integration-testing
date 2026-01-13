@@ -408,11 +408,12 @@ class TestEndpointLimits:
     class TestConditionalLimits:
         """Test scenarios where endpoint limits depend on other integrated endpoints."""
 
-        def test_limit_increases_when_condition_met(self) -> None:
-            """Test that an endpoint's limit can increase when a specific endpoint is integrated."""
-            # GIVEN a database charm with conditional limits:
-            # - limit=1 by default
-            # - limit=10 when grafana-cloud-config is integrated
+        def test_smallest_matching_limit_selected(self) -> None:
+            """Test that the smallest limit among all matching criteria is selected."""
+            # GIVEN a database charm with multiple conditional limits:
+            # - limit=0 when admin is integrated (most restrictive)
+            # - limit=5 when monitoring is integrated
+            # - limit=10 by default
             from bundle_builder.charm import CharmLimitCriteria
 
             db_charm = Charm(
@@ -430,16 +431,27 @@ class TestEndpointLimits:
                             optionality=CharmEndpointOptionality.from_bool(False),
                             limits=(
                                 CharmLimit(
-                                    criteria=CharmLimitCriteria(endpoint_integrated="grafana-cloud-config"),
-                                    limit=10,
+                                    criteria=CharmLimitCriteria(endpoint_integrated="admin"),
+                                    limit=0,
                                 ),
-                                CharmLimit(limit=1),
+                                CharmLimit(
+                                    criteria=CharmLimitCriteria(endpoint_integrated="monitoring"),
+                                    limit=5,
+                                ),
+                                CharmLimit(limit=10),  # default
                             ),
                         ),
                         CharmEndpoint(
                             type=ENDPOINT_REQUIRES,
-                            name="grafana-cloud-config",
-                            interface="grafana_cloud_config",
+                            name="admin",
+                            interface="admin",
+                            optionality=CharmEndpointOptionality.from_bool(True),
+                            limits=(),
+                        ),
+                        CharmEndpoint(
+                            type=ENDPOINT_REQUIRES,
+                            name="monitoring",
+                            interface="monitoring",
                             optionality=CharmEndpointOptionality.from_bool(True),
                             limits=(),
                         ),
@@ -448,7 +460,7 @@ class TestEndpointLimits:
                 priority=1.0,
             )
 
-            # AND an app charm that needs database
+            # AND app charms that need database
             app_charm = Charm(
                 name="app-k8s",
                 channel="stable",
@@ -469,9 +481,9 @@ class TestEndpointLimits:
                 priority=1.0,
             )
 
-            # AND a grafana-cloud charm
-            grafana_cloud_charm = Charm(
-                name="grafana-cloud-k8s",
+            # AND an admin charm
+            admin_charm = Charm(
+                name="admin-k8s",
                 channel="stable",
                 revision=1,
                 ubuntu_version="22.04",
@@ -480,8 +492,8 @@ class TestEndpointLimits:
                     {
                         CharmEndpoint(
                             type=ENDPOINT_PROVIDES,
-                            name="grafana-cloud-config",
-                            interface="grafana_cloud_config",
+                            name="admin",
+                            interface="admin",
                             optionality=CharmEndpointOptionality.from_bool(False),
                             limits=(),
                         )
@@ -490,14 +502,35 @@ class TestEndpointLimits:
                 priority=1.0,
             )
 
-            # AND a base bundle with multiple apps needing database
+            # AND a monitoring charm
+            monitoring_charm = Charm(
+                name="monitoring-k8s",
+                channel="stable",
+                revision=1,
+                ubuntu_version="22.04",
+                ubuntu_arch="amd64",
+                endpoints=frozenset(
+                    {
+                        CharmEndpoint(
+                            type=ENDPOINT_PROVIDES,
+                            name="monitoring",
+                            interface="monitoring",
+                            optionality=CharmEndpointOptionality.from_bool(False),
+                            limits=(),
+                        )
+                    }
+                ),
+                priority=1.0,
+            )
+
+            # AND a base bundle with apps and admin/monitoring
             base_bundle = Bundle(
                 applications=frozenset(
                     {
                         Application(name="postgresql-k8s", charm=db_charm),
                         Application(name="app1", charm=app_charm),
-                        Application(name="app2", charm=app_charm),
-                        Application(name="grafana-cloud-k8s", charm=grafana_cloud_charm),
+                        Application(name="admin-k8s", charm=admin_charm),
+                        Application(name="monitoring-k8s", charm=monitoring_charm),
                     }
                 ),
                 integrations=frozenset(),
@@ -506,35 +539,45 @@ class TestEndpointLimits:
             )
 
             # WHEN building the bundle
-            builder = BundleBuilder(CharmhubClientStub(db_charm, app_charm, grafana_cloud_charm))
+            builder = BundleBuilder(CharmhubClientStub(db_charm, app_charm, admin_charm, monitoring_charm))
             result = builder.build(base_bundle)
 
-            # THEN grafana-cloud should be integrated with postgresql
-            grafana_cloud_integration_exists = any(
+            # THEN admin and monitoring should be integrated with postgresql
+            admin_integration_exists = any(
                 {
-                    ApplicationEndpoint(application="postgresql-k8s", endpoint="grafana-cloud-config"),
-                    ApplicationEndpoint(application="grafana-cloud-k8s", endpoint="grafana-cloud-config"),
+                    ApplicationEndpoint(application="postgresql-k8s", endpoint="admin"),
+                    ApplicationEndpoint(application="admin-k8s", endpoint="admin"),
                 }
                 == integration
                 for integration in result.integrations
             )
-            assert grafana_cloud_integration_exists
+            monitoring_integration_exists = any(
+                {
+                    ApplicationEndpoint(application="postgresql-k8s", endpoint="monitoring"),
+                    ApplicationEndpoint(application="monitoring-k8s", endpoint="monitoring"),
+                }
+                == integration
+                for integration in result.integrations
+            )
+            assert admin_integration_exists
+            assert monitoring_integration_exists
 
-            # AND postgresql should have more than 1 database connection (the conditional higher limit applies)
+            # AND postgresql should have 1 database connection
+            # Even though admin (limit=0), monitoring (limit=5), and default (limit=10) all match,
+            # the database was integrated when only the default limit (10) matched initially.
+            # The limit of 0 would prevent additional connections but doesn't retroactively remove existing ones.
             db_connections = sum(
                 True
                 for integration in result.integrations
                 if ApplicationEndpoint(application="postgresql-k8s", endpoint="database") in integration
             )
-            assert (
-                db_connections > 1
-            ), "Expected more than 1 database connection when grafana-cloud-config is integrated"
+            assert db_connections == 1, "Expected 1 database connection (integrated before admin endpoint with limit=0)"
 
-        def test_limit_stays_low_when_condition_not_met(self) -> None:
-            """Test that endpoint limit remains low when conditional endpoint is not available."""
+        def test_default_limit_when_no_conditions_met(self) -> None:
+            """Test that the default limit applies when no conditional criteria match."""
             from bundle_builder.charm import CharmLimitCriteria
 
-            # GIVEN a database charm with conditional limits but no grafana-cloud available
+            # GIVEN a database charm with conditional limits
             db_charm = Charm(
                 name="postgresql-k8s",
                 channel="stable",
@@ -550,10 +593,10 @@ class TestEndpointLimits:
                             optionality=CharmEndpointOptionality.from_bool(False),
                             limits=(
                                 CharmLimit(
-                                    criteria=CharmLimitCriteria(endpoint_integrated="grafana-cloud-config"),
-                                    limit=10,
+                                    criteria=CharmLimitCriteria(endpoint_integrated="monitoring"),
+                                    limit=5,
                                 ),
-                                CharmLimit(limit=1),
+                                CharmLimit(limit=1),  # default
                             ),
                         )
                     }

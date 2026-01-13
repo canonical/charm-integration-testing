@@ -594,7 +594,7 @@ class TestCharmEndpoint:
                 expected_limit=5,
             ),
             Params(
-                label="conditional_limit_criteria_met",
+                label="conditional_limit_when_criteria_met",
                 endpoint=CharmEndpoint(
                     type=ENDPOINT_PROVIDES,
                     name="database",
@@ -606,7 +606,7 @@ class TestCharmEndpoint:
                     ),
                 ),
                 integrated_endpoints=frozenset({"grafana-cloud-config"}),
-                expected_limit=10,
+                expected_limit=1,  # Both match, smallest (1) is selected
             ),
             Params(
                 label="conditional_limit_criteria_not_met_fallback_to_default",
@@ -624,7 +624,7 @@ class TestCharmEndpoint:
                 expected_limit=1,
             ),
             Params(
-                label="multiple_conditional_limits_first_match_wins",
+                label="multiple_conditional_limits_smallest_wins",
                 endpoint=CharmEndpoint(
                     type=ENDPOINT_PROVIDES,
                     name="metrics",
@@ -640,7 +640,7 @@ class TestCharmEndpoint:
                     ),
                 ),
                 integrated_endpoints=frozenset({"send-remote-write"}),
-                expected_limit=50,
+                expected_limit=5,  # Both send-remote-write (50) and default (5) match, smallest (5) is selected
             ),
             Params(
                 label="no_matching_criteria_returns_none",
