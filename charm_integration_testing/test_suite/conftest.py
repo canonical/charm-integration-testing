@@ -8,8 +8,8 @@ import os
 import warnings
 from datetime import timedelta
 from pathlib import Path
-from typing import Any, Callable, Iterator
 from subprocess import CalledProcessError, run  # nosec
+from typing import Any, Callable, Iterator
 
 import pytest
 from extensions import (
@@ -303,7 +303,7 @@ def record_failure_execution_metadata(
 @pytest.fixture
 def record_juju_execution_metadata(
     juju_client: JujuClient, model: str, execution_metadata: Callable[[str, str | int], None]
-):
+) -> Iterator[None]:
     # Let the test run
     yield
 
