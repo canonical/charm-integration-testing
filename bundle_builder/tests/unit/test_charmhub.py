@@ -70,7 +70,8 @@ class OverridesStub(OverridesClient):
     def get_charm_test_configs(self, charm: str) -> list[CharmTestConfig]:  # type: ignore[override]
         configs = self.charm_test_configs.get(charm, [])
         # Use CharmTestConfigs wrapper to let Pydantic validate the list properly
-        return CharmTestConfigs(configs=configs).configs
+        # TODO(raul): remove on merge with main
+        return CharmTestConfigs(configs=configs).configs  # type: ignore[arg-type]
 
 
 matching_base = CharmhubBase(name="ubuntu", architecture="amd64", channel="20.04")

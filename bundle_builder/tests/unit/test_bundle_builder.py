@@ -785,7 +785,8 @@ class TestAddTestConfigs:
             charm = dataclasses.replace(
                 sample_charm_postgresql_k8s(),
                 name="test-charm",
-                channel="1.0/stable",
+                # TODO(raul): remove on merge with main
+                channel="1.0/stable",  # type: ignore[arg-type]
                 test_configs=(
                     CharmTestConfig(
                         criteria=CharmConfigCriteria(track="1.0"),
@@ -931,7 +932,8 @@ class TestAddTestConfigs:
             charm1 = dataclasses.replace(
                 sample_charm_postgresql_k8s(),
                 name="charm1",
-                channel="1.0/stable",
+                # TODO(raul): remove on merge with main
+                channel="1.0/stable",  # type: ignore[arg-type]
                 test_configs=(
                     CharmTestConfig(
                         criteria=CharmConfigCriteria(track="1.0"),
@@ -942,7 +944,8 @@ class TestAddTestConfigs:
             charm2 = dataclasses.replace(
                 sample_charm_kratos(),
                 name="charm2",
-                channel="2.0/stable",
+                # TODO(raul): remove on merge with main
+                channel="2.0/stable",  # type: ignore[arg-type]
                 test_configs=(
                     CharmTestConfig(
                         criteria=CharmConfigCriteria(track="2.0"),
@@ -1006,7 +1009,8 @@ class TestAddTestConfigs:
             charm = dataclasses.replace(
                 sample_charm_kratos(),
                 name="test-charm",
-                channel="1.0/stable",
+                # TODO(raul): remove on merge with main
+                channel="1.0/stable",  # type: ignore[arg-type]
                 endpoints=frozenset(
                     {
                         dataclasses.replace(

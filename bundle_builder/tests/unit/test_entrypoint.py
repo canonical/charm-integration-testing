@@ -134,7 +134,8 @@ class TestApplicationFromArgs:
             return dataclasses.replace(
                 charm,
                 ubuntu_arch=ubuntu_arch,
-                channel=charm_channel if charm_channel is not None else charm.channel,
+                # TODO(raul): remove on merge with main
+                channel=charm_channel if charm_channel is not None else charm.channel,  # type: ignore[arg-type]
                 revision=charm_revision or charm.revision,
                 ubuntu_version=ubuntu_version or charm.ubuntu_version,
             )
@@ -166,7 +167,8 @@ class TestApplicationFromArgs:
             applications={
                 Application(
                     name="target",
-                    charm=dataclasses.replace(sample_charm_postgresql_k8s(), channel="edge"),
+                    # TODO(raul): remove on merge with main
+                    charm=dataclasses.replace(sample_charm_postgresql_k8s(), channel="edge"),  # type: ignore[arg-type]
                 )
             },
         ),

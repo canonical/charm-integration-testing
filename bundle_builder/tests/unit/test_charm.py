@@ -64,7 +64,8 @@ def sample_charm_endpoint_postgresql_k8s_database() -> CharmEndpoint:
 def sample_charm_postgresql_k8s() -> Charm:
     return Charm(
         name="postgresql-k8s",
-        channel="stable",
+        # TODO(raul): remove on merge with main
+        channel="stable",  # type: ignore[arg-type]
         revision=1,
         ubuntu_version="22.04",
         ubuntu_arch="amd64",
@@ -101,7 +102,8 @@ def sample_charm_endpoint_pgbouncer_k8s_backend_database() -> CharmEndpoint:
 def sample_charm_pgbouncer_k8s() -> Charm:
     return Charm(
         name="pgbouncer-k8s",
-        channel="stable",
+        # TODO(raul): remove on merge with main
+        channel="stable",  # type: ignore[arg-type]
         revision=1,
         ubuntu_version="22.04",
         ubuntu_arch="amd64",
@@ -128,7 +130,8 @@ def sample_charm_endpoint_kratos_pg_database() -> CharmEndpoint:
 def sample_charm_kratos() -> Charm:
     return Charm(
         name="kratos",
-        channel="edge",
+        # TODO(raul): remove on merge with main
+        channel="edge",  # type: ignore[arg-type]
         revision=123,
         ubuntu_version="24.04",
         ubuntu_arch="amd64",
@@ -154,7 +157,8 @@ def sample_charm_endpoint_self_signed_certificates_certificates() -> CharmEndpoi
 def sample_charm_self_signed_certificates() -> Charm:
     return Charm(
         name="self-signed-certificates",
-        channel="edge",
+        # TODO(raul): remove on merge with main
+        channel="edge",  # type: ignore[arg-type]
         revision=444,
         ubuntu_version="20.04",
         ubuntu_arch="amd64",

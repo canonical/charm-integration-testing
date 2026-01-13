@@ -518,7 +518,8 @@ class TestBundle:
             # GIVEN a charm with limit 1
             limited_charm = Charm(
                 name="limited-charm",
-                channel="stable",
+                # TODO(raul): remove on merge with main
+                channel="stable",  # type: ignore[arg-type]
                 revision=1,
                 ubuntu_version="22.04",
                 ubuntu_arch="amd64",
@@ -538,7 +539,8 @@ class TestBundle:
 
             requiring_charm = Charm(
                 name="app",
-                channel="stable",
+                # TODO(raul): remove on merge with main
+                channel="stable",  # type: ignore[arg-type]
                 revision=1,
                 ubuntu_version="22.04",
                 ubuntu_arch="amd64",
@@ -586,7 +588,8 @@ class TestBundle:
             # GIVEN a charm with limit 2
             limited_charm = Charm(
                 name="limited-charm",
-                channel="stable",
+                # TODO(raul): remove on merge with main
+                channel="stable",  # type: ignore[arg-type]
                 revision=1,
                 ubuntu_version="22.04",
                 ubuntu_arch="amd64",
@@ -606,7 +609,8 @@ class TestBundle:
 
             requiring_charm = Charm(
                 name="app",
-                channel="stable",
+                # TODO(raul): remove on merge with main
+                channel="stable",  # type: ignore[arg-type]
                 revision=1,
                 ubuntu_version="22.04",
                 ubuntu_arch="amd64",

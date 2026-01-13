@@ -235,7 +235,8 @@ class CharmhubClient:
 
         return Charm(
             name=charm_name,
-            channel=default_refresh_info.effective_channel,
+            # TODO(raul): remove on merge with main
+            channel=default_refresh_info.effective_channel,  # type: ignore[arg-type]
             revision=charm_revision,
             ubuntu_version=ubuntu_version,
             ubuntu_arch=ubuntu_arch,
@@ -282,7 +283,8 @@ class CharmhubClient:
 
         return Charm(
             name=charm_name,
-            channel=charm_channel,
+            # TODO(raul): remove on merge with main
+            channel=charm_channel,  # type: ignore[arg-type]
             revision=refresh_info.charm.revision,
             ubuntu_version=ubuntu_version,
             ubuntu_arch=ubuntu_arch,
@@ -322,7 +324,8 @@ class CharmhubClient:
 
         return Charm(
             name=charm_name,
-            channel=refresh_info.effective_channel,
+            # TODO(raul): remove on merge with main
+            channel=refresh_info.effective_channel,  # type: ignore[arg-type]
             revision=refresh_info.charm.revision,
             ubuntu_version=ubuntu_version,
             ubuntu_arch=ubuntu_arch,
