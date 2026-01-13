@@ -602,7 +602,7 @@ class TestNormalizeStringMultiline:
     ]
 
     @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-    def test(self, params: Params):
+    def test(self, params: Params) -> None:
         # WHEN normalizing the input
         result_lines = normalize_string_multiline(params.input)
 
