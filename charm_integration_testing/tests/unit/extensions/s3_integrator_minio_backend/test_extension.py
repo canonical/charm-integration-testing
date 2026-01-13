@@ -3,8 +3,10 @@
 
 import logging
 from dataclasses import dataclass, field
+from datetime import timedelta
 from pathlib import Path
-from subprocess import CalledProcessError  # nosec
+from subprocess import CalledProcessError
+from typing import Generator  # nosec
 
 import pytest
 from extensions.s3_integrator_minio_backend.extension import (
@@ -14,62 +16,131 @@ from extensions.s3_integrator_minio_backend.extension import (
     MINIO_SECRET_KEY,
     S3IntegratorMinIOBackendExtension,
 )
+from juju.backend import JujuBackend
 
 
 @dataclass
-class JujuStub:
-    deployed: list = field(default_factory=list)
-    configured: list = field(default_factory=list)
-    waited_scaled: list = field(default_factory=list)
-    waited_settled: list = field(default_factory=list)
-    scp_calls: list = field(default_factory=list)
-    ssh_calls: list = field(default_factory=list)
-    actions: list = field(default_factory=list)
-    applications: dict = field(default_factory=lambda: {"s3-app": "s3-integrator"})
-    unit_ips: dict = field(default_factory=lambda: {"s3-app-minio/leader": "10.0.0.1"})
+class JujuStub(JujuBackend):
+    deployed: list[tuple[str, str, str]] = field(default_factory=list)
+    configured: list[tuple[str, str, dict[str, str]]] = field(default_factory=list)
+    waited_scaled: list[tuple[str, str, str]] = field(default_factory=list)
+    waited_settled: list[tuple[str, str, str]] = field(default_factory=list)
+    scp_calls: list[tuple[str, str, str]] = field(default_factory=list)
+    ssh_calls: list[tuple[str, str, str]] = field(default_factory=list)
+    actions: list[tuple[str, str, str, dict[str, str]]] = field(default_factory=list)
+    applications: dict[str, str] = field(default_factory=lambda: {"s3-app": "s3-integrator"})
+    unit_ips: dict[str, str] = field(default_factory=lambda: {"s3-app-minio/leader": "10.0.0.1"})
 
-    def list_applications(self, model: str):
-        return self.applications.keys()
+    def scale_application(self) -> None:  # type: ignore[override]
+        pass
 
-    def application_charm(self, model: str, application: str):
+    def num_units(self) -> None:  # type: ignore[override]
+        pass
+
+    def list_applications(self, model: str) -> list[str]:  # type: ignore[override]
+        return list(self.applications.keys())
+
+    def list_integrations(self) -> None:  # type: ignore[override]
+        pass
+
+    def integration_exists(self) -> None:  # type: ignore[override]
+        pass
+
+    def wait_idle(self) -> None:  # type: ignore[override]
+        pass
+
+    def wait_for_unit_message(self) -> None:  # type: ignore[override]
+        pass
+
+    def juju_status_text(self) -> None:  # type: ignore[override]
+        pass
+
+    def integrate(self) -> None:  # type: ignore[override]
+        pass
+
+    def remove_integration(self) -> None:  # type: ignore[override]
+        pass
+
+    def deploy_bundle_file(self) -> None:  # type: ignore[override]
+        pass
+
+    def remove_applications(self) -> None:  # type: ignore[override]
+        pass
+
+    def wait_for_removal(self) -> None:  # type: ignore[override]
+        pass
+
+    def wait_for_removal_of_integration(self) -> None:  # type: ignore[override]
+        pass
+
+    def wait_for_removal_of_units(self) -> None:  # type: ignore[override]
+        pass
+
+    def application_units(self) -> None:  # type: ignore[override]
+        pass
+
+    def exec_unit(self) -> None:  # type: ignore[override]
+        pass
+
+    def add_secret(self) -> None:  # type: ignore[override]
+        pass
+
+    def read_secret(self) -> None:  # type: ignore[override]
+        pass
+
+    def grant_secret(self) -> None:  # type: ignore[override]
+        pass
+
+    def remove_secret(self) -> None:  # type: ignore[override]
+        pass
+
+    def get_charm_revisions(self) -> None:  # type: ignore[override]
+        pass
+
+    def version(self) -> None:  # type: ignore[override]
+        pass
+
+    def application_charm(self, model: str, application: str) -> str:
         return self.applications[application]
 
-    def deploy_application(self, model: str, charm: str, application: str):
+    def deploy_application(self, model: str, charm: str, application: str) -> None:  # type: ignore[override]
         self.deployed.append((model, charm, application))
 
-    def configure_application(self, model: str, application: str, values: dict):
+    def configure_application(self, model: str, application: str, values: dict[str, str]) -> None:
         self.configured.append((model, application, values))
 
-    def wait_application_scaled(self, model: str, application: str, timeout):
+    def wait_application_scaled(self, model: str, application: str, timeout: timedelta) -> None:  # type: ignore[override]
         self.waited_scaled.append((model, application, str(timeout)))
 
-    def wait_application_settled(self, model: str, application: str, timeout):
+    def wait_application_settled(self, model: str, application: str, timeout: timedelta) -> None:  # type: ignore[override]
         self.waited_settled.append((model, application, str(timeout)))
 
-    def scp(self, model: str, source: str, destination: str):
+    def scp(self, model: str, source: str, destination: str) -> None:
         self.scp_calls.append((model, source, destination))
 
-    def ssh(self, model: str, target: str, command: str):
+    def ssh(self, model: str, target: str, command: str) -> None:
         self.ssh_calls.append((model, target, command))
 
-    def run_action(self, model: str, unit: str, action: str, params: dict):
+    def run_action(self, model: str, unit: str, action: str, params: dict[str, str]) -> None:
         self.actions.append((model, unit, action, params))
 
-    def unit_ip(self, model: str, unit: str):
+    def unit_ip(self, model: str, unit: str) -> str:
         return self.unit_ips[unit]
 
 
 class TestS3IntegratorMinIOBackendExtension:
     @pytest.fixture
-    def juju(self):
+    def juju(self) -> JujuStub:
         return JujuStub()
 
     @pytest.fixture
-    def extension(self, juju):
+    def extension(self, juju: JujuStub) -> S3IntegratorMinIOBackendExtension:
         return S3IntegratorMinIOBackendExtension(juju, logging.getLogger("test"))
 
     class TestPostDeploy:
-        def test_deploys_minio_if_s3_integrator_present(self, extension, juju):
+        def test_deploys_minio_if_s3_integrator_present(
+            self, extension: S3IntegratorMinIOBackendExtension, juju: JujuStub
+        ) -> None:
             # GIVEN a model with an s3-integrator application
             # WHEN post_deploy is called
             extension.post_deploy("test-model")
@@ -77,7 +148,7 @@ class TestS3IntegratorMinIOBackendExtension:
             # THEN minio is deployed
             assert ("test-model", "minio", "s3-app-minio") in juju.deployed
 
-        def test_ignores_non_s3_integrator_apps(self, juju):
+        def test_ignores_non_s3_integrator_apps(self, juju: JujuStub) -> None:
             # GIVEN a model with no s3-integrator applications
             juju.applications = {"non-s3": "not-s3"}
             extension = S3IntegratorMinIOBackendExtension(juju, logging.getLogger("test"))
@@ -89,7 +160,9 @@ class TestS3IntegratorMinIOBackendExtension:
             assert juju.deployed == []
 
     class TestDeployMinIO:
-        def test_deploy_flow_sets_up_everything(self, extension, juju):
+        def test_deploy_flow_sets_up_everything(
+            self, extension: S3IntegratorMinIOBackendExtension, juju: JujuStub
+        ) -> None:
             # GIVEN a ready extension with the client downloaded
             extension.minio_client_file = Path("mc")
 
@@ -140,14 +213,16 @@ class TestS3IntegratorMinIOBackendExtension:
                 },
             ) in juju.actions
 
-        def test_alias_retries_on_failure(self, extension, juju, monkeypatch):
-            def generate_results():
+        def test_alias_retries_on_failure(
+            self, extension: S3IntegratorMinIOBackendExtension, juju: JujuStub, monkeypatch: pytest.MonkeyPatch
+        ) -> None:
+            def generate_results() -> Generator[CalledProcessError | str, None, None]:
                 yield CalledProcessError(1, "bad-command")
                 yield "Success"
 
             results = generate_results()
 
-            def ssh_errors_once(model: str, target: str, command: str):
+            def ssh_errors_once(model: str, target: str, command: str) -> None:
                 result = next(results)
                 if isinstance(result, CalledProcessError):
                     raise result
@@ -164,8 +239,10 @@ class TestS3IntegratorMinIOBackendExtension:
             # THEN the alias command runs successfully
             assert any("/usr/local/bin/mc alias set local" in cmd for _, _, cmd in juju.ssh_calls)
 
-        def test_alias_max_attempts_exceeded(self, extension, juju, monkeypatch):
-            def ssh_errors(model: str, target: str, command: str):
+        def test_alias_max_attempts_exceeded(
+            self, extension: S3IntegratorMinIOBackendExtension, juju: JujuStub, monkeypatch: pytest.MonkeyPatch
+        ) -> None:
+            def ssh_errors(model: str, target: str, command: str) -> None:
                 raise CalledProcessError(1, "bad-command")
 
             monkeypatch.setattr(juju, "ssh", ssh_errors)
@@ -177,7 +254,9 @@ class TestS3IntegratorMinIOBackendExtension:
             with pytest.raises(CalledProcessError):
                 extension.set_minio_alias("test-model", "s3-app", max_attempts=3, retry_sleep_seconds=0)
 
-        def test_create_minio_bucket_creates_path(self, extension, juju):
+        def test_create_minio_bucket_creates_path(
+            self, extension: S3IntegratorMinIOBackendExtension, juju: JujuStub
+        ) -> None:
             # GIVEN a ready extension with the client downloaded
             extension.minio_client_file = Path("mc")
 
@@ -194,7 +273,9 @@ class TestS3IntegratorMinIOBackendExtension:
                 for _, _, cmd in juju.ssh_calls
             )
 
-        def test_authenticate_s3_integrator_includes_path(self, extension, juju):
+        def test_authenticate_s3_integrator_includes_path(
+            self, extension: S3IntegratorMinIOBackendExtension, juju: JujuStub
+        ) -> None:
             # GIVEN a ready extension
             # WHEN authenticate_s3_integrator is called
             extension.authenticate_s3_integrator("test-model", "s3-app")
@@ -222,7 +303,7 @@ class TestS3IntegratorMinIOBackendExtension:
             ) in juju.actions
 
     class TestGetMinioClientFile:
-        def test_downloads_only_once(self, extension):
+        def test_downloads_only_once(self, extension: S3IntegratorMinIOBackendExtension) -> None:
             # GIVEN no client downloaded
             extension.minio_client_file = None
 
@@ -239,7 +320,7 @@ class TestS3IntegratorMinIOBackendExtension:
             assert path == path2
 
     class TestUtilityFunctions:
-        def test_minio_application_name(self, extension):
+        def test_minio_application_name(self, extension: S3IntegratorMinIOBackendExtension) -> None:
             # GIVEN an s3 integrator name
             # WHEN minio_application is called
             result = extension.minio_application("s3-app")
@@ -247,7 +328,7 @@ class TestS3IntegratorMinIOBackendExtension:
             # THEN the correct minio app name is returned
             assert result == "s3-app-minio"
 
-        def test_minio_unit_name(self, extension):
+        def test_minio_unit_name(self, extension: S3IntegratorMinIOBackendExtension) -> None:
             # GIVEN an s3 integrator name
             # WHEN minio_unit is called
             result = extension.minio_unit("s3-app")
@@ -255,7 +336,7 @@ class TestS3IntegratorMinIOBackendExtension:
             # THEN it returns the leader unit
             assert result == "s3-app-minio/leader"
 
-        def test_minio_address_builds_from_unit_ip(self, extension):
+        def test_minio_address_builds_from_unit_ip(self, extension: S3IntegratorMinIOBackendExtension) -> None:
             # GIVEN a known unit IP
             # WHEN minio_address is called
             result = extension.minio_address("test-model", "s3-app")

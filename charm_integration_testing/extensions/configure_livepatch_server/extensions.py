@@ -21,13 +21,13 @@ class ConfigureLivepatchServerExtension(JujuExtension, ABC):
         self.logger = logger
         self.ubuntu_pro_token = ubuntu_pro_token
 
-    def post_deploy(self, model: str):
+    def post_deploy(self, model: str) -> None:
         # Look for livepatch server application
         for application in self.juju.list_applications(model):
             if self.juju.application_charm(model, application) == LIVEPATCH_SERVER_CHARM:
                 self.configure_livepatch_server(model, application)
 
-    def configure_livepatch_server(self, model: str, application: str):
+    def configure_livepatch_server(self, model: str, application: str) -> None:
         # Following guide: https://discourse.ubuntu.com/t/getting-started-with-livepatch-on-prem-and-microk8s/39130
 
         # Skip if no token

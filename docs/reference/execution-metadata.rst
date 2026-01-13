@@ -32,6 +32,22 @@ Collected Metadata Categories
 
 The following tables document all execution metadata categories that are automatically collected by the test framework.
 
+Juju Information
+~~~~~~~~~~~~~~~~
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 40 15 20
+
+   * - Category
+     - Description
+     - Normalized
+     - Example Value
+   * - ``juju:version``
+     - Version of the Juju controller. Collected automatically during test execution.
+     - No
+     - ``3.5.0``
+
 Charm Information
 ~~~~~~~~~~~~~~~~~
 
@@ -51,6 +67,30 @@ Charm Information
      - Revision number for a specific charm. Dynamic category based on charm name (e.g., ``charm:postgresql:revision``). Collected at start and end of test.
      - No
      - ``123``
+
+Pipeline Information
+~~~~~~~~~~~~~~~~~~~~
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 40 15 20
+
+   * - Category
+     - Description
+     - Normalized
+     - Example Value
+   * - ``pipeline:ref``
+     - Git commit hash (short) of the repository at test execution time. Collected from the current git HEAD.
+     - No
+     - ``e484374``
+   * - ``pipeline:tag``
+     - Git tag pointing to the current commit, if one exists. Only collected when the commit has an exact tag match.
+     - No
+     - ``v1.2.3``
+   * - ``pipeline:workflow_hash``
+     - Git hash of the ``.github/workflows/charm-testing.yaml`` workflow file. Provides version tracking of the testing pipeline itself.
+     - No
+     - ``a1b2c3d4e5f6...``
 
 Warning Information
 ~~~~~~~~~~~~~~~~~~~

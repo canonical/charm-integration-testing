@@ -23,7 +23,7 @@ from bundle_builder import Application, ApplicationEndpoint, Bundle, BundleBuild
 
 def test_overrides_metadata_make_optional(
     tmp_path: Path, sample_dependent_charm: str, sample_dependent_charm_endpoint: str
-):
+) -> None:
     # GIVEN an override to make an endpoint optional
     with (tmp_path / f"{sample_dependent_charm}.yaml").open("w") as f:
         yaml.dump(
@@ -40,13 +40,14 @@ def test_overrides_metadata_make_optional(
     charmhub_client = CharmhubClient(overrides_client=OverridesClient(charm_metadata_overrides=tmp_path))
 
     # WHEN a bundle is built with that charm
+    charm_from_store = charmhub_client.charm_from_store(sample_dependent_charm, "amd64")
     minimal_bundle = BundleBuilder(charmhub_client).build(
         Bundle(
             applications=frozenset(
                 {
                     Application(
                         name=sample_dependent_charm,
-                        charm=charmhub_client.charm_from_store(sample_dependent_charm, "amd64"),
+                        charm=charm_from_store,
                     )
                 }
             ),
@@ -62,24 +63,26 @@ def test_overrides_metadata_make_optional(
     }
 
 
-def test_charm_config(tmp_path: Path, sample_independent_charm: str):
+def test_charm_config(tmp_path: Path, sample_independent_charm: str) -> None:
     # GIVEN a charm test config
     with (tmp_path / f"{sample_independent_charm}.yaml").open("w") as f:
         yaml.dump(
-            {"configs": [{"config-option": "config-value"}]},
+            {"configs": [{"config": {"config-option": "config-value"}}]},
             f,
         )
     # AND a charmhub client with an overrides client pointed to it
     charmhub_client = CharmhubClient(overrides_client=OverridesClient(charm_test_configs=tmp_path))
 
     # WHEN a bundle is built with that charm
+    charm_from_store = charmhub_client.charm_from_store(sample_independent_charm, "amd64")
     minimal_bundle = BundleBuilder(charmhub_client).build(
         Bundle(
             applications=frozenset(
                 {
                     Application(
                         name=sample_independent_charm,
-                        charm=charmhub_client.charm_from_store(sample_independent_charm, "amd64"),
+                        charm=charm_from_store,
+                        config=charm_from_store.test_configs[0].config,
                     )
                 }
             ),
@@ -93,5 +96,5 @@ def test_charm_config(tmp_path: Path, sample_independent_charm: str):
     assert all(
         (("config-option", "config-value"),) == application.config
         for application in minimal_bundle.applications
-        if application.charm == sample_independent_charm
+        if application.charm.name == sample_independent_charm
     )

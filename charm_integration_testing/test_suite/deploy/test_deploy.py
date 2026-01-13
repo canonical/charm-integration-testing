@@ -12,7 +12,7 @@ def test_deploy(
     model: str,
     bundles: list[str],
     integrations: list[tuple[tuple[str, str], tuple[str, str]]],
-):
+) -> None:
     # Deploy each bundle
     for bundle in bundles:
         juju_client.deploy_bundle_file(bundle, model=model)

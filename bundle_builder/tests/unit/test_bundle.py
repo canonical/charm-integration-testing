@@ -14,6 +14,8 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import dataclasses
+from functools import cache
+from typing import Any
 
 import pytest
 import yaml
@@ -29,7 +31,7 @@ from bundle_builder.charm import (
     CharmLimit,
 )
 from bundle_builder.charmhub import CharmhubClient
-from bundle_builder.charmhub_http import CharmhubBase
+from bundle_builder.charmhub_http import CharmhubBase, CharmhubHttpClient
 from bundle_builder.overrides import CharmEndpointOverride, CharmMetadataOverride, OverridesClient
 
 from .test_charm import (
@@ -68,7 +70,7 @@ class TestApplication:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test(self, params: Params):
+        def test(self, params: Params) -> None:
             # GIVEN the application
             application = params.application
 
@@ -80,14 +82,14 @@ class TestApplication:
 
 
 class TestLimitParsing:
-    def test_charm_endpoint_override_limit(self):
+    def test_charm_endpoint_override_limit(self) -> None:
         # GIVEN an override with limit
         override = CharmEndpointOverride(limit=3)
 
         # THEN limit is correctly set
         assert override.limit == 3
 
-    def test_charm_endpoint_override_no_limit(self):
+    def test_charm_endpoint_override_no_limit(self) -> None:
         # GIVEN an override without limit
         override = CharmEndpointOverride()
 
@@ -96,54 +98,53 @@ class TestLimitParsing:
 
 
 class TestLimitApplication:
-    def test_charmhub_client_applies_limit_overrides(self):
+    def test_charmhub_client_applies_limit_overrides(self) -> None:
         # Mock overrides client that returns limit overrides
         class MockOverridesClient(OverridesClient):
-            def get_charm_metadata_overrides(self, charm: str):
+            @cache
+            def get_charm_metadata_overrides(self, charm: str) -> CharmMetadataOverride:
                 if charm == "test-charm":
                     return CharmMetadataOverride(provides={"database": CharmEndpointOverride(limit=2)})
                 return CharmMetadataOverride()
 
         # Mock HTTP client that returns mock charm data
-        class MockHttpClient:
-            def refresh(self, action):
+        class MockHttpClient(CharmhubHttpClient):
+            def refresh(self, action: object) -> Any:  # type: ignore[override]
                 class MockResponse:
-                    def __init__(self):
+                    def __init__(self) -> None:
+                        class MockError:
+                            def __init__(self) -> None:
+                                self.code = "invalid-charm-base"
+
+                                class MockExtra:
+                                    def __init__(self) -> None:
+                                        self.default_bases = [MockBase()]
+
+                                self.extra = MockExtra()
+
                         # Mock error for default base lookup (when base is "NA")
+                        self.error: MockError | None = None
                         if hasattr(action, "base") and action.base.name == "NA":
-
-                            class MockError:
-                                def __init__(self):
-                                    self.code = "invalid-charm-base"
-
-                                    class MockExtra:
-                                        def __init__(self):
-                                            self.default_bases = [MockBase()]
-
-                                    self.extra = MockExtra()
-
                             self.error = MockError()
-                        else:
-                            self.error = None
 
                         self.name = "test-charm"
                         self.effective_channel = "stable"
 
                         class MockCharm:
-                            def __init__(self):
+                            def __init__(self) -> None:
                                 self.revision = 1
                                 self.bases = [MockBase()]
 
                                 class MockMetadata:
-                                    def __init__(self):
+                                    def __init__(self) -> None:
                                         class MockEndpoint:
-                                            def __init__(self, interface, optional=None):
+                                            def __init__(self, interface: Any, optional: Any = None) -> None:
                                                 self.interface = interface
                                                 self.optional = optional
 
                                         self.provides = {"database": MockEndpoint("postgresql")}
-                                        self.requires = {}
-                                        self.peers = {}
+                                        self.requires: dict[str, MockEndpoint] = {}
+                                        self.peers: dict[str, MockEndpoint] = {}
 
                                 self.metadata = MockMetadata()
 
@@ -151,7 +152,7 @@ class TestLimitApplication:
 
                 return MockResponse()
 
-        def MockBase():
+        def MockBase() -> CharmhubBase:
             return CharmhubBase(name="ubuntu", architecture="amd64", channel="22.04")
 
         # Create CharmhubClient with mock dependencies
@@ -168,7 +169,7 @@ class TestLimitApplication:
 class TestApplicationEndpoint:
     sample_application_endpoint = ApplicationEndpoint("postgresql-k8s", "certificates")
 
-    def test_repr(self):
+    def test_repr(self) -> None:
         # GIVEN an application endpoint
         application_endpoint = self.sample_application_endpoint
 
@@ -178,7 +179,7 @@ class TestApplicationEndpoint:
         # THEN repr is application:endpoint
         assert repr == f"{application_endpoint.application}:{application_endpoint.endpoint}"
 
-    def test_str(self):
+    def test_str(self) -> None:
         # GIVEN an application endpoint
         application_endpoint = self.sample_application_endpoint
 
@@ -236,7 +237,8 @@ class TestBundle:
             ),
             Params(
                 label="duplicate_application_names",
-                bundle=dataclasses.replace(
+                # TODO(raul): remove type ignore in subsequent type checker PRs
+                bundle=dataclasses.replace(  # type: ignore
                     sample_bundle_postgresql_k8s_kratos(),
                     applications=frozenset(
                         {
@@ -250,7 +252,8 @@ class TestBundle:
             ),
             Params(
                 label="more_than_two_endpoints_in_integration",
-                bundle=dataclasses.replace(
+                # TODO(raul): remove type ignore in subsequent type checker PRs
+                bundle=dataclasses.replace(  # type: ignore
                     sample_bundle_postgresql_k8s_kratos(),
                     integrations=frozenset(
                         {
@@ -271,7 +274,8 @@ class TestBundle:
             ),
             Params(
                 label="unknown_application_in_integration",
-                bundle=dataclasses.replace(
+                # TODO(raul): remove type ignore in subsequent type checker PRs
+                bundle=dataclasses.replace(  # type: ignore
                     sample_bundle_postgresql_k8s_kratos(),
                     integrations=frozenset(
                         {
@@ -289,7 +293,8 @@ class TestBundle:
             ),
             Params(
                 label="unknown_endpoint_in_integration",
-                bundle=dataclasses.replace(
+                # TODO(raul): remove type ignore in subsequent type checker PRs
+                bundle=dataclasses.replace(  # type: ignore
                     sample_bundle_postgresql_k8s_kratos(),
                     integrations=frozenset(
                         {
@@ -307,7 +312,8 @@ class TestBundle:
             ),
             Params(
                 label="different_interface_types_in_integration",
-                bundle=dataclasses.replace(
+                # TODO(raul): remove type ignore in subsequent type checker PRs
+                bundle=dataclasses.replace(  # type: ignore
                     sample_bundle_postgresql_k8s_kratos(),
                     applications=frozenset(
                         {
@@ -337,21 +343,24 @@ class TestBundle:
             ),
             Params(
                 label="endpoint_limit_exceeded",
-                bundle=dataclasses.replace(
+                # TODO(raul): remove type ignore in subsequent type checker PRs
+                bundle=dataclasses.replace(  # type: ignore
                     sample_bundle_postgresql_k8s_kratos(),
                     applications=frozenset(
                         {
                             Application(
                                 name="db",
-                                charm=dataclasses.replace(
+                                # TODO(raul): remove type ignore in subsequent type checker PRs
+                                charm=dataclasses.replace(  # type: ignore
                                     sample_charm_postgresql_k8s(),
                                     endpoints=frozenset(
+                                        # TODO(raul): remove type ignore in subsequent type checker PRs
                                         {
                                             dataclasses.replace(
                                                 sample_charm_endpoint_postgresql_k8s_database(),
                                                 limits=(CharmLimit(limit=1),),
                                             )
-                                        }
+                                        }  # type: ignore
                                     ),
                                 ),
                             ),
@@ -388,7 +397,7 @@ class TestBundle:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test_validate(self, params: Params):
+        def test_validate(self, params: Params) -> None:
             if params.should_raise:
                 with pytest.raises(ValueError, match=params.match if params.match else ""):
                     params.bundle.validate()
@@ -396,7 +405,7 @@ class TestBundle:
                 # should not raise
                 params.bundle.validate()
 
-    def test_application_endpoints(self):
+    def test_application_endpoints(self) -> None:
         # GIVEN a bundle
         bundle = sample_bundle_postgresql_k8s_kratos()
 
@@ -417,12 +426,13 @@ class TestBundle:
         class Params:
             label: str
             bundle: Bundle
-            charms: set[str]
+            charms: frozenset[str]
 
         test_cases = [
             Params(
                 label="no_charms",
-                bundle=dataclasses.replace(
+                # TODO(raul): remove type ignore in subsequent type checker PRs
+                bundle=dataclasses.replace(  # type: ignore
                     sample_bundle_postgresql_k8s_kratos(),
                     applications=frozenset(),
                 ),
@@ -435,7 +445,8 @@ class TestBundle:
             ),
             Params(
                 label="duplicate_charms",
-                bundle=dataclasses.replace(
+                # TODO(raul): remove type ignore in subsequent type checker PRs
+                bundle=dataclasses.replace(  # type: ignore
                     sample_bundle_postgresql_k8s_kratos(),
                     applications=frozenset(
                         {
@@ -449,7 +460,7 @@ class TestBundle:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test(self, params: Params):
+        def test(self, params: Params) -> None:
             # GIVEN the bundle
             bundle = params.bundle
 
@@ -457,19 +468,21 @@ class TestBundle:
             charms = bundle.charms
 
             # THEN charms match
-            assert charms == params.charms
+            # TODO(raul): remove type ignore in subsequent type checker PRs
+            assert charms == params.charms  # type: ignore
 
     class TestUnfulfilledEndpoints:
         @dataclass
         class Params:
             label: str
             bundle: Bundle
-            unfulfilled_endpoints: set[ApplicationEndpoint]
+            unfulfilled_endpoints: frozenset[ApplicationEndpoint]
 
         test_cases = [
             Params(
                 label="no_non_optional_endpoints",
-                bundle=dataclasses.replace(
+                # TODO(raul): remove type ignore in subsequent type checker PRs
+                bundle=dataclasses.replace(  # type: ignore
                     sample_bundle_postgresql_k8s_kratos(),
                     applications=frozenset(
                         {
@@ -482,7 +495,8 @@ class TestBundle:
             ),
             Params(
                 label="missing_non_optional_endpoint",
-                bundle=dataclasses.replace(
+                # TODO(raul): remove type ignore in subsequent type checker PRs
+                bundle=dataclasses.replace(  # type: ignore
                     sample_bundle_postgresql_k8s_kratos(),
                     applications=frozenset(
                         {
@@ -503,7 +517,7 @@ class TestBundle:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test(self, params: Params):
+        def test(self, params: Params) -> None:
             # GIVEN the bundle
             bundle = params.bundle
 
@@ -511,9 +525,10 @@ class TestBundle:
             unfulfilled_endpoints = bundle.unfulfilled_endpoints
 
             # THEN unfulfilled endpoints match
-            assert unfulfilled_endpoints == params.unfulfilled_endpoints
+            # TODO(raul): remove type ignore in subsequent type checker PRs
+            assert unfulfilled_endpoints == params.unfulfilled_endpoints  # type: ignore
 
-        def test_unfulfilled_endpoints_considers_limits(self):
+        def test_unfulfilled_endpoints_considers_limits(self) -> None:
             # GIVEN a charm with limit 1
             limited_charm = Charm(
                 name="limited-charm",
@@ -579,9 +594,10 @@ class TestBundle:
 
             # THEN the limited endpoint should not be unfulfilled (limit reached)
             db_endpoint = ApplicationEndpoint(application="db", endpoint="database")
-            assert db_endpoint not in unfulfilled
+            # TODO(raul): remove type ignore in subsequent type checker PRs
+            assert db_endpoint not in unfulfilled  # type: ignore
 
-        def test_unfulfilled_endpoints_includes_under_limit(self):
+        def test_unfulfilled_endpoints_includes_under_limit(self) -> None:
             # GIVEN a charm with limit 2
             limited_charm = Charm(
                 name="limited-charm",
@@ -647,7 +663,8 @@ class TestBundle:
 
             # THEN the limited endpoint should be fulfilled (already has one connection)
             db_endpoint = ApplicationEndpoint(application="db", endpoint="database")
-            assert db_endpoint not in unfulfilled
+            # TODO(raul): remove type ignore in subsequent type checker PRs
+            assert db_endpoint not in unfulfilled  # type: ignore
 
     class TestDependencyGraph:
         @dataclass
@@ -884,7 +901,7 @@ class TestBundle:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test_graph_and_dependencies(self, params: Params):
+        def test_graph_and_dependencies(self, params: Params) -> None:
             # GIVEN a bundle
             bundle = params.bundle
 
@@ -892,12 +909,15 @@ class TestBundle:
             graph = bundle.dependency_graph
 
             # THEN graph keys match
-            assert set(graph.keys()) == params.expected_graph_keys
+            # TODO(raul): remove type ignore in subsequent type checker PRs
+            assert set(graph.keys()) == params.expected_graph_keys  # type: ignore
 
             # AND requires/provides match expected
             for app in params.expected_graph_keys:
-                assert {dep.application for dep in graph[app].requires} == params.expected_requires[app]
-                assert {dep.application for dep in graph[app].provides} == params.expected_provides[app]
+                # TODO(raul): remove type ignore in subsequent type checker PRs
+                assert {dep.application for dep in graph[app].requires} == params.expected_requires[app]  # type: ignore
+                # TODO(raul): remove type ignore in subsequent type checker PRs
+                assert {dep.application for dep in graph[app].provides} == params.expected_provides[app]  # type: ignore
 
             # AND has_application_dependency matches expected
             for dep_app, dep_on_app, expected in params.application_dependencies:
@@ -966,9 +986,10 @@ class TestBundle:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test(self, params: Params):
+        def test(self, params: Params) -> None:
             # GIVEN a bundle with the applications
-            bundle = dataclasses.replace(
+            # TODO(raul): remove type ignore in subsequent type checker PRs
+            bundle = dataclasses.replace(  # type: ignore
                 sample_bundle_postgresql_k8s_kratos(),
                 applications=frozenset(params.applications),
             )
@@ -979,7 +1000,7 @@ class TestBundle:
             # THEN matches expected
             assert name == params.name
 
-    def test_export(self):
+    def test_export(self) -> None:
         # GIVEN a bundle
         bundle = sample_bundle_postgresql_k8s_kratos()
 
@@ -1040,9 +1061,10 @@ class TestBundle:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test_platform_specific_export(self, params: Params):
+        def test_platform_specific_export(self, params: Params) -> None:
             # GIVEN a bundle with specific platform
-            bundle = dataclasses.replace(
+            # TODO(raul): remove type ignore in subsequent type checker PRs
+            bundle = dataclasses.replace(  # type: ignore
                 sample_bundle_postgresql_k8s_kratos(),
                 platform=params.platform,
             )
@@ -1065,13 +1087,15 @@ class TestBundle:
                 # AND the platform is correctly set
                 assert parsed_yaml["bundle"] == params.platform
 
-        def test_platform_yaml_structure_consistency(self):
+        def test_platform_yaml_structure_consistency(self) -> None:
             # GIVEN bundles with different platforms
-            kubernetes_bundle = dataclasses.replace(
+            # TODO(raul): remove type ignore in subsequent type checker PRs
+            kubernetes_bundle = dataclasses.replace(  # type: ignore
                 sample_bundle_postgresql_k8s_kratos(),
                 platform="kubernetes",
             )
-            machine_bundle = dataclasses.replace(
+            # TODO(raul): remove type ignore in subsequent type checker PRs
+            machine_bundle = dataclasses.replace(  # type: ignore
                 sample_bundle_postgresql_k8s_kratos(),
                 platform="machine",
             )
@@ -1101,7 +1125,7 @@ class TestBundle:
                 assert k8s_scale == machine_units == 1
                 assert k8s_app == machine_app
 
-    def test_export_mermaid(self):
+    def test_export_mermaid(self) -> None:
         # GIVEN a bundle
         bundle = sample_bundle_postgresql_k8s_kratos()
 
