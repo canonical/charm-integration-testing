@@ -139,11 +139,11 @@ Failure Information
      - ``1``
    * - ``failure:cli:stdout``
      - Standard output from a failed command. Only recorded for ``CalledProcessError`` with stdout.
-     - Yes
+     - Yes, multi-line normalized
      - ``Error: unit not found``
    * - ``failure:cli:stderr``
      - Standard error from a failed command. Only recorded for ``CalledProcessError`` with stderr.
-     - Yes
+     - Yes, multi-line normalized
      - ``ERROR connection refused``
 
 Skip Information
