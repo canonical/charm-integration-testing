@@ -2,6 +2,7 @@
 # See LICENSE file for licensing details.
 
 import logging
+import subprocess
 import time
 from dataclasses import asdict
 from datetime import timedelta
@@ -148,8 +149,8 @@ class VaultUnsealer:
         try:
             self.juju.remove_secret(model, secret_name)
             self.logger.info(f"Removed existing secret '{secret_name}'")
-        except Exception as err:  # TODO(@motjuste): or (juju.CliError | subprocess.CalledProcessError)
-            self.logger.info(f"Ignoring failure to remove secret '{secret_name}': {getattr(err, 'stderr', err)}")
+        except subprocess.CalledProcessError as err:
+            self.logger.info(f"Ignoring failure to remove secret '{secret_name}': {err.stderr}")
 
         # Add the vault tokens
         self.juju.add_secret(

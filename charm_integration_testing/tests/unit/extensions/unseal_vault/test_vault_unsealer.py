@@ -4,6 +4,7 @@
 import logging
 from dataclasses import dataclass, field
 from datetime import timedelta
+import subprocess
 
 from extensions.unseal_vault.vault_client import VaultClient, VaultStatus, VaultTokenSecret
 from extensions.unseal_vault.vault_unsealer import CharmInfo, VaultUnsealer
@@ -54,7 +55,10 @@ class JujuStub(JujuBackend):
         self.actions_run.append((unit, action, params))
 
     def remove_secret(self, model: str, name: str) -> None:
-        del self.secrets[name]
+        try:
+            del self.secrets[name]
+        except KeyError as err:
+            raise subprocess.CalledProcessError(-1, ["remove", "unknown"], stderr="did not find it") from err
 
     def read_secret(self, model: str, name: str) -> dict[str, str]:
         return self.secrets[name]
