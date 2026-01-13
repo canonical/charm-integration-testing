@@ -85,6 +85,8 @@ def get_unit_agent_state(status: jubilant.Status, unit: str) -> JujuUnitAgentSta
     application, _ = unit.split("/")
     application_info = status.apps[application]
     unit_info = get_unit_info(status, unit)
+    if unit_info is None:
+        raise ValueError(f"Unit {unit} not found in status")
     return JujuUnitAgentState(
         charm=application_info.charm,
         revision=application_info.charm_rev,
@@ -102,9 +104,9 @@ def all_statuses_are_in(
 ) -> tuple[bool, JujuWaitState]:
     applications = set(application_args if application_args else status.apps.keys())
 
-    noncompliant_applications = {}
-    noncompliant_units = {}
-    noncompliant_unit_agents = {}
+    noncompliant_applications: dict[str, JujuApplicationState | None] = {}
+    noncompliant_units: dict[str, JujuUnitState | None] = {}
+    noncompliant_unit_agents: dict[str, JujuUnitAgentState | None] = {}
 
     for application in applications:
         if application not in status.apps:
