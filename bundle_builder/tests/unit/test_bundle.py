@@ -356,11 +356,11 @@ class TestBundle:
                                     endpoints=frozenset(
                                         # TODO(raul): remove type ignore in subsequent type checker PRs
                                         {
-                                            dataclasses.replace(
+                                            dataclasses.replace(  # type: ignore[type-var]
                                                 sample_charm_endpoint_postgresql_k8s_database(),
                                                 limits=(CharmLimit(limit=1),),
                                             )
-                                        }  # type: ignore
+                                        }
                                     ),
                                 ),
                             ),

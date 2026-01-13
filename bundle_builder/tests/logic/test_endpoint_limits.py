@@ -408,7 +408,7 @@ class TestEndpointLimits:
     class TestConditionalLimits:
         """Test scenarios where endpoint limits depend on other integrated endpoints."""
 
-        def test_limit_increases_when_condition_met(self):
+        def test_limit_increases_when_condition_met(self) -> None:
             """Test that an endpoint's limit can increase when a specific endpoint is integrated."""
             # GIVEN a database charm with conditional limits:
             # - limit=1 by default
@@ -522,7 +522,7 @@ class TestEndpointLimits:
 
             # AND postgresql should have more than 1 database connection (the conditional higher limit applies)
             db_connections = sum(
-                1
+                True
                 for integration in result.integrations
                 if ApplicationEndpoint(application="postgresql-k8s", endpoint="database") in integration
             )
@@ -530,7 +530,7 @@ class TestEndpointLimits:
                 db_connections > 1
             ), "Expected more than 1 database connection when grafana-cloud-config is integrated"
 
-        def test_limit_stays_low_when_condition_not_met(self):
+        def test_limit_stays_low_when_condition_not_met(self) -> None:
             """Test that endpoint limit remains low when conditional endpoint is not available."""
             from bundle_builder.charm import CharmLimitCriteria
 
@@ -602,7 +602,7 @@ class TestEndpointLimits:
 
             # THEN postgresql should have at most 1 database connection (the default limit)
             db_connections = sum(
-                1
+                True
                 for integration in result.integrations
                 if ApplicationEndpoint(application="postgresql-k8s", endpoint="database") in integration
             )

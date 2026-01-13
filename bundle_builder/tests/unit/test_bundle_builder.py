@@ -211,13 +211,15 @@ class TestBundleBuilder:
         for child in children:
             assert any(app.name.startswith("postgresql-k8s") for app in child.bundle.applications)
 
-    def test_child_nodes_new_applications_rejects_limit_zero(self):
+    def test_child_nodes_new_applications_rejects_limit_zero(self) -> None:
         # GIVEN a stub that returns a charm with limit 0
         class ZeroLimitStub:
-            def find_charms(self, *args, **kwargs):
+            # TODO(raul): remove type ignore in subsequent type checker PRs
+            def find_charms(self, *args, **kwargs) -> frozenset[str]:  # type: ignore[no-untyped-def]
                 return frozenset({"zero-limit-db"})
 
-            def charm_from_store(self, charm_name, ubuntu_arch, **kwargs):
+            # TODO(raul): remove type ignore in subsequent type checker PRs
+            def charm_from_store(self, charm_name, ubuntu_arch, **kwargs) -> Charm:  # type: ignore[no-untyped-def]
                 return Charm(
                     name="zero-limit-db",
                     channel="stable",
@@ -239,12 +241,14 @@ class TestBundleBuilder:
                 )
 
         # AND a requirer charm
-        requirer_charm = dataclasses.replace(
+        # TODO(raul): remove type ignore in subsequent type checker PRs
+        requirer_charm = dataclasses.replace(  # type: ignore[type-var]
             sample_charm_kratos(),
             name="app",
             endpoints=frozenset(
                 {
-                    dataclasses.replace(
+                    # TODO(raul): remove type ignore in subsequent type checker PRs
+                    dataclasses.replace(  # type: ignore[type-var]
                         sample_charm_endpoint_kratos_pg_database(),
                         name="database",
                     )
@@ -261,7 +265,8 @@ class TestBundleBuilder:
         )
 
         # WHEN checking for new application children
-        builder = BundleBuilder(charmhub_client=ZeroLimitStub())
+        # TODO(raul): remove type ignore in subsequent type checker PRs
+        builder = BundleBuilder(charmhub_client=ZeroLimitStub())  # type: ignore[arg-type]
         node = Node(bundle=bundle, aggression=0.0)
         children = builder.child_nodes_new_applications(node, ApplicationEndpoint("app", "database"))
 

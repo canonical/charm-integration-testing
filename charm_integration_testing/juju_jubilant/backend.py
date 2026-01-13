@@ -238,4 +238,5 @@ class JubilantBackend(JujuCmdBackend):
         return target_applications in {integration.applications for integration in integrations}
 
     def version(self, model: str) -> str:
-        return str(self.client.model(model).version())
+        # TODO(raul): remove type ignore in subsequent type checker PRs
+        return str(self.client.model(model).version())  # type: ignore[attr-defined]

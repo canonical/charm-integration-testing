@@ -445,7 +445,7 @@ class TestCharmLimitCriteria:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test(self, params: Params):
+        def test(self, params: Params) -> None:
             # GIVEN the criteria and endpoints
             criteria = params.criteria
             endpoints = params.endpoints
@@ -471,7 +471,7 @@ class TestCharmLimitCriteria:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test(self, params: Params):
+        def test(self, params: Params) -> None:
             # GIVEN the criteria for the value
             criteria = CharmLimitCriteria.from_bool(params.value)
 
@@ -519,7 +519,7 @@ class TestCharmLimit:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test(self, params: Params):
+        def test(self, params: Params) -> None:
             # GIVEN a limit with criteria
             limit = params.limit
 
@@ -631,7 +631,7 @@ class TestCharmEndpoint:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test(self, params: Params):
+        def test(self, params: Params) -> None:
             # GIVEN an endpoint with limits
             endpoint = params.endpoint
 

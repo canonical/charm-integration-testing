@@ -112,7 +112,7 @@ class CharmLimitCriteria:
 
     @model_validator(mode="before")
     @classmethod
-    def validate_config_from_dict(cls, value):
+    def validate_config_from_dict(cls, value: dict[str, object] | list[object]) -> dict[str, object]:
         if isinstance(value, list):
             return {"all_of": value}
         return value

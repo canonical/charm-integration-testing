@@ -475,11 +475,11 @@ class CharmhubClient:
                 if endpoint_name in metadata_overrides_map and metadata_overrides_map[endpoint_name].limits is not None:
                     limits = metadata_overrides_map[endpoint_name].limits
                 elif endpoint.limit is not None:
-                    limits = [CharmLimit(limit=endpoint.limit)]
+                    limits = (CharmLimit(limit=endpoint.limit),)
                 elif endpoint_name in edge_endpoint_map and edge_endpoint_map[endpoint_name].limit is not None:
-                    limits = [CharmLimit(limit=edge_endpoint_map[endpoint_name].limit)]
+                    limits = (CharmLimit(limit=edge_endpoint_map[endpoint_name].limit),)
                 else:
-                    limits = []
+                    limits = ()
 
                 # Add endpoint
                 endpoints.add(

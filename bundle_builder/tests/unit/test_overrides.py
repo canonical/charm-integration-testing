@@ -135,7 +135,7 @@ class TestCharmEndpointOverride:
     class TestLimitsProperty:
         """Test the limits property logic that combines limit and limit_if."""
 
-        def test_limit_if_comes_before_limit(self):
+        def test_limit_if_comes_before_limit(self) -> None:
             # GIVEN an override with both limit and limit_if
             override = CharmEndpointOverride(
                 limit=1,
@@ -148,6 +148,7 @@ class TestCharmEndpointOverride:
             limits = override.limits
 
             # THEN limit_if entries come first, followed by limit
+            assert limits is not None
             assert len(limits) == 2
             assert limits[0].limit == 10  # From limit_if
             assert limits[1].limit == 1  # From limit

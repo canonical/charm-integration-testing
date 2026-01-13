@@ -104,10 +104,11 @@ class Bundle:
 
         # Ensure endpoints are not integrated more than their limit
         # TODO(raul): remove type ignore in subsequent type checker PRs
-        for endpoint, count in self.endpoint_connection_counts.items():  # type: ignore
+        for endpoint, count in self.endpoint_connection_counts.items():  # type: ignore[attr-defined]
             # TODO(raul): remove type ignore in subsequent type checker PRs
-            charm_endpoint = self.application_endpoints[endpoint]  # type: ignore
-            endpoint_limit = charm_endpoint.limit(self.application_to_integrated_endpoints[endpoint.application])
+            charm_endpoint = self.application_endpoints[endpoint]  # type: ignore[index]
+            # TODO(raul): remove type ignore in subsequent type checker PRs
+            endpoint_limit = charm_endpoint.limit(self.application_to_integrated_endpoints[endpoint.application])  # type: ignore[index]
             if endpoint_limit is not None and count > endpoint_limit:
                 raise ValueError(
                     f"Endpoint '{endpoint}' is connected {count} times, exceeding its limit of {endpoint_limit}"
@@ -145,12 +146,13 @@ class Bundle:
         saturated_endpoints = set()
         # PERF: It is faster to create tuple keys than ApplicationEndpoint in queries below
         # TODO(raul): remove type ignore in subsequent type checker PRs
-        counts = {(k.application, k.endpoint): v for k, v in self.endpoint_connection_counts.items()}  # type: ignore
+        counts = {(k.application, k.endpoint): v for k, v in self.endpoint_connection_counts.items()}  # type: ignore[attr-defined]
 
         # Check if they are saturated
         for app in self.applications:
             for endpoint in app.charm.endpoints:
-                endpoint_limit = endpoint.limit(self.application_to_integrated_endpoints[app.name])
+                # TODO(raul): remove type ignore in subsequent type checker PRs
+                endpoint_limit = endpoint.limit(self.application_to_integrated_endpoints[app.name])  # type: ignore[index]
                 if endpoint_limit is not None:
                     # Get the current connection count (default to 0 if not in counts)
                     current_count = counts.get((app.name, endpoint.name), 0)
