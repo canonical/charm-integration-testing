@@ -22,7 +22,7 @@ from extensions import (
 )
 from juju import JujuBackend, JujuClient, JujuWaitTimeoutError
 from juju_jubilant import JubilantBackend
-from pytest import CollectReport, StashKey
+from pytest import StashKey
 from utils import normalize_string, normalize_string_multiline
 
 
