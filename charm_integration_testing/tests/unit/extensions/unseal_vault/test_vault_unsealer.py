@@ -200,7 +200,7 @@ class TestVaultUnsealer:
         assert "vault/0" in vault.unseals
         assert "vault/1" not in vault.unseals
 
-    def test_try_init_vault_authorizes_charm_by_default(self):
+    def test_try_init_vault_authorizes_charm_by_default(self) -> None:
         # GIVEN
         juju = JujuStub(units={"vault": ["vault/leader"]})
         vault = VaultStub(initialized_units={"vault/leader": False})
@@ -213,7 +213,7 @@ class TestVaultUnsealer:
         # THEN
         assert ("vault/leader", "authorize-charm", {"secret-id": "secret-id"}) in juju.actions_run
 
-    def test_try_init_vault_wont_authorize_charm_if_asked(self):
+    def test_try_init_vault_wont_authorize_charm_if_asked(self) -> None:
         # GIVEN
         juju = JujuStub(units={"vault": ["vault/leader"]})
         vault = VaultStub(initialized_units={"vault/leader": False})
@@ -227,7 +227,7 @@ class TestVaultUnsealer:
         for target, action, _ in juju.actions_run:
             assert (target, action) != ("vault/leader", "authorize-charm")
 
-    def test_authorize_vault_charm_runs_action_and_removes_secret(self):
+    def test_authorize_vault_charm_runs_action_and_removes_secret(self) -> None:
         # GIVEN
         juju = JujuStub()
         vault = VaultStub()
@@ -260,7 +260,7 @@ class TestVaultUnsealer:
         assert juju.secrets["vault-secret-application-vault-tokens"] == {"root-token": "abc", "unseal-key": "xyz"}
         assert result == tokens
 
-    def test_saving_vault_tokens_overwrites_existing(self):
+    def test_saving_vault_tokens_overwrites_existing(self) -> None:
         # GIVEN
         juju = JujuStub()
         vault = VaultStub()
@@ -279,7 +279,7 @@ class TestVaultUnsealer:
         assert juju.secrets["vault-secret-application-vault-tokens"] == {"root-token": "efg", "unseal-key": "jkl"}
         assert result == tokens_2
 
-    def test_vault_status_retries_on_connection_refused(self):
+    def test_vault_status_retries_on_connection_refused(self) -> None:
         # GIVEN
         juju = JujuStub(units={"vault": ["vault/leader"]})
         vault = VaultStub()

@@ -16,10 +16,10 @@ class GenericUnsealVaultJujuExtension(JujuExtension, ABC):
     def __init__(self, vault_unsealer: VaultUnsealer) -> None:
         self.vault_unsealer = vault_unsealer
 
-    def post_deploy(self, model: str):
+    def post_deploy(self, model: str) -> None:
         self.vault_unsealer.try_init_or_unseal_all_vaults(model, authorize_charm=True)
 
-    def post_scale(self, model: str):
+    def post_scale(self, model: str) -> None:
         self.vault_unsealer.try_init_or_unseal_all_vaults(model, authorize_charm=False)
 
 

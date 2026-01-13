@@ -32,13 +32,13 @@ class VaultUnsealer:
         self.juju = juju
         self.logger = logger
 
-    def try_init_or_unseal_all_vaults(self, model: str, authorize_charm: bool = True):
+    def try_init_or_unseal_all_vaults(self, model: str, authorize_charm: bool = True) -> None:
         # Look for vault charms
         for application in self.juju.list_applications(model):
             if self.juju.application_charm(model, application) == self.charm.name:
                 self.try_init_or_unseal_vault(model, application, authorize_charm)
 
-    def try_init_or_unseal_vault(self, model: str, application: str, authorize_charm: bool = True):
+    def try_init_or_unseal_vault(self, model: str, application: str, authorize_charm: bool = True) -> None:
         # Wait for application to be scaled
         self.logger.info(f"Waiting for vault charm '{self.charm.name}' application '{application}' to be scaled")
         self.juju.wait_application_scaled(model, application, timedelta(minutes=10))
@@ -58,7 +58,7 @@ class VaultUnsealer:
         # Try to unseal any sealed units
         self.try_unseal_vault(model, application)
 
-    def try_init_vault(self, model: str, application: str, authorize_charm: bool = True):
+    def try_init_vault(self, model: str, application: str, authorize_charm: bool = True) -> None:
         # Get leader unit
         leader_unit = f"{application}/leader"
 
@@ -142,7 +142,7 @@ class VaultUnsealer:
         # Remove the one time secret
         self.juju.remove_secret(model, self.vault_one_time_token_secret_name(application))
 
-    def save_vault_tokens(self, model: str, application: str, tokens: VaultTokenSecret):
+    def save_vault_tokens(self, model: str, application: str, tokens: VaultTokenSecret) -> None:
         # See if vault-token already exists
         secret_name = self.vault_tokens_secret_name(application)
         try:
