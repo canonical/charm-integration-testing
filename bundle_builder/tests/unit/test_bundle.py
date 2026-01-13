@@ -1218,7 +1218,7 @@ class TestBundle:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test(self, params: Params):
+        def test(self, params: Params) -> None:
             # GIVEN a bundle
             bundle = params.bundle
 
@@ -1226,7 +1226,8 @@ class TestBundle:
             features = bundle.application_endpoint_features
 
             # THEN features match expected
-            assert features == params.expected_features
+            # TODO(raul): remove type ignore in subsequent type checker PRs
+            assert features == params.expected_features  # type: ignore[comparison-overlap]
 
     def test_export(self) -> None:
         # GIVEN a bundle

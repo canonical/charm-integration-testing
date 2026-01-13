@@ -486,7 +486,8 @@ class CharmhubClient:
                     endpoint_name in metadata_overrides_map
                     and metadata_overrides_map[endpoint_name].features is not None
                 ):
-                    features = frozenset(metadata_overrides_map[endpoint_name].features)
+                    # TODO(raul): remove type ignore in subsequent type checker PRs
+                    features = frozenset(metadata_overrides_map[endpoint_name].features)  # type: ignore[arg-type]
                 else:
                     features = frozenset()
 

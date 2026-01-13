@@ -61,7 +61,7 @@ class Bundle:
     def validate(self) -> None:
         # Ensure all applications have unique names
         # TODO(raul): remove type ignore in subsequent type checker PRs
-        if len(self.application_lookup) != len(self.applications):  # type: ignore
+        if len(self.application_lookup) != len(self.applications):  # type: ignore[arg-type]
             raise ValueError("Application names must be unique in the bundle.")
 
         # Validate integrations
@@ -73,15 +73,15 @@ class Bundle:
             # Ensure all integrations reference valid applications and endpoints
             for app_endpoint in integration:
                 # TODO(raul): remove type ignore in subsequent type checker PRs
-                if app_endpoint not in self.application_endpoints:  # type: ignore
+                if app_endpoint not in self.application_endpoints:  # type: ignore[operator]
                     raise ValueError(f"Integration references unknown endpoint '{app_endpoint}'")
 
             # Ensure integration does not connect endpoints with different interfaces
             ep1, ep2 = list(integration)
             # TODO(raul): remove type ignore in subsequent type checker PRs
-            charm_ep1 = self.application_endpoints[ep1]  # type: ignore
+            charm_ep1 = self.application_endpoints[ep1]  # type: ignore[index]
             # TODO(raul): remove type ignore in subsequent type checker PRs
-            charm_ep2 = self.application_endpoints[ep2]  # type: ignore
+            charm_ep2 = self.application_endpoints[ep2]  # type: ignore[index]
             if charm_ep1.interface != charm_ep2.interface:
                 raise ValueError(
                     f"Integration connects endpoints with different interfaces: '{ep1}' ({charm_ep1.interface}) "
@@ -187,8 +187,10 @@ class Bundle:
         provider_to_requirers: dict[tuple[str, str], set[tuple[str, str]]] = {}
         for integration in self.integrations:
             ep1, ep2 = tuple(integration)
-            charm_ep1 = self.application_endpoints[ep1]
-            charm_ep2 = self.application_endpoints[ep2]
+            # TODO(raul): remove type ignore in subsequent type checker PRs
+            charm_ep1 = self.application_endpoints[ep1]  # type: ignore[index]
+            # TODO(raul): remove type ignore in subsequent type checker PRs
+            charm_ep2 = self.application_endpoints[ep2]  # type: ignore[index]
 
             # Skip if neither endpoint has features
             if not charm_ep1.features and not charm_ep2.features:
@@ -214,7 +216,8 @@ class Bundle:
                     continue
 
                 # Check if this endpoint is integrated
-                if endpoint.name not in self.application_to_integrated_endpoints[application.name]:
+                # TODO(raul): remove type ignore in subsequent type checker PRs
+                if endpoint.name not in self.application_to_integrated_endpoints[application.name]:  # type: ignore[index]
                     continue
 
                 if endpoint.type == ENDPOINT_REQUIRES:
@@ -224,10 +227,11 @@ class Bundle:
                 elif endpoint.type == ENDPOINT_PROVIDES:
                     # For providing endpoints: return union of features required by all connected requirers
                     app_endpoint_tuple = (application.name, endpoint.name)
-                    requirers = provider_to_requirers.get(app_endpoint_tuple, [])
+                    requirers: set[tuple[str, str]] = provider_to_requirers.get(app_endpoint_tuple, set())
                     if requirers:
+                        # TODO(raul): remove type ignore in subsequent type checker PRs
                         connected_features = [
-                            self.application_endpoints[ApplicationEndpoint(req[0], req[1])].features
+                            self.application_endpoints[ApplicationEndpoint(req[0], req[1])].features  # type: ignore[index]
                             for req in requirers
                         ]
                         used_features = frozenset().union(*connected_features)
@@ -251,9 +255,10 @@ class Bundle:
         non_optional_endpoints = set()
         for application in self.applications:
             for endpoint in application.charm.endpoints:
+                # TODO(raul): remove type ignore in subsequent type checker PRs
                 if endpoint.optionality.is_optional(
-                    self.application_to_integrated_endpoints[application.name],
-                    self.application_endpoint_features[application.name],
+                    self.application_to_integrated_endpoints[application.name],  # type: ignore[index]
+                    self.application_endpoint_features[application.name],  # type: ignore[index]
                 ):
                     continue
                 non_optional_endpoints.add(ApplicationEndpoint(application=application.name, endpoint=endpoint.name))
