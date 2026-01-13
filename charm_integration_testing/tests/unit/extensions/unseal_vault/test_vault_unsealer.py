@@ -2,9 +2,9 @@
 # See LICENSE file for licensing details.
 
 import logging
+import subprocess
 from dataclasses import dataclass, field
 from datetime import timedelta
-import subprocess
 
 from extensions.unseal_vault.vault_client import VaultClient, VaultStatus, VaultTokenSecret
 from extensions.unseal_vault.vault_unsealer import CharmInfo, VaultUnsealer
