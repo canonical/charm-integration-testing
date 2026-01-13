@@ -14,10 +14,13 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
+from typing import Any
+
 import pytest
 import yaml
 from pydantic import Field
 from pydantic.dataclasses import dataclass
+from requests import Session
 
 from bundle_builder.charmhub_http import (
     CHARM_FIND_ENDPOINT,
@@ -41,28 +44,28 @@ class CustomError(Exception):
 class ResponseStub:
     raise_for_status_error: bool = False
 
-    def raise_for_status(self):
+    def raise_for_status(self) -> None:
         if self.raise_for_status_error:
             raise CustomError
 
-    json_result: list | dict | None = None
+    json_result: list[str] | dict[str, Any] | None = None
 
-    def json(self):
+    def json(self) -> list[str] | dict[str, Any] | None:
         return self.json_result
 
 
 @dataclass
-class SessionStub:
-    def mount(self, *args, **kwargs):
+class SessionStub(Session):
+    def mount(self, *args: Any, **kwargs: Any) -> None:
         pass
 
     get_url: str | None = None
-    get_params: dict | None = None
-    get_headers: dict | None = None
+    get_params: dict[str, str] | None = None
+    get_headers: dict[str, str] | None = None
     get_timeout: int | None = None
     get_result: ResponseStub | None = None
 
-    def get(self, url: str, params: dict, headers: dict, timeout: int) -> ResponseStub:
+    def get(self, url: str, params: dict[str, str], headers: dict[str, str], timeout: int) -> ResponseStub:  # type: ignore[override]
         if self.get_url is not None:
             assert url == self.get_url
         if self.get_params is not None:
@@ -71,15 +74,16 @@ class SessionStub:
             assert headers == self.get_headers
         if self.get_timeout is not None:
             assert timeout == self.get_timeout
+        assert self.get_result is not None
         return self.get_result
 
     post_url: str | None = None
-    post_json: dict | list | None = None
-    post_headers: dict | None = None
+    post_json: dict[str, Any] | list[Any] | None = None
+    post_headers: dict[str, str] | None = None
     post_timeout: int | None = None
     post_result: ResponseStub | None = None
 
-    def post(self, url: str, json: dict | list, headers: dict, timeout: int) -> ResponseStub:
+    def post(self, url: str, json: dict[str, Any] | list[Any], headers: dict[str, str], timeout: int) -> ResponseStub:  # type: ignore[override]
         if self.post_url is not None:
             assert url == self.post_url
         if self.post_json is not None:
@@ -88,10 +92,11 @@ class SessionStub:
             assert headers == self.post_headers
         if self.post_timeout is not None:
             assert timeout == self.post_timeout
+        assert self.post_result is not None
         return self.post_result
 
 
-def sample_find_json() -> dict:
+def sample_find_json() -> dict[str, Any]:
     return {
         "results": [
             {
@@ -108,7 +113,7 @@ def sample_find_response() -> list[FindResponse]:
     return [FindResponse(**result) for result in sample_find_json()["results"]]
 
 
-def sample_refresh_json() -> dict:
+def sample_refresh_json() -> dict[str, Any]:
     return {
         "results": [
             {
@@ -140,7 +145,7 @@ def sample_refresh_response() -> RefreshResponse:
     return RefreshResponse(**sample_refresh_json()["results"][0])
 
 
-def sample_info_json() -> dict:
+def sample_info_json() -> dict[str, dict[str, Any]]:
     return {
         "default-release": {
             "revision": {
@@ -168,7 +173,7 @@ def sample_info_response() -> InfoResponse:
 
 class TestRefreshResponse:
     class TestCharm:
-        def test_parse_yaml(self):
+        def test_parse_yaml(self) -> None:
             # GIVEN metadata yaml
             metadata_yaml = yaml.dump(
                 {
@@ -240,7 +245,7 @@ class TestCharmhubHttpClient:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test(self, params: Params):
+        def test(self, params: Params) -> None:
             # GIVEN the query
             provides = params.provides
             requires = params.requires
@@ -376,7 +381,7 @@ class TestCharmhubHttpClient:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test(self, params: Params):
+        def test(self, params: Params) -> None:
             # GIVEN the action
             action = params.action
 
@@ -428,7 +433,7 @@ class TestCharmhubHttpClient:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test(self, params: Params):
+        def test(self, params: Params) -> None:
             # GIVEN the charm name
             charm = params.charm
 

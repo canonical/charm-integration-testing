@@ -13,7 +13,7 @@ from .vault_unsealer import CharmInfo, VaultUnsealer
 class GenericUnsealVaultJujuExtension(JujuExtension, ABC):
     vault_unsealer: VaultUnsealer
 
-    def __init__(self, vault_unsealer: VaultUnsealer):
+    def __init__(self, vault_unsealer: VaultUnsealer) -> None:
         self.vault_unsealer = vault_unsealer
 
     def post_deploy(self, model: str):
@@ -24,7 +24,7 @@ class GenericUnsealVaultJujuExtension(JujuExtension, ABC):
 
 
 class UnsealVaultJujuExtension(GenericUnsealVaultJujuExtension):
-    def __init__(self, juju: JujuBackend, logger: logging.Logger):
+    def __init__(self, juju: JujuBackend, logger: logging.Logger) -> None:
         super().__init__(VaultUnsealer(CharmInfo(name="vault"), VaultClientJujuExec(juju), juju, logger))
 
 

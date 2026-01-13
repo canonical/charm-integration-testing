@@ -6,7 +6,7 @@ import pytest
 from juju import JujuClient
 
 
-def pytest_addoption(parser):
+def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption(
         "--applications",
         nargs="*",
@@ -18,8 +18,10 @@ def pytest_addoption(parser):
 
 
 @pytest.fixture
-def applications(request: pytest.FixtureRequest) -> str:
-    return request.config.getoption("--applications")
+def applications(request: pytest.FixtureRequest) -> list[str]:
+    option = request.config.getoption("--applications")
+    assert isinstance(option, list)
+    return option
 
 
 @pytest.fixture(autouse=True)
@@ -28,7 +30,7 @@ def assert_applications_exist(
     juju_client: JujuClient,
     model: str,
     applications: list[str],
-):
+) -> None:
     _ = assert_idle  # Enforce fixture execution order
 
     for application in applications:

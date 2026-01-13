@@ -24,8 +24,10 @@ from pydantic.dataclasses import dataclass
 # Computed property attribute
 # Meant for use with @immutable_dataclass
 # Computed at initialization once
-def computed_property(func: Callable) -> Callable:
-    func._is_computed_property = True
+# TODO(raul): remove type ignore in subsequent type checker PRs
+def computed_property(func: Callable) -> Callable:  # type: ignore
+    # TODO(raul): remove type ignore in subsequent type checker PRs
+    func._is_computed_property = True  # type: ignore
     return func
 
 
@@ -34,8 +36,10 @@ _UNINITIALIZED = object()
 
 
 # Create a lazy property that computes its value once
-def make_lazy_property(private_name, method):
-    def prop(self):
+# TODO(raul): remove type ignore in subsequent type checker PRs
+def make_lazy_property(private_name, method):  # type: ignore
+    # TODO(raul): remove type ignore in subsequent type checker PRs
+    def prop(self):  # type: ignore
         value = getattr(self, private_name)
         if value is _UNINITIALIZED:
             value = method(self)
@@ -55,15 +59,18 @@ _CACHE_MISS = object()
 # Cached method backed by instance-level cache
 # Meant for use with @immutable_dataclass
 # Much like functools.cache, but at the instance level instead of global
-def cached_method(func):
+# TODO(raul): remove type ignore in subsequent type checker PRs
+def cached_method(func):  # type: ignore
     setattr(func, _MARKED_AS_CACHED_METHOD, True)
     return func
 
 
 # Wraps the method to cache results in the given field in the instance
-def make_cached_method(cached_field_name, method):
+# TODO(raul): remove type ignore in subsequent type checker PRs
+def make_cached_method(cached_field_name, method):  # type: ignore
     @wraps(method)
-    def wrapped(*args, **kwargs):
+    # TODO(raul): remove type ignore in subsequent type checker PRs
+    def wrapped(*args, **kwargs):  # type: ignore
         cache = getattr(args[0], cached_field_name)
         cache_key = tuple(args[1:]) + tuple(kwargs.items())
         result = cache.get(cache_key, _CACHE_MISS)
@@ -77,8 +84,10 @@ def make_cached_method(cached_field_name, method):
 
 # Create an immutable dataclass using frozen=True
 # and defaults slots=True
-def immutable_dataclass(_cls=None, **dataclass_kwargs):
-    def wrap(cls):
+# TODO(raul): remove type ignore in subsequent type checker PRs
+def immutable_dataclass(_cls=None, **dataclass_kwargs):  # type: ignore
+    # TODO(raul): remove type ignore in subsequent type checker PRs
+    def wrap(cls):  # type: ignore
         # Collect methods decorated as computed fields
         computed_fields = {}
         cached_methods = {}
@@ -94,14 +103,17 @@ def immutable_dataclass(_cls=None, **dataclass_kwargs):
             # Modify the class in place to add the private field
             private_name = f"_{name}"
             annotations[private_name] = get_type_hints(method).get("return", Any)
-            setattr(cls, name, make_lazy_property(private_name, method))
+            # TODO(raul): remove type ignore in subsequent type checker PRs
+            setattr(cls, name, make_lazy_property(private_name, method))  # type: ignore
             setattr(cls, private_name, field(init=False, repr=False, hash=False, compare=False, default=_UNINITIALIZED))
 
         # Create a private slot for the cache of each computed field, similar to above
         for name, method in cached_methods.items():
             cached_field_name = f"_cached_{name}"
-            annotations[cached_field_name] = Dict[tuple, Any]
-            setattr(cls, name, make_cached_method(cached_field_name, method))
+            # TODO(raul): remove type ignore in subsequent type checker PRs
+            annotations[cached_field_name] = Dict[tuple, Any]  # type: ignore
+            # TODO(raul): remove type ignore in subsequent type checker PRs
+            setattr(cls, name, make_cached_method(cached_field_name, method))  # type: ignore
             setattr(
                 cls, cached_field_name, field(init=False, repr=False, hash=False, compare=False, default_factory=dict)
             )
@@ -114,6 +126,7 @@ def immutable_dataclass(_cls=None, **dataclass_kwargs):
 
     # Handle both @decorator and @decorator()
     if _cls is not None and isinstance(_cls, type):
-        return wrap(_cls)
+        # TODO(raul): remove type ignore in subsequent type checker PRs
+        return wrap(_cls)  # type: ignore
 
     return wrap

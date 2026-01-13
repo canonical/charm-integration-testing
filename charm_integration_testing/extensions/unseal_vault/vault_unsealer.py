@@ -96,7 +96,7 @@ class VaultUnsealer:
         # Authorize the charm
         self.authorize_vault_charm(model, application, tokens)
 
-    def try_unseal_vault(self, model: str, application: str):
+    def try_unseal_vault(self, model: str, application: str) -> None:
         # Get vault tokens
         tokens = self.get_vault_tokens(model, application)
 
@@ -115,7 +115,7 @@ class VaultUnsealer:
             self.logger.info(f"Unsealing vault charm '{self.charm.name}' unit '{unit}'")
             self.vault.unseal(model, unit, tokens)
 
-    def authorize_vault_charm(self, model: str, application: str, tokens: VaultTokenSecret):
+    def authorize_vault_charm(self, model: str, application: str, tokens: VaultTokenSecret) -> None:
         # Log
         self.logger.info(f"Authorizing vault charm '{self.charm.name}' application '{application}'")
 
