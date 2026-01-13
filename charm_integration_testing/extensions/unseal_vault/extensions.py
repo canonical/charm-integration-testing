@@ -17,10 +17,10 @@ class GenericUnsealVaultJujuExtension(JujuExtension, ABC):
         self.vault_unsealer = vault_unsealer
 
     def post_deploy(self, model: str) -> None:
-        self.vault_unsealer.try_init_or_unseal_all_vaults(model)
+        self.vault_unsealer.try_init_or_unseal_all_vaults(model, authorize_charm=True)
 
     def post_scale(self, model: str) -> None:
-        self.vault_unsealer.try_init_or_unseal_all_vaults(model)
+        self.vault_unsealer.try_init_or_unseal_all_vaults(model, authorize_charm=False)
 
 
 class UnsealVaultJujuExtension(GenericUnsealVaultJujuExtension):

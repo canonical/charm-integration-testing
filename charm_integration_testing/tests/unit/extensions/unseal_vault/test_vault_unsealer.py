@@ -2,6 +2,7 @@
 # See LICENSE file for licensing details.
 
 import logging
+import subprocess
 from dataclasses import dataclass, field
 from datetime import timedelta
 
@@ -54,7 +55,10 @@ class JujuStub(JujuBackend):
         self.actions_run.append((unit, action, params))
 
     def remove_secret(self, model: str, name: str) -> None:
-        del self.secrets[name]
+        try:
+            del self.secrets[name]
+        except KeyError as err:
+            raise subprocess.CalledProcessError(-1, ["remove", "unknown"], stderr="did not find it") from err
 
     def read_secret(self, model: str, name: str) -> dict[str, str]:
         return self.secrets[name]
@@ -200,6 +204,33 @@ class TestVaultUnsealer:
         assert "vault/0" in vault.unseals
         assert "vault/1" not in vault.unseals
 
+    def test_try_init_vault_authorizes_charm_by_default(self) -> None:
+        # GIVEN
+        juju = JujuStub(units={"vault": ["vault/leader"]})
+        vault = VaultStub(initialized_units={"vault/leader": False})
+        logger = LoggerStub()
+        charm = CharmInfo(name="vault")
+
+        # WHEN
+        VaultUnsealer(charm, vault, juju, logger).try_init_vault("test-model", "vault")
+
+        # THEN
+        assert ("vault/leader", "authorize-charm", {"secret-id": "secret-id"}) in juju.actions_run
+
+    def test_try_init_vault_wont_authorize_charm_if_asked(self) -> None:
+        # GIVEN
+        juju = JujuStub(units={"vault": ["vault/leader"]})
+        vault = VaultStub(initialized_units={"vault/leader": False})
+        logger = LoggerStub()
+        charm = CharmInfo(name="vault")
+
+        # WHEN
+        VaultUnsealer(charm, vault, juju, logger).try_init_vault("test-model", "vault", authorize_charm=False)
+
+        # THEN
+        for target, action, _ in juju.actions_run:
+            assert (target, action) != ("vault/leader", "authorize-charm")
+
     def test_authorize_vault_charm_runs_action_and_removes_secret(self) -> None:
         # GIVEN
         juju = JujuStub()
@@ -232,6 +263,25 @@ class TestVaultUnsealer:
         # THEN
         assert juju.secrets["vault-secret-application-vault-tokens"] == {"root-token": "abc", "unseal-key": "xyz"}
         assert result == tokens
+
+    def test_saving_vault_tokens_overwrites_existing(self) -> None:
+        # GIVEN
+        juju = JujuStub()
+        vault = VaultStub()
+        logger = LoggerStub()
+        charm = CharmInfo(name="vault")
+        unsealer = VaultUnsealer(charm, vault, juju, logger)
+        tokens_1 = VaultTokenSecret(root_token="abc", unseal_key="xyz")
+        tokens_2 = VaultTokenSecret(root_token="efg", unseal_key="jkl")
+
+        # WHEN
+        unsealer.save_vault_tokens("test-model", "vault", tokens_1)
+        unsealer.save_vault_tokens("test-model", "vault", tokens_2)
+        result = unsealer.get_vault_tokens("test-model", "vault")
+
+        # THEN
+        assert juju.secrets["vault-secret-application-vault-tokens"] == {"root-token": "efg", "unseal-key": "jkl"}
+        assert result == tokens_2
 
     def test_vault_status_retries_on_connection_refused(self) -> None:
         # GIVEN
