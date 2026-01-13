@@ -174,6 +174,25 @@ class TestVaultUnsealer:
         assert juju.secrets["vault-secret-application-vault-tokens"] == {"root-token": "abc", "unseal-key": "xyz"}
         assert result == tokens
 
+    def test_saving_vault_tokens_overwrites_existing(self):
+        # GIVEN
+        juju = JujuStub()
+        vault = VaultStub()
+        logger = LoggerStub()
+        charm = CharmInfo(name="vault")
+        unsealer = VaultUnsealer(charm, vault, juju, logger)
+        tokens_1 = VaultTokenSecret(root_token="abc", unseal_key="xyz")
+        tokens_2 = VaultTokenSecret(root_token="efg", unseal_key="jkl")
+
+        # WHEN
+        unsealer.save_vault_tokens("test-model", "vault", tokens_1)
+        unsealer.save_vault_tokens("test-model", "vault", tokens_2)
+        result = unsealer.get_vault_tokens("test-model", "vault")
+
+        # THEN
+        assert juju.secrets["vault-secret-application-vault-tokens"] == {"root-token": "efg", "unseal-key": "jkl"}
+        assert result == tokens_2
+
     def test_vault_status_retries_on_connection_refused(self):
         # GIVEN
         juju = JujuStub(units={"vault": ["vault/leader"]})
