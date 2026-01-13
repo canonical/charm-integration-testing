@@ -19,3 +19,13 @@ requires:
     optional: true
   sharding:
     optional: true
+
+  ldap:
+    optional_if:
+      - none_of:
+          - endpoint_integrated: ldap-certificate-transfer
+  ldap-certificate-transfer:
+    optional_if:
+      - none_of:
+          - endpoint_integrated: ldap
+    features: [ldap-certificates]

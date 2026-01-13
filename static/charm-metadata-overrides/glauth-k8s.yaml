@@ -10,3 +10,4 @@ provides:
     optional: true
   send-ca-cert:
     optional: true
+    features: [ldap-certificates]
