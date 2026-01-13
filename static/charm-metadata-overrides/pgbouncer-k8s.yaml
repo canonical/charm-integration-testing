@@ -7,13 +7,32 @@ provides:
       - any_of:
           - endpoint_integrated: db
           - endpoint_integrated: db-admin
+    features: [tls]
   db:
     optional_if:
       - any_of:
           - endpoint_integrated: database
           - endpoint_integrated: db-admin
+    features: [tls]
   db-admin:
     optional_if:
       - any_of:
           - endpoint_integrated: database
           - endpoint_integrated: db
+    features: [tls]
+
+requires:
+  # To provide tls-enabled endpoints, pgbouncer needs certificates
+  certificates:
+    optional_if:
+      - none_of:
+          - any_of:
+              - all_of:
+                  - endpoint_integrated: database
+                  - endpoint_feature: database:tls
+              - all_of:
+                  - endpoint_integrated: db
+                  - endpoint_feature: db:tls
+              - all_of:
+                  - endpoint_integrated: db-admin
+                  - endpoint_feature: db-admin:tls

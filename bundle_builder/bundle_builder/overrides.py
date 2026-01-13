@@ -30,6 +30,7 @@ class CharmEndpointOverride:
     optional_if: list[CharmEndpointOptionality] | None = None
     limit: int | None = None
     limit_if: list[CharmLimit] | None = None
+    features: frozenset[str] | None = None
 
     @property
     def optionality(self) -> CharmEndpointOptionality | None:

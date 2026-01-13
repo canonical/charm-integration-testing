@@ -175,6 +175,7 @@ class TestCharmEndpointOptionality:
             optionality: CharmEndpointOptionality
             endpoints: set[str]
             is_optional: bool
+            endpoint_features: set[str] = Field(default_factory=set)
 
         always_optional = CharmEndpointOptionality()
 
@@ -286,6 +287,34 @@ class TestCharmEndpointOptionality:
                 endpoints={"db"},
                 is_optional=False,
             ),
+            Params(
+                label="endpoint_feature_present",
+                optionality=CharmEndpointOptionality(endpoint_feature="db:ssl"),
+                endpoints={"db"},
+                endpoint_features={"db:ssl", "db:compression"},
+                is_optional=True,
+            ),
+            Params(
+                label="endpoint_feature_missing",
+                optionality=CharmEndpointOptionality(endpoint_feature="db:ssl"),
+                endpoints={"db"},
+                endpoint_features={"db:compression"},
+                is_optional=False,
+            ),
+            Params(
+                label="endpoint_feature_with_endpoint_integrated_both_true",
+                optionality=CharmEndpointOptionality(endpoint_integrated="db", endpoint_feature="db:ssl"),
+                endpoints={"db"},
+                endpoint_features={"db:ssl"},
+                is_optional=True,
+            ),
+            Params(
+                label="endpoint_feature_with_endpoint_integrated_feature_missing",
+                optionality=CharmEndpointOptionality(endpoint_integrated="db", endpoint_feature="db:ssl"),
+                endpoints={"db"},
+                endpoint_features={"db:compression"},
+                is_optional=False,
+            ),
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
@@ -293,8 +322,8 @@ class TestCharmEndpointOptionality:
             # GIVEN the optionality
             optionality = params.optionality
 
-            # WHEN is optional is called with the set of endpoints
-            is_optional = optionality.is_optional(frozenset(params.endpoints))
+            # WHEN is optional is called with the set of endpoints and features
+            is_optional = optionality.is_optional(frozenset(params.endpoints), frozenset(params.endpoint_features))
 
             # THEN matches expected
             assert is_optional == params.is_optional
@@ -319,7 +348,7 @@ class TestCharmEndpointOptionality:
             optionality = CharmEndpointOptionality.from_bool(params.value)
 
             # WHEN is optional is called
-            is_optional = optionality.is_optional(frozenset(params.endpoints))
+            is_optional = optionality.is_optional(frozenset(params.endpoints), frozenset())
 
             # THEN matches expected
             assert is_optional == params.value

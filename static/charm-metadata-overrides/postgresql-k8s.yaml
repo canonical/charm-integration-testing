@@ -2,34 +2,53 @@
 provides:
   replication-offer:
     optional: true
-  database:
-    optional: true
-    limit_if:
-      - criteria: 
-          - any_of:
-              - endpoint_integrated: db
-              - endpoint_integrated: db-admin
-        limit: 0
-    limit: 1
-  db:
-    optional: true
-    limit_if:
-      - criteria: 
-          - any_of:
-              - endpoint_integrated: database
-              - endpoint_integrated: db-admin
-        limit: 0
-    limit: 1
-  db-admin:
-    optional: true
-    limit_if:
-      - criteria: 
-          - any_of:
-              - endpoint_integrated: database
-              - endpoint_integrated: db
-        limit: 0
-    limit: 1
   metrics-endpoint:
     optional: true
   grafana-dashboard:
     optional: true
+
+  database:
+    limit_if:
+      - criteria: 
+          - any_of:
+              - endpoint_integrated: db
+              - endpoint_integrated: db-admin
+        limit: 0
+    limit: 1
+    optional: true
+    features: [tls]
+  db:
+    limit_if:
+      - criteria: 
+          - any_of:
+              - endpoint_integrated: database
+              - endpoint_integrated: db-admin
+        limit: 0
+    limit: 1
+    optional: true
+    features: [tls]
+  db-admin:
+    limit_if:
+      - criteria: 
+          - any_of:
+              - endpoint_integrated: database
+              - endpoint_integrated: db
+        limit: 0
+    limit: 1
+    optional: true
+    features: [tls]
+
+requires:
+  certificates:
+    optional_if:
+      - none_of:
+          - any_of:
+              - all_of:
+                  - endpoint_integrated: database
+                  - endpoint_feature: database:tls
+              - all_of:
+                  - endpoint_integrated: db
+                  - endpoint_feature: db:tls
+              - all_of:
+                  - endpoint_integrated: db-admin
+                  - endpoint_feature: db-admin:tls

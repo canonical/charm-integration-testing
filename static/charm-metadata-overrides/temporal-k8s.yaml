@@ -16,6 +16,14 @@ requires:
     interface: s3
     optional: true
     limit: 1
+  
+  # https://github.com/canonical/temporal-k8s-operator/issues/120
+  admin:
+    features: [admin]
+    optional: false
+  ui:
+    features: [ui]
+    optional: true
 
 provides:
   metrics-endpoint:

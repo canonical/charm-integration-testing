@@ -481,6 +481,16 @@ class CharmhubClient:
                 else:
                     limits = ()
 
+                # Determine endpoint features from overrides
+                if (
+                    endpoint_name in metadata_overrides_map
+                    and metadata_overrides_map[endpoint_name].features is not None
+                ):
+                    # TODO(raul): remove type ignore in subsequent type checker PRs
+                    features = frozenset(metadata_overrides_map[endpoint_name].features)  # type: ignore[arg-type]
+                else:
+                    features = frozenset()
+
                 # Add endpoint
                 endpoints.add(
                     CharmEndpoint(
@@ -489,6 +499,7 @@ class CharmhubClient:
                         interface=endpoint.interface,
                         optionality=optionality,
                         limits=limits,
+                        features=features,
                     )
                 )
 

@@ -64,25 +64,28 @@ class CharmEndpointOptionality:
     any_of: frozenset["CharmEndpointOptionality"] | None = None
     none_of: frozenset["CharmEndpointOptionality"] | None = None
     endpoint_integrated: str | None = None
+    endpoint_feature: str | None = None
 
     @cached_method
-    def is_optional(self, integrated_endpoints: frozenset[str]) -> bool:
+    def is_optional(self, integrated_endpoints: frozenset[str], endpoint_features: frozenset[str]) -> bool:
         return all(
             [
                 # all of
-                all(condition.is_optional(integrated_endpoints) for condition in self.all_of)
+                all(condition.is_optional(integrated_endpoints, endpoint_features) for condition in self.all_of)
                 if self.all_of is not None
                 else True,
                 # any of
-                any(condition.is_optional(integrated_endpoints) for condition in self.any_of)
+                any(condition.is_optional(integrated_endpoints, endpoint_features) for condition in self.any_of)
                 if self.any_of is not None
                 else True,
                 # none of
-                all(not condition.is_optional(integrated_endpoints) for condition in self.none_of)
+                all(not condition.is_optional(integrated_endpoints, endpoint_features) for condition in self.none_of)
                 if self.none_of is not None
                 else True,
                 # endpoint integrated
                 (self.endpoint_integrated in integrated_endpoints) if self.endpoint_integrated is not None else True,
+                # endpoint feature
+                (self.endpoint_feature in endpoint_features) if self.endpoint_feature is not None else True,
             ]
         )
 
@@ -171,6 +174,7 @@ class CharmEndpoint:
     interface: str
     optionality: CharmEndpointOptionality
     limits: tuple[CharmLimit, ...]
+    features: frozenset[str] = Field(default_factory=frozenset)
 
     @cached_method
     def limit(self, integrated_endpoints: frozenset[str]) -> int | None:

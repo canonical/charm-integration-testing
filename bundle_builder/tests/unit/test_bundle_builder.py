@@ -22,10 +22,8 @@ from pydantic.dataclasses import dataclass
 from bundle_builder.bundle import Application, ApplicationEndpoint, Bundle, Integration
 from bundle_builder.bundle_builder import BundleBuilder, Node
 from bundle_builder.charm import (
-    ENDPOINT_PROVIDES,
     Charm,
     CharmConfigCriteria,
-    CharmEndpoint,
     CharmEndpointOptionality,
     CharmLimit,
     CharmTestConfig,
@@ -211,36 +209,182 @@ class TestBundleBuilder:
         for child in children:
             assert any(app.name.startswith("postgresql-k8s") for app in child.bundle.applications)
 
-    def test_child_nodes_new_applications_rejects_limit_zero(self) -> None:
-        # GIVEN a stub that returns a charm with limit 0
-        class ZeroLimitStub:
-            # TODO(raul): remove type ignore in subsequent type checker PRs
-            def find_charms(self, *args, **kwargs) -> frozenset[str]:  # type: ignore[no-untyped-def]
-                return frozenset({"zero-limit-db"})
+    def test_child_nodes_existing_applications_validates_endpoint_features(self) -> None:
+        # GIVEN a provider charm with limited features (only compression, not SSL)
+        # TODO(raul): remove type ignore in subsequent type checker PRs
+        provider_charm = dataclasses.replace(  # type: ignore[type-var]
+            sample_charm_postgresql_k8s(),
+            name="database",
+            endpoints=frozenset(
+                {
+                    # TODO(raul): remove type ignore in subsequent type checker PRs
+                    dataclasses.replace(  # type: ignore[type-var]
+                        sample_charm_endpoint_postgresql_k8s_database(),
+                        features=frozenset({"compression"}),
+                    )
+                }
+            ),
+        )
 
-            # TODO(raul): remove type ignore in subsequent type checker PRs
-            def charm_from_store(self, charm_name, ubuntu_arch, **kwargs) -> Charm:  # type: ignore[no-untyped-def]
-                return Charm(
-                    name="zero-limit-db",
-                    channel="stable",
-                    revision=1,
-                    ubuntu_version="22.04",
-                    ubuntu_arch="amd64",
-                    endpoints=frozenset(
-                        {
-                            CharmEndpoint(
-                                type=ENDPOINT_PROVIDES,
-                                name="database",
-                                interface="postgresql",
-                                optionality=CharmEndpointOptionality.from_bool(False),
-                                limits=(CharmLimit(limit=0),),
-                            )
-                        }
-                    ),
-                    priority=1.0,
-                )
+        # AND a requirer charm that requires SSL feature
+        # TODO(raul): remove type ignore in subsequent type checker PRs
+        requirer_with_ssl = dataclasses.replace(  # type: ignore[type-var]
+            sample_charm_kratos(),
+            name="app-ssl",
+            endpoints=frozenset(
+                {
+                    dataclasses.replace(  # type: ignore[type-var]
+                        sample_charm_endpoint_kratos_pg_database(),
+                        name="database",
+                        features=frozenset({"ssl"}),
+                    )
+                }
+            ),
+        )
 
-        # AND a requirer charm
+        # AND a requirer charm that requires compression feature
+        # TODO(raul): remove type ignore in subsequent type checker PRs
+        requirer_with_compression = dataclasses.replace(  # type: ignore[type-var]
+            sample_charm_kratos(),
+            name="app-compression",
+            endpoints=frozenset(
+                {
+                    # TODO(raul): remove type ignore in subsequent type checker PRs
+                    dataclasses.replace(  # type: ignore[type-var]
+                        sample_charm_endpoint_kratos_pg_database(),
+                        name="database",
+                        features=frozenset({"compression"}),
+                    )
+                }
+            ),
+        )
+
+        # AND a bundle with the provider and both requirers
+        bundle = Bundle(
+            applications=frozenset(
+                {
+                    Application(name="db", charm=provider_charm),
+                    Application(name="app-ssl", charm=requirer_with_ssl),
+                    Application(name="app-compression", charm=requirer_with_compression),
+                }
+            ),
+            integrations=frozenset(),
+            platform="machine",
+            arch="amd64",
+        )
+
+        stub = CharmhubClientStub()
+        # TODO(raul): remove type ignore in subsequent type checker PRs
+        builder = BundleBuilder(charmhub_client=stub)  # type: ignore[arg-type]
+        node = Node(bundle=bundle, aggression=0.0)
+
+        # WHEN checking child nodes for the SSL requirer endpoint
+        children_ssl = builder.child_nodes_existing_applications(node, ApplicationEndpoint("app-ssl", "database"))
+
+        # THEN no children should be created (provider doesn't have SSL feature)
+        assert len(children_ssl) == 0
+
+        # WHEN checking child nodes for the compression requirer endpoint
+        children_compression = builder.child_nodes_existing_applications(
+            node, ApplicationEndpoint("app-compression", "database")
+        )
+
+        # THEN one child should be created (provider has compression feature)
+        assert len(children_compression) == 1
+        child = next(iter(children_compression))
+        assert (
+            Integration(
+                {
+                    ApplicationEndpoint("db", "database"),
+                    ApplicationEndpoint("app-compression", "database"),
+                }
+            )
+            in child.bundle.integrations
+        )
+
+    def test_child_nodes_existing_applications_allows_superset_features(self) -> None:
+        # GIVEN a provider charm with multiple features
+        provider_charm = dataclasses.replace(  # type: ignore[type-var]
+            sample_charm_postgresql_k8s(),
+            name="database",
+            endpoints=frozenset(
+                {
+                    dataclasses.replace(  # type: ignore[type-var]
+                        sample_charm_endpoint_postgresql_k8s_database(),
+                        features=frozenset({"ssl", "compression", "replication"}),
+                    )
+                }
+            ),
+        )
+
+        # AND a requirer charm that only requires SSL
+        # TODO(raul): remove type ignore in subsequent type checker PRs
+        requirer_charm = dataclasses.replace(  # type: ignore[type-var]
+            sample_charm_kratos(),
+            name="app",
+            endpoints=frozenset(
+                {
+                    dataclasses.replace(  # type: ignore[type-var]
+                        sample_charm_endpoint_kratos_pg_database(),
+                        name="database",
+                        features=frozenset({"ssl"}),
+                    )
+                }
+            ),
+        )
+
+        # AND a bundle with both applications
+        bundle = Bundle(
+            applications=frozenset(
+                {
+                    Application(name="db", charm=provider_charm),
+                    Application(name="app", charm=requirer_charm),
+                }
+            ),
+            integrations=frozenset(),
+            platform="machine",
+            arch="amd64",
+        )
+
+        stub = CharmhubClientStub()
+        # TODO(raul): remove type ignore in subsequent type checker PRs
+        builder = BundleBuilder(charmhub_client=stub)  # type: ignore[arg-type]
+        node = Node(bundle=bundle, aggression=0.0)
+
+        # WHEN checking child nodes for the requirer endpoint
+        children = builder.child_nodes_existing_applications(node, ApplicationEndpoint("app", "database"))
+
+        # THEN one child should be created (provider has all required features and more)
+        assert len(children) == 1
+        child = next(iter(children))
+        assert (
+            Integration(
+                {
+                    ApplicationEndpoint("db", "database"),
+                    ApplicationEndpoint("app", "database"),
+                }
+            )
+            in child.bundle.integrations
+        )
+
+    def test_child_nodes_existing_applications_allows_no_features(self) -> None:
+        # GIVEN a provider charm without features
+        # TODO(raul): remove type ignore in subsequent type checker PRs
+        provider_charm = dataclasses.replace(  # type: ignore[type-var]
+            sample_charm_postgresql_k8s(),
+            name="database",
+            endpoints=frozenset(
+                {
+                    # TODO(raul): remove type ignore in subsequent type checker PRs
+                    dataclasses.replace(  # type: ignore[type-var]
+                        sample_charm_endpoint_postgresql_k8s_database(),
+                        features=frozenset(),
+                    )
+                }
+            ),
+        )
+
+        # AND a requirer charm without features
         # TODO(raul): remove type ignore in subsequent type checker PRs
         requirer_charm = dataclasses.replace(  # type: ignore[type-var]
             sample_charm_kratos(),
@@ -251,27 +395,45 @@ class TestBundleBuilder:
                     dataclasses.replace(  # type: ignore[type-var]
                         sample_charm_endpoint_kratos_pg_database(),
                         name="database",
+                        features=frozenset(),
                     )
                 }
             ),
         )
 
-        # AND a bundle with only the requirer
+        # AND a bundle with both applications
         bundle = Bundle(
-            applications=frozenset({Application(name="app", charm=requirer_charm)}),
+            applications=frozenset(
+                {
+                    Application(name="db", charm=provider_charm),
+                    Application(name="app", charm=requirer_charm),
+                }
+            ),
             integrations=frozenset(),
             platform="machine",
             arch="amd64",
         )
 
-        # WHEN checking for new application children
+        stub = CharmhubClientStub()
         # TODO(raul): remove type ignore in subsequent type checker PRs
-        builder = BundleBuilder(charmhub_client=ZeroLimitStub())  # type: ignore[arg-type]
+        builder = BundleBuilder(charmhub_client=stub)  # type: ignore[arg-type]
         node = Node(bundle=bundle, aggression=0.0)
-        children = builder.child_nodes_new_applications(node, ApplicationEndpoint("app", "database"))
 
-        # THEN no children should be created (provider has limit 0)
-        assert len(children) == 0
+        # WHEN checking child nodes for the requirer endpoint
+        children = builder.child_nodes_existing_applications(node, ApplicationEndpoint("app", "database"))
+
+        # THEN one child should be created (both have no features, which is compatible)
+        assert len(children) == 1
+        child = next(iter(children))
+        assert (
+            Integration(
+                {
+                    ApplicationEndpoint("db", "database"),
+                    ApplicationEndpoint("app", "database"),
+                }
+            )
+            in child.bundle.integrations
+        )
 
     class TestBundleBuilderLimitValidation:
         def test_can_add_integration_respects_limits(self) -> None:

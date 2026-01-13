@@ -3,7 +3,18 @@
 # And appears in limbo due to being handed off to IS
 requires:
   certificates:
-    optional: true
+    optional_if:
+      - none_of:
+          - any_of:
+              - all_of:
+                  - endpoint_integrated: traefik-route
+                  - endpoint_feature: traefik-route:tls
+              - all_of:
+                  - endpoint_integrated: ingress
+                  - endpoint_feature: ingress:tls
+              - all_of:
+                  - endpoint_integrated: ingress-per-unit
+                  - endpoint_feature: ingress-per-unit:tls
   experimental-forward-auth:
     optional: true
   logging:
@@ -13,4 +24,21 @@ requires:
   workload-tracing:
     optional: true
   receive-ca-cert:
+    optional: true
+  upstream-ingress:
+    optional: true
+
+provides:
+  ingress:
+    optional: true
+    features: [tls]
+  ingress-per-unit:
+    optional: true
+    features: [tls]
+  metrics-endpoint:
+    optional: true
+  traefik-route:
+    optional: true
+    features: [tls]
+  grafana-dashboard:
     optional: true

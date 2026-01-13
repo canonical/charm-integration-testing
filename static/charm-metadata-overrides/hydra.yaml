@@ -8,3 +8,21 @@ provides:
     optional: true
   grafana-dashboard:
     optional: true
+
+requires:
+  public-route:
+    features: [tls]
+    optional: false
+  internal-route:
+    features: [tls]
+    optional: true
+
+  public-ingress:
+    features: [tls]
+    optional: false
+  internal-ingress:
+    features: [tls]
+    optional: true
+  admin-ingress:
+    features: [tls]
+    optional: true
