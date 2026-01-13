@@ -23,7 +23,9 @@ class CharmhubClientStub(CharmhubClient):
     def __init__(self, *charms: Charm):
         self.charms = set(charms)
 
-    def find_charms(self, *args, **kwargs):
+    # TODO(raul): remove type ignore in subsequent type checker PRs
+    # TODO(raul): remove type ignore in subsequent type checker PRs # type: ignore
+    def find_charms(self, *args, **kwargs):  # type: ignore
         if "provides" in kwargs:
             return {
                 charm.name
@@ -44,7 +46,9 @@ class CharmhubClientStub(CharmhubClient):
             }
         return set()
 
-    def charm_from_store(self, *args, **kwargs):
+    # TODO(raul): remove type ignore in subsequent type checker PRs
+    # TODO(raul): remove type ignore in subsequent type checker PRs # type: ignore
+    def charm_from_store(self, *args, **kwargs):  # type: ignore
         for charm in self.charms:
             if charm.name == kwargs.get("charm_name"):
                 return charm

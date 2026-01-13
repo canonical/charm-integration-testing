@@ -8,14 +8,18 @@ from datetime import timedelta
 import pytest
 from extensions.database_replication.database_client import DatabaseClient
 from extensions.database_replication.database_replicator import CharmInfo
+from extensions.database_replication.extension import GenericDatabaseReplicationExtension
+from juju.backend import JujuBackend
 
 
 @dataclass
 class DatabaseClientStub(DatabaseClient):
     """Stub implementation of DatabaseClient for testing"""
 
-    databases_by_app: dict = field(default_factory=lambda: {"postgresql-1": ["testdb"], "postgresql-2": ["testdb"]})
-    tables_by_db: dict = field(default_factory=lambda: {"testdb": ["public.users", "public.orders"]})
+    databases_by_app: dict[str, list[str]] = field(
+        default_factory=lambda: {"postgresql-1": ["testdb"], "postgresql-2": ["testdb"]}
+    )
+    tables_by_db: dict[str, list[str]] = field(default_factory=lambda: {"testdb": ["public.users", "public.orders"]})
 
     def get_databases(self, model: str, application: str) -> list[str]:
         """Return databases for an application"""
@@ -31,58 +35,137 @@ class DatabaseClientStub(DatabaseClient):
 
 
 @dataclass
-class JujuStub:
+class JujuStub(JujuBackend):
     """Stub implementation of JujuBackend for testing DatabaseReplicator"""
 
-    applications: dict = field(default_factory=lambda: {"postgresql-1": "postgresql", "postgresql-2": "postgresql"})
-    integrations: list = field(default_factory=list)
-    waited_scaled: list = field(default_factory=list)
-    waited_settled: list = field(default_factory=list)
-    units: dict = field(default_factory=lambda: {"postgresql-1": 3, "postgresql-2": 3})
-    configured_applications: list = field(default_factory=list)
+    applications: dict[str, str] = field(
+        default_factory=lambda: {"postgresql-1": "postgresql", "postgresql-2": "postgresql"}
+    )
+    integrations: list[tuple[str, str, str, str]] = field(default_factory=list)
+    waited_scaled: list[tuple[str, str, str]] = field(default_factory=list)
+    waited_settled: list[tuple[str, str, str]] = field(default_factory=list)
+    units: dict[str, int] = field(default_factory=lambda: {"postgresql-1": 3, "postgresql-2": 3})
+    configured_applications: list[tuple[str, str, dict[str, str]]] = field(default_factory=list)
 
-    def list_applications(self, model: str):
+    def scale_application(self) -> None:  # type: ignore[override]
+        pass
+
+    def list_integrations(self) -> None:  # type: ignore[override]
+        pass
+
+    def wait_idle(self) -> None:  # type: ignore[override]
+        pass
+
+    def wait_for_unit_message(self) -> None:  # type: ignore[override]
+        pass
+
+    def juju_status_text(self) -> None:  # type: ignore[override]
+        pass
+
+    def integrate(self) -> None:  # type: ignore[override]
+        pass
+
+    def remove_integration(self) -> None:  # type: ignore[override]
+        pass
+
+    def deploy_bundle_file(self) -> None:  # type: ignore[override]
+        pass
+
+    def remove_applications(self) -> None:  # type: ignore[override]
+        pass
+
+    def wait_for_removal(self) -> None:  # type: ignore[override]
+        pass
+
+    def wait_for_removal_of_integration(self) -> None:  # type: ignore[override]
+        pass
+
+    def wait_for_removal_of_units(self) -> None:  # type: ignore[override]
+        pass
+
+    def application_units(self) -> None:  # type: ignore[override]
+        pass
+
+    def exec_unit(self) -> None:  # type: ignore[override]
+        pass
+
+    def run_action(self) -> None:  # type: ignore[override]
+        pass
+
+    def add_secret(self) -> None:  # type: ignore[override]
+        pass
+
+    def read_secret(self) -> None:  # type: ignore[override]
+        pass
+
+    def grant_secret(self) -> None:  # type: ignore[override]
+        pass
+
+    def remove_secret(self) -> None:  # type: ignore[override]
+        pass
+
+    def deploy_application(self) -> None:  # type: ignore[override]
+        pass
+
+    def scp(self) -> None:  # type: ignore[override]
+        pass
+
+    def ssh(self) -> None:  # type: ignore[override]
+        pass
+
+    def unit_ip(self) -> None:  # type: ignore[override]
+        pass
+
+    def get_charm_revisions(self) -> None:  # type: ignore[override]
+        pass
+
+    def version(self) -> None:  # type: ignore[override]
+        pass
+
+    def list_applications(self, model: str) -> list[str]:  # type: ignore[override]
         """Return list of application names in the model"""
-        return self.applications.keys()
+        return list(self.applications.keys())
 
-    def application_charm(self, model: str, application: str):
+    def application_charm(self, model: str, application: str) -> str:
         """Return the charm name for a given application"""
         return self.applications[application]
 
-    def integration_exists(self, application1: str, endpoint1: str, application2: str, endpoint2: str, model: str):
+    def integration_exists(
+        self, application1: str, endpoint1: str, application2: str, endpoint2: str, model: str
+    ) -> bool:
         """Check if an integration exists between two applications"""
         return (application1, endpoint1, application2, endpoint2) in self.integrations
 
-    def wait_application_scaled(self, model: str, application: str, timeout: timedelta):
+    def wait_application_scaled(self, model: str, application: str, timeout: timedelta) -> None:  # type: ignore[override]
         """Wait for application to be scaled (captures call for verification)"""
         self.waited_scaled.append((model, application, str(timeout)))
 
-    def wait_application_settled(self, model: str, application: str, timeout: timedelta):
+    def wait_application_settled(self, model: str, application: str, timeout: timedelta) -> None:  # type: ignore[override]
         """Wait for application to settle (captures call for verification)"""
         self.waited_settled.append((model, application, str(timeout)))
 
-    def num_units(self, model: str, application: str):
+    def num_units(self, model: str, application: str) -> int:
         """Return the number of units for an application"""
         return self.units.get(application, 0)
 
-    def configure_application(self, model: str, application: str, values: dict):
+    def configure_application(self, model: str, application: str, values: dict[str, str]) -> None:
         """Mock configuring an application (captures call for verification)"""
         self.configured_applications.append((model, application, values))
 
 
 class TestPostgreSQLDatabaseReplicationExtension:
     @pytest.fixture
-    def juju(self):
+    def juju(self) -> JujuStub:
         """Provide a JujuStub instance for testing"""
         return JujuStub()
 
     @pytest.fixture
-    def database_client(self):
+    def database_client(self) -> DatabaseClientStub:
         """Provide a DatabaseClientStub instance for testing"""
         return DatabaseClientStub()
 
     @pytest.fixture
-    def extension(self, juju, database_client):
+    def extension(self, juju: JujuStub, database_client: DatabaseClientStub) -> GenericDatabaseReplicationExtension:
         """Provide a PostgresqlDatabaseReplicationExtension instance with stubbed client"""
         from extensions.database_replication.database_replicator import DatabaseReplicator
 
@@ -90,13 +173,14 @@ class TestPostgreSQLDatabaseReplicationExtension:
             name="postgresql", offer_endpoint="logical-replication-offer", consumer_endpoint="logical-replication"
         )
         replicator = DatabaseReplicator(charm_info, juju, logging.getLogger("test"), database_client)
-        from extensions.database_replication.extension import GenericDatabaseReplicationExtension
 
         ext = GenericDatabaseReplicationExtension(replicator)
         return ext
 
     class TestPostDeploy:
-        def test_skips_when_no_postgresql_applications(self, juju, database_client):
+        def test_skips_when_no_postgresql_applications(
+            self, juju: JujuStub, database_client: DatabaseClientStub
+        ) -> None:
             # GIVEN a model with no postgresql applications
             juju.applications = {"other-app": "other-charm"}
             from extensions.database_replication.database_replicator import DatabaseReplicator
@@ -115,7 +199,9 @@ class TestPostgreSQLDatabaseReplicationExtension:
             assert juju.waited_scaled == []
             assert juju.waited_settled == []
 
-        def test_skips_when_only_one_postgresql_application(self, juju, database_client):
+        def test_skips_when_only_one_postgresql_application(
+            self, juju: JujuStub, database_client: DatabaseClientStub
+        ) -> None:
             # GIVEN a model with only one postgresql application
             juju.applications = {"postgresql-1": "postgresql"}
             from extensions.database_replication.database_replicator import DatabaseReplicator
@@ -134,7 +220,9 @@ class TestPostgreSQLDatabaseReplicationExtension:
             assert juju.waited_scaled == []
             assert juju.waited_settled == []
 
-        def test_processes_when_two_or_more_postgresql_applications_with_integration(self, extension, juju):
+        def test_processes_when_two_or_more_postgresql_applications_with_integration(
+            self, extension: GenericDatabaseReplicationExtension, juju: JujuStub
+        ) -> None:
             # GIVEN a model with 2+ postgresql applications and an integration
             juju.integrations = [("postgresql-1", "logical-replication-offer", "postgresql-2", "logical-replication")]
 
@@ -145,7 +233,9 @@ class TestPostgreSQLDatabaseReplicationExtension:
             assert ("test-model", "postgresql-1", "0:10:00") in juju.waited_scaled
             assert ("test-model", "postgresql-1", "0:10:00") in juju.waited_settled
 
-        def test_skips_when_no_integrations_exist(self, extension, juju):
+        def test_skips_when_no_integrations_exist(
+            self, extension: GenericDatabaseReplicationExtension, juju: JujuStub
+        ) -> None:
             # GIVEN a model with 2+ postgresql applications but no integrations
             juju.integrations = []
 
@@ -157,7 +247,9 @@ class TestPostgreSQLDatabaseReplicationExtension:
             assert juju.waited_settled == []
 
     class TestTryReplicateDatabaseCluster:
-        def test_waits_for_application_to_scale_and_settle(self, extension, juju):
+        def test_waits_for_application_to_scale_and_settle(
+            self, extension: GenericDatabaseReplicationExtension, juju: JujuStub
+        ) -> None:
             # GIVEN a model with postgresql applications
             database_replicator = extension.database_replicator
 
@@ -170,7 +262,9 @@ class TestPostgreSQLDatabaseReplicationExtension:
             assert ("test-model", "postgresql-1", "0:10:00") in juju.waited_scaled
             assert ("test-model", "postgresql-1", "0:10:00") in juju.waited_settled
 
-        def test_skips_when_no_units_exist(self, extension, juju):
+        def test_skips_when_no_units_exist(
+            self, extension: GenericDatabaseReplicationExtension, juju: JujuStub
+        ) -> None:
             # GIVEN an application with no units
             juju.units["postgresql-1"] = 0
             database_replicator = extension.database_replicator
@@ -186,7 +280,9 @@ class TestPostgreSQLDatabaseReplicationExtension:
             # No configuration should happen
             assert len(juju.configured_applications) == 0
 
-        def test_configures_replication_when_common_databases_and_tables_exist(self, extension, juju):
+        def test_configures_replication_when_common_databases_and_tables_exist(
+            self, extension: GenericDatabaseReplicationExtension, juju: JujuStub
+        ) -> None:
             # GIVEN a model with postgresql applications that have common databases and tables
             juju.integrations = [("postgresql-1", "logical-replication-offer", "postgresql-2", "logical-replication")]
             database_replicator = extension.database_replicator
@@ -218,7 +314,9 @@ class TestPostgreSQLDatabaseReplicationExtension:
             assert "public.users" in subscription_request["testdb"]
             assert "public.orders" in subscription_request["testdb"]
 
-        def test_skips_when_consumer_has_no_units(self, extension, juju):
+        def test_skips_when_consumer_has_no_units(
+            self, extension: GenericDatabaseReplicationExtension, juju: JujuStub
+        ) -> None:
             # GIVEN an application where consumer has no units
             juju.units["postgresql-2"] = 0
             database_replicator = extension.database_replicator
@@ -233,7 +331,9 @@ class TestPostgreSQLDatabaseReplicationExtension:
             assert ("test-model", "postgresql-2", "0:10:00") in juju.waited_scaled
             assert len(juju.configured_applications) == 0
 
-        def test_skips_when_no_common_databases(self, extension, juju, database_client):
+        def test_skips_when_no_common_databases(
+            self, extension: GenericDatabaseReplicationExtension, juju: JujuStub, database_client: DatabaseClientStub
+        ) -> None:
             # GIVEN applications where database queries return different databases
             database_replicator = extension.database_replicator
 
@@ -248,7 +348,9 @@ class TestPostgreSQLDatabaseReplicationExtension:
             # THEN no configuration is applied
             assert len(juju.configured_applications) == 0
 
-        def test_skips_when_no_tables_in_common_databases(self, extension, juju, database_client):
+        def test_skips_when_no_tables_in_common_databases(
+            self, extension: GenericDatabaseReplicationExtension, juju: JujuStub, database_client: DatabaseClientStub
+        ) -> None:
             # GIVEN applications with common databases but no tables
             database_replicator = extension.database_replicator
 

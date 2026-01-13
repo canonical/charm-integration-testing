@@ -14,7 +14,7 @@ def test_remove_and_restore_integration(
     target_endpoint: str,
     neighbor_application: str,
     neighbor_endpoint: str,
-):
+) -> None:
     # Break relation
     juju_client.remove_integration(
         model=model,

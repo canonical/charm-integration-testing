@@ -1,98 +1,157 @@
 # Copyright 2025 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import logging
 from dataclasses import dataclass, field
 from datetime import timedelta
 
-from extensions.unseal_vault.vault_unsealer import CharmInfo, VaultTokenSecret, VaultUnsealer
+from extensions.unseal_vault.vault_client import VaultClient, VaultStatus, VaultTokenSecret
+from extensions.unseal_vault.vault_unsealer import CharmInfo, VaultUnsealer
+from juju.backend import JujuBackend
 
 
 @dataclass
-class JujuStub:
+class JujuStub(JujuBackend):
     apps: list[str] = field(default_factory=list)
     charm_name: str = ""
     scaled_apps: list[str] = field(default_factory=list)
     settled_apps: list[str] = field(default_factory=list)
     units: dict[str, list[str]] = field(default_factory=dict)
-    messages: list[tuple[str, str, str, timedelta]] = field(default_factory=list)
-    secrets: dict[str, dict] = field(default_factory=dict)
+    messages: list[tuple[str, str, timedelta]] = field(default_factory=list)
+    secrets: dict[str, dict[str, str]] = field(default_factory=dict)
     secrets_granted: list[tuple[str, str]] = field(default_factory=list)
-    actions_run: list[tuple[str, str, dict]] = field(default_factory=list)
+    actions_run: list[tuple[str, str, dict[str, str]]] = field(default_factory=list)
 
-    def list_applications(self, model: str):
+    def list_applications(self, model: str) -> list[str]:  # type: ignore[override]
         return self.apps
 
-    def application_charm(self, model: str, application: str):
+    def application_charm(self, model: str, application: str) -> str:
         return self.charm_name
 
-    def wait_application_scaled(self, model, app, timeout):
+    def wait_application_scaled(self, model: str, app: str, timeout: timedelta) -> None:  # type: ignore[override]
         self.scaled_apps.append(app)
 
-    def wait_application_settled(self, model, app, timeout):
+    def wait_application_settled(self, model: str, app: str, timeout: timedelta) -> None:  # type: ignore[override]
         self.settled_apps.append(app)
 
-    def application_units(self, model, app):
+    def application_units(self, model: str, app: str) -> list[str]:
         return self.units.get(app, [])
 
-    def num_units(self, model, app):
+    def num_units(self, model: str, app: str) -> int:
         return len(self.units.get(app, []))
 
-    def wait_for_unit_message(self, model, unit, message, timeout):
+    def wait_for_unit_message(self, model: str, unit: str, message: str, timeout: timedelta) -> None:  # type: ignore[override]
         self.messages.append((unit, message, timeout))
 
-    def add_secret(self, model, name, content):
+    def add_secret(self, model: str, name: str, content: dict[str, str]) -> str:
         self.secrets[name] = content
         return "secret-id"
 
-    def grant_secret(self, model, name, app):
+    def grant_secret(self, model: str, name: str, app: str) -> None:
         self.secrets_granted.append((name, app))
 
-    def run_action(self, model, unit, action, params):
+    def run_action(self, model: str, unit: str, action: str, params: dict[str, str]) -> None:
         self.actions_run.append((unit, action, params))
 
-    def remove_secret(self, model, name):
+    def remove_secret(self, model: str, name: str) -> None:
         del self.secrets[name]
 
-    def read_secret(self, model, name):
+    def read_secret(self, model: str, name: str) -> dict[str, str]:
         return self.secrets[name]
+
+    def scale_application(self) -> None:  # type: ignore[override]
+        pass
+
+    def list_integrations(self) -> None:  # type: ignore[override]
+        pass
+
+    def integration_exists(self) -> None:  # type: ignore[override]
+        pass
+
+    def wait_idle(self) -> None:  # type: ignore[override]
+        pass
+
+    def juju_status_text(self) -> None:  # type: ignore[override]
+        pass
+
+    def integrate(self) -> None:  # type: ignore[override]
+        pass
+
+    def remove_integration(self) -> None:  # type: ignore[override]
+        pass
+
+    def deploy_bundle_file(self) -> None:  # type: ignore[override]
+        pass
+
+    def remove_applications(self) -> None:  # type: ignore[override]
+        pass
+
+    def wait_for_removal(self) -> None:  # type: ignore[override]
+        pass
+
+    def wait_for_removal_of_integration(self) -> None:  # type: ignore[override]
+        pass
+
+    def wait_for_removal_of_units(self) -> None:  # type: ignore[override]
+        pass
+
+    def exec_unit(self) -> None:  # type: ignore[override]
+        pass
+
+    def deploy_application(self) -> None:  # type: ignore[override]
+        pass
+
+    def configure_application(self) -> None:  # type: ignore[override]
+        pass
+
+    def scp(self) -> None:  # type: ignore[override]
+        pass
+
+    def ssh(self) -> None:  # type: ignore[override]
+        pass
+
+    def unit_ip(self) -> None:  # type: ignore[override]
+        pass
+
+    def get_charm_revisions(self) -> None:  # type: ignore[override]
+        pass
+
+    def version(self) -> None:  # type: ignore[override]
+        pass
 
 
 @dataclass
-class VaultStub:
+class VaultStub(VaultClient):
     initialized_units: dict[str, bool] = field(default_factory=dict)
     sealed_units: dict[str, bool] = field(default_factory=dict)
     inits: list[str] = field(default_factory=list)
     unseals: list[str] = field(default_factory=list)
     tokens: VaultTokenSecret = field(default_factory=lambda: VaultTokenSecret(root_token="root", unseal_key="key"))
 
-    def status(self, model, unit):
-        return type(
-            "Status",
-            (),
-            {
-                "initialized": self.initialized_units.get(unit, False),
-                "sealed": self.sealed_units.get(unit, True),
-            },
-        )()
+    def status(self, model: str, unit: str) -> VaultStatus:
+        return VaultStatus(
+            initialized=self.initialized_units.get(unit, False),
+            sealed=self.sealed_units.get(unit, True),
+        )
 
-    def init(self, model, unit):
+    def init(self, model: str, unit: str) -> VaultTokenSecret:
         self.inits.append(unit)
         return self.tokens
 
-    def unseal(self, model, unit, tokens):
+    def unseal(self, model: str, unit: str, tokens: VaultTokenSecret) -> None:
         self.unseals.append(unit)
 
 
-class LoggerStub:
-    def __init__(self):
-        self.messages = []
+class LoggerStub(logging.Logger):
+    def __init__(self) -> None:
+        self.messages: list[str] = []
 
-    def info(self, message):
+    def info(self, message: str) -> None:  # type: ignore[override]
         self.messages.append(message)
 
 
 class TestVaultUnsealer:
-    def test_try_init_or_unseal_all_vaults(self):
+    def test_try_init_or_unseal_all_vaults(self) -> None:
         # GIVEN
         juju = JujuStub(apps=["vault"], charm_name="vault", units={"vault": ["vault/leader"]})
         vault = VaultStub(initialized_units={"vault/leader": False})
@@ -106,7 +165,7 @@ class TestVaultUnsealer:
         assert "vault" in juju.scaled_apps
         assert "vault/leader" in vault.inits
 
-    def test_try_init_vault_skips_if_already_initialized(self):
+    def test_try_init_vault_skips_if_already_initialized(self) -> None:
         # GIVEN
         juju = JujuStub(units={"vault": ["vault/leader"]})
         vault = VaultStub(initialized_units={"vault/leader": True})
@@ -120,7 +179,7 @@ class TestVaultUnsealer:
         assert vault.inits == []
         assert vault.unseals == []
 
-    def test_try_unseal_vault_unseals_if_initialized_and_sealed(self):
+    def test_try_unseal_vault_unseals_if_initialized_and_sealed(self) -> None:
         # GIVEN
         juju = JujuStub(
             units={"vault": ["vault/0", "vault/1"]},
@@ -141,7 +200,7 @@ class TestVaultUnsealer:
         assert "vault/0" in vault.unseals
         assert "vault/1" not in vault.unseals
 
-    def test_authorize_vault_charm_runs_action_and_removes_secret(self):
+    def test_authorize_vault_charm_runs_action_and_removes_secret(self) -> None:
         # GIVEN
         juju = JujuStub()
         vault = VaultStub()
@@ -157,7 +216,7 @@ class TestVaultUnsealer:
         assert ("vault/leader", "authorize-charm", {"secret-id": "secret-id"}) in juju.actions_run
         assert "vault-secret-application-vault-one-time-token" not in juju.secrets
 
-    def test_save_and_get_vault_tokens(self):
+    def test_save_and_get_vault_tokens(self) -> None:
         # GIVEN
         juju = JujuStub()
         vault = VaultStub()
@@ -174,12 +233,12 @@ class TestVaultUnsealer:
         assert juju.secrets["vault-secret-application-vault-tokens"] == {"root-token": "abc", "unseal-key": "xyz"}
         assert result == tokens
 
-    def test_vault_status_retries_on_connection_refused(self):
+    def test_vault_status_retries_on_connection_refused(self) -> None:
         # GIVEN
         juju = JujuStub(units={"vault": ["vault/leader"]})
         vault = VaultStub()
 
-        def raise_connection_refused(model, unit):
+        def raise_connection_refused(model: str, unit: str) -> VaultStatus:
             raise RuntimeError(
                 'ERROR Failure in test_deploy: RuntimeError: Failed to query vault status: \
                          Error checking seal status: Get "https://127.0.0.1:8200/v1/sys/seal-status": dial tcp 127.0.0.1:8200: connect: connection refused'
@@ -198,12 +257,12 @@ class TestVaultUnsealer:
         else:
             assert False, "Expected RuntimeError was not raised"
 
-    def test_vault_status_does_not_retry_on_other_errors(self):
+    def test_vault_status_does_not_retry_on_other_errors(self) -> None:
         # GIVEN
         juju = JujuStub(units={"vault": ["vault/leader"]})
         vault = VaultStub()
 
-        def raise_other_error(model, unit):
+        def raise_other_error(model: str, unit: str) -> VaultStatus:
             raise RuntimeError(
                 "ERROR Failure in test_deploy: RuntimeError: Failed to query vault status: Some other error occurred"
             )

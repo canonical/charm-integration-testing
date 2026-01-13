@@ -15,6 +15,7 @@
 
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -48,10 +49,12 @@ class TestCharmEndpointOverride:
                     ]
                 ),
                 optionality=CharmEndpointOptionality(
-                    all_of=[
-                        CharmEndpointOptionality.from_bool(True),
-                        CharmEndpointOptionality.from_bool(False),
-                    ]
+                    all_of=frozenset(
+                        [
+                            CharmEndpointOptionality.from_bool(True),
+                            CharmEndpointOptionality.from_bool(False),
+                        ]
+                    )
                 ),
             ),
             Params(
@@ -87,7 +90,7 @@ class TestCharmEndpointOverride:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test(self, params: Params):
+        def test(self, params: Params) -> None:
             # GIVEN the override
             override = params.override
 
@@ -104,7 +107,7 @@ class TestOverridesClient:
         class Params:
             label: str
             charm: str = "postgresql-k8s"
-            overrides: dict = Field(default_factory=dict)
+            overrides: dict[str, Any] = Field(default_factory=dict)
             expected_override: CharmMetadataOverride = Field(default_factory=CharmMetadataOverride)
             overrides_directory: bool = True
 
@@ -150,7 +153,7 @@ class TestOverridesClient:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test(self, params: Params, tmp_path: Path):
+        def test(self, params: Params, tmp_path: Path) -> None:
             # GIVEN
             if params.overrides_directory:
                 for charm, override in params.overrides.items():
@@ -172,7 +175,7 @@ class TestOverridesClient:
         class Params:
             label: str
             charm: str = "postgresql-k8s"
-            overrides: dict = Field(default_factory=dict)
+            overrides: dict[str, Any] = Field(default_factory=dict)
             expected_override: set[str] = Field(default_factory=set)
             overrides_directory: bool = True
 
@@ -189,7 +192,7 @@ class TestOverridesClient:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test(self, params: Params, tmp_path: Path):
+        def test(self, params: Params, tmp_path: Path) -> None:
             # GIVEN
             if params.overrides_directory:
                 for charm, override in params.overrides.items():
@@ -210,7 +213,7 @@ class TestOverridesClient:
         @dataclass
         class Params:
             label: str
-            overrides: dict = Field(default_factory=dict)
+            overrides: dict[str, Any] = Field(default_factory=dict)
             expected_overrides: set[str] = Field(default_factory=set)
             supply_file: bool = True
 
@@ -225,7 +228,7 @@ class TestOverridesClient:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test(self, params: Params, tmp_path: Path):
+        def test(self, params: Params, tmp_path: Path) -> None:
             # GIVEN
             override_file = tmp_path / "listing.yaml"
             # AND
@@ -246,7 +249,7 @@ class TestOverridesClient:
         class Params:
             label: str
             charm: str = "charm-a"
-            overrides: dict = Field(default_factory=dict)
+            overrides: dict[str, Any] = Field(default_factory=dict)
             expected: list[CharmTestConfig] = Field(default_factory=list)
             overrides_directory: bool = True
 
@@ -277,7 +280,7 @@ class TestOverridesClient:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test(self, params: Params, tmp_path: Path):
+        def test(self, params: Params, tmp_path: Path) -> None:
             # GIVEN
             if params.overrides_directory:
                 for charm, override in params.overrides.items():
@@ -296,7 +299,7 @@ class TestOverridesClient:
         @dataclass
         class Params:
             label: str
-            overrides: dict = Field(default_factory=dict)
+            overrides: dict[str, Any] = Field(default_factory=dict)
             expected_priorities: dict[str, float] = Field(default_factory=dict)
             supply_file: bool = True
 
@@ -311,7 +314,7 @@ class TestOverridesClient:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test(self, params: Params, tmp_path: Path):
+        def test(self, params: Params, tmp_path: Path) -> None:
             # GIVEN a yaml file
             override_file = tmp_path / "priorities.yaml"
             # AND its content according to params.overrides

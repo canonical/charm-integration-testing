@@ -3,22 +3,24 @@
 
 from dataclasses import field
 from datetime import timedelta
+from typing import Any, Callable
 
 import jubilant
 import pytest
 import yaml
 from juju import JujuWaitState, JujuWaitTimeoutError
-from juju_jubilant.backend import JubilantBackend, JubilantClient
+from juju_jubilant.backend import JubilantBackend
+from juju_jubilant.client import JubilantClient
 from pydantic.dataclasses import dataclass
 
 
-class JubilantClientStub:
-    client: any
+class JubilantClientStub(JubilantClient):
+    client: Any
 
-    def __init__(self, client: any):
+    def __init__(self, client: Any) -> None:
         self.client = client
 
-    def model(self, model: str) -> any:
+    def model(self, model: str) -> Any:
         return self.client
 
 
@@ -33,7 +35,7 @@ class JubilantCliStub:
 
 
 class TestJubilantClient:
-    def test_model(self):
+    def test_model(self) -> None:
         # GIVEN a jubilant client
         client = JubilantClient()
 
@@ -50,7 +52,7 @@ class StatusStub:
 
     call_count: int = 0
 
-    def status(self):
+    def status(self) -> jubilant.Status:
         self.call_count += 1
         return jubilant.Status(
             model=jubilant.statustypes.ModelStatus(
@@ -75,13 +77,13 @@ class WaitStub:
     def wait(
         self,
         model: str,
-        ready,
-        error=None,
-        timeout=None,
-        successes=None,
-        delay=None,
-        strict_timeout=False,
-    ):
+        ready: Callable[[jubilant.Status], tuple[bool, JujuWaitState]],
+        error: Callable[[jubilant.Status], tuple[bool, JujuWaitState]] | None = None,
+        timeout: timedelta | None = None,
+        successes: int | None = None,
+        delay: timedelta | None = None,
+        strict_timeout: bool = False,
+    ) -> None:
         self.call_count += 1
         if self.raise_timeout:
             raise JujuWaitTimeoutError()
@@ -89,7 +91,7 @@ class WaitStub:
 
 class TestJubilantBackend:
     class TestWait:
-        def test_wait_success(self):
+        def test_wait_success(self) -> None:
             # GIVEN a backend with mocked status
             stub = StatusStub()
             client = JubilantClientStub(client=stub)
@@ -107,7 +109,7 @@ class TestJubilantBackend:
             # THEN status was called 3 times (for 3 successes)
             assert stub.call_count == 3
 
-        def test_wait_timeout_with_failures(self):
+        def test_wait_timeout_with_failures(self) -> None:
             # GIVEN a backend with mocked status
             stub = StatusStub()
             client = JubilantClientStub(client=stub)
@@ -127,7 +129,7 @@ class TestJubilantBackend:
             assert exc_info.value.wait_state.message == "not ready"
             assert not exc_info.value.wait_state.insufficient_status_checks
 
-        def test_wait_timeout_insufficient_checks(self):
+        def test_wait_timeout_insufficient_checks(self) -> None:
             # GIVEN a backend with mocked status
             stub = StatusStub()
             client = JubilantClientStub(client=stub)
@@ -136,7 +138,7 @@ class TestJubilantBackend:
             # Track call count
             call_count = 0
 
-            def ready_func(status):
+            def ready_func(status: jubilant.Status) -> tuple[bool, JujuWaitState]:
                 nonlocal call_count
                 call_count += 1
                 # Always ready but timeout before getting 100 successes
@@ -157,7 +159,7 @@ class TestJubilantBackend:
             assert exc_info.value.wait_state.insufficient_status_checks
             assert call_count < 100
 
-        def test_wait_with_error_callback(self):
+        def test_wait_with_error_callback(self) -> None:
             # GIVEN a backend with mocked status
             stub = StatusStub()
             client = JubilantClientStub(client=stub)
@@ -177,7 +179,7 @@ class TestJubilantBackend:
             # THEN the error message is in the wait state
             assert exc_info.value.wait_state.message == "error occurred"
 
-        def test_wait_success_resets_on_failure(self):
+        def test_wait_success_resets_on_failure(self) -> None:
             # GIVEN a backend with mocked status
             stub = StatusStub()
             client = JubilantClientStub(client=stub)
@@ -187,7 +189,7 @@ class TestJubilantBackend:
             ready_states = [True, True, False, True, True, True]
             call_count = 0
 
-            def ready_func(status):
+            def ready_func(status: jubilant.Status) -> tuple[bool, JujuWaitState]:
                 nonlocal call_count
                 is_ready = ready_states[min(call_count, len(ready_states) - 1)]
                 call_count += 1
@@ -205,7 +207,7 @@ class TestJubilantBackend:
             # THEN we needed 6 calls (2 ready, 1 fail resets count, 3 ready to succeed)
             assert call_count == 6
 
-        def test_wait_extends_timeout_when_making_progress(self):
+        def test_wait_extends_timeout_when_making_progress(self) -> None:
             # GIVEN a backend with mocked status
             stub = StatusStub()
             client = JubilantClientStub(client=stub)
@@ -214,7 +216,7 @@ class TestJubilantBackend:
             # Track call count - we need 10 successes but timeout after 5 checks
             call_count = 0
 
-            def ready_func(status):
+            def ready_func(status: jubilant.Status) -> tuple[bool, JujuWaitState]:
                 nonlocal call_count
                 call_count += 1
                 # Always ready
@@ -233,7 +235,7 @@ class TestJubilantBackend:
             # THEN we got all 10 successes despite timeout being exceeded
             assert call_count == 10
 
-        def test_wait_enforces_strict_timeout(self):
+        def test_wait_enforces_strict_timeout(self) -> None:
             # GIVEN a backend with mocked status
             stub = StatusStub()
             client = JubilantClientStub(client=stub)
@@ -242,7 +244,7 @@ class TestJubilantBackend:
             # Track call count
             call_count = 0
 
-            def ready_func(status):
+            def ready_func(status: jubilant.Status) -> tuple[bool, JujuWaitState]:
                 nonlocal call_count
                 call_count += 1
                 # Always ready
@@ -263,7 +265,7 @@ class TestJubilantBackend:
             assert call_count < 100
             assert exc_info.value.wait_state.insufficient_status_checks
 
-        def test_wait_timeout_when_not_making_progress(self):
+        def test_wait_timeout_when_not_making_progress(self) -> None:
             # GIVEN a backend with mocked status
             stub = StatusStub()
             client = JubilantClientStub(client=stub)
@@ -272,7 +274,7 @@ class TestJubilantBackend:
             # Track call count
             call_count = 0
 
-            def ready_func(status):
+            def ready_func(status: jubilant.Status) -> tuple[bool, JujuWaitState]:
                 nonlocal call_count
                 call_count += 1
                 # Never ready
@@ -294,7 +296,7 @@ class TestJubilantBackend:
             assert not exc_info.value.wait_state.insufficient_status_checks
 
     class TestWaitIdle:
-        def test_wait_idle(self):
+        def test_wait_idle(self) -> None:
             # GIVEN
             stub = StatusStub()
             client = JubilantClientStub(client=stub)
@@ -306,7 +308,7 @@ class TestJubilantBackend:
             # THEN status was called 3 times
             assert stub.call_count == 3
 
-        def test_timeout(self):
+        def test_timeout(self) -> None:
             # GIVEN a backend with stubbed wait that raises timeout
             wait_stub = WaitStub(raise_timeout=True)
             backend = JubilantBackend()
@@ -316,7 +318,7 @@ class TestJubilantBackend:
             with pytest.raises(JujuWaitTimeoutError):
                 backend.wait_idle("test-model", timedelta(milliseconds=100), count=5)
 
-        def test_wait_idle_with_strict_timeout(self):
+        def test_wait_idle_with_strict_timeout(self) -> None:
             # GIVEN
             stub = StatusStub()
             client = JubilantClientStub(client=stub)
@@ -328,7 +330,7 @@ class TestJubilantBackend:
             # THEN status was called 3 times
             assert stub.call_count == 3
 
-        def test_wait_idle_extends_timeout_by_default(self):
+        def test_wait_idle_extends_timeout_by_default(self) -> None:
             # GIVEN
             stub = StatusStub()
             client = JubilantClientStub(client=stub)
@@ -341,7 +343,7 @@ class TestJubilantBackend:
             assert stub.call_count == 10
 
     class TestWaitApplicationSettled:
-        def test_application_settled(self):
+        def test_application_settled(self) -> None:
             # GIVEN
             wait_stub = WaitStub()
             backend = JubilantBackend()
@@ -353,7 +355,7 @@ class TestJubilantBackend:
             # THEN wait was called
             assert wait_stub.call_count == 1
 
-        def test_timeout(self):
+        def test_timeout(self) -> None:
             # GIVEN
             wait_stub = WaitStub(raise_timeout=True)
             backend = JubilantBackend()
@@ -364,7 +366,7 @@ class TestJubilantBackend:
                 backend.wait_application_settled("test-model", "my-app", timeout=timedelta(milliseconds=100))
 
     class TestWaitApplicationScaled:
-        def test_application_scaled(self):
+        def test_application_scaled(self) -> None:
             # GIVEN
             wait_stub = WaitStub()
             backend = JubilantBackend()
@@ -376,7 +378,7 @@ class TestJubilantBackend:
             # THEN wait was called
             assert wait_stub.call_count == 1
 
-        def test_timeout(self):
+        def test_timeout(self) -> None:
             # GIVEN
             wait_stub = WaitStub(raise_timeout=True)
             backend = JubilantBackend()
@@ -387,7 +389,7 @@ class TestJubilantBackend:
                 backend.wait_application_scaled("test-model", "my-app", timeout=timedelta(milliseconds=100))
 
     class TestWaitForUnitMessage:
-        def test_unit_message(self):
+        def test_unit_message(self) -> None:
             # GIVEN
             wait_stub = WaitStub()
             backend = JubilantBackend()
@@ -399,7 +401,7 @@ class TestJubilantBackend:
             # THEN wait was called
             assert wait_stub.call_count == 1
 
-        def test_timeout(self):
+        def test_timeout(self) -> None:
             # GIVEN
             wait_stub = WaitStub(raise_timeout=True)
             backend = JubilantBackend()
@@ -412,7 +414,7 @@ class TestJubilantBackend:
                 )
 
     class TestWaitForRemoval:
-        def test_removal(self):
+        def test_removal(self) -> None:
             # GIVEN
             stub = StatusStub()
             client = JubilantClientStub(client=stub)
@@ -424,7 +426,7 @@ class TestJubilantBackend:
             # THEN status was called
             assert stub.call_count >= 1
 
-        def test_timeout(self):
+        def test_timeout(self) -> None:
             # GIVEN
             wait_stub = WaitStub(raise_timeout=True)
             backend = JubilantBackend()
@@ -435,7 +437,7 @@ class TestJubilantBackend:
                 backend.wait_for_removal("test-model", ["my-app"], timeout=timedelta(milliseconds=100))
 
     class TestWaitForRemovalOfIntegration:
-        def test_removal_of_integration(self):
+        def test_removal_of_integration(self) -> None:
             # GIVEN
             stub = StatusStub()
             client = JubilantClientStub(client=stub)
@@ -451,7 +453,7 @@ class TestJubilantBackend:
             # THEN status was called
             assert stub.call_count >= 1
 
-        def test_timeout(self):
+        def test_timeout(self) -> None:
             # GIVEN
             wait_stub = WaitStub(raise_timeout=True)
             backend = JubilantBackend()
@@ -468,7 +470,7 @@ class TestJubilantBackend:
                 )
 
     class TestWaitForRemovalOfUnits:
-        def test_removal_of_units(self):
+        def test_removal_of_units(self) -> None:
             # GIVEN
             wait_stub = WaitStub()
             backend = JubilantBackend()
@@ -480,7 +482,7 @@ class TestJubilantBackend:
             # THEN wait was called
             assert wait_stub.call_count == 1
 
-        def test_timeout(self):
+        def test_timeout(self) -> None:
             # GIVEN
             wait_stub = WaitStub(raise_timeout=True)
             backend = JubilantBackend()
@@ -493,14 +495,14 @@ class TestJubilantBackend:
     class TestAddSecret:
         @dataclass
         class AddSecretStub:
-            secrets: dict = field(default_factory=dict)
+            secrets: dict[str, dict[str, str]] = field(default_factory=dict)
             secret_uri: str = "secret:test-secret-id"
 
-            def add_secret(self, name: str, content: dict[str, str]):
+            def add_secret(self, name: str, content: dict[str, str]) -> jubilant.SecretURI:
                 self.secrets[name] = content
                 return jubilant.SecretURI(self.secret_uri)
 
-        def test(self):
+        def test(self) -> None:
             # GIVEN
             client = JubilantClientStub(client=self.AddSecretStub())
 
@@ -513,7 +515,7 @@ class TestJubilantBackend:
             assert client.client.secrets["my-secret"] == {"key": "value"}
 
     class TestReadSecret:
-        def test(self):
+        def test(self) -> None:
             # GIVEN
             client = JubilantClientStub(
                 client=JubilantCliStub(
@@ -543,7 +545,7 @@ class TestJubilantBackend:
             assert content == {"my-key": "my-value"}
 
     class TestGrantSecret:
-        def test(self):
+        def test(self) -> None:
             # GIVEN
             client = JubilantClientStub(client=JubilantCliStub())
 
@@ -554,7 +556,7 @@ class TestJubilantBackend:
             assert ("grant-secret", "my-secret", "my-application") in client.client.executions
 
     class TestRemoveSecret:
-        def test(self):
+        def test(self) -> None:
             # GIVEN
             client = JubilantClientStub(client=JubilantCliStub())
 
@@ -570,11 +572,11 @@ class TestJubilantBackend:
             charm: str | None = None
             app: str | None = None
 
-            def deploy(self, charm: str, app: str | None = None):
+            def deploy(self, charm: str, app: str | None = None) -> None:
                 self.charm = charm
                 self.app = app
 
-        def test(self):
+        def test(self) -> None:
             # GIVEN
             stub = self.DeployStub()
             client = JubilantClientStub(client=stub)
@@ -592,11 +594,11 @@ class TestJubilantBackend:
             app: str | None = None
             values: dict[str, str] = field(default_factory=dict)
 
-            def config(self, app: str, values: dict[str, str]):
+            def config(self, app: str, values: dict[str, str]) -> None:
                 self.app = app
                 self.values = values
 
-        def test(self):
+        def test(self) -> None:
             # GIVEN
             stub = self.ConfigStub()
             client = JubilantClientStub(client=stub)
@@ -614,11 +616,11 @@ class TestJubilantBackend:
             source: str = ""
             destination: str = ""
 
-            def scp(self, source: str, destination: str):
+            def scp(self, source: str, destination: str) -> None:
                 self.source = source
                 self.destination = destination
 
-        def test(self):
+        def test(self) -> None:
             # GIVEN
             stub = self.ScpStub()
             client = JubilantClientStub(client=stub)
@@ -636,11 +638,11 @@ class TestJubilantBackend:
             target: str = ""
             command: str = ""
 
-            def ssh(self, target: str, command: str):
+            def ssh(self, target: str, command: str) -> None:
                 self.target = target
                 self.command = command
 
-        def test(self):
+        def test(self) -> None:
             # GIVEN
             stub = self.SshStub()
             client = JubilantClientStub(client=stub)
@@ -654,16 +656,16 @@ class TestJubilantBackend:
 
     class TestUnitIp:
         class Unit:
-            def __init__(self, address, leader=False):
+            def __init__(self, address: str, leader: bool = False) -> None:
                 self.address = address
                 self.leader = leader
 
         class AppStatus:
-            def __init__(self, units):
+            def __init__(self, units: dict[str, "TestJubilantBackend.TestUnitIp.Unit"]) -> None:
                 self.units = units
 
         class ModelStatus:
-            def __init__(self):
+            def __init__(self) -> None:
                 self.apps = {
                     "my-app": TestJubilantBackend.TestUnitIp.AppStatus(
                         {
@@ -674,10 +676,10 @@ class TestJubilantBackend:
                 }
 
         class StatusStub:
-            def status(self):
+            def status(self) -> "TestJubilantBackend.TestUnitIp.ModelStatus":
                 return TestJubilantBackend.TestUnitIp.ModelStatus()
 
-        def test_by_unit_id(self):
+        def test_by_unit_id(self) -> None:
             # GIVEN
             stub = self.StatusStub()
             client = JubilantClientStub(client=stub)
@@ -688,7 +690,7 @@ class TestJubilantBackend:
             # THEN
             assert ip == "10.0.0.1"
 
-        def test_by_leader(self):
+        def test_by_leader(self) -> None:
             # GIVEN
             stub = self.StatusStub()
             client = JubilantClientStub(client=stub)
@@ -699,7 +701,7 @@ class TestJubilantBackend:
             # THEN
             assert ip == "10.0.0.2"
 
-        def test_not_found(self):
+        def test_not_found(self) -> None:
             # GIVEN
             stub = self.StatusStub()
             client = JubilantClientStub(client=stub)
@@ -714,7 +716,7 @@ class TestJubilantBackend:
 
     class TestGetCharmRevisions:
         class StatusStub:
-            def __init__(self, charm, charm_rev):
+            def __init__(self, charm: str, charm_rev: int) -> None:
                 self.apps = {
                     "my-app": jubilant.statustypes.AppStatus(
                         charm=charm,
@@ -726,23 +728,23 @@ class TestJubilantBackend:
                 }
 
         class ModelStatus:
-            def __init__(self, charm, charm_rev):
+            def __init__(self, charm: str, charm_rev: int) -> None:
                 self.apps = TestJubilantBackend.TestGetCharmRevisions.StatusStub(charm, charm_rev).apps
 
         class StatusStubClient:
-            def status(self):
+            def status(self) -> "TestJubilantBackend.TestGetCharmRevisions.ModelStatus":
                 return TestJubilantBackend.TestGetCharmRevisions.ModelStatus("my-charm", 1)
 
         class ModelStub:
             client: "TestJubilantBackend.TestGetCharmRevisions.StatusStubClient"
 
-            def __init__(self, client):
+            def __init__(self, client: "TestJubilantBackend.TestGetCharmRevisions.StatusStubClient") -> None:
                 self.client = client
 
-            def status(self):
+            def status(self) -> "TestJubilantBackend.TestGetCharmRevisions.ModelStatus":
                 return self.client.status()
 
-        def test_get_charm_revisions(self):
+        def test_get_charm_revisions(self) -> None:
             # GIVEN
             client = JubilantClientStub(client=self.ModelStub(client=self.StatusStubClient()))
 

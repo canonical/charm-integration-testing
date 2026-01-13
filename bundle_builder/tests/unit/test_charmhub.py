@@ -14,56 +14,60 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
+from typing import Any
+
 import pytest
 import yaml
 from pydantic import Field
 from pydantic.dataclasses import dataclass
 
 from bundle_builder.charm import CharmConfigCriteria, CharmTestConfig
-from bundle_builder.charmhub import CharmhubClient, CharmReleaseNotFoundException
+from bundle_builder.charmhub import CharmhubClient
 from bundle_builder.charmhub_http import (
     CharmhubBase,
+    CharmhubHttpClient,
+    CharmReleaseNotFoundException,
     FindResponse,
     InfoResponse,
     RefreshAction,
     RefreshResponse,
 )
-from bundle_builder.overrides import CharmTestConfigs
+from bundle_builder.overrides import CharmTestConfigs, OverridesClient
 
 
 @dataclass
-class CharmhubHttpStub:
+class CharmhubHttpStub(CharmhubHttpClient):
     refresh_response: dict[RefreshAction, RefreshResponse] = Field(default_factory=dict)
 
-    def refresh(self, action: RefreshAction) -> RefreshResponse:
+    def refresh(self, action: RefreshAction) -> RefreshResponse:  # type: ignore[override]
         return self.refresh_response[action]
 
     find_response: list[FindResponse] = Field(default_factory=list)
 
-    def find(self, provides: str | None = None, requires: str | None = None) -> list[FindResponse]:
+    def find(self, provides: str | None = None, requires: str | None = None) -> list[FindResponse]:  # type: ignore[override]
         return self.find_response
 
     info_response: dict[str, InfoResponse] = Field(default_factory=dict)
 
-    def info(self, charm: str) -> InfoResponse:
+    def info(self, charm: str) -> InfoResponse:  # type: ignore[override]
         return self.info_response[charm]
 
 
 @dataclass
-class OverridesStub:
-    charm_platform_overrides: dict[str, set[str]] = Field(default_factory=dict)
+class OverridesStub(OverridesClient):
+    charm_platform_overrides: dict[str, set[str]] = Field(default_factory=dict)  # type: ignore[assignment]
 
-    def get_charm_platform_overrides(self, charm: str) -> set[str]:
+    def get_charm_platform_overrides(self, charm: str) -> set[str]:  # type: ignore[override]
         return self.charm_platform_overrides.get(charm, set())
 
-    charm_listing_overrides: set[str] = Field(default_factory=set)
+    charm_listing_overrides: set[str] = Field(default_factory=set)  # type: ignore[assignment]
 
-    def get_charm_listing_overrides(self) -> set[str]:
+    def get_charm_listing_overrides(self) -> set[str]:  # type: ignore[override]
         return self.charm_listing_overrides
 
-    charm_test_configs: dict[str, list[dict]] = Field(default_factory=dict)
+    charm_test_configs: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)  # type: ignore[assignment]
 
-    def get_charm_test_configs(self, charm: str) -> list[CharmTestConfig]:
+    def get_charm_test_configs(self, charm: str) -> list[CharmTestConfig]:  # type: ignore[override]
         configs = self.charm_test_configs.get(charm, [])
         # Use CharmTestConfigs wrapper to let Pydantic validate the list properly
         return CharmTestConfigs(configs=configs).configs
@@ -153,7 +157,7 @@ class TestCharmhubClient:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test(self, params: Params):
+        def test(self, params: Params) -> None:
             # GIVEN
             http_client = CharmhubHttpStub(
                 refresh_response={
@@ -252,10 +256,34 @@ class TestCharmhubClient:
                     RefreshAction(
                         charm_name="my-charm",
                         base=matching_base,
-                        channel="stable",
+                        charm_channel="stable",
                     ): RefreshResponse(
                         name="my-charm",
                         effective_channel="stable",
+                    ),
+                    RefreshAction(
+                        charm_name="my-charm",
+                        base=matching_base,
+                        charm_channel="latest/stable",
+                    ): RefreshResponse(
+                        name="my-charm",
+                        error=RefreshResponse.Error(message="Error Message", code="error-code"),
+                    ),
+                    RefreshAction(
+                        charm_name="my-charm",
+                        base=matching_base,
+                        charm_channel="latest/edge",
+                    ): RefreshResponse(
+                        name="my-charm",
+                        error=RefreshResponse.Error(message="Error Message", code="error-code"),
+                    ),
+                    RefreshAction(
+                        charm_name="my-charm",
+                        base=matching_base,
+                        charm_channel="edge",
+                    ): RefreshResponse(
+                        name="my-charm",
+                        error=RefreshResponse.Error(message="Error Message", code="error-code"),
                     ),
                 },
                 expected_refresh_info=RefreshResponse(
@@ -339,7 +367,7 @@ class TestCharmhubClient:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test(self, params: Params):
+        def test(self, params: Params) -> None:
             # GIVEN
             http_client = CharmhubHttpStub(refresh_response=params.refresh_info)
 
@@ -433,7 +461,7 @@ class TestCharmhubClient:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test(self, params: Params):
+        def test(self, params: Params) -> None:
             # GIVEN
             http_client = CharmhubHttpStub(find_response=params.find_response, info_response=params.info_response)
             overrides_client = OverridesStub(
@@ -539,7 +567,7 @@ class TestCharmhubClient:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test(self, params: Params):
+        def test(self, params: Params) -> None:
             # GIVEN
             http_client = CharmhubHttpStub(info_response=params.info_response)
             overrides_client = OverridesStub(charm_listing_overrides=params.listing_overrides)
@@ -589,7 +617,7 @@ class TestCharmhubClient:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test(self, params: Params):
+        def test(self, params: Params) -> None:
             # GIVEN
             overrides_client = OverridesStub(charm_platform_overrides=params.platform_overrides)
 
@@ -648,7 +676,7 @@ class TestCharmhubClient:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test(self, params: Params):
+        def test(self, params: Params) -> None:
             # GIVEN
             client = CharmhubClient()
 
@@ -663,7 +691,7 @@ class TestCharmhubClient:
         class Params:
             label: str
             charm: str
-            charm_test_configs: dict[str, list[dict]]
+            charm_test_configs: dict[str, list[dict[str, Any]]]
             expected: tuple[CharmTestConfig, ...]
 
         test_cases = [
@@ -702,7 +730,7 @@ class TestCharmhubClient:
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
-        def test(self, params: Params):
+        def test(self, params: Params) -> None:
             # GIVEN
             overrides_client = OverridesStub(charm_test_configs=params.charm_test_configs)
             client = CharmhubClient(overrides_client=overrides_client)
