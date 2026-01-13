@@ -8,8 +8,8 @@ import os
 import warnings
 from datetime import timedelta
 from pathlib import Path
-from subprocess import CalledProcessError  # nosec
 from typing import Any, Callable, Iterator
+from subprocess import CalledProcessError, run  # nosec
 
 import pytest
 from extensions import (
@@ -193,12 +193,16 @@ def execution_metadata(record_property: Callable[[str, object], None]) -> Iterat
 def record_execution_metadata(
     record_warning_execution_metadata: None,
     record_failure_execution_metadata: None,
+    record_juju_execution_metadata: None,
     record_charms_and_revisions_execution_metadata: None,
+    record_pipeline_version_execution_metadata: None,
 ) -> None:
     # Save various execution metadata
     _ = record_warning_execution_metadata
     _ = record_failure_execution_metadata
+    _ = record_juju_execution_metadata
     _ = record_charms_and_revisions_execution_metadata
+    _ = record_pipeline_version_execution_metadata
 
 
 @pytest.fixture
@@ -294,3 +298,57 @@ def record_failure_execution_metadata(
                 execution_metadata("failure:cli:stdout", normalize_string(exc.stdout))
             if exc.stderr:
                 execution_metadata("failure:cli:stderr", normalize_string(exc.stderr))
+
+
+@pytest.fixture
+def record_juju_execution_metadata(
+    juju_client: JujuClient, model: str, execution_metadata: Callable[[str, str | int], None]
+):
+    # Let the test run
+    yield
+
+    # Save Juju version
+    juju_version = juju_client.version(model)
+    execution_metadata("juju:version", juju_version)
+
+
+@pytest.fixture
+def record_pipeline_version_execution_metadata(
+    execution_metadata: Callable[[str, str | int], None],
+    request: pytest.FixtureRequest,
+) -> None:
+    pipeline_path: Path = Path(request.config.rootpath) / ".github" / "workflows" / "charm-testing.yaml"
+
+    # Get repository commit hash
+    repository_version_command = ["git", "--no-pager", "log", "-n", "1", "--pretty=format:%h"]
+    repository_result = run(repository_version_command, capture_output=True, text=True)  # nosec B603
+    if repository_result.returncode == 0:
+        execution_metadata("pipeline:ref", repository_result.stdout.strip())
+    else:
+        warnings.warn(f"Failed to get git commit hash: {repository_result.stderr.strip()}")
+
+    # Get repository tag if it exists
+    repository_tag_command = ["git", "describe", "--tags", "--exact-match", repository_result.stdout.strip()]
+    repository_tag_result = run(repository_tag_command, capture_output=True, text=True)  # nosec B603
+    if repository_tag_result.returncode == 0:
+        execution_metadata("pipeline:tag", repository_tag_result.stdout.strip())
+    elif "no tag exactly matches" in repository_tag_result.stderr.lower():
+        warnings.warn("No tag exists in git repo pointing to this commit.")
+    else:
+        warnings.warn(f"Failed to get git tag: {repository_tag_result.stderr.strip()}")
+
+    # Get pipeline workflow hash if file exists
+    if pipeline_path.exists():
+        pipeline_version_command = [
+            "git",
+            "hash-object",
+            "--",
+            str(pipeline_path.resolve()),
+        ]
+        pipeline_result = run(pipeline_version_command, capture_output=True, text=True)  # nosec B603
+        if pipeline_result.returncode == 0:
+            execution_metadata("pipeline:workflow_hash", pipeline_result.stdout.strip())
+        else:
+            warnings.warn(f"Failed to get pipeline workflow hash: {pipeline_result.stderr.strip()}")
+    else:
+        warnings.warn(f"Pipeline file not found: {pipeline_path}")

@@ -358,3 +358,6 @@ class JujuCmdBackend(JujuBackend):
 
     def remove_secret(self, model: str, name_or_id: str) -> None:
         raise NotImplementedError
+
+    def version(self, model: str) -> str:
+        raise NotImplementedError

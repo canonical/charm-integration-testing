@@ -252,3 +252,7 @@ class JujuBackend(ABC):
     @abstractmethod
     def get_charm_revisions(self, model: str) -> set[tuple[str, int]]:
         raise NotImplementedError
+
+    @abstractmethod
+    def version(self, model: str) -> str:
+        raise NotImplementedError

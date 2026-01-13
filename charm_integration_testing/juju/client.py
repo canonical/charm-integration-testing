@@ -147,3 +147,6 @@ class JujuClient:
 
     def get_charm_revisions(self, model: str = "default") -> set[tuple[str, int]]:
         return self.backend.get_charm_revisions(model)
+
+    def version(self, model: str = "default") -> str:
+        return self.backend.version(model)
