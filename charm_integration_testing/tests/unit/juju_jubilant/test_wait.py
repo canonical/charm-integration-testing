@@ -134,7 +134,7 @@ def sample_database_webapp_status() -> jubilant.Status:
 
 
 class TestWaitConditions:
-    def test_get_unit_info_leader(self, sample_database_webapp_status: jubilant.Status):
+    def test_get_unit_info_leader(self, sample_database_webapp_status: jubilant.Status) -> None:
         # GIVEN / WHEN
         result = get_unit_info(sample_database_webapp_status, "database/leader")
 
@@ -142,7 +142,7 @@ class TestWaitConditions:
         assert result is not None
         assert result.leader is True
 
-    def test_get_unit_info_by_name(self, sample_database_webapp_status: jubilant.Status):
+    def test_get_unit_info_by_name(self, sample_database_webapp_status: jubilant.Status) -> None:
         # GIVEN / WHEN
         result = get_unit_info(sample_database_webapp_status, "webapp/0")
 
@@ -150,14 +150,14 @@ class TestWaitConditions:
         assert result is not None
         assert result.workload_status.current == "active"
 
-    def test_get_unit_info_invalid(self, sample_minimal_status: jubilant.Status):
+    def test_get_unit_info_invalid(self, sample_minimal_status: jubilant.Status) -> None:
         # GIVEN / WHEN
         result = get_unit_info(sample_minimal_status, "fake/0")
 
         # THEN
         assert result is None
 
-    def test_get_integrations(self, sample_database_webapp_status: jubilant.Status):
+    def test_get_integrations(self, sample_database_webapp_status: jubilant.Status) -> None:
         # GIVEN / WHEN
         result = get_integrations(sample_database_webapp_status)
 
@@ -166,22 +166,23 @@ class TestWaitConditions:
         integration = next(iter(result))
         assert integration.interface == "dbi"
 
-    def test_get_application_state(self, sample_database_webapp_status: jubilant.Status):
+    def test_get_application_state(self, sample_database_webapp_status: jubilant.Status) -> None:
         # GIVEN / WHEN
         result = get_application_state(sample_database_webapp_status, "database")
 
         # THEN
         assert result.status == "active"
 
-    def test_get_unit_state(self, sample_database_webapp_status: jubilant.Status):
+    def test_get_unit_state(self, sample_database_webapp_status: jubilant.Status) -> None:
         # GIVEN / WHEN
         result = get_unit_state(sample_database_webapp_status, "webapp/0")
 
         # THEN
+        assert result is not None
         assert result.status == "active"
         assert "web app" in result.message
 
-    def test_all_statuses_are_in_compliant(self, sample_database_webapp_status: jubilant.Status):
+    def test_all_statuses_are_in_compliant(self, sample_database_webapp_status: jubilant.Status) -> None:
         # GIVEN / WHEN
         result, wait = all_statuses_are_in({"active"}, sample_database_webapp_status)
 
@@ -190,7 +191,9 @@ class TestWaitConditions:
         assert wait.noncompliant_applications == {}
         assert wait.noncompliant_units == {}
 
-    def test_all_statuses_are_in_application_not_in_status(self, sample_database_webapp_status: jubilant.Status):
+    def test_all_statuses_are_in_application_not_in_status(
+        self, sample_database_webapp_status: jubilant.Status
+    ) -> None:
         # GIVEN / WHEN
         result, wait = all_statuses_are_in({"active"}, sample_database_webapp_status, "missing")
 
@@ -198,7 +201,7 @@ class TestWaitConditions:
         assert result is False
         assert "missing" in wait.noncompliant_applications
 
-    def test_all_statuses_are_in_noncompliant(self, sample_database_webapp_status: jubilant.Status):
+    def test_all_statuses_are_in_noncompliant(self, sample_database_webapp_status: jubilant.Status) -> None:
         # GIVEN / WHEN
         result, wait = all_statuses_are_in({"waiting"}, sample_database_webapp_status)
 
@@ -206,7 +209,7 @@ class TestWaitConditions:
         assert result is False
         assert "webapp" in wait.noncompliant_applications
 
-    def test_applications_are_scaled_compliant(self, sample_database_webapp_status: jubilant.Status):
+    def test_applications_are_scaled_compliant(self, sample_database_webapp_status: jubilant.Status) -> None:
         # GIVEN / WHEN
         result, wait = applications_are_scaled(sample_database_webapp_status)
 
@@ -215,7 +218,9 @@ class TestWaitConditions:
         assert wait.noncompliant_applications == {}
         assert wait.noncompliant_units == {}
 
-    def test_applications_are_scaled_application_not_in_status(self, sample_database_webapp_status: jubilant.Status):
+    def test_applications_are_scaled_application_not_in_status(
+        self, sample_database_webapp_status: jubilant.Status
+    ) -> None:
         # GIVEN / WHEN
         result, wait = applications_are_scaled(sample_database_webapp_status, "missing")
 
@@ -223,7 +228,7 @@ class TestWaitConditions:
         assert result is False
         assert "missing" in wait.noncompliant_applications
 
-    def test_units_have_message_match(self, sample_database_webapp_status: jubilant.Status):
+    def test_units_have_message_match(self, sample_database_webapp_status: jubilant.Status) -> None:
         # GIVEN / WHEN
         result, wait = units_have_message("secret", sample_database_webapp_status, "database/0")
 
@@ -231,7 +236,7 @@ class TestWaitConditions:
         assert result is True
         assert wait.noncompliant_units == {}
 
-    def test_units_have_message_no_match(self, sample_database_webapp_status: jubilant.Status):
+    def test_units_have_message_no_match(self, sample_database_webapp_status: jubilant.Status) -> None:
         # GIVEN / WHEN
         result, wait = units_have_message("missing", sample_database_webapp_status, "database/0")
 
@@ -239,7 +244,7 @@ class TestWaitConditions:
         assert result is False
         assert "database/0" in wait.noncompliant_units
 
-    def test_applications_are_removed_none_removed(self, sample_database_webapp_status: jubilant.Status):
+    def test_applications_are_removed_none_removed(self, sample_database_webapp_status: jubilant.Status) -> None:
         # GIVEN / WHEN
         result, wait = applications_are_removed(sample_database_webapp_status, "database")
 
@@ -247,7 +252,7 @@ class TestWaitConditions:
         assert result is False
         assert "database" in wait.noncompliant_applications
 
-    def test_applications_are_removed_all_removed(self, sample_minimal_status: jubilant.Status):
+    def test_applications_are_removed_all_removed(self, sample_minimal_status: jubilant.Status) -> None:
         # GIVEN / WHEN
         result, wait = applications_are_removed(sample_minimal_status, "database")
 
@@ -255,7 +260,7 @@ class TestWaitConditions:
         assert result is True
         assert wait.noncompliant_applications == {}
 
-    def test_integrations_are_removed_not_removed(self, sample_database_webapp_status: jubilant.Status):
+    def test_integrations_are_removed_not_removed(self, sample_database_webapp_status: jubilant.Status) -> None:
         # GIVEN
         integration = (
             JujuIntegrationApplication("database", "db"),
@@ -269,7 +274,7 @@ class TestWaitConditions:
         assert result is False
         assert "database" in wait.noncompliant_applications
 
-    def test_integrations_are_removed_all_removed(self, sample_minimal_status: jubilant.Status):
+    def test_integrations_are_removed_all_removed(self, sample_minimal_status: jubilant.Status) -> None:
         # GIVEN
         integration = (
             JujuIntegrationApplication("webapp", "db"),
@@ -283,7 +288,7 @@ class TestWaitConditions:
         assert result is True
         assert wait.noncompliant_applications == {}
 
-    def test_applications_have_no_units_false(self, sample_database_webapp_status: jubilant.Status):
+    def test_applications_have_no_units_false(self, sample_database_webapp_status: jubilant.Status) -> None:
         # GIVEN / WHEN
         result, wait = applications_have_no_units(sample_database_webapp_status)
 
@@ -292,7 +297,7 @@ class TestWaitConditions:
         assert "database" in wait.noncompliant_applications
         assert "database/0" in wait.noncompliant_units
 
-    def test_applications_have_no_units_true(self, sample_minimal_status: jubilant.Status):
+    def test_applications_have_no_units_true(self, sample_minimal_status: jubilant.Status) -> None:
         # GIVEN / WHEN
         result, wait = applications_have_no_units(sample_minimal_status)
 

@@ -31,7 +31,7 @@ class DatabaseReplicator:
         self.charm_info = charm_info
         self.database_client = database_client
 
-    def try_replicate_all_database_clusters(self, model: str):
+    def try_replicate_all_database_clusters(self, model: str) -> None:
         # Look for database charms
         database_applications = set()
 
@@ -58,7 +58,7 @@ class DatabaseReplicator:
                             model=model, application_offer=application1, application_consumer=application2
                         )
 
-    def try_replicate_database_cluster(self, model: str, application_offer: str, application_consumer: str):
+    def try_replicate_database_cluster(self, model: str, application_offer: str, application_consumer: str) -> None:
         # Wait for application to be scaled
         self.logger.info(
             f"Waiting for database charm '{self.charm_info.name}' application '{application_offer}' to be scaled"

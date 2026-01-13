@@ -62,4 +62,4 @@ class JujuExecTask:
 @serializeable_dataclass
 class JujuSecretInfo:
     name: str | None = None
-    content: dict | None = None
+    content: dict[str, str] | None = None

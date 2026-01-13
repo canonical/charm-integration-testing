@@ -36,21 +36,22 @@ class User:
         return message, time.time()
 
 
-def test_computed_property_value():
+def test_computed_property_value() -> None:
     # WHEN a user with first and last names
     u = User(first="Ada", last="Lovelace")
     # THEN the computed full_name should concatenate them
-    assert u.full_name == "Ada Lovelace"
+    # TODO(raul): remove type ignore in subsequent type checker PRs
+    assert u.full_name == "Ada Lovelace"  # type: ignore
 
 
-def test_computed_property_type():
+def test_computed_property_type() -> None:
     # WHEN a user
     u = User(first="Grace", last="Hopper")
     # THEN the computed full_name should be a string
     assert isinstance(u.full_name, str)
 
 
-def test_cached_method_is_executed_for_different_inputs():
+def test_cached_method_is_executed_for_different_inputs() -> None:
     # GIVEN a frozen User dataclass
     u = User(first="Alan", last="Turing")
     # WHEN asked to echo something hello and bye
@@ -61,7 +62,7 @@ def test_cached_method_is_executed_for_different_inputs():
     assert bye[0] == "bye"
 
 
-def test_cached_method_result_remains_same():
+def test_cached_method_result_remains_same() -> None:
     # GIVEN a frozen User dataclass who echoed hello with timestamp
     u = User(first="Alan", last="Turing")
     response_1 = u.echo_with_time_stamp("hello")
@@ -71,7 +72,7 @@ def test_cached_method_result_remains_same():
     assert response_2 == response_1
 
 
-def test_frozen_enforcement():
+def test_frozen_enforcement() -> None:
     # GIVEN a frozen User dataclass
     u = User(first="Alan", last="Turing")
     # WHEN attempting to mutate an attribute
@@ -80,7 +81,8 @@ def test_frozen_enforcement():
         u.first = "Charles"
 
 
-@immutable_dataclass()
+# TODO(raul): remove type ignore in subsequent type checker PRs
+@immutable_dataclass()  # type: ignore
 class Measurement:
     meters: float
 
@@ -101,15 +103,17 @@ class Measurement:
         return f"{name}: {self.inches:.2f} inches"
 
 
-def test_multiple_computed_fields():
+def test_multiple_computed_fields() -> None:
     # WHEN a measurement in meters
     m = Measurement(meters=1.5)
     # THEN computed centimeters and inches should be correct
-    assert m.centimeters == 150.0
-    assert round(m.inches, 2) == 59.06
+    # TODO(raul): remove type ignore in subsequent type checker PRs
+    assert m.centimeters == 150.0  # type: ignore
+    # TODO(raul): remove type ignore in subsequent type checker PRs
+    assert round(m.inches, 2) == 59.06  # type: ignore
 
 
-def test_multiple_cached_methods():
+def test_multiple_cached_methods() -> None:
     # WHEN a measurement in meters
     m = Measurement(meters=1.5)
     # THEN centimeters and inches with prefix should be correct
@@ -122,19 +126,20 @@ class Thing:
     name: str
     initialized: bool = False
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         object.__setattr__(self, "initialized", True)
 
     @computed_property
-    def name_len(self):
+    def name_len(self) -> int:
         return len(self.name)
 
 
-def test_preserves_original_post_init():
+def test_preserves_original_post_init() -> None:
     # WHEN a class with a custom __post_init__ and a computed field
     t = Thing(name="Widget")
     # THEN both the original __post_init__ and computed field should apply
-    assert t.name_len == 6
+    # TODO(raul): remove type ignore in subsequent type checker PRs
+    assert t.name_len == 6  # type: ignore
     assert t.initialized is True
 
 
@@ -143,21 +148,23 @@ class Loose:
     foo: int
 
     @computed_property
-    def bar(self):  # No type annotation
+    def bar(self):  # type: ignore[no-untyped-def]
         return self.foo * 2
 
 
-def test_missing_type_hint_fallbacks_to_any():
+def test_missing_type_hint_fallbacks_to_any() -> None:
     # WHEN a computed property without a return type annotation
     loose = Loose(foo=3)
     # THEN it should compute correctly and default to Any
-    assert loose.bar == 6
+    # TODO(raul): remove type ignore in subsequent type checker PRs
+    assert loose.bar == 6  # type: ignore
     assert isinstance(loose.bar, int)
 
 
-def test_decorator_usage_forms():
+def test_decorator_usage_forms() -> None:
     # WHEN a class using @immutable_dataclass() with parentheses
-    @immutable_dataclass(order=True)
+    # TODO(raul): remove type ignore in subsequent type checker PRs
+    @immutable_dataclass(order=True)  # type: ignore
     class A:
         x: int
 
@@ -167,7 +174,8 @@ def test_decorator_usage_forms():
 
     # THEN the computed field should work
     a = A(x=10)
-    assert a.double == 20
+    # TODO(raul): remove type ignore in subsequent type checker PRs
+    assert a.double == 20  # type: ignore
 
     # WHEN a class using @immutable_dataclass without parentheses
     @immutable_dataclass
@@ -175,29 +183,30 @@ def test_decorator_usage_forms():
         y: int
 
         @computed_property
-        def square(self):
+        def square(self) -> int:
             return self.y * self.y
 
     # THEN the computed field should also work
     b = B(y=5)
-    assert b.square == 25
+    # TODO(raul): remove type ignore in subsequent type checker PRs
+    assert b.square == 25  # type: ignore
 
 
-def test_cannot_overwrite_frozen():
+def test_cannot_overwrite_frozen() -> None:
     # WHEN class attempts to overwrite frozen
     # THEN raise exception
     with pytest.raises(TypeError):
-
-        @immutable_dataclass(frozen=True)
+        # TODO(raul): remove type ignore in subsequent type checker PRs
+        @immutable_dataclass(frozen=True)  # type: ignore
         class A:
             pass
 
 
-def test_cannot_overwrite_slots():
+def test_cannot_overwrite_slots() -> None:
     # WHEN class attempts to overwrite slots
     # THEN raise exception
     with pytest.raises(TypeError):
-
-        @immutable_dataclass(slots=False)
+        # TODO(raul): remove type ignore in subsequent type checker PRs
+        @immutable_dataclass(slots=False)  # type: ignore
         class A:
             pass

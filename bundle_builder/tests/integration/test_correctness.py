@@ -23,18 +23,19 @@ def test_correctness_independent(
     sample_independent_charm_revision: int,
     sample_arch: str,
     sample_platform: str,
-):
+) -> None:
     # GIVEN a base bundle with a dependent charm
+    charm_from_store = charmhub_client.charm_from_store(
+        charm_name=sample_independent_charm,
+        charm_revision=sample_independent_charm_revision,
+        ubuntu_arch=sample_arch,
+    )
     base_bundle = Bundle(
         applications=frozenset(
             {
                 Application(
                     sample_independent_charm,
-                    charmhub_client.charm_from_store(
-                        charm_name=sample_independent_charm,
-                        charm_revision=sample_independent_charm_revision,
-                        ubuntu_arch=sample_arch,
-                    ),
+                    charm_from_store,
                 )
             }
         ),
@@ -61,18 +62,19 @@ def test_correctness_dependent(
     sample_dependent_charm_revision: int,
     sample_arch: str,
     sample_platform: str,
-):
+) -> None:
     # GIVEN a base bundle of the independent charm
+    charm_from_store = charmhub_client.charm_from_store(
+        charm_name=sample_dependent_charm,
+        charm_revision=sample_dependent_charm_revision,
+        ubuntu_arch=sample_arch,
+    )
     base_bundle = Bundle(
         applications=frozenset(
             {
                 Application(
                     sample_dependent_charm,
-                    charmhub_client.charm_from_store(
-                        charm_name=sample_dependent_charm,
-                        charm_revision=sample_dependent_charm_revision,
-                        ubuntu_arch=sample_arch,
-                    ),
+                    charm_from_store,
                 )
             },
         ),
