@@ -2,9 +2,17 @@ requires:
   database-legacy:
     optional_if:
       - endpoint_integrated: database
+    limit_if:
+      - criteria: [endpoint_integrated: database]
+        limit: 0
+    limit: 1
   database:
     optional_if:
       - endpoint_integrated: database-legacy
+    limit_if:
+      - criteria: [endpoint_integrated: database-legacy]
+        limit: 0
+    limit: 1
 
 # Remove after: https://github.com/canonical/livepatch-k8s-operator/pull/76
 provides:

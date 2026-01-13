@@ -28,6 +28,7 @@ from bundle_builder.charm import (
     Charm,
     CharmEndpoint,
     CharmEndpointOptionality,
+    CharmLimit,
 )
 from bundle_builder.charmhub import CharmhubClient
 from bundle_builder.charmhub_http import CharmhubBase, CharmhubHttpClient
@@ -160,9 +161,9 @@ class TestLimitApplication:
         # WHEN getting charm from store
         charm = client.charm_from_store("test-charm", "amd64")
 
-        # THEN the endpoint has the correct limit
+        # THEN the endpoint has the correct limits
         database_endpoint = next(e for e in charm.endpoints if e.name == "database")
-        assert database_endpoint.limit == 2
+        assert database_endpoint.limits == (CharmLimit(limit=2),)
 
 
 class TestApplicationEndpoint:
@@ -354,7 +355,12 @@ class TestBundle:
                                     sample_charm_postgresql_k8s(),
                                     endpoints=frozenset(
                                         # TODO(raul): remove type ignore in subsequent type checker PRs
-                                        {dataclasses.replace(sample_charm_endpoint_postgresql_k8s_database(), limit=1)}  # type: ignore
+                                        {
+                                            dataclasses.replace(  # type: ignore[type-var]
+                                                sample_charm_endpoint_postgresql_k8s_database(),
+                                                limits=(CharmLimit(limit=1),),
+                                            )
+                                        }
                                     ),
                                 ),
                             ),
@@ -537,7 +543,7 @@ class TestBundle:
                             name="database",
                             interface="postgresql",
                             optionality=CharmEndpointOptionality.from_bool(False),
-                            limit=1,
+                            limits=(CharmLimit(limit=1),),
                         )
                     }
                 ),
@@ -557,7 +563,7 @@ class TestBundle:
                             name="database",
                             interface="postgresql",
                             optionality=CharmEndpointOptionality.from_bool(False),
-                            limit=None,
+                            limits=(),
                         )
                     }
                 ),
@@ -606,7 +612,7 @@ class TestBundle:
                             name="database",
                             interface="postgresql",
                             optionality=CharmEndpointOptionality.from_bool(False),
-                            limit=2,
+                            limits=(CharmLimit(limit=2),),
                         )
                     }
                 ),
@@ -626,7 +632,7 @@ class TestBundle:
                             name="database",
                             interface="postgresql",
                             optionality=CharmEndpointOptionality.from_bool(False),
-                            limit=None,
+                            limits=(),
                         )
                     }
                 ),
@@ -993,6 +999,235 @@ class TestBundle:
 
             # THEN matches expected
             assert name == params.name
+
+    class TestApplicationEndpointFeatures:
+        @dataclass
+        class Params:
+            label: str
+            bundle: Bundle
+            expected_features: dict[str, frozenset[str]]
+
+        # Create charms with features for testing
+        provider_charm_with_features = Charm(
+            name="provider",
+            channel="stable",
+            revision=1,
+            ubuntu_version="22.04",
+            ubuntu_arch="amd64",
+            endpoints=frozenset(
+                {
+                    CharmEndpoint(
+                        type=ENDPOINT_PROVIDES,
+                        name="database",
+                        interface="postgresql",
+                        optionality=CharmEndpointOptionality.from_bool(False),
+                        limits=(),
+                        features=frozenset({"ssl", "compression", "replication"}),
+                    )
+                }
+            ),
+            priority=1.0,
+        )
+
+        requirer_charm_with_features = Charm(
+            name="requirer",
+            channel="stable",
+            revision=1,
+            ubuntu_version="22.04",
+            ubuntu_arch="amd64",
+            endpoints=frozenset(
+                {
+                    CharmEndpoint(
+                        type=ENDPOINT_REQUIRES,
+                        name="database",
+                        interface="postgresql",
+                        optionality=CharmEndpointOptionality.from_bool(False),
+                        limits=(),
+                        features=frozenset({"ssl", "compression"}),
+                    )
+                }
+            ),
+            priority=1.0,
+        )
+
+        requirer_charm_with_subset_features = Charm(
+            name="requirer2",
+            channel="stable",
+            revision=1,
+            ubuntu_version="22.04",
+            ubuntu_arch="amd64",
+            endpoints=frozenset(
+                {
+                    CharmEndpoint(
+                        type=ENDPOINT_REQUIRES,
+                        name="database",
+                        interface="postgresql",
+                        optionality=CharmEndpointOptionality.from_bool(False),
+                        limits=(),
+                        features=frozenset({"ssl"}),
+                    )
+                }
+            ),
+            priority=1.0,
+        )
+
+        test_cases = [
+            Params(
+                label="no_integrations_returns_empty",
+                bundle=Bundle(
+                    applications=frozenset(
+                        {
+                            Application(name="provider", charm=provider_charm_with_features),
+                            Application(name="requirer", charm=requirer_charm_with_features),
+                        }
+                    ),
+                    integrations=frozenset(),
+                    platform="kubernetes",
+                    arch="amd64",
+                ),
+                expected_features={
+                    "provider": frozenset(),
+                    "requirer": frozenset(),
+                },
+            ),
+            Params(
+                label="requirer_returns_all_features_when_integrated",
+                bundle=Bundle(
+                    applications=frozenset(
+                        {
+                            Application(name="provider", charm=provider_charm_with_features),
+                            Application(name="requirer", charm=requirer_charm_with_features),
+                        }
+                    ),
+                    integrations=frozenset(
+                        {
+                            Integration(
+                                {
+                                    ApplicationEndpoint(application="provider", endpoint="database"),
+                                    ApplicationEndpoint(application="requirer", endpoint="database"),
+                                }
+                            )
+                        }
+                    ),
+                    platform="kubernetes",
+                    arch="amd64",
+                ),
+                expected_features={
+                    "provider": frozenset({"database:ssl", "database:compression"}),
+                    "requirer": frozenset({"database:ssl", "database:compression"}),
+                },
+            ),
+            Params(
+                label="provider_returns_union_of_requirer_features",
+                bundle=Bundle(
+                    applications=frozenset(
+                        {
+                            Application(name="provider", charm=provider_charm_with_features),
+                            Application(name="requirer1", charm=requirer_charm_with_features),
+                            Application(name="requirer2", charm=requirer_charm_with_subset_features),
+                        }
+                    ),
+                    integrations=frozenset(
+                        {
+                            Integration(
+                                {
+                                    ApplicationEndpoint(application="provider", endpoint="database"),
+                                    ApplicationEndpoint(application="requirer1", endpoint="database"),
+                                }
+                            ),
+                            Integration(
+                                {
+                                    ApplicationEndpoint(application="provider", endpoint="database"),
+                                    ApplicationEndpoint(application="requirer2", endpoint="database"),
+                                }
+                            ),
+                        }
+                    ),
+                    platform="kubernetes",
+                    arch="amd64",
+                ),
+                expected_features={
+                    "provider": frozenset({"database:ssl", "database:compression"}),
+                    "requirer1": frozenset({"database:ssl", "database:compression"}),
+                    "requirer2": frozenset({"database:ssl"}),
+                },
+            ),
+            Params(
+                label="multiple_endpoints_returns_features_per_endpoint",
+                bundle=Bundle(
+                    applications=frozenset(
+                        {
+                            Application(
+                                name="multi",
+                                charm=Charm(
+                                    name="multi",
+                                    channel="stable",
+                                    revision=1,
+                                    ubuntu_version="22.04",
+                                    ubuntu_arch="amd64",
+                                    endpoints=frozenset(
+                                        {
+                                            CharmEndpoint(
+                                                type=ENDPOINT_REQUIRES,
+                                                name="db1",
+                                                interface="postgresql",
+                                                optionality=CharmEndpointOptionality.from_bool(False),
+                                                limits=(),
+                                                features=frozenset({"ssl"}),
+                                            ),
+                                            CharmEndpoint(
+                                                type=ENDPOINT_REQUIRES,
+                                                name="db2",
+                                                interface="postgresql",
+                                                optionality=CharmEndpointOptionality.from_bool(False),
+                                                limits=(),
+                                                features=frozenset({"compression"}),
+                                            ),
+                                        }
+                                    ),
+                                    priority=1.0,
+                                ),
+                            ),
+                            Application(name="provider", charm=provider_charm_with_features),
+                        }
+                    ),
+                    integrations=frozenset(
+                        {
+                            Integration(
+                                {
+                                    ApplicationEndpoint(application="provider", endpoint="database"),
+                                    ApplicationEndpoint(application="multi", endpoint="db1"),
+                                }
+                            ),
+                            Integration(
+                                {
+                                    ApplicationEndpoint(application="provider", endpoint="database"),
+                                    ApplicationEndpoint(application="multi", endpoint="db2"),
+                                }
+                            ),
+                        }
+                    ),
+                    platform="kubernetes",
+                    arch="amd64",
+                ),
+                expected_features={
+                    "multi": frozenset({"db1:ssl", "db2:compression"}),
+                    "provider": frozenset({"database:ssl", "database:compression"}),
+                },
+            ),
+        ]
+
+        @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
+        def test(self, params: Params) -> None:
+            # GIVEN a bundle
+            bundle = params.bundle
+
+            # WHEN application_endpoint_features is called
+            features = bundle.application_endpoint_features
+
+            # THEN features match expected
+            # TODO(raul): remove type ignore in subsequent type checker PRs
+            assert features == params.expected_features  # type: ignore[comparison-overlap]
 
     def test_export(self) -> None:
         # GIVEN a bundle

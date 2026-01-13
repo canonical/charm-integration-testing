@@ -24,6 +24,7 @@ from .charm import (
     Charm,
     CharmEndpoint,
     CharmEndpointOptionality,
+    CharmLimit,
     CharmTestConfig,
 )
 from .charmhub_http import (
@@ -471,14 +472,24 @@ class CharmhubClient:
                     optionality = CharmEndpointOptionality.from_bool(True)
 
                 # Determine endpoint limit from overrides
-                if endpoint_name in metadata_overrides_map and metadata_overrides_map[endpoint_name].limit is not None:
-                    limit = metadata_overrides_map[endpoint_name].limit
+                if endpoint_name in metadata_overrides_map and metadata_overrides_map[endpoint_name].limits is not None:
+                    limits = metadata_overrides_map[endpoint_name].limits
                 elif endpoint.limit is not None:
-                    limit = endpoint.limit
+                    limits = (CharmLimit(limit=endpoint.limit),)
                 elif endpoint_name in edge_endpoint_map and edge_endpoint_map[endpoint_name].limit is not None:
-                    limit = edge_endpoint_map[endpoint_name].limit
+                    limits = (CharmLimit(limit=edge_endpoint_map[endpoint_name].limit),)
                 else:
-                    limit = None
+                    limits = ()
+
+                # Determine endpoint features from overrides
+                if (
+                    endpoint_name in metadata_overrides_map
+                    and metadata_overrides_map[endpoint_name].features is not None
+                ):
+                    # TODO(raul): remove type ignore in subsequent type checker PRs
+                    features = frozenset(metadata_overrides_map[endpoint_name].features)  # type: ignore[arg-type]
+                else:
+                    features = frozenset()
 
                 # Add endpoint
                 endpoints.add(
@@ -487,7 +498,8 @@ class CharmhubClient:
                         name=endpoint_name,
                         interface=endpoint.interface,
                         optionality=optionality,
-                        limit=limit,
+                        limits=limits,
+                        features=features,
                     )
                 )
 

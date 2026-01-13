@@ -22,7 +22,13 @@ import yaml
 from pydantic import Field
 from pydantic.dataclasses import dataclass
 
-from bundle_builder.charm import CharmConfigCriteria, CharmEndpointOptionality, CharmTestConfig
+from bundle_builder.charm import (
+    CharmConfigCriteria,
+    CharmEndpointOptionality,
+    CharmLimit,
+    CharmLimitCriteria,
+    CharmTestConfig,
+)
 from bundle_builder.overrides import CharmEndpointOverride, CharmMetadataOverride, OverridesClient
 
 
@@ -69,23 +75,49 @@ class TestCharmEndpointOverride:
         class Params:
             label: str
             override: CharmEndpointOverride
-            expected_limit: int | None
+            expected_limits: tuple[CharmLimit, ...] | None
 
         test_cases = [
             Params(
                 label="limit_set",
                 override=CharmEndpointOverride(limit=5),
-                expected_limit=5,
+                expected_limits=(CharmLimit(limit=5),),
             ),
             Params(
                 label="limit_zero",
                 override=CharmEndpointOverride(limit=0),
-                expected_limit=0,
+                expected_limits=(CharmLimit(limit=0),),
             ),
             Params(
                 label="limit_not_set",
                 override=CharmEndpointOverride(),
-                expected_limit=None,
+                expected_limits=None,
+            ),
+            Params(
+                label="limit_if_only",
+                override=CharmEndpointOverride(
+                    limit_if=[
+                        CharmLimit(criteria=CharmLimitCriteria(endpoint_integrated="grafana-cloud-config"), limit=10),
+                        CharmLimit(limit=1),
+                    ]
+                ),
+                expected_limits=(
+                    CharmLimit(criteria=CharmLimitCriteria(endpoint_integrated="grafana-cloud-config"), limit=10),
+                    CharmLimit(limit=1),
+                ),
+            ),
+            Params(
+                label="limit_and_limit_if_combined",
+                override=CharmEndpointOverride(
+                    limit=5,
+                    limit_if=[
+                        CharmLimit(criteria=CharmLimitCriteria(endpoint_integrated="grafana-cloud-config"), limit=10),
+                    ],
+                ),
+                expected_limits=(
+                    CharmLimit(criteria=CharmLimitCriteria(endpoint_integrated="grafana-cloud-config"), limit=10),
+                    CharmLimit(limit=5),
+                ),
             ),
         ]
 
@@ -94,11 +126,32 @@ class TestCharmEndpointOverride:
             # GIVEN the override
             override = params.override
 
-            # WHEN limit property is fetched
-            limit = override.limit
+            # WHEN limits property is fetched
+            limits = override.limits
 
             # THEN matches expected
-            assert limit == params.expected_limit
+            assert limits == params.expected_limits
+
+    class TestLimitsProperty:
+        """Test the limits property logic that combines limit and limit_if."""
+
+        def test_limit_if_comes_before_limit(self) -> None:
+            # GIVEN an override with both limit and limit_if
+            override = CharmEndpointOverride(
+                limit=1,
+                limit_if=[
+                    CharmLimit(criteria=CharmLimitCriteria(endpoint_integrated="grafana-cloud-config"), limit=10),
+                ],
+            )
+
+            # WHEN getting limits
+            limits = override.limits
+
+            # THEN limit_if entries come first, followed by limit
+            assert limits is not None
+            assert len(limits) == 2
+            assert limits[0].limit == 10  # From limit_if
+            assert limits[1].limit == 1  # From limit
 
 
 class TestOverridesClient:

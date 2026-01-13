@@ -64,25 +64,28 @@ class CharmEndpointOptionality:
     any_of: frozenset["CharmEndpointOptionality"] | None = None
     none_of: frozenset["CharmEndpointOptionality"] | None = None
     endpoint_integrated: str | None = None
+    endpoint_feature: str | None = None
 
     @cached_method
-    def is_optional(self, integrated_endpoints: frozenset[str]) -> bool:
+    def is_optional(self, integrated_endpoints: frozenset[str], endpoint_features: frozenset[str]) -> bool:
         return all(
             [
                 # all of
-                all(condition.is_optional(integrated_endpoints) for condition in self.all_of)
+                all(condition.is_optional(integrated_endpoints, endpoint_features) for condition in self.all_of)
                 if self.all_of is not None
                 else True,
                 # any of
-                any(condition.is_optional(integrated_endpoints) for condition in self.any_of)
+                any(condition.is_optional(integrated_endpoints, endpoint_features) for condition in self.any_of)
                 if self.any_of is not None
                 else True,
                 # none of
-                all(not condition.is_optional(integrated_endpoints) for condition in self.none_of)
+                all(not condition.is_optional(integrated_endpoints, endpoint_features) for condition in self.none_of)
                 if self.none_of is not None
                 else True,
                 # endpoint integrated
                 (self.endpoint_integrated in integrated_endpoints) if self.endpoint_integrated is not None else True,
+                # endpoint feature
+                (self.endpoint_feature in endpoint_features) if self.endpoint_feature is not None else True,
             ]
         )
 
@@ -104,12 +107,97 @@ class CharmEndpointOptionality:
 
 
 @immutable_dataclass
+class CharmLimitCriteria:
+    all_of: frozenset["CharmLimitCriteria"] | None = None
+    any_of: frozenset["CharmLimitCriteria"] | None = None
+    none_of: frozenset["CharmLimitCriteria"] | None = None
+    endpoint_integrated: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def validate_config_from_dict(cls, value: dict[str, object] | list[object]) -> dict[str, object]:
+        if isinstance(value, list):
+            return {"all_of": value}
+        return value
+
+    @cached_method
+    def valid(
+        self,
+        integrated_endpoints: set[str],
+    ) -> bool:
+        return all(
+            [
+                # all of
+                all(condition.valid(integrated_endpoints) for condition in self.all_of)
+                if self.all_of is not None
+                else True,
+                # any of
+                any(condition.valid(integrated_endpoints) for condition in self.any_of)
+                if self.any_of is not None
+                else True,
+                # none of
+                all(not condition.valid(integrated_endpoints) for condition in self.none_of)
+                if self.none_of is not None
+                else True,
+                # endpoint integrated
+                (self.endpoint_integrated in integrated_endpoints) if self.endpoint_integrated is not None else True,
+            ]
+        )
+
+    @classmethod
+    def from_bool(cls, value: bool) -> "CharmLimitCriteria":
+        """Create a CharmLimitCriteria from a boolean value.
+
+        Args:
+            value: If True, creates criteria that's always valid (satisfied by empty all_of).
+                   If False, creates criteria that's never valid (unsatisfied by empty any_of).
+
+        Returns:
+            CharmLimitCriteria instance representing the boolean validity.
+        """
+        if value:
+            return cls(all_of=frozenset())
+        else:
+            return cls(any_of=frozenset())
+
+
+@immutable_dataclass
+class CharmLimit:
+    criteria: CharmLimitCriteria = Field(default=CharmLimitCriteria.from_bool(True))
+    limit: int | None = None
+
+
+@immutable_dataclass
 class CharmEndpoint:
     type: str
     name: str
     interface: str
     optionality: CharmEndpointOptionality
-    limit: int | None
+    limits: tuple[CharmLimit, ...]
+    features: frozenset[str] = Field(default_factory=frozenset)
+
+    @cached_method
+    def limit(self, integrated_endpoints: frozenset[str]) -> int | None:
+        """Get the endpoint limit based on currently integrated endpoints.
+
+        Returns the smallest (most restrictive) limit among all matching criteria.
+        When multiple limits match, the minimum is selected for conservative behavior.
+
+        Args:
+            integrated_endpoints: Set of endpoint names currently integrated for this application.
+
+        Returns:
+            The smallest limit among matching criteria, or None if no limits match.
+        """
+        smallest_limit: int | None = None
+        for limit in self.limits:
+            if not limit.criteria.valid(integrated_endpoints):
+                continue
+            if smallest_limit is None:
+                smallest_limit = limit.limit
+            elif limit.limit is not None:
+                smallest_limit = min(smallest_limit, limit.limit)
+        return smallest_limit
 
 
 CharmConfig = tuple[tuple[str, str | int], ...]
@@ -131,6 +219,7 @@ class CharmConfigCriteria:
             return {"all_of": value}
         return value
 
+    @cached_method
     def valid(
         self,
         channel: CharmChannel,

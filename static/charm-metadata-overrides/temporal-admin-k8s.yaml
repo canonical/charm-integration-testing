@@ -1,0 +1,5 @@
+provides:
+  admin:
+    limit: 1
+    optional: false
+    features: [admin]

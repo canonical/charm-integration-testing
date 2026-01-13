@@ -22,6 +22,7 @@ from bundle_builder.charm import (
     Charm,
     CharmEndpoint,
     CharmEndpointOptionality,
+    CharmLimit,
 )
 
 from .conftest import CharmhubClientStub
@@ -44,7 +45,7 @@ class TestEndpointLimits:
                             name="disabled",
                             interface="http",
                             optionality=CharmEndpointOptionality.from_bool(False),
-                            limit=0,
+                            limits=(CharmLimit(limit=0),),
                         )
                     }
                 ),
@@ -64,7 +65,7 @@ class TestEndpointLimits:
                             name="http",
                             interface="http",
                             optionality=CharmEndpointOptionality.from_bool(False),
-                            limit=None,
+                            limits=(),
                         )
                     }
                 ),
@@ -112,7 +113,7 @@ class TestEndpointLimits:
                             name="api",
                             interface="http",
                             optionality=CharmEndpointOptionality.from_bool(False),
-                            limit=1,
+                            limits=(CharmLimit(limit=1),),
                         )
                     }
                 ),
@@ -132,7 +133,7 @@ class TestEndpointLimits:
                             name="upstream",
                             interface="http",
                             optionality=CharmEndpointOptionality.from_bool(False),
-                            limit=1,
+                            limits=(CharmLimit(limit=1),),
                         )
                     }
                 ),
@@ -202,7 +203,7 @@ class TestEndpointLimits:
                             name="database",
                             interface="postgresql",
                             optionality=CharmEndpointOptionality.from_bool(False),
-                            limit=1,  # This is the key limitation
+                            limits=(CharmLimit(limit=1),),  # This is the key limitation
                         )
                     }
                 ),
@@ -222,14 +223,14 @@ class TestEndpointLimits:
                             name="database",
                             interface="postgresql",
                             optionality=CharmEndpointOptionality.from_bool(False),
-                            limit=1,
+                            limits=(CharmLimit(limit=1),),
                         ),
                         CharmEndpoint(
                             type=ENDPOINT_REQUIRES,
                             name="juju-info",
                             interface="juju-info",
                             optionality=CharmEndpointOptionality.from_bool(False),
-                            limit=1,
+                            limits=(CharmLimit(limit=1),),
                         ),
                     }
                 ),
@@ -249,14 +250,14 @@ class TestEndpointLimits:
                             name="juju-info",
                             interface="juju-info",
                             optionality=CharmEndpointOptionality.from_bool(False),
-                            limit=1,
+                            limits=(CharmLimit(limit=1),),
                         ),
                         CharmEndpoint(
                             type=ENDPOINT_REQUIRES,
                             name="database",
                             interface="postgresql",
                             optionality=CharmEndpointOptionality.from_bool(False),
-                            limit=1,
+                            limits=(CharmLimit(limit=1),),
                         ),
                     }
                 ),
@@ -339,14 +340,14 @@ class TestEndpointLimits:
                             name="tracing-provider",
                             interface="tracing",
                             optionality=CharmEndpointOptionality.from_bool(False),
-                            limit=None,
+                            limits=(),
                         ),
                         CharmEndpoint(
                             type=ENDPOINT_REQUIRES,
                             name="tracing-consumer",
                             interface="tracing",
                             optionality=CharmEndpointOptionality.from_bool(False),
-                            limit=None,
+                            limits=(),
                         ),
                     }
                 ),
@@ -366,7 +367,7 @@ class TestEndpointLimits:
                             name="tracing",
                             interface="tracing",
                             optionality=CharmEndpointOptionality.from_bool(False),
-                            limit=None,
+                            limits=(),
                         ),
                     }
                 ),
@@ -403,3 +404,251 @@ class TestEndpointLimits:
             grafana_apps = [app for app in result.applications if app.charm.name == "grafana-agent-k8s"]
             # AND it should stop adding new instances when limit is reached
             assert len(grafana_apps) < 10  # Definitely not infinite!
+
+    class TestConditionalLimits:
+        """Test scenarios where endpoint limits depend on other integrated endpoints."""
+
+        def test_smallest_matching_limit_selected(self) -> None:
+            """Test that the smallest limit among all matching criteria is selected."""
+            # GIVEN a database charm with multiple conditional limits:
+            # - limit=0 when admin is integrated (most restrictive)
+            # - limit=5 when monitoring is integrated
+            # - limit=10 by default
+            from bundle_builder.charm import CharmLimitCriteria
+
+            db_charm = Charm(
+                name="postgresql-k8s",
+                channel="stable",
+                revision=1,
+                ubuntu_version="22.04",
+                ubuntu_arch="amd64",
+                endpoints=frozenset(
+                    {
+                        CharmEndpoint(
+                            type=ENDPOINT_PROVIDES,
+                            name="database",
+                            interface="postgresql",
+                            optionality=CharmEndpointOptionality.from_bool(False),
+                            limits=(
+                                CharmLimit(
+                                    criteria=CharmLimitCriteria(endpoint_integrated="admin"),
+                                    limit=0,
+                                ),
+                                CharmLimit(
+                                    criteria=CharmLimitCriteria(endpoint_integrated="monitoring"),
+                                    limit=5,
+                                ),
+                                CharmLimit(limit=10),  # default
+                            ),
+                        ),
+                        CharmEndpoint(
+                            type=ENDPOINT_REQUIRES,
+                            name="admin",
+                            interface="admin",
+                            optionality=CharmEndpointOptionality.from_bool(True),
+                            limits=(),
+                        ),
+                        CharmEndpoint(
+                            type=ENDPOINT_REQUIRES,
+                            name="monitoring",
+                            interface="monitoring",
+                            optionality=CharmEndpointOptionality.from_bool(True),
+                            limits=(),
+                        ),
+                    }
+                ),
+                priority=1.0,
+            )
+
+            # AND app charms that need database
+            app_charm = Charm(
+                name="app-k8s",
+                channel="stable",
+                revision=1,
+                ubuntu_version="22.04",
+                ubuntu_arch="amd64",
+                endpoints=frozenset(
+                    {
+                        CharmEndpoint(
+                            type=ENDPOINT_REQUIRES,
+                            name="database",
+                            interface="postgresql",
+                            optionality=CharmEndpointOptionality.from_bool(False),
+                            limits=(),
+                        )
+                    }
+                ),
+                priority=1.0,
+            )
+
+            # AND an admin charm
+            admin_charm = Charm(
+                name="admin-k8s",
+                channel="stable",
+                revision=1,
+                ubuntu_version="22.04",
+                ubuntu_arch="amd64",
+                endpoints=frozenset(
+                    {
+                        CharmEndpoint(
+                            type=ENDPOINT_PROVIDES,
+                            name="admin",
+                            interface="admin",
+                            optionality=CharmEndpointOptionality.from_bool(False),
+                            limits=(),
+                        )
+                    }
+                ),
+                priority=1.0,
+            )
+
+            # AND a monitoring charm
+            monitoring_charm = Charm(
+                name="monitoring-k8s",
+                channel="stable",
+                revision=1,
+                ubuntu_version="22.04",
+                ubuntu_arch="amd64",
+                endpoints=frozenset(
+                    {
+                        CharmEndpoint(
+                            type=ENDPOINT_PROVIDES,
+                            name="monitoring",
+                            interface="monitoring",
+                            optionality=CharmEndpointOptionality.from_bool(False),
+                            limits=(),
+                        )
+                    }
+                ),
+                priority=1.0,
+            )
+
+            # AND a base bundle with apps and admin/monitoring
+            base_bundle = Bundle(
+                applications=frozenset(
+                    {
+                        Application(name="postgresql-k8s", charm=db_charm),
+                        Application(name="app1", charm=app_charm),
+                        Application(name="admin-k8s", charm=admin_charm),
+                        Application(name="monitoring-k8s", charm=monitoring_charm),
+                    }
+                ),
+                integrations=frozenset(),
+                platform="kubernetes",
+                arch="amd64",
+            )
+
+            # WHEN building the bundle
+            builder = BundleBuilder(CharmhubClientStub(db_charm, app_charm, admin_charm, monitoring_charm))
+            result = builder.build(base_bundle)
+
+            # THEN admin and monitoring should be integrated with postgresql
+            admin_integration_exists = any(
+                {
+                    ApplicationEndpoint(application="postgresql-k8s", endpoint="admin"),
+                    ApplicationEndpoint(application="admin-k8s", endpoint="admin"),
+                }
+                == integration
+                for integration in result.integrations
+            )
+            monitoring_integration_exists = any(
+                {
+                    ApplicationEndpoint(application="postgresql-k8s", endpoint="monitoring"),
+                    ApplicationEndpoint(application="monitoring-k8s", endpoint="monitoring"),
+                }
+                == integration
+                for integration in result.integrations
+            )
+            assert admin_integration_exists
+            assert monitoring_integration_exists
+
+            # AND postgresql should have 1 database connection
+            # Even though admin (limit=0), monitoring (limit=5), and default (limit=10) all match,
+            # the database was integrated when only the default limit (10) matched initially.
+            # The limit of 0 would prevent additional connections but doesn't retroactively remove existing ones.
+            db_connections = sum(
+                True
+                for integration in result.integrations
+                if ApplicationEndpoint(application="postgresql-k8s", endpoint="database") in integration
+            )
+            assert db_connections == 1, "Expected 1 database connection (integrated before admin endpoint with limit=0)"
+
+        def test_default_limit_when_no_conditions_met(self) -> None:
+            """Test that the default limit applies when no conditional criteria match."""
+            from bundle_builder.charm import CharmLimitCriteria
+
+            # GIVEN a database charm with conditional limits
+            db_charm = Charm(
+                name="postgresql-k8s",
+                channel="stable",
+                revision=1,
+                ubuntu_version="22.04",
+                ubuntu_arch="amd64",
+                endpoints=frozenset(
+                    {
+                        CharmEndpoint(
+                            type=ENDPOINT_PROVIDES,
+                            name="database",
+                            interface="postgresql",
+                            optionality=CharmEndpointOptionality.from_bool(False),
+                            limits=(
+                                CharmLimit(
+                                    criteria=CharmLimitCriteria(endpoint_integrated="monitoring"),
+                                    limit=5,
+                                ),
+                                CharmLimit(limit=1),  # default
+                            ),
+                        )
+                    }
+                ),
+                priority=1.0,
+            )
+
+            # AND app charms that need database
+            app_charm = Charm(
+                name="app-k8s",
+                channel="stable",
+                revision=1,
+                ubuntu_version="22.04",
+                ubuntu_arch="amd64",
+                endpoints=frozenset(
+                    {
+                        CharmEndpoint(
+                            type=ENDPOINT_REQUIRES,
+                            name="database",
+                            interface="postgresql",
+                            optionality=CharmEndpointOptionality.from_bool(False),
+                            limits=(),
+                        )
+                    }
+                ),
+                priority=1.0,
+            )
+
+            # AND a base bundle with multiple apps needing database (but no grafana-cloud)
+            base_bundle = Bundle(
+                applications=frozenset(
+                    {
+                        Application(name="postgresql-k8s", charm=db_charm),
+                        Application(name="app1", charm=app_charm),
+                        Application(name="app2", charm=app_charm),
+                    }
+                ),
+                integrations=frozenset(),
+                platform="kubernetes",
+                arch="amd64",
+            )
+
+            # WHEN building the bundle
+            builder = BundleBuilder(CharmhubClientStub(db_charm, app_charm))
+            result = builder.build(base_bundle)
+
+            # THEN postgresql should have at most 1 database connection (the default limit)
+            db_connections = sum(
+                True
+                for integration in result.integrations
+                if ApplicationEndpoint(application="postgresql-k8s", endpoint="database") in integration
+            )
+            assert (
+                db_connections == 1
+            ), "Expected exactly 1 database connection when grafana-cloud-config is not integrated"
