@@ -141,6 +141,33 @@ class TestVaultUnsealer:
         assert "vault/0" in vault.unseals
         assert "vault/1" not in vault.unseals
 
+    def test_try_init_vault_authorizes_charm_by_default(self):
+        # GIVEN
+        juju = JujuStub(units={"vault": ["vault/leader"]})
+        vault = VaultStub(initialized_units={"vault/leader": False})
+        logger = LoggerStub()
+        charm = CharmInfo(name="vault")
+
+        # WHEN
+        VaultUnsealer(charm, vault, juju, logger).try_init_vault("test-model", "vault")
+
+        # THEN
+        assert ("vault/leader", "authorize-charm", {"secret-id": "secret-id"}) in juju.actions_run
+
+    def test_try_init_vault_wont_authorize_charm_if_asked(self):
+        # GIVEN
+        juju = JujuStub(units={"vault": ["vault/leader"]})
+        vault = VaultStub(initialized_units={"vault/leader": False})
+        logger = LoggerStub()
+        charm = CharmInfo(name="vault")
+
+        # WHEN
+        VaultUnsealer(charm, vault, juju, logger).try_init_vault("test-model", "vault", authorize_charm=False)
+
+        # THEN
+        for target, action, _ in juju.actions_run:
+            assert (target, action) != ("vault/leader", "authorize-charm")
+
     def test_authorize_vault_charm_runs_action_and_removes_secret(self):
         # GIVEN
         juju = JujuStub()
