@@ -376,6 +376,8 @@ class CharmhubClient:
             return ubuntu_version
 
         # Return first ubuntu version with matching base
+        # This matches Juju's behavior when the requested base is empty
+        # https://github.com/juju/juju/blob/ed42a9975f6676210e81029b8c0d9c9bd9b152e5/core/charm/computedbase.go#L23
         for base in bases:
             if base.name == "ubuntu" and base.architecture == ubuntu_arch:
                 return base.channel
@@ -404,6 +406,7 @@ class CharmhubClient:
         self, charm_name: str, ubuntu_arch: str, charm_channel: str | None = None
     ) -> list[str]:
         # Juju passes "NA" to get the secret "default-bases" error field
+        # https://github.com/juju/juju/blob/ed42a9975f6676210e81029b8c0d9c9bd9b152e5/internal/charmhub/refresh.go#L417
         refresh_info = self.http_client.refresh(
             RefreshAction(
                 charm_name=charm_name,
@@ -446,7 +449,9 @@ class CharmhubClient:
         if len(versions) == 0:
             raise CharmReleaseNotFoundException(f"No default bases found for {charm_name} in arch {ubuntu_arch}")
 
-        # Return the first version (like Juju)
+        # Return the first version
+        # This matches Juju's behavior when the requested base is empty
+        # https://github.com/juju/juju/blob/ed42a9975f6676210e81029b8c0d9c9bd9b152e5/core/charm/computedbase.go#L23
         return versions[0]
 
     def _default_refresh_info(self, charm_name: str, base: CharmhubBase) -> RefreshResponse:
