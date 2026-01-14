@@ -20,6 +20,5 @@ poetry run bandit \
         scripts
 poetry run mypy bundle_builder
 poetry run mypy charm_integration_testing
-poetry run yamlfix $(find . -type f \( -name "*.yaml" -o -name "*.yml" \))
 poetry run yamllint -d relaxed --no-warnings .
 markdownlint-cli2 --config docs/.sphinx/.markdownlint.json "#docs/_build" "*.md"

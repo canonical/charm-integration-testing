@@ -25,7 +25,7 @@ on:
           - staging
           - production
       arch:
-        description: "Architecture of the charms being tested."
+        description: Architecture of the charms being tested.
         required: false
         type: choice
         options:
