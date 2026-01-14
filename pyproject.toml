@@ -24,6 +24,7 @@ pytest-cov = "^6.2.1"
 mypy = "^1.19.0"
 types-pyyaml = "^6.0.12.20250915"
 types-requests = "^2.32.4.20250913"
+yamllint = ">=1.35.0,<2.0.0"
 
 [tool.ruff]
 line-length = 120
