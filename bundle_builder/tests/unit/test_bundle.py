@@ -994,7 +994,8 @@ class TestBundle:
         # Create charms with features for testing
         provider_charm_with_features = Charm(
             name="provider",
-            channel="stable",
+            # TODO(raul): type: ignore
+            channel="stable",  # type: ignore
             revision=1,
             ubuntu_version="22.04",
             ubuntu_arch="amd64",
@@ -1015,7 +1016,8 @@ class TestBundle:
 
         requirer_charm_with_features = Charm(
             name="requirer",
-            channel="stable",
+            # TODO(raul): type: ignore
+            channel="stable",  # type: ignore
             revision=1,
             ubuntu_version="22.04",
             ubuntu_arch="amd64",
@@ -1036,7 +1038,8 @@ class TestBundle:
 
         requirer_charm_with_subset_features = Charm(
             name="requirer2",
-            channel="stable",
+            # TODO(raul): type: ignore
+            channel="stable",  # type: ignore
             revision=1,
             ubuntu_version="22.04",
             ubuntu_arch="amd64",
@@ -1145,7 +1148,8 @@ class TestBundle:
                                 name="multi",
                                 charm=Charm(
                                     name="multi",
-                                    channel="stable",
+                                    # TODO(raul): type: ignore
+                                    channel="stable",  # type: ignore
                                     revision=1,
                                     ubuntu_version="22.04",
                                     ubuntu_arch="amd64",

@@ -427,7 +427,8 @@ class TestEndpointLimits:
 
             db_charm = Charm(
                 name="postgresql-k8s",
-                channel="stable",
+                # TODO(raul): type: ignore
+                channel="stable",  # type: ignore
                 revision=1,
                 ubuntu_version="22.04",
                 ubuntu_arch="amd64",
@@ -472,7 +473,8 @@ class TestEndpointLimits:
             # AND app charms that need database
             app_charm = Charm(
                 name="app-k8s",
-                channel="stable",
+                # TODO(raul): type: ignore
+                channel="stable",  # type: ignore
                 revision=1,
                 ubuntu_version="22.04",
                 ubuntu_arch="amd64",
@@ -493,7 +495,8 @@ class TestEndpointLimits:
             # AND an admin charm
             admin_charm = Charm(
                 name="admin-k8s",
-                channel="stable",
+                # TODO(raul): type: ignore
+                channel="stable",  # type: ignore
                 revision=1,
                 ubuntu_version="22.04",
                 ubuntu_arch="amd64",
@@ -514,7 +517,8 @@ class TestEndpointLimits:
             # AND a monitoring charm
             monitoring_charm = Charm(
                 name="monitoring-k8s",
-                channel="stable",
+                # TODO(raul): type: ignore
+                channel="stable",  # type: ignore
                 revision=1,
                 ubuntu_version="22.04",
                 ubuntu_arch="amd64",
@@ -589,7 +593,8 @@ class TestEndpointLimits:
             # GIVEN a database charm with conditional limits
             db_charm = Charm(
                 name="postgresql-k8s",
-                channel="stable",
+                # TODO(raul): type: ignore
+                channel="stable",  # type: ignore
                 revision=1,
                 ubuntu_version="22.04",
                 ubuntu_arch="amd64",
@@ -616,7 +621,8 @@ class TestEndpointLimits:
             # AND app charms that need database
             app_charm = Charm(
                 name="app-k8s",
-                channel="stable",
+                # TODO(raul): type: ignore
+                channel="stable",  # type: ignore
                 revision=1,
                 ubuntu_version="22.04",
                 ubuntu_arch="amd64",

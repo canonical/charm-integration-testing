@@ -484,7 +484,8 @@ class TestCharmLimitCriteria:
             endpoints = params.endpoints
 
             # WHEN valid is called
-            is_valid = criteria.valid(endpoints)
+            # TODO(raul): type: ignore
+            is_valid = criteria.valid(endpoints)  # type: ignore
 
             # THEN matches expected
             assert is_valid == params.is_valid
@@ -509,7 +510,8 @@ class TestCharmLimitCriteria:
             criteria = CharmLimitCriteria.from_bool(params.value)
 
             # WHEN valid is called
-            is_valid = criteria.valid(params.endpoints)
+            # TODO(raul): type: ignore
+            is_valid = criteria.valid(params.endpoints)  # type: ignore
 
             # THEN matches expected
             assert is_valid == params.value
@@ -557,7 +559,8 @@ class TestCharmLimit:
             limit = params.limit
 
             # WHEN checking if criteria is valid
-            is_valid = limit.criteria.valid(params.endpoints)
+            # TODO(raul): type: ignore
+            is_valid = limit.criteria.valid(params.endpoints)  # type: ignore
 
             # THEN matches expected
             assert is_valid == params.expected_valid
@@ -845,7 +848,8 @@ class TestCharmConfigCriteria:
             channel = channel_from_string("stable")
 
             # WHEN valid is called
-            is_valid = criteria.valid(channel, frozenset())
+            # TODO(raul): type: ignore
+            is_valid = criteria.valid(channel, frozenset())  # type: ignore
 
             # THEN it's always valid
             assert is_valid is True
@@ -856,7 +860,8 @@ class TestCharmConfigCriteria:
             channel = channel_from_string("1.0/stable")
 
             # WHEN valid is called
-            is_valid = criteria.valid(channel, frozenset())
+            # TODO(raul): type: ignore
+            is_valid = criteria.valid(channel, frozenset())  # type: ignore
 
             # THEN it's valid
             assert is_valid is True
@@ -867,7 +872,8 @@ class TestCharmConfigCriteria:
             channel = channel_from_string("2.0/stable")
 
             # WHEN valid is called
-            is_valid = criteria.valid(channel, frozenset())
+            # TODO(raul): type: ignore
+            is_valid = criteria.valid(channel, frozenset())  # type: ignore
 
             # THEN it's not valid
             assert is_valid is False
@@ -878,7 +884,8 @@ class TestCharmConfigCriteria:
             channel = channel_from_string("stable")
 
             # WHEN valid is called
-            is_valid = criteria.valid(channel, frozenset())
+            # TODO(raul): type: ignore
+            is_valid = criteria.valid(channel, frozenset())  # type: ignore
 
             # THEN it's valid (empty track = latest)
             assert is_valid is True
@@ -889,7 +896,8 @@ class TestCharmConfigCriteria:
             channel = channel_from_string("stable")
 
             # WHEN valid is called with db endpoint integrated
-            is_valid = criteria.valid(channel, frozenset({"db"}))
+            # TODO(raul): type: ignore
+            is_valid = criteria.valid(channel, frozenset({"db"}))  # type: ignore
 
             # THEN it's valid
             assert is_valid is True
@@ -900,7 +908,8 @@ class TestCharmConfigCriteria:
             channel = channel_from_string("stable")
 
             # WHEN valid is called without db endpoint
-            is_valid = criteria.valid(channel, frozenset({"api"}))
+            # TODO(raul): type: ignore
+            is_valid = criteria.valid(channel, frozenset({"api"}))  # type: ignore
 
             # THEN it's not valid
             assert is_valid is False
@@ -918,7 +927,8 @@ class TestCharmConfigCriteria:
             channel = channel_from_string("1.0/stable")
 
             # WHEN valid is called with all conditions true
-            is_valid = criteria.valid(channel, frozenset({"db"}))
+            # TODO(raul): type: ignore
+            is_valid = criteria.valid(channel, frozenset({"db"}))  # type: ignore
 
             # THEN it's valid
             assert is_valid is True
@@ -936,7 +946,8 @@ class TestCharmConfigCriteria:
             channel = channel_from_string("1.0/stable")
 
             # WHEN valid is called with one condition false
-            is_valid = criteria.valid(channel, frozenset({"api"}))
+            # TODO(raul): type: ignore
+            is_valid = criteria.valid(channel, frozenset({"api"}))  # type: ignore
 
             # THEN it's not valid
             assert is_valid is False
@@ -954,7 +965,8 @@ class TestCharmConfigCriteria:
             channel = channel_from_string("2.0/stable")
 
             # WHEN valid is called with one condition true
-            is_valid = criteria.valid(channel, frozenset({"db"}))
+            # TODO(raul): type: ignore
+            is_valid = criteria.valid(channel, frozenset({"db"}))  # type: ignore
 
             # THEN it's valid
             assert is_valid is True
@@ -972,7 +984,8 @@ class TestCharmConfigCriteria:
             channel = channel_from_string("2.0/stable")
 
             # WHEN valid is called with all conditions false
-            is_valid = criteria.valid(channel, frozenset({"api"}))
+            # TODO(raul): type: ignore
+            is_valid = criteria.valid(channel, frozenset({"api"}))  # type: ignore
 
             # THEN it's not valid
             assert is_valid is False
@@ -983,7 +996,8 @@ class TestCharmConfigCriteria:
             channel = channel_from_string("stable")
 
             # WHEN valid is called with condition not met
-            is_valid = criteria.valid(channel, frozenset({"api"}))
+            # TODO(raul): type: ignore
+            is_valid = criteria.valid(channel, frozenset({"api"}))  # type: ignore
 
             # THEN it's valid
             assert is_valid is True
@@ -994,7 +1008,8 @@ class TestCharmConfigCriteria:
             channel = channel_from_string("stable")
 
             # WHEN valid is called with condition met
-            is_valid = criteria.valid(channel, frozenset({"db"}))
+            # TODO(raul): type: ignore
+            is_valid = criteria.valid(channel, frozenset({"db"}))  # type: ignore
 
             # THEN it's not valid
             assert is_valid is False
@@ -1010,7 +1025,8 @@ class TestCharmConfigCriteria:
             channel = channel_from_string("1.0/stable")
 
             # WHEN valid is called with all conditions true
-            is_valid = criteria.valid(channel, frozenset({"db"}))
+            # TODO(raul): type: ignore
+            is_valid = criteria.valid(channel, frozenset({"db"}))  # type: ignore
 
             # THEN it's valid
             assert is_valid is True
@@ -1026,7 +1042,8 @@ class TestCharmConfigCriteria:
             channel = channel_from_string("1.0/stable")
 
             # WHEN valid is called with none_of condition failing
-            is_valid = criteria.valid(channel, frozenset({"db"}))
+            # TODO(raul): type: ignore
+            is_valid = criteria.valid(channel, frozenset({"db"}))  # type: ignore
 
             # THEN it's not valid
             assert is_valid is False
@@ -1063,7 +1080,8 @@ class TestCharmConfigCriteria:
             channel = channel_from_string(params.channel_str)
 
             # WHEN valid is called
-            is_valid = criteria.valid(channel, params.endpoints)
+            # TODO(raul): type: ignore
+            is_valid = criteria.valid(channel, params.endpoints)  # type: ignore
 
             # THEN it matches the expected value
             assert is_valid == params.value
@@ -1141,7 +1159,8 @@ class TestCharmTestConfig:
         channel = channel_from_string("stable")
 
         # WHEN checking if criteria is valid
-        is_valid = test_config.criteria.valid(channel, frozenset())
+        # TODO(raul): type: ignore
+        is_valid = test_config.criteria.valid(channel, frozenset())  # type: ignore
 
         # THEN it's always valid
         assert is_valid is True
@@ -1154,9 +1173,11 @@ class TestCharmTestConfig:
         channel_no_match = channel_from_string("2.0/stable")
 
         # WHEN checking validity for matching channel
-        is_valid_match = test_config.criteria.valid(channel_match, frozenset())
+        # TODO(raul): type: ignore
+        is_valid_match = test_config.criteria.valid(channel_match, frozenset())  # type: ignore
         # AND checking validity for non-matching channel
-        is_valid_no_match = test_config.criteria.valid(channel_no_match, frozenset())
+        # TODO(raul): type: ignore
+        is_valid_no_match = test_config.criteria.valid(channel_no_match, frozenset())  # type: ignore
 
         # THEN it validates correctly
         assert is_valid_match is True

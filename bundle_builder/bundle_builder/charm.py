@@ -191,7 +191,8 @@ class CharmEndpoint:
         """
         smallest_limit: int | None = None
         for limit in self.limits:
-            if not limit.criteria.valid(integrated_endpoints):
+            # TODO(raul): type: ignore
+            if not limit.criteria.valid(integrated_endpoints):  # type: ignore
                 continue
             if smallest_limit is None:
                 smallest_limit = limit.limit

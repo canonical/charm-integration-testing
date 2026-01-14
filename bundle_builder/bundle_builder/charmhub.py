@@ -496,8 +496,10 @@ class CharmhubClient:
                         type=endpoint_type,
                         name=endpoint_name,
                         interface=endpoint.interface,
-                        optionality=optionality,
-                        limits=limits,
+                        # TODO(raul): type: ignore
+                        optionality=optionality,  # type: ignore
+                        # TODO(raul): type: ignore
+                        limits=limits,  # type: ignore
                         features=features,
                     )
                 )
