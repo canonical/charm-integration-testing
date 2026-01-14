@@ -101,8 +101,8 @@ To run the tests, we will generate a dynamic bundle that includes our test charm
 
    ./scripts/build-bundle.sh \
     --charms \
-      "target::${TARGET_CHARM}::${REVISION}::${SERIES}" \
-      "neighbor::${NEIGHBOR_CHARM}::default::default" \
+      "target::${TARGET_CHARM}::${CHANNEL}::${REVISION}::${SERIES}" \
+      "neighbor::${NEIGHBOR_CHARM}::default::default::default" \
     --integrations "target:${TARGET_ENDPOINT}::neighbor:${NEIGHBOR_ENDPOINT}" \
     --substrate "${SUBSTRATE}" \
     --charm-metadata-overrides ./static/charm-metadata-overrides/ \

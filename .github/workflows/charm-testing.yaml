@@ -19,17 +19,13 @@ on:
           - testing
           - staging
           - production
-      # TODO SQT-452: GitHub workflow_dispatch is limited to 10 inputs
-      # But maybe by the time we need this that will have changed!
-      # https://github.com/orgs/community/discussions/8774
-      # If not, maybe pass in JSON and use fromJSON()
-      # arch:
-      #   description: "Architecture of the charms being tested."
-      #   required: false
-      #   type: choice
-      #   options:
-      #     - amd64
-      #   default: amd64
+      arch:
+        description: "Architecture of the charms being tested."
+        required: false
+        type: choice
+        options:
+          - amd64
+        default: amd64
       charm_under_test:
         description: "charmhub.io name of the primary charm under test"
         required: true
@@ -51,16 +47,22 @@ on:
         required: true
       revision:
         description: "Revision number of the charm under test."
-        required: true
+        required: false
+        default: "default"
+      channel:
+        description: "Channel of the charm under test."
+        required: false
+        default: "default"
       series:
         description: "Series to run the charm tests under."
         required: false
         type: choice
         options:
+          - "default"
           - "20.04"
           - "22.04"
           - "24.04"
-        default: "24.04"
+        default: "default"
       substrate:
         description: "Substrate to run the tests on"
         required: false
@@ -153,6 +155,7 @@ jobs:
           neighbor: ${{ inputs.neighbor }}
           neighbor_endpoint: ${{ inputs.neighbor_endpoint }}
           revision: ${{ inputs.revision }}
+          channel: ${{ inputs.channel }}
           series: ${{ inputs.series }}
           substrate: ${{ inputs.substrate }}
           model: ${{ steps.juju_resources.outputs.model }}
@@ -169,6 +172,7 @@ jobs:
           echo "| \`neighbor\` | \`${neighbor}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| \`neighbor_endpoint\` | \`${neighbor_endpoint}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| \`revision\` | \`${revision}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| \`channel\` | \`${channel}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| \`series\` | \`${series}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| \`substrate\` | \`${substrate}\` |" >> $GITHUB_STEP_SUMMARY
 
@@ -288,6 +292,7 @@ jobs:
         env:
           charm_under_test: ${{ inputs.charm_under_test }}
           revision: ${{ inputs.revision }}
+          channel: ${{ inputs.channel }}
           series: ${{ inputs.series }}
           neighbor: ${{ inputs.neighbor }}
           charm_endpoint: ${{ inputs.charm_endpoint }}
@@ -298,8 +303,8 @@ jobs:
           set +e
           ./scripts/build-bundle.sh \
             --charms \
-              "target::${charm_under_test}::${revision}::${series}" \
-              "neighbor::${neighbor}::default::default" \
+              "target::${charm_under_test}::${channel}::${revision}::${series}" \
+              "neighbor::${neighbor}::default::default::default" \
             --integrations "target:${charm_endpoint}::neighbor:${neighbor_endpoint}" \
             --substrate "${substrate}" \
             --output-file generated-bundle.yaml \
