@@ -1,3 +1,4 @@
+---
 # KFP Visualization Server - renders pipeline graphs and metrics
 provides:
   kfp-viz:

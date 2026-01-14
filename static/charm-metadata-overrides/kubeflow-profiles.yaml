@@ -1,3 +1,4 @@
+---
 # Kubeflow Profiles - manages user namespaces and access control
 provides:
   kubeflow-profiles:

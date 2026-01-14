@@ -1,3 +1,4 @@
+---
 # Kubeflow Central Dashboard - main UI entry point
 provides:
   # Remove after: https://github.com/canonical/charm-integration-testing/issues/282

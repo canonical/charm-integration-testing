@@ -1,3 +1,4 @@
+---
 # Kubeflow Pipelines API server - core backend for pipeline management
 provides:
   kfp-api:

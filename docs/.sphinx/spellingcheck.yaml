@@ -1,3 +1,4 @@
+---
 matrix:
   - name: rST files
     aspell:

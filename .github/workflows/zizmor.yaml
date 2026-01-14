@@ -1,11 +1,12 @@
+---
 name: Workflow validation
 permissions:
   contents: read
 on:
   push:
     paths:
-      - '.github/workflows/*'
-      - '.github/actions/**'
+      - .github/workflows/*
+      - .github/actions/**
 
 jobs:
   workflow_validation:
@@ -25,7 +26,7 @@ jobs:
         run: |
           find .github/workflows -type f \( -iname \*.yaml -o -iname \*.yml \) \
             | xargs -I {} action-validator --verbose {}
-          
+
           find .github/actions -type f \( -iname \*.yaml -o -iname \*.yml \) \
             | xargs -I {} action-validator --verbose {}
   workflow_vulnerability_scan:
@@ -40,7 +41,7 @@ jobs:
         uses: baptiste0928/cargo-install@91c5da15570085bcde6f4d7aed98cb82d6769fd3
         with:
           crate: zizmor
-          version: '1.5.1'
+          version: 1.5.1
       - name: Scan all workflows
-        run: |
+        run: |-
           zizmor --pedantic .github

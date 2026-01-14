@@ -1,35 +1,36 @@
+---
 name: Clean up K8s environments
-run-name: "Cleaning up ${{ inputs.environment }} K8s environment"
+run-name: Cleaning up ${{ inputs.environment }} K8s environment
 
 concurrency:
   group: ${{ github.workflow }}-${{ inputs.environment }}
   cancel-in-progress: true
 
 permissions:
-  contents: read # only needed for private repos
+  contents: read  # only needed for private repos
 
 on:
   workflow_dispatch:
     inputs:
       environment:
-        description: "Environment to clean."
+        description: Environment to clean.
         type: choice
         default: staging
         options:
           - staging
           - production
       age_threshold:
-        description: "Age threshold in minutes (resources older than this will be deleted)"
+        description: Age threshold in minutes (resources older than this will be deleted)
         type: number
         default: 240
   workflow_call:
     inputs:
       environment:
-        description: "Environment to clean."
+        description: Environment to clean.
         type: string
         required: true
       age_threshold:
-        description: "Age threshold in minutes (resources older than this will be deleted)"
+        description: Age threshold in minutes (resources older than this will be deleted)
         type: number
         default: 240
     secrets:
@@ -116,11 +117,11 @@ jobs:
 
       - name: Remove all resources
         shell: bash
-        run: |
+        run: |-
           # Group resources by namespace
           declare -A namespaced_resources
           cluster_resources=()
-          while IFS= read -r line; do 
+          while IFS= read -r line; do
             if [[ "$line" == *:* ]]; then
               namespace="${line%%:*}"
               resource="${line#*:}"
@@ -129,15 +130,15 @@ jobs:
               cluster_resources+=("$line")
             fi
           done < resources_to_remove.txt
-          
+
           # Delete cluster-scoped resources
           if [ ${#cluster_resources[@]} -gt 0 ]; then
             kubectl delete "${cluster_resources[@]}" --timeout=25m &
           fi
-          
+
           # Delete namespaced resources (one command per namespace)
           for namespace in "${!namespaced_resources[@]}"; do
             kubectl delete ${namespaced_resources[$namespace]} --namespace="$namespace" --timeout=25m &
           done
-          
+
           wait

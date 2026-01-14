@@ -1,3 +1,4 @@
+---
 # Kubeflow Pipelines UI - web interface for pipeline management
 provides:
   kfp-ui:
