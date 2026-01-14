@@ -135,8 +135,7 @@ class TestEndpointFeatures:
         # THEN monitoring endpoint should be optional (SSL feature present)
         # so it should not be in unfulfilled endpoints
         monitoring_endpoint = ApplicationEndpoint("app", "monitoring")
-        # TODO(raul): remove type ignore in subsequent type checker PRs
-        assert monitoring_endpoint not in new_bundle.unfulfilled_endpoints  # type: ignore[operator]
+        assert monitoring_endpoint not in new_bundle.unfulfilled_endpoints
 
     def test_provider_without_required_feature_makes_endpoint_required(self) -> None:
         # GIVEN a provider charm WITHOUT SSL feature
@@ -352,21 +351,18 @@ class TestEndpointFeatures:
         new_bundle = builder.build(bundle)
 
         # THEN the provider should have all features from both requirers
-        # TODO(raul): remove type ignore in subsequent type checker PRs
-        features = new_bundle.application_endpoint_features["db"]  # type: ignore[index]
+        features = new_bundle.application_endpoint_features["db"]
         assert "database:ssl" in features
         assert "database:compression" in features
         assert "database:replication" in features
 
         # AND requirer1 should have only its features
-        # TODO(raul): remove type ignore in subsequent type checker PRs
-        features1 = new_bundle.application_endpoint_features["app1"]  # type: ignore[index]
+        features1 = new_bundle.application_endpoint_features["app1"]
         assert "database:ssl" in features1
         assert "database:compression" not in features1
 
         # AND requirer2 should have only its features
-        # TODO(raul): remove type ignore in subsequent type checker PRs
-        features2 = new_bundle.application_endpoint_features["app2"]  # type: ignore[index]
+        features2 = new_bundle.application_endpoint_features["app2"]
         assert "database:compression" in features2
         assert "database:replication" in features2
         assert "database:ssl" not in features2
@@ -481,7 +477,6 @@ class TestEndpointFeatures:
 
         # THEN logging endpoint should be optional (both features present)
         logging_endpoint = ApplicationEndpoint("app", "logging")
-        # TODO(raul): remove type ignore in subsequent type checker PRs
-        assert logging_endpoint not in new_bundle.unfulfilled_endpoints  # type: ignore[operator]
+        assert logging_endpoint not in new_bundle.unfulfilled_endpoints
         # And no logger should be added
         assert not any(app.charm.name == "logger" for app in new_bundle.applications)

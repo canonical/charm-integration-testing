@@ -199,14 +199,12 @@ class TestBundleBuilder:
 
     def test_child_nodes_existing_applications_validates_endpoint_features(self) -> None:
         # GIVEN a provider charm with limited features (only compression, not SSL)
-        # TODO(raul): remove type ignore in subsequent type checker PRs
-        provider_charm = dataclasses.replace(  # type: ignore[type-var]
+        provider_charm = dataclasses.replace(
             sample_charm_postgresql_k8s(),
             name="database",
             endpoints=frozenset(
                 {
-                    # TODO(raul): remove type ignore in subsequent type checker PRs
-                    dataclasses.replace(  # type: ignore[type-var]
+                    dataclasses.replace(
                         sample_charm_endpoint_postgresql_k8s_database(),
                         features=frozenset({"compression"}),
                     )
@@ -215,13 +213,12 @@ class TestBundleBuilder:
         )
 
         # AND a requirer charm that requires SSL feature
-        # TODO(raul): remove type ignore in subsequent type checker PRs
-        requirer_with_ssl = dataclasses.replace(  # type: ignore[type-var]
+        requirer_with_ssl = dataclasses.replace(
             sample_charm_kratos(),
             name="app-ssl",
             endpoints=frozenset(
                 {
-                    dataclasses.replace(  # type: ignore[type-var]
+                    dataclasses.replace(
                         sample_charm_endpoint_kratos_pg_database(),
                         name="database",
                         features=frozenset({"ssl"}),
@@ -231,14 +228,12 @@ class TestBundleBuilder:
         )
 
         # AND a requirer charm that requires compression feature
-        # TODO(raul): remove type ignore in subsequent type checker PRs
-        requirer_with_compression = dataclasses.replace(  # type: ignore[type-var]
+        requirer_with_compression = dataclasses.replace(
             sample_charm_kratos(),
             name="app-compression",
             endpoints=frozenset(
                 {
-                    # TODO(raul): remove type ignore in subsequent type checker PRs
-                    dataclasses.replace(  # type: ignore[type-var]
+                    dataclasses.replace(
                         sample_charm_endpoint_kratos_pg_database(),
                         name="database",
                         features=frozenset({"compression"}),
@@ -292,12 +287,12 @@ class TestBundleBuilder:
 
     def test_child_nodes_existing_applications_allows_superset_features(self) -> None:
         # GIVEN a provider charm with multiple features
-        provider_charm = dataclasses.replace(  # type: ignore[type-var]
+        provider_charm = dataclasses.replace(
             sample_charm_postgresql_k8s(),
             name="database",
             endpoints=frozenset(
                 {
-                    dataclasses.replace(  # type: ignore[type-var]
+                    dataclasses.replace(
                         sample_charm_endpoint_postgresql_k8s_database(),
                         features=frozenset({"ssl", "compression", "replication"}),
                     )
@@ -306,13 +301,12 @@ class TestBundleBuilder:
         )
 
         # AND a requirer charm that only requires SSL
-        # TODO(raul): remove type ignore in subsequent type checker PRs
-        requirer_charm = dataclasses.replace(  # type: ignore[type-var]
+        requirer_charm = dataclasses.replace(
             sample_charm_kratos(),
             name="app",
             endpoints=frozenset(
                 {
-                    dataclasses.replace(  # type: ignore[type-var]
+                    dataclasses.replace(
                         sample_charm_endpoint_kratos_pg_database(),
                         name="database",
                         features=frozenset({"ssl"}),
@@ -357,14 +351,12 @@ class TestBundleBuilder:
 
     def test_child_nodes_existing_applications_allows_no_features(self) -> None:
         # GIVEN a provider charm without features
-        # TODO(raul): remove type ignore in subsequent type checker PRs
-        provider_charm = dataclasses.replace(  # type: ignore[type-var]
+        provider_charm = dataclasses.replace(
             sample_charm_postgresql_k8s(),
             name="database",
             endpoints=frozenset(
                 {
-                    # TODO(raul): remove type ignore in subsequent type checker PRs
-                    dataclasses.replace(  # type: ignore[type-var]
+                    dataclasses.replace(
                         sample_charm_endpoint_postgresql_k8s_database(),
                         features=frozenset(),
                     )
@@ -373,14 +365,12 @@ class TestBundleBuilder:
         )
 
         # AND a requirer charm without features
-        # TODO(raul): remove type ignore in subsequent type checker PRs
-        requirer_charm = dataclasses.replace(  # type: ignore[type-var]
+        requirer_charm = dataclasses.replace(
             sample_charm_kratos(),
             name="app",
             endpoints=frozenset(
                 {
-                    # TODO(raul): remove type ignore in subsequent type checker PRs
-                    dataclasses.replace(  # type: ignore[type-var]
+                    dataclasses.replace(
                         sample_charm_endpoint_kratos_pg_database(),
                         name="database",
                         features=frozenset(),

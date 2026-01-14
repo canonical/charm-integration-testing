@@ -108,9 +108,9 @@ class Bundle:
                 )
 
         # Ensure endpoints are not integrated more than their limit
-        for endpoint, count in self.endpoint_connection_counts.items():  # type: ignore[attr-defined]
-            charm_endpoint = self.application_endpoints[endpoint]  # type: ignore[index]
-            endpoint_limit = charm_endpoint.limit(self.application_to_integrated_endpoints[endpoint.application])  # type: ignore[index]
+        for endpoint, count in self.endpoint_connection_counts.items():
+            charm_endpoint = self.application_endpoints[endpoint]
+            endpoint_limit = charm_endpoint.limit(self.application_to_integrated_endpoints[endpoint.application])
             if endpoint_limit is not None and count > endpoint_limit:
                 raise ValueError(
                     f"Endpoint '{endpoint}' is connected {count} times, exceeding its limit of {endpoint_limit}"
@@ -152,8 +152,7 @@ class Bundle:
         # Check if they are saturated
         for app in self.applications:
             for endpoint in app.charm.endpoints:
-                # TODO(raul): remove type ignore in subsequent type checker PRs
-                endpoint_limit = endpoint.limit(self.application_to_integrated_endpoints[app.name])  # type: ignore[index]
+                endpoint_limit = endpoint.limit(self.application_to_integrated_endpoints[app.name])
                 if endpoint_limit is not None:
                     # Get the current connection count (default to 0 if not in counts)
                     current_count = counts.get((app.name, endpoint.name), 0)
@@ -178,10 +177,8 @@ class Bundle:
         provider_to_requirers: dict[tuple[str, str], set[tuple[str, str]]] = {}
         for integration in self.integrations:
             ep1, ep2 = tuple(integration)
-            # TODO(raul): remove type ignore in subsequent type checker PRs
-            charm_ep1 = self.application_endpoints[ep1]  # type: ignore[index]
-            # TODO(raul): remove type ignore in subsequent type checker PRs
-            charm_ep2 = self.application_endpoints[ep2]  # type: ignore[index]
+            charm_ep1 = self.application_endpoints[ep1]
+            charm_ep2 = self.application_endpoints[ep2]
 
             # Skip if neither endpoint has features
             if not charm_ep1.features and not charm_ep2.features:
@@ -207,8 +204,7 @@ class Bundle:
                     continue
 
                 # Check if this endpoint is integrated
-                # TODO(raul): remove type ignore in subsequent type checker PRs
-                if endpoint.name not in self.application_to_integrated_endpoints[application.name]:  # type: ignore[index]
+                if endpoint.name not in self.application_to_integrated_endpoints[application.name]:
                     continue
 
                 if endpoint.type == ENDPOINT_REQUIRES:
@@ -220,9 +216,8 @@ class Bundle:
                     app_endpoint_tuple = (application.name, endpoint.name)
                     requirers: set[tuple[str, str]] = provider_to_requirers.get(app_endpoint_tuple, set())
                     if requirers:
-                        # TODO(raul): remove type ignore in subsequent type checker PRs
                         connected_features = [
-                            self.application_endpoints[ApplicationEndpoint(req[0], req[1])].features  # type: ignore[index]
+                            self.application_endpoints[ApplicationEndpoint(req[0], req[1])].features
                             for req in requirers
                         ]
                         used_features = frozenset().union(*connected_features)

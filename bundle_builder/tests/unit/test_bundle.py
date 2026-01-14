@@ -1210,8 +1210,7 @@ class TestBundle:
             features = bundle.application_endpoint_features
 
             # THEN features match expected
-            # TODO(raul): remove type ignore in subsequent type checker PRs
-            assert features == params.expected_features  # type: ignore[comparison-overlap]
+            assert features == params.expected_features
 
     def test_export(self) -> None:
         # GIVEN a bundle
