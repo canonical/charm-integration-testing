@@ -16,9 +16,10 @@
 
 from dataclasses import field
 from functools import wraps
-from typing import Any, Callable, Dict, get_type_hints
+from typing import Any, Callable, Dict, Type, TypeVar, get_type_hints, overload
 
 from pydantic.dataclasses import dataclass
+from typing_extensions import dataclass_transform
 
 
 # Computed property attribute
@@ -82,10 +83,29 @@ def make_cached_method(cached_field_name, method):  # type: ignore
     return wrapped
 
 
+_T = TypeVar("_T", bound=Type[Any])
+
+
+@dataclass_transform(frozen_default=True)
+@overload
+def immutable_dataclass(_cls: _T, **dataclass_kwargs: Any) -> _T: ...
+
+
+@dataclass_transform(frozen_default=True, order_default=True)
+@overload
+def immutable_dataclass(*, order: bool = True) -> Callable[[_T], _T]: ...
+
+
+@dataclass_transform(frozen_default=True)
+@overload
+def immutable_dataclass(**dataclass_kwargs: Any) -> Callable[[_T], _T]: ...
+
+
 # Create an immutable dataclass using frozen=True
 # and defaults slots=True
 # TODO(raul): remove type ignore in subsequent type checker PRs
-def immutable_dataclass(_cls=None, **dataclass_kwargs):  # type: ignore
+@dataclass_transform(frozen_default=True)
+def immutable_dataclass(_cls=None, **dataclass_kwargs):  # type: ignore[no-untyped-def]
     # TODO(raul): remove type ignore in subsequent type checker PRs
     def wrap(cls):  # type: ignore
         # Collect methods decorated as computed fields
