@@ -29,6 +29,7 @@ class CharmhubClientStub(CharmhubClient):
     def find_charms(
         self, provides: str | None = None, requires: str | None = None, platform: str | None = None
     ) -> frozenset[str]:
+        _ = platform  # unused in stub
         if provides is not None:
             return frozenset(
                 {
