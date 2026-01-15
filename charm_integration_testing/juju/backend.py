@@ -7,7 +7,7 @@ from collections.abc import Callable
 from dataclasses import field
 from datetime import datetime, timedelta
 from functools import wraps
-from typing import Any, TypeVar
+from typing import Any, Mapping, TypeVar
 
 from pydantic.dataclasses import dataclass
 
@@ -242,11 +242,15 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def deploy_application(self, model: str, charm: str, application: str | None = None) -> None:
+    def deploy_application(self, model: str, charm: str, application: str | None = None, config: Mapping | None = None):
         raise NotImplementedError
 
     @abstractmethod
     def configure_application(self, model: str, application: str, values: dict[str, str]) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_application_config(self, model: str, application: str) -> Mapping[str, Any]:
         raise NotImplementedError
 
     @abstractmethod

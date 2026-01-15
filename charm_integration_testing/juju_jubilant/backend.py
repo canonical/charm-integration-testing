@@ -5,7 +5,7 @@
 import dataclasses
 import time
 from datetime import datetime, timedelta
-from typing import Callable
+from typing import Any, Callable, Mapping
 
 import jubilant
 import yaml
@@ -197,10 +197,11 @@ class JubilantBackend(JujuCmdBackend):
             name_or_id,
         )
 
-    def deploy_application(self, model: str, charm: str, application: str | None = None) -> None:
+    def deploy_application(self, model: str, charm: str, application: str | None = None, config: Mapping | None = None):
         self.client.model(model).deploy(
             charm=charm,
             app=application,
+            config=config,
         )
 
     def configure_application(self, model: str, application: str, values: dict[str, str]) -> None:
@@ -208,6 +209,9 @@ class JubilantBackend(JujuCmdBackend):
             app=application,
             values=values,
         )
+
+    def get_application_config(self, model: str, application: str) -> Mapping[str, Any]:
+        return self.client.model(model).config(application)
 
     def scp(self, model: str, source: str, destination: str) -> None:
         self.client.model(model).scp(
