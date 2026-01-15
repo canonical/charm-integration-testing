@@ -2,9 +2,12 @@
 # See LICENSE file for licensing details.
 
 import logging
+import time
 from abc import ABC
+from datetime import timedelta
 from typing import Any, Mapping
 
+from juju_jubilant.wait import all_statuses_are_in
 from juju import JujuBackend, JujuExtension
 from juju.backend import JujuIntegrationApplication
 
@@ -20,55 +23,19 @@ class TemporalExtension(JujuExtension, ABC):
         "temporal-worker-k8s": "host",
     }
 
+    TEMPORAL_WAIT_TIMEOUT = timedelta(minutes=15)
+    BOOTSTRAP_MAX_RETRIES = 10
+    BOOTSTRAP_RETRY_INTERVAL = 10  # seconds
+
     def __init__(self, juju: JujuBackend, logger: logging.Logger):
         self.juju = juju
         self.logger = logger
 
     def post_deploy(self, model: str):
-        """
-        Docstring for post_deploy
-        
-        :param self: Description
-        :param model: Description
-        :type model: str
-        """
+        """Post-deploy hook to deploy temporal if necessary.
 
-        """
-        Pseudo-code:
-        * What triggers this extension?
-          * airbyte-k8s charm presense: implicit dependency on temporal
-            * Lacks a relation to temporal
-            * Does have a config option for temporal endpoint
-          * Other charms?
-            * temporal-worker-k8s mentioned.  How would it relate?
-              * Also no relation to temporal
-              * But it does have a "host" config option.
-          So, for initial implementation:
-            * Mapping from charm name to config option for temporal endpoint:
-                * airbyte-k8s -> "temporal-host"
-                * temporal-worker-k8s -> "host"
-            * For airbyte-k8s: config targets temporal-k8s:7233; we just need to deploy that app and it'll link up.
-            * For temporal-worker-k8s: no default specified.  Assuming above constraint, just set the host to temporal-k8s:7233.
-        * Upon detection, what happens?
-          * Look for the following charms and note their application names.  For any charms not found, deploy them with default names:
-            * temporal-k8s (note: requires --config num-history-shards=4)
-            * temporal-admin-k8s
-            * postgresql-k8s
-          * Set up relations if not present:
-            * temporal-k8s:db         -> postgresql-k8s:database
-            * temporal-k8s:visibility -> postgresql-k8s:database
-            * temporal-k8s:admin      -> temporal-admin-k8s:admin
-          * Wait for all applications to become active/idle
-          * Bootstrap temporal-k8s, if necessary:
-            * Check for if namespace is already registered:
-                juju run temporal-admin-k8s/0 tctl args="--ns default namespace describe"  #  Is this real?  Double-check...
-            * If not registered, run:
-                juju run temporal-admin-k8s/0 tctl args="--ns default namespace register -rd 3"
-          * Set the config option on the detected charms to point to temporal:
-            * airbyte-k8s: temporal-host -> temporal-k8s:7233  (default, so no need to *actually* set this)
-            * temporal-worker-k8s: host -> temporal-k8s:7233   (required; there is no default)
-          * Should we handle workarounds for known issues?
-            ...Not for airbyte-k8s.  This extension is intended to be generic.
+        :param model: The Juju model to deploy to.
+        :type model: str
         """
         if self.should_deploy_temporal(model):
             self.deploy_temporal_stack(model)
@@ -93,23 +60,6 @@ class TemporalExtension(JujuExtension, ABC):
         :param model: The Juju model to deploy to.
         :type model: str
         """
-        # Pseudo-code implementation
-        # Find or deploy temporal-k8s, temporal-admin-k8s, postgresql-k8s
-        # Set up necessary relations if not present
-        # Wait for the temporal-related applications specifically to become active/idle
-        # Bootstrap temporal if necessary
-        #
-        # This is roughly equivalent to the following CLI actions (assuming we have to deploy everything):
-        # juju deploy temporal-k8s --config num-history-shards=4
-        # juju deploy temporal-admin-k8s
-        # juju deploy postgresql-k8s
-        # juju relate temporal-k8s:db postgresql-k8s:database
-        # juju relate temporal-k8s:visibility postgresql-k8s:database
-        # juju relate temporal-k8s:admin temporal-admin-k8s:admin
-        # juju wait --for application=temporal-k8s,temporal-admin-k8s,postgresql-k8s  # Until active/idle
-        # juju run temporal-admin-k8s/0 tctl args="--ns default namespace describe"
-        # (if not registered)
-        # juju run temporal-admin-k8s/0 tctl args="--ns default namespace register -rd 3"
         required_charms_and_config: Mapping[str, Mapping[str, Any]] = {
             "temporal-k8s": {"num-history-shards": 4},
             "temporal-admin-k8s": {},
@@ -145,31 +95,58 @@ class TemporalExtension(JujuExtension, ABC):
                     JujuIntegrationApplication(app2, endpoint2),
                 )
 
-        return  # Disable remaining code for now
-
-        # Wait for the terraform sub-bundle to become active/idle.
+        # Wait for the temporal sub-bundle to become active/idle.
         # Note: this uses jubilant for waiting, not "juju wait-for" which is going away,
         # so hopefully this doesn't break when that finally gets removed.
-        for app in deployed_apps.values():
-            self._log(f"Waiting for application '{app}' to become active/idle")
-            self.juju.wait_application_settled(model, app, timeout=None)  # Use default timeout
+        apps_to_wait_for = tuple(deployed_apps.values())
+        self._log(f"Waiting for temporal-related applications to settle: {apps_to_wait_for}")
+        self.juju.wait_idle(model, applications=apps_to_wait_for, timeout=self.TEMPORAL_WAIT_TIMEOUT, count=3)
 
         # Bootstrap temporal if necessary
         temporal_admin_app = deployed_apps["temporal-admin-k8s"]
-        namespace_registered = self.juju.run_command(
+        if not self._is_default_temporal_namespace_bootstrapped(model, temporal_admin_app):
+            self._bootstrap_default_temporal_namespace(model, temporal_admin_app)
+
+    def _is_default_temporal_namespace_bootstrapped(self, model: str, temporal_admin_app: str) -> bool:
+        # NOTE: tctl is apparently deprecated upstream, so this will likely need to change at some point
+        # in the future.
+        task = self.juju.run_action(
             model,
             f"{temporal_admin_app}/0",
-            "tctl args='--ns default namespace describe'",
+            "tctl",
+            {"args": "namespace list"},
         )
-        if namespace_registered.exit_code != 0:
-            self._log("Bootstrapping temporal namespace 'default'")
-            self.juju.run_command(
+        for line in task.output.splitlines():
+            if line.strip() == f"Name: default":
+                return True
+
+        return False
+
+    def _bootstrap_default_temporal_namespace(self, model, temporal_admin_app):
+        def inner_logic():
+            task = self.juju.run_action(
                 model,
                 f"{temporal_admin_app}/0",
-                "tctl args='--ns default namespace register -rd 3'",
+                "tctl",
+                {"args": "--ns default namespace register -rd 3"},
             )
+            if task.status != "completed":
+                raise RuntimeError("Failed to bootstrap temporal default namespace", task)
 
-        # Unsure: wait again?
+        # We'll wrap this in a retry loop just in case
+        self._log("Bootstrapping temporal namespace 'default'")
+        for i in range(self.BOOTSTRAP_MAX_RETRIES):
+            try:
+                inner_logic()
+            except RuntimeError as e:
+                if i < self.BOOTSTRAP_MAX_RETRIES - 1:
+                    self._log(f"Temporal namespace bootstrap action failed on attempt {i + 1}: {e.args[1]}")
+                    self._log(f"Retrying in {self.BOOTSTRAP_RETRY_INTERVAL} seconds...")
+                    time.sleep(self.BOOTSTRAP_RETRY_INTERVAL)
+                else:
+                    raise
+            else:
+                break
 
     def configure_dependent_charms(self, model: str):
         """Configure charms that depend on temporal in the given model.
