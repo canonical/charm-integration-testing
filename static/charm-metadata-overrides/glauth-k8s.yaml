@@ -1,3 +1,4 @@
+---
 # Remove after: https://github.com/canonical/glauth-k8s-operator/pull/151
 provides:
   metrics-endpoint:

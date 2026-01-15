@@ -1,22 +1,21 @@
+---
 name: Post relevant links
 description: Post relevant links to Test Observer
-
 inputs:
   test_observer_api:
-    description: "URL for the Test Observer API"
+    description: URL for the Test Observer API
     required: true
   test_observer_token:
-    description: "Bearer token to send as Authorization header"
-    required: True
+    description: Bearer token to send as Authorization header
+    required: true
   test_execution_id:
-    description: "Test Execution ID"
+    description: Test Execution ID
     required: true
   job_uuid:
-    description: "Job UUID"
+    description: Job UUID
     required: true
-
 runs:
-  using: "composite"
+  using: composite
   steps:
     - name: Get Test Observer JSON
       id: request-body
@@ -33,12 +32,12 @@ runs:
           }
         ' > body.json
         echo "file=$(realpath body.json)" >> "$GITHUB_OUTPUT"
-
     - name: Send request to Test Observer
       uses: ./.github/actions/test-observer/call-api
       id: call-api
       with:
-        test_observer_api: "${{ inputs.test_observer_api }}/v1/test-executions/${{ inputs.test_execution_id }}/links"
-        test_observer_token: "${{ inputs.test_observer_token }}"
-        method_type: "POST"
-        request_body: "@${{ steps.request-body.outputs.file }}"
+        test_observer_api: ${{ inputs.test_observer_api }}/v1/test-executions/${{
+          inputs.test_execution_id }}/links
+        test_observer_token: ${{ inputs.test_observer_token }}
+        method_type: POST
+        request_body: '@${{ steps.request-body.outputs.file }}'

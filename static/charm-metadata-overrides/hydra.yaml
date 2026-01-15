@@ -1,3 +1,4 @@
+---
 # Remove after: https://github.com/canonical/hydra-operator/pull/358
 provides:
   hydra-endpoint-info:
@@ -8,7 +9,6 @@ provides:
     optional: true
   grafana-dashboard:
     optional: true
-
 requires:
   public-route:
     features: [tls]
@@ -16,7 +16,6 @@ requires:
   internal-route:
     features: [tls]
     optional: true
-
   public-ingress:
     features: [tls]
     optional: false
