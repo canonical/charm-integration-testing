@@ -10,9 +10,9 @@ provides:
   peer-cluster-orchestrator:
     optional: true
 requires:
-  # The `client-cas` integration creates a hard dependency on the `certificates`
-  # integration - when `client-cas` is present, the charm
-  # [defers processing indefinitely](https://github.com/canonical/kafka-k8s-operator/blob/main/src/events/tls.py#L247-L270)
+  # The `client-cas` integration creates a hard dependency on the `certificates` 
+  # integration - when `client-cas` is present, the charm 
+  # [defers processing indefinitely](https://github.com/canonical/kafka-k8s-operator/blob/main/src/events/tls.py#L247-L270) 
   # until `certificates` is also integrated to provide signed certificates.
   certificates:
     interface: tls-certificates

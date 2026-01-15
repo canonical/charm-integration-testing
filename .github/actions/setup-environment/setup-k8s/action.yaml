@@ -34,7 +34,7 @@ runs:
         mkdir -p $HOME/.kube
         if [ "${environment}" = "production" ]; then
           echo "${k8sprod}" > ${kubeconfig_path}
-        else
+        else        
           echo "${k8sstg}" > ${kubeconfig_path}
         fi
     - name: Add K8s

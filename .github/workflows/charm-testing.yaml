@@ -45,13 +45,18 @@ on:
         required: true
       revision:
         description: Revision number of the charm under test.
-        required: true
+        required: false
+        default: default
+      channel:
+        description: Channel of the charm under test.
+        required: false
+        default: default
       series:
         description: Series to run the charm tests under.
         required: false
         type: choice
-        options: ['20.04', '22.04', '24.04']
-        default: '24.04'
+        options: [default, '20.04', '22.04', '24.04']
+        default: default
       substrate:
         description: Substrate to run the tests on
         required: false
@@ -593,7 +598,7 @@ jobs:
               echo "Error: JUNIT has test failures."
               TEST_STATUS="FAILED"
           fi
-          echo "Summary: # tests: $tests | Failed: $failures | Errors: $errors | Skipped: $skipped"
+          echo "Summary: #tests: $tests | Failed: $failures | Errors: $errors | Skipped: $skipped"
           echo "test_status=$TEST_STATUS" >> $GITHUB_OUTPUT
       - name: Mark Test Execution completed on Test Observer with the correct status
         if: ${{ always() && env.test_observer_api != '' && inputs.execution_id != '' }}

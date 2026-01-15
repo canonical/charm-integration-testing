@@ -22,7 +22,7 @@ runs:
       run: |
         jq --null-input --compact-output --arg test_execution_id "${test_execution_id}" '
           {
-            "test_execution_ids": [$test_execution_id]
+            "test_execution_ids": [$test_execution_id] 
           }
         ' > body.json
         echo "file=$(realpath body.json)" >> "$GITHUB_OUTPUT"

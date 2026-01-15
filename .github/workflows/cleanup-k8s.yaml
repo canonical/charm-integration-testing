@@ -108,7 +108,7 @@ jobs:
           # Group resources by namespace
           declare -A namespaced_resources
           cluster_resources=()
-          while IFS= read -r line; do
+          while IFS= read -r line; do 
             if [[ "$line" == *:* ]]; then
               namespace="${line%%:*}"
               resource="${line#*:}"
