@@ -1,42 +1,39 @@
+---
 name: Get Test Execution
 description: Get information about a Test Execution on Test Observer
-
 inputs:
   test_observer_api:
-    description: "URL for the Test Observer API"
-    required: True
+    description: URL for the Test Observer API
+    required: true
   test_observer_token:
-    description: "Bearer token to send as Authorization header"
-    required: True
+    description: Bearer token to send as Authorization header
+    required: true
   test_execution_id:
-    description: "ID for the Test Execution"
-    required: True
-
+    description: ID for the Test Execution
+    required: true
 outputs:
   test_execution_status:
-    description: "Test Execution Status"
+    description: Test Execution Status
     value: ${{ steps.read-response.outputs.test_execution_status }}
   test_execution_metadata:
-    description: "Test Execution Metadata"
+    description: Test Execution Metadata
     value: ${{ steps.read-response.outputs.test_execution_metadata }}
-
 runs:
-  using: "composite"
+  using: composite
   steps:
     - name: Send request to Test Observer
       uses: ./.github/actions/test-observer/call-api
       id: call-api
       with:
-        test_observer_api: "${{ inputs.test_observer_api }}/v1/test-executions/${{ inputs.test_execution_id }}"
-        test_observer_token: "${{ inputs.test_observer_token }}"
-        method_type: "GET"
-
-
+        test_observer_api: ${{ inputs.test_observer_api }}/v1/test-executions/${{
+          inputs.test_execution_id }}
+        test_observer_token: ${{ inputs.test_observer_token }}
+        method_type: GET
     - name: Read response
       id: read-response
       shell: bash
       env:
-        response_file: "${{ steps.call-api.outputs.response_file }}"
-      run: |
+        response_file: ${{ steps.call-api.outputs.response_file }}
+      run: |-
         echo "test_execution_status=$(cat "$response_file" | jq --raw-output '.status')" >> "$GITHUB_OUTPUT"
         echo "test_execution_metadata=$(cat "$response_file" | jq --compact-output '.execution_metadata')" >> "$GITHUB_OUTPUT"

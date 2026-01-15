@@ -1,3 +1,4 @@
+---
 # Remove after: https://github.com/canonical/content-cache-k8s-operator/pull/106
 provides:
   metrics-endpoint:

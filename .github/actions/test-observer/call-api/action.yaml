@@ -1,27 +1,25 @@
+---
 name: Call Test Observer API
 description: Call the Test Observer API
-
 inputs:
   test_observer_api:
-    description: "URL for the Test Observer API"
-    required: True
+    description: URL for the Test Observer API
+    required: true
   test_observer_token:
-    description: "Bearer token to send as Authorization header"
-    required: True
+    description: Bearer token to send as Authorization header
+    required: true
   method_type:
-    description: "HTTP method to use (e.g., GET, POST)"
-    required: True
+    description: HTTP method to use (e.g., GET, POST)
+    required: true
   request_body:
-    description: "Request body"
-    required: False
-
+    description: Request body
+    required: false
 outputs:
   response_file:
-    description: "Path to the response file written by the action"
+    description: Path to the response file written by the action
     value: ${{ steps.call-api.outputs.response_file }}
-
 runs:
-  using: "composite"
+  using: composite
   steps:
     - name: Send request to Test Observer API
       id: call-api
@@ -31,7 +29,7 @@ runs:
         test_observer_token: ${{ inputs.test_observer_token }}
         method_type: ${{ inputs.method_type }}
         request_body: ${{ inputs.request_body }}
-      run: |
+      run: |-
         # Build curl arguments
         curl_args=( --fail-with-body )
         curl_args+=( --retry-all-errors )

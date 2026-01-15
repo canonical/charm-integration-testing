@@ -1,3 +1,4 @@
+---
 # Dex Auth - federated OpenID Connect provider
 provides:
   # Remove after: https://github.com/canonical/charm-integration-testing/issues/282
