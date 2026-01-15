@@ -1,4 +1,3 @@
----
 # Grafana Agent K8s acts as an observability aggregator with the following constraints:
 #
 # 1. At least ONE incoming observability integration must be present (otherwise the charm is blocked):
@@ -37,6 +36,7 @@ provides:
           - endpoint_integrated: metrics-endpoint
           - endpoint_integrated: logging-provider
           - endpoint_integrated: grafana-dashboards-consumer
+
 requires:
   send-remote-write:
     optional_if:
@@ -85,9 +85,9 @@ requires:
   metrics-endpoint:
     optional_if:
       - any_of:
-          - endpoint_integrated: logging-provider
-          - endpoint_integrated: tracing-provider
-          - endpoint_integrated: grafana-dashboards-consumer
+        - endpoint_integrated: logging-provider
+        - endpoint_integrated: tracing-provider
+        - endpoint_integrated: grafana-dashboards-consumer
   grafana-dashboards-consumer:
     optional_if:
       - any_of:

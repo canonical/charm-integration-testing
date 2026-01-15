@@ -1,4 +1,3 @@
----
 # Remove after: https://github.com/canonical/temporal-worker-k8s-operator/pull/88
 provides:
   metrics-endpoint:
@@ -7,6 +6,7 @@ provides:
   grafana-dashboard:
     interface: grafana_dashboard
     optional: true
+
 requires:
   logging:
     interface: loki_push_api

@@ -1,4 +1,3 @@
----
 bundle: kubernetes
 applications:
   self-signed-certificates:

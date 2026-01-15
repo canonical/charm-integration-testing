@@ -1,4 +1,3 @@
----
 bundle: kubernetes
 applications:
   loki-k8s:

@@ -1,4 +1,3 @@
----
 # Remove after: https://github.com/canonical/mongodb-k8s-operator/pull/408
 provides:
   database:
@@ -20,6 +19,7 @@ requires:
     optional: true
   sharding:
     optional: true
+
   ldap:
     optional_if:
       - none_of:

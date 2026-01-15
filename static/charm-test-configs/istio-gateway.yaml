@@ -1,4 +1,3 @@
----
 configs:
   - config:
       kind: ingress

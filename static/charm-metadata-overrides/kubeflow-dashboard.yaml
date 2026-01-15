@@ -1,4 +1,3 @@
----
 # Kubeflow Central Dashboard - main UI entry point
 provides:
   # Remove after: https://github.com/canonical/charm-integration-testing/issues/282
@@ -6,6 +5,7 @@ provides:
     optional: true
   grafana-dashboard:
     optional: true
+
 requires:
   kubeflow-profiles:
     features: [kubeflow-profiles]

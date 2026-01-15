@@ -1,4 +1,3 @@
----
 configs:
   - config:
       num-history-shards: 1

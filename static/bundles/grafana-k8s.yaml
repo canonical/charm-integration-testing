@@ -1,4 +1,3 @@
----
 bundle: kubernetes
 applications:
   grafana-k8s:

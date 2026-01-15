@@ -1,4 +1,3 @@
----
 configs:
   - criteria:
       - any_of:
@@ -6,16 +5,16 @@ configs:
           - track: '1.16'
           - track: '1.17'
       - any_of:
-          - endpoint_integrated: vault-pki
-          - endpoint_integrated: tls-certificates-pki
+        - endpoint_integrated: "vault-pki"
+        - endpoint_integrated: "tls-certificates-pki"
     config:
       # NOTE: "charmqa" is just random value
       common_name: charmqa
   - criteria:
-      - track: '1.18'
+      - track: "1.18"
       - any_of:
-          - endpoint_integrated: vault-pki
-          - endpoint_integrated: tls-certificates-pki
+        - endpoint_integrated: "vault-pki"
+        - endpoint_integrated: "tls-certificates-pki"
     config:
       # NOTE: the config key changed in 1.18
       pki_ca_common_name: charmqa

@@ -1,4 +1,3 @@
----
 # KFP Metadata Writer - records pipeline execution metadata to MLMD
 requires:
   grpc:

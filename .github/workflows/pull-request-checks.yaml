@@ -1,13 +1,15 @@
----
 name: Pull Request Checks
+
 on:
   pull_request:
+
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref
-    }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
+
 permissions:
   contents: read
+
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -16,18 +18,24 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
+
       - name: Install poetry
         run: pipx install poetry==2.0.1
+
       - name: Install dependencies
         run: poetry install
+
       - name: Setup NPM
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 18
+
       - name: Install markdownlint-cli2
         run: npm install markdownlint-cli2 --global
+
       - name: Run linter
         run: ./scripts/lint.sh
+
   bundle-builder-unit-tests:
     runs-on: ubuntu-latest
     steps:
@@ -35,12 +43,16 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
+
       - name: Install poetry
         run: pipx install poetry==2.0.1
+
       - name: Install dependencies
         run: poetry install
+
       - name: Run Bundle Builder Unit Tests
         run: ./scripts/bundle-builder-unit-tests.sh
+
   bundle-builder-integration-tests:
     runs-on: ubuntu-latest
     steps:
@@ -48,12 +60,16 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
+
       - name: Install poetry
         run: pipx install poetry==2.0.1
+
       - name: Install dependencies
         run: poetry install
+
       - name: Run Bundle Builder Integration Tests
         run: ./scripts/bundle-builder-integration-tests.sh
+
   bundle-builder-logic-tests:
     runs-on: ubuntu-latest
     steps:
@@ -61,12 +77,16 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
+
       - name: Install poetry
         run: pipx install poetry==2.0.1
+
       - name: Install dependencies
         run: poetry install
+
       - name: Run Bundle Builder Integration Tests
         run: ./scripts/bundle-builder-logic-tests.sh
+
   charm-integration-testing-unit-tests:
     runs-on: ubuntu-latest
     steps:
@@ -74,12 +94,16 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
+
       - name: Install poetry
         run: pipx install poetry==2.0.1
+
       - name: Install dependencies
         run: poetry install
+
       - name: Run Charm Integration Testing Unit Tests
         run: ./scripts/charm-integration-testing-unit-tests.sh
+
   charm-testing-integration-tests:
     uses: ./.github/workflows/charm-testing-integration-tests.yaml
     permissions:

@@ -1,4 +1,3 @@
----
 requires:
   # https://github.com/canonical/mattermost-k8s-operator/issues/42
   db:

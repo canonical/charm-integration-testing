@@ -1,4 +1,3 @@
----
 bundle: kubernetes
 applications:
   grafana-agent-k8s:

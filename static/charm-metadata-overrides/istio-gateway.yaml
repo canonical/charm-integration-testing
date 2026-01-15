@@ -1,9 +1,9 @@
----
 # Istio Ingress Gateway - entry point for external traffic
 provides:
   # Remove after: https://github.com/canonical/charm-integration-testing/issues/282
   metrics-endpoint:
     optional: true
+
 requires:
   istio-pilot:
     features: [istio-pilot]

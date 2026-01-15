@@ -1,4 +1,3 @@
----
 bundle: kubernetes
 applications:
   postgresql-k8s:

@@ -1,4 +1,3 @@
----
 # Remove after: https://github.com/canonical/mysql-router-k8s-operator/pull/448
 provides:
   metrics-endpoint:

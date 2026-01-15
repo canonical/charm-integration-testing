@@ -1,4 +1,3 @@
----
 # Remove after: https://github.com/canonical/postgresql-k8s-operator/pull/1018
 provides:
   replication-offer:
@@ -7,9 +6,10 @@ provides:
     optional: true
   grafana-dashboard:
     optional: true
+
   database:
     limit_if:
-      - criteria:
+      - criteria: 
           - any_of:
               - endpoint_integrated: db
               - endpoint_integrated: db-admin
@@ -19,7 +19,7 @@ provides:
     features: [tls]
   db:
     limit_if:
-      - criteria:
+      - criteria: 
           - any_of:
               - endpoint_integrated: database
               - endpoint_integrated: db-admin
@@ -29,7 +29,7 @@ provides:
     features: [tls]
   db-admin:
     limit_if:
-      - criteria:
+      - criteria: 
           - any_of:
               - endpoint_integrated: database
               - endpoint_integrated: db
@@ -37,6 +37,7 @@ provides:
     limit: 1
     optional: true
     features: [tls]
+
 requires:
   certificates:
     optional_if:

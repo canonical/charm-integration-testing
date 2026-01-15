@@ -1,7 +1,8 @@
----
 name: Run Charm Tests and Assert Passed
+
 permissions:
   contents: read
+
 on:
   workflow_call:
     inputs:
@@ -29,9 +30,12 @@ on:
     secrets:
       STG_TEST_OBSERVER_TOKEN:
         required: true
+
 jobs:
   run-charm-tests-and-assert-pass:
-    runs-on: [self-hosted, charm_qa]
+    runs-on:
+      - self-hosted
+      - charm_qa
     permissions:
       contents: read
       actions: write
@@ -40,6 +44,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
+
       - name: Create Test Execution
         id: create-test-execution
         uses: ./.github/actions/test-observer/create-test-execution
@@ -48,22 +53,20 @@ jobs:
           test_observer_token: ${{ secrets.STG_TEST_OBSERVER_TOKEN }}
           charm: ${{ inputs.target_charm }}
           revision: ${{ inputs.target_revision }}
-          arch: charm-testing-integration-test-assert-pass-arch
-          environment: charm-testing-integration-test-assert-pass-environment
-          test_plan: charm-testing-integration-test-assert-pass-test_plan
-          track: charm-testing-integration-test-assert-pass-track
-          risk: stable
-          status: NOT_STARTED
+          arch: "charm-testing-integration-test-assert-pass-arch"
+          environment: "charm-testing-integration-test-assert-pass-environment"
+          test_plan: "charm-testing-integration-test-assert-pass-test_plan"
+          track: "charm-testing-integration-test-assert-pass-track"
+          risk: "stable"
+          status: "NOT_STARTED"
+
       - name: Trigger Charm Tests
         id: trigger-charm-tests
         uses: ./.github/actions/workflow-dispatch
         with:
-          workflow: charm-testing.yaml
+          workflow: "charm-testing.yaml"
           ref: ${{ github.head_ref || github.ref_name }}
-          title: 'Testing ${{ inputs.target_charm }}:${{ inputs.target_endpoint }}
-            against ${{ inputs.neighbor_charm }}:${{ inputs.neighbor_endpoint }}.
-            (environment: staging, test execution: ${{ steps.create-test-execution.outputs.test_execution_id }},
-            substrate: ${{ inputs.substrate }})'
+          title: "Testing ${{ inputs.target_charm }}:${{ inputs.target_endpoint }} against ${{ inputs.neighbor_charm }}:${{ inputs.neighbor_endpoint }}. (environment: staging, test execution: ${{ steps.create-test-execution.outputs.test_execution_id }}, substrate: ${{ inputs.substrate }})"
           inputs: |
             {
               "environment": "staging",
@@ -77,6 +80,7 @@ jobs:
               "series": "${{ inputs.target_base }}",
               "substrate": "${{ inputs.substrate }}"
             }
+
       - name: Ensure Charm Tests Workflow Success
         shell: bash
         env:
@@ -88,6 +92,7 @@ jobs:
             echo "Failing workflow since charm tests workflow failed"
             exit 1
           fi
+
       - name: Get Test Execution
         id: get-test-execution
         uses: ./.github/actions/test-observer/get-test-execution
@@ -95,6 +100,7 @@ jobs:
           test_observer_api: ${{ vars.STG_TEST_OBSERVER_API }}
           test_observer_token: ${{ secrets.STG_TEST_OBSERVER_TOKEN }}
           test_execution_id: ${{ steps.create-test-execution.outputs.test_execution_id }}
+
       - name: Ensure Test Execution Passed
         shell: bash
         env:
@@ -106,11 +112,12 @@ jobs:
             echo "Failing workflow since tests did not pass"
             exit 1
           fi
+
       - name: Ensure Test Execution Metadata Posted
         shell: bash
         env:
           test_execution_metadata: ${{ steps.get-test-execution.outputs.test_execution_metadata }}
-        run: |-
+        run: |
           echo "Test Execution Metadata is:"
           echo "$test_execution_metadata" | jq
           if ! echo "$test_execution_metadata" | jq --exit-status 'has("charm_qa:charm")' > /dev/null

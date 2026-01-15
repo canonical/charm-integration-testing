@@ -1,4 +1,3 @@
----
 configs:
     # Temporal worker requires the following 3 configurations to be set
     # the charm will go into an active/idle state once these are provided

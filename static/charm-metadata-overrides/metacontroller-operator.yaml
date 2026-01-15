@@ -1,4 +1,3 @@
----
 # Metacontroller Operator - custom controller framework
 provides:
   # Remove after: https://github.com/canonical/charm-integration-testing/issues/282

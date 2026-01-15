@@ -1,4 +1,3 @@
----
 provides:
   admin:
     limit: 1

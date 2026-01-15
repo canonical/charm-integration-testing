@@ -1,4 +1,3 @@
----
 unlisted_charms:
   # https://github.com/canonical/redis-k8s-operator/issues/115
   - redis-k8s
