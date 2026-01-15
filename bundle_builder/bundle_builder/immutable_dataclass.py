@@ -21,15 +21,17 @@ from typing import Any, Callable, Dict, Type, TypeVar, get_type_hints, overload
 from pydantic.dataclasses import dataclass
 from typing_extensions import dataclass_transform
 
+_Self = TypeVar("_Self")
+_Return = TypeVar("_Return")
+
 
 # Computed property attribute
 # Meant for use with @immutable_dataclass
 # Computed at initialization once
 # TODO(raul): remove type ignore in subsequent type checker PRs
-def computed_property(func: Callable) -> Callable:  # type: ignore
-    # TODO(raul): remove type ignore in subsequent type checker PRs
-    func._is_computed_property = True  # type: ignore
-    return func
+def computed_property(func: Callable[[_Self], _Return]) -> _Return:
+    setattr(func, "_is_computed_property", True)
+    return func  # type: ignore
 
 
 # Sentinel value for uninitialized computed fields
