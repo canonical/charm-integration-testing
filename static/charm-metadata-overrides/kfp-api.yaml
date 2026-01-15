@@ -8,7 +8,6 @@ provides:
     optional: true
   grafana-dashboard:
     optional: true
-
 requires:
   kfp-viz:
     features: [kfp-viz]

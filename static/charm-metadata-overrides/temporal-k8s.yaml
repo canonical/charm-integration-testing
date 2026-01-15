@@ -25,7 +25,6 @@ requires:
   ui:
     features: [ui]
     optional: true
-
 provides:
   metrics-endpoint:
     interface: prometheus_scrape

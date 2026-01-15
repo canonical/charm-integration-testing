@@ -7,7 +7,6 @@ provides:
   grafana-dashboard:
     interface: grafana_dashboard
     optional: true
-
 requires:
   nginx-route:
     interface: nginx-route

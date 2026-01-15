@@ -3,7 +3,6 @@
 provides:
   kfp-ui:
     features: [kfp-ui]
-
 requires:
   kfp-api:
     features: [kfp-api]

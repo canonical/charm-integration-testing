@@ -4,15 +4,12 @@ run-name: "Testing ${{ inputs.charm_under_test }}:${{ inputs.charm_endpoint }} a
   \ ${{ inputs.neighbor }}:${{ inputs.neighbor_endpoint }}. (environment: ${{ inputs.environment }}${{\
   \ inputs.execution_id != '' && ', test execution: ' || '' }}${{ inputs.execution_id\
   \ }}, substrate: ${{ inputs.substrate }})"
-
 concurrency:
   group: ${{ github.workflow }}-${{ inputs.environment }}-${{ inputs.execution_id
     || github.run_id }}
   cancel-in-progress: true
-
 permissions:
   contents: read  # only needed for private repos
-
 on:
   workflow_dispatch:
     inputs:
@@ -20,16 +17,12 @@ on:
         description: Environment to run in.
         type: choice
         default: testing
-        options:
-          - testing
-          - staging
-          - production
+        options: [testing, staging, production]
       arch:
         description: Architecture of the charms being tested.
         required: false
         type: choice
-        options:
-          - amd64
+        options: [amd64]
         default: amd64
       charm_under_test:
         description: charmhub.io name of the primary charm under test
@@ -57,29 +50,19 @@ on:
         description: Series to run the charm tests under.
         required: false
         type: choice
-        options:
-          - '20.04'
-          - '22.04'
-          - '24.04'
+        options: ['20.04', '22.04', '24.04']
         default: '24.04'
       substrate:
         description: Substrate to run the tests on
         required: false
         type: choice
-        options:
-          - kubernetes
-          - openstack
+        options: [kubernetes, openstack]
         default: kubernetes
       debug_sleep_after:
         description: The stage of the workflow to sleep after. Enables SSH access.
         required: false
         type: choice
-        options:
-          - none
-          - setup
-          - deployment
-          - integration
-          - log_collection
+        options: [none, setup, deployment, integration, log_collection]
         default: none
       debug_extra_ssh_imports:
         # The IDs take the form of lp:<value> for Launchpad and gh:<value> for GitHub.
@@ -88,16 +71,12 @@ on:
           mode.
         required: false
         default: ''
-
 env:
   DEBUG_SLEEP_SECONDS: 7200  # 2 hours
-
 jobs:
   execute-charm-test:
     name: Execute integration tests against the charms
-    runs-on:
-      - self-hosted
-      - charm_qa
+    runs-on: [self-hosted, charm_qa]
     env:
       test_observer_api: ${{ inputs.environment == 'production' && vars.PROD_TEST_OBSERVER_API || (inputs.environment == 'staging' && vars.STG_TEST_OBSERVER_API || '') }}
       test_observer_token: ${{ inputs.environment == 'production' && secrets.PROD_TEST_OBSERVER_TOKEN || (inputs.environment == 'staging' && secrets.STG_TEST_OBSERVER_TOKEN || '') }}
@@ -108,7 +87,6 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
-
       - name: Enable Debug Session
         if: ${{ inputs.debug_sleep_after != 'none' }}
         shell: bash
@@ -118,13 +96,10 @@ jobs:
           # Always include the GitHub Actor
           mkdir --parents ~/.ssh/
           ssh-import-id "gh:${GITHUB_ACTOR}"
-
           SSH_IDS=$(echo "${SSH_IDS}" | tr ',' ' ')
           ssh-import-id ${SSH_IDS} || true
-
           echo "Debug mode enabled. SSH connection details:"
           echo "ssh $(whoami)@$(hostname -I | cut -d ' ' -f 1)"
-
       - name: Create swap file
         shell: bash
         run: |
@@ -133,7 +108,6 @@ jobs:
           sudo mkswap /swapfile
           sudo swapon /swapfile
           sudo swapon --show
-
       - name: Generate Juju Model and Controller Name
         id: juju_resources
         shell: bash
@@ -143,7 +117,6 @@ jobs:
           name="${run_id}-$(date +'%y%m%d%H%M%S')"
           echo "model=model-$name" >> $GITHUB_OUTPUT
           echo "controller=$name" >> $GITHUB_OUTPUT
-
       - name: Log job information
         shell: bash
         env:
@@ -175,13 +148,11 @@ jobs:
           echo "| \`channel\` | \`${channel}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| \`series\` | \`${series}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| \`substrate\` | \`${substrate}\` |" >> $GITHUB_STEP_SUMMARY
-
           echo "### Job variables" >> $GITHUB_STEP_SUMMARY
           echo "| Variable | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|---|---|" >> $GITHUB_STEP_SUMMARY
           echo "| Juju model | \`${model}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Juju controller | \`${controller}\` |" >> $GITHUB_STEP_SUMMARY
-
       - name: Report Test Execution Start To Test Observer
         if: ${{ !cancelled() && env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/patch-test-execution
@@ -192,7 +163,6 @@ jobs:
           status: IN_PROGRESS
           ci_link: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{
             github.run_id }}
-
       - name: Post 'job_start' event
         if: ${{ !cancelled() && env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-events
@@ -203,7 +173,6 @@ jobs:
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
           event_name: job_start
           detail: Charm integration test job started.
-
       - name: Install Juju
         shell: bash
         env:
@@ -221,7 +190,6 @@ jobs:
           done
           # Ensure the juju home directory exists
           mkdir -p $HOME/.local/share/juju
-
       - name: Setup K8s Cloud
         if: ${{ inputs.substrate == 'kubernetes'}}
         id: setup_k8s
@@ -233,7 +201,6 @@ jobs:
           environment: ${{ inputs.environment }}
           controller: ${{ steps.juju_resources.outputs.controller }}
           model: ${{ steps.juju_resources.outputs.model }}
-
       - name: Post 'setup_k8s_failed' event
         if: ${{ failure() && env.test_observer_api != '' && inputs.execution_id != '' && steps.setup_k8s.conclusion == 'failure' }}
         uses: ./.github/actions/test-observer/post-events
@@ -244,7 +211,6 @@ jobs:
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
           event_name: setup_k8s_failed
           detail: Setup of Kubernetes cloud failed.
-
       - name: Setup O7k Cloud
         if: ${{ inputs.substrate == 'openstack'}}
         id: setup_o7k
@@ -256,7 +222,6 @@ jobs:
           environment: ${{ inputs.environment }}
           controller: ${{ steps.juju_resources.outputs.controller }}
           model: ${{ steps.juju_resources.outputs.model }}
-
       - name: Post 'setup_o7k_failed' event
         if: ${{ failure() && env.test_observer_api != '' && inputs.execution_id != '' && steps.setup_o7k.conclusion == 'failure' }}
         uses: ./.github/actions/test-observer/post-events
@@ -267,14 +232,12 @@ jobs:
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
           event_name: setup_o7k_failed
           detail: Setup of OpenStack cloud failed.
-
       - name: Debug Setup
         if: ${{ !cancelled() && inputs.debug_sleep_after == 'setup' }}
         shell: bash
         run: |
           echo "Sleeping to debug setup"
           sleep ${DEBUG_SLEEP_SECONDS}
-
       - name: Install Repository
         shell: bash
         run: |
@@ -286,7 +249,6 @@ jobs:
           EOF
           pipx install poetry==2.0
           HTTPS_PROXY="http://squid.internal:3128" poetry install
-
       - name: Generate dynamic bundles
         id: build_bundle
         shell: bash
@@ -326,17 +288,14 @@ jobs:
 
           # Note the generated bundles
           echo "bundle=$(realpath generated-bundle.yaml)" >> $GITHUB_OUTPUT
-
           echo '### Generated Bundle Mermaid Diagram' >> $GITHUB_STEP_SUMMARY
           echo '```mermaid' >> $GITHUB_STEP_SUMMARY
           cat generated-bundle.mmd >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-
           echo '### Generated Juju Bundle' >> $GITHUB_STEP_SUMMARY
           echo '```yaml' >> $GITHUB_STEP_SUMMARY
           cat generated-bundle.yaml >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-
       - name: Post 'bundle_generated' event
         if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-events
@@ -347,7 +306,6 @@ jobs:
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
           event_name: bundle_generated
           detail: Bundle generated.
-
       - name: Post 'bundle_generation_failed' event
         if: ${{ failure() && env.test_observer_api != '' && inputs.execution_id != '' && steps.build_bundle.conclusion == 'failure' && steps.build_bundle.outputs.invalid_input != 'true' }}
         uses: ./.github/actions/test-observer/post-events
@@ -358,7 +316,6 @@ jobs:
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
           event_name: bundle_generation_failed
           detail: Bundle generation failed.
-
       - name: Post 'bundle_generation_invalid_input' event
         if: ${{ failure() && env.test_observer_api != '' && inputs.execution_id != '' && steps.build_bundle.conclusion == 'failure' && steps.build_bundle.outputs.invalid_input == 'true' }}
         uses: ./.github/actions/test-observer/post-events
@@ -369,7 +326,6 @@ jobs:
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
           event_name: bundle_generation_invalid_input
           detail: Bundle generation failed due to invalid input.
-
       - name: Post 'test_deploy_start' event
         if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-events
@@ -380,7 +336,6 @@ jobs:
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
           event_name: test_deploy_start
           detail: Test deployment started.
-
       - name: Deploy Bundles
         id: test_deploy
         continue-on-error: true
@@ -394,7 +349,6 @@ jobs:
             --model "${model}" \
             --bundles "${bundle}" \
             --junit-xml=junit-deploy.xml
-
       - name: Post 'test_deploy_end' event
         if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-events
@@ -405,14 +359,12 @@ jobs:
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
           event_name: test_deploy_end
           detail: Test deployment finished.
-
       - name: Debug Deployment Tests
         if: ${{ !cancelled() && inputs.debug_sleep_after == 'deployment' }}
         shell: bash
         run: |
           echo "Sleeping to debug deployment tests"
           sleep ${DEBUG_SLEEP_SECONDS}
-
       - name: Post 'test_integration_start' event
         if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-events
@@ -423,7 +375,6 @@ jobs:
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
           event_name: test_integration_start
           detail: Test integration started.
-
       - name: Execute Tests
         id: test_integration
         continue-on-error: true
@@ -441,7 +392,6 @@ jobs:
             --neighbor-application "neighbor" \
             --neighbor-endpoint "${neighbor_endpoint}" \
             --junit-xml=junit-integration.xml
-
       - name: Post 'test_integration_end' event
         if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-events
@@ -452,14 +402,12 @@ jobs:
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
           event_name: test_integration_end
           detail: Test integration ended.
-
       - name: Debug Integration Tests
         if: ${{ !cancelled() && inputs.debug_sleep_after == 'integration' }}
         shell: bash
         run: |
           echo "Sleeping to debug integration tests"
           sleep ${DEBUG_SLEEP_SECONDS}
-
       - name: Post 'test_teardown_start' event
         if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-events
@@ -470,7 +418,6 @@ jobs:
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
           event_name: test_teardown_start
           detail: Test teardown phase started.
-
       - name: Teardown charm under test
         id: test_teardown
         continue-on-error: true
@@ -483,7 +430,6 @@ jobs:
             --model "${model}" \
             --applications "target" \
             --junit-xml=junit-teardown.xml
-
       - name: Post 'test_teardown_end' event
         if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-events
@@ -494,7 +440,6 @@ jobs:
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
           event_name: test_teardown_end
           detail: Test teardown phase finished.
-
       - name: Merge JUnit output
         id: junit_results
         shell: bash
@@ -510,7 +455,6 @@ jobs:
             junit.xml
           echo "junit_xml=$(realpath junit.xml)" >> $GITHUB_OUTPUT
           cat junit.xml
-
       - name: Post execution metadata to Test Observer
         if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-execution-metadata
@@ -519,7 +463,6 @@ jobs:
           test_observer_token: ${{ env.test_observer_token }}
           test_execution_id: ${{ inputs.execution_id }}
           junit_xml: ${{ steps.junit_results.outputs.junit_xml }}
-
       - name: Post results to Test Observer
         if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-results
@@ -528,7 +471,6 @@ jobs:
           test_observer_token: ${{ env.test_observer_token }}
           test_execution_id: ${{ inputs.execution_id }}
           junit_xml: ${{ steps.junit_results.outputs.junit_xml }}
-
       - name: Call Juju K8s Crashdump
         id: juju_k8s_crashdump
         if: ${{ !cancelled() && inputs.substrate == 'kubernetes'}}
@@ -537,7 +479,6 @@ jobs:
           kubeconf: ${{ steps.setup_k8s.outputs.kubeconfig_path }}
           controller: ${{ steps.juju_resources.outputs.controller }}
           proxy: http://squid.internal:3128
-
       - name: Call Juju Crashdump
         id: juju_crashdump
         env:
@@ -553,7 +494,6 @@ jobs:
           juju-crashdump --model ${controller}:controller --timeout 300 --small -f 100000000 --compression gz --unit-dump-location ${CONTROLLER_CRASHDUMP} --as-root || True
           echo "OS_MODEL_CRASHDUMP=$(realpath ${MODEL_CRASHDUMP})" >> $GITHUB_OUTPUT
           echo "OS_CONTROLLER_CRASHDUMP=$(realpath ${CONTROLLER_CRASHDUMP})" >> $GITHUB_OUTPUT
-
       - name: Collect logs
         id: collect_logs
         if: ${{ !cancelled() }}
@@ -572,7 +512,6 @@ jobs:
           [ -f "${openstack_model_crashdump}" ] && cp "${openstack_model_crashdump}" "logs/model-logs.tar.gz"
           [ -f "${openstack_controller_crashdump}" ] && cp "${openstack_controller_crashdump}" "logs/controller-logs.tar.gz"
           echo "directory_path=$(realpath "logs")" >> $GITHUB_OUTPUT
-
       - name: Post Logs To Swift
         id: post_logs_to_swift
         if: ${{ !cancelled() && inputs.execution_id != '' }}
@@ -588,7 +527,6 @@ jobs:
           SWIFT_OS_REGION_NAME: ${{ secrets.SWIFT_OS_REGION_NAME }}
           SWIFT_OS_USER_DOMAIN_NAME: ${{ secrets.SWIFT_OS_USER_DOMAIN_NAME }}
           SWIFT_OS_PROJECT_DOMAIN_NAME: ${{ secrets.SWIFT_OS_PROJECT_DOMAIN_NAME }}
-
       - name: Post 'log_collection_finished' event
         if: ${{ !cancelled() && steps.post_logs_to_swift.outcome == 'success' && env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-events
@@ -599,14 +537,12 @@ jobs:
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
           event_name: log_collection_finished
           detail: Log collection has completed.
-
       - name: Debug Post Log Collection
         if: ${{ !cancelled() && inputs.debug_sleep_after == 'log_collection' }}
         shell: bash
         run: |
           echo "Sleeping to debug post log collection"
           sleep ${DEBUG_SLEEP_SECONDS}
-
       - name: Post links to Test Observer
         if: ${{ !cancelled() && steps.post_logs_to_swift.outcome == 'success' && env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-links
@@ -615,7 +551,6 @@ jobs:
           test_observer_token: ${{ env.test_observer_token }}
           test_execution_id: ${{ inputs.execution_id }}
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
-
       - name: Post 'job_end' event
         if: ${{ !cancelled() && env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-events
@@ -626,7 +561,6 @@ jobs:
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
           event_name: job_end
           detail: Charm integration test job completed.
-
       - name: Calculate Job Status
         id: calculate_job_status
         env:
@@ -647,7 +581,6 @@ jobs:
               echo "Warning: JUNIT_FILE '$JUNIT_FILE' does not exist. Failing job."
               exit 1
           fi
-
           TEST_STATUS="PASSED"
 
           # If all tests are skipped, then fail right away.
@@ -660,10 +593,8 @@ jobs:
               echo "Error: JUNIT has test failures."
               TEST_STATUS="FAILED"
           fi
-
           echo "Summary: # tests: $tests | Failed: $failures | Errors: $errors | Skipped: $skipped"
           echo "test_status=$TEST_STATUS" >> $GITHUB_OUTPUT
-
       - name: Mark Test Execution completed on Test Observer with the correct status
         if: ${{ always() && env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/patch-test-execution
@@ -672,7 +603,6 @@ jobs:
           test_observer_token: ${{ env.test_observer_token }}
           test_execution_id: ${{ inputs.execution_id }}
           status: ${{ steps.calculate_job_status.outputs.test_status != '' && steps.calculate_job_status.outputs.test_status || 'ENDED_PREMATURELY' }}
-
       - name: Trigger rerun on Test Observer if failure
         if: ${{ failure() && env.test_observer_api != '' && inputs.execution_id != '' && !(steps.build_bundle.conclusion == 'failure' && steps.build_bundle.outputs.invalid_input == 'true') }}
         uses: ./.github/actions/test-observer/trigger-rerun
@@ -680,7 +610,6 @@ jobs:
           test_observer_api: ${{ env.test_observer_api }}
           test_observer_token: ${{ env.test_observer_token }}
           test_execution_id: ${{ inputs.execution_id }}
-
       - name: Teardown Controller
         if: ${{ always() }}
         shell: bash

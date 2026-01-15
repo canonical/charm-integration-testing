@@ -1,9 +1,7 @@
 ---
 name: Run Charm Tests and Assert Passed
-
 permissions:
   contents: read
-
 on:
   workflow_call:
     inputs:
@@ -31,12 +29,9 @@ on:
     secrets:
       STG_TEST_OBSERVER_TOKEN:
         required: true
-
 jobs:
   run-charm-tests-and-assert-pass:
-    runs-on:
-      - self-hosted
-      - charm_qa
+    runs-on: [self-hosted, charm_qa]
     permissions:
       contents: read
       actions: write
@@ -45,7 +40,6 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
-
       - name: Create Test Execution
         id: create-test-execution
         uses: ./.github/actions/test-observer/create-test-execution
@@ -60,7 +54,6 @@ jobs:
           track: charm-testing-integration-test-assert-pass-track
           risk: stable
           status: NOT_STARTED
-
       - name: Trigger Charm Tests
         id: trigger-charm-tests
         uses: ./.github/actions/workflow-dispatch
@@ -84,7 +77,6 @@ jobs:
               "series": "${{ inputs.target_base }}",
               "substrate": "${{ inputs.substrate }}"
             }
-
       - name: Ensure Charm Tests Workflow Success
         shell: bash
         env:
@@ -96,7 +88,6 @@ jobs:
             echo "Failing workflow since charm tests workflow failed"
             exit 1
           fi
-
       - name: Get Test Execution
         id: get-test-execution
         uses: ./.github/actions/test-observer/get-test-execution
@@ -104,7 +95,6 @@ jobs:
           test_observer_api: ${{ vars.STG_TEST_OBSERVER_API }}
           test_observer_token: ${{ secrets.STG_TEST_OBSERVER_TOKEN }}
           test_execution_id: ${{ steps.create-test-execution.outputs.test_execution_id }}
-
       - name: Ensure Test Execution Passed
         shell: bash
         env:
@@ -116,7 +106,6 @@ jobs:
             echo "Failing workflow since tests did not pass"
             exit 1
           fi
-
       - name: Ensure Test Execution Metadata Posted
         shell: bash
         env:

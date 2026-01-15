@@ -1,10 +1,8 @@
 ---
 name: Clean up K8s environments on a schedule
 run-name: Cleaning up K8s environments on schedule
-
 permissions:
   contents: read  # only needed for private repos
-
 on:
   schedule:
     - cron: '*/30 * * * *'

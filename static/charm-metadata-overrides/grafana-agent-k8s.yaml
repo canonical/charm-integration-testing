@@ -37,7 +37,6 @@ provides:
           - endpoint_integrated: metrics-endpoint
           - endpoint_integrated: logging-provider
           - endpoint_integrated: grafana-dashboards-consumer
-
 requires:
   send-remote-write:
     optional_if:

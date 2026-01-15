@@ -1,7 +1,6 @@
 ---
 name: Setup Kubernetes
 description: Setup A kubernetes environment for charm qa
-
 inputs:
   environment:
     description: Environment to setup the k8s for
@@ -23,7 +22,6 @@ outputs:
   kubeconfig_path:
     description: Path to kubeconfig file
     value: ${{ inputs.kubeconfig_path }}
-
 runs:
   using: composite
   steps:
@@ -58,12 +56,10 @@ runs:
           fi
         done
         echo "cloud=$CLOUD" >> $GITHUB_OUTPUT
-
     - name: Set extra-options
       shell: bash
       id: extra-options
       run: echo "extra-options=--bootstrap-constraints root-disk=5G" >> $GITHUB_OUTPUT
-
     - name: Bootstrap Controller
       env:
         cloud: ${{ steps.cloud.outputs.cloud }}
@@ -82,7 +78,6 @@ runs:
             exit 1
           fi
         done
-
     - name: Create Model
       env:
         model: ${{ inputs.model }}

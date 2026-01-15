@@ -6,7 +6,6 @@ provides:
     optional: true
   grafana-dashboard:
     optional: true
-
 requires:
   kubeflow-profiles:
     features: [kubeflow-profiles]

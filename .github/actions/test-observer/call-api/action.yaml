@@ -1,7 +1,6 @@
 ---
 name: Call Test Observer API
 description: Call the Test Observer API
-
 inputs:
   test_observer_api:
     description: URL for the Test Observer API
@@ -15,12 +14,10 @@ inputs:
   request_body:
     description: Request body
     required: false
-
 outputs:
   response_file:
     description: Path to the response file written by the action
     value: ${{ steps.call-api.outputs.response_file }}
-
 runs:
   using: composite
   steps:

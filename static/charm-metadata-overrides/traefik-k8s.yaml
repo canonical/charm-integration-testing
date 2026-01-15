@@ -28,7 +28,6 @@ requires:
     optional: true
   upstream-ingress:
     optional: true
-
 provides:
   ingress:
     optional: true

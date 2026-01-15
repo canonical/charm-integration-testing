@@ -1,7 +1,6 @@
 ---
 name: Get Test Execution
 description: Get information about a Test Execution on Test Observer
-
 inputs:
   test_observer_api:
     description: URL for the Test Observer API
@@ -12,7 +11,6 @@ inputs:
   test_execution_id:
     description: ID for the Test Execution
     required: true
-
 outputs:
   test_execution_status:
     description: Test Execution Status
@@ -20,7 +18,6 @@ outputs:
   test_execution_metadata:
     description: Test Execution Metadata
     value: ${{ steps.read-response.outputs.test_execution_metadata }}
-
 runs:
   using: composite
   steps:
@@ -32,8 +29,6 @@ runs:
           inputs.test_execution_id }}
         test_observer_token: ${{ inputs.test_observer_token }}
         method_type: GET
-
-
     - name: Read response
       id: read-response
       shell: bash

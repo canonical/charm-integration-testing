@@ -1,7 +1,6 @@
 ---
 name: Dispatch and Wait for Workflow
 description: Dispatch a GitHub Actions workflow and wait for it to complete
-
 inputs:
   workflow:
     description: Workflow filename to dispatch (e.g. callee.yml)
@@ -16,7 +15,6 @@ inputs:
     description: JSON object of workflow inputs
     required: false
     default: '{}'
-
 outputs:
   run_id:
     description: GitHub Workflow Run ID
@@ -24,7 +22,6 @@ outputs:
   conclusion:
     description: GitHub Workflow Run Conclusion
     value: ${{ steps.completion.outputs.conclusion }}
-
 runs:
   using: composite
   steps:
@@ -32,7 +29,6 @@ runs:
       shell: bash
       run: |
         echo "${{ github.token }}" | gh auth login --with-token
-
     - name: Parse inputs and run workflow
       id: trigger
       shell: bash
@@ -68,7 +64,6 @@ runs:
 
         # Save run id
         echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
-
     - name: Wait for completion
       id: completion
       shell: bash
@@ -79,7 +74,6 @@ runs:
         while true
         do
           status=$(gh run view "$run_id" --json status --jq '.status')
-
           echo "Status: $status"
           if [[ "$status" == "completed" ]]
           then
@@ -87,5 +81,4 @@ runs:
           fi
           sleep 10
         done
-
         echo "conclusion=$(gh run view $run_id --json conclusion --jq '.conclusion')" >> "$GITHUB_OUTPUT"

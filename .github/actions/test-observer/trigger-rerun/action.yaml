@@ -1,7 +1,6 @@
 ---
 name: Trigger a rerun on Test Observer
 description: Posts a rerun request for the Test Execution ID on Test Observer
-
 inputs:
   test_observer_api:
     description: URL for the Test Observer API
@@ -12,7 +11,6 @@ inputs:
   test_execution_id:
     description: ID for the Test Execution to trigger a rerun for
     required: true
-
 runs:
   using: composite
   steps:
@@ -28,7 +26,6 @@ runs:
           }
         ' > body.json
         echo "file=$(realpath body.json)" >> "$GITHUB_OUTPUT"
-
     - name: Send request to Test Observer
       uses: ./.github/actions/test-observer/call-api
       id: call-api

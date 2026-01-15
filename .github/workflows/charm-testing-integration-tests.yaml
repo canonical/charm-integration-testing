@@ -1,13 +1,10 @@
 ---
 name: Run Integration Tests for Charm Testing
-
 permissions:
   contents: read
-
 on:
   workflow_dispatch:
   workflow_call:
-
 jobs:
   assert-pass:
     strategy:

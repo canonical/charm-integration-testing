@@ -1,34 +1,27 @@
 ---
 name: Post events to Test Observer
 description: Post a timestamped event to the Test Observer API for the given job UUID.
-
 inputs:
   test_observer_api:
     description: Base URL of the Test Observer API
     required: true
-
   test_observer_token:
     description: Bearer token to send as Authorization header
     required: true
-
   test_execution_id:
     description: The unique identifier for the test execution (e.g., test execution
       id).
     required: true
-
   job_uuid:
     description: The unique job identifier (e.g., env/test_execution_id) used in Test
       Observer.
     required: true
-
   event_name:
     description: The event name to be posted (e.g., job_start, test_end).
     required: true
-
   detail:
     description: The context of the event.
     required: true
-
 runs:
   using: composite
   steps:
@@ -55,7 +48,6 @@ runs:
           }
         ' > body.json
         echo "file=$(realpath body.json)" >> "$GITHUB_OUTPUT"
-
     - name: Send request to Test Observer
       uses: ./.github/actions/test-observer/call-api
       id: call-api

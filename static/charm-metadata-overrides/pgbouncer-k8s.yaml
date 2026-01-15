@@ -21,7 +21,6 @@ provides:
           - endpoint_integrated: database
           - endpoint_integrated: db
     features: [tls]
-
 requires:
   # To provide tls-enabled endpoints, pgbouncer needs certificates
   certificates:

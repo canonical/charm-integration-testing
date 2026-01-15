@@ -1,4 +1,2 @@
 ---
-platforms:
-  - kubernetes
-  - machine
+platforms: [kubernetes, machine]

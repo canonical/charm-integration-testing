@@ -9,7 +9,6 @@ provides:
     optional: true
   peer-cluster-orchestrator:
     optional: true
-
 requires:
   # The `client-cas` integration creates a hard dependency on the `certificates`
   # integration - when `client-cas` is present, the charm

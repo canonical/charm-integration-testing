@@ -1,7 +1,6 @@
 ---
 name: Setup Openstack
 description: Setup an Openstack environment for charm qa
-
 inputs:
   environment:
     description: Environment to setup the o7k for
@@ -12,12 +11,10 @@ inputs:
   model:
     description: Name of the model to create
     required: true
-
 outputs:
   cloud-name:
     description: Name of the cloud created and bootstrapped to
     value: ${{ steps.cloud.outputs.cloud }}
-
 runs:
   using: composite
   steps:
@@ -55,7 +52,6 @@ runs:
               ${OS_REGION_NAME}:
                 endpoint: ${OS_AUTH_URL}
         EOF
-
         cat >> $HOME/openstack/openstack-credentials.yaml << EOF
         credentials:
           ${CLOUD}:
@@ -69,16 +65,13 @@ runs:
               user-domain-name: ${OS_USER_DOMAIN_NAME}
               username: ${OS_USERNAME}
         EOF
-
         juju add-cloud $CLOUD $HOME/openstack/openstack-cloud.yaml --client
         juju add-credential $CLOUD -f $HOME/openstack/openstack-credentials.yaml --client
         echo "cloud-name=${CLOUD}" >> $GITHUB_OUTPUT
-
     - name: Set extra-options
       shell: bash
       id: extra-options
       run: echo "extra-options=--metadata-source $HOME/openstack/images" >> $GITHUB_OUTPUT
-
     - name: Bootstrap Controller
       env:
         controller: ${{ inputs.controller }}
@@ -88,7 +81,6 @@ runs:
       run: |
         # juju will prefix the namespace with "controller"
         juju bootstrap ${cloud_name} ${extra_options} ${controller}
-
     - name: Create Model
       env:
         model: ${{ inputs.model }}

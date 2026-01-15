@@ -1,7 +1,6 @@
 ---
 name: Post results
 description: Post results to Test Observer
-
 inputs:
   test_observer_api:
     description: URL for the Test Observer API
@@ -15,7 +14,6 @@ inputs:
   junit_xml:
     description: Test results JUnit XML file
     required: true
-
 runs:
   using: composite
   steps:
@@ -32,7 +30,6 @@ runs:
             exit 1
           fi
         done
-
     - name: Convert JUnit XML to Test Observer JSON
       id: request-body
       shell: bash
@@ -57,7 +54,6 @@ runs:
           }
         ' > body.json
         echo "file=$(realpath body.json)" >> "$GITHUB_OUTPUT"
-
     - name: Send request to Test Observer
       uses: ./.github/actions/test-observer/call-api
       id: call-api

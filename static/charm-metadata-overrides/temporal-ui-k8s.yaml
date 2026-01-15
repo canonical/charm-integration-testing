@@ -5,7 +5,6 @@ provides:
     limit: 1
     optional: false
     features: [ui]
-
 requires:
   nginx-route:
     optional: true

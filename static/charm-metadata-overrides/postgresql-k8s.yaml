@@ -7,7 +7,6 @@ provides:
     optional: true
   grafana-dashboard:
     optional: true
-
   database:
     limit_if:
       - criteria:
@@ -38,7 +37,6 @@ provides:
     limit: 1
     optional: true
     features: [tls]
-
 requires:
   certificates:
     optional_if:

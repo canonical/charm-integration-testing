@@ -4,10 +4,7 @@ permissions:
   contents: read
 on:
   push:
-    paths:
-      - .github/workflows/*
-      - .github/actions/**
-
+    paths: [.github/workflows/*, .github/actions/**]
 jobs:
   workflow_validation:
     name: Workflow validation
@@ -26,7 +23,6 @@ jobs:
         run: |
           find .github/workflows -type f \( -iname \*.yaml -o -iname \*.yml \) \
             | xargs -I {} action-validator --verbose {}
-
           find .github/actions -type f \( -iname \*.yaml -o -iname \*.yml \) \
             | xargs -I {} action-validator --verbose {}
   workflow_vulnerability_scan:
