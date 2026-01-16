@@ -3,7 +3,7 @@
 
 from dataclasses import field
 from datetime import timedelta
-from typing import Any, Callable
+from typing import Any, Callable, Self
 
 import jubilant
 import pytest
@@ -51,10 +51,11 @@ class StatusStub:
     """Stub for status() method"""
 
     call_count: int = 0
+    application_statuses: dict[str, str] = field(default_factory=dict)
 
     def status(self) -> jubilant.Status:
         self.call_count += 1
-        return jubilant.Status(
+        status = jubilant.Status(
             model=jubilant.statustypes.ModelStatus(
                 name="test-model",
                 type="caas",
@@ -65,6 +66,23 @@ class StatusStub:
             machines={},
             apps={},
         )
+        if self.application_statuses:
+            for app_name, app_status in self.application_statuses.items():
+                status.apps[app_name] = jubilant.statustypes.AppStatus(
+                    charm="test-charm",
+                    charm_origin="charmhub",
+                    charm_name="test-charm",
+                    charm_rev=1,
+                    exposed=False,
+                    app_status=app_status,
+                    units={
+                        f"{app_name}/0": jubilant.statustypes.UnitStatus(
+                            workload_status=app_status,
+                            agent_status="idle",
+                        ),
+                    },
+                )
+        return status
 
 
 @dataclass
@@ -341,6 +359,23 @@ class TestJubilantBackend:
 
             # THEN it completed all 10 checks despite short timeout
             assert stub.call_count == 10
+
+        def test_wait_idle_on_subset_of_model(self) -> None:
+            # GIVEN
+            stub = StatusStub()
+            client = JubilantClientStub(client=stub)
+            backend = JubilantBackend(client)
+
+            # WHEN wait_idle is called with specific applications/units
+            backend.wait_idle(
+                "test-model",
+                timedelta(seconds=10), 
+                count=3,
+                applications=["app1", "app2"],
+            )
+
+            # THEN status was called 3 times
+            assert stub.call_count == 3
 
     class TestWaitApplicationSettled:
         def test_application_settled(self) -> None:
