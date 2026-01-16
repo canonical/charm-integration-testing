@@ -33,7 +33,7 @@ class TestEndpointLimits:
     class TestEdgeCases:
         def test_unfulfillable_endpoint_never_builds(self) -> None:
             # GIVEN an unfulfillable charm
-            unfulillable_charm = Charm(
+            unfulfillable_charm = Charm(
                 name="unfulfillable-charm",
                 channel="stable",
                 revision=1,
@@ -55,7 +55,7 @@ class TestEndpointLimits:
             bundle = Bundle(
                 applications=frozenset(
                     {
-                        Application(name="snowflake", charm=unfulillable_charm),
+                        Application(name="snowflake", charm=unfulfillable_charm),
                     }
                 ),
                 integrations=frozenset(),
@@ -64,7 +64,7 @@ class TestEndpointLimits:
             )
 
             # AND a bundle builder with a charmhub client that knows about the charm
-            builder = BundleBuilder(CharmhubClientStub(unfulillable_charm))
+            builder = BundleBuilder(CharmhubClientStub(unfulfillable_charm))
 
             # WHEN we build the bundle
             # THEN it errors because of unfulfilled endpoints
