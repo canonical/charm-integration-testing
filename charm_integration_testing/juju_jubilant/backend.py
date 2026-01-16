@@ -119,7 +119,7 @@ class JubilantBackend(JujuCmdBackend):
             applications = []
         self.wait(
             model,
-            lambda status: all_statuses_are_in(status, applications, application_statuses={"active"}, unit_statuses={"active"}),
+            lambda status: all_statuses_are_in(status, *applications, application_statuses={"active"}, unit_statuses={"active"}),
             timeout=timeout,
             successes=count,
             strict_timeout=strict_timeout,

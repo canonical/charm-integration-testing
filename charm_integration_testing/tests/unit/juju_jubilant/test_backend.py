@@ -52,6 +52,8 @@ class StatusStub:
 
     call_count: int = 0
     application_statuses: dict[str, str] = field(default_factory=dict)
+    unit_workload_statuses: dict[str, str] = field(default_factory=dict)
+    unit_juju_statuses: dict[str, str] = field(default_factory=dict)
 
     def status(self) -> jubilant.Status:
         self.call_count += 1
@@ -66,22 +68,45 @@ class StatusStub:
             machines={},
             apps={},
         )
-        if self.application_statuses:
-            for app_name, app_status in self.application_statuses.items():
-                status.apps[app_name] = jubilant.statustypes.AppStatus(
-                    charm="test-charm",
-                    charm_origin="charmhub",
-                    charm_name="test-charm",
-                    charm_rev=1,
-                    exposed=False,
-                    app_status=app_status,
-                    units={
-                        f"{app_name}/0": jubilant.statustypes.UnitStatus(
-                            workload_status=app_status,
-                            agent_status="idle",
-                        ),
-                    },
+
+        # If statuses are provided, populate the apps dictionary for any apps/units supplied.
+
+        # 1. Collect all application and unit names from application statuses and unit statuses.
+        app_names = set(self.application_statuses.keys())
+        unit_derived_app_names = set()
+        for status_dict in (self.unit_workload_statuses, self.unit_juju_statuses):
+            for unit_id in status_dict.keys():
+                app_name = unit_id.split("/")[0]
+                unit_derived_app_names.add(app_name)
+        app_names.update(unit_derived_app_names)
+
+        units_by_app_name = {}
+        for status_dict in (self.unit_workload_statuses, self.unit_juju_statuses):
+            for unit_id in status_dict.keys():
+                units_by_app_name.setdefault(unit_id.split("/")[0], set()).add(unit_id)
+
+        # 2. For each application, create AppStatus with relevant UnitStatus entries.
+        for app in app_names:
+            unit_names = units_by_app_name.get(app, set())
+            units = {
+                unit_name: jubilant.statustypes.UnitStatus(
+                    workload_status=self.unit_workload_statuses.get(unit_name, "unknown"),
+                    juju_status=self.unit_juju_statuses.get(unit_name, "unknown"),
                 )
+                for unit_name in unit_names
+            }
+            status.apps[app] = jubilant.statustypes.AppStatus(
+                # Required - just supplying some dummy values
+                charm="test-charm",
+                charm_origin="charmhub",
+                charm_name="test-charm",
+                charm_rev=1,
+                exposed=False,
+                # These are the parameters we actually care about:
+                app_status=jubilant.statustypes.StatusInfo(current=self.application_statuses.get(app, "unknown")),
+                units=units,
+            )
+
         return status
 
 
@@ -362,14 +387,14 @@ class TestJubilantBackend:
 
         def test_wait_idle_on_subset_of_model(self) -> None:
             # GIVEN
-            stub = StatusStub()
+            stub = StatusStub(application_statuses={"app1": "active", "app2": "active", "app3": "blocked"})
             client = JubilantClientStub(client=stub)
             backend = JubilantBackend(client)
 
             # WHEN wait_idle is called with specific applications/units
             backend.wait_idle(
                 "test-model",
-                timedelta(seconds=10), 
+                timedelta(seconds=3), 
                 count=3,
                 applications=["app1", "app2"],
             )
@@ -607,9 +632,10 @@ class TestJubilantBackend:
             charm: str | None = None
             app: str | None = None
 
-            def deploy(self, charm: str, app: str | None = None) -> None:
+            def deploy(self, charm: str, app: str | None = None, config: Any = None) -> None:
                 self.charm = charm
                 self.app = app
+                # config is ignored for this stub
 
         def test(self) -> None:
             # GIVEN
