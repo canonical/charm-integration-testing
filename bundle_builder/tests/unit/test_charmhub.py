@@ -741,3 +741,389 @@ class TestCharmhubClient:
 
             # THEN
             assert actual == params.expected
+
+    class TestGetUbuntuVersionFromBases:
+        @dataclass
+        class Params:
+            label: str
+            bases: list[CharmhubBase]
+            ubuntu_arch: str
+            charm_name: str
+            charm_revision: int
+            ubuntu_version: str | None
+            expected_version: str | None = None
+            raise_exception: bool = False
+
+        test_cases = [
+            Params(
+                label="returns_first_matching_base",
+                bases=[matching_base, other_base],
+                ubuntu_arch="amd64",
+                charm_name="test-charm",
+                charm_revision=42,
+                ubuntu_version=None,
+                expected_version="20.04",
+            ),
+            Params(
+                label="validates_provided_version_exists",
+                bases=[matching_base, other_base],
+                ubuntu_arch="amd64",
+                charm_name="test-charm",
+                charm_revision=42,
+                ubuntu_version="22.04",
+                expected_version="22.04",
+            ),
+            Params(
+                label="raises_when_provided_version_not_in_bases",
+                bases=[matching_base],
+                ubuntu_arch="amd64",
+                charm_name="test-charm",
+                charm_revision=42,
+                ubuntu_version="24.04",
+                raise_exception=True,
+            ),
+            Params(
+                label="raises_when_no_matching_arch",
+                bases=[CharmhubBase(name="ubuntu", architecture="arm64", channel="20.04")],
+                ubuntu_arch="amd64",
+                charm_name="test-charm",
+                charm_revision=42,
+                ubuntu_version=None,
+                raise_exception=True,
+            ),
+            Params(
+                label="raises_when_empty_bases",
+                bases=[],
+                ubuntu_arch="amd64",
+                charm_name="test-charm",
+                charm_revision=42,
+                ubuntu_version=None,
+                raise_exception=True,
+            ),
+        ]
+
+        @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
+        def test(self, params: Params) -> None:
+            # GIVEN
+            client = CharmhubClient()
+
+            # WHEN
+            try:
+                version = client._get_ubuntu_version_from_bases(
+                    params.bases,
+                    params.ubuntu_arch,
+                    params.charm_name,
+                    params.charm_revision,
+                    params.ubuntu_version,
+                )
+            except CharmReleaseNotFoundException:
+                raised = True
+            else:
+                raised = False
+
+            # THEN
+            if params.raise_exception:
+                assert raised
+            else:
+                assert not raised
+                assert version == params.expected_version
+
+    class TestGetRevisionRefreshInfo:
+        @dataclass
+        class Params:
+            label: str
+            charm_name: str
+            charm_revision: int
+            refresh_response: RefreshResponse
+            raise_exception: bool = False
+
+        test_cases = [
+            Params(
+                label="successful_refresh",
+                charm_name="my-charm",
+                charm_revision=123,
+                refresh_response=RefreshResponse(
+                    name="my-charm",
+                    effective_channel="stable",
+                    charm=RefreshResponse.Charm(
+                        revision=123,
+                        bases=[matching_base],
+                    ),
+                ),
+            ),
+            Params(
+                label="raises_on_error",
+                charm_name="my-charm",
+                charm_revision=999,
+                refresh_response=RefreshResponse(
+                    name="my-charm",
+                    error=RefreshResponse.Error(
+                        code="revision-not-found",
+                        message="Revision not found",
+                    ),
+                ),
+                raise_exception=True,
+            ),
+        ]
+
+        @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
+        def test(self, params: Params) -> None:
+            # GIVEN
+            http_client = CharmhubHttpStub(
+                refresh_response={
+                    RefreshAction(
+                        charm_name=params.charm_name,
+                        charm_revision=params.charm_revision,
+                        always_include_base=True,
+                    ): params.refresh_response,
+                }
+            )
+            client = CharmhubClient(http_client=http_client)
+
+            # WHEN
+            try:
+                result = client._get_revision_refresh_info(params.charm_name, params.charm_revision)
+            except CharmReleaseNotFoundException:
+                raised = True
+            else:
+                raised = False
+
+            # THEN
+            if params.raise_exception:
+                assert raised
+            else:
+                assert not raised
+                assert result == params.refresh_response
+
+    class TestSupportedUbuntuVersions:
+        @dataclass
+        class Params:
+            label: str
+            charm_name: str
+            ubuntu_arch: str
+            charm_channel: str | None
+            refresh_response: RefreshResponse
+            expected_versions: list[str]
+            raise_exception: bool = False
+
+        test_cases = [
+            Params(
+                label="returns_default_bases_from_error",
+                charm_name="my-charm",
+                ubuntu_arch="amd64",
+                charm_channel="stable",
+                refresh_response=RefreshResponse(
+                    name="my-charm",
+                    error=RefreshResponse.Error(
+                        code="invalid-charm-base",
+                        message="Invalid base",
+                        extra=RefreshResponse.Error.Extra(default_bases=[matching_base, other_base]),
+                    ),
+                ),
+                expected_versions=["20.04", "22.04"],
+            ),
+            Params(
+                label="filters_non_ubuntu_bases",
+                charm_name="my-charm",
+                ubuntu_arch="amd64",
+                charm_channel=None,
+                refresh_response=RefreshResponse(
+                    name="my-charm",
+                    error=RefreshResponse.Error(
+                        code="invalid-charm-base",
+                        message="Invalid base",
+                        extra=RefreshResponse.Error.Extra(
+                            default_bases=[
+                                matching_base,
+                                CharmhubBase(name="centos", architecture="amd64", channel="7"),
+                            ]
+                        ),
+                    ),
+                ),
+                expected_versions=["20.04"],
+            ),
+            Params(
+                label="raises_on_unexpected_error",
+                charm_name="my-charm",
+                ubuntu_arch="amd64",
+                charm_channel="edge",
+                refresh_response=RefreshResponse(
+                    name="my-charm",
+                    error=RefreshResponse.Error(
+                        code="some-other-error",
+                        message="Unexpected error",
+                    ),
+                ),
+                expected_versions=[],
+                raise_exception=True,
+            ),
+        ]
+
+        @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
+        def test(self, params: Params) -> None:
+            # GIVEN
+            http_client = CharmhubHttpStub(
+                refresh_response={
+                    RefreshAction(
+                        charm_name=params.charm_name,
+                        charm_channel=params.charm_channel,
+                        base=CharmhubBase(name="NA", architecture=params.ubuntu_arch, channel="NA"),
+                    ): params.refresh_response,
+                }
+            )
+            client = CharmhubClient(http_client=http_client)
+
+            # WHEN
+            try:
+                versions = client._supported_ubuntu_versions(
+                    params.charm_name, params.ubuntu_arch, charm_channel=params.charm_channel
+                )
+            except CharmReleaseNotFoundException:
+                raised = True
+            else:
+                raised = False
+
+            # THEN
+            if params.raise_exception:
+                assert raised
+            else:
+                assert not raised
+                assert versions == params.expected_versions
+
+    class TestCharmFromStoreByChannelAndRevision:
+        @dataclass
+        class Params:
+            label: str
+            charm_name: str
+            ubuntu_arch: str
+            charm_channel: str
+            charm_revision: int
+            ubuntu_version: str | None
+            revision_refresh_response: RefreshResponse
+            supported_versions_refresh_response: RefreshResponse
+            raise_exception: bool = False
+
+        test_cases = [
+            Params(
+                label="successful_with_matching_base",
+                charm_name="test-charm",
+                ubuntu_arch="amd64",
+                charm_channel="stable",
+                charm_revision=42,
+                ubuntu_version=None,
+                revision_refresh_response=RefreshResponse(
+                    name="test-charm",
+                    effective_channel="stable",
+                    charm=RefreshResponse.Charm(
+                        revision=42,
+                        bases=[matching_base],
+                        config=yaml.dump({"provides": {"endpoint-a": {"interface": "interface-a"}}}),
+                        metadata=yaml.dump({"provides": {"endpoint-a": {"interface": "interface-a"}}}),
+                    ),
+                ),
+                supported_versions_refresh_response=RefreshResponse(
+                    name="test-charm",
+                    error=RefreshResponse.Error(
+                        code="invalid-charm-base",
+                        message="Invalid base",
+                        extra=RefreshResponse.Error.Extra(default_bases=[matching_base]),
+                    ),
+                ),
+            ),
+            Params(
+                label="raises_when_channel_does_not_support_base",
+                charm_name="test-charm",
+                ubuntu_arch="amd64",
+                charm_channel="edge",
+                charm_revision=99,
+                ubuntu_version=None,
+                revision_refresh_response=RefreshResponse(
+                    name="test-charm",
+                    effective_channel="stable",
+                    charm=RefreshResponse.Charm(
+                        revision=99,
+                        bases=[matching_base],
+                        config=yaml.dump({}),
+                        metadata=yaml.dump({}),
+                    ),
+                ),
+                supported_versions_refresh_response=RefreshResponse(
+                    name="test-charm",
+                    error=RefreshResponse.Error(
+                        code="invalid-charm-base",
+                        message="Invalid base",
+                        extra=RefreshResponse.Error.Extra(default_bases=[other_base]),
+                    ),
+                ),
+                raise_exception=True,
+            ),
+            Params(
+                label="validates_provided_ubuntu_version",
+                charm_name="test-charm",
+                ubuntu_arch="amd64",
+                charm_channel="stable",
+                charm_revision=50,
+                ubuntu_version="22.04",
+                revision_refresh_response=RefreshResponse(
+                    name="test-charm",
+                    effective_channel="stable",
+                    charm=RefreshResponse.Charm(
+                        revision=50,
+                        bases=[matching_base, other_base],
+                        config=yaml.dump({}),
+                        metadata=yaml.dump({}),
+                    ),
+                ),
+                supported_versions_refresh_response=RefreshResponse(
+                    name="test-charm",
+                    error=RefreshResponse.Error(
+                        code="invalid-charm-base",
+                        message="Invalid base",
+                        extra=RefreshResponse.Error.Extra(default_bases=[matching_base, other_base]),
+                    ),
+                ),
+            ),
+        ]
+
+        @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
+        def test(self, params: Params) -> None:
+            # GIVEN
+            http_client = CharmhubHttpStub(
+                refresh_response={
+                    RefreshAction(
+                        charm_name=params.charm_name,
+                        charm_revision=params.charm_revision,
+                        always_include_base=True,
+                    ): params.revision_refresh_response,
+                    RefreshAction(
+                        charm_name=params.charm_name,
+                        charm_channel=params.charm_channel,
+                        base=CharmhubBase(name="NA", architecture=params.ubuntu_arch, channel="NA"),
+                    ): params.supported_versions_refresh_response,
+                }
+            )
+            client = CharmhubClient(http_client=http_client)
+
+            # WHEN
+            try:
+                charm = client._charm_from_store_by_channel_and_revision(
+                    charm_name=params.charm_name,
+                    ubuntu_arch=params.ubuntu_arch,
+                    charm_channel=params.charm_channel,
+                    charm_revision=params.charm_revision,
+                    ubuntu_version=params.ubuntu_version,
+                )
+            except CharmReleaseNotFoundException:
+                raised = True
+            else:
+                raised = False
+
+            # THEN
+            if params.raise_exception:
+                assert raised
+            else:
+                assert not raised
+                assert charm.name == params.charm_name
+                assert str(charm.channel) == params.charm_channel
+                assert charm.revision == params.charm_revision
+                assert charm.ubuntu_arch == params.ubuntu_arch

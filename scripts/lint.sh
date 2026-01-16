@@ -20,4 +20,5 @@ poetry run bandit \
         scripts
 poetry run mypy bundle_builder
 poetry run mypy charm_integration_testing
+poetry run yamlfix --check $(find . -name '*.yaml' -o -name '*.yml') || { echo "ERROR: yamlfix check failed"; exit 1; }
 markdownlint-cli2 --config docs/.sphinx/.markdownlint.json "#docs/_build" "*.md"

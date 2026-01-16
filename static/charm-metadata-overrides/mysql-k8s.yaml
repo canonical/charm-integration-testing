@@ -1,3 +1,4 @@
+---
 # Remove after: https://github.com/canonical/mysql-k8s-operator/pull/626
 provides:
   database:
@@ -21,7 +22,7 @@ provides:
   mysql-root:
     optional: true
     limit_if:
-      - criteria: 
+      - criteria:
           - any_of:
               - endpoint_integrated: database
               - endpoint_integrated: mysql

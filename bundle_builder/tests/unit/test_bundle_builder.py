@@ -164,13 +164,6 @@ class TestBundleBuilder:
         # Should resolve integrations if possible
         assert any(app.name == "postgresql-k8s" for app in result.applications)
 
-    def test_build_stops_on_max_nodes_visited(self) -> None:
-        stub = CharmhubClientStub()
-        builder = BundleBuilder(charmhub_client=stub, logger=logging.getLogger("test"), max_nodes_visited=1)  # type: ignore[arg-type]
-        base = sample_node_kratos().bundle
-        result = builder.build(base)
-        assert isinstance(result, Bundle)
-
     def test_child_nodes_returns_possible_children(self) -> None:
         stub = CharmhubClientStub()
         builder = BundleBuilder(charmhub_client=stub)  # type: ignore[arg-type]

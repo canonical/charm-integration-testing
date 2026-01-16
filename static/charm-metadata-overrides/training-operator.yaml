@@ -1,3 +1,4 @@
+---
 # Training Operator - distributed training on Kubernetes
 provides:
   # Remove after: https://github.com/canonical/charm-integration-testing/issues/282

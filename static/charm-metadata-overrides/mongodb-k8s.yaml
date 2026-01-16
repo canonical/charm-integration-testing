@@ -1,3 +1,4 @@
+---
 # Remove after: https://github.com/canonical/mongodb-k8s-operator/pull/408
 provides:
   database:
@@ -10,6 +11,10 @@ provides:
     optional: true
   config-server:
     optional: true
+    limit_if:
+      - criteria:
+          - endpoint_integrated: sharding
+        limit: 0
   cluster:
     optional: true
 requires:
@@ -18,8 +23,11 @@ requires:
   s3-credentials:
     optional: true
   sharding:
-    optional: true
-
+    limit_if:
+      - criteria:
+          - endpoint_integrated: config-server
+        limit: 0
+    limit: 1
   ldap:
     optional_if:
       - none_of:

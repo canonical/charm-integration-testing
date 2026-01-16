@@ -1,3 +1,4 @@
+---
 # Knative Operator - manages Knative components
 provides:
   # Remove after: https://github.com/canonical/charm-integration-testing/issues/282

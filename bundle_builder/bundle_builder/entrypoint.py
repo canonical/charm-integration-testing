@@ -45,7 +45,9 @@ def add_args_to_parser(parser: argparse.ArgumentParser) -> None:
         "--charms",
         type=str,
         nargs="+",
-        help="Charms to include in the bundle, format <application_name>::<charm>::<channel_or_revision>::<base>. Charm channel or revision, and base may be `default`.",
+        help="Charms to include in the bundle, format <application_name>::<charm>::<channel>::<revision>::<base>. "
+        "Channel format is '<track>/<risk>/<branch>' (track and branch optional), revision is an integer. "
+        "Use 'default' for channel, revision, or base to use defaults.",
         required=True,
     )
     parser.add_argument(
@@ -96,22 +98,29 @@ def applications_from_args(
     for spec in specs:
         # Get charm specs
         try:
-            name, spec_charm, channel_or_revision, spec_base = spec.split("::")
+            name, charm_str, channel_str, revision_str, base_str = spec.split("::")
         except ValueError:
-            parser.error(f"Invalid charm format: '{spec}'")
-        channel = None
+            parser.error(
+                f"Invalid charm format: '{spec}' - expected format <name>::<charm>::<channel>::<revision>::<base>"
+            )
+
+        # Parse channel
+        channel = None if channel_str == "default" else channel_str
+
+        # Parse revision
         revision = None
-        if channel_or_revision != "default":
-            if channel_or_revision.isnumeric():
-                revision = int(channel_or_revision)
-            else:
-                channel = channel_or_revision
-        base = spec_base if spec_base != "default" else None
+        if revision_str != "default":
+            if not revision_str.isnumeric():
+                parser.error(f"Invalid revision in '{spec}': revision must be numeric, got '{revision_str}'")
+            revision = int(revision_str)
+
+        # Parse base
+        base = None if base_str == "default" else base_str
 
         # Get charm from store
         try:
             charm = charmhub_client.charm_from_store(
-                charm_name=spec_charm,
+                charm_name=charm_str,
                 charm_channel=channel,
                 charm_revision=revision,
                 ubuntu_version=base,
