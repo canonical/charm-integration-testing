@@ -13,7 +13,7 @@ Inputs and outputs
 
 The bundle-building algorithm accepts a base bundle of charms and integrations specified by the
 user, and the product is a bundle with additional applications that fulfill all non-optional
-endpoints. If the algorithm cannot find a bundle configuration that that meets this criteria
+endpoints. If the algorithm cannot find a bundle configuration that meets this criteria
 it will fail with an error.
 
 How the graph is defined
