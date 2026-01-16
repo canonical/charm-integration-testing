@@ -32,12 +32,6 @@ class CharmChannel:
     risk: str
     branch: str
 
-    @overload  # type: ignore[no-overload-impl]
-    def __init__(self, value: str) -> None: ...
-
-    @overload
-    def __init__(self, track: str, risk: str, branch: str) -> None: ...
-
     @model_validator(mode="wrap")
     @classmethod
     def validate_from_string(cls, value: Any, handler: Any) -> Any:
@@ -306,17 +300,6 @@ class CharmConfigCriteria:
 class CharmTestConfig:
     criteria: CharmConfigCriteria = Field(default=CharmConfigCriteria.from_bool(True))
     config: CharmConfig = Field(default_factory=CharmConfig)
-
-    @overload  # type: ignore[no-overload-impl]
-    def __init__(self, value: dict[str, Any]) -> None: ...
-
-    @overload
-    def __init__(
-        self,
-        *,
-        criteria: CharmConfigCriteria = CharmConfigCriteria.from_bool(True),
-        config: CharmConfig = tuple(),
-    ) -> None: ...
 
     @model_validator(mode="wrap")
     @classmethod
