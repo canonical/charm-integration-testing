@@ -21,8 +21,12 @@ from bundle_builder import CharmhubClient, OverridesClient
 
 
 @pytest.fixture
-def overrides_client() -> OverridesClient:
-    static_charm_metadata_overrides = Path(__file__).parent / "../../../static/charm-metadata-overrides"
+def static_charm_metadata_overrides() -> Path:
+    return Path(__file__).parent / "../../../static/charm-metadata-overrides"
+
+
+@pytest.fixture
+def overrides_client(static_charm_metadata_overrides: Path) -> OverridesClient:
     return OverridesClient(charm_metadata_overrides=static_charm_metadata_overrides)
 
 
