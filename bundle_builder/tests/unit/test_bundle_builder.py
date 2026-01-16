@@ -250,8 +250,7 @@ class TestBundleBuilder:
         )
 
         stub = CharmhubClientStub()
-        # TODO(raul): remove type ignore in subsequent type checker PRs
-        builder = BundleBuilder(charmhub_client=stub)  # type: ignore[arg-type]
+        builder = BundleBuilder(charmhub_client=stub)
         node = Node(bundle=bundle, aggression=0.0)
 
         # WHEN checking child nodes for the SSL requirer endpoint
@@ -322,8 +321,7 @@ class TestBundleBuilder:
         )
 
         stub = CharmhubClientStub()
-        # TODO(raul): remove type ignore in subsequent type checker PRs
-        builder = BundleBuilder(charmhub_client=stub)  # type: ignore[arg-type]
+        builder = BundleBuilder(charmhub_client=stub)
         node = Node(bundle=bundle, aggression=0.0)
 
         # WHEN checking child nodes for the requirer endpoint
@@ -386,8 +384,7 @@ class TestBundleBuilder:
         )
 
         stub = CharmhubClientStub()
-        # TODO(raul): remove type ignore in subsequent type checker PRs
-        builder = BundleBuilder(charmhub_client=stub)  # type: ignore[arg-type]
+        builder = BundleBuilder(charmhub_client=stub)
         node = Node(bundle=bundle, aggression=0.0)
 
         # WHEN checking child nodes for the requirer endpoint
@@ -768,8 +765,7 @@ class TestAddTestConfigs:
             charm = dataclasses.replace(
                 sample_charm_postgresql_k8s(),
                 name="test-charm",
-                # TODO(raul): remove type: ignore in subsequent type checker-related PR
-                channel="1.0/stable",  # type: ignore[arg-type]
+                channel="1.0/stable",
                 test_configs=(
                     CharmTestConfig(
                         criteria=CharmConfigCriteria(track="1.0"),
@@ -915,8 +911,7 @@ class TestAddTestConfigs:
             charm1 = dataclasses.replace(
                 sample_charm_postgresql_k8s(),
                 name="charm1",
-                # TODO(raul): remove type: ignore in subsequent type checker-related PR
-                channel="1.0/stable",  # type: ignore[arg-type]
+                channel="1.0/stable",
                 test_configs=(
                     CharmTestConfig(
                         criteria=CharmConfigCriteria(track="1.0"),
@@ -927,8 +922,7 @@ class TestAddTestConfigs:
             charm2 = dataclasses.replace(
                 sample_charm_kratos(),
                 name="charm2",
-                # TODO(raul): remove type: ignore in subsequent type checker-related PR
-                channel="2.0/stable",  # type: ignore[arg-type]
+                channel="2.0/stable",
                 test_configs=(
                     CharmTestConfig(
                         criteria=CharmConfigCriteria(track="2.0"),
@@ -992,8 +986,7 @@ class TestAddTestConfigs:
             charm = dataclasses.replace(
                 sample_charm_kratos(),
                 name="test-charm",
-                # TODO(raul): remove type: ignore in subsequent type checker-related PR
-                channel="1.0/stable",  # type: ignore[arg-type]
+                channel="1.0/stable",
                 endpoints=frozenset(
                     {
                         dataclasses.replace(

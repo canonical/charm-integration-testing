@@ -70,8 +70,7 @@ class OverridesStub(OverridesClient):
     def get_charm_test_configs(self, charm: str) -> list[CharmTestConfig]:  # type: ignore[override]
         configs = self.charm_test_configs.get(charm, [])
         # Use CharmTestConfigs wrapper to let Pydantic validate the list properly
-        # TODO(raul): remove type: ignore in subsequent type checker-related PR
-        return CharmTestConfigs(configs=configs).configs  # type: ignore[arg-type]
+        return CharmTestConfigs(configs=configs).configs
 
 
 matching_base = CharmhubBase(name="ubuntu", architecture="amd64", channel="20.04")
@@ -1056,8 +1055,7 @@ class TestCharmhubClient:
                         revision=42,
                         bases=[matching_base],
                         config=yaml.dump({"provides": {"endpoint-a": {"interface": "interface-a"}}}),
-                        # TODO(raul): remove type: ignore in subsequent type checker-related PR
-                        metadata=yaml.dump({"provides": {"endpoint-a": {"interface": "interface-a"}}}),  # type: ignore[arg-type]
+                        metadata=yaml.dump({"provides": {"endpoint-a": {"interface": "interface-a"}}}),
                     ),
                 ),
                 supported_versions_refresh_response=RefreshResponse(
@@ -1083,8 +1081,7 @@ class TestCharmhubClient:
                         revision=99,
                         bases=[matching_base],
                         config=yaml.dump({}),
-                        # TODO(raul): remove type: ignore in subsequent type checker-related PR
-                        metadata=yaml.dump({}),  # type: ignore[arg-type]
+                        metadata=yaml.dump({}),
                     ),
                 ),
                 supported_versions_refresh_response=RefreshResponse(
@@ -1111,8 +1108,7 @@ class TestCharmhubClient:
                         revision=50,
                         bases=[matching_base, other_base],
                         config=yaml.dump({}),
-                        # TODO(raul): remove type: ignore in subsequent type checker-related PR
-                        metadata=yaml.dump({}),  # type: ignore[arg-type]
+                        metadata=yaml.dump({}),
                     ),
                 ),
                 supported_versions_refresh_response=RefreshResponse(

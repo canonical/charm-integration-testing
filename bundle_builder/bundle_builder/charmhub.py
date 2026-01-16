@@ -205,8 +205,7 @@ class CharmhubClient:
         # Return Charm from refresh info
         return Charm(
             name=charm_name,
-            # TODO(raul): remove type: ignore in subsequent type checker-related PR
-            channel=charm_channel,  # type: ignore[arg-type]
+            channel=charm_channel,
             revision=charm_revision,
             ubuntu_version=ubuntu_version,
             ubuntu_arch=ubuntu_arch,
@@ -261,8 +260,7 @@ class CharmhubClient:
 
         return Charm(
             name=charm_name,
-            # TODO(raul): remove type: ignore in subsequent type checker-related PR
-            channel=default_refresh_info.effective_channel,  # type: ignore[arg-type]
+            channel=default_refresh_info.effective_channel,
             revision=charm_revision,
             ubuntu_version=ubuntu_version,
             ubuntu_arch=ubuntu_arch,
@@ -311,8 +309,7 @@ class CharmhubClient:
 
         return Charm(
             name=charm_name,
-            # TODO(raul): remove type: ignore in subsequent type checker-related PR
-            channel=charm_channel,  # type: ignore[arg-type]
+            channel=charm_channel,
             revision=refresh_info.charm.revision,
             ubuntu_version=ubuntu_version,
             ubuntu_arch=ubuntu_arch,
@@ -352,8 +349,7 @@ class CharmhubClient:
 
         return Charm(
             name=charm_name,
-            # TODO(raul): remove type: ignore in subsequent type checker-related PR
-            channel=refresh_info.effective_channel,  # type: ignore[arg-type]
+            channel=refresh_info.effective_channel,
             revision=refresh_info.charm.revision,
             ubuntu_version=ubuntu_version,
             ubuntu_arch=ubuntu_arch,
@@ -568,8 +564,7 @@ class CharmhubClient:
                     endpoint_name in metadata_overrides_map
                     and metadata_overrides_map[endpoint_name].features is not None
                 ):
-                    # TODO(raul): remove type: ignore in subsequent type checker-related PR
-                    features = frozenset(metadata_overrides_map[endpoint_name].features)  # type: ignore[arg-type]
+                    features = frozenset(metadata_overrides_map[endpoint_name].features)
                 else:
                     features = frozenset()
 
@@ -579,10 +574,9 @@ class CharmhubClient:
                         type=endpoint_type,
                         name=endpoint_name,
                         interface=endpoint.interface,
-                        # TODO(raul): remove type: ignore in subsequent type checker-related PR
-                        optionality=optionality,  # type: ignore
-                        # TODO(raul): remove type: ignore in subsequent type checker-related PR
-                        limits=limits,  # type: ignore
+                        optionality=optionality,
+                        limits=limits,
+>>>>>>> f87d2f9 (chore: remove type: ignore comments)
                         features=features,
                     )
                 )

@@ -32,8 +32,7 @@ class TestEndpointFeatures:
         # GIVEN a provider charm with SSL feature
         provider_with_ssl = Charm(
             name="database",
-            # TODO(raul): remove type: ignore in subsequent type checker-related PR
-            channel="stable",  # type: ignore
+            channel="stable",
             revision=1,
             ubuntu_version="22.04",
             ubuntu_arch="amd64",
@@ -55,8 +54,7 @@ class TestEndpointFeatures:
         # AND a requirer charm with an optional endpoint that requires SSL feature
         requirer_with_ssl_requirement = Charm(
             name="app",
-            # TODO(raul): remove type: ignore in subsequent type checker-related PR
-            channel="stable",  # type: ignore
+            channel="stable",
             revision=1,
             ubuntu_version="22.04",
             ubuntu_arch="amd64",
@@ -86,8 +84,7 @@ class TestEndpointFeatures:
         # AND a monitoring provider
         monitoring_provider = Charm(
             name="prometheus",
-            # TODO(raul): remove type: ignore in subsequent type checker-related PR
-            channel="stable",  # type: ignore
+            channel="stable",
             revision=1,
             ubuntu_version="22.04",
             ubuntu_arch="amd64",
@@ -144,8 +141,7 @@ class TestEndpointFeatures:
         # GIVEN a provider charm WITHOUT SSL feature
         provider_without_ssl = Charm(
             name="database",
-            # TODO(raul): remove type: ignore in subsequent type checker-related PR
-            channel="stable",  # type: ignore
+            channel="stable",
             revision=1,
             ubuntu_version="22.04",
             ubuntu_arch="amd64",
@@ -167,8 +163,7 @@ class TestEndpointFeatures:
         # AND a requirer charm with an optional endpoint that requires SSL feature
         requirer_with_ssl_requirement = Charm(
             name="app",
-            # TODO(raul): remove type: ignore in subsequent type checker-related PR
-            channel="stable",  # type: ignore
+            channel="stable",
             revision=1,
             ubuntu_version="22.04",
             ubuntu_arch="amd64",
@@ -198,8 +193,7 @@ class TestEndpointFeatures:
         # AND a monitoring provider
         monitoring_provider = Charm(
             name="prometheus",
-            # TODO(raul): remove type: ignore in subsequent type checker-related PR
-            channel="stable",  # type: ignore
+            channel="stable",
             revision=1,
             ubuntu_version="22.04",
             ubuntu_arch="amd64",
@@ -259,8 +253,7 @@ class TestEndpointFeatures:
         # GIVEN a provider charm with multiple features
         provider = Charm(
             name="database",
-            # TODO(raul): remove type: ignore in subsequent type checker-related PR
-            channel="stable",  # type: ignore
+            channel="stable",
             revision=1,
             ubuntu_version="22.04",
             ubuntu_arch="amd64",
@@ -282,8 +275,7 @@ class TestEndpointFeatures:
         # AND two requirer charms with different feature requirements
         requirer1 = Charm(
             name="app1",
-            # TODO(raul): remove type: ignore in subsequent type checker-related PR
-            channel="stable",  # type: ignore
+            channel="stable",
             revision=1,
             ubuntu_version="22.04",
             ubuntu_arch="amd64",
@@ -304,8 +296,7 @@ class TestEndpointFeatures:
 
         requirer2 = Charm(
             name="app2",
-            # TODO(raul): remove type: ignore in subsequent type checker-related PR
-            channel="stable",  # type: ignore
+            channel="stable",
             revision=1,
             ubuntu_version="22.04",
             ubuntu_arch="amd64",
@@ -380,8 +371,7 @@ class TestEndpointFeatures:
         # GIVEN a provider with features
         provider = Charm(
             name="database",
-            # TODO(raul): remove type: ignore in subsequent type checker-related PR
-            channel="stable",  # type: ignore
+            channel="stable",
             revision=1,
             ubuntu_version="22.04",
             ubuntu_arch="amd64",
@@ -403,8 +393,7 @@ class TestEndpointFeatures:
         # AND a requirer with complex optionality (requires both SSL AND backup features)
         requirer = Charm(
             name="app",
-            # TODO(raul): remove type: ignore in subsequent type checker-related PR
-            channel="stable",  # type: ignore
+            channel="stable",
             revision=1,
             ubuntu_version="22.04",
             ubuntu_arch="amd64",
@@ -440,8 +429,7 @@ class TestEndpointFeatures:
 
         logger = Charm(
             name="logger",
-            # TODO(raul): remove type: ignore in subsequent type checker-related PR
-            channel="stable",  # type: ignore
+            channel="stable",
             revision=1,
             ubuntu_version="22.04",
             ubuntu_arch="amd64",

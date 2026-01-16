@@ -64,8 +64,7 @@ def sample_charm_endpoint_postgresql_k8s_database() -> CharmEndpoint:
 def sample_charm_postgresql_k8s() -> Charm:
     return Charm(
         name="postgresql-k8s",
-        # TODO(raul): remove type: ignore in subsequent type checker-related PR
-        channel="stable",  # type: ignore[arg-type]
+        channel="stable",
         revision=1,
         ubuntu_version="22.04",
         ubuntu_arch="amd64",
@@ -102,8 +101,7 @@ def sample_charm_endpoint_pgbouncer_k8s_backend_database() -> CharmEndpoint:
 def sample_charm_pgbouncer_k8s() -> Charm:
     return Charm(
         name="pgbouncer-k8s",
-        # TODO(raul): remove type: ignore in subsequent type checker-related PR
-        channel="stable",  # type: ignore[arg-type]
+        channel="stable",
         revision=1,
         ubuntu_version="22.04",
         ubuntu_arch="amd64",
@@ -130,8 +128,7 @@ def sample_charm_endpoint_kratos_pg_database() -> CharmEndpoint:
 def sample_charm_kratos() -> Charm:
     return Charm(
         name="kratos",
-        # TODO(raul): remove type: ignore in subsequent type checker-related PR
-        channel="edge",  # type: ignore[arg-type]
+        channel="edge",
         revision=123,
         ubuntu_version="24.04",
         ubuntu_arch="amd64",
@@ -157,8 +154,7 @@ def sample_charm_endpoint_self_signed_certificates_certificates() -> CharmEndpoi
 def sample_charm_self_signed_certificates() -> Charm:
     return Charm(
         name="self-signed-certificates",
-        # TODO(raul): remove type: ignore in subsequent type checker-related PR
-        channel="edge",  # type: ignore[arg-type]
+        channel="edge",
         revision=444,
         ubuntu_version="20.04",
         ubuntu_arch="amd64",
