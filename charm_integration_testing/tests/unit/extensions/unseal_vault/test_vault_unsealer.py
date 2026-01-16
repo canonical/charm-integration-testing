@@ -123,6 +123,10 @@ class JujuStub(JujuBackend):
     def version(self) -> None:  # type: ignore[override]
         pass
 
+    def get_application_config(self, model: str, application: str) -> None:  # type: ignore[override]
+        pass
+
+
 
 @dataclass
 class VaultStub(VaultClient):
