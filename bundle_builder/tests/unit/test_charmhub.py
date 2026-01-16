@@ -1018,7 +1018,8 @@ class TestCharmhubClient:
                         revision=42,
                         bases=[matching_base],
                         config=yaml.dump({"provides": {"endpoint-a": {"interface": "interface-a"}}}),
-                        metadata=yaml.dump({"provides": {"endpoint-a": {"interface": "interface-a"}}}),
+                        # TODO(raul): type: ignore
+                        metadata=yaml.dump({"provides": {"endpoint-a": {"interface": "interface-a"}}}),  # type: ignore[arg-type]
                     ),
                 ),
                 supported_versions_refresh_response=RefreshResponse(
@@ -1044,7 +1045,8 @@ class TestCharmhubClient:
                         revision=99,
                         bases=[matching_base],
                         config=yaml.dump({}),
-                        metadata=yaml.dump({}),
+                        # TODO(raul): type: ignore
+                        metadata=yaml.dump({}),  # type: ignore[arg-type]
                     ),
                 ),
                 supported_versions_refresh_response=RefreshResponse(
@@ -1071,7 +1073,8 @@ class TestCharmhubClient:
                         revision=50,
                         bases=[matching_base, other_base],
                         config=yaml.dump({}),
-                        metadata=yaml.dump({}),
+                        # TODO(raul): type: ignore
+                        metadata=yaml.dump({}),  # type: ignore[arg-type]
                     ),
                 ),
                 supported_versions_refresh_response=RefreshResponse(

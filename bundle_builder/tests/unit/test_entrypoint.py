@@ -231,10 +231,13 @@ class TestApplicationFromArgs:
             applications={
                 Application(
                     name="target",
-                    # TODO(raul): remove type ignore in subsequent type checker PRs
                     charm=dataclasses.replace(
-                        sample_charm_postgresql_k8s(), channel="edge", revision=111, ubuntu_version="24.04"
-                    ),  # type: ignore
+                        sample_charm_postgresql_k8s(),
+                        # TODO(raul): type: ignore
+                        channel="edge",  # type: ignore[arg-type]
+                        revision=111,
+                        ubuntu_version="24.04",
+                    ),
                 )
             },
         ),

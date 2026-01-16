@@ -18,7 +18,6 @@ from dataclasses import field
 from functools import wraps
 from typing import Any, Callable, Dict, Type, TypeVar, get_type_hints, overload
 
-
 from pydantic.dataclasses import dataclass
 from typing_extensions import dataclass_transform
 
@@ -77,7 +76,6 @@ def make_cached_method(cached_field_name: str, method: Callable[..., Any]) -> Ca
         return result
 
     return wrapped
-
 
 
 _T = TypeVar("_T", bound=Type[Any])

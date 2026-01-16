@@ -203,7 +203,8 @@ class CharmhubClient:
         # Return Charm from refresh info
         return Charm(
             name=charm_name,
-            channel=charm_channel,
+            # TODO(raul): type: ignore
+            channel=charm_channel,  # type: ignore[arg-type]
             revision=charm_revision,
             ubuntu_version=ubuntu_version,
             ubuntu_arch=ubuntu_arch,
