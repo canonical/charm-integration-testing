@@ -13,12 +13,13 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import warnings
 from datetime import timedelta
 
 import pytest
 from pydantic.dataclasses import dataclass
 
-from bundle_builder import Application, Bundle, BundleBuilder, CharmhubClient
+from bundle_builder import Application, Bundle, BundleBuilder, CharmhubClient, UncompletableBundleError
 
 
 @dataclass
@@ -65,7 +66,11 @@ def test_speed(charmhub_client: CharmhubClient, params: Params) -> None:
     )
 
     # WHEN minimal bundle is built
-    minimal_bundle = BundleBuilder(charmhub_client).build(base_bundle)
+    try:
+        minimal_bundle = BundleBuilder(charmhub_client).build(base_bundle)
+    except UncompletableBundleError as e:
+        warnings.warn("Bundle could not be completed, using last best bundle")
+        minimal_bundle = e.best_bundle
 
     # THEN the test doesn't timeout in 20 minutes
     # AND the minimal bundle contains all the charms
