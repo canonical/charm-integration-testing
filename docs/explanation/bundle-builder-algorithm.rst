@@ -12,8 +12,9 @@ Inputs and outputs
 ------------------
 
 The bundle-building algorithm accepts a base bundle of charms and integrations specified by the
-user, and the product is a bundle with additional applications that fulfill as many non-optional
-endpoints as possible.
+user, and the product is a bundle with additional applications that fulfill all non-optional
+endpoints. If the algorithm cannot find a bundle configuration that that meets this criteria
+it will fail with an error.
 
 How the graph is defined
 ------------------------
@@ -29,7 +30,7 @@ integrations added by the bundle builder.
 
 It should be noted that because a node's uniqueness is defined as the *unordered* set of integrations, child nodes can converge, as shown in the example below, so this is not a tree. This makes the traversal more efficient as it removes repetitive checking of paths and allows the algorithm to explore bundles with different integration structures.
 
-.. mermaid:: 
+.. mermaid::
 
     graph TD;
         A[grafana-k8s<br>grafana-agent-k8s];
@@ -50,11 +51,12 @@ The target node
 The target node, or node that we want to find in the undiscovered graph, is one that is the bundle
 for which there are no more charm endpoints that can be fulfilled.
 
-Some charms in Charmhub have required endpoints for which no charm can fulfill them. These are
-referred to as unfulfillable interfaces.
-
 There may be more than one of these nodes in the graph, but due to the size of some of the graphs,
 we cannot fully explore and find all these nodes.
+
+Some charms in Charmhub have required endpoints for which no charm can fulfill them. These are
+referred to as unfulfillable interfaces. Such charms will ultimately remain unfulfilled, and a
+bundle build with them will not be valid.
 
 Graph traversal: uniform cost search
 ------------------------------------
