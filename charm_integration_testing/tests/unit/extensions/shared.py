@@ -1,11 +1,11 @@
 from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import Any, Iterable, Mapping
-from juju.backend import JujuIntegrationApplication
+from juju.backend import JujuBackend, JujuIntegrationApplication
 
 
 @dataclass
-class JujuStub:
+class JujuStub(JujuBackend):
     deployed: list = field(default_factory=list)
     configured: list = field(default_factory=list)
     waited_idle: list = field(default_factory=list)
@@ -99,5 +99,62 @@ class JujuStub:
     def unit_ip(self, model: str, unit: str):
         """Return the IP address of a unit"""
         return self.unit_ips[unit]
+
+    # Dummy methods to satisfy abstract base class requirements
+
+    def num_units(self, model: str, application: str) -> None:  # type: ignore[override]
+        pass
+
+    def scale_application(self) -> None:  # type: ignore[override]
+        pass
+
+    def list_integrations(self) -> None:  # type: ignore[override]
+        pass
+
+    def juju_status_text(self) -> None:  # type: ignore[override]
+        pass
+
+    def remove_integration(self) -> None:  # type: ignore[override]
+        pass
+
+    def deploy_bundle_file(self) -> None:  # type: ignore[override]
+        pass
+
+    def remove_applications(self) -> None:  # type: ignore[override]
+        pass
+
+    def wait_for_removal(self) -> None:  # type: ignore[override]
+        pass
+
+    def wait_for_removal_of_integration(self) -> None:  # type: ignore[override]
+        pass
+
+    def wait_for_removal_of_units(self) -> None:  # type: ignore[override]
+        pass
+
+    def application_units(self) -> None:  # type: ignore[override]
+        pass
+
+    def exec_unit(self) -> None:  # type: ignore[override]
+        pass
+
+    def add_secret(self) -> None:  # type: ignore[override]
+        pass
+
+    def read_secret(self) -> None:  # type: ignore[override]
+        pass
+
+    def grant_secret(self) -> None:  # type: ignore[override]
+        pass
+
+    def remove_secret(self) -> None:  # type: ignore[override]
+        pass
+
+    def get_charm_revisions(self) -> None:  # type: ignore[override]
+        pass
+
+    def version(self) -> None:  # type: ignore[override]
+        pass
+
 
     # Additional methods can be added as needed for testing

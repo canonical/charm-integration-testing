@@ -12,6 +12,7 @@ from extensions.configure_livepatch_server.extensions import (
     LIVEPATCH_SERVER_CONFIGURE_MESSAGE,
     ConfigureLivepatchServerExtension,
 )
+from juju.backend import JujuBackend
 from ..shared import JujuStub as JujuStubBase
 
 
