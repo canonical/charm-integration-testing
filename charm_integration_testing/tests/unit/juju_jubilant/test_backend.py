@@ -635,7 +635,7 @@ class TestJubilantBackend:
             def deploy(self, charm: str, app: str | None = None, config: Any = None) -> None:
                 self.charm = charm
                 self.app = app
-                # config is ignored for this stub
+                self.config = config
 
         def test(self) -> None:
             # GIVEN
@@ -643,11 +643,12 @@ class TestJubilantBackend:
             client = JubilantClientStub(client=stub)
 
             # WHEN
-            JubilantBackend(client).deploy_application("test-model", charm="my-charm", application="my-app")
+            JubilantBackend(client).deploy_application("test-model", charm="my-charm", application="my-app", config={"setting": "value"})
 
             # THEN
             assert stub.charm == "my-charm"
             assert stub.app == "my-app"
+            assert stub.config == {"setting": "value"}
 
     class TestConfigureApplication:
         @dataclass
