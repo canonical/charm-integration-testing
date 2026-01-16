@@ -1,0 +1,19 @@
+---
+provides:
+  dashboard:
+    optional: true
+  grafana-dashboard:
+    optional: true
+  metrics-endpoint:
+    optional: true
+requires:
+  ingress:
+    optional: true
+  ingress-ssh:
+    optional: true
+  nginx-route:
+    optional: true
+  receive-ca-cert:
+    # TODO: this needs to be the same cert-transfer bridge as the oauth's ingress certs
+    # Currently the bundle builder sometimes makes the wrong choice.
+    optional: false
