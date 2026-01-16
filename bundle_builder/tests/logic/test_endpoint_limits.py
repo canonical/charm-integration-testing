@@ -31,6 +31,49 @@ from .conftest import CharmhubClientStub
 
 class TestEndpointLimits:
     class TestEdgeCases:
+        def test_unfulfillable_endpoint_never_builds(self) -> None:
+            # GIVEN an unfulfillable charm
+            unfulillable_charm = Charm(
+                name="unfulfillable-charm",
+                channel="stable",
+                revision=1,
+                ubuntu_version="22.04",
+                ubuntu_arch="amd64",
+                endpoints=frozenset(
+                    {
+                        CharmEndpoint(
+                            type=ENDPOINT_REQUIRES,
+                            name="oneway",
+                            interface="entry",
+                            optionality=CharmEndpointOptionality.from_bool(False),
+                            limits=(),
+                        )
+                    }
+                ),
+                priority=1.0,
+            )
+            bundle = Bundle(
+                applications=frozenset(
+                    {
+                        Application(name="snowflake", charm=unfulillable_charm),
+                    }
+                ),
+                integrations=frozenset(),
+                platform="machine",
+                arch="amd64",
+            )
+
+            # AND a bundle builder with a charmhub client that knows about the charm
+            builder = BundleBuilder(CharmhubClientStub(unfulillable_charm))
+
+            # WHEN we build the bundle
+            # THEN it errors because of unfulfilled endpoints
+            with pytest.raises(UnfulfilledEndpointsError) as caught:
+                builder.build(bundle)
+
+            # AND the non-optional endpoint is not fulfilled
+            assert caught.value.unfulfilled_endpoints == {ApplicationEndpoint("snowflake", "oneway")}
+
         def test_zero_limit_on_required_endpoint_never_builds(self) -> None:
             # GIVEN a charm with limit 0
             zero_limit_charm = Charm(
