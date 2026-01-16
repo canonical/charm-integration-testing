@@ -138,6 +138,15 @@ class TestEndpointLimits:
             # AND the zero-limit non-optional endpoint is not fulfilled
             assert caught.value.unfulfilled_endpoints == {ApplicationEndpoint("client", "http")}
 
+            # AND in the last best bundle, no integration should exist between server:disabled and client:http
+            expected = Integration(
+                {
+                    ApplicationEndpoint("server", "disabled"),
+                    ApplicationEndpoint("client", "http"),
+                }
+            )
+            assert expected not in caught.value.best_bundle.integrations
+
         def test_limit_applies_to_both_endpoints_in_integration(self) -> None:
             # GIVEN two charms both with limits
             charm1 = Charm(
@@ -447,6 +456,13 @@ class TestEndpointLimits:
             #   because we don't allow chaining forever even with unlimited endpoint, and
             #   because we don't allow loops
             assert caught.value.unfulfilled_endpoints == {ApplicationEndpoint("grafana-agent-k8s", "tracing-consumer")}
+
+            result = caught.value.best_bundle
+
+            # AND in the last built bundle, it should not exceed the limit
+            grafana_apps = [app for app in result.applications if app.charm.name == "grafana-agent-k8s"]
+            # AND it should stop adding new instances when limit is reached
+            assert len(grafana_apps) < 10  # Definitely not infinite!
 
     class TestConditionalLimits:
         """Test scenarios where endpoint limits depend on other integrated endpoints."""
