@@ -15,7 +15,7 @@
 
 import pytest
 
-from bundle_builder.bundle import Application, ApplicationEndpoint, Bundle, Integration
+from bundle_builder.bundle import Application, ApplicationEndpoint, Bundle
 from bundle_builder.bundle_builder import BundleBuilder, UnfulfilledEndpointsError
 from bundle_builder.charm import (
     ENDPOINT_PROVIDES,

@@ -18,7 +18,6 @@ import dataclasses
 import heapq
 import logging
 import random
-from typing import Self
 
 from .bundle import Application, ApplicationEndpoint, Bundle, Integration
 from .charm import ENDPOINT_PROVIDES, ENDPOINT_REQUIRES, CharmConfig
@@ -140,7 +139,7 @@ class BundleBuilder:
         # Raise exception on unfulfillable endpoints
         # TODO(raul): remove type ignore in subsequent type checker PRs
         if len(best_bundle.unfulfilled_endpoints) > 0:  # type: ignore
-            raise UnfulfilledEndpointsError(best_bundle.unfulfilled_endpoints)
+            raise UnfulfilledEndpointsError(best_bundle.unfulfilled_endpoints)  # type: ignore
 
         # Resolve test configs
         best_bundle = self.add_test_configs(best_bundle)
