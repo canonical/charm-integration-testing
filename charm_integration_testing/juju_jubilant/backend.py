@@ -159,13 +159,12 @@ class JubilantBackend(JujuCmdBackend):
     def wait_for_removal_of_units(self, model: str, applications: list[str], timeout: timedelta | None) -> None:
         self.wait(model, lambda status: applications_have_no_units(status, *applications), timeout=timeout)
 
-    def run_action(self, model: str, unit: str, action: str, params: Mapping[str, Any], wait: float | None = None) -> JujuTask:
+    def run_action(self, model: str, unit: str, action: str, params: Mapping[str, Any]) -> JujuTask:
         try:
             task = self.client.model(model).run(
                 unit=unit,
                 action=action,
                 params=params,
-                wait=wait,
             )
         except jubilant._task.TaskError as e:
             # Just extract the task from the exception

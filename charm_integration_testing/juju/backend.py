@@ -236,7 +236,7 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def run_action(self, model: str, unit: str, action: str, arguments: Mapping[str, Any], wait: float | None = None) -> JujuTask:
+    def run_action(self, model: str, unit: str, action: str, arguments: Mapping[str, Any]) -> JujuTask:
         raise NotImplementedError
 
     @abstractmethod
