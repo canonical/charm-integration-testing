@@ -139,7 +139,7 @@ class BundleBuilder:
         # Raise exception on unfulfillable endpoints
         # TODO(raul): remove type ignore in subsequent type checker PRs
         if len(best_bundle.unfulfilled_endpoints) > 0:  # type: ignore
-            raise UnfulfilledEndpointsError(best_bundle.unfulfilled_endpoints)  # type: ignore
+            raise UnfulfilledEndpointsError(best_bundle)
 
         # Resolve test configs
         best_bundle = self.add_test_configs(best_bundle)
@@ -371,6 +371,11 @@ class BundleBuilder:
 class UncompletableBundleError(ValueError):
     """Exception raised when bundle builder cannot generate a complete bundle from the base bundle"""
 
+    def __init__(self, best_bundle: Bundle, reason: str = "no reason set"):
+        self.best_bundle = best_bundle
+        message = f"Could not build a complete valid bundle: {reason}"
+        super().__init__(message)
+
 
 class UnfulfilledEndpointsError(UncompletableBundleError):
     """UncompletableBundleError when we cannot fulfill required application endpoints.
@@ -379,8 +384,8 @@ class UnfulfilledEndpointsError(UncompletableBundleError):
         unfulfilled_endpoints: The set of application endpoints that could not be fulfilled.
     """
 
-    def __init__(self, unfulfilled_endpoints: frozenset[ApplicationEndpoint]) -> None:
-        self.unfulfilled_endpoints = unfulfilled_endpoints
-        endpoints_list = ", ".join(str(ep) for ep in unfulfilled_endpoints)
-        message = f"Cannot fulfill application endpoints: {endpoints_list}"
-        super().__init__(message)
+    def __init__(self, best_bundle: Bundle) -> None:
+        self.unfulfilled_endpoints = best_bundle.unfulfilled_endpoints
+        # TODO(raul): remove type ignore in subsequent type checker PRs
+        reason = f"Cannot fulfill application endpoints: {', '.join(str(ep) for ep in self.unfulfilled_endpoints)}"  # type: ignore
+        super().__init__(best_bundle, reason=reason)

@@ -228,6 +228,7 @@ def main() -> None:
     try:
         built_bundle = bundle_builder.build(base_bundle)
     except UncompletableBundleError as e:
+        logger.error(f"incomplete built bundle: {e.best_bundle.export()}")
         parser.error(f"Uncompletable bundle: {e}")
 
     logger.info(f"Generated bundle: \n{'-' * 80}\n{built_bundle.export()}{'-' * 80}")
