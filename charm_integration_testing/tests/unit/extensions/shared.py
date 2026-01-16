@@ -1,10 +1,14 @@
 from dataclasses import dataclass, field
+from datetime import timedelta
+from typing import Any, Iterable, Mapping
+from juju.backend import JujuIntegrationApplication
 
 
 @dataclass
 class JujuStub:
     deployed: list = field(default_factory=list)
     configured: list = field(default_factory=list)
+    waited_idle: list = field(default_factory=list)
     waited_messages: list = field(default_factory=list)
     waited_scaled: list = field(default_factory=list)
     waited_settled: list = field(default_factory=list)
@@ -16,6 +20,8 @@ class JujuStub:
     configured_applications: list = field(default_factory=list)
     unit_ips: dict = field(default_factory=dict)
 
+    # Implementation of methods mocking a JujuBackend
+
     def list_applications(self, model: str):
         """Return list of application names in the model"""
         return self.applications.keys()
@@ -24,17 +30,47 @@ class JujuStub:
         """Return the charm name for a given application"""
         return self.applications[application]
 
-    def integration_exists(self, application1: str, endpoint1: str, application2: str, endpoint2: str, model: str):
-        """Check if an integration exists between two applications"""
-        return (application1, endpoint1, application2, endpoint2) in self.integrations
+    def integrate(self, model: str,
+                  target_1: JujuIntegrationApplication, target_2: JujuIntegrationApplication):
+        """Mock integrating two applications (captures call for verification)"""
+        self.integrations.append((
+            model, target_1.application, target_1.endpoint, target_2.application, target_2.endpoint))
 
-    def deploy_application(self, model: str, charm: str, application: str):
+    def integration_exists(self, application1: str, endpoint1: str, application2: str, endpoint2: str, model: str):
+        """Check if an integration exists between two applications
+
+        We treat integrations as undirected for simplicity.
+
+        """
+        for (m, app1, endp1, app2, endp2) in self.integrations:
+            if m != model:
+                continue
+            if (application1 == app1 and endpoint1 == endp1 and application2 == app2 and endpoint2 == endp2):
+                return True
+            if (application1 == app2 and endpoint1 == endp2 and application2 == app1 and endpoint2 == endp1):
+                return True
+        return False
+
+    def deploy_application(self, model: str, charm: str, application: str | None = None,
+                           config: Mapping | None = None):
         """Mock deploying an application (captures call for verification)"""
-        self.deployed.append((model, charm, application))
+        self.deployed.append((model, charm, application))   # Ignoring config for simplicity
 
     def configure_application(self, model: str, application: str, values: dict):
         """Mock configuring an application (captures call for verification)"""
         self.configured_applications.append((model, application, values))
+
+    def get_application_config(self, model: str, application: str) -> Mapping[str, Any]:
+        """Mock getting application configuration (returns empty dict)"""
+        for m, app, values in self.configured_applications:
+            if m == model and app == application:
+                return values
+        raise KeyError(f"Application {application} not configured in model {model}")
+
+    def wait_idle(self, model: str, timeout: timedelta | None, count: int | None,
+                  strict_timeout: bool = False, applications: Iterable[str] | None = None):
+        """Wait for model to become idle (captures call for verification)"""
+        self.waited_idle.append((model, str(timeout), count, strict_timeout, applications))
 
     def wait_application_scaled(self, model: str, application: str, timeout):
         """Wait for application to be scaled (captures call for verification)"""
@@ -63,3 +99,5 @@ class JujuStub:
     def unit_ip(self, model: str, unit: str):
         """Return the IP address of a unit"""
         return self.unit_ips[unit]
+
+    # Additional methods can be added as needed for testing

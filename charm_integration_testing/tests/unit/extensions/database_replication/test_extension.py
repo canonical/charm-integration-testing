@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from datetime import timedelta
 
 import pytest
+from juju.backend import JujuIntegrationApplication
 from extensions.database_replication.database_client import DatabaseClient
 from extensions.database_replication.database_replicator import CharmInfo
 from extensions.database_replication.extension import GenericDatabaseReplicationExtension
@@ -117,7 +118,10 @@ class TestPostgreSQLDatabaseReplicationExtension:
             self, extension: GenericDatabaseReplicationExtension, juju: JujuStub
         ) -> None:
             # GIVEN a model with 2+ postgresql applications and an integration
-            juju.integrations = [("postgresql-1", "logical-replication-offer", "postgresql-2", "logical-replication")]
+            juju.integrate(
+                "test-model",
+                JujuIntegrationApplication("postgresql-1", "logical-replication-offer"),
+                JujuIntegrationApplication("postgresql-2", "logical-replication"))
 
             # WHEN post_deploy is called
             extension.post_deploy("test-model")
@@ -130,7 +134,6 @@ class TestPostgreSQLDatabaseReplicationExtension:
             self, extension: GenericDatabaseReplicationExtension, juju: JujuStub
         ) -> None:
             # GIVEN a model with 2+ postgresql applications but no integrations
-            juju.integrations = []
 
             # WHEN post_deploy is called
             extension.post_deploy("test-model")
@@ -177,7 +180,11 @@ class TestPostgreSQLDatabaseReplicationExtension:
             self, extension: GenericDatabaseReplicationExtension, juju: JujuStub
         ) -> None:
             # GIVEN a model with postgresql applications that have common databases and tables
-            juju.integrations = [("postgresql-1", "logical-replication-offer", "postgresql-2", "logical-replication")]
+            juju.integrate(
+                "test-model",
+                JujuIntegrationApplication("postgresql-1", "logical-replication-offer"),
+                JujuIntegrationApplication("postgresql-2", "logical-replication")
+            )
             database_replicator = extension.database_replicator
 
             # WHEN try_replicate_database_cluster is called
