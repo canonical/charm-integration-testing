@@ -76,7 +76,7 @@ class TestS3IntegratorMinIOBackendExtension:
                     "access-key": MINIO_ACCESS_KEY,
                     "secret-key": MINIO_SECRET_KEY,
                 },
-            ) in juju.configured
+            ) in juju.configured_applications
 
             assert ("test-model", "s3-app", "0:10:00") in juju.waited_scaled
             assert ("test-model", "s3-app-minio", "0:10:00") in juju.waited_scaled
@@ -98,7 +98,7 @@ class TestS3IntegratorMinIOBackendExtension:
                     "endpoint": "http://10.0.0.1:9000",
                     "bucket": MINIO_BUCKET,
                 },
-            ) in juju.configured
+            ) in juju.configured_applications
 
             assert (
                 "test-model",
@@ -186,7 +186,7 @@ class TestS3IntegratorMinIOBackendExtension:
                     "endpoint": "http://10.0.0.1:9000",
                     "bucket": MINIO_BUCKET,
                 },
-            ) in juju.configured
+            ) in juju.configured_applications
 
             # AND credentials are synced
             assert (
