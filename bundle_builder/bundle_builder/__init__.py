@@ -33,5 +33,5 @@ __all__ = [
     "Integration",
     "Node",
     "OverridesClient",
-    "UncompletableBundleError"
+    "UncompletableBundleError",
 ]
