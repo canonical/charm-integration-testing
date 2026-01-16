@@ -1190,8 +1190,7 @@ class TestCharm:
         charm = sample_charm_postgresql_k8s()
 
         # WHEN repr is called
-        # TODO(raul): remove type ignore in subsequent type checker PRs
-        repr = charm.__repr__()  # type: ignore
+        repr = charm.__repr__()
 
         # THEN repr is charm name
         assert repr == charm.name

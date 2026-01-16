@@ -16,29 +16,21 @@
 
 from dataclasses import field
 from functools import wraps
-from typing import Any, Callable, Dict, TypeVar, get_type_hints
+from typing import Any, Callable, Dict, Type, TypeVar, get_type_hints, overload
+
 
 from pydantic.dataclasses import dataclass
 from typing_extensions import dataclass_transform
 
-_F = TypeVar("_F", bound=Callable[..., Any])
+_F = TypeVar("_F")
+_Self = TypeVar("_Self")
+_Return = TypeVar("_Return")
 
 
-# Custom property subclass that allows marking for computed properties
-class _ComputedProperty(property):
-    _is_computed_property = True
-
-    def __init__(self, func: Callable[..., Any]) -> None:
-        super().__init__(func)
-        self._original_func = func
-
-
-# Computed property attribute
-# Meant for use with @immutable_dataclass
-# Computed at initialization once
-def computed_property(func: _F) -> Any:
-    # Return a custom property that mypy understands as a property
-    return _ComputedProperty(func)
+def computed_property(func: Callable[[_Self], _Return]) -> _Return:
+    setattr(func, "_is_computed_property", True)
+    # TODO(raul): type: ignore
+    return func  # type: ignore
 
 
 # Sentinel value for uninitialized computed fields
@@ -87,9 +79,28 @@ def make_cached_method(cached_field_name: str, method: Callable[..., Any]) -> Ca
     return wrapped
 
 
+
+_T = TypeVar("_T", bound=Type[Any])
+
+
+@dataclass_transform(frozen_default=True)
+@overload
+def immutable_dataclass(_cls: _T, **dataclass_kwargs: Any) -> _T: ...
+
+
+@dataclass_transform(frozen_default=True, order_default=True)
+@overload
+def immutable_dataclass(*, order: bool = True) -> Callable[[_T], _T]: ...
+
+
+@dataclass_transform(frozen_default=True)
+@overload
+def immutable_dataclass(**dataclass_kwargs: Any) -> Callable[[_T], _T]: ...
+
+
 # Create an immutable dataclass using frozen=True
 # and defaults slots=True
-@dataclass_transform(frozen_default=True, field_specifiers=(field,))
+@dataclass_transform(frozen_default=True)
 def immutable_dataclass(_cls: type | None = None, **dataclass_kwargs: Any) -> Any:
     def wrap(cls: type) -> Any:
         # Collect methods decorated as computed fields

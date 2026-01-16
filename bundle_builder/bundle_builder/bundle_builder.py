@@ -54,8 +54,7 @@ class Node:
 
     def __lt__(self, other: "Node") -> bool:
         # TODO(raul): add type: ignore[no-any-return]
-        # TODO(raul): remove type ignore in subsequent type checker PRs
-        return self.score < other.score  # type: ignore
+        return self.score < other.score
 
 
 class BundleBuilder:
@@ -338,7 +337,7 @@ class BundleBuilder:
             for test_config in application.charm.test_configs:
                 if test_config.criteria.valid(
                     channel=application.charm.channel,
-                    integrated_endpoints=bundle.application_to_integrated_endpoints[application.name],
+                    integrated_endpoints=set(bundle.application_to_integrated_endpoints[application.name]),
                 ):
                     possible_configs.append(test_config.config)
 
