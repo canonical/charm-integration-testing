@@ -64,7 +64,6 @@ class Node:
 class BundleBuilder:
     charmhub_client: CharmhubClient
     logger: logging.Logger
-    max_nodes_visited: int | None
     aggression_limit: int
     aggression_interval: int
     avoid_application_dependency_cycles: bool
@@ -73,14 +72,12 @@ class BundleBuilder:
         self,
         charmhub_client: CharmhubClient,
         logger: logging.Logger = logging.getLogger(__name__),
-        max_nodes_visited: int | None = None,
         aggression_limit: int = 50000,
         aggression_interval: int = 5000,
         avoid_application_dependency_cycles: bool = False,
     ):
         self.charmhub_client = charmhub_client
         self.logger = logger
-        self.max_nodes_visited = max_nodes_visited
         self.aggression_limit = aggression_limit
         self.aggression_interval = aggression_interval
         self.avoid_application_dependency_cycles = avoid_application_dependency_cycles
@@ -118,11 +115,6 @@ class BundleBuilder:
             if node < best_node:
                 self.logger.info(f"New best bundle: {node.stats}")
                 best_node = node
-
-            # If we've reached the maximum number of visited nodes stop
-            if self.max_nodes_visited is not None and num_visited_nodes >= self.max_nodes_visited:
-                self.logger.info("Reached maximum number of visited nodes, stopping")
-                break
 
             # Get the child nodes
             child_nodes = self.child_nodes(node)
