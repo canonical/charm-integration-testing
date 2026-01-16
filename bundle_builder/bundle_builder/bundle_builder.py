@@ -18,6 +18,7 @@ import dataclasses
 import heapq
 import logging
 import random
+from typing import Self
 
 from .bundle import Application, ApplicationEndpoint, Bundle, Integration
 from .charm import ENDPOINT_PROVIDES, ENDPOINT_REQUIRES, CharmConfig
@@ -136,10 +137,10 @@ class BundleBuilder:
         # Pick the best bundle
         best_bundle = best_node.bundle
 
-        # Note unresolved endpoints
+        # Raise exception on unfulfillable endpoints
         # TODO(raul): remove type ignore in subsequent type checker PRs
-        for application_endpoint in best_bundle.unfulfilled_endpoints:  # type: ignore
-            self.logger.warning(f"Cannot resolve application endpoint: {application_endpoint}")
+        if len(best_bundle.unfulfilled_endpoints) > 0:  # type: ignore
+            raise UnfulfilledEndpointsError(best_bundle.unfulfilled_endpoints)
 
         # Resolve test configs
         best_bundle = self.add_test_configs(best_bundle)
@@ -366,3 +367,21 @@ class BundleBuilder:
 
         # TODO(raul): remove type ignore in subsequent type checker PRs
         return dataclasses.replace(bundle, applications=frozenset(applications))  # type: ignore
+
+
+class UncompletableBundleError(ValueError):
+    """Exception raised when bundle builder cannot generate a complete bundle from the base bundle"""
+
+
+class UnfulfilledEndpointsError(UncompletableBundleError):
+    """UncompletableBundleError when we cannot fulfill required application endpoints.
+
+    Attributes:
+        unfulfilled_endpoints: The set of application endpoints that could not be fulfilled.
+    """
+
+    def __init__(self, unfulfilled_endpoints: frozenset[ApplicationEndpoint]) -> None:
+        self.unfulfilled_endpoints = unfulfilled_endpoints
+        endpoints_list = ", ".join(str(ep) for ep in unfulfilled_endpoints)
+        message = f"Cannot fulfill application endpoints: {endpoints_list}"
+        super().__init__(message)
