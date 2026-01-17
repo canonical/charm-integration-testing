@@ -3,7 +3,7 @@
 
 from dataclasses import field
 from datetime import timedelta
-from typing import Any, Callable, Self
+from typing import Any, Callable, Mapping, Self
 
 import jubilant
 import pytest
@@ -815,3 +815,65 @@ class TestJubilantBackend:
 
             # THEN
             assert charm_revisions == {("my-charm", 1)}
+
+
+    class TestRunAction:
+        @dataclass
+        class ActionStub:
+            unit: str = ""
+            action: str = ""
+            params: dict[str, Any] = field(default_factory=dict)
+
+            def run(self, unit: str, action: str, params: Mapping[str, Any]) -> jubilant.Task:
+                self.unit = unit
+                self.action = action
+                self.params = params
+                return jubilant.Task(id="123", status="failed", return_code=1, message="error", results={"output": "error output"})
+
+        def test(self) -> None:
+            # This test does two things:
+            # * Verifies basic plumbing of run_action via our backend class.
+            # * Verifies that we correctly transform from jubilant.Task to our own JujuTask.
+
+            # GIVEN
+            stub = self.ActionStub()
+            client = JubilantClientStub(client=stub)
+
+            # WHEN
+            task = JubilantBackend(client).run_action(
+                "test-model", unit="my-app/0", action="restart-service", params={"force": True}
+            )
+
+            # THEN
+            assert stub.unit == "my-app/0"
+            assert stub.action == "restart-service"
+            assert stub.params == {"force": True}
+            
+            # The following just verifies that we transform from the jubilant.Task to our own JujuTask as expected.
+            assert task.id == "123"
+            assert task.return_code == 1
+            assert task.status == "failed"
+            assert task.message == "error"
+            assert task.output == "error output"
+
+
+    class TestGetApplicationConfig:
+        @dataclass
+        class ConfigStub:
+            app: str = ""
+
+            def config(self, app: str) -> dict[str, Any]:
+                self.app = app
+                return {"setting1": "value1", "setting2": "value2"}
+
+        def test(self) -> None:
+            # GIVEN
+            stub = self.ConfigStub()
+            client = JubilantClientStub(client=stub)
+
+            # WHEN
+            config = JubilantBackend(client).get_application_config("test-model", "my-app")
+
+            # THEN
+            assert stub.app == "my-app"
+            assert config == {"setting1": "value1", "setting2": "value2"}
