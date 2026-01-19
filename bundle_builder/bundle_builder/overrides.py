@@ -61,7 +61,7 @@ class CharmMetadataOverride:
 
 @immutable_dataclass
 class CharmPlatformOverride:
-    platforms: set[str] = Field(default_factory=set)
+    platforms: set[str] | None = None
 
 
 @immutable_dataclass
@@ -121,7 +121,7 @@ class OverridesClient:
         return CharmMetadataOverride(**self._read_yaml_file(self.charm_metadata_overrides, f"{charm}.yaml"))
 
     @cache
-    def get_charm_platform_overrides(self, charm: str) -> set[str]:
+    def get_charm_platform_overrides(self, charm: str) -> set[str] | None:
         return CharmPlatformOverride(**self._read_yaml_file(self.charm_platform_overrides, f"{charm}.yaml")).platforms
 
     @cache
