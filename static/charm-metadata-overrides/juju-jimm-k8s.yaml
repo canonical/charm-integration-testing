@@ -16,4 +16,5 @@ requires:
   receive-ca-cert:
     # TODO: this needs to be the same cert-transfer bridge as the oauth's ingress certs
     # Currently the bundle builder sometimes makes the wrong choice.
+    # See: https://github.com/canonical/charm-integration-testing/issues/306
     optional: false
