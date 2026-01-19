@@ -173,6 +173,8 @@ def execution_metadata(record_property: Callable[[str, object], None]) -> Iterat
     metadata: dict[str, set[str]] = {}
 
     def add(category: str, value: str) -> None:
+        if not category.strip() or not value.strip():
+            return
         if category not in metadata:
             metadata[category] = set()
         metadata[category].add(value)
