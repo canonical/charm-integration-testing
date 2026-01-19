@@ -18,7 +18,7 @@ import logging
 from pathlib import Path
 
 from .bundle import Application, ApplicationEndpoint, Bundle, Integration
-from .bundle_builder import BundleBuilder
+from .bundle_builder import BundleBuilder, UncompletableBundleError
 from .charmhub import CharmhubClient
 from .charmhub_http import CharmReleaseNotFoundException
 from .overrides import OverridesClient
@@ -224,7 +224,13 @@ def main() -> None:
         parser.error(f"Invalid bundle: {e}")
 
     # Build the bundle
-    built_bundle = BundleBuilder(charmhub_client=charmhub_client, logger=logger).build(base_bundle)
+    bundle_builder = BundleBuilder(charmhub_client=charmhub_client, logger=logger)
+    try:
+        built_bundle = bundle_builder.build(base_bundle)
+    except UncompletableBundleError as e:
+        logger.error(f"incomplete built bundle: {e.best_bundle.export()}")
+        parser.error(f"Uncompletable bundle: {e}")
+
     logger.info(f"Generated bundle: \n{'-' * 80}\n{built_bundle.export()}{'-' * 80}")
 
     # Export the bundle to file
