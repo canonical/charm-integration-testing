@@ -188,7 +188,7 @@ def execution_metadata(record_property: Callable[[str, object], None]) -> Iterat
         # Execution metadata is category value, where one category can be mapped to multiple values
         # So just store the values as a list in the single key
         # and use JSON to ensure characters are escaped properly
-        record_property(category, json.dumps([str(value) for value in sorted(values)]))
+        record_property(category, json.dumps([value for value in sorted(values)]))
 
 
 @pytest.fixture(autouse=True)
@@ -240,7 +240,7 @@ def record_charms_and_revisions_execution_metadata_instantaneous(
         # Save the charm
         execution_metadata("charm", charm)
         # Save the revision
-        execution_metadata(f"charm:{charm}:revision", revision)
+        execution_metadata(f"charm:{charm}:revision", str(revision))
 
 
 @pytest.fixture
