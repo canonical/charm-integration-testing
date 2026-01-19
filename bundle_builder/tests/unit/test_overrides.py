@@ -229,12 +229,12 @@ class TestOverridesClient:
             label: str
             charm: str = "postgresql-k8s"
             overrides: dict[str, Any] = Field(default_factory=dict)
-            expected_override: set[str] = Field(default_factory=set)
+            expected_override: set[str] | None = Field(default_factory=set)
             overrides_directory: bool = True
 
         test_cases = [
-            Params(label="overrides_directory_not_given", overrides_directory=False),
-            Params(label="override_for_charm_not_found", overrides={}),
+            Params(label="overrides_directory_not_given", overrides_directory=False, expected_override=None),
+            Params(label="override_for_charm_not_found", overrides={}, expected_override=None),
             Params(
                 label="override_is_provided",
                 overrides={
