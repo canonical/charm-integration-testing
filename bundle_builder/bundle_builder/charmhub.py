@@ -107,6 +107,7 @@ class CharmhubClient:
         # Add platform overrides
         response = self._find_charms_add_platform_overrides(response)
 
+        # Override deployable_on if empty
         response = self._find_charms_add_deployable_on_overrides(response)
 
         # Filter response by platform
@@ -154,7 +155,7 @@ class CharmhubClient:
                 result=dataclasses.replace(  # type: ignore
                     charm.result,
                     deployable_on=frozenset(
-                        charm.result.deployable_on | self.overrides_client.get_charm_platform_overrides(charm.name)
+                        self.overrides_client.get_charm_platform_overrides(charm.name)
                     ),
                 ),
             )
