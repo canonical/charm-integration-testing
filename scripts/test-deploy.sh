@@ -4,6 +4,7 @@
 
 cd "$(dirname "$0")/.."
 set +e
+exit 3
 poetry run pytest \
     charm_integration_testing/test_suite/deploy \
     --override-ini junit_suite_name=test-deploy \
