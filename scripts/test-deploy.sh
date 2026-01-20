@@ -4,7 +4,6 @@
 
 cd "$(dirname "$0")/.."
 set +e
-exit 3
 poetry run pytest \
     charm_integration_testing/test_suite/deploy \
     --override-ini junit_suite_name=test-deploy \
@@ -20,4 +19,5 @@ echo $exit_code
 # 3 - Internal error happened while executing tests
 # 4 - pytest command line usage error
 # 5 - No tests were collected
+exit 3
 exit $exit_code
