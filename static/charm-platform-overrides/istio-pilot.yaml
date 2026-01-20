@@ -1,0 +1,3 @@
+---
+# https://github.com/canonical/istio-operators/issues/672
+platforms: [kubernetes]
