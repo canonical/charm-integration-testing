@@ -640,12 +640,15 @@ jobs:
           test_execution_id: ${{ inputs.execution_id }}
           status: ${{ steps.calculate_job_status.outputs.test_status != '' && steps.calculate_job_status.outputs.test_status || 'ENDED_PREMATURELY' }}
       - name: Trigger rerun on Test Observer if unexpected failure
-        if: ${{ failure() && env.test_observer_api != '' && inputs.execution_id != '' && !(steps.build_bundle.conclusion == 'failure' && steps.build_bundle.outputs.invalid_input == 'true') && steps.calculate_job_status.outputs.unexpected_failure == 'true' }}
-        uses: ./.github/actions/test-observer/trigger-rerun
-        with:
-          test_observer_api: ${{ env.test_observer_api }}
-          test_observer_token: ${{ env.test_observer_token }}
-          test_execution_id: ${{ inputs.execution_id }}
+        if: ${{ failure() && !(steps.build_bundle.conclusion == 'failure' && steps.build_bundle.outputs.invalid_input == 'true') && steps.calculate_job_status.outputs.unexpected_failure == 'true' }}
+        shell: bash
+        run:
+          echo "Unexpected failure detected, triggering rerun on Test Observer."
+        # uses: ./.github/actions/test-observer/trigger-rerun
+        # with:
+        #   test_observer_api: ${{ env.test_observer_api }}
+        #   test_observer_token: ${{ env.test_observer_token }}
+        #   test_execution_id: ${{ inputs.execution_id }}
       - name: Teardown Controller
         if: ${{ always() }}
         shell: bash
