@@ -8,3 +8,10 @@ configs:
       host: charmqa.canonical.com
       namespace: charm-test
       queue: test-queue
+  - criteria:
+      - endpoint_integrated: database
+    config:
+      host: charmqa.canonical.com
+      namespace: charm-test
+      queue: test-queue
+      db-name: temporal
