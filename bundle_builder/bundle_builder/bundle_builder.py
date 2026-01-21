@@ -329,7 +329,7 @@ class BundleBuilder:
             for test_config in application.charm.test_configs:
                 if test_config.criteria.valid(
                     channel=application.charm.channel,
-                    integrated_endpoints=set(bundle.application_to_integrated_endpoints[application.name]),
+                    integrated_endpoints=bundle.application_to_integrated_endpoints[application.name],
                 ):
                     possible_configs.append(test_config.config)
 

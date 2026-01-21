@@ -123,7 +123,7 @@ class CharmLimitCriteria:
     @cached_method
     def valid(
         self,
-        integrated_endpoints: set[str],
+        integrated_endpoints: frozenset[str],
     ) -> bool:
         return all(
             [
@@ -191,8 +191,7 @@ class CharmEndpoint:
         """
         smallest_limit: int | None = None
         for limit in self.limits:
-            # TODO(raul): type: ignore
-            if not limit.criteria.valid(integrated_endpoints):  # type: ignore
+            if not limit.criteria.valid(integrated_endpoints):
                 continue
             if smallest_limit is None:
                 smallest_limit = limit.limit
@@ -224,7 +223,7 @@ class CharmConfigCriteria:
     def valid(
         self,
         channel: CharmChannel,
-        integrated_endpoints: set[str],
+        integrated_endpoints: frozenset[str],
     ) -> bool:
         return all(
             [
