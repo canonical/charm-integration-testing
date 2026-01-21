@@ -17,7 +17,7 @@ which markdownlint-cli2 || die 'markdownlint-cli2 missing; install via "npm inst
 
 # Actual lint checks begin here.
 poetry run ruff check || die 'Failed "ruff check"'
-poetry run ruff format --check || die 'Failed on "ruff format --check"; consider running "poetry run ruff format"'
+poetry run ruff format --check || die 'Failed on "ruff format --check"; consider running: poetry run ruff format'
 poetry run bandit \
     --configfile pyproject.toml \
     --quiet \
@@ -33,7 +33,8 @@ poetry run bandit \
     || die 'Failed on "bandit"'
 poetry run mypy bundle_builder || die 'Failed on "mypy bundle_builder"'
 poetry run mypy charm_integration_testing || die 'Failed on "mypy charm_integration_testing"'
-poetry run yamlfix --check $(find . -name '*.yaml' -o -name '*.yml') || die 'Failed on "yamlfix"'
+poetry run yamlfix --check $(find . -name '*.yaml' -o -name '*.yml') \
+    || die 'Failed on "yamlfix"; consider running: poetry run yamlfix $(find . -name '\''*.yaml'\'' -o -name '\''*.yml'\'')'
 markdownlint-cli2 --config docs/.sphinx/.markdownlint.json "#docs/_build" "*.md" || die 'Failed on markdownlint-cli2'
 
 echo "Linting passed"
