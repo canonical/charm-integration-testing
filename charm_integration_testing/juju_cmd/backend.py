@@ -6,7 +6,7 @@ import json
 import os
 import time
 from datetime import datetime, timedelta, timezone
-from typing import Any, Mapping
+from typing import Any
 
 import yaml
 from juju import (

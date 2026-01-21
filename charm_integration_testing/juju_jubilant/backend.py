@@ -5,7 +5,7 @@
 import dataclasses
 import time
 from datetime import datetime, timedelta
-from typing import Any, Callable, Mapping
+from typing import Any, Callable
 
 import jubilant
 import yaml

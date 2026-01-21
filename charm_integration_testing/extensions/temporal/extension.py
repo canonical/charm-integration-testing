@@ -5,7 +5,7 @@ import logging
 import time
 from abc import ABC
 from datetime import timedelta
-from typing import Any, Mapping
+from typing import Any
 
 from juju import JujuBackend, JujuExtension
 from juju.backend import JujuIntegrationApplication

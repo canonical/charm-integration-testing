@@ -7,7 +7,7 @@ from collections.abc import Callable
 from dataclasses import field
 from datetime import datetime, timedelta
 from functools import wraps
-from typing import Any, Iterable, TypeVar
+from typing import Any, TypeVar
 
 from pydantic.dataclasses import dataclass
 
