@@ -7,7 +7,7 @@ from collections.abc import Callable
 from dataclasses import field
 from datetime import datetime, timedelta
 from functools import wraps
-from typing import Any, Iterable, Mapping, TypeVar
+from typing import Any, Iterable, TypeVar
 
 from pydantic.dataclasses import dataclass
 
@@ -175,8 +175,8 @@ class JujuBackend(ABC):
         timeout: timedelta | None,
         count: int | None,
         strict_timeout: bool = False,
-        applications: Iterable[str] | None = None,
-    ):
+        applications: list[str] | None = None,
+    ) -> None:
         raise NotImplementedError
 
     @abstractmethod
@@ -244,7 +244,7 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def run_action(self, model: str, unit: str, action: str, arguments: Mapping[str, Any]) -> JujuTask:
+    def run_action(self, model: str, unit: str, action: str, arguments: dict[str, Any]) -> JujuTask:
         raise NotImplementedError
 
     @abstractmethod
@@ -264,7 +264,7 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def deploy_application(self, model: str, charm: str, application: str | None = None, config: Mapping | None = None):
+    def deploy_application(self, model: str, charm: str, application: str | None = None, config: dict[str, Any] | None = None) -> None:
         raise NotImplementedError
 
     @abstractmethod
@@ -272,7 +272,7 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def get_application_config(self, model: str, application: str) -> Mapping[str, Any]:
+    def get_application_config(self, model: str, application: str) -> dict[str, Any]:
         raise NotImplementedError
 
     @abstractmethod

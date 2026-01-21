@@ -17,8 +17,8 @@ from ..shared import JujuStub as JujuStubBase
 
 @dataclass
 class JujuStub(JujuStubBase):
-    applications: dict = field(default_factory=lambda: {"livepatch": LIVEPATCH_SERVER_CHARM})
-    unit_ips: dict = field(default_factory=lambda: {"livepatch/leader": "10.1.2.157"})
+    applications: dict[str, str] = field(default_factory=lambda: {"livepatch": LIVEPATCH_SERVER_CHARM})
+    unit_ips: dict[str, str] = field(default_factory=lambda: {"livepatch/leader": "10.1.2.157"})
 
     def num_units(self) -> None:  # type: ignore[override]
         pass

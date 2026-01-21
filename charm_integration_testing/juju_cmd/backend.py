@@ -6,6 +6,7 @@ import json
 import os
 import time
 from datetime import datetime, timedelta, timezone
+from typing import Any, Mapping
 
 import yaml
 from juju import (
@@ -354,7 +355,7 @@ class JujuCmdBackend(JujuBackend):
             CmdArg(value=application),
         )
 
-    def run_action(self, model: str, unit: str, action: str, arguments: dict[str, str]) -> JujuTask:
+    def run_action(self, model: str, unit: str, action: str, arguments: dict[str, Any]) -> JujuTask:
         # Run the action on the unit
         result = self._call_juju(
             CmdArg(value="run"),

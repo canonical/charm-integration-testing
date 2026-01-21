@@ -3,7 +3,7 @@
 
 from dataclasses import field
 from datetime import timedelta
-from typing import Any, Callable, Mapping
+from typing import Any, Callable
 
 import jubilant
 import pytest
@@ -80,7 +80,7 @@ class StatusStub:
                 unit_derived_app_names.add(app_name)
         app_names.update(unit_derived_app_names)
 
-        units_by_app_name = {}
+        units_by_app_name: dict[str, set[str]] = {}
         for status_dict in (self.unit_workload_statuses, self.unit_juju_statuses):
             for unit_id in status_dict.keys():
                 units_by_app_name.setdefault(unit_id.split("/")[0], set()).add(unit_id)
@@ -90,8 +90,8 @@ class StatusStub:
             unit_names = units_by_app_name.get(app, set())
             units = {
                 unit_name: jubilant.statustypes.UnitStatus(
-                    workload_status=self.unit_workload_statuses.get(unit_name, "unknown"),
-                    juju_status=self.unit_juju_statuses.get(unit_name, "unknown"),
+                    workload_status=jubilant.statustypes.StatusInfo(self.unit_workload_statuses.get(unit_name, "unknown")),
+                    juju_status=jubilant.statustypes.StatusInfo(self.unit_juju_statuses.get(unit_name, "unknown")),
                 )
                 for unit_name in unit_names
             }
@@ -825,7 +825,7 @@ class TestJubilantBackend:
             action: str = ""
             params: dict[str, Any] = field(default_factory=dict)
 
-            def run(self, unit: str, action: str, params: Mapping[str, Any]) -> jubilant.Task:
+            def run(self, unit: str, action: str, params: dict[str, Any]) -> jubilant.Task:
                 self.unit = unit
                 self.action = action
                 self.params = params

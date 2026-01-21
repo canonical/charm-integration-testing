@@ -21,8 +21,8 @@ from ..shared import JujuStub as JujuStubBase
 
 @dataclass
 class JujuStub(JujuStubBase):
-    applications: dict = field(default_factory=lambda: {"s3-app": "s3-integrator"})
-    unit_ips: dict = field(default_factory=lambda: {"s3-app-minio/leader": "10.0.0.1"})
+    applications: dict[str, str] = field(default_factory=lambda: {"s3-app": "s3-integrator"})
+    unit_ips: dict[str, str] = field(default_factory=lambda: {"s3-app-minio/leader": "10.0.0.1"})
 
 
 class TestS3IntegratorMinIOBackendExtension:

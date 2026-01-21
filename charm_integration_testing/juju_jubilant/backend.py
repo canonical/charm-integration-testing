@@ -121,7 +121,7 @@ class JubilantBackend(JujuCmdBackend):
         count: int | None,
         strict_timeout: bool = False,
         applications: list[str] | None = None,
-    ):
+    ) -> None:
         if applications is None:
             applications = []
         self.wait(
@@ -168,7 +168,7 @@ class JubilantBackend(JujuCmdBackend):
     def wait_for_removal_of_units(self, model: str, applications: list[str], timeout: timedelta | None) -> None:
         self.wait(model, lambda status: applications_have_no_units(status, *applications), timeout=timeout)
 
-    def run_action(self, model: str, unit: str, action: str, params: Mapping[str, Any]) -> JujuTask:
+    def run_action(self, model: str, unit: str, action: str, params: dict[str, Any]) -> JujuTask:
         try:
             task = self.client.model(model).run(
                 unit=unit,
@@ -222,7 +222,7 @@ class JubilantBackend(JujuCmdBackend):
             name_or_id,
         )
 
-    def deploy_application(self, model: str, charm: str, application: str | None = None, config: Mapping | None = None):
+    def deploy_application(self, model: str, charm: str, application: str | None = None, config: dict[str, Any] | None = None) -> None:
         self.client.model(model).deploy(
             charm=charm,
             app=application,
@@ -235,8 +235,10 @@ class JubilantBackend(JujuCmdBackend):
             values=values,
         )
 
-    def get_application_config(self, model: str, application: str) -> Mapping[str, Any]:
-        return self.client.model(model).config(application)
+    def get_application_config(self, model: str, application: str) -> dict[str, Any]:
+        # I'd rather just pass this through, but to follow the return type correctly,
+        # we'll convert to a dict.
+        return {k: v for k, v in self.client.model(model).config(application).items()}
 
     def scp(self, model: str, source: str, destination: str) -> None:
         self.client.model(model).scp(

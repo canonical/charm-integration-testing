@@ -31,7 +31,7 @@ class TemporalExtension(JujuExtension, ABC):
         self.juju = juju
         self.logger = logger
 
-    def post_deploy(self, model: str):
+    def post_deploy(self, model: str) -> None:
         """Post-deploy hook to deploy temporal if necessary.
 
         :param model: The Juju model to deploy to.
@@ -54,13 +54,13 @@ class TemporalExtension(JujuExtension, ABC):
                 return True
         return False
 
-    def deploy_temporal_stack(self, model: str):
+    def deploy_temporal_stack(self, model: str) -> None:
         """Deploy the temporal stack in the given model.
 
         :param model: The Juju model to deploy to.
         :type model: str
         """
-        required_charms_and_config: Mapping[str, Mapping[str, Any]] = {
+        required_charms_and_config: dict[str, dict[str, Any]] = {
             "temporal-k8s": {"num-history-shards": 4},
             "temporal-admin-k8s": {},
             "postgresql-k8s": {},
@@ -98,7 +98,7 @@ class TemporalExtension(JujuExtension, ABC):
         # Wait for the temporal sub-bundle to become active/idle.
         # Note: this uses jubilant for waiting, not "juju wait-for" which is going away,
         # so hopefully this doesn't break when that finally gets removed.
-        apps_to_wait_for = tuple(deployed_apps.values())
+        apps_to_wait_for = list(deployed_apps.values())
         self._log(f"Waiting for temporal-related applications to settle: {apps_to_wait_for}")
         self.juju.wait_idle(model, applications=apps_to_wait_for, timeout=self.TEMPORAL_WAIT_TIMEOUT, count=3)
 
@@ -122,8 +122,8 @@ class TemporalExtension(JujuExtension, ABC):
 
         return False
 
-    def _bootstrap_default_temporal_namespace(self, model, temporal_admin_app):
-        def inner_logic():
+    def _bootstrap_default_temporal_namespace(self, model: str, temporal_admin_app: str) -> None:
+        def inner_logic() -> None:
             task = self.juju.run_action(
                 model,
                 f"{temporal_admin_app}/0",
@@ -148,7 +148,7 @@ class TemporalExtension(JujuExtension, ABC):
             else:
                 break
 
-    def configure_dependent_charms(self, model: str):
+    def configure_dependent_charms(self, model: str) -> None:
         """Configure charms that depend on temporal in the given model.
 
         :param model: The Juju model to configure.
@@ -167,5 +167,5 @@ class TemporalExtension(JujuExtension, ABC):
                             {config_option: TEMPORAL_HOST},
                         )
 
-    def _log(self, message: str):
+    def _log(self, message: str) -> None:
         self.logger.info(f"TemporalExtension: {message}")

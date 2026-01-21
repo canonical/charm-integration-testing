@@ -3,42 +3,42 @@
 
 import logging
 from dataclasses import dataclass, field
+from typing import Any
 
 import pytest
 from extensions.temporal.extension import (
     TemporalExtension,
 )
-from juju.backend import JujuTask
+from juju.backend import JujuBackend, JujuTask
 
 from ..shared import JujuStub as JujuStubBase
 
 
 @dataclass
 class JujuStub(JujuStubBase):
-    applications: dict = field(default_factory=dict)  # {"temporal-app": "temporal"})
-    unit_ips: dict = field(default_factory=dict)  # {"temporal-app/leader": "10.0.0.1"})
-    action_responses: list = field(default_factory=list)
+    applications: dict[str, str] = field(default_factory=dict)  # {"temporal-app": "temporal"})
+    unit_ips: dict[str, str] = field(default_factory=dict)  # {"temporal-app/leader": "10.0.0.1"})
+    action_responses: list[JujuTask] = field(default_factory=list)
 
-    def run_action(self, model: str, unit: str, action: str, params: dict):
+    def run_action(self, model: str, unit: str, action: str, params: dict[str, Any]) -> JujuTask:
         """Mock running an action on a unit (captures call for verification)"""
         super().run_action(model, unit, action, params)
-        if self.action_responses:
-            return self.action_responses.pop(0)
+        return self.action_responses.pop(0)
 
 
 class TestTemporalExtension:
     @pytest.fixture
-    def juju(self):
+    def juju(self) -> JujuStub:
         return JujuStub()
 
     @pytest.fixture
-    def extension(self, juju):
+    def extension(self, juju: JujuBackend) -> TemporalExtension:
         return TemporalExtension(juju, logging.getLogger("test"))
 
     class TestPostDeploy:
         test_model = "test-model"
 
-        def test_deploys_temporal_if_app_implicitly_requiring_it_is_present(self, extension, juju):
+        def test_deploys_temporal_if_app_implicitly_requiring_it_is_present(self, extension: TemporalExtension, juju: JujuStub) -> None:
             # Known example case: airbyte-k8s
             charm_name = "airbyte-k8s"
             app_name = "airbyte-app"
@@ -77,7 +77,7 @@ class TestTemporalExtension:
             assert juju.actions[1][2] == "tctl"
             assert juju.actions[1][3] == {"args": "--ns default namespace register -rd 3"}
 
-        def test_ignores_apps_without_known_temporal_dependency(self, juju):
+        def test_ignores_apps_without_known_temporal_dependency(self, juju: JujuStub) -> None:
             # GIVEN a model with no airbyte-k8s applications
             juju.applications = {"non-airbyte": "not-airbyte"}
             extension = TemporalExtension(juju, logging.getLogger("test"))
