@@ -26,6 +26,7 @@ from bundle_builder.charm import (
     ENDPOINT_PROVIDES,
     ENDPOINT_REQUIRES,
     Charm,
+    CharmChannel,
     CharmEndpoint,
     CharmEndpointOptionality,
     CharmLimit,
@@ -518,7 +519,7 @@ class TestBundle:
             # GIVEN a charm with limit 1
             limited_charm = Charm(
                 name="limited-charm",
-                channel="stable",
+                channel=CharmChannel("stable"),
                 revision=1,
                 ubuntu_version="22.04",
                 ubuntu_arch="amd64",
@@ -538,7 +539,7 @@ class TestBundle:
 
             requiring_charm = Charm(
                 name="app",
-                channel="stable",
+                channel=CharmChannel("stable"),
                 revision=1,
                 ubuntu_version="22.04",
                 ubuntu_arch="amd64",
@@ -586,7 +587,7 @@ class TestBundle:
             # GIVEN a charm with limit 2
             limited_charm = Charm(
                 name="limited-charm",
-                channel="stable",
+                channel=CharmChannel("stable"),
                 revision=1,
                 ubuntu_version="22.04",
                 ubuntu_arch="amd64",
@@ -606,7 +607,7 @@ class TestBundle:
 
             requiring_charm = Charm(
                 name="app",
-                channel="stable",
+                channel=CharmChannel("stable"),
                 revision=1,
                 ubuntu_version="22.04",
                 ubuntu_arch="amd64",
@@ -990,7 +991,7 @@ class TestBundle:
         # Create charms with features for testing
         provider_charm_with_features = Charm(
             name="provider",
-            channel="stable",
+            channel=CharmChannel("stable"),
             revision=1,
             ubuntu_version="22.04",
             ubuntu_arch="amd64",
@@ -1011,7 +1012,7 @@ class TestBundle:
 
         requirer_charm_with_features = Charm(
             name="requirer",
-            channel="stable",
+            channel=CharmChannel("stable"),
             revision=1,
             ubuntu_version="22.04",
             ubuntu_arch="amd64",
@@ -1032,7 +1033,7 @@ class TestBundle:
 
         requirer_charm_with_subset_features = Charm(
             name="requirer2",
-            channel="stable",
+            channel=CharmChannel("stable"),
             revision=1,
             ubuntu_version="22.04",
             ubuntu_arch="amd64",
@@ -1141,7 +1142,7 @@ class TestBundle:
                                 name="multi",
                                 charm=Charm(
                                     name="multi",
-                                    channel="stable",
+                                    channel=CharmChannel("stable"),
                                     revision=1,
                                     ubuntu_version="22.04",
                                     ubuntu_arch="amd64",

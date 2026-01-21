@@ -22,6 +22,7 @@ from .charm import (
     ENDPOINT_PROVIDES,
     ENDPOINT_REQUIRES,
     Charm,
+    CharmChannel,
     CharmEndpoint,
     CharmEndpointOptionality,
     CharmLimit,
@@ -205,7 +206,7 @@ class CharmhubClient:
         # Return Charm from refresh info
         return Charm(
             name=charm_name,
-            channel=charm_channel,
+            channel=CharmChannel(charm_channel),
             revision=charm_revision,
             ubuntu_version=ubuntu_version,
             ubuntu_arch=ubuntu_arch,
@@ -260,7 +261,7 @@ class CharmhubClient:
 
         return Charm(
             name=charm_name,
-            channel=default_refresh_info.effective_channel,
+            channel=CharmChannel(default_refresh_info.effective_channel),
             revision=charm_revision,
             ubuntu_version=ubuntu_version,
             ubuntu_arch=ubuntu_arch,
@@ -309,7 +310,7 @@ class CharmhubClient:
 
         return Charm(
             name=charm_name,
-            channel=charm_channel,
+            channel=CharmChannel(charm_channel),
             revision=refresh_info.charm.revision,
             ubuntu_version=ubuntu_version,
             ubuntu_arch=ubuntu_arch,
@@ -349,7 +350,7 @@ class CharmhubClient:
 
         return Charm(
             name=charm_name,
-            channel=refresh_info.effective_channel,
+            channel=CharmChannel(refresh_info.effective_channel),
             revision=refresh_info.charm.revision,
             ubuntu_version=ubuntu_version,
             ubuntu_arch=ubuntu_arch,
@@ -540,6 +541,7 @@ class CharmhubClient:
                     and metadata_overrides_map[endpoint_name].optionality is not None
                 ):
                     optionality = metadata_overrides_map[endpoint_name].optionality
+                    assert optionality is not None
                 elif endpoint.optional is not None:
                     optionality = CharmEndpointOptionality.from_bool(endpoint.optional)
                 elif endpoint_name in edge_endpoint_map and edge_endpoint_map[endpoint_name].optional is not None:
@@ -552,6 +554,7 @@ class CharmhubClient:
                 # Determine endpoint limit from overrides
                 if endpoint_name in metadata_overrides_map and metadata_overrides_map[endpoint_name].limits is not None:
                     limits = metadata_overrides_map[endpoint_name].limits
+                    assert limits is not None
                 elif endpoint.limit is not None:
                     limits = (CharmLimit(limit=endpoint.limit),)
                 elif endpoint_name in edge_endpoint_map and edge_endpoint_map[endpoint_name].limit is not None:
@@ -564,7 +567,8 @@ class CharmhubClient:
                     endpoint_name in metadata_overrides_map
                     and metadata_overrides_map[endpoint_name].features is not None
                 ):
-                    features = frozenset(metadata_overrides_map[endpoint_name].features)
+                    features = metadata_overrides_map[endpoint_name].features
+                    assert features is not None
                 else:
                     features = frozenset()
 

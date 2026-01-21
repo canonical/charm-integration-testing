@@ -14,9 +14,9 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
-from typing import Any, TypeAlias, overload
+from typing import Any, TypeAlias, overload, TYPE_CHECKING
 
-from pydantic import Field, model_serializer, model_validator
+from pydantic import Field, model_serializer, model_validator, field_validator
 from pydantic_core import ArgsKwargs
 
 from .immutable_dataclass import cached_method, immutable_dataclass
@@ -301,22 +301,19 @@ class CharmTestConfig:
     criteria: CharmConfigCriteria = Field(default=CharmConfigCriteria.from_bool(True))
     config: CharmConfig = Field(default_factory=CharmConfig)
 
-    @model_validator(mode="wrap")
-    @classmethod
-    def validate_config_from_dict(cls, value: Any, handler: Any) -> Any:
-        # Handle ArgsKwargs for positional arguments
-        if isinstance(value, ArgsKwargs):
-            if len(value.args) == 1 and isinstance(value.args[0], dict):
-                value = value.args[0]
-            else:
-                return handler(value)
+    if TYPE_CHECKING:  # tell mypy what types are allowed
+        def __init__(
+            self, 
+            criteria: CharmConfigCriteria = ..., 
+            config: CharmConfig | dict[str, Any] = ...
+        ): ...
 
-        if isinstance(value, dict) and "config" in value:
-            if isinstance(value["config"], dict):
-                # Convert dict to tuple of tuples
-                value = value.copy()
-                value["config"] = tuple(sorted(value["config"].items()))
-        return handler(value)
+    @field_validator("config", mode="before")
+    @classmethod
+    def _convert_config_dict(cls, v: Any) -> Any:
+        if isinstance(v, dict):
+            return tuple(sorted(v.items()))
+        return v
 
 
 @immutable_dataclass

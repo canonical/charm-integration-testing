@@ -15,11 +15,11 @@
 
 import logging
 from functools import cache
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 import requests
 import yaml
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, TypeAdapter
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
@@ -77,6 +77,18 @@ class CharmMetadata:
     peers: dict[str, Endpoint] = Field(default_factory=dict)
     requires: dict[str, Endpoint] = Field(default_factory=dict)
     provides: dict[str, Endpoint] = Field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, dict[str, str]]) -> "CharmMetadata":
+        return TypeAdapter(cls).validate_python(data)
+
+    if TYPE_CHECKING:  # so mypy knows the class can be constructed from a dict
+        def __init__(
+            self,
+            peers: dict[str, Endpoint | dict[str, Any]] = ...,
+            requires: dict[str, Endpoint | dict[str, Any]] = ...,
+            provides: dict[str, Endpoint | dict[str, Any]] = ...,
+        ): ...
 
 
 @immutable_dataclass(config=dict(validate_by_name=True))

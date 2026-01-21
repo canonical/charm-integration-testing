@@ -17,12 +17,14 @@
 import dataclasses
 import logging
 
+from bundle_builder.charmhub import CharmhubClient
 from pydantic.dataclasses import dataclass
 
 from bundle_builder.bundle import Application, ApplicationEndpoint, Bundle, Integration
 from bundle_builder.bundle_builder import BundleBuilder, Node
 from bundle_builder.charm import (
     Charm,
+    CharmChannel,
     CharmConfigCriteria,
     CharmEndpointOptionality,
     CharmLimit,
@@ -40,8 +42,8 @@ from .test_charm import (
 
 
 @dataclass
-class CharmhubClientStub:
-    def find_charms(
+class CharmhubClientStub(CharmhubClient):
+    def find_charms(  # type: ignore[override]
         self, provides: str | None = None, requires: str | None = None, platform: str | None = None
     ) -> frozenset[str]:
         if provides == "db":
@@ -52,7 +54,7 @@ class CharmhubClientStub:
             return frozenset()
         return frozenset()
 
-    def charm_from_store(
+    def charm_from_store(  # type: ignore[override]
         self,
         charm_name: str,
         ubuntu_arch: str,
@@ -157,7 +159,7 @@ class TestNode:
 class TestBundleBuilder:
     def test_build_returns_best_node_bundle(self) -> None:
         stub = CharmhubClientStub()
-        builder = BundleBuilder(charmhub_client=stub, logger=logging.getLogger("test"))  # type: ignore[arg-type]
+        builder = BundleBuilder(charmhub_client=stub, logger=logging.getLogger("test"))
         base = sample_node_kratos().bundle
         result = builder.build(base)
         assert isinstance(result, Bundle)
@@ -166,7 +168,7 @@ class TestBundleBuilder:
 
     def test_child_nodes_returns_possible_children(self) -> None:
         stub = CharmhubClientStub()
-        builder = BundleBuilder(charmhub_client=stub)  # type: ignore[arg-type]
+        builder = BundleBuilder(charmhub_client=stub)
         node = sample_node_kratos()
         children = builder.child_nodes(node)
         assert isinstance(children, set)
@@ -175,7 +177,7 @@ class TestBundleBuilder:
 
     def test_child_nodes_existing_applications_filters_cycles_and_limits(self) -> None:
         stub = CharmhubClientStub()
-        builder = BundleBuilder(charmhub_client=stub, avoid_application_dependency_cycles=True)  # type: ignore[arg-type]
+        builder = BundleBuilder(charmhub_client=stub, avoid_application_dependency_cycles=True)
         node = sample_node_kratos()
         # Should not create cycles
         children = builder.child_nodes_existing_applications(node, ApplicationEndpoint("kratos", "pg-database"))
@@ -184,7 +186,7 @@ class TestBundleBuilder:
 
     def test_child_nodes_new_applications_adds_valid_children(self) -> None:
         stub = CharmhubClientStub()
-        builder = BundleBuilder(charmhub_client=stub)  # type: ignore[arg-type]
+        builder = BundleBuilder(charmhub_client=stub)
         node = sample_node_kratos()
         children = builder.child_nodes_new_applications(node, ApplicationEndpoint("kratos", "pg-database"))
         for child in children:
@@ -765,7 +767,7 @@ class TestAddTestConfigs:
             charm = dataclasses.replace(
                 sample_charm_postgresql_k8s(),
                 name="test-charm",
-                channel="1.0/stable",
+                channel=CharmChannel("1.0/stable"),
                 test_configs=(
                     CharmTestConfig(
                         criteria=CharmConfigCriteria(track="1.0"),
@@ -911,7 +913,7 @@ class TestAddTestConfigs:
             charm1 = dataclasses.replace(
                 sample_charm_postgresql_k8s(),
                 name="charm1",
-                channel="1.0/stable",
+                channel=CharmChannel("1.0/stable"),
                 test_configs=(
                     CharmTestConfig(
                         criteria=CharmConfigCriteria(track="1.0"),
@@ -922,7 +924,7 @@ class TestAddTestConfigs:
             charm2 = dataclasses.replace(
                 sample_charm_kratos(),
                 name="charm2",
-                channel="2.0/stable",
+                channel=CharmChannel("2.0/stable"),
                 test_configs=(
                     CharmTestConfig(
                         criteria=CharmConfigCriteria(track="2.0"),
@@ -986,7 +988,7 @@ class TestAddTestConfigs:
             charm = dataclasses.replace(
                 sample_charm_kratos(),
                 name="test-charm",
-                channel="1.0/stable",
+                channel=CharmChannel("1.0/stable"),
                 endpoints=frozenset(
                     {
                         dataclasses.replace(
