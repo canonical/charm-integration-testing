@@ -124,7 +124,7 @@ def immutable_dataclass(_cls: type | None = None, **dataclass_kwargs: Any) -> An
         # Create a private slot for the cache of each computed field, similar to above
         for name, method in cached_methods.items():
             cached_field_name = f"_cached_{name}"
-            annotations[cached_field_name] = Dict[tuple[Any, ...], Any]
+            annotations[cached_field_name] = dict[tuple[Any, ...], Any]
             setattr(cls, name, make_cached_method(cached_field_name, method))
             setattr(
                 cls, cached_field_name, field(init=False, repr=False, hash=False, compare=False, default_factory=dict)
