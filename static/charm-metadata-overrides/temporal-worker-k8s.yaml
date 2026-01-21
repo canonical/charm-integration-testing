@@ -8,6 +8,10 @@ provides:
     interface: grafana_dashboard
     optional: true
 requires:
+  database:
+    interface: postgresql_client
+    optional: true
+    limit: 1
   logging:
     interface: loki_push_api
     optional: true
