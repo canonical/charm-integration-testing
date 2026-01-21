@@ -2,10 +2,17 @@
 # Copyright 2024-2025 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+die () {
+    echo -en '\e[1;31m'  # Red, bolded
+    echo -n $*
+    echo -e '\e[0m'      # Reset coloring
+    exit 1
+}
+
 cd "$(dirname "$0")/.."
 set -e
-poetry run ruff check
-poetry run ruff format --check
+poetry run ruff check || die 'Failed "ruff check"'
+poetry run ruff format --check || die 'Failed on "ruff format --check"; consider running "poetry run ruff format"'
 poetry run bandit \
     --configfile pyproject.toml \
     --quiet \
@@ -17,7 +24,8 @@ poetry run bandit \
         charm_integration_testing/serializeable_dataclass \
         charm_integration_testing/test_suite \
         bundle_builder/bundle_builder \
-        scripts
-poetry run mypy bundle_builder
-poetry run mypy charm_integration_testing
-markdownlint-cli2 --config docs/.sphinx/.markdownlint.json "#docs/_build" "*.md"
+        scripts \
+    || die 'Failed on "bandit"'
+poetry run mypy bundle_builder || die 'Failed on "mypy bundle_builder"'
+poetry run mypy charm_integration_testing || die 'Failed on "mypy charm_integration_testing"'
+markdownlint-cli2 --config docs/.sphinx/.markdownlint.json "#docs/_build" "*.md" || die 'Failed on markdownlint-cli2'
