@@ -19,7 +19,7 @@ from typing import Any, TYPE_CHECKING
 
 import requests
 import yaml
-from pydantic import Field, field_validator, TypeAdapter
+from pydantic import Field, field_validator, model_validator, TypeAdapter
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
@@ -89,6 +89,26 @@ class CharmMetadata:
             requires: dict[str, Endpoint | dict[str, Any]] = ...,
             provides: dict[str, Endpoint | dict[str, Any]] = ...,
         ): ...
+
+    @model_validator(mode="before")
+    @classmethod
+    def _validate_init(cls, data: Any) -> Any:
+        check_dict = None
+        if hasattr(data, "args") and hasattr(data, "kwargs"):
+            if data.args and len(data.args) == 1 and isinstance(data.args[0], dict) and not data.kwargs:
+                check_dict = data.args[0]
+
+        if check_dict:
+            for key in ["provides", "requires", "peers"]:
+                if key in check_dict:
+                    section = check_dict[key]
+                    if isinstance(section, dict) and "interface" not in section:
+                        return {
+                            "peers": check_dict.get("peers", {}),
+                            "requires": check_dict.get("requires", {}),
+                            "provides": check_dict.get("provides", {}),
+                        }
+        return data
 
 
 @immutable_dataclass(config=dict(validate_by_name=True))
