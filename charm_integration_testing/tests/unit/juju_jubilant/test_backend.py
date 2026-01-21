@@ -90,7 +90,9 @@ class StatusStub:
             unit_names = units_by_app_name.get(app, set())
             units = {
                 unit_name: jubilant.statustypes.UnitStatus(
-                    workload_status=jubilant.statustypes.StatusInfo(self.unit_workload_statuses.get(unit_name, "unknown")),
+                    workload_status=jubilant.statustypes.StatusInfo(
+                        self.unit_workload_statuses.get(unit_name, "unknown")
+                    ),
                     juju_status=jubilant.statustypes.StatusInfo(self.unit_juju_statuses.get(unit_name, "unknown")),
                 )
                 for unit_name in unit_names

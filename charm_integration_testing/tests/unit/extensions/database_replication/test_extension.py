@@ -39,7 +39,9 @@ class DatabaseClientStub(DatabaseClient):
 class JujuStub(JujuStubBase):
     """Stub implementation of JujuBackend for testing DatabaseReplicator"""
 
-    applications: dict[str, str] = field(default_factory=lambda: {"postgresql-1": "postgresql", "postgresql-2": "postgresql"})
+    applications: dict[str, str] = field(
+        default_factory=lambda: {"postgresql-1": "postgresql", "postgresql-2": "postgresql"}
+    )
     units: dict[str, int] = field(default_factory=lambda: {"postgresql-1": 3, "postgresql-2": 3})
 
     def num_units(self, model: str, application: str) -> int:

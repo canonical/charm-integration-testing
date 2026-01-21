@@ -264,7 +264,9 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def deploy_application(self, model: str, charm: str, application: str | None = None, config: dict[str, Any] | None = None) -> None:
+    def deploy_application(
+        self, model: str, charm: str, application: str | None = None, config: dict[str, Any] | None = None
+    ) -> None:
         raise NotImplementedError
 
     @abstractmethod

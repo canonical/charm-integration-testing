@@ -222,7 +222,9 @@ class JubilantBackend(JujuCmdBackend):
             name_or_id,
         )
 
-    def deploy_application(self, model: str, charm: str, application: str | None = None, config: dict[str, Any] | None = None) -> None:
+    def deploy_application(
+        self, model: str, charm: str, application: str | None = None, config: dict[str, Any] | None = None
+    ) -> None:
         self.client.model(model).deploy(
             charm=charm,
             app=application,

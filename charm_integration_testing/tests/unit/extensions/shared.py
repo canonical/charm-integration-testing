@@ -37,7 +37,9 @@ class JujuStub(JujuBackend):
             (model, target_1.application, target_1.endpoint, target_2.application, target_2.endpoint)
         )
 
-    def integration_exists(self, application1: str, endpoint1: str, application2: str, endpoint2: str, model: str) -> bool:
+    def integration_exists(
+        self, application1: str, endpoint1: str, application2: str, endpoint2: str, model: str
+    ) -> bool:
         """Check if an integration exists between two applications
 
         We treat integrations as undirected for simplicity.
@@ -52,7 +54,9 @@ class JujuStub(JujuBackend):
                 return True
         return False
 
-    def deploy_application(self, model: str, charm: str, application: str | None = None, config: dict[str, Any] | None = None) -> None:
+    def deploy_application(
+        self, model: str, charm: str, application: str | None = None, config: dict[str, Any] | None = None
+    ) -> None:
         """Mock deploying an application (captures call for verification)"""
         self.deployed.append((model, charm, application))  # Ignoring config for simplicity
 

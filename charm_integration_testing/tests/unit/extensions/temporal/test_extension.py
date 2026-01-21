@@ -38,7 +38,9 @@ class TestTemporalExtension:
     class TestPostDeploy:
         test_model = "test-model"
 
-        def test_deploys_temporal_if_app_implicitly_requiring_it_is_present(self, extension: TemporalExtension, juju: JujuStub) -> None:
+        def test_deploys_temporal_if_app_implicitly_requiring_it_is_present(
+            self, extension: TemporalExtension, juju: JujuStub
+        ) -> None:
             # Known example case: airbyte-k8s
             charm_name = "airbyte-k8s"
             app_name = "airbyte-app"
