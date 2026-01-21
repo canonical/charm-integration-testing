@@ -28,7 +28,7 @@ _Return = TypeVar("_Return")
 
 def computed_property(func: Callable[[_Self], _Return]) -> _Return:
     setattr(func, "_is_computed_property", True)
-    # TODO(raul): type: ignore
+    # TODO(raul): remove type: ignore in subsequent type checker-related PR
     return func  # type: ignore
 
 

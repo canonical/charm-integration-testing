@@ -768,7 +768,7 @@ class TestAddTestConfigs:
             charm = dataclasses.replace(
                 sample_charm_postgresql_k8s(),
                 name="test-charm",
-                # TODO(raul): remove on merge with main
+                # TODO(raul): remove type: ignore in subsequent type checker-related PR
                 channel="1.0/stable",  # type: ignore[arg-type]
                 test_configs=(
                     CharmTestConfig(
@@ -915,7 +915,7 @@ class TestAddTestConfigs:
             charm1 = dataclasses.replace(
                 sample_charm_postgresql_k8s(),
                 name="charm1",
-                # TODO(raul): remove on merge with main
+                # TODO(raul): remove type: ignore in subsequent type checker-related PR
                 channel="1.0/stable",  # type: ignore[arg-type]
                 test_configs=(
                     CharmTestConfig(
@@ -927,7 +927,7 @@ class TestAddTestConfigs:
             charm2 = dataclasses.replace(
                 sample_charm_kratos(),
                 name="charm2",
-                # TODO(raul): remove on merge with main
+                # TODO(raul): remove type: ignore in subsequent type checker-related PR
                 channel="2.0/stable",  # type: ignore[arg-type]
                 test_configs=(
                     CharmTestConfig(
@@ -992,7 +992,7 @@ class TestAddTestConfigs:
             charm = dataclasses.replace(
                 sample_charm_kratos(),
                 name="test-charm",
-                # TODO(raul): remove on merge with main
+                # TODO(raul): remove type: ignore in subsequent type checker-related PR
                 channel="1.0/stable",  # type: ignore[arg-type]
                 endpoints=frozenset(
                     {

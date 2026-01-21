@@ -518,7 +518,7 @@ class TestBundle:
             # GIVEN a charm with limit 1
             limited_charm = Charm(
                 name="limited-charm",
-                # TODO(raul): remove on merge with main
+                # TODO(raul): remove type: ignore in subsequent type checker-related PR
                 channel="stable",  # type: ignore[arg-type]
                 revision=1,
                 ubuntu_version="22.04",
@@ -539,7 +539,7 @@ class TestBundle:
 
             requiring_charm = Charm(
                 name="app",
-                # TODO(raul): remove on merge with main
+                # TODO(raul): remove type: ignore in subsequent type checker-related PR
                 channel="stable",  # type: ignore[arg-type]
                 revision=1,
                 ubuntu_version="22.04",
@@ -588,7 +588,7 @@ class TestBundle:
             # GIVEN a charm with limit 2
             limited_charm = Charm(
                 name="limited-charm",
-                # TODO(raul): remove on merge with main
+                # TODO(raul): remove type: ignore in subsequent type checker-related PR
                 channel="stable",  # type: ignore[arg-type]
                 revision=1,
                 ubuntu_version="22.04",
@@ -609,7 +609,7 @@ class TestBundle:
 
             requiring_charm = Charm(
                 name="app",
-                # TODO(raul): remove on merge with main
+                # TODO(raul): remove type: ignore in subsequent type checker-related PR
                 channel="stable",  # type: ignore[arg-type]
                 revision=1,
                 ubuntu_version="22.04",
@@ -994,7 +994,7 @@ class TestBundle:
         # Create charms with features for testing
         provider_charm_with_features = Charm(
             name="provider",
-            # TODO(raul): type: ignore
+            # TODO(raul): remove type: ignore in subsequent type checker-related PR
             channel="stable",  # type: ignore
             revision=1,
             ubuntu_version="22.04",
@@ -1016,7 +1016,7 @@ class TestBundle:
 
         requirer_charm_with_features = Charm(
             name="requirer",
-            # TODO(raul): type: ignore
+            # TODO(raul): remove type: ignore in subsequent type checker-related PR
             channel="stable",  # type: ignore
             revision=1,
             ubuntu_version="22.04",
@@ -1038,7 +1038,7 @@ class TestBundle:
 
         requirer_charm_with_subset_features = Charm(
             name="requirer2",
-            # TODO(raul): type: ignore
+            # TODO(raul): remove type: ignore in subsequent type checker-related PR
             channel="stable",  # type: ignore
             revision=1,
             ubuntu_version="22.04",
@@ -1148,7 +1148,7 @@ class TestBundle:
                                 name="multi",
                                 charm=Charm(
                                     name="multi",
-                                    # TODO(raul): type: ignore
+                                    # TODO(raul): remove type: ignore in subsequent type checker-related PR
                                     channel="stable",  # type: ignore
                                     revision=1,
                                     ubuntu_version="22.04",

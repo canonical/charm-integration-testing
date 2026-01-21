@@ -134,7 +134,7 @@ class TestApplicationFromArgs:
             return dataclasses.replace(
                 charm,
                 ubuntu_arch=ubuntu_arch,
-                # TODO(raul): remove on merge with main
+                # TODO(raul): remove type: ignore in subsequent type checker-related PR
                 channel=charm_channel if charm_channel is not None else charm.channel,  # type: ignore[arg-type]
                 revision=charm_revision or charm.revision,
                 ubuntu_version=ubuntu_version or charm.ubuntu_version,
@@ -167,7 +167,7 @@ class TestApplicationFromArgs:
             applications={
                 Application(
                     name="target",
-                    # TODO(raul): remove on merge with main
+                    # TODO(raul): remove type: ignore in subsequent type checker-related PR
                     charm=dataclasses.replace(sample_charm_postgresql_k8s(), channel="edge"),  # type: ignore[arg-type]
                 )
             },
@@ -209,7 +209,7 @@ class TestApplicationFromArgs:
             applications={
                 Application(
                     name="target",
-                    # TODO(raul): remove type ignore in subsequent type checker PRs
+                    # TODO(raul): remove type: ignore in subsequent type checker-related PR
                     charm=dataclasses.replace(sample_charm_postgresql_k8s(), channel="edge", revision=111),  # type: ignore
                 )
             },
@@ -233,7 +233,7 @@ class TestApplicationFromArgs:
                     name="target",
                     charm=dataclasses.replace(
                         sample_charm_postgresql_k8s(),
-                        # TODO(raul): type: ignore
+                        # TODO(raul): remove type: ignore in subsequent type checker-related PR
                         channel="edge",  # type: ignore[arg-type]
                         revision=111,
                         ubuntu_version="24.04",
