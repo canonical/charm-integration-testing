@@ -66,7 +66,7 @@ def cached_method(func: _F) -> _F:
 # Wraps the method to cache results in the given field in the instance
 def make_cached_method(cached_field_name: str, method: Callable[..., Any]) -> Callable[..., Any]:
     @wraps(method)
-    def wrapped(*args: str, **kwargs: Any) -> Any:
+    def wrapped(*args: Any, **kwargs: Any) -> Any:
         cache = getattr(args[0], cached_field_name)
         cache_key = tuple(args[1:]) + tuple(kwargs.items())
         result = cache.get(cache_key, _CACHE_MISS)
