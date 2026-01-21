@@ -107,6 +107,7 @@ class CharmhubClient:
         # Add platform overrides
         response = self._find_charms_add_platform_overrides(response)
 
+        # Override deployable_on if empty
         response = self._find_charms_add_deployable_on_overrides(response)
 
         # Filter response by platform
@@ -146,18 +147,19 @@ class CharmhubClient:
         return charms
 
     def _find_charms_add_platform_overrides(self, response: set[FindResponse]) -> set[FindResponse]:
-        return {
-            dataclasses.replace(
-                charm,
-                result=dataclasses.replace(
-                    charm.result,
-                    deployable_on=frozenset(
-                        charm.result.deployable_on | self.overrides_client.get_charm_platform_overrides(charm.name)
+        updated_response = set()
+        for charm in response:
+            platform_overrides = self.overrides_client.get_charm_platform_overrides(charm.name)
+            if platform_overrides is not None:
+                charm = dataclasses.replace(
+                    charm,
+                    result=dataclasses.replace(
+                        charm.result,
+                        deployable_on=frozenset(platform_overrides),
                     ),
-                ),
-            )
-            for charm in response
-        }
+                )
+            updated_response.add(charm)
+        return updated_response
 
     def _find_charms_add_deployable_on_overrides(self, response: set[FindResponse]) -> set[FindResponse]:
         # If response[n].charm.result.deployable_on is empty, then it is deployable on machine environments by default.

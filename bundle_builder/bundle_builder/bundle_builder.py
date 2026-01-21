@@ -130,9 +130,9 @@ class BundleBuilder:
         # Pick the best bundle
         best_bundle = best_node.bundle
 
-        # Note unresolved endpoints
-        for application_endpoint in best_bundle.unfulfilled_endpoints:
-            self.logger.warning(f"Cannot resolve application endpoint: {application_endpoint}")
+        # Raise exception on unfulfillable endpoints
+        if len(best_bundle.unfulfilled_endpoints) > 0:
+            raise UnfulfilledEndpointsError(best_bundle)
 
         # Resolve test configs
         best_bundle = self.add_test_configs(best_bundle)
@@ -347,3 +347,25 @@ class BundleBuilder:
             )
 
         return dataclasses.replace(bundle, applications=frozenset(applications))
+
+
+class UncompletableBundleError(ValueError):
+    """Exception raised when bundle builder cannot generate a complete bundle from the base bundle"""
+
+    def __init__(self, best_bundle: Bundle, reason: str = "no reason set"):
+        self.best_bundle = best_bundle
+        message = f"Could not build a complete valid bundle: {reason}"
+        super().__init__(message)
+
+
+class UnfulfilledEndpointsError(UncompletableBundleError):
+    """UncompletableBundleError when we cannot fulfill required application endpoints.
+
+    Attributes:
+        unfulfilled_endpoints: The set of application endpoints that could not be fulfilled.
+    """
+
+    def __init__(self, best_bundle: Bundle) -> None:
+        self.unfulfilled_endpoints = best_bundle.unfulfilled_endpoints
+        reason = f"Cannot fulfill application endpoints: {', '.join(str(ep) for ep in self.unfulfilled_endpoints)}"
+        super().__init__(best_bundle, reason=reason)

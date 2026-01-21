@@ -13,9 +13,10 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import pytest
 
 from bundle_builder.bundle import Application, ApplicationEndpoint, Bundle, Integration
-from bundle_builder.bundle_builder import BundleBuilder
+from bundle_builder.bundle_builder import BundleBuilder, UnfulfilledEndpointsError
 from bundle_builder.charm import (
     ENDPOINT_PROVIDES,
     ENDPOINT_REQUIRES,
@@ -30,7 +31,51 @@ from .conftest import CharmhubClientStub
 
 class TestEndpointLimits:
     class TestEdgeCases:
-        def test_zero_limit_blocks_all_connections(self) -> None:
+        def test_unfulfillable_endpoint_never_builds(self) -> None:
+            # GIVEN an unfulfillable charm
+            unfulfillable_charm = Charm(
+                name="unfulfillable-charm",
+                # TODO(raul): fix on future PR
+                channel="stable",  # type: ignore[arg-type]
+                revision=1,
+                ubuntu_version="22.04",
+                ubuntu_arch="amd64",
+                endpoints=frozenset(
+                    {
+                        CharmEndpoint(
+                            type=ENDPOINT_REQUIRES,
+                            name="oneway",
+                            interface="entry",
+                            optionality=CharmEndpointOptionality.from_bool(False),
+                            limits=(),
+                        )
+                    }
+                ),
+                priority=1.0,
+            )
+            bundle = Bundle(
+                applications=frozenset(
+                    {
+                        Application(name="snowflake", charm=unfulfillable_charm),
+                    }
+                ),
+                integrations=frozenset(),
+                platform="machine",
+                arch="amd64",
+            )
+
+            # AND a bundle builder with a charmhub client that knows about the charm
+            builder = BundleBuilder(CharmhubClientStub(unfulfillable_charm))
+
+            # WHEN we build the bundle
+            # THEN it errors because of unfulfilled endpoints
+            with pytest.raises(UnfulfilledEndpointsError) as caught:
+                builder.build(bundle)
+
+            # AND the non-optional endpoint is not fulfilled
+            assert caught.value.unfulfilled_endpoints == {ApplicationEndpoint("snowflake", "oneway")}
+
+        def test_zero_limit_on_required_endpoint_never_builds(self) -> None:
             # GIVEN a charm with limit 0
             zero_limit_charm = Charm(
                 name="zero-limit-charm",
@@ -89,16 +134,21 @@ class TestEndpointLimits:
             builder = BundleBuilder(CharmhubClientStub(zero_limit_charm, requiring_charm))
 
             # WHEN we build the bundle
-            new_bundle = builder.build(bundle)
+            # THEN it errors because of unfulfilled endpoints
+            with pytest.raises(UnfulfilledEndpointsError) as caught:
+                builder.build(bundle)
 
-            # THEN no integration should exist between server:disabled and client:http
+            # AND the zero-limit non-optional endpoint is not fulfilled
+            assert caught.value.unfulfilled_endpoints == {ApplicationEndpoint("client", "http")}
+
+            # AND in the last best bundle, no integration should exist between server:disabled and client:http
             expected = Integration(
                 {
                     ApplicationEndpoint("server", "disabled"),
                     ApplicationEndpoint("client", "http"),
                 }
             )
-            assert expected not in new_bundle.integrations
+            assert expected not in caught.value.best_bundle.integrations
 
         def test_limit_applies_to_both_endpoints_in_integration(self) -> None:
             # GIVEN two charms both with limits
@@ -407,9 +457,19 @@ class TestEndpointLimits:
             builder = BundleBuilder(CharmhubClientStub(self_ref_charm, app_charm))
 
             # WHEN we build the bundle
-            result = builder.build(base_bundle)
+            # THEN it errors because of unfulfilled endpoints
+            # AND stops creating the bundle
+            with pytest.raises(UnfulfilledEndpointsError) as caught:
+                builder.build(base_bundle)
 
-            # THEN it should not exceed the limit
+            # AND one self referential charm at the end remains unfulfilled
+            #   because we don't allow chaining forever even with unlimited endpoint, and
+            #   because we don't allow loops
+            assert caught.value.unfulfilled_endpoints == {ApplicationEndpoint("grafana-agent-k8s", "tracing-consumer")}
+
+            result = caught.value.best_bundle
+
+            # AND in the last built bundle, it should not exceed the limit
             grafana_apps = [app for app in result.applications if app.charm.name == "grafana-agent-k8s"]
             # AND it should stop adding new instances when limit is reached
             assert len(grafana_apps) < 10  # Definitely not infinite!

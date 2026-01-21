@@ -22,9 +22,20 @@ from bundle_builder import Application, ApplicationEndpoint, Bundle, BundleBuild
 
 
 def test_overrides_metadata_make_optional(
-    tmp_path: Path, sample_dependent_charm: str, sample_dependent_charm_endpoint: str
+    tmp_path: Path,
+    static_charm_metadata_overrides: Path,
+    sample_dependent_charm: str,
+    sample_dependent_charm_endpoint: str,
 ) -> None:
-    # GIVEN an override to make an endpoint optional
+    # GIVEN static charm metadata overrides
+    for file in static_charm_metadata_overrides.iterdir():
+        if not file.is_file():
+            # NOTE: not recursing into sub-directories
+            continue
+
+        (tmp_path / file.name).write_bytes(file.read_bytes())
+
+    # AND an override to make an endpoint optional
     with (tmp_path / f"{sample_dependent_charm}.yaml").open("w") as f:
         yaml.dump(
             {
@@ -36,7 +47,7 @@ def test_overrides_metadata_make_optional(
             },
             f,
         )
-    # AND a charmhub client with an overrides client pointed to it
+    # AND a charmhub client with an overrides client pointed to it all
     charmhub_client = CharmhubClient(overrides_client=OverridesClient(charm_metadata_overrides=tmp_path))
 
     # WHEN a bundle is built with that charm

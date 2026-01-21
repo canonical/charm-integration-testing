@@ -55,10 +55,10 @@ class CharmhubHttpStub(CharmhubHttpClient):
 
 @dataclass
 class OverridesStub(OverridesClient):
-    charm_platform_overrides: dict[str, set[str]] = Field(default_factory=dict)  # type: ignore[assignment]
+    charm_platform_overrides: dict[str, set[str] | None] = Field(default_factory=dict)  # type: ignore[assignment]
 
-    def get_charm_platform_overrides(self, charm: str) -> set[str]:  # type: ignore[override]
-        return self.charm_platform_overrides.get(charm, set())
+    def get_charm_platform_overrides(self, charm: str) -> set[str] | None:  # type: ignore[override]
+        return self.charm_platform_overrides.get(charm, None)
 
     charm_listing_overrides: set[str] = Field(default_factory=set)  # type: ignore[assignment]
 
@@ -398,7 +398,7 @@ class TestCharmhubClient:
             platform: str | None = None
             find_response: list[FindResponse] = Field(default_factory=list)
             info_response: dict[str, InfoResponse] = Field(default_factory=dict)
-            platform_overrides: dict[str, set[str]] = Field(default_factory=dict)
+            platform_overrides: dict[str, set[str] | None] = Field(default_factory=dict)
             listing_overrides: set[str] = Field(default_factory=set)
             expected: set[str] = Field(default_factory=set)
 
@@ -590,7 +590,7 @@ class TestCharmhubClient:
         class Params:
             label: str
             given: set[FindResponse] = Field(default_factory=set)
-            platform_overrides: dict[str, set[str]] = Field(default_factory=dict)
+            platform_overrides: dict[str, set[str] | None] = Field(default_factory=dict)
             expected: set[FindResponse] = Field(default_factory=set)
 
         test_cases = [
@@ -610,8 +610,46 @@ class TestCharmhubClient:
                 },
                 platform_overrides={"charm-a": {"machine"}},
                 expected={
+                    FindResponse("charm-a", result=FindResponse.Result(deployable_on=frozenset({"machine"}))),
+                },
+            ),
+            Params(
+                label="override_replaces_not_extends",
+                given={
                     FindResponse(
                         "charm-a", result=FindResponse.Result(deployable_on=frozenset({"kubernetes", "machine"}))
+                    ),
+                },
+                platform_overrides={"charm-a": {"machine"}},
+                expected={
+                    FindResponse("charm-a", result=FindResponse.Result(deployable_on=frozenset({"machine"}))),
+                },
+            ),
+            Params(
+                label="none_override_skips_charm",
+                given={
+                    FindResponse("charm-a", result=FindResponse.Result(deployable_on=frozenset({"kubernetes"}))),
+                },
+                platform_overrides={"charm-a": None},
+                expected={
+                    FindResponse("charm-a", result=FindResponse.Result(deployable_on=frozenset({"kubernetes"}))),
+                },
+            ),
+            Params(
+                label="multiple_charms_mixed_overrides",
+                given={
+                    FindResponse("charm-a", result=FindResponse.Result(deployable_on=frozenset({"kubernetes"}))),
+                    FindResponse("charm-b", result=FindResponse.Result(deployable_on=frozenset({"machine"}))),
+                    FindResponse(
+                        "charm-c", result=FindResponse.Result(deployable_on=frozenset({"kubernetes", "machine"}))
+                    ),
+                },
+                platform_overrides={"charm-a": {"machine"}, "charm-b": None},
+                expected={
+                    FindResponse("charm-a", result=FindResponse.Result(deployable_on=frozenset({"machine"}))),
+                    FindResponse("charm-b", result=FindResponse.Result(deployable_on=frozenset({"machine"}))),
+                    FindResponse(
+                        "charm-c", result=FindResponse.Result(deployable_on=frozenset({"kubernetes", "machine"}))
                     ),
                 },
             ),
