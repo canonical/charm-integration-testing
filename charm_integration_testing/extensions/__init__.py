@@ -4,8 +4,8 @@
 from .configure_livepatch_server import ConfigureLivepatchServerExtension
 from .database_replication import PostgresqlDatabaseReplicationExtension, PostgresqlK8sDatabaseReplicationExtension
 from .s3_integrator_minio_backend import S3IntegratorMinIOBackendExtension
-from .unseal_vault import UnsealVaultJujuExtension, UnsealVaultK8sJujuExtension
 from .temporal import TemporalExtension
+from .unseal_vault import UnsealVaultJujuExtension, UnsealVaultK8sJujuExtension
 
 __all__ = [
     "ConfigureLivepatchServerExtension",

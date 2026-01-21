@@ -3,7 +3,7 @@
 
 from dataclasses import field
 from datetime import timedelta
-from typing import Any, Callable, Mapping, Self
+from typing import Any, Callable, Mapping
 
 import jubilant
 import pytest

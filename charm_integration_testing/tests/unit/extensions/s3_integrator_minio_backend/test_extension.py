@@ -3,7 +3,6 @@
 
 import logging
 from dataclasses import dataclass, field
-from datetime import timedelta
 from pathlib import Path
 from subprocess import CalledProcessError
 from typing import Generator  # nosec
@@ -16,6 +15,7 @@ from extensions.s3_integrator_minio_backend.extension import (
     MINIO_SECRET_KEY,
     S3IntegratorMinIOBackendExtension,
 )
+
 from ..shared import JujuStub as JujuStubBase
 
 

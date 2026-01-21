@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import Any, Iterable, Mapping
+
 from juju.backend import JujuBackend, JujuIntegrationApplication
 
 

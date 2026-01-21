@@ -7,7 +7,6 @@ from abc import ABC
 from datetime import timedelta
 from typing import Any, Mapping
 
-from juju_jubilant.wait import all_statuses_are_in
 from juju import JujuBackend, JujuExtension
 from juju.backend import JujuIntegrationApplication
 
@@ -117,7 +116,7 @@ class TemporalExtension(JujuExtension, ABC):
             {"args": "namespace list"},
         )
         for line in task.output.splitlines():
-            if line.strip() == f"Name: default":
+            if line.strip() == "Name: default":
                 return True
 
         return False

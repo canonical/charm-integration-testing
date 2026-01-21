@@ -2,9 +2,7 @@
 # See LICENSE file for licensing details.
 
 import logging
-from collections.abc import KeysView
 from dataclasses import dataclass, field
-from datetime import timedelta
 
 import pytest
 from extensions.configure_livepatch_server.extensions import (
@@ -13,6 +11,7 @@ from extensions.configure_livepatch_server.extensions import (
     ConfigureLivepatchServerExtension,
 )
 from juju.backend import JujuBackend
+
 from ..shared import JujuStub as JujuStubBase
 
 

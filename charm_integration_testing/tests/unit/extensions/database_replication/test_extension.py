@@ -3,13 +3,13 @@
 
 import logging
 from dataclasses import dataclass, field
-from datetime import timedelta
 
 import pytest
-from juju.backend import JujuIntegrationApplication
 from extensions.database_replication.database_client import DatabaseClient
 from extensions.database_replication.database_replicator import CharmInfo
 from extensions.database_replication.extension import GenericDatabaseReplicationExtension
+from juju.backend import JujuIntegrationApplication
+
 from ..shared import JujuStub as JujuStubBase
 
 

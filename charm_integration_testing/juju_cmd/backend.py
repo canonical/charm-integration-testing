@@ -8,7 +8,14 @@ import time
 from datetime import datetime, timedelta, timezone
 
 import yaml
-from juju import JujuBackend, JujuExecOutput, JujuIntegration, JujuIntegrationApplication, JujuTask, JujuWaitTimeoutError
+from juju import (
+    JujuBackend,
+    JujuExecOutput,
+    JujuIntegration,
+    JujuIntegrationApplication,
+    JujuTask,
+    JujuWaitTimeoutError,
+)
 from juju.backend import JujuStatusPerformanceWarning, warn_performance
 
 from .cmd import CmdArg, CmdClient, CmdError

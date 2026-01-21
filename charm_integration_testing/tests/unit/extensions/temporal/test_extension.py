@@ -3,14 +3,13 @@
 
 import logging
 from dataclasses import dataclass, field
-from pathlib import Path
-from subprocess import CalledProcessError  # nosec
 
 import pytest
 from extensions.temporal.extension import (
     TemporalExtension,
 )
 from juju.backend import JujuTask
+
 from ..shared import JujuStub as JujuStubBase
 
 
