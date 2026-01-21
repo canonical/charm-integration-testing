@@ -1,0 +1,40 @@
+---
+bundle: kubernetes
+applications:
+  netbox-k8s:
+    charm: netbox-k8s
+    channel: latest/edge
+    trust: true
+    scale: 1
+  hydra:
+    charm: hydra
+    channel: latest/edge
+    trust: true
+    scale: 1
+  identity-platform-login-ui-operator:
+    charm: identity-platform-login-ui-operator
+    channel: latest/edge
+    trust: true
+    scale: 1
+  traefik-k8s:
+    charm: traefik-k8s
+    channel: latest/stable
+    trust: true
+    scale: 1
+  self-signed-certificates:
+    charm: self-signed-certificates
+    channel: latest/stable
+    scale: 1
+  postgresql-k8s:
+    charm: postgresql-k8s
+    channel: 14/stable
+    trust: true
+    scale: 1
+relations:
+  - [netbox-k8s:oidc, hydra:oauth]
+  - [netbox-k8s:database, postgresql-k8s:database]
+  - [hydra:public-ingress, traefik-k8s:ingress]
+  - [hydra:ui-endpoint-info, identity-platform-login-ui-operator:ui-endpoint-info]
+  - [hydra:certificates, self-signed-certificates:certificates]
+  - [traefik-k8s:certificates, self-signed-certificates:certificates]
+  - [identity-platform-login-ui-operator:ingress, traefik-k8s:ingress]
