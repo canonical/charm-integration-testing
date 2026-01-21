@@ -127,7 +127,6 @@ class JujuStub(JujuBackend):
         pass
 
 
-
 @dataclass
 class VaultStub(VaultClient):
     initialized_units: dict[str, bool] = field(default_factory=dict)

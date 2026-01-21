@@ -15,9 +15,10 @@ from ..shared import JujuStub as JujuStubBase
 
 @dataclass
 class JujuStub(JujuStubBase):
-    applications: dict = field(default_factory=dict)  #{"temporal-app": "temporal"})
-    unit_ips: dict = field(default_factory=dict)      #{"temporal-app/leader": "10.0.0.1"})
+    applications: dict = field(default_factory=dict)  # {"temporal-app": "temporal"})
+    unit_ips: dict = field(default_factory=dict)  # {"temporal-app/leader": "10.0.0.1"})
     action_responses: list = field(default_factory=list)
+
     def run_action(self, model: str, unit: str, action: str, params: dict):
         """Mock running an action on a unit (captures call for verification)"""
         super().run_action(model, unit, action, params)
@@ -33,9 +34,8 @@ class TestTemporalExtension:
     @pytest.fixture
     def extension(self, juju):
         return TemporalExtension(juju, logging.getLogger("test"))
-    
-    class TestPostDeploy:
 
+    class TestPostDeploy:
         test_model = "test-model"
 
         def test_deploys_temporal_if_app_implicitly_requiring_it_is_present(self, extension, juju):
@@ -48,8 +48,12 @@ class TestTemporalExtension:
             #    extension looks for.
             # 2. Creation of the default namespace.  As long as the response has status="completed", the code doesn't
             #    care.
-            juju.action_responses.append(JujuTask(id="1", return_code=0, status="completed", message="message", output=""))
-            juju.action_responses.append(JujuTask(id="1", return_code=0, status="completed", message="message", output=""))
+            juju.action_responses.append(
+                JujuTask(id="1", return_code=0, status="completed", message="message", output="")
+            )
+            juju.action_responses.append(
+                JujuTask(id="1", return_code=0, status="completed", message="message", output="")
+            )
 
             # Also, prepping some config for the airbyte-k8s app to mock its default config pointing to temporal
             juju.configured_applications.append((self.test_model, app_name, {"temporal-host": "temporal-k8s:7233"}))

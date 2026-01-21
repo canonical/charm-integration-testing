@@ -133,13 +133,14 @@ class JujuExecOutput:
 @dataclass
 class JujuTask:
     """Represents a Juju task, as used by Juju Actions to represent action results."""
+
     # For now, keeping this somewhat minimal and opinionated.
     # Not doing a full wrapper of jubilant.Task.
     id: str
     return_code: int
     status: str
     message: str
-    output: str   # from results.output
+    output: str  # from results.output
     # Omitting log, stdout and stderr for now.  During testing these were blank or empty.
     # We can always add them later.
 
@@ -168,7 +169,14 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def wait_idle(self, model: str, timeout: timedelta | None, count: int | None, strict_timeout: bool = False, applications: Iterable[str] | None = None):
+    def wait_idle(
+        self,
+        model: str,
+        timeout: timedelta | None,
+        count: int | None,
+        strict_timeout: bool = False,
+        applications: Iterable[str] | None = None,
+    ):
         raise NotImplementedError
 
     @abstractmethod

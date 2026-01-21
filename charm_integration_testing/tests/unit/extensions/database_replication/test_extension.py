@@ -121,7 +121,8 @@ class TestPostgreSQLDatabaseReplicationExtension:
             juju.integrate(
                 "test-model",
                 JujuIntegrationApplication("postgresql-1", "logical-replication-offer"),
-                JujuIntegrationApplication("postgresql-2", "logical-replication"))
+                JujuIntegrationApplication("postgresql-2", "logical-replication"),
+            )
 
             # WHEN post_deploy is called
             extension.post_deploy("test-model")
@@ -183,7 +184,7 @@ class TestPostgreSQLDatabaseReplicationExtension:
             juju.integrate(
                 "test-model",
                 JujuIntegrationApplication("postgresql-1", "logical-replication-offer"),
-                JujuIntegrationApplication("postgresql-2", "logical-replication")
+                JujuIntegrationApplication("postgresql-2", "logical-replication"),
             )
             database_replicator = extension.database_replicator
 

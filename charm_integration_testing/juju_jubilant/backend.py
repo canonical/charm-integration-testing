@@ -114,12 +114,21 @@ class JubilantBackend(JujuCmdBackend):
             )
         raise JujuWaitTimeoutError(wait_state=noncompliant_wait_state)
 
-    def wait_idle(self, model: str, timeout: timedelta | None, count: int | None, strict_timeout: bool = False, applications: list[str] | None = None):
+    def wait_idle(
+        self,
+        model: str,
+        timeout: timedelta | None,
+        count: int | None,
+        strict_timeout: bool = False,
+        applications: list[str] | None = None,
+    ):
         if applications is None:
             applications = []
         self.wait(
             model,
-            lambda status: all_statuses_are_in(status, *applications, application_statuses={"active"}, unit_statuses={"active"}),
+            lambda status: all_statuses_are_in(
+                status, *applications, application_statuses={"active"}, unit_statuses={"active"}
+            ),
             timeout=timeout,
             successes=count,
             strict_timeout=strict_timeout,
@@ -170,7 +179,7 @@ class JubilantBackend(JujuCmdBackend):
             # Just extract the task from the exception
             task = e.task
 
-        return JujuTask(task.id, task.return_code, task.status, task.message, task.results.get('output', ''))
+        return JujuTask(task.id, task.return_code, task.status, task.message, task.results.get("output", ""))
 
     def add_secret(self, model: str, name: str, values: dict[str, str]) -> str:
         return (

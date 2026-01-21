@@ -394,7 +394,7 @@ class TestJubilantBackend:
             # WHEN wait_idle is called with specific applications/units
             backend.wait_idle(
                 "test-model",
-                timedelta(seconds=3), 
+                timedelta(seconds=3),
                 count=3,
                 applications=["app1", "app2"],
             )
@@ -643,7 +643,9 @@ class TestJubilantBackend:
             client = JubilantClientStub(client=stub)
 
             # WHEN
-            JubilantBackend(client).deploy_application("test-model", charm="my-charm", application="my-app", config={"setting": "value"})
+            JubilantBackend(client).deploy_application(
+                "test-model", charm="my-charm", application="my-app", config={"setting": "value"}
+            )
 
             # THEN
             assert stub.charm == "my-charm"
@@ -816,7 +818,6 @@ class TestJubilantBackend:
             # THEN
             assert charm_revisions == {("my-charm", 1)}
 
-
     class TestRunAction:
         @dataclass
         class ActionStub:
@@ -828,7 +829,9 @@ class TestJubilantBackend:
                 self.unit = unit
                 self.action = action
                 self.params = params
-                return jubilant.Task(id="123", status="failed", return_code=1, message="error", results={"output": "error output"})
+                return jubilant.Task(
+                    id="123", status="failed", return_code=1, message="error", results={"output": "error output"}
+                )
 
         def test(self) -> None:
             # This test does two things:
@@ -848,14 +851,13 @@ class TestJubilantBackend:
             assert stub.unit == "my-app/0"
             assert stub.action == "restart-service"
             assert stub.params == {"force": True}
-            
+
             # The following just verifies that we transform from the jubilant.Task to our own JujuTask as expected.
             assert task.id == "123"
             assert task.return_code == 1
             assert task.status == "failed"
             assert task.message == "error"
             assert task.output == "error output"
-
 
     class TestGetApplicationConfig:
         @dataclass

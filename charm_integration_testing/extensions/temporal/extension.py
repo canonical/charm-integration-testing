@@ -13,6 +13,7 @@ from juju.backend import JujuIntegrationApplication
 
 class TemporalExtension(JujuExtension, ABC):
     """Auto-deploys temporal to support charms with implicit temporal dependencies."""
+
     juju: JujuBackend
     logger: logging.Logger
 
