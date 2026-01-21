@@ -54,7 +54,7 @@ class JujuStub(JujuBackend):
 
     def run_action(self, model: str, unit: str, action: str, params: dict[str, Any]) -> JujuTask:
         self.actions_run.append((unit, action, params))
-        return JujuTask()  # Dummy; provided to satisfy return type
+        return JujuTask("", 0, "", "", "")  # Dummy; provided to satisfy return type
 
     def remove_secret(self, model: str, name: str) -> None:
         try:

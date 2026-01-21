@@ -105,7 +105,7 @@ class JujuStub(JujuBackend):
     def run_action(self, model: str, unit: str, action: str, params: dict[str, Any]) -> JujuTask:
         """Mock running an action on a unit (captures call for verification)"""
         self.actions.append((model, unit, action, params))
-        return JujuTask()  # Return dummy value; we're not really using this (yet).
+        return JujuTask("", 0, "", "", "")  # Return dummy value; we're not really using this (yet).
 
     def unit_ip(self, model: str, unit: str) -> str:
         """Return the IP address of a unit"""
