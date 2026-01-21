@@ -13,9 +13,10 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import pytest
 
 from bundle_builder.bundle import Application, ApplicationEndpoint, Bundle, Integration
-from bundle_builder.bundle_builder import BundleBuilder
+from bundle_builder.bundle_builder import BundleBuilder, UnfulfilledEndpointsError
 from bundle_builder.charm import (
     ENDPOINT_PROVIDES,
     ENDPOINT_REQUIRES,
@@ -72,9 +73,18 @@ class TestDependencyCycle:
         builder = BundleBuilder(CharmhubClientStub(provides_and_requires_same_interface_charm))
 
         # WHEN we build the bundle
-        new_bundle = builder.build(bundle)
+        # THEN it errors because of unfulfilled endpoints
+        with pytest.raises(UnfulfilledEndpointsError) as caught:
+            builder.build(bundle)
 
-        # THEN the charm should be added once
+        # AND the added charm must have unfulfilled non-optional endpoint
+        #   because we don't allow a loop back
+        #   between the existing application-a and the charm-a added by the bundle-builder
+        assert caught.value.unfulfilled_endpoints == {ApplicationEndpoint("charm-a", "interface-consumer")}
+
+        new_bundle = caught.value.best_bundle
+
+        # AND in the last best bundle, charm should be added once
         assert len(new_bundle.applications) == 2
         # AND the integration exists once
         assert new_bundle.integrations == {
@@ -129,9 +139,18 @@ class TestDependencyCycle:
         builder = BundleBuilder(CharmhubClientStub(provides_and_requires_same_interface_charm))
 
         # WHEN we build the bundle
-        new_bundle = builder.build(bundle)
+        # THEN it errors because of unfulfilled endpoints
+        with pytest.raises(UnfulfilledEndpointsError) as caught:
+            builder.build(bundle)
 
-        # THEN the charm should be added once
+        # AND the added charm must have unfulfilled non-optional endpoint
+        #   because we don't allow a loop back
+        #   between the existing application-a and the charm-a added by the bundle-builder
+        assert caught.value.unfulfilled_endpoints == {ApplicationEndpoint("charm-a", "interface-provider")}
+
+        new_bundle = caught.value.best_bundle
+
+        # AND in the last best bundle, the charm should be added once
         assert len(new_bundle.applications) == 2
         # AND the integration exists once
         assert new_bundle.integrations == {
@@ -291,9 +310,19 @@ class TestDependencyCycle:
         builder = BundleBuilder(CharmhubClientStub(charm_a, charm_b), avoid_application_dependency_cycles=True)
 
         # WHEN we build the bundle
-        new_bundle = builder.build(bundle)
+        # THEN it errors because of unfulfilled endpoints
+        with pytest.raises(UnfulfilledEndpointsError) as caught:
+            builder.build(bundle)
 
-        # THEN the given charm should be integrated with the second charm
+        # AND the added charm-a must have unfulfilled non-optional endpoint
+        #   because we don't allow a loop back
+        #   between the existing application-a and the charm-a added by the bundle-builder, nor
+        #   between the charm-b and charm-a added by the bundle-builder
+        assert caught.value.unfulfilled_endpoints == {ApplicationEndpoint("charm-a", "interface-consumer")}
+
+        new_bundle = caught.value.best_bundle
+
+        # AND in the last best bundle, the given charm should be integrated with the second charm
         assert (
             Integration(
                 {

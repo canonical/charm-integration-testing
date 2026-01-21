@@ -1,3 +1,4 @@
+---
 # Argo Controller - workflow engine for Kubernetes
 provides:
   # Remove after: https://github.com/canonical/charm-integration-testing/issues/282

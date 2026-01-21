@@ -1,3 +1,4 @@
+---
 # Remove after: https://github.com/canonical/identity-platform-login-ui-operator/pull/282
 provides:
   ui-endpoint-info:

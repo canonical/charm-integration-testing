@@ -1,3 +1,4 @@
+---
 # pgbouncer needs at least one of these to exit blocked state
 # (db and db-admin are legacy endpoints)
 # https://github.com/canonical/pgbouncer-operator/pull/548
@@ -20,7 +21,6 @@ provides:
           - endpoint_integrated: database
           - endpoint_integrated: db
     features: [tls]
-
 requires:
   # To provide tls-enabled endpoints, pgbouncer needs certificates
   certificates:

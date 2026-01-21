@@ -1,3 +1,4 @@
+---
 # Istio Pilot - control plane for service mesh
 provides:
   istio-pilot:

@@ -1,45 +1,43 @@
+---
 name: Create Test Execution
 description: Create a Test Execution on Test Observer
-
 inputs:
   test_observer_api:
-    description: "URL for the Test Observer API"
-    required: True
+    description: URL for the Test Observer API
+    required: true
   test_observer_token:
-    description: "Bearer token to send as Authorization header"
-    required: True
+    description: Bearer token to send as Authorization header
+    required: true
   charm:
-    description: "Charm name"
-    required: True
+    description: Charm name
+    required: true
   revision:
-    description: "Charm revision"
-    required: True
+    description: Charm revision
+    required: true
   arch:
-    description: "Charm architecture"
-    required: True
+    description: Charm architecture
+    required: true
   environment:
-    description: "Test environment"
-    required: True
+    description: Test environment
+    required: true
   test_plan:
-    description: "Test execution plan"
-    required: True
+    description: Test execution plan
+    required: true
   track:
-    description: "Charm track"
-    required: True
+    description: Charm track
+    required: true
   risk:
-    description: "Charm risk"
-    required: True
+    description: Charm risk
+    required: true
   status:
-    description: "Initial test execution status"
-    default: "NOT_STARTED"
-
+    description: Initial test execution status
+    default: NOT_STARTED
 outputs:
   test_execution_id:
-    description: "Created Test Execution ID"
+    description: Created Test Execution ID
     value: ${{ steps.read-response.outputs.test_execution_id }}
-
 runs:
-  using: "composite"
+  using: composite
   steps:
     - name: Get Test Observer JSON
       id: request-body
@@ -75,24 +73,21 @@ runs:
             "revision": ($revision | tonumber),
             "track": $track,
             "execution_stage": $risk
-
           }
         ' > body.json
         echo "file=$(realpath body.json)" >> "$GITHUB_OUTPUT"
-
     - name: Send request to Test Observer
       uses: ./.github/actions/test-observer/call-api
       id: call-api
       with:
-        test_observer_api: "${{ inputs.test_observer_api }}/v1/test-executions/start-test"
-        test_observer_token: "${{ inputs.test_observer_token }}"
-        method_type: "PUT"
-        request_body: "@${{ steps.request-body.outputs.file }}"
-
+        test_observer_api: ${{ inputs.test_observer_api }}/v1/test-executions/start-test
+        test_observer_token: ${{ inputs.test_observer_token }}
+        method_type: PUT
+        request_body: '@${{ steps.request-body.outputs.file }}'
     - name: Read response
       id: read-response
       shell: bash
       env:
-        response_file: "${{ steps.call-api.outputs.response_file }}"
-      run: |
+        response_file: ${{ steps.call-api.outputs.response_file }}
+      run: |-
         echo "test_execution_id=$(cat "$response_file" | jq --raw-output '.id')" >> "$GITHUB_OUTPUT"

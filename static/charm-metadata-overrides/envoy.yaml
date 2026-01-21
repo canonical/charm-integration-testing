@@ -1,8 +1,8 @@
+---
 # Envoy proxy - HTTP/gRPC access to ML Metadata
 requires:
   grpc:
     features: [mlmd-grpc]
-
 provides:
   # Remove after: https://github.com/canonical/charm-integration-testing/issues/282
   metrics-endpoint:

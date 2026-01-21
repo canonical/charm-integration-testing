@@ -1,33 +1,29 @@
-name: "Post events to Test Observer"
-description: "Post a timestamped event to the Test Observer API for the given job UUID."
-
+---
+name: Post events to Test Observer
+description: Post a timestamped event to the Test Observer API for the given job UUID.
 inputs:
   test_observer_api:
-    description: "Base URL of the Test Observer API"
+    description: Base URL of the Test Observer API
     required: true
-
   test_observer_token:
-    description: "Bearer token to send as Authorization header"
-    required: True
-
+    description: Bearer token to send as Authorization header
+    required: true
   test_execution_id:
-    description: "The unique identifier for the test execution (e.g., test execution id)."
+    description: The unique identifier for the test execution (e.g., test execution
+      id).
     required: true
-
   job_uuid:
-    description: "The unique job identifier (e.g., env/test_execution_id) used in Test Observer."
+    description: The unique job identifier (e.g., env/test_execution_id) used in Test
+      Observer.
     required: true
-
   event_name:
-    description: "The event name to be posted (e.g., job_start, test_end)."
+    description: The event name to be posted (e.g., job_start, test_end).
     required: true
-
   detail:
-    description: "The context of the event."
+    description: The context of the event.
     required: true
-
 runs:
-  using: "composite"
+  using: composite
   steps:
     - name: Get Test Observer JSON
       id: request-body
@@ -52,12 +48,12 @@ runs:
           }
         ' > body.json
         echo "file=$(realpath body.json)" >> "$GITHUB_OUTPUT"
-
     - name: Send request to Test Observer
       uses: ./.github/actions/test-observer/call-api
       id: call-api
       with:
-        test_observer_api: "${{ inputs.test_observer_api }}/v1/test-executions/${{ inputs.test_execution_id }}/status_update"
-        test_observer_token: "${{ inputs.test_observer_token }}"
-        method_type: "POST"
-        request_body: "@${{ steps.request-body.outputs.file }}"
+        test_observer_api: ${{ inputs.test_observer_api }}/v1/test-executions/${{
+          inputs.test_execution_id }}/status_update
+        test_observer_token: ${{ inputs.test_observer_token }}
+        method_type: POST
+        request_body: '@${{ steps.request-body.outputs.file }}'

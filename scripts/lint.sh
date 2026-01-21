@@ -33,6 +33,7 @@ poetry run bandit \
     || die 'Failed on "bandit"'
 poetry run mypy bundle_builder || die 'Failed on "mypy bundle_builder"'
 poetry run mypy charm_integration_testing || die 'Failed on "mypy charm_integration_testing"'
+poetry run yamlfix --check $(find . -name '*.yaml' -o -name '*.yml') || die 'Failed on "yamlfix"'
 markdownlint-cli2 --config docs/.sphinx/.markdownlint.json "#docs/_build" "*.md" || die 'Failed on markdownlint-cli2'
 
 echo "Linting passed"

@@ -1,3 +1,4 @@
+---
 # Remove after: https://github.com/canonical/wordpress-k8s-operator/pull/343
 provides:
   metrics-endpoint:
@@ -6,7 +7,6 @@ provides:
   grafana-dashboard:
     interface: grafana_dashboard
     optional: true
-
 requires:
   nginx-route:
     interface: nginx-route

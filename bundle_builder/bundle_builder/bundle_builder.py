@@ -64,7 +64,6 @@ class Node:
 class BundleBuilder:
     charmhub_client: CharmhubClient
     logger: logging.Logger
-    max_nodes_visited: int | None
     aggression_limit: int
     aggression_interval: int
     avoid_application_dependency_cycles: bool
@@ -73,14 +72,12 @@ class BundleBuilder:
         self,
         charmhub_client: CharmhubClient,
         logger: logging.Logger = logging.getLogger(__name__),
-        max_nodes_visited: int | None = None,
         aggression_limit: int = 50000,
         aggression_interval: int = 5000,
         avoid_application_dependency_cycles: bool = False,
     ):
         self.charmhub_client = charmhub_client
         self.logger = logger
-        self.max_nodes_visited = max_nodes_visited
         self.aggression_limit = aggression_limit
         self.aggression_interval = aggression_interval
         self.avoid_application_dependency_cycles = avoid_application_dependency_cycles
@@ -119,11 +116,6 @@ class BundleBuilder:
                 self.logger.info(f"New best bundle: {node.stats}")
                 best_node = node
 
-            # If we've reached the maximum number of visited nodes stop
-            if self.max_nodes_visited is not None and num_visited_nodes >= self.max_nodes_visited:
-                self.logger.info("Reached maximum number of visited nodes, stopping")
-                break
-
             # Get the child nodes
             child_nodes = self.child_nodes(node)
 
@@ -144,10 +136,10 @@ class BundleBuilder:
         # Pick the best bundle
         best_bundle = best_node.bundle
 
-        # Note unresolved endpoints
+        # Raise exception on unfulfillable endpoints
         # TODO(raul): remove type ignore in subsequent type checker PRs
-        for application_endpoint in best_bundle.unfulfilled_endpoints:  # type: ignore
-            self.logger.warning(f"Cannot resolve application endpoint: {application_endpoint}")
+        if len(best_bundle.unfulfilled_endpoints) > 0:  # type: ignore
+            raise UnfulfilledEndpointsError(best_bundle)
 
         # Resolve test configs
         best_bundle = self.add_test_configs(best_bundle)
@@ -374,3 +366,26 @@ class BundleBuilder:
 
         # TODO(raul): remove type ignore in subsequent type checker PRs
         return dataclasses.replace(bundle, applications=frozenset(applications))  # type: ignore
+
+
+class UncompletableBundleError(ValueError):
+    """Exception raised when bundle builder cannot generate a complete bundle from the base bundle"""
+
+    def __init__(self, best_bundle: Bundle, reason: str = "no reason set"):
+        self.best_bundle = best_bundle
+        message = f"Could not build a complete valid bundle: {reason}"
+        super().__init__(message)
+
+
+class UnfulfilledEndpointsError(UncompletableBundleError):
+    """UncompletableBundleError when we cannot fulfill required application endpoints.
+
+    Attributes:
+        unfulfilled_endpoints: The set of application endpoints that could not be fulfilled.
+    """
+
+    def __init__(self, best_bundle: Bundle) -> None:
+        self.unfulfilled_endpoints = best_bundle.unfulfilled_endpoints
+        # TODO(raul): remove type ignore in subsequent type checker PRs
+        reason = f"Cannot fulfill application endpoints: {', '.join(str(ep) for ep in self.unfulfilled_endpoints)}"  # type: ignore
+        super().__init__(best_bundle, reason=reason)
