@@ -580,7 +580,6 @@ class CharmhubClient:
                         interface=endpoint.interface,
                         optionality=optionality,
                         limits=limits,
->>>>>>> f87d2f9 (chore: remove type: ignore comments)
                         features=features,
                     )
                 )
