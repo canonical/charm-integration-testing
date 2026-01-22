@@ -1073,7 +1073,7 @@ class TestCharmConfigCriteria:
             ]
 
             # WHEN creating CharmConfigCriteria from the list
-            criteria = CharmConfigCriteria(criteria_list)  # type: ignore[arg-type]
+            criteria = CharmConfigCriteria(criteria_list)
 
             # THEN it's converted to all_of
             assert criteria.all_of is not None
