@@ -16,7 +16,7 @@
 
 from dataclasses import field
 from functools import wraps
-from typing import Any, Callable, Type, TypeVar, get_type_hints, overload
+from typing import Any, Callable, Type, TypeVar, get_type_hints, cast
 
 from pydantic.dataclasses import dataclass
 from typing_extensions import dataclass_transform
@@ -28,8 +28,7 @@ _Return = TypeVar("_Return")
 
 def computed_property(func: Callable[[_Self], _Return]) -> _Return:
     setattr(func, "_is_computed_property", True)
-    # TODO(raul): remove type: ignore in subsequent type checker-related PR
-    return func  # type: ignore
+    return cast(_Return, func)  # the immutable_dataclass logic below will change the type of func
 
 
 # Sentinel value for uninitialized computed fields
