@@ -23,6 +23,7 @@ from pydantic.dataclasses import dataclass
 
 from bundle_builder.bundle import Application, ApplicationEndpoint, Integration
 from bundle_builder.charm import Charm, CharmChannel
+from bundle_builder.charmhub import CharmhubClient
 from bundle_builder.charmhub_http import CharmReleaseNotFoundException
 from bundle_builder.entrypoint import (
     add_args_to_parser,
@@ -109,14 +110,14 @@ class TestAddArgsToParser:
             assert not params.fail
 
 
-class ArgumentParserStub:
-    def error(self, message: str) -> None:
+class ArgumentParserStub(argparse.ArgumentParser):
+    def error(self, message: str) -> None:  # type: ignore[override]
         raise RuntimeError
 
 
 class TestApplicationFromArgs:
-    class CharmhubClientStub:
-        def charm_from_store(
+    class CharmhubClientStub(CharmhubClient):
+        def charm_from_store(  # type: ignore[override]
             self,
             charm_name: str,
             ubuntu_arch: str,
@@ -247,7 +248,7 @@ class TestApplicationFromArgs:
 
         # WHEN called with the specs
         try:
-            applications = applications_from_args(parser, charmhub_client, params.specs, params.arch)  # type: ignore[arg-type]
+            applications = applications_from_args(parser, charmhub_client, params.specs, params.arch)
         except RuntimeError:
             threw = True
         else:
@@ -305,7 +306,7 @@ class TestIntegrationFromArgs:
 
         # WHEN called with the specs
         try:
-            integrations = integrations_from_args(parser, params.specs)  # type: ignore[arg-type]
+            integrations = integrations_from_args(parser, params.specs)
         except RuntimeError:
             threw = True
         else:
@@ -347,7 +348,7 @@ class TestPlatformFromArgs:
 
         # WHEN called with the specs
         try:
-            platform = platform_from_args(parser, params.substrate)  # type: ignore[arg-type]
+            platform = platform_from_args(parser, params.substrate)
         except RuntimeError:
             threw = True
         else:
