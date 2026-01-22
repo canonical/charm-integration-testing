@@ -70,7 +70,8 @@ class OverridesStub(OverridesClient):
     def get_charm_test_configs(self, charm: str) -> list[CharmTestConfig]:  # type: ignore[override]
         configs = self.charm_test_configs.get(charm, [])
         # Use CharmTestConfigs wrapper to let Pydantic validate the list properly
-        return CharmTestConfigs(configs=configs).configs
+        # TODO(raul): remove type: ignore in subsequent type checker-related PR
+        return CharmTestConfigs(configs=configs).configs  # type: ignore[arg-type]
 
 
 matching_base = CharmhubBase(name="ubuntu", architecture="amd64", channel="20.04")
@@ -514,7 +515,7 @@ class TestCharmhubClient:
                     "charm-a": InfoResponse(
                         default_release=InfoResponse.DefaultRelease(
                             revision=InfoResponse.DefaultRelease.Revision(
-                                metadata=yaml.dump(
+                                metadata=yaml.dump(  # type: ignore[arg-type]
                                     {
                                         "provides": {
                                             "endpoint-a": {
@@ -543,7 +544,7 @@ class TestCharmhubClient:
                     "charm-a": InfoResponse(
                         default_release=InfoResponse.DefaultRelease(
                             revision=InfoResponse.DefaultRelease.Revision(
-                                metadata=yaml.dump(
+                                metadata=yaml.dump(  # type: ignore[arg-type]
                                     {
                                         "requires": {
                                             "endpoint-a": {
@@ -1055,7 +1056,8 @@ class TestCharmhubClient:
                         revision=42,
                         bases=[matching_base],
                         config=yaml.dump({"provides": {"endpoint-a": {"interface": "interface-a"}}}),
-                        metadata=yaml.dump({"provides": {"endpoint-a": {"interface": "interface-a"}}}),
+                        # TODO(raul): remove type: ignore in subsequent type checker-related PR
+                        metadata=yaml.dump({"provides": {"endpoint-a": {"interface": "interface-a"}}}),  # type: ignore[arg-type]
                     ),
                 ),
                 supported_versions_refresh_response=RefreshResponse(
@@ -1081,7 +1083,8 @@ class TestCharmhubClient:
                         revision=99,
                         bases=[matching_base],
                         config=yaml.dump({}),
-                        metadata=yaml.dump({}),
+                        # TODO(raul): remove type: ignore in subsequent type checker-related PR
+                        metadata=yaml.dump({}),  # type: ignore[arg-type]
                     ),
                 ),
                 supported_versions_refresh_response=RefreshResponse(
@@ -1108,7 +1111,8 @@ class TestCharmhubClient:
                         revision=50,
                         bases=[matching_base, other_base],
                         config=yaml.dump({}),
-                        metadata=yaml.dump({}),
+                        # TODO(raul): remove type: ignore in subsequent type checker-related PR
+                        metadata=yaml.dump({}),  # type: ignore[arg-type]
                     ),
                 ),
                 supported_versions_refresh_response=RefreshResponse(

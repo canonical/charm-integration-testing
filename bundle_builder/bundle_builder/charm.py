@@ -123,7 +123,7 @@ class CharmLimitCriteria:
     @cached_method
     def valid(
         self,
-        integrated_endpoints: set[str],
+        integrated_endpoints: frozenset[str],
     ) -> bool:
         return all(
             [
@@ -223,7 +223,7 @@ class CharmConfigCriteria:
     def valid(
         self,
         channel: CharmChannel,
-        integrated_endpoints: set[str],
+        integrated_endpoints: frozenset[str],
     ) -> bool:
         return all(
             [
@@ -291,6 +291,5 @@ class Charm:
     priority: float  # greater priority values mean a node with this charm is prioritized
     test_configs: tuple[CharmTestConfig, ...] = Field(default_factory=tuple)
 
-    # TODO(raul): remove type ignore in subsequent type checker PRs
-    def __repr__(self):  # type: ignore
+    def __repr__(self) -> str:
         return self.name

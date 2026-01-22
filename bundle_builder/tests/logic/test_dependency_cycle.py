@@ -34,7 +34,8 @@ class TestDependencyCycle:
         # GIVEN a charm that provides and requires the same interface
         provides_and_requires_same_interface_charm = Charm(
             name="charm-a",
-            channel="stable",
+            # TODO(raul): remove type: ignore in subsequent type checker-related PR
+            channel="stable",  # type: ignore[arg-type]
             revision=1,
             ubuntu_version="22.04",
             ubuntu_arch="amd64",
@@ -100,7 +101,8 @@ class TestDependencyCycle:
         # GIVEN a charm that provides and requires the same interface
         provides_and_requires_same_interface_charm = Charm(
             name="charm-a",
-            channel="stable",
+            # TODO(raul): remove type: ignore in subsequent type checker-related PR
+            channel="stable",  # type: ignore[arg-type]
             revision=1,
             ubuntu_version="22.04",
             ubuntu_arch="amd64",
@@ -166,7 +168,8 @@ class TestDependencyCycle:
         # GIVEN a charm that provides and requires the same interface
         charm_a = Charm(
             name="charm-a",
-            channel="stable",
+            # TODO(raul): remove type: ignore in subsequent type checker-related PR
+            channel="stable",  # type: ignore[arg-type]
             revision=1,
             ubuntu_version="22.04",
             ubuntu_arch="amd64",
@@ -193,7 +196,8 @@ class TestDependencyCycle:
         # AND a second charm that only provides the interface
         charm_b = Charm(
             name="charm-b",
-            channel="stable",
+            # TODO(raul): remove type: ignore in subsequent type checker-related PR
+            channel="stable",  # type: ignore[arg-type]
             revision=1,
             ubuntu_version="22.04",
             ubuntu_arch="amd64",
@@ -244,7 +248,8 @@ class TestDependencyCycle:
         # GIVEN a charm that provides and requires some interface
         charm_a = Charm(
             name="charm-a",
-            channel="stable",
+            # TODO(raul): remove type: ignore in subsequent type checker-related PR
+            channel="stable",  # type: ignore[arg-type]
             revision=1,
             ubuntu_version="22.04",
             ubuntu_arch="amd64",
@@ -271,7 +276,8 @@ class TestDependencyCycle:
         # AND a second charm that provides and requires the opposite interfaces
         charm_b = Charm(
             name="charm-b",
-            channel="stable",
+            # TODO(raul): remove type: ignore in subsequent type checker-related PR
+            channel="stable",  # type: ignore[arg-type]
             revision=1,
             ubuntu_version="22.04",
             ubuntu_arch="amd64",

@@ -237,8 +237,7 @@ class TestBundle:
             ),
             Params(
                 label="duplicate_application_names",
-                # TODO(raul): remove type ignore in subsequent type checker PRs
-                bundle=dataclasses.replace(  # type: ignore
+                bundle=dataclasses.replace(
                     sample_bundle_postgresql_k8s_kratos(),
                     applications=frozenset(
                         {
@@ -252,8 +251,7 @@ class TestBundle:
             ),
             Params(
                 label="more_than_two_endpoints_in_integration",
-                # TODO(raul): remove type ignore in subsequent type checker PRs
-                bundle=dataclasses.replace(  # type: ignore
+                bundle=dataclasses.replace(
                     sample_bundle_postgresql_k8s_kratos(),
                     integrations=frozenset(
                         {
@@ -274,8 +272,7 @@ class TestBundle:
             ),
             Params(
                 label="unknown_application_in_integration",
-                # TODO(raul): remove type ignore in subsequent type checker PRs
-                bundle=dataclasses.replace(  # type: ignore
+                bundle=dataclasses.replace(
                     sample_bundle_postgresql_k8s_kratos(),
                     integrations=frozenset(
                         {
@@ -293,8 +290,7 @@ class TestBundle:
             ),
             Params(
                 label="unknown_endpoint_in_integration",
-                # TODO(raul): remove type ignore in subsequent type checker PRs
-                bundle=dataclasses.replace(  # type: ignore
+                bundle=dataclasses.replace(
                     sample_bundle_postgresql_k8s_kratos(),
                     integrations=frozenset(
                         {
@@ -312,8 +308,7 @@ class TestBundle:
             ),
             Params(
                 label="different_interface_types_in_integration",
-                # TODO(raul): remove type ignore in subsequent type checker PRs
-                bundle=dataclasses.replace(  # type: ignore
+                bundle=dataclasses.replace(
                     sample_bundle_postgresql_k8s_kratos(),
                     applications=frozenset(
                         {
@@ -343,20 +338,17 @@ class TestBundle:
             ),
             Params(
                 label="endpoint_limit_exceeded",
-                # TODO(raul): remove type ignore in subsequent type checker PRs
-                bundle=dataclasses.replace(  # type: ignore
+                bundle=dataclasses.replace(
                     sample_bundle_postgresql_k8s_kratos(),
                     applications=frozenset(
                         {
                             Application(
                                 name="db",
-                                # TODO(raul): remove type ignore in subsequent type checker PRs
-                                charm=dataclasses.replace(  # type: ignore
+                                charm=dataclasses.replace(
                                     sample_charm_postgresql_k8s(),
                                     endpoints=frozenset(
-                                        # TODO(raul): remove type ignore in subsequent type checker PRs
                                         {
-                                            dataclasses.replace(  # type: ignore[type-var]
+                                            dataclasses.replace(
                                                 sample_charm_endpoint_postgresql_k8s_database(),
                                                 limits=(CharmLimit(limit=1),),
                                             )
@@ -431,8 +423,7 @@ class TestBundle:
         test_cases = [
             Params(
                 label="no_charms",
-                # TODO(raul): remove type ignore in subsequent type checker PRs
-                bundle=dataclasses.replace(  # type: ignore
+                bundle=dataclasses.replace(
                     sample_bundle_postgresql_k8s_kratos(),
                     applications=frozenset(),
                 ),
@@ -445,8 +436,7 @@ class TestBundle:
             ),
             Params(
                 label="duplicate_charms",
-                # TODO(raul): remove type ignore in subsequent type checker PRs
-                bundle=dataclasses.replace(  # type: ignore
+                bundle=dataclasses.replace(
                     sample_bundle_postgresql_k8s_kratos(),
                     applications=frozenset(
                         {
@@ -468,8 +458,7 @@ class TestBundle:
             charms = bundle.charms
 
             # THEN charms match
-            # TODO(raul): remove type ignore in subsequent type checker PRs
-            assert charms == params.charms  # type: ignore
+            assert charms == params.charms
 
     class TestUnfulfilledEndpoints:
         @dataclass
@@ -481,8 +470,7 @@ class TestBundle:
         test_cases = [
             Params(
                 label="no_non_optional_endpoints",
-                # TODO(raul): remove type ignore in subsequent type checker PRs
-                bundle=dataclasses.replace(  # type: ignore
+                bundle=dataclasses.replace(
                     sample_bundle_postgresql_k8s_kratos(),
                     applications=frozenset(
                         {
@@ -495,8 +483,7 @@ class TestBundle:
             ),
             Params(
                 label="missing_non_optional_endpoint",
-                # TODO(raul): remove type ignore in subsequent type checker PRs
-                bundle=dataclasses.replace(  # type: ignore
+                bundle=dataclasses.replace(
                     sample_bundle_postgresql_k8s_kratos(),
                     applications=frozenset(
                         {
@@ -525,14 +512,14 @@ class TestBundle:
             unfulfilled_endpoints = bundle.unfulfilled_endpoints
 
             # THEN unfulfilled endpoints match
-            # TODO(raul): remove type ignore in subsequent type checker PRs
-            assert unfulfilled_endpoints == params.unfulfilled_endpoints  # type: ignore
+            assert unfulfilled_endpoints == params.unfulfilled_endpoints
 
         def test_unfulfilled_endpoints_considers_limits(self) -> None:
             # GIVEN a charm with limit 1
             limited_charm = Charm(
                 name="limited-charm",
-                channel="stable",
+                # TODO(raul): remove type: ignore in subsequent type checker-related PR
+                channel="stable",  # type: ignore[arg-type]
                 revision=1,
                 ubuntu_version="22.04",
                 ubuntu_arch="amd64",
@@ -552,7 +539,8 @@ class TestBundle:
 
             requiring_charm = Charm(
                 name="app",
-                channel="stable",
+                # TODO(raul): remove type: ignore in subsequent type checker-related PR
+                channel="stable",  # type: ignore[arg-type]
                 revision=1,
                 ubuntu_version="22.04",
                 ubuntu_arch="amd64",
@@ -594,14 +582,14 @@ class TestBundle:
 
             # THEN the limited endpoint should not be unfulfilled (limit reached)
             db_endpoint = ApplicationEndpoint(application="db", endpoint="database")
-            # TODO(raul): remove type ignore in subsequent type checker PRs
-            assert db_endpoint not in unfulfilled  # type: ignore
+            assert db_endpoint not in unfulfilled
 
         def test_unfulfilled_endpoints_includes_under_limit(self) -> None:
             # GIVEN a charm with limit 2
             limited_charm = Charm(
                 name="limited-charm",
-                channel="stable",
+                # TODO(raul): remove type: ignore in subsequent type checker-related PR
+                channel="stable",  # type: ignore[arg-type]
                 revision=1,
                 ubuntu_version="22.04",
                 ubuntu_arch="amd64",
@@ -621,7 +609,8 @@ class TestBundle:
 
             requiring_charm = Charm(
                 name="app",
-                channel="stable",
+                # TODO(raul): remove type: ignore in subsequent type checker-related PR
+                channel="stable",  # type: ignore[arg-type]
                 revision=1,
                 ubuntu_version="22.04",
                 ubuntu_arch="amd64",
@@ -663,8 +652,7 @@ class TestBundle:
 
             # THEN the limited endpoint should be fulfilled (already has one connection)
             db_endpoint = ApplicationEndpoint(application="db", endpoint="database")
-            # TODO(raul): remove type ignore in subsequent type checker PRs
-            assert db_endpoint not in unfulfilled  # type: ignore
+            assert db_endpoint not in unfulfilled
 
     class TestDependencyGraph:
         @dataclass
@@ -909,15 +897,12 @@ class TestBundle:
             graph = bundle.dependency_graph
 
             # THEN graph keys match
-            # TODO(raul): remove type ignore in subsequent type checker PRs
-            assert set(graph.keys()) == params.expected_graph_keys  # type: ignore
+            assert set(graph.keys()) == params.expected_graph_keys
 
             # AND requires/provides match expected
             for app in params.expected_graph_keys:
-                # TODO(raul): remove type ignore in subsequent type checker PRs
-                assert {dep.application for dep in graph[app].requires} == params.expected_requires[app]  # type: ignore
-                # TODO(raul): remove type ignore in subsequent type checker PRs
-                assert {dep.application for dep in graph[app].provides} == params.expected_provides[app]  # type: ignore
+                assert {dep.application for dep in graph[app].requires} == params.expected_requires[app]
+                assert {dep.application for dep in graph[app].provides} == params.expected_provides[app]
 
             # AND has_application_dependency matches expected
             for dep_app, dep_on_app, expected in params.application_dependencies:
@@ -988,8 +973,7 @@ class TestBundle:
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
         def test(self, params: Params) -> None:
             # GIVEN a bundle with the applications
-            # TODO(raul): remove type ignore in subsequent type checker PRs
-            bundle = dataclasses.replace(  # type: ignore
+            bundle = dataclasses.replace(
                 sample_bundle_postgresql_k8s_kratos(),
                 applications=frozenset(params.applications),
             )
@@ -1010,7 +994,8 @@ class TestBundle:
         # Create charms with features for testing
         provider_charm_with_features = Charm(
             name="provider",
-            channel="stable",
+            # TODO(raul): remove type: ignore in subsequent type checker-related PR
+            channel="stable",  # type: ignore
             revision=1,
             ubuntu_version="22.04",
             ubuntu_arch="amd64",
@@ -1031,7 +1016,8 @@ class TestBundle:
 
         requirer_charm_with_features = Charm(
             name="requirer",
-            channel="stable",
+            # TODO(raul): remove type: ignore in subsequent type checker-related PR
+            channel="stable",  # type: ignore
             revision=1,
             ubuntu_version="22.04",
             ubuntu_arch="amd64",
@@ -1052,7 +1038,8 @@ class TestBundle:
 
         requirer_charm_with_subset_features = Charm(
             name="requirer2",
-            channel="stable",
+            # TODO(raul): remove type: ignore in subsequent type checker-related PR
+            channel="stable",  # type: ignore
             revision=1,
             ubuntu_version="22.04",
             ubuntu_arch="amd64",
@@ -1161,7 +1148,8 @@ class TestBundle:
                                 name="multi",
                                 charm=Charm(
                                     name="multi",
-                                    channel="stable",
+                                    # TODO(raul): remove type: ignore in subsequent type checker-related PR
+                                    channel="stable",  # type: ignore
                                     revision=1,
                                     ubuntu_version="22.04",
                                     ubuntu_arch="amd64",
@@ -1226,8 +1214,7 @@ class TestBundle:
             features = bundle.application_endpoint_features
 
             # THEN features match expected
-            # TODO(raul): remove type ignore in subsequent type checker PRs
-            assert features == params.expected_features  # type: ignore[comparison-overlap]
+            assert features == params.expected_features
 
     def test_export(self) -> None:
         # GIVEN a bundle
@@ -1292,8 +1279,7 @@ class TestBundle:
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
         def test_platform_specific_export(self, params: Params) -> None:
             # GIVEN a bundle with specific platform
-            # TODO(raul): remove type ignore in subsequent type checker PRs
-            bundle = dataclasses.replace(  # type: ignore
+            bundle = dataclasses.replace(
                 sample_bundle_postgresql_k8s_kratos(),
                 platform=params.platform,
             )
@@ -1318,13 +1304,11 @@ class TestBundle:
 
         def test_platform_yaml_structure_consistency(self) -> None:
             # GIVEN bundles with different platforms
-            # TODO(raul): remove type ignore in subsequent type checker PRs
-            kubernetes_bundle = dataclasses.replace(  # type: ignore
+            kubernetes_bundle = dataclasses.replace(
                 sample_bundle_postgresql_k8s_kratos(),
                 platform="kubernetes",
             )
-            # TODO(raul): remove type ignore in subsequent type checker PRs
-            machine_bundle = dataclasses.replace(  # type: ignore
+            machine_bundle = dataclasses.replace(
                 sample_bundle_postgresql_k8s_kratos(),
                 platform="machine",
             )

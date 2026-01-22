@@ -64,7 +64,8 @@ def sample_charm_endpoint_postgresql_k8s_database() -> CharmEndpoint:
 def sample_charm_postgresql_k8s() -> Charm:
     return Charm(
         name="postgresql-k8s",
-        channel="stable",
+        # TODO(raul): remove type: ignore in subsequent type checker-related PR
+        channel="stable",  # type: ignore[arg-type]
         revision=1,
         ubuntu_version="22.04",
         ubuntu_arch="amd64",
@@ -101,7 +102,8 @@ def sample_charm_endpoint_pgbouncer_k8s_backend_database() -> CharmEndpoint:
 def sample_charm_pgbouncer_k8s() -> Charm:
     return Charm(
         name="pgbouncer-k8s",
-        channel="stable",
+        # TODO(raul): remove type: ignore in subsequent type checker-related PR
+        channel="stable",  # type: ignore[arg-type]
         revision=1,
         ubuntu_version="22.04",
         ubuntu_arch="amd64",
@@ -128,7 +130,8 @@ def sample_charm_endpoint_kratos_pg_database() -> CharmEndpoint:
 def sample_charm_kratos() -> Charm:
     return Charm(
         name="kratos",
-        channel="edge",
+        # TODO(raul): remove type: ignore in subsequent type checker-related PR
+        channel="edge",  # type: ignore[arg-type]
         revision=123,
         ubuntu_version="24.04",
         ubuntu_arch="amd64",
@@ -154,7 +157,8 @@ def sample_charm_endpoint_self_signed_certificates_certificates() -> CharmEndpoi
 def sample_charm_self_signed_certificates() -> Charm:
     return Charm(
         name="self-signed-certificates",
-        channel="edge",
+        # TODO(raul): remove type: ignore in subsequent type checker-related PR
+        channel="edge",  # type: ignore[arg-type]
         revision=444,
         ubuntu_version="20.04",
         ubuntu_arch="amd64",
@@ -1073,7 +1077,7 @@ class TestCharmConfigCriteria:
             ]
 
             # WHEN creating CharmConfigCriteria from the list
-            criteria = CharmConfigCriteria(criteria_list)
+            criteria = CharmConfigCriteria(criteria_list)  # type: ignore[arg-type]
 
             # THEN it's converted to all_of
             assert criteria.all_of is not None
@@ -1086,7 +1090,7 @@ class TestCharmConfigCriteria:
             criteria_dict = {"track": "1.0", "endpoint_integrated": "db"}
 
             # WHEN creating CharmConfigCriteria from the dict
-            criteria = CharmConfigCriteria(**criteria_dict)
+            criteria = CharmConfigCriteria(**criteria_dict)  # type: ignore[arg-type]
 
             # THEN it's created with the dict values
             assert criteria.track == "1.0"
@@ -1165,8 +1169,7 @@ class TestCharm:
         charm = sample_charm_postgresql_k8s()
 
         # WHEN repr is called
-        # TODO(raul): remove type ignore in subsequent type checker PRs
-        repr = charm.__repr__()  # type: ignore
+        repr = charm.__repr__()
 
         # THEN repr is charm name
         assert repr == charm.name

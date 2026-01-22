@@ -151,11 +151,9 @@ class CharmhubClient:
         for charm in response:
             platform_overrides = self.overrides_client.get_charm_platform_overrides(charm.name)
             if platform_overrides is not None:
-                # TODO(raul): remove type ignore in subsequent type checker PRs
-                charm = dataclasses.replace(  # type: ignore
+                charm = dataclasses.replace(
                     charm,
-                    # TODO(raul): remove type ignore in subsequent type checker PRs
-                    result=dataclasses.replace(  # type: ignore
+                    result=dataclasses.replace(
                         charm.result,
                         deployable_on=frozenset(platform_overrides),
                     ),
@@ -166,11 +164,9 @@ class CharmhubClient:
     def _find_charms_add_deployable_on_overrides(self, response: set[FindResponse]) -> set[FindResponse]:
         # If response[n].charm.result.deployable_on is empty, then it is deployable on machine environments by default.
         return {
-            # TODO(raul): remove type ignore in subsequent type checker PRs
-            dataclasses.replace(  # type: ignore
+            dataclasses.replace(
                 charm,
-                # TODO(raul): remove type ignore in subsequent type checker PRs
-                result=dataclasses.replace(  # type: ignore
+                result=dataclasses.replace(
                     charm.result,
                     deployable_on=frozenset(["machine"])
                     if len(charm.result.deployable_on) == 0
@@ -209,7 +205,8 @@ class CharmhubClient:
         # Return Charm from refresh info
         return Charm(
             name=charm_name,
-            channel=charm_channel,
+            # TODO(raul): remove type: ignore in subsequent type checker-related PR
+            channel=charm_channel,  # type: ignore[arg-type]
             revision=charm_revision,
             ubuntu_version=ubuntu_version,
             ubuntu_arch=ubuntu_arch,
@@ -264,7 +261,8 @@ class CharmhubClient:
 
         return Charm(
             name=charm_name,
-            channel=default_refresh_info.effective_channel,
+            # TODO(raul): remove type: ignore in subsequent type checker-related PR
+            channel=default_refresh_info.effective_channel,  # type: ignore[arg-type]
             revision=charm_revision,
             ubuntu_version=ubuntu_version,
             ubuntu_arch=ubuntu_arch,
@@ -313,7 +311,8 @@ class CharmhubClient:
 
         return Charm(
             name=charm_name,
-            channel=charm_channel,
+            # TODO(raul): remove type: ignore in subsequent type checker-related PR
+            channel=charm_channel,  # type: ignore[arg-type]
             revision=refresh_info.charm.revision,
             ubuntu_version=ubuntu_version,
             ubuntu_arch=ubuntu_arch,
@@ -353,7 +352,8 @@ class CharmhubClient:
 
         return Charm(
             name=charm_name,
-            channel=refresh_info.effective_channel,
+            # TODO(raul): remove type: ignore in subsequent type checker-related PR
+            channel=refresh_info.effective_channel,  # type: ignore[arg-type]
             revision=refresh_info.charm.revision,
             ubuntu_version=ubuntu_version,
             ubuntu_arch=ubuntu_arch,
@@ -568,7 +568,7 @@ class CharmhubClient:
                     endpoint_name in metadata_overrides_map
                     and metadata_overrides_map[endpoint_name].features is not None
                 ):
-                    # TODO(raul): remove type ignore in subsequent type checker PRs
+                    # TODO(raul): remove type: ignore in subsequent type checker-related PR
                     features = frozenset(metadata_overrides_map[endpoint_name].features)  # type: ignore[arg-type]
                 else:
                     features = frozenset()
@@ -579,8 +579,10 @@ class CharmhubClient:
                         type=endpoint_type,
                         name=endpoint_name,
                         interface=endpoint.interface,
-                        optionality=optionality,
-                        limits=limits,
+                        # TODO(raul): remove type: ignore in subsequent type checker-related PR
+                        optionality=optionality,  # type: ignore
+                        # TODO(raul): remove type: ignore in subsequent type checker-related PR
+                        limits=limits,  # type: ignore
                         features=features,
                     )
                 )
