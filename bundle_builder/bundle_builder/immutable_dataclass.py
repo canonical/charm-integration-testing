@@ -81,21 +81,6 @@ def make_cached_method(cached_field_name: str, method: Callable[..., Any]) -> Ca
 _T = TypeVar("_T", bound=Type[Any])
 
 
-@dataclass_transform(frozen_default=True)
-@overload
-def immutable_dataclass(_cls: _T, **dataclass_kwargs: Any) -> _T: ...
-
-
-@dataclass_transform(frozen_default=True, order_default=True)
-@overload
-def immutable_dataclass(*, order: bool = True) -> Callable[[_T], _T]: ...
-
-
-@dataclass_transform(frozen_default=True)
-@overload
-def immutable_dataclass(**dataclass_kwargs: Any) -> Callable[[_T], _T]: ...
-
-
 # Create an immutable dataclass using frozen=True
 # and defaults slots=True
 @dataclass_transform(frozen_default=True)
