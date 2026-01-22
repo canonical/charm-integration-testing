@@ -154,17 +154,17 @@ class TemporalExtension(JujuExtension, ABC):
         :param model: The Juju model to configure.
         :type model: str
         """
-        TEMPORAL_HOST = "temporal-k8s:7233"
+        temporal_host = "temporal-k8s:7233"
         for charm in self.CONFIG_MAP:
             for application in self.juju.list_applications(model):
                 if self.juju.application_charm(model, application) == charm:
                     config_option = self.CONFIG_MAP[charm]
-                    if self.juju.get_application_config(model, application).get(config_option) != TEMPORAL_HOST:
+                    if self.juju.get_application_config(model, application).get(config_option) != temporal_host:
                         self._log(f"Configuring {application} in model {model} to use temporal endpoint")
                         self.juju.configure_application(
                             model,
                             application,
-                            {config_option: TEMPORAL_HOST},
+                            {config_option: temporal_host},
                         )
 
     def _log(self, message: str) -> None:

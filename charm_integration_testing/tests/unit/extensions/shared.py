@@ -66,8 +66,8 @@ class JujuStub(JujuBackend):
 
     def get_application_config(self, model: str, application: str) -> dict[str, Any]:
         """Mock getting application configuration (returns empty dict)"""
-        for model, app, config in self.configured_applications:
-            if model == model and app == application:
+        for m, app, config in self.configured_applications:
+            if m == model and app == application:
                 return config
         raise KeyError(f"Application {application} not configured in model {model}")
 
