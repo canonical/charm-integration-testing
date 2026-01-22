@@ -1,0 +1,6 @@
+---
+configs:
+  - criteria:
+      endpoint_integrated: oauth
+    config:
+      external_hostname: discourse-test.local
