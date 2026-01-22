@@ -36,8 +36,7 @@ class TestEndpointLimits:
             # GIVEN an unfulfillable charm
             unfulfillable_charm = Charm(
                 name="unfulfillable-charm",
-                # TODO(raul): remove type: ignore in subsequent type checker-related PR
-                channel="stable",  # type: ignore[arg-type]
+                channel=CharmChannel("stable"),
                 revision=1,
                 ubuntu_version="22.04",
                 ubuntu_arch="amd64",
