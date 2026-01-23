@@ -71,21 +71,14 @@ def argument_parser() -> ArgumentParser:
         type=int,
         help="The issue number on GitHub",
     )
+    parser.add_argument(
+        "ref",
+        type=str,
+        help="The git ref (branch or tag) to run the workflow on",
+    )
+
     return parser
 
-def get_ref() -> str:
-    # Get the current git ref (branch or tag)
-    result = run(
-        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-        stdout=PIPE,
-        stderr=PIPE,
-        text=True,
-    )
-    if result.returncode != 0:
-        print(f"Error getting git ref: {result.stderr}")
-        exit(1)
-    ref = result.stdout.strip()
-    return ref
 
 def dispatch_run(
     github_token: str,
@@ -134,12 +127,11 @@ if __name__ == "__main__":
     print(f"target_endpoint_name: {target['endpoint_name']}")
     print(f"neighbor_charm_name: {neighbor['charm_name']}")
     print(f"neighbor_endpoint_name: {neighbor['endpoint_name']}")
-    ref = get_ref()
     dispatch_run(
         github_token,
         target['charm_name'],
         target['endpoint_name'],
         neighbor['charm_name'],
         neighbor['endpoint_name'],
-        ref,
+        args.ref,
     )
