@@ -55,6 +55,10 @@ jobs:
                     
                     // Return just the numbers as an array
                     const issueNumbers = issues.map(i => i.number);
+                    // When multiple issues are linked to the PR, we only test one of them per run
+                    // to keep this workflow lightweight and within resource limits. We randomly
+                    // select the issue so that, over time, different linked issues are exercised
+                    // instead of always picking the same one (e.g., the first in the list).
                     core.setOutput('issue_number', issueNumbers.sample());
             - name: dispatch test to check if issue is fixed
               uses: ./.github/actions/check_issue_fixed

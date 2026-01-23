@@ -1,4 +1,4 @@
-#!/bin/python3
+#!/usr/bin/python3
 
 import requests
 import os
@@ -43,9 +43,16 @@ def get_test_result_input(test_observer_issue_id : int) -> dict:
     }
 
     response = requests.get(endpoint_url, params=params)
+    if response.status_code != 200:
+        raise RuntimeError(
+            f"Failed to fetch test result input from {endpoint_url} "
+            f"(status code {response.status_code}): {response.text}"
+        )
     data = response.json()
+    if not data.get("test_results"):
+        raise ValueError(f"No test results found for issue id {test_observer_issue_id}")
     testplan = data['test_results'][0]['test_execution']['test_plan']
-    #anatomy of a testplan <test_type>/<charm>:<endpoint>/<interface>/<charm>:<endpoint>
+    # anatomy of a testplan <test_type>/<charm>:<endpoint>/<interface>/<charm>:<endpoint>
     testplan = testplan.removeprefix('integration/')
     testplan = testplan.split('/')
     target_name, target_endpoint = testplan[0].split(':')
@@ -128,6 +135,9 @@ if __name__ == "__main__":
     target, neighbor = get_test_result_input(issue_id)
 
     github_token = os.getenv("GITHUB_TOKEN")
+    if not github_token:
+        print("Error: GITHUB_TOKEN environment variable is not set. Please set it before running this script.")
+        exit(1)
     print("Workflow inputs:")
     print(f"target_charm_name: {target['charm_name']}")
     print(f"target_endpoint_name: {target['endpoint_name']}")
