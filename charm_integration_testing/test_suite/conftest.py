@@ -26,7 +26,7 @@ from pytest import StashKey
 from utils import normalize_string, normalize_string_multiline
 
 KNOWN_FAILURE_EXCEPTIONS = (
-    # JujuWaitTimeoutError,
+    JujuWaitTimeoutError,
     AssertionError,
     CalledProcessError,
 )
