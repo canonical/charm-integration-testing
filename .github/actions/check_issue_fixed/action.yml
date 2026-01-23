@@ -11,6 +11,9 @@ inputs:
   reference_tag:
     description: The reference tag to check the issue against
     required: true
+  repo:
+    description: The repository to run the workflow on, in the style of {owner}/{repo}
+    required: true
 
 runs:
   using: 'composite'
@@ -23,5 +26,6 @@ runs:
         GITHUB_TOKEN: ${{ inputs.github_token }}
         ISSUE_NUMBER: ${{ inputs.issue_number }}
         REFERENCE_TAG: ${{ inputs.reference_tag }}
+        REPO: ${{ inputs.repo }}
       run: |
-        ./script.py $ISSUE_NUMBER $REFERENCE_TAG
+        ./script.py ${ISSUE_NUMBER} ${REFERENCE_TAG} ${REPO}
