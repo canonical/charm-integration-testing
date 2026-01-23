@@ -1,0 +1,27 @@
+---
+name: Check Issue Fixed
+description: Check if a Github issue marked as fixed is fixed
+inputs:
+  github_token:
+    description: GitHub Token with repo access
+    required: true
+  issue_number:
+    description: The issue number to check
+    required: true
+  reference_tag:
+    description: The reference tag to check the issue against
+    required: true
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Check if issue is fixed
+      id: check_fixed
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      env:
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+        ISSUE_NUMBER: ${{ inputs.issue_number }}
+        REFERENCE_TAG: ${{ inputs.reference_tag }}
+      run: |
+        ./script.py $ISSUE_NUMBER $REFERENCE_TAG
