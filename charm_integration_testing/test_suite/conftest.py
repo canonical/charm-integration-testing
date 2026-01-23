@@ -31,6 +31,7 @@ KNOWN_FAILURE_EXCEPTIONS = (
     CalledProcessError,
 )
 
+
 @pytest.fixture
 def logger() -> logging.Logger:
     jubilant_logger = logging.getLogger("jubilant")
@@ -97,6 +98,7 @@ error_message = StashKey[str]()
 skipped_message = StashKey[str]()
 failure_exception = StashKey[BaseException]()
 
+
 # Get failure message for logging
 @pytest.hookimpl(tryfirst=True, hookwrapper=True)
 def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[Any]) -> Iterator[None]:
@@ -108,20 +110,13 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[Any]) -> 
 
     if call.excinfo is not None:
         exception_type = call.excinfo.type
-        print("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
-        print(exception_type)
+
         # Don't interfere with pytest's built-in exceptions (skip, xfail, etc.)
-        if exception_type.__name__ in ('Skipped', 'XFailed', 'Exit'):
+        if exception_type.__name__ in ("Skipped", "XFailed", "Exit"):
             pass
-        elif exception_type in KNOWN_FAILURE_EXCEPTIONS:
-            # Known failures: ensure they're marked as "failed" not "error"
-            if report.outcome == "error":
-                report.outcome = "failed"
-        else:
+        elif exception_type not in KNOWN_FAILURE_EXCEPTIONS:
             # Unexpected errors: keep failed=True, but force JUnit to emit <error>
             unexpected_error = True
-            if report.outcome != "failed":
-                report.outcome = "failed"
             if report.when == "call":
                 report.when = "setup"
 
@@ -344,12 +339,11 @@ def record_failure_execution_metadata(
             if exc.stderr:
                 for line in normalize_string_multiline(exc.stderr):
                     execution_metadata("failure:cli:stderr", line)
-        
+
         elif is_error:
             # For other unexpected errors, log the error line by line
             for line in normalize_string_multiline(str(exc)):
                 execution_metadata("error:exception:", line)
-        
 
 
 @pytest.fixture
