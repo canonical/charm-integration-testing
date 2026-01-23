@@ -126,7 +126,9 @@ def dispatch_run(
 if __name__ == "__main__":
     parser = argument_parser()
     args = parser.parse_args()
-
+    if not args.issue_number:
+        print("No issue found")
+        exit(0)
     issue_id = get_issue(args.issue_number, args.repo)
     if issue_id is None:
         print(f"No issue found in Test Observer for issue number {args.issue_number}")
