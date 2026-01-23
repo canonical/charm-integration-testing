@@ -11,4 +11,5 @@ Contents
 
    bundle-builder-algorithm
    charm-priorities
+   error-vs-failure-classification
    wait-conditions

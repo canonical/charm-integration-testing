@@ -3,6 +3,8 @@ Execution Metadata
 
 Execution metadata are arbitrary attributes automatically collected during test execution and written to JUnit XML reports as test case properties. These properties provide rich context about test runs, including charm versions, warnings, and failure details.
 
+The framework distinguishes between **failures** (expected test failures) and **errors** (unexpected issues), using different metadata prefixes for each. See :doc:`../explanation/error-vs-failure-classification` for details on this classification system.
+
 Overview
 --------
 
@@ -110,8 +112,17 @@ Warning Information
      - Yes
      - ``UserWarning: Deprecated function``
 
-Failure Information
-~~~~~~~~~~~~~~~~~~~
+Failure and Error Information
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The framework distinguishes between expected failures and unexpected errors, using different metadata prefixes for each category. All metadata keys use either ``failure:*`` or ``error:*`` prefixes depending on the exception type classification.
+
+See :doc:`../explanation/error-vs-failure-classification` for a complete explanation of how exceptions are classified and when each prefix is used.
+
+Failure Metadata (Expected Failures)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Collected when the exception type is in ``KNOWN_FAILURE_EXCEPTIONS`` (``JujuWaitTimeoutError``, ``AssertionError``, ``CalledProcessError``):
 
 .. list-table::
    :header-rows: 1
@@ -122,7 +133,7 @@ Failure Information
      - Normalized
      - Example Value
    * - ``failure:message``
-     - Failure message when a test fails. Contains the error message from failed tests.
+     - Failure message when a test fails with a known exception. Contains the error message from failed tests.
      - Yes
      - ``AssertionError: Expected 'active'``
    * - ``failure:charm:<name>:status``
@@ -146,6 +157,24 @@ Failure Information
      - Yes, multi-line normalized
      - ``ERROR connection refused``
 
+Error Metadata (Unexpected Errors)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Collected when the exception type is **not** in ``KNOWN_FAILURE_EXCEPTIONS``:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 40 15 20
+
+   * - Category
+     - Description
+     - Normalized
+     - Example Value
+   * - ``error:exception:message``
+     - A catch-all for unexpected errors. Contains the exception message for any error not classified as a known failure.
+     - Yes, multi-line normalized
+     - ``KeyError: 'applications'``
+   
 Skip Information
 ~~~~~~~~~~~~~~~~
 
