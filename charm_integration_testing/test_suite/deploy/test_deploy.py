@@ -35,4 +35,4 @@ def test_deploy(
             )
 
     # Wait until idle
-    juju_client.idle_for_period(model=model, timeout=timedelta(minutes=0.1))
+    juju_client.idle_for_period(model=model, timeout=timedelta(minutes=15))
