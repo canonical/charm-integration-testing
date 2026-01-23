@@ -3,70 +3,36 @@ name: Run Integration from fixed branch
 permissions:
     contents: read
 on:
-    pull_request:
-        types: [synchronize, edited]
-        branches:
-            - main
+    issue_comment:
+        types: [created]
+
 jobs:
     check_issue_fixed:
         name: issue_checker
         runs-on: [self-hosted, charm_qa]
+        if: ${{ github.event.issue.pull_request }}
         permissions:
             contents: read
             pull-requests: read
             issues: read
         steps:
-            - name: Get linked issue
-              uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
-              id: linked-issues
+            - name: Get PR details
+              uses: actions/github-script@v7
+              id: pr-details
               with:
                 script: |
-                    Array.prototype.sample = function() {
-                        return this[Math.floor(Math.random() * this.length)];
-                    }
-                    const query = `query($owner:String!, $repo:String!, $pr:Int!) {
-                    repository(owner: $owner, name: $repo) {
-                        pullRequest(number: $pr) {
-                        closingIssuesReferences(first: 10) {
-                            nodes {
-                            number
-                            title
-                            }
-                        }
-                        }
-                    }
-                    }`;
+                    const pr = await github.rest.pulls.get({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        pull_number: context.issue.number
+                    });
+                    core.setOutput('sha', pr.data.head.sha);
                     
-                    const variables = {
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    pr: context.issue.number
-                    };
-                    
-                    const result = await github.graphql(query, variables);
-                    const issues = result.repository.pullRequest.closingIssuesReferences.nodes;
-                    
-                    console.log('Linked issues:', issues);
-                    
-                    if (issues.length === 0) {
-                    core.warning('No linked issues found');
-                    core.setOutput('issue_number', '');
-                    return;
-                    }
-                    
-                    // Return just the numbers as an array
-                    const issueNumbers = issues.map(i => i.number);
-                    // When multiple issues are linked to the PR, we only test one of them per run
-                    // to keep this workflow lightweight and within resource limits. We randomly
-                    // select the issue so that, over time, different linked issues are exercised
-                    // instead of always picking the same one (e.g., the first in the list).
-                    core.setOutput('issue_number', issueNumbers.sample());
             - name: dispatch test to check if issue is fixed
-              if: steps.linked-issues.outputs.issue_number != ''
               uses: ./.github/actions/check_issue_fixed
               id: check-issue-fixed
               with:
                 github_token: ${{ secrets.GITHUB_TOKEN }}
-                issue_number: ${{ steps.linked-issues.outputs.issue_number }}
-                reference_tag: ${{ github.event.pull_request.head.sha }}
+                issue_number: ${{ github.event.issue.number }}
+                reference_tag: ${{ steps.pr-details.outputs.sha }}
                 repo: ${{ github.repository }}
