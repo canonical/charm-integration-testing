@@ -26,7 +26,7 @@ from pytest import StashKey
 from utils import normalize_string, normalize_string_multiline
 
 KNOWN_FAILURE_EXCEPTIONS = (
-    JujuWaitTimeoutError,
+    # JujuWaitTimeoutError,
     AssertionError,
     CalledProcessError,
 )
@@ -108,7 +108,8 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[Any]) -> 
 
     if call.excinfo is not None:
         exception_type = call.excinfo.type
-
+        print("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
+        print(exception_type)
         # Don't interfere with pytest's built-in exceptions (skip, xfail, etc.)
         if exception_type.__name__ in ('Skipped', 'XFailed', 'Exit'):
             pass
