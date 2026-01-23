@@ -16,6 +16,9 @@ jobs:
             pull-requests: read
             issues: read
         steps:
+            - name: Checkout repository
+              uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+              
             - name: Get PR details
               uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
               id: pr-details
