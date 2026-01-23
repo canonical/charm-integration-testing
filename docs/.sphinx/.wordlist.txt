@@ -5,8 +5,13 @@ AGPLv
 API
 APIs
 balancer
+behavior
+Behavior
+categorizes
 Charmhub
 CLI
+JujuWaitTimeoutError
+pytest's
 DCO
 Diátaxis
 Dqlite
