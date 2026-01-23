@@ -1,5 +1,7 @@
 ---
 name: Run Integration from fixed branch
+permissions:
+    contents: read
 on:
     pull_request:
         types: [synchronize, edited]
