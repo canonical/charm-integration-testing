@@ -1,14 +1,14 @@
 #!/usr/bin/python3
 
-import requests
 import os
-from subprocess import run, PIPE
 from argparse import ArgumentParser
-from time import sleep
+
+import requests
 
 BASE_URL = "https://test-observer-api.canonical.com/v1/"
 
-def get_issue(issue_number : int, repo : str) -> int | None:
+
+def get_issue(issue_number: int, repo: str) -> int | None:
     # Returns the issue id for this issue from Test Observer
     ENDPOINT = "issues"
     url = BASE_URL + ENDPOINT
@@ -21,26 +21,24 @@ def get_issue(issue_number : int, repo : str) -> int | None:
             break
 
         data = response.json()
-        if not data['issues']:
+        if not data["issues"]:
             break
-        
-        for issue in data['issues']:
-            if int(issue['key']) == issue_number:
-                return issue['id']
+
+        for issue in data["issues"]:
+            if int(issue["key"]) == issue_number:
+                return issue["id"]
         offset += limit
-        params = {"project": repo, "offset": offset, "limit": limit }
+        params = {"project": repo, "offset": offset, "limit": limit}
     return None
 
-def get_test_result_input(test_observer_issue_id : int) -> dict:
+
+def get_test_result_input(test_observer_issue_id: int) -> dict:
     # Returns the inputs needed to trigger a workflow for a test result
     # that failed with this issue id
     ENDPOINT = "test-results"
     endpoint_url = BASE_URL + ENDPOINT
 
-    params = {
-        "issues": test_observer_issue_id,
-        "limit": 1
-    }
+    params = {"issues": test_observer_issue_id, "limit": 1}
 
     response = requests.get(endpoint_url, params=params)
     if response.status_code != 200:
@@ -51,23 +49,18 @@ def get_test_result_input(test_observer_issue_id : int) -> dict:
     data = response.json()
     if not data.get("test_results"):
         raise ValueError(f"No test results found for issue id {test_observer_issue_id}")
-    testplan = data['test_results'][0]['test_execution']['test_plan']
+    testplan = data["test_results"][0]["test_execution"]["test_plan"]
     # anatomy of a testplan <test_type>/<charm>:<endpoint>/<interface>/<charm>:<endpoint>
-    testplan = testplan.removeprefix('integration/')
-    testplan = testplan.split('/')
-    target_name, target_endpoint = testplan[0].split(':')
-    neighbor_name, neighbor_endpoint = testplan[-1].split(':')
-    target = {
-        "charm_name" :   target_name,
-        "endpoint_name" : target_endpoint
-    }
-    
-    neighbor = {
-        "charm_name" :   neighbor_name,
-        "endpoint_name" : neighbor_endpoint
-    }
+    testplan = testplan.removeprefix("integration/")
+    testplan = testplan.split("/")
+    target_name, target_endpoint = testplan[0].split(":")
+    neighbor_name, neighbor_endpoint = testplan[-1].split(":")
+    target = {"charm_name": target_name, "endpoint_name": target_endpoint}
+
+    neighbor = {"charm_name": neighbor_name, "endpoint_name": neighbor_endpoint}
 
     return (target, neighbor)
+
 
 def argument_parser() -> ArgumentParser:
     parser = ArgumentParser(
@@ -99,7 +92,7 @@ def dispatch_run(
     target_endpoint_name: str,
     neighbor_charm_name: str,
     neighbor_endpoint_name: str,
-    ref: str ,
+    ref: str,
 ) -> None:
     url = "https://api.github.com/repos/canonical/charm-integration-testing/actions/workflows/charm-testing.yaml/dispatches"
     headers = {
@@ -122,6 +115,7 @@ def dispatch_run(
         print(f"Failed to dispatch workflow: {response.status_code} - {response.text}")
         exit(1)
     print("Workflow dispatched successfully")
+
 
 if __name__ == "__main__":
     parser = argument_parser()
@@ -147,9 +141,9 @@ if __name__ == "__main__":
     print(f"neighbor_endpoint_name: {neighbor['endpoint_name']}")
     dispatch_run(
         github_token,
-        target['charm_name'],
-        target['endpoint_name'],
-        neighbor['charm_name'],
-        neighbor['endpoint_name'],
+        target["charm_name"],
+        target["endpoint_name"],
+        neighbor["charm_name"],
+        neighbor["endpoint_name"],
         args.ref,
     )
