@@ -49,7 +49,8 @@ jobs:
                     console.log('Linked issues:', issues);
                     
                     if (issues.length === 0) {
-                    core.setFailed('No linked issues found');
+                    core.warning('No linked issues found');
+                    core.setOutput('issue_number', '');
                     return;
                     }
                     
@@ -61,6 +62,7 @@ jobs:
                     // instead of always picking the same one (e.g., the first in the list).
                     core.setOutput('issue_number', issueNumbers.sample());
             - name: dispatch test to check if issue is fixed
+              if: steps.linked-issues.outputs.issue_number != ''
               uses: ./.github/actions/check_issue_fixed
               id: check-issue-fixed
               with:
