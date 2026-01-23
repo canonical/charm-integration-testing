@@ -25,6 +25,11 @@ from juju_jubilant import JubilantBackend
 from pytest import StashKey
 from utils import normalize_string, normalize_string_multiline
 
+KNOWN_FAILURE_EXCEPTIONS = (
+    JujuWaitTimeoutError,
+    AssertionError,
+    CalledProcessError,
+)
 
 @pytest.fixture
 def logger() -> logging.Logger:
@@ -88,9 +93,9 @@ def ubuntu_pro_token() -> str | None:
 
 
 failure_message = StashKey[str]()
+error_message = StashKey[str]()
 skipped_message = StashKey[str]()
 failure_exception = StashKey[BaseException]()
-
 
 # Get failure message for logging
 @pytest.hookimpl(tryfirst=True, hookwrapper=True)
@@ -98,6 +103,19 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[Any]) -> 
     result = yield
     assert result is not None
     report = result.get_result()
+
+    unexpected_error = False
+
+    if call.excinfo is not None:
+        exception_type = call.excinfo.type
+
+        if exception_type not in KNOWN_FAILURE_EXCEPTIONS:
+            # Unexpected errors: keep failed=True, but force JUnit to emit <error>
+            unexpected_error = True
+            if report.outcome != "failed":
+                report.outcome = "failed"
+            if report.when == "call":
+                report.when = "setup"
 
     # Save failure message
     if report.failed:
@@ -107,6 +125,8 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[Any]) -> 
             item.stash[failure_message] = reprcrash.message
         else:
             item.stash[failure_message] = str(report.longrepr)
+        if unexpected_error:
+            item.stash[error_message] = item.stash[failure_message]
 
     # Save skip message
     if report.skipped:
@@ -145,7 +165,9 @@ def print_setup_and_teardown_info(
     yield
 
     # Log error
-    if failure_message in request.node.stash:
+    if error_message in request.node.stash:
+        logger.error(f"Error in {request.node.name}: {request.node.stash[error_message]}")
+    elif failure_message in request.node.stash:
         logger.error(f"Failure in {request.node.name}: {request.node.stash[failure_message]}")
     elif skipped_message in request.node.stash:
         logger.info(f"Skipped {request.node.name}: {request.node.stash[skipped_message]}")
@@ -266,7 +288,10 @@ def record_failure_execution_metadata(
 
     # Save the failure message
     if failure_message in request.node.stash:
-        execution_metadata("failure:message", normalize_string(request.node.stash[failure_message]))
+        if error_message in request.node.stash:
+            execution_metadata("error:message", normalize_string(request.node.stash[error_message]))
+        else:
+            execution_metadata("failure:message", normalize_string(request.node.stash[failure_message]))
 
     # Save the skip message
     if skipped_message in request.node.stash:
@@ -277,6 +302,8 @@ def record_failure_execution_metadata(
         exc = request.node.stash[failure_exception]
 
         # Save state from wait timeout
+        is_error = error_message in request.node.stash
+
         if isinstance(exc, JujuWaitTimeoutError):
             for application in exc.wait_state.noncompliant_applications.values():
                 if application is None:
@@ -309,6 +336,12 @@ def record_failure_execution_metadata(
             if exc.stderr:
                 for line in normalize_string_multiline(exc.stderr):
                     execution_metadata("failure:cli:stderr", line)
+        
+        elif is_error:
+            # For other unexpected errors, log the error line by line
+            for line in normalize_string_multiline(str(exc)):
+                execution_metadata("error:exception:", line)
+        
 
 
 @pytest.fixture
