@@ -7,15 +7,14 @@ from argparse import ArgumentParser
 from time import sleep
 
 BASE_URL = "https://test-observer-api.canonical.com/v1/"
-PROJECT = "canonical/charm-integration-testing"
 
-def get_issue(issue_number : int) -> int | None:
+def get_issue(issue_number : int, repo : str) -> int | None:
     # Returns the issue id for this issue from Test Observer
     ENDPOINT = "issues"
     url = BASE_URL + ENDPOINT
     offset = 0
     limit = 50
-    params = {"project": PROJECT, "offset": offset, "limit": limit}
+    params = {"project": repo, "offset": offset, "limit": limit}
     session = requests.Session()
     while response := session.get(url, params=params):
         if response.status_code != 200:
@@ -29,7 +28,7 @@ def get_issue(issue_number : int) -> int | None:
             if int(issue['key']) == issue_number:
                 return issue['id']
         offset += limit
-        params = {"project": PROJECT, "offset": offset, "limit": limit }
+        params = {"project": repo, "offset": offset, "limit": limit }
     return None
 
 def get_test_result_input(test_observer_issue_id : int) -> dict:
@@ -46,18 +45,19 @@ def get_test_result_input(test_observer_issue_id : int) -> dict:
     response = requests.get(endpoint_url, params=params)
     data = response.json()
     testplan = data['test_results'][0]['test_execution']['test_plan']
-    print(testplan)
     #anatomy of a testplan <test_type>/<charm>:<endpoint>/<interface>/<charm>:<endpoint>
     testplan = testplan.removeprefix('integration/')
     testplan = testplan.split('/')
-    print(testplan)
+    target_name, target_endpoint = testplan[0].split(':')
+    neighbor_name, neighbor_endpoint = testplan[-1].split(':')
     target = {
-        "charm_name" :   testplan[0].split(':')[0],
-        "endpoint_name" : testplan[0].split(':')[1]
+        "charm_name" :   target_name,
+        "endpoint_name" : target_endpoint
     }
+    
     neighbor = {
-        "charm_name" :   testplan[-1].split(':')[0],
-        "endpoint_name" : testplan[-1].split(':')[1]
+        "charm_name" :   neighbor_name,
+        "endpoint_name" : neighbor_endpoint
     }
 
     return (target, neighbor)
@@ -75,6 +75,12 @@ def argument_parser() -> ArgumentParser:
         "ref",
         type=str,
         help="The git ref (branch or tag) to run the workflow on",
+    )
+
+    parser.add_argument(
+        "repo",
+        type=str,
+        help="The repository to run the workflow on, in the style of {owner}/{repo}",
     )
 
     return parser
@@ -114,7 +120,7 @@ if __name__ == "__main__":
     parser = argument_parser()
     args = parser.parse_args()
 
-    issue_id = get_issue(args.issue_number)
+    issue_id = get_issue(args.issue_number, args.repo)
     if issue_id is None:
         print(f"No issue found in Test Observer for issue number {args.issue_number}")
         exit(1)
