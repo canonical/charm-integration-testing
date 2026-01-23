@@ -109,7 +109,10 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[Any]) -> 
     if call.excinfo is not None:
         exception_type = call.excinfo.type
 
-        if exception_type in KNOWN_FAILURE_EXCEPTIONS:
+        # Don't interfere with pytest's built-in exceptions (skip, xfail, etc.)
+        if exception_type.__name__ in ('Skipped', 'XFailed', 'Exit'):
+            pass
+        elif exception_type in KNOWN_FAILURE_EXCEPTIONS:
             # Known failures: ensure they're marked as "failed" not "error"
             if report.outcome == "error":
                 report.outcome = "failed"
