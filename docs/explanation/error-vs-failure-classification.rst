@@ -9,10 +9,10 @@ Overview
 The testing framework categorizes test failures into two distinct types:
 
 **Failures (Expected)**
-  Test failures that occur due to known, expected conditions. These represent legitimate test assertions that didn't pass or environmental conditions that are anticipated during testing (e.g., timeout waiting for model to stabilize). Failures are recorded with ``<failure>`` tags in JUnit XML and use ``failure:*`` metadata prefixes.
+  Test failures that occur due to known, expected conditions. These represent legitimate test assertions that didn't pass or environmental conditions that are anticipated during testing (e.g., timeout waiting for model to stabilize). Failures are recorded with ``<failure>`` tags in JUnit XML and use ``failure:*`` metadata prefixes. The ``failure:expected`` metadata flag will be set to true.
 
 **Errors (Unexpected)**
-  Exceptional conditions that represent bugs, infrastructure issues, or unexpected problems in the test framework itself. These are recorded with ``<error>`` tags in JUnit XML and use ``error:*`` metadata prefixes. 
+  Exceptional conditions that represent bugs, infrastructure issues, or unexpected problems in the test framework itself. These are marked with the ``failure:expected`` metadata flag being set to false, and will have the same tags as failures for the JUnit XML and the metadata.
 
 Classification Mechanism
 -------------------------
@@ -24,7 +24,6 @@ The classification happens in the ``pytest_runtest_makereport`` hook in ``confte
     KNOWN_FAILURE_EXCEPTIONS = (
         JujuWaitTimeoutError,  # Model didn't reach stable state in time
         AssertionError,        # Test assertion failed
-        CalledProcessError,    # CLI command returned non-zero exit code
     )
 
 **Classification Logic:**
@@ -33,14 +32,14 @@ The classification happens in the ``pytest_runtest_makereport`` hook in ``confte
 
 2. **Known Failures**: Exceptions in ``KNOWN_FAILURE_EXCEPTIONS`` are:
    
-   - Converted from ``"error"`` to ``"failed"`` outcome if pytest initially classified them as errors
+   - No logic changes
    - Keep their original execution phase (``setup``, ``call``, ``teardown``)
    - Recorded as ``<failure>`` in JUnit XML
 
 3. **Unexpected Errors**: All other exceptions are:
    
    - Kept as ``"failed"`` outcome (pytest's standard behavior for exceptions)
-   - Forced to ``when="setup"`` phase when occurring during test execution, which causes JUnit XML to emit ``<error>`` tags
+   - flips the unexpected_error flag to true
    - Marked internally with ``error_message`` in the test item stash
 
 Impact on Test Behavior
@@ -123,69 +122,17 @@ Collected when the exception type is **not** in ``KNOWN_FAILURE_EXCEPTIONS``:
      - Description
      - Normalized
      - Example Value
-   * - ``error:exception:message``
-     - A catch-all for unexpected errors. Contains the exception message for any error not classified as a known failure.
-     - Yes, multi-line normalized
-     - ``KeyError: 'applications'``
+   * - ``failure:expected````
+     - Flag indicating the failure was unexpected
+     - No
+     - ``failure:expected: false``
 
 The metadata prefix (``failure:`` vs ``error:``) is determined dynamically based on whether the exception type is in ``KNOWN_FAILURE_EXCEPTIONS``.
-
-Test Observer Integration
---------------------------
-
-The Test Observer receives different status codes based on JUnit XML classification:
-
-**JUnit XML to Test Observer Status Mapping:**
-
-.. code-block:: yaml
-
-    <error>   → ERROR     # Unexpected errors
-    <failure> → FAILED    # Expected failures
-    <skipped> → SKIPPED   # Skipped tests
-    (success) → PASSED    # Passing tests
-
-This mapping is implemented in ``.github/actions/test-observer/post-results/action.yaml``:
-
-.. code-block:: yaml
-
-    "status": (
-      if .error != [] then "ERROR"
-      elif .failure != [] then "FAILED"
-      elif .skipped != [] then "SKIPPED"
-      else "PASSED"
-      end
-    )
 
 Automatic Retry Behavior
 -------------------------
 
-The GitHub Actions workflow skips automatic retries when errors are detected:
-
-.. code-block:: yaml
-
-    - name: Calculate Job Status
-      run: |
-        errors=$(yq -p xml -oy '.testsuites.+@errors' "$JUNIT_FILE")
-        if [[ "$errors" -gt 0 ]]; then
-          echo "has_errors=true" >> $GITHUB_OUTPUT
-        else
-          echo "has_errors=false" >> $GITHUB_OUTPUT
-        fi
-
-    - name: Trigger rerun on Test Observer if failure
-      if: |
-        failure() && 
-        steps.calculate_job_status.outputs.has_errors != 'true' &&
-        !(steps.build_bundle.conclusion == 'failure' && 
-          steps.build_bundle.outputs.invalid_input == 'true')
-      uses: ./.github/actions/test-observer/trigger-rerun
-
-**Retry Logic:**
-
-- **Failures** (``<failure>`` in JUnit): May trigger automatic retry if the overall job failed
-- **Errors** (``<error>`` in JUnit): Do **not** trigger automatic retry, retry would be handled by Test Observer if desired
-
-Adding New Exception Types
+The retry logic is handled through test observer through attachment rules
 ---------------------------
 
 To classify a new exception type as a known failure:
@@ -197,7 +144,6 @@ To classify a new exception type as a known failure:
        KNOWN_FAILURE_EXCEPTIONS = (
            JujuWaitTimeoutError,
            AssertionError,
-           CalledProcessError,
            YourNewException,  # Add here
        )
 
@@ -205,62 +151,3 @@ To classify a new exception type as a known failure:
 
 To ensure an exception is treated as an unexpected error, make sure it is **not** in ``KNOWN_FAILURE_EXCEPTIONS``.
 
-Example Scenarios
------------------
-
-Scenario 1: Deployment Timeout (Known Failure)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. code-block:: python
-
-    # Test execution
-    def test_deploy(juju_client, model):
-        juju_client.deploy_bundle(...)
-        juju_client.idle_for_period(timeout=timedelta(minutes=1))
-        # Timeout after 1 minute
-
-**Result:**
-
-- JUnit: ``<failure message="Timed out...">``
-- Test Observer: ``FAILED``
-- Metadata: ``failure:message``, ``failure:charm:*:status``
-- Retry: May be triggered
-
-Scenario 2: Unexpected Python Error
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. code-block:: python
-
-    # Test execution
-    def test_integration(juju_client):
-        result = juju_client.get_status()
-        # KeyError: 'applications' - unexpected bug in framework
-
-**Result:**
-
-- JUnit: ``<error message="KeyError: 'applications'">``
-- Test Observer: ``ERROR``
-- Metadata: ``error:message``, ``error:exception:message``
-- Retry: **Not** triggered
-
-Scenario 3: Graceful Skip After Failure
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. code-block:: python
-
-    # test_deploy fails with JujuWaitTimeoutError
-    # test_integration runs assert_idle fixture
-    
-    @pytest.fixture(autouse=True)
-    def assert_idle(...):
-        try:
-            juju_client.idle_for_period(...)
-        except JujuWaitTimeoutError as e:
-            pytest.skip(str(e))  # Gracefully skip
-
-**Result:**
-
-- JUnit: ``<skipped message="Timed out...">``
-- Test Observer: ``SKIPPED``
-- Metadata: ``skipped:message``
-- No additional errors propagated

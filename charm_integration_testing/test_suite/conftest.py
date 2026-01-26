@@ -284,10 +284,8 @@ def record_failure_execution_metadata(
     # Let the test run
     yield
 
-    # Save the error or failure message
-    if error_message in request.node.stash:
-        execution_metadata("error:message", normalize_string(request.node.stash[error_message]))
-    elif failure_message in request.node.stash:
+    # Save the failure message
+    if failure_message in request.node.stash:
         execution_metadata("failure:message", normalize_string(request.node.stash[failure_message]))
 
     # Save the skip message

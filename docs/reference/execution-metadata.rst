@@ -170,10 +170,10 @@ Collected when the exception type is **not** in ``KNOWN_FAILURE_EXCEPTIONS``:
      - Description
      - Normalized
      - Example Value
-   * - ``error:exception:message``
-     - A catch-all for unexpected errors. Contains the exception message for any error not classified as a known failure.
-     - Yes, multi-line normalized
-     - ``KeyError: 'applications'``
+   * - ``failure:expected````
+     - Flag indicating the failure was unexpected
+     - No
+     - ``failure:expected: false``
    
 Skip Information
 ~~~~~~~~~~~~~~~~
