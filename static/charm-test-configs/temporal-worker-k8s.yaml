@@ -4,7 +4,10 @@ configs:
     # the charm will go into an active/idle state once these are provided
     # all these values are dummy values for testing purposes
     # nothing is currently deployed at charmqa.canonical.com
-  - config:
+  - criteria:
+      none_of:
+        - endpoint_integrated: database
+    config:
       host: charmqa.canonical.com
       namespace: charm-test
       queue: test-queue
