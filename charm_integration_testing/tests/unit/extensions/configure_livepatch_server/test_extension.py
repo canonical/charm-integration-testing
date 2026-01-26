@@ -83,9 +83,6 @@ class JujuStub(JujuStubBase):
     def ssh(self) -> None:  # type: ignore[override]
         pass
 
-    def get_charm_revisions(self) -> None:  # type: ignore[override]
-        pass
-
     def version(self) -> None:  # type: ignore[override]
         pass
 

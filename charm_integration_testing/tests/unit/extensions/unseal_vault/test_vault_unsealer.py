@@ -10,6 +10,7 @@ from typing import Any
 from extensions.unseal_vault.vault_client import VaultClient, VaultStatus, VaultTokenSecret
 from extensions.unseal_vault.vault_unsealer import CharmInfo, VaultUnsealer
 from juju.backend import JujuBackend, JujuTask
+from juju.models import JujuApplicationInfo
 
 
 @dataclass
@@ -24,8 +25,8 @@ class JujuStub(JujuBackend):
     secrets_granted: list[tuple[str, str]] = field(default_factory=list)
     actions_run: list[tuple[str, str, dict[str, str]]] = field(default_factory=list)
 
-    def list_applications(self, model: str) -> list[str]:  # type: ignore[override]
-        return self.apps
+    def list_applications(self, model: str) -> dict[str, JujuApplicationInfo]:
+        return {app: JujuApplicationInfo(charm=self.charm_name, revision=0) for app in self.apps}
 
     def application_charm(self, model: str, application: str) -> str:
         return self.charm_name
@@ -117,9 +118,6 @@ class JujuStub(JujuBackend):
         pass
 
     def unit_ip(self) -> None:  # type: ignore[override]
-        pass
-
-    def get_charm_revisions(self) -> None:  # type: ignore[override]
         pass
 
     def version(self) -> None:  # type: ignore[override]

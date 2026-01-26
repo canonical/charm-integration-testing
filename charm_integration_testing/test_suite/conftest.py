@@ -238,11 +238,22 @@ def record_charms_and_revisions_execution_metadata_instantaneous(
     juju_client: JujuClient, model: str, execution_metadata: Callable[[str, str | int], None]
 ) -> None:
     # Get all charm revisions
-    for charm, revision in juju_client.get_charm_revisions(model=model):
+    applications = juju_client.list_applications(model=model)
+    for application_info in applications.values():
         # Save the charm
-        execution_metadata("charm", charm)
+        execution_metadata("charm", application_info.charm)
         # Save the revision
-        execution_metadata(f"charm:{charm}:revision", str(revision))
+        execution_metadata(f"charm:{application_info.charm}:revision", str(application_info.revision))
+
+    # Get all integrations and record them
+    for integration in juju_client.list_integrations(model=model):
+        # Record integration in format: provider:endpoint/interface/requirer:endpoint
+        integration_str = (
+            f"{applications[integration.provider.application].charm}:{integration.provider.endpoint}/"
+            f"{integration.interface}/"
+            f"{applications[integration.requirer.application].charm}:{integration.requirer.endpoint}"
+        )
+        execution_metadata("integration", integration_str)
 
 
 @pytest.fixture
