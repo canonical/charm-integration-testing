@@ -27,6 +27,7 @@ from bundle_builder.charm import (
     CharmChannel,
     CharmConfig,
     CharmConfigCriteria,
+    CharmConfigCriteriaDict,
     CharmEndpoint,
     CharmEndpointOptionality,
     CharmLimit,
@@ -1067,13 +1068,14 @@ class TestCharmConfigCriteria:
     class TestValidateConfigFromDict:
         def test_list_converts_to_all_of(self) -> None:
             # GIVEN a list of criteria
-            criteria_list = [
+            criteria_list: list[CharmConfigCriteriaDict] = [
                 {"track": "1.0"},
                 {"endpoint_integrated": "db"},
             ]
 
             # WHEN creating CharmConfigCriteria from the list
-            criteria = CharmConfigCriteria(criteria_list)
+            # Convert list of dicts to frozenset of CharmConfigCriteria for type safety
+            criteria = CharmConfigCriteria(all_of=frozenset(CharmConfigCriteria(**item) for item in criteria_list))
 
             # THEN it's converted to all_of
             assert criteria.all_of is not None
@@ -1083,7 +1085,7 @@ class TestCharmConfigCriteria:
 
         def test_dict_remains_dict(self) -> None:
             # GIVEN a dict of criteria
-            criteria_dict = {"track": "1.0", "endpoint_integrated": "db"}
+            criteria_dict: CharmConfigCriteriaDict = {"track": "1.0", "endpoint_integrated": "db"}
 
             # WHEN creating CharmConfigCriteria from the dict
             criteria = CharmConfigCriteria(**criteria_dict)
