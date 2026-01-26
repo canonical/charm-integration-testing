@@ -14,9 +14,8 @@ inputs:
   repo:
     description: The repository to run the workflow on, in the style of {owner}/{repo}
     required: true
-
 runs:
-  using: 'composite'
+  using: composite
   steps:
     - name: Check if issue is fixed
       id: check_fixed
@@ -27,5 +26,5 @@ runs:
         ISSUE_NUMBER: ${{ inputs.issue_number }}
         REFERENCE_TAG: ${{ inputs.reference_tag }}
         REPO: ${{ inputs.repo }}
-      run: |
+      run: |-
         ./script.py ${ISSUE_NUMBER} ${REFERENCE_TAG} ${REPO}
