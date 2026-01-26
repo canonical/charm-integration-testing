@@ -23,8 +23,7 @@ def get_issue(issue_number: int, repo: str) -> int | None:
             max_tries -= 1
             if max_tries == 0:
                 raise RuntimeError(
-                    f"Failed to fetch issues from {url} "
-                    f"(status code {response.status_code}): {response.text}"
+                    f"Failed to fetch issues from {url} " f"(status code {response.status_code}): {response.text}"
                 )
             continue
 
