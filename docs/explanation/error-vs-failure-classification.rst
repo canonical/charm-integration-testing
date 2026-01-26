@@ -133,6 +133,8 @@ Automatic Retry Behavior
 -------------------------
 
 The retry logic is handled through test observer through attachment rules
+
+Modifying Classification
 ---------------------------
 
 To classify a new exception type as a known failure:
