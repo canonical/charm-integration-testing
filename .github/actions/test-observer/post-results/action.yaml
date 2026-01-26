@@ -52,8 +52,7 @@ runs:
             {
               "name": ."+@name",
               "status": (
-                if .error != [] then "ERROR"
-                elif .failure != [] then "FAILED"
+                if .error != [] or .failure != [] then "FAILED"
                 elif .skipped != [] then "SKIPPED"
                 else "PASSED"
                 end

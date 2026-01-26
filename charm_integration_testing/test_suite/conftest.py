@@ -28,7 +28,6 @@ from utils import normalize_string, normalize_string_multiline
 KNOWN_FAILURE_EXCEPTIONS = (
     JujuWaitTimeoutError,
     AssertionError,
-    CalledProcessError,
 )
 
 
@@ -110,26 +109,27 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[Any]) -> 
 
     if call.excinfo is not None:
         exception_type = call.excinfo.type
-
         # Don't interfere with pytest's built-in exceptions (skip, xfail, etc.)
         if exception_type.__name__ in ("Skipped", "XFailed", "Exit"):
             pass
         elif exception_type not in KNOWN_FAILURE_EXCEPTIONS:
-            # Unexpected errors: keep failed=True, but force JUnit to emit <error>
+            # Unexpected errors: set flag to modify message
             unexpected_error = True
-            if report.when == "call":
-                report.when = "setup"
 
     # Save failure message
     if report.failed:
         # Adapted from https://docs.pytest.org/en/stable/_modules/_pytest/junitxml.html
         reprcrash = getattr(report.longrepr, "reprcrash", None)
         if reprcrash is not None:
-            item.stash[failure_message] = reprcrash.message
+            if unexpected_error:
+                item.stash[error_message] = reprcrash.message
+            else:
+                item.stash[failure_message] = reprcrash.message
         else:
-            item.stash[failure_message] = str(report.longrepr)
-        if unexpected_error:
-            item.stash[error_message] = item.stash[failure_message]
+            if unexpected_error:
+                item.stash[error_message] = str(report.longrepr)
+            else:
+                item.stash[failure_message] = str(report.longrepr)
 
     # Save skip message
     if report.skipped:
@@ -289,12 +289,11 @@ def record_failure_execution_metadata(
     # Let the test run
     yield
 
-    # Save the failure message
-    if failure_message in request.node.stash:
-        if error_message in request.node.stash:
-            execution_metadata("error:message", normalize_string(request.node.stash[error_message]))
-        else:
-            execution_metadata("failure:message", normalize_string(request.node.stash[failure_message]))
+    # Save the error or failure message
+    if error_message in request.node.stash:
+        execution_metadata("error:message", normalize_string(request.node.stash[error_message]))
+    elif failure_message in request.node.stash:
+        execution_metadata("failure:message", normalize_string(request.node.stash[failure_message]))
 
     # Save the skip message
     if skipped_message in request.node.stash:
@@ -343,7 +342,7 @@ def record_failure_execution_metadata(
         elif is_error:
             # For other unexpected errors, log the error line by line
             for line in normalize_string_multiline(str(exc)):
-                execution_metadata("error:exception:", line)
+                execution_metadata("error:exception", line)
 
 
 @pytest.fixture

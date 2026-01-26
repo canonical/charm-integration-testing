@@ -600,11 +600,6 @@ jobs:
           fi
           echo "Summary: #tests: $tests | Failed: $failures | Errors: $errors | Skipped: $skipped"
           echo "test_status=$TEST_STATUS" >> $GITHUB_OUTPUT
-          if [[ "$errors" -gt 0 ]]; then
-            echo "has_errors=true" >> $GITHUB_OUTPUT
-          else
-            echo "has_errors=false" >> $GITHUB_OUTPUT
-          fi
       - name: Mark Test Execution completed on Test Observer with the correct status
         if: ${{ always() && env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/patch-test-execution
@@ -614,7 +609,7 @@ jobs:
           test_execution_id: ${{ inputs.execution_id }}
           status: ${{ steps.calculate_job_status.outputs.test_status != '' && steps.calculate_job_status.outputs.test_status || 'ENDED_PREMATURELY' }}
       - name: Trigger rerun on Test Observer if failure
-        if: ${{ failure() && env.test_observer_api != '' && inputs.execution_id != '' && steps.calculate_job_status.outputs.has_errors != 'true' && !(steps.build_bundle.conclusion == 'failure' && steps.build_bundle.outputs.invalid_input == 'true') }}
+        if: ${{ failure() && env.test_observer_api != '' && inputs.execution_id != '' && !(steps.build_bundle.conclusion == 'failure' && steps.build_bundle.outputs.invalid_input == 'true') }}
         uses: ./.github/actions/test-observer/trigger-rerun
         with:
           test_observer_api: ${{ env.test_observer_api }}
