@@ -15,11 +15,11 @@
 
 import logging
 from functools import cache
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import requests
 import yaml
-from pydantic import Field, field_validator, model_validator, TypeAdapter
+from pydantic import Field, TypeAdapter, field_validator, model_validator
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
@@ -83,6 +83,7 @@ class CharmMetadata:
         return TypeAdapter(cls).validate_python(data)
 
     if TYPE_CHECKING:  # so mypy knows the class can be constructed from a dict
+
         def __init__(
             self,
             peers: dict[str, Endpoint | dict[str, Any]] = ...,

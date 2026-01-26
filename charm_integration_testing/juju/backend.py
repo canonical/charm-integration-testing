@@ -7,10 +7,9 @@ from collections.abc import Callable
 from dataclasses import field
 from datetime import datetime, timedelta
 from functools import wraps
-from typing import Any, TypeVar, ParamSpec
+from typing import ParamSpec, TypeVar
 
 from pydantic.dataclasses import dataclass
-
 
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
@@ -24,7 +23,9 @@ class JujuStatusPerformanceWarning(JujuPerformanceWarning):
     """Warning when juju status operations are slow."""
 
 
-def warn_performance(threshold: timedelta, category: type[Warning] = JujuPerformanceWarning) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
+def warn_performance(
+    threshold: timedelta, category: type[Warning] = JujuPerformanceWarning
+) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
     """Decorator that emits a warning if a function takes longer than threshold.
 
     Args:

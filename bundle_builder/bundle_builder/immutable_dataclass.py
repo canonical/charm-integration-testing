@@ -16,7 +16,7 @@
 
 from dataclasses import field
 from functools import wraps
-from typing import Any, Callable, Type, TypeVar, get_type_hints, cast
+from typing import Any, Callable, Type, TypeVar, cast, get_type_hints
 
 from pydantic.dataclasses import dataclass
 from typing_extensions import dataclass_transform

@@ -17,7 +17,6 @@
 import dataclasses
 import logging
 
-from bundle_builder.charmhub import CharmhubClient
 from pydantic.dataclasses import dataclass
 
 from bundle_builder.bundle import Application, ApplicationEndpoint, Bundle, Integration
@@ -30,6 +29,7 @@ from bundle_builder.charm import (
     CharmLimit,
     CharmTestConfig,
 )
+from bundle_builder.charmhub import CharmhubClient
 
 from .test_bundle import sample_bundle_postgresql_k8s_kratos
 from .test_charm import (

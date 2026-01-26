@@ -14,9 +14,9 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
-from typing import Any, TypeAlias, overload, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, TypeAlias
 
-from pydantic import Field, model_serializer, model_validator, field_validator
+from pydantic import Field, field_validator, model_serializer, model_validator
 from pydantic_core import ArgsKwargs
 
 from .immutable_dataclass import cached_method, immutable_dataclass
@@ -228,30 +228,6 @@ class CharmConfigCriteria:
     track: str | None = None
     endpoint_integrated: str | None = None
 
-    @overload  # type: ignore[no-overload-impl]
-    def __init__(self, value: list["CharmConfigCriteria"]) -> None: ...
-
-    @overload
-    def __init__(self, value: list[dict[str, str]]) -> None: ...
-
-    @overload
-    def __init__(
-        self,
-        *,
-        all_of: frozenset["CharmConfigCriteria"] | None = None,
-        any_of: frozenset["CharmConfigCriteria"] | None = None,
-        none_of: frozenset["CharmConfigCriteria"] | None = None,
-        track: str | None = None,
-        endpoint_integrated: str | None = None,
-    ) -> None: ...
-
-    @model_validator(mode="before")
-    @classmethod
-    def validate_config_from_dict(cls, value: Any) -> Any:
-        if isinstance(value, list):
-            return {"all_of": value}
-        return value
-
     @cached_method
     def valid(
         self,
@@ -302,11 +278,8 @@ class CharmTestConfig:
     config: CharmConfig = Field(default_factory=CharmConfig)
 
     if TYPE_CHECKING:  # tell mypy what types are allowed
-        def __init__(
-            self, 
-            criteria: CharmConfigCriteria = ..., 
-            config: CharmConfig | dict[str, Any] = ...
-        ): ...
+
+        def __init__(self, criteria: CharmConfigCriteria = ..., config: CharmConfig | dict[str, Any] = ...): ...
 
     @field_validator("config", mode="before")
     @classmethod

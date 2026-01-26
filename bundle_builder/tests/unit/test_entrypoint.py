@@ -208,7 +208,9 @@ class TestApplicationFromArgs:
             applications={
                 Application(
                     name="target",
-                    charm=dataclasses.replace(sample_charm_postgresql_k8s(), channel=CharmChannel("edge"), revision=111),
+                    charm=dataclasses.replace(
+                        sample_charm_postgresql_k8s(), channel=CharmChannel("edge"), revision=111
+                    ),
                 )
             },
         ),
@@ -218,7 +220,9 @@ class TestApplicationFromArgs:
             applications={
                 Application(
                     name="target",
-                    charm=dataclasses.replace(sample_charm_postgresql_k8s(), channel=CharmChannel("stable"), ubuntu_version="24.04"),
+                    charm=dataclasses.replace(
+                        sample_charm_postgresql_k8s(), channel=CharmChannel("stable"), ubuntu_version="24.04"
+                    ),
                 )
             },
         ),
