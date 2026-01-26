@@ -121,16 +121,11 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[Any]) -> 
         # Adapted from https://docs.pytest.org/en/stable/_modules/_pytest/junitxml.html
         reprcrash = getattr(report.longrepr, "reprcrash", None)
         if reprcrash is not None:
-            if unexpected_error:
-                item.stash[error_message] = reprcrash.message
-            else:
-                item.stash[failure_message] = reprcrash.message
+            item.stash[failure_message] = reprcrash.message
         else:
-            if unexpected_error:
-                item.stash[error_message] = str(report.longrepr)
-            else:
-                item.stash[failure_message] = str(report.longrepr)
-
+            item.stash[failure_message] = str(report.longrepr)
+        if unexpected_error:
+            item.stash[error_message] = item.stash[failure_message]
     # Save skip message
     if report.skipped:
         # Adapted from https://docs.pytest.org/en/stable/_modules/_pytest/junitxml.html
@@ -303,9 +298,6 @@ def record_failure_execution_metadata(
     if failure_exception in request.node.stash:
         exc = request.node.stash[failure_exception]
 
-        # Save state from wait timeout
-        is_error = error_message in request.node.stash
-
         if isinstance(exc, JujuWaitTimeoutError):
             for application in exc.wait_state.noncompliant_applications.values():
                 if application is None:
@@ -339,10 +331,11 @@ def record_failure_execution_metadata(
                 for line in normalize_string_multiline(exc.stderr):
                     execution_metadata("failure:cli:stderr", line)
 
-        elif is_error:
-            # For other unexpected errors, log the error line by line
-            for line in normalize_string_multiline(str(exc)):
-                execution_metadata("error:exception", line)
+        if error_message in request.node.stash:
+            # toggle expected failure flag
+            execution_metadata("failure:expected", "false")
+        else:
+            execution_metadata("failure:expected", "true")
 
 
 @pytest.fixture
