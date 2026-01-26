@@ -16,9 +16,17 @@ def get_issue(issue_number: int, repo: str) -> int | None:
     limit = 50
     params = {"project": repo, "offset": offset, "limit": limit}
     session = requests.Session()
-    while response := session.get(url, params=params):
+    max_tries = 5
+    while max_tries > 0:
+        response = session.get(url, params=params)
         if response.status_code != 200:
-            break
+            max_tries -= 1
+            if max_tries == 0:
+                raise RuntimeError(
+                    f"Failed to fetch issues from {url} "
+                    f"(status code {response.status_code}): {response.text}"
+                )
+            continue
 
         data = response.json()
         if not data["issues"]:
@@ -112,7 +120,7 @@ def dispatch_run(
     }
     response = requests.post(url, headers=headers, json=data)
     if response.status_code != 204:
-        print(f"Failed to dispatch workflow: {response.status_code} - {response.text}")
+        print(f"Failed to dispatch charm-testing workflow: {response.status_code} - {response.text}")
         exit(1)
     print("Workflow dispatched successfully")
 
@@ -120,10 +128,8 @@ def dispatch_run(
 if __name__ == "__main__":
     parser = argument_parser()
     args = parser.parse_args()
-    if not args.issue_number:
-        print("No issue found")
-        exit(0)
     issue_id = get_issue(args.issue_number, args.repo)
+
     if issue_id is None:
         print(f"No issue found in Test Observer for issue number {args.issue_number}")
         exit(1)
@@ -134,11 +140,13 @@ if __name__ == "__main__":
     if not github_token:
         print("Error: GITHUB_TOKEN environment variable is not set. Please set it before running this script.")
         exit(1)
+
     print("Workflow inputs:")
     print(f"target_charm_name: {target['charm_name']}")
     print(f"target_endpoint_name: {target['endpoint_name']}")
     print(f"neighbor_charm_name: {neighbor['charm_name']}")
     print(f"neighbor_endpoint_name: {neighbor['endpoint_name']}")
+
     dispatch_run(
         github_token,
         target["charm_name"],
