@@ -2,12 +2,21 @@
 # See LICENSE file for licensing details.
 
 
+import json
 import os
 import time
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 import yaml
-from juju import JujuBackend, JujuExecOutput, JujuIntegration, JujuIntegrationApplication, JujuWaitTimeoutError
+from juju import (
+    JujuBackend,
+    JujuExecOutput,
+    JujuIntegration,
+    JujuIntegrationApplication,
+    JujuTask,
+    JujuWaitTimeoutError,
+)
 from juju.backend import JujuStatusPerformanceWarning, warn_performance
 
 from .cmd import CmdArg, CmdClient, CmdError
@@ -346,14 +355,24 @@ class JujuCmdBackend(JujuBackend):
             CmdArg(value=application),
         )
 
-    def run_action(self, model: str, unit: str, action: str, arguments: dict[str, str]) -> None:
+    def run_action(self, model: str, unit: str, action: str, arguments: dict[str, Any]) -> JujuTask:
         # Run the action on the unit
-        self._call_juju(
+        result = self._call_juju(
             CmdArg(value="run"),
+            CmdArg(name="format", value="json"),
             CmdArg(name="model", value=model),
             CmdArg(value=unit),
             CmdArg(value=action),
             *[CmdArg(value=f"{key}={value}") for key, value in arguments.items()],
+        )
+        result_from_json = json.loads(result)
+        unit_data = result_from_json[unit]
+        return JujuTask(
+            id=unit_data["id"],
+            return_code=unit_data.get("results", {}).get("return-code", 0),
+            status=unit_data["status"],
+            message=unit_data.get("message", ""),
+            output=unit_data.get("results", {}).get("output"),
         )
 
     def remove_secret(self, model: str, name_or_id: str) -> None:

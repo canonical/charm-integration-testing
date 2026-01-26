@@ -5,10 +5,11 @@ import logging
 import subprocess
 from dataclasses import dataclass, field
 from datetime import timedelta
+from typing import Any
 
 from extensions.unseal_vault.vault_client import VaultClient, VaultStatus, VaultTokenSecret
 from extensions.unseal_vault.vault_unsealer import CharmInfo, VaultUnsealer
-from juju.backend import JujuBackend
+from juju.backend import JujuBackend, JujuTask
 
 
 @dataclass
@@ -51,8 +52,9 @@ class JujuStub(JujuBackend):
     def grant_secret(self, model: str, name: str, app: str) -> None:
         self.secrets_granted.append((name, app))
 
-    def run_action(self, model: str, unit: str, action: str, params: dict[str, str]) -> None:
+    def run_action(self, model: str, unit: str, action: str, params: dict[str, Any]) -> JujuTask:
         self.actions_run.append((unit, action, params))
+        return JujuTask("", 0, "", "", "")  # Dummy; provided to satisfy return type
 
     def remove_secret(self, model: str, name: str) -> None:
         try:
@@ -121,6 +123,9 @@ class JujuStub(JujuBackend):
         pass
 
     def version(self) -> None:  # type: ignore[override]
+        pass
+
+    def get_application_config(self, model: str, application: str) -> None:  # type: ignore[override]
         pass
 
 

@@ -51,10 +51,13 @@ class StatusStub:
     """Stub for status() method"""
 
     call_count: int = 0
+    application_statuses: dict[str, str] = field(default_factory=dict)
+    unit_workload_statuses: dict[str, str] = field(default_factory=dict)
+    unit_juju_statuses: dict[str, str] = field(default_factory=dict)
 
     def status(self) -> jubilant.Status:
         self.call_count += 1
-        return jubilant.Status(
+        status = jubilant.Status(
             model=jubilant.statustypes.ModelStatus(
                 name="test-model",
                 type="caas",
@@ -65,6 +68,48 @@ class StatusStub:
             machines={},
             apps={},
         )
+
+        # If statuses are provided, populate the apps dictionary for any apps/units supplied.
+
+        # 1. Collect all application and unit names from application statuses and unit statuses.
+        app_names = set(self.application_statuses.keys())
+        unit_derived_app_names = set()
+        for status_dict in (self.unit_workload_statuses, self.unit_juju_statuses):
+            for unit_id in status_dict.keys():
+                app_name = unit_id.split("/")[0]
+                unit_derived_app_names.add(app_name)
+        app_names.update(unit_derived_app_names)
+
+        units_by_app_name: dict[str, set[str]] = {}
+        for status_dict in (self.unit_workload_statuses, self.unit_juju_statuses):
+            for unit_id in status_dict.keys():
+                units_by_app_name.setdefault(unit_id.split("/")[0], set()).add(unit_id)
+
+        # 2. For each application, create AppStatus with relevant UnitStatus entries.
+        for app in app_names:
+            unit_names = units_by_app_name.get(app, set())
+            units = {
+                unit_name: jubilant.statustypes.UnitStatus(
+                    workload_status=jubilant.statustypes.StatusInfo(
+                        self.unit_workload_statuses.get(unit_name, "unknown")
+                    ),
+                    juju_status=jubilant.statustypes.StatusInfo(self.unit_juju_statuses.get(unit_name, "unknown")),
+                )
+                for unit_name in unit_names
+            }
+            status.apps[app] = jubilant.statustypes.AppStatus(
+                # Required - just supplying some dummy values
+                charm="test-charm",
+                charm_origin="charmhub",
+                charm_name="test-charm",
+                charm_rev=1,
+                exposed=False,
+                # These are the parameters we actually care about:
+                app_status=jubilant.statustypes.StatusInfo(current=self.application_statuses.get(app, "unknown")),
+                units=units,
+            )
+
+        return status
 
 
 @dataclass
@@ -342,6 +387,23 @@ class TestJubilantBackend:
             # THEN it completed all 10 checks despite short timeout
             assert stub.call_count == 10
 
+        def test_wait_idle_on_subset_of_model(self) -> None:
+            # GIVEN
+            stub = StatusStub(application_statuses={"app1": "active", "app2": "active", "app3": "blocked"})
+            client = JubilantClientStub(client=stub)
+            backend = JubilantBackend(client)
+
+            # WHEN wait_idle is called with specific applications/units
+            backend.wait_idle(
+                "test-model",
+                timedelta(seconds=3),
+                count=3,
+                applications=["app1", "app2"],
+            )
+
+            # THEN status was called 3 times
+            assert stub.call_count == 3
+
     class TestWaitApplicationSettled:
         def test_application_settled(self) -> None:
             # GIVEN
@@ -572,9 +634,10 @@ class TestJubilantBackend:
             charm: str | None = None
             app: str | None = None
 
-            def deploy(self, charm: str, app: str | None = None) -> None:
+            def deploy(self, charm: str, app: str | None = None, config: Any = None) -> None:
                 self.charm = charm
                 self.app = app
+                self.config = config
 
         def test(self) -> None:
             # GIVEN
@@ -582,11 +645,14 @@ class TestJubilantBackend:
             client = JubilantClientStub(client=stub)
 
             # WHEN
-            JubilantBackend(client).deploy_application("test-model", charm="my-charm", application="my-app")
+            JubilantBackend(client).deploy_application(
+                "test-model", charm="my-charm", application="my-app", config={"setting": "value"}
+            )
 
             # THEN
             assert stub.charm == "my-charm"
             assert stub.app == "my-app"
+            assert stub.config == {"setting": "value"}
 
     class TestConfigureApplication:
         @dataclass
@@ -753,3 +819,65 @@ class TestJubilantBackend:
 
             # THEN
             assert charm_revisions == {("my-charm", 1)}
+
+    class TestRunAction:
+        @dataclass
+        class ActionStub:
+            unit: str = ""
+            action: str = ""
+            params: dict[str, Any] = field(default_factory=dict)
+
+            def run(self, unit: str, action: str, params: dict[str, Any]) -> jubilant.Task:
+                self.unit = unit
+                self.action = action
+                self.params = params
+                return jubilant.Task(
+                    id="123", status="failed", return_code=1, message="error", results={"output": "error output"}
+                )
+
+        def test(self) -> None:
+            # This test does two things:
+            # * Verifies basic plumbing of run_action via our backend class.
+            # * Verifies that we correctly transform from jubilant.Task to our own JujuTask.
+
+            # GIVEN
+            stub = self.ActionStub()
+            client = JubilantClientStub(client=stub)
+
+            # WHEN
+            task = JubilantBackend(client).run_action(
+                "test-model", unit="my-app/0", action="restart-service", params={"force": True}
+            )
+
+            # THEN
+            assert stub.unit == "my-app/0"
+            assert stub.action == "restart-service"
+            assert stub.params == {"force": True}
+
+            # The following just verifies that we transform from the jubilant.Task to our own JujuTask as expected.
+            assert task.id == "123"
+            assert task.return_code == 1
+            assert task.status == "failed"
+            assert task.message == "error"
+            assert task.output == "error output"
+
+    class TestGetApplicationConfig:
+        @dataclass
+        class ConfigStub:
+            app: str = ""
+
+            def config(self, app: str) -> dict[str, Any]:
+                self.app = app
+                return {"setting1": "value1", "setting2": "value2"}
+
+        def test(self) -> None:
+            # GIVEN
+            stub = self.ConfigStub()
+            client = JubilantClientStub(client=stub)
+
+            # WHEN
+            config = JubilantBackend(client).get_application_config("test-model", "my-app")
+
+            # THEN
+            assert stub.app == "my-app"
+            assert config == {"setting1": "value1", "setting2": "value2"}

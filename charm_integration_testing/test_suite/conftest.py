@@ -17,6 +17,7 @@ from extensions import (
     PostgresqlDatabaseReplicationExtension,
     PostgresqlK8sDatabaseReplicationExtension,
     S3IntegratorMinIOBackendExtension,
+    TemporalExtension,
     UnsealVaultJujuExtension,
     UnsealVaultK8sJujuExtension,
 )
@@ -54,6 +55,7 @@ def juju_client(
             PostgresqlDatabaseReplicationExtension(juju_backend, logger),
             PostgresqlK8sDatabaseReplicationExtension(juju_backend, logger),
             S3IntegratorMinIOBackendExtension(juju_backend, logger, minio_client_file),
+            TemporalExtension(juju_backend, logger),
             UnsealVaultJujuExtension(juju_backend, logger),
             UnsealVaultK8sJujuExtension(juju_backend, logger),
         ],

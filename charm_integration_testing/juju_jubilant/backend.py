@@ -5,13 +5,14 @@
 import dataclasses
 import time
 from datetime import datetime, timedelta
-from typing import Callable
+from typing import Any, Callable
 
 import jubilant
 import yaml
 from juju import (
     JujuIntegrationApplication,
     JujuStatusPerformanceWarning,
+    JujuTask,
     JujuWaitState,
     JujuWaitTimeoutError,
     warn_performance,
@@ -113,10 +114,21 @@ class JubilantBackend(JujuCmdBackend):
             )
         raise JujuWaitTimeoutError(wait_state=noncompliant_wait_state)
 
-    def wait_idle(self, model: str, timeout: timedelta | None, count: int | None, strict_timeout: bool = False) -> None:
+    def wait_idle(
+        self,
+        model: str,
+        timeout: timedelta | None,
+        count: int | None,
+        strict_timeout: bool = False,
+        applications: list[str] | None = None,
+    ) -> None:
+        if applications is None:
+            applications = []
         self.wait(
             model,
-            lambda status: all_statuses_are_in(status, application_statuses={"active"}, unit_statuses={"active"}),
+            lambda status: all_statuses_are_in(
+                status, *applications, application_statuses={"active"}, unit_statuses={"active"}
+            ),
             timeout=timeout,
             successes=count,
             strict_timeout=strict_timeout,
@@ -155,6 +167,19 @@ class JubilantBackend(JujuCmdBackend):
 
     def wait_for_removal_of_units(self, model: str, applications: list[str], timeout: timedelta | None) -> None:
         self.wait(model, lambda status: applications_have_no_units(status, *applications), timeout=timeout)
+
+    def run_action(self, model: str, unit: str, action: str, params: dict[str, Any]) -> JujuTask:
+        try:
+            task = self.client.model(model).run(
+                unit=unit,
+                action=action,
+                params=params,
+            )
+        except jubilant._task.TaskError as e:
+            # Just extract the task from the exception
+            task = e.task
+
+        return JujuTask(task.id, task.return_code, task.status, task.message, task.results.get("output", ""))
 
     def add_secret(self, model: str, name: str, values: dict[str, str]) -> str:
         return (
@@ -197,10 +222,13 @@ class JubilantBackend(JujuCmdBackend):
             name_or_id,
         )
 
-    def deploy_application(self, model: str, charm: str, application: str | None = None) -> None:
+    def deploy_application(
+        self, model: str, charm: str, application: str | None = None, config: dict[str, Any] | None = None
+    ) -> None:
         self.client.model(model).deploy(
             charm=charm,
             app=application,
+            config=config,
         )
 
     def configure_application(self, model: str, application: str, values: dict[str, str]) -> None:
@@ -208,6 +236,11 @@ class JubilantBackend(JujuCmdBackend):
             app=application,
             values=values,
         )
+
+    def get_application_config(self, model: str, application: str) -> dict[str, Any]:
+        # I'd rather just pass this through, but to follow the return type correctly,
+        # we'll convert to a dict.
+        return {k: v for k, v in self.client.model(model).config(application).items()}
 
     def scp(self, model: str, source: str, destination: str) -> None:
         self.client.model(model).scp(

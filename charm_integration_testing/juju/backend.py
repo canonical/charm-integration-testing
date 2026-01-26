@@ -130,6 +130,21 @@ class JujuExecOutput:
     stderr: str
 
 
+@dataclass
+class JujuTask:
+    """Represents a Juju task, as used by Juju Actions to represent action results."""
+
+    # For now, keeping this somewhat minimal and opinionated.
+    # Not doing a full wrapper of jubilant.Task.
+    id: str
+    return_code: int
+    status: str
+    message: str
+    output: str  # from results.output
+    # Omitting log, stdout and stderr for now.  During testing these were blank or empty.
+    # We can always add them later.
+
+
 class JujuBackend(ABC):
     @abstractmethod
     def scale_application(self, model: str, application: str, num: int) -> None:
@@ -154,7 +169,14 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def wait_idle(self, model: str, timeout: timedelta | None, count: int | None, strict_timeout: bool = False) -> None:
+    def wait_idle(
+        self,
+        model: str,
+        timeout: timedelta | None,
+        count: int | None,
+        strict_timeout: bool = False,
+        applications: list[str] | None = None,
+    ) -> None:
         raise NotImplementedError
 
     @abstractmethod
@@ -222,7 +244,7 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def run_action(self, model: str, unit: str, action: str, arguments: dict[str, str]) -> None:
+    def run_action(self, model: str, unit: str, action: str, arguments: dict[str, Any]) -> JujuTask:
         raise NotImplementedError
 
     @abstractmethod
@@ -242,11 +264,17 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def deploy_application(self, model: str, charm: str, application: str | None = None) -> None:
+    def deploy_application(
+        self, model: str, charm: str, application: str | None = None, config: dict[str, Any] | None = None
+    ) -> None:
         raise NotImplementedError
 
     @abstractmethod
     def configure_application(self, model: str, application: str, values: dict[str, str]) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_application_config(self, model: str, application: str) -> dict[str, Any]:
         raise NotImplementedError
 
     @abstractmethod
