@@ -3,8 +3,6 @@ Execution Metadata
 
 Execution metadata are arbitrary attributes automatically collected during test execution and written to JUnit XML reports as test case properties. These properties provide rich context about test runs, including charm versions, warnings, and failure details.
 
-The framework distinguishes between **failures** (expected test failures) and **errors** (unexpected issues), using different metadata prefixes for each. See :doc:`../explanation/error-vs-failure-classification` for details on this classification system.
-
 Overview
 --------
 
@@ -116,8 +114,6 @@ Failure and Error Information
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The framework distinguishes between expected failures and unexpected errors, using different metadata prefixes for each category. All metadata keys use either ``failure:*`` or ``error:*`` prefixes depending on the exception type classification.
-
-See :doc:`../explanation/error-vs-failure-classification` for a complete explanation of how exceptions are classified and when each prefix is used.
 
 Failure Metadata (Expected Failures)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
