@@ -166,10 +166,10 @@ Collected when the exception type is **not** in ``KNOWN_FAILURE_EXCEPTIONS``:
      - Description
      - Normalized
      - Example Value
-   * - ``failure:expected````
+   * - ``failure:expected``
      - Flag indicating the failure was unexpected
      - No
-     - ``failure:expected: false``
+     - ``false``
    
 Skip Information
 ~~~~~~~~~~~~~~~~
