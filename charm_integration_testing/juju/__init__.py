@@ -5,8 +5,6 @@ from .backend import (
     JujuApplicationState,
     JujuBackend,
     JujuExecOutput,
-    JujuIntegration,
-    JujuIntegrationApplication,
     JujuPerformanceWarning,
     JujuStatusPerformanceWarning,
     JujuTask,
@@ -18,8 +16,10 @@ from .backend import (
 )
 from .client import JujuClient
 from .extension import JujuExtension
+from .models import JujuApplicationInfo, JujuIntegration, JujuIntegrationApplication
 
 __all__ = [
+    "JujuApplicationInfo",
     "JujuApplicationState",
     "JujuBackend",
     "JujuClient",

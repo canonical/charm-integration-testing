@@ -10,6 +10,7 @@ from typing import Any
 
 import yaml
 from juju import (
+    JujuApplicationInfo,
     JujuBackend,
     JujuExecOutput,
     JujuIntegration,
@@ -95,8 +96,15 @@ class JujuCmdBackend(JujuBackend):
     def num_units(self, model: str, application: str) -> int:
         return len(self._status(model).applications[application].units)
 
-    def list_applications(self, model: str) -> set[str]:
-        return set(self._status(model).applications.keys())
+    def list_applications(self, model: str) -> dict[str, JujuApplicationInfo]:
+        status = self._status(model)
+        return {
+            app_name: JujuApplicationInfo(
+                charm=app.charm or "",
+                revision=app.charm_rev if hasattr(app, "charm_rev") and app.charm_rev is not None else 0,
+            )
+            for app_name, app in status.applications.items()
+        }
 
     def list_integrations(self, model: str) -> set[JujuIntegration]:
         status = self._status(model)
@@ -248,7 +256,7 @@ class JujuCmdBackend(JujuBackend):
         start_time = datetime.now(timezone.utc)
         while timeout is None or datetime.now(timezone.utc) < start_time + timeout:
             # Check if any of the applications exist
-            if not (set(applications) & self.list_applications(model=model)):
+            if not (set(applications) & set(self.list_applications(model=model).keys())):
                 return
 
             time.sleep(0.05)
@@ -268,7 +276,7 @@ class JujuCmdBackend(JujuBackend):
             # Check if the integration exists
             if not any(
                 [
-                    ({target_1, target_2} & integration.applications)
+                    {target_1, target_2} == {integration.provider, integration.requirer}
                     for integration in self.list_integrations(model=model)
                 ]
             ):

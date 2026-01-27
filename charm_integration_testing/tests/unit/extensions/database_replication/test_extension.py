@@ -8,7 +8,7 @@ import pytest
 from extensions.database_replication.database_client import DatabaseClient
 from extensions.database_replication.database_replicator import CharmInfo
 from extensions.database_replication.extension import GenericDatabaseReplicationExtension
-from juju.backend import JujuIntegrationApplication
+from juju.models import JujuIntegrationApplication
 
 from ..shared import JujuStub as JujuStubBase
 

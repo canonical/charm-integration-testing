@@ -70,6 +70,22 @@ Charm Information
      - No
      - ``123``
 
+Integration Information
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 40 15 20
+
+   * - Category
+     - Description
+     - Normalized
+     - Example Value
+   * - ``integration``
+     - Integrations between charms deployed in the test model. Each integration is recorded in the format ``<provider>:<provider_endpoint>/<interface>/<requirer>:<requirer_endpoint>``. Collected at start and end of test. Peer integrations are automatically excluded.
+     - No
+     - ``postgresql:db/postgresql/app:database``
+
 Pipeline Information
 ~~~~~~~~~~~~~~~~~~~~
 
@@ -222,6 +238,7 @@ Execution metadata is written to JUnit XML files as properties:
         <properties>
             <property name="charm" value="[&quot;postgresql&quot;, &quot;vault&quot;]"/>
             <property name="charm:postgresql:revision" value="[&quot;123&quot;]"/>
+            <property name="integration" value="[&quot;postgresql:db/postgresql/app:database&quot;]"/>
             <property name="warning:message" value="[&quot;DeprecationWarning: ...&quot;]"/>
         </properties>
     </testcase>

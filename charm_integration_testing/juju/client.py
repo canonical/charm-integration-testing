@@ -4,8 +4,9 @@
 import logging
 from datetime import timedelta
 
-from .backend import JujuBackend, JujuIntegrationApplication
+from .backend import JujuBackend
 from .extension import JujuExtension
+from .models import JujuApplicationInfo, JujuIntegration, JujuIntegrationApplication
 
 
 class JujuClient:
@@ -140,13 +141,16 @@ class JujuClient:
         self.logger.info(
             f"Checking that integration exists: {application_1}:{endpoint_1}/{application_2}:{endpoint_2}."
         )
-        return {
-            JujuIntegrationApplication(application_1, endpoint_1),
-            JujuIntegrationApplication(application_2, endpoint_2),
-        } in {integration.applications for integration in self.backend.list_integrations(model)}
+        return self.backend.integration_exists(application_1, endpoint_1, application_2, endpoint_2, model)
 
-    def get_charm_revisions(self, model: str = "default") -> set[tuple[str, int]]:
-        return self.backend.get_charm_revisions(model)
+    def list_applications(self, model: str = "default") -> dict[str, JujuApplicationInfo]:
+        self.logger.info("Getting list of applications.")
+        return self.backend.list_applications(model)
+
+    def list_integrations(self, model: str = "default") -> set[JujuIntegration]:
+        self.logger.info("Getting list of integrations.")
+        return self.backend.list_integrations(model)
 
     def version(self, model: str = "default") -> str:
+        self.logger.info("Collecting Juju version.")
         return self.backend.version(model)

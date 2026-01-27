@@ -8,7 +8,7 @@ from datetime import timedelta
 from typing import Any
 
 from juju import JujuBackend, JujuExtension
-from juju.backend import JujuIntegrationApplication
+from juju.models import JujuIntegrationApplication
 
 
 class TemporalExtension(JujuExtension, ABC):
@@ -49,8 +49,8 @@ class TemporalExtension(JujuExtension, ABC):
         :return: True if temporal should be deployed, False otherwise.
         :rtype: bool
         """
-        for application in self.juju.list_applications(model):
-            if self.juju.application_charm(model, application) in self.CONFIG_MAP:
+        for info in self.juju.list_applications(model).values():
+            if info.charm in self.CONFIG_MAP:
                 return True
         return False
 
@@ -68,10 +68,9 @@ class TemporalExtension(JujuExtension, ABC):
 
         # Find required apps, or deploy them if necessary
         deployed_apps = {}
-        for application in self.juju.list_applications(model):
-            charm = self.juju.application_charm(model, application)
-            if charm in required_charms_and_config:
-                deployed_apps[charm] = application
+        for application, info in self.juju.list_applications(model).items():
+            if info.charm in required_charms_and_config:
+                deployed_apps[info.charm] = application
         for charm, config in required_charms_and_config.items():
             if charm not in deployed_apps:
                 self._log(f"Deploying {charm} to model {model}")
@@ -156,8 +155,8 @@ class TemporalExtension(JujuExtension, ABC):
         """
         temporal_host = "temporal-k8s:7233"
         for charm in self.CONFIG_MAP:
-            for application in self.juju.list_applications(model):
-                if self.juju.application_charm(model, application) == charm:
+            for application, info in self.juju.list_applications(model).items():
+                if info.charm == charm:
                     config_option = self.CONFIG_MAP[charm]
                     if self.juju.get_application_config(model, application).get(config_option) != temporal_host:
                         self._log(f"Configuring {application} in model {model} to use temporal endpoint")

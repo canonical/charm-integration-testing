@@ -11,6 +11,8 @@ from typing import Any, TypeVar
 
 from pydantic.dataclasses import dataclass
 
+from .models import JujuApplicationInfo, JujuIntegration, JujuIntegrationApplication
+
 _F = TypeVar("_F", bound=Callable[..., Any])
 
 
@@ -108,21 +110,6 @@ class JujuWaitTimeoutError(TimeoutError):
         return str(self)
 
 
-@dataclass(frozen=True)
-class JujuIntegrationApplication:
-    application: str
-    endpoint: str
-
-    def __str__(self) -> str:
-        return f"{self.application}:{self.endpoint}"
-
-
-@dataclass(frozen=True)
-class JujuIntegration:
-    interface: str
-    applications: frozenset[JujuIntegrationApplication]
-
-
 @dataclass
 class JujuExecOutput:
     return_code: int
@@ -155,7 +142,7 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def list_applications(self, model: str) -> set[str]:
+    def list_applications(self, model: str) -> dict[str, JujuApplicationInfo]:
         raise NotImplementedError
 
     @abstractmethod
@@ -287,10 +274,6 @@ class JujuBackend(ABC):
 
     @abstractmethod
     def unit_ip(self, model: str, unit: str) -> str:
-        raise NotImplementedError
-
-    @abstractmethod
-    def get_charm_revisions(self, model: str) -> set[tuple[str, int]]:
         raise NotImplementedError
 
     @abstractmethod

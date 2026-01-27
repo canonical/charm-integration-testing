@@ -2,7 +2,8 @@ from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import Any, Iterable
 
-from juju.backend import JujuBackend, JujuIntegrationApplication, JujuTask
+from juju.backend import JujuBackend, JujuTask
+from juju.models import JujuApplicationInfo, JujuIntegrationApplication
 
 
 @dataclass
@@ -23,9 +24,9 @@ class JujuStub(JujuBackend):
 
     # Implementation of methods mocking a JujuBackend
 
-    def list_applications(self, model: str) -> set[str]:
+    def list_applications(self, model: str) -> dict[str, JujuApplicationInfo]:
         """Return list of application names in the model"""
-        return {key for key in self.applications.keys()}
+        return {key: JujuApplicationInfo(charm=value, revision=0) for key, value in self.applications.items()}
 
     def application_charm(self, model: str, application: str) -> str:
         """Return the charm name for a given application"""
@@ -161,7 +162,7 @@ class JujuStub(JujuBackend):
     def remove_secret(self) -> None:  # type: ignore[override]
         pass
 
-    def get_charm_revisions(self) -> None:  # type: ignore[override]
+    def get_charm_revisions(self) -> None:
         pass
 
     def version(self) -> None:  # type: ignore[override]
