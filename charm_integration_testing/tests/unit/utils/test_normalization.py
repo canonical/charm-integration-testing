@@ -4,11 +4,14 @@
 import pytest
 from pydantic.dataclasses import dataclass
 from utils.normalization import (
+    _normalize_container_names,
+    _normalize_hook_failure_apps,
     _normalize_ip_addresses,
     _normalize_minio_probe_urls,
     _normalize_numeric_sequences,
     _normalize_oci_image_digests,
     _normalize_pod_names,
+    _normalize_relation_version_apps,
     _normalize_temp_files,
     _normalize_timestamps,
     _normalize_uuids,
@@ -64,6 +67,51 @@ class TestNormalizeNumericSequences:
             label="port_number",
             input="localhost:8080",
             expected="localhost:XXX",
+        ),
+        Params(
+            label="k8s_lowercase",
+            input="running on k8s cluster",
+            expected="running on k8s cluster",
+        ),
+        Params(
+            label="k8s_mixed_case",
+            input="K8s deployment failed",
+            expected="K8s deployment failed",
+        ),
+        Params(
+            label="k8s_uppercase",
+            input="K8S error",
+            expected="K8S error",
+        ),
+        Params(
+            label="s3_lowercase",
+            input="s3 bucket not found",
+            expected="s3 bucket not found",
+        ),
+        Params(
+            label="s3_uppercase",
+            input="S3 connection failed",
+            expected="S3 connection failed",
+        ),
+        Params(
+            label="k8s_and_s3_with_other_numbers",
+            input="k8s cluster 123 using S3 storage 456",
+            expected="k8s cluster XXX using S3 storage XXX",
+        ),
+        Params(
+            label="s3_with_adjacent_numbers",
+            input="s3210 is not s3",
+            expected="sXXX is not s3",
+        ),
+        Params(
+            label="k8s_with_adjacent_numbers",
+            input="k8s123 cluster and k8s version",
+            expected="kXXXsXXX cluster and k8s version",
+        ),
+        Params(
+            label="k8s_in_middle_of_word",
+            input="abck8sabc cluster and k8s version",
+            expected="abckXXXsabc cluster and k8s version",
         ),
     ]
 
@@ -465,6 +513,159 @@ class TestNormalizeOciImageDigests:
         assert result == params.expected
 
 
+class TestNormalizeContainerNames:
+    @dataclass
+    class Params:
+        label: str
+        input: str
+        expected: str
+
+    test_cases = [
+        Params(
+            label="simple_container_name",
+            input="container=katib-controller",
+            expected="container=<CONTAINER>",
+        ),
+        Params(
+            label="container_in_crash_loop",
+            input="crash loop backoff: back-off 5m0s restarting failed container=litestream pod=<POD>",
+            expected="crash loop backoff: back-off 5m0s restarting failed container=<CONTAINER> pod=<POD>",
+        ),
+        Params(
+            label="container_with_hyphens",
+            input="container=ml-pipeline-persistenceagent",
+            expected="container=<CONTAINER>",
+        ),
+        Params(
+            label="multiple_containers",
+            input="container=app1 and container=app2",
+            expected="container=<CONTAINER> and container=<CONTAINER>",
+        ),
+        Params(
+            label="no_container",
+            input="hello world",
+            expected="hello world",
+        ),
+        Params(
+            label="container_in_brackets",
+            input="[container:persistenceagent] Waiting for Pebble services",
+            expected="[container:persistenceagent] Waiting for Pebble services",  # Not matched, different format
+        ),
+    ]
+
+    @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
+    def test(self, params: Params) -> None:
+        result = _normalize_container_names(params.input)
+        assert result == params.expected
+
+
+class TestNormalizeHookFailureApps:
+    @dataclass
+    class Params:
+        label: str
+        input: str
+        expected: str
+
+    test_cases = [
+        Params(
+            label="simple_hook_failure",
+            input='hook failed: "admin-ingress-relation-changed" for traefik-k8s:ingress',
+            expected='hook failed: "admin-ingress-relation-changed" for <APP>:<ENDPOINT>',
+        ),
+        Params(
+            label="hook_with_target",
+            input='hook failed: "dashboard-relation-changed" for target:nbi',
+            expected='hook failed: "dashboard-relation-changed" for <APP>:<ENDPOINT>',
+        ),
+        Params(
+            label="hook_without_for_clause",
+            input='hook failed: "config-changed"',
+            expected='hook failed: "config-changed"',
+        ),
+        Params(
+            label="hook_with_update_status",
+            input='hook failed: "update-status"',
+            expected='hook failed: "update-status"',
+        ),
+        Params(
+            label="hook_with_relation_created",
+            input='hook failed: "metrics-endpoint-relation-created" for prometheus-k8s:metrics-endpoint',
+            expected='hook failed: "metrics-endpoint-relation-created" for <APP>:<ENDPOINT>',
+        ),
+        Params(
+            label="hook_with_underscores",
+            input='hook failed: "database-relation-changed" for hydra:pg-database',
+            expected='hook failed: "database-relation-changed" for <APP>:<ENDPOINT>',
+        ),
+        Params(
+            label="multiple_hook_failures",
+            input='hook failed: "install" for app1:endpoint1 and hook failed: "start" for app2:endpoint2',
+            expected='hook failed: "install" for <APP>:<ENDPOINT> and hook failed: "start" for <APP>:<ENDPOINT>',
+        ),
+        Params(
+            label="no_hook_failure",
+            input="hello world",
+            expected="hello world",
+        ),
+    ]
+
+    @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
+    def test(self, params: Params) -> None:
+        result = _normalize_hook_failure_apps(params.input)
+        assert result == params.expected
+
+
+class TestNormalizeRelationVersionApps:
+    @dataclass
+    class Params:
+        label: str
+        input: str
+        expected: str
+
+    test_cases = [
+        Params(
+            label="simple_versions_not_found",
+            input="List of <ops.model.Relation kfp-viz:XXX> versions not found for apps: kfp-api",
+            expected="List of <ops.model.Relation kfp-viz:XXX> versions not found for apps: <APP>",
+        ),
+        Params(
+            label="versions_with_target",
+            input="List of ingress versions not found for apps: target",
+            expected="List of ingress versions not found for apps: <APP>",
+        ),
+        Params(
+            label="versions_with_neighbor",
+            input="List of <ops.model.Relation object-storage:XXX> versions not found for apps: neighbor",
+            expected="List of <ops.model.Relation object-storage:XXX> versions not found for apps: <APP>",
+        ),
+        Params(
+            label="versions_with_relation_prefix",
+            input="[relation:kfp-viz] List of <ops.model.Relation kfp-viz:XXX> versions not found for apps: kubeflow-dashboard",
+            expected="[relation:kfp-viz] List of <ops.model.Relation kfp-viz:XXX> versions not found for apps: <APP>",
+        ),
+        Params(
+            label="versions_with_hyphens_in_app",
+            input="List of kfp-api versions not found for apps: katib-controller",
+            expected="List of kfp-api versions not found for apps: <APP>",
+        ),
+        Params(
+            label="multiple_version_errors",
+            input="versions not found for apps: app1 and versions not found for apps: app2",
+            expected="versions not found for apps: <APP> and versions not found for apps: <APP>",
+        ),
+        Params(
+            label="no_version_error",
+            input="hello world",
+            expected="hello world",
+        ),
+    ]
+
+    @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
+    def test(self, params: Params) -> None:
+        result = _normalize_relation_version_apps(params.input)
+        assert result == params.expected
+
+
 class TestNormalizeString:
     """Integration tests for the full normalize_string function."""
 
@@ -525,7 +726,7 @@ class TestNormalizeString:
         Params(
             label="pod_crash_loop_backoff",
             input="crash loop backoff: back-off 5m0s restarting failed container=ml-pipeline-persistenceagent pod=target-dd123-jngfd_model-123-456(12345678-1234-1234-1234-123456789abc)",
-            expected="crash loop backoff: back-off XXXmXXXs restarting failed container=ml-pipeline-persistenceagent pod=<POD>",
+            expected="crash loop backoff: back-off XXXmXXXs restarting failed container=<CONTAINER> pod=<POD>",
         ),
         Params(
             label="juju_add_secret_with_temp_file",
@@ -565,7 +766,27 @@ class TestNormalizeString:
         Params(
             label="sample_error_with_pod_name",
             input="crash loop backoff: back-off 5m0s restarting failed container=ml-pipeline-persistenceagent pod=target-dd5599494-jngfd_model-16804415299-250807122629(6c3c20e7-df7a-4101-a6e7-1d9e7f8d8f63)",
-            expected="crash loop backoff: back-off XXXmXXXs restarting failed container=ml-pipeline-persistenceagent pod=<POD>",
+            expected="crash loop backoff: back-off XXXmXXXs restarting failed container=<CONTAINER> pod=<POD>",
+        ),
+        Params(
+            label="container_crash_loop_normalized",
+            input="crash loop backoff: back-off 5m0s restarting failed container=katib-controller pod=<POD>",
+            expected="crash loop backoff: back-off XXXmXXXs restarting failed container=<CONTAINER> pod=<POD>",
+        ),
+        Params(
+            label="hook_failure_with_app_endpoint",
+            input='hook failed: "admin-ingress-relation-changed" for traefik-k8s:ingress',
+            expected='hook failed: "admin-ingress-relation-changed" for <APP>:<ENDPOINT>',
+        ),
+        Params(
+            label="relation_version_error",
+            input="List of <ops.model.Relation kfp-viz:123> versions not found for apps: kfp-api",
+            expected="List of <ops.model.Relation kfp-viz:XXX> versions not found for apps: <APP>",
+        ),
+        Params(
+            label="combined_container_and_hook_failure",
+            input='container=litestream failed with hook failed: "update-status" for app:endpoint',
+            expected='container=<CONTAINER> failed with hook failed: "update-status" for <APP>:<ENDPOINT>',
         ),
     ]
 

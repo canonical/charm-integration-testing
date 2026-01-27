@@ -22,7 +22,10 @@ The ``normalize_string()`` function applies these transformations:
 - **OCI image digests**: ``sha256:a1b2c3...`` → ``sha256:<DIGEST>``
 - **IP addresses**: IPv4 (``192.168.1.1``) and IPv6 (``2001:db8::1``) → ``<IP>``
 - **Timestamps**: ISO 8601, dates, times → ``<TIMESTAMP>``
-- **All numeric sequences**: ``12345`` → ``XXX``
+- **Container names**: ``container=katib-controller`` → ``container=<CONTAINER>``
+- **Hook failure app/endpoint**: ``hook failed: "install" for app:endpoint`` → ``hook failed: "install" for <APP>:<ENDPOINT>``
+- **Relation version errors**: ``versions not found for apps: app-name`` → ``versions not found for apps: <APP>``
+- **Numeric sequences**: ``12345`` → ``XXX`` (excludes technical terms like ``k8s``, ``s3``)
 - **Truncation**: Values longer than 150 characters are truncated with ``...``
 
 The ``normalize_string_multiline()`` function extends this to multi-line strings by applying ``normalize_string()`` to each line individually, and returns a list of normalized strings.
