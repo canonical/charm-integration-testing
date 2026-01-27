@@ -2,69 +2,85 @@
 
 import os
 from argparse import ArgumentParser
+from typing import NamedTuple
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3 import Retry
 
 BASE_URL = os.getenv("TEST_OBSERVER_BASE_URL", "https://test-observer-api.canonical.com/v1/")
+RETRY = Retry(
+    total=5,
+    backoff_factor=1,
+    status_forcelist=[500, 502, 503, 504],
+)
+ADAPTER = HTTPAdapter(max_retries=RETRY)
+
+
+class CharmEndpoint(NamedTuple):
+    charm_name: str
+    endpoint_name: str
 
 
 def get_test_observer_issue_id(issue_number: int, repo: str) -> int | None:
-    # Returns the issue id for this issue from Test Observer
+    """Returns the issue id for this issue from Test Observer"""
     ENDPOINT = "issues"
     url = BASE_URL + ENDPOINT
+    session = requests.Session()
+    session.mount("https://", ADAPTER)
+
     offset = 0
     limit = 50
-    params = {"project": repo, "offset": offset, "limit": limit}
-    session = requests.Session()
-    max_tries = 5
-    while max_tries > 0:
-        response = session.get(url, params=params)
-        if response.status_code != 200:
-            max_tries -= 1
-            if max_tries == 0:
-                raise RuntimeError(
-                    f"Failed to fetch issues from {url} (status code {response.status_code}): {response.text}"
-                )
-            continue
 
+    while True:
+        params = {"project": repo, "offset": offset, "limit": limit}
+        response = session.get(url, params=params)
+        try:
+            response.raise_for_status()
+        except requests.HTTPError as e:
+            raise RuntimeError(f"Failed to fetch issues from Test Observer: {e}") from e
         data = response.json()
-        if not data["issues"]:
+        issues = data.get("issues", [])
+        if not issues:
             break
 
-        for issue in data["issues"]:
+        for issue in issues:
             if int(issue["key"]) == issue_number:
                 return issue["id"]
+
+        if len(issues) < limit:
+            break
+
         offset += limit
-        params = {"project": repo, "offset": offset, "limit": limit}
     return None
 
 
-def get_test_result_input(test_observer_issue_id: int) -> tuple[dict[str, str], dict[str, str]]:
-    # Returns the inputs needed to trigger a workflow for a test result
-    # that failed with this issue id
+def get_test_result_input(test_observer_issue_id: int) -> tuple[CharmEndpoint, CharmEndpoint]:
+    """Returns the inputs needed to trigger a workflow for a test result
+    that failed with this issue id"""
     ENDPOINT = "test-results"
     endpoint_url = BASE_URL + ENDPOINT
 
     params = {"issues": test_observer_issue_id, "limit": 1}
+    session = requests.Session()
+    session.mount("https://", ADAPTER)
+    response = session.get(endpoint_url, params=params)
+    try:
+        response.raise_for_status()
+    except requests.HTTPError as e:
+        raise RuntimeError(f"Failed to fetch test results from Test Observer: {e}") from e
 
-    response = requests.get(endpoint_url, params=params)
-    if response.status_code != 200:
-        raise RuntimeError(
-            f"Failed to fetch test result input from {endpoint_url} "
-            f"(status code {response.status_code}): {response.text}"
-        )
     data = response.json()
     if not data.get("test_results"):
         raise ValueError(f"No test results found for issue id {test_observer_issue_id}")
     testplan = data["test_results"][0]["test_execution"]["test_plan"]
-    # anatomy of a testplan <test_type>/<charm>:<endpoint>/<interface>/<charm>:<endpoint>
+    # anatomy of a testplan: <test_type>/<charm>:<endpoint>/<interface>/<charm>:<endpoint>
     testplan = testplan.removeprefix("integration/")
     testplan = testplan.split("/")
     target_name, target_endpoint = testplan[0].split(":")
     neighbor_name, neighbor_endpoint = testplan[-1].split(":")
-    target = {"charm_name": target_name, "endpoint_name": target_endpoint}
-
-    neighbor = {"charm_name": neighbor_name, "endpoint_name": neighbor_endpoint}
+    target = CharmEndpoint(charm_name=target_name, endpoint_name=target_endpoint)
+    neighbor = CharmEndpoint(charm_name=neighbor_name, endpoint_name=neighbor_endpoint)
 
     return (target, neighbor)
 
@@ -95,13 +111,10 @@ def argument_parser() -> ArgumentParser:
 
 def dispatch_run(
     github_token: str,
-    target_charm_name: str,
-    target_endpoint_name: str,
-    neighbor_charm_name: str,
-    neighbor_endpoint_name: str,
+    workflow_url: str,
+    workflow_inputs: dict,
     ref: str,
 ) -> None:
-    url = "https://api.github.com/repos/canonical/charm-integration-testing/actions/workflows/charm-testing.yaml/dispatches"
     headers = {
         "Accept": "application/vnd.github+json",
         "Authorization": f"Bearer {github_token}",
@@ -109,48 +122,53 @@ def dispatch_run(
     }
     data = {
         "ref": ref,
-        "inputs": {
-            "charm_under_test": target_charm_name,
-            "charm_endpoint": target_endpoint_name,
-            "neighbor": neighbor_charm_name,
-            "neighbor_endpoint": neighbor_endpoint_name,
-            "environment": "staging",
-        },
+        "inputs": workflow_inputs,
     }
-    response = requests.post(url, headers=headers, json=data)
-    if response.status_code != 204:
-        print(f"Failed to dispatch charm-testing workflow: {response.status_code} - {response.text}")
-        exit(1)
+
+    session = requests.Session()
+    session.mount("https://", ADAPTER)
+    response = session.post(workflow_url, headers=headers, json=data)
+    try:
+        response.raise_for_status()
+    except requests.HTTPError as e:
+        raise RuntimeError(f"Failed to dispatch workflow: {e}") from e
     print("Workflow dispatched successfully")
 
 
 if __name__ == "__main__":
+    DISPATCH_WORKFLOW_URL = "https://api.github.com/repos/canonical/charm-integration-testing/actions/workflows/charm-testing.yaml/dispatches"
     parser = argument_parser()
     args = parser.parse_args()
-    issue_id = get_issue(args.issue_number, args.repo)
+    try:
+        issue_id = get_test_observer_issue_id(args.issue_number, args.repo)
 
-    if issue_id is None:
-        print(f"No issue found in Test Observer for issue number {args.issue_number}")
+        if issue_id is None:
+            print(f"No issue found in Test Observer for issue number {args.issue_number}")
+            exit(1)
+
+        target, neighbor = get_test_result_input(issue_id)
+
+        github_token = os.getenv("GITHUB_TOKEN")
+        if not github_token:
+            print("Error: GITHUB_TOKEN environment variable is not set. Please set it before running this script.")
+            exit(1)
+
+        data = {
+            "charm_under_test": target.charm_name,
+            "charm_endpoint": target.endpoint_name,
+            "neighbor": neighbor.charm_name,
+            "neighbor_endpoint": neighbor.endpoint_name,
+            "environment": "staging",
+        }
+
+        print(f"Workflow inputs: {data}")
+
+        dispatch_run(
+            github_token=github_token,
+            workflow_url=DISPATCH_WORKFLOW_URL,
+            workflow_inputs=data,
+            ref=args.ref,
+        )
+    except Exception as e:
+        print(f"Error: {e}")
         exit(1)
-
-    target, neighbor = get_test_result_input(issue_id)
-
-    github_token = os.getenv("GITHUB_TOKEN")
-    if not github_token:
-        print("Error: GITHUB_TOKEN environment variable is not set. Please set it before running this script.")
-        exit(1)
-
-    print("Workflow inputs:")
-    print(f"target_charm_name: {target['charm_name']}")
-    print(f"target_endpoint_name: {target['endpoint_name']}")
-    print(f"neighbor_charm_name: {neighbor['charm_name']}")
-    print(f"neighbor_endpoint_name: {neighbor['endpoint_name']}")
-
-    dispatch_run(
-        github_token,
-        target["charm_name"],
-        target["endpoint_name"],
-        neighbor["charm_name"],
-        neighbor["endpoint_name"],
-        args.ref,
-    )
