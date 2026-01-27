@@ -43,9 +43,9 @@ def _normalize_numeric_sequences(text: str) -> str:
     """
     # Store exceptions temporarily with placeholders to protect them
     # We need to track the actual matches to preserve case
-    placeholder_to_original = {}
+    placeholder_to_original: dict[str, str] = {}
 
-    def replace_with_placeholder(match, exception_idx):
+    def replace_with_placeholder(match: re.Match[str], exception_idx: int) -> str:
         """Replace a match with a placeholder and store the original."""
         original = match.group(0)
         placeholder = f"__NUMERIC_EXCEPTION_{chr(65 + exception_idx)}__"
