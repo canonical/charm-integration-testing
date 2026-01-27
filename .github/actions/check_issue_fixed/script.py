@@ -5,10 +5,10 @@ from argparse import ArgumentParser
 
 import requests
 
-BASE_URL = "https://test-observer-api.canonical.com/v1/"
+BASE_URL = os.getenv("TEST_OBSERVER_BASE_URL", "https://test-observer-api.canonical.com/v1/")
 
 
-def get_issue(issue_number: int, repo: str) -> int | None:
+def get_test_observer_issue_id(issue_number: int, repo: str) -> int | None:
     # Returns the issue id for this issue from Test Observer
     ENDPOINT = "issues"
     url = BASE_URL + ENDPOINT
@@ -39,7 +39,7 @@ def get_issue(issue_number: int, repo: str) -> int | None:
     return None
 
 
-def get_test_result_input(test_observer_issue_id: int) -> dict:
+def get_test_result_input(test_observer_issue_id: int) -> tuple[dict[str, str], dict[str, str]]:
     # Returns the inputs needed to trigger a workflow for a test result
     # that failed with this issue id
     ENDPOINT = "test-results"
