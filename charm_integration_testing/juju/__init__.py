@@ -26,7 +26,6 @@ __all__ = [
     "JujuExecOutput",
     "JujuExtension",
     "JujuIntegration",
-    "JujuIntegration",
     "JujuIntegrationApplication",
     "JujuPerformanceWarning",
     "JujuStatusPerformanceWarning",
