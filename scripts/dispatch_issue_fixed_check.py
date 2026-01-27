@@ -101,12 +101,12 @@ def argument_parser() -> ArgumentParser:
     )
     parser.add_argument(
         "--project",
-            type=str,
-            help="The repository the issue is associated with in Test Observer, in the style of {owner}/{repo}",
-            default="canonical/charm-integration-testing",
-            required=False,
-        )
-    
+        type=str,
+        help="The repository the issue is associated with in Test Observer, in the style of {owner}/{repo}",
+        default="canonical/charm-integration-testing",
+        required=False,
+    )
+
     parser.add_argument(
         "--environment",
         type=str,
@@ -115,8 +115,6 @@ def argument_parser() -> ArgumentParser:
         default="staging",
         required=False,
     )
-
-    
 
     return parser
 

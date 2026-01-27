@@ -34,7 +34,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_REF: ${{ steps.pr-details.outputs.sha }}
-          PROJECT: "canonical/charm-integration-testing"
-          ENVIRONMENT: "staging"
-        run: |
+          PROJECT: canonical/charm-integration-testing
+          ENVIRONMENT: staging
+        run: |-
           python3 ./scripts/dispatch_issue_fixed_check.py ${{ github.event.issue.number }} ${PR_REF} --project ${PROJECT} --environment ${ENVIRONMENT}
