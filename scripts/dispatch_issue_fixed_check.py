@@ -22,10 +22,10 @@ class CharmEndpoint(NamedTuple):
     endpoint_name: str
 
 
-def get_test_observer_issue_id(issue_number: int, repo: str) -> int | None:
+def get_test_observer_issue_id(issue_number: int, project: str) -> int | None:
     """Returns the issue id for this issue from Test Observer"""
-    ENDPOINT = "issues"
-    url = BASE_URL + ENDPOINT
+    endpoint = "issues"
+    url = BASE_URL + endpoint
     session = requests.Session()
     session.mount("https://", ADAPTER)
 
@@ -33,7 +33,7 @@ def get_test_observer_issue_id(issue_number: int, repo: str) -> int | None:
     limit = 50
 
     while True:
-        params = {"project": repo, "offset": offset, "limit": limit}
+        params = {"project": project, "offset": offset, "limit": limit}
         response = session.get(url, params=params)
         try:
             response.raise_for_status()
@@ -58,8 +58,8 @@ def get_test_observer_issue_id(issue_number: int, repo: str) -> int | None:
 def get_test_result_input(test_observer_issue_id: int) -> tuple[CharmEndpoint, CharmEndpoint]:
     """Returns the inputs needed to trigger a workflow for a test result
     that failed with this issue id"""
-    ENDPOINT = "test-results"
-    endpoint_url = BASE_URL + ENDPOINT
+    endpoint = "test-results"
+    endpoint_url = BASE_URL + endpoint
 
     params = {"issues": test_observer_issue_id, "limit": 1}
     session = requests.Session()
@@ -99,12 +99,24 @@ def argument_parser() -> ArgumentParser:
         type=str,
         help="The git ref (branch or tag) to run the workflow on",
     )
-
     parser.add_argument(
-        "repo",
+        "--project",
+            type=str,
+            help="The repository the issue is associated with in Test Observer, in the style of {owner}/{repo}",
+            default="canonical/charm-integration-testing",
+            required=False,
+        )
+    
+    parser.add_argument(
+        "--environment",
         type=str,
-        help="The repository to run the workflow on, in the style of {owner}/{repo}",
+        help="The environment to run the workflow in",
+        choices=["staging", "production"],
+        default="staging",
+        required=False,
     )
+
+    
 
     return parser
 
@@ -140,7 +152,7 @@ if __name__ == "__main__":
     parser = argument_parser()
     args = parser.parse_args()
     try:
-        issue_id = get_test_observer_issue_id(args.issue_number, args.repo)
+        issue_id = get_test_observer_issue_id(args.issue_number, args.project)
 
         if issue_id is None:
             print(f"No issue found in Test Observer for issue number {args.issue_number}")
@@ -158,7 +170,7 @@ if __name__ == "__main__":
             "charm_endpoint": target.endpoint_name,
             "neighbor": neighbor.charm_name,
             "neighbor_endpoint": neighbor.endpoint_name,
-            "environment": "staging",
+            "environment": args.environment,
         }
 
         print(f"Workflow inputs: {data}")

@@ -31,10 +31,10 @@ jobs:
             });
             core.setOutput('sha', pr.data.head.sha);
       - name: dispatch test to check if issue is fixed
-        uses: ./.github/actions/check_issue_fixed
-        id: check-issue-fixed
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          issue_number: ${{ github.event.issue.number }}
-          reference_tag: ${{ steps.pr-details.outputs.sha }}
-          repo: ${{ github.repository }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_REF: ${{ steps.pr-details.outputs.sha }}
+          PROJECT: "canonical/charm-integration-testing"
+          ENVIRONMENT: "staging"
+        run: |
+          python3 ./.github/actions/check_issue_fixed/script.py ${{ github.event.issue.number }} ${PR_REF} --project ${PROJECT} --environment ${ENVIRONMENT}
