@@ -11,6 +11,7 @@ package-mode = false
 [tool.poetry.dependencies]
 charm-integration-testing = { path = "./charm_integration_testing", develop = true }
 bundle-builder = { path = "./bundle_builder", develop = true }
+bundle-builder-v2 = { path = "./bundle_builder_v2", develop = true }
 
 
 [build-system]
