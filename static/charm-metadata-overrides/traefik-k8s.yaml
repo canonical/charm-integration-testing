@@ -9,13 +9,13 @@ requires:
           - any_of:
               - all_of:
                   - endpoint_integrated: traefik-route
-                  - endpoint_feature: traefik-route:tls
+                  - endpoint_feature: [traefik-route, tls]
               - all_of:
                   - endpoint_integrated: ingress
                   - endpoint_feature: ingress:tls
               - all_of:
                   - endpoint_integrated: ingress-per-unit
-                  - endpoint_feature: ingress-per-unit:tls
+                  - endpoint_feature: [ingress-per-unit, tls]
   experimental-forward-auth:
     optional: true
   logging:
@@ -31,14 +31,24 @@ requires:
 provides:
   ingress:
     optional: true
-    features: [tls]
+    modes: [[tls], [""]]
   ingress-per-unit:
     optional: true
-    features: [tls]
+    modes: [[tls], [""]]
   metrics-endpoint:
     optional: true
   traefik-route:
     optional: true
-    features: [tls]
+    modes: [[tls], [""]]
   grafana-dashboard:
     optional: true
+bridges:
+  - interface: certificate_transfer
+    requires: certificates
+    provides: ingress
+  - interface: certificate_transfer
+    requires: certificates
+    provides: ingress-per-unit
+  - interface: certificate_transfer
+    requires: certificates
+    provides: traefik-route

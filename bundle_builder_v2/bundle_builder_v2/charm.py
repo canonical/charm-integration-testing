@@ -14,7 +14,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
-from pydantic import BaseModel, Field, model_serializer, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_serializer, model_validator
 
 ENDPOINT_PEERS = "peers"
 ENDPOINT_REQUIRES = "requires"
@@ -22,6 +22,8 @@ ENDPOINT_PROVIDES = "provides"
 
 
 class CharmChannel(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     track: str
     risk: str
     branch: str
@@ -56,15 +58,26 @@ class CharmChannel(BaseModel):
 
 
 class CharmEndpoint(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     type: str
     interface: str
 
 
 class CharmConstraints(BaseModel):
-    pass
+    model_config = ConfigDict(frozen=True)
+
+    # Things to include:
+    # * Endpoint is non-optional
+    # * Endpoint has limit
+    # * Mutual exclusion with other endpoints
+    # * Endpoint must be integrated with same application as other endpoint
+    # * 
 
 
 class Charm(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     name: str
     channel: CharmChannel
     revision: int

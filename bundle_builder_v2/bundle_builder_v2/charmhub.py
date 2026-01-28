@@ -22,6 +22,7 @@ from .charm import (
     ENDPOINT_REQUIRES,
     Charm,
     CharmEndpoint,
+    CharmChannel,
 )
 from .charmhub_http import (
     CharmhubBase,
@@ -197,17 +198,19 @@ class CharmhubClient:
                 f"Charm {charm_name} channel {charm_channel} does not support ubuntu version {ubuntu_version} for arch {ubuntu_arch}"
             )
 
+        # Get the channel
+        channel = CharmChannel(charm_channel)
+
         # Return Charm from refresh info
         return Charm(
             name=charm_name,
-            # TODO(raul): remove type: ignore in subsequent type checker-related PR
-            channel=charm_channel,  # type: ignore[arg-type]
+            channel=channel,
             revision=charm_revision,
             ubuntu_version=ubuntu_version,
             ubuntu_arch=ubuntu_arch,
             endpoints=self._all_charm_endpoints(refresh_info),
-            test_configs=self._charm_test_configs(charm_name),
             priority=self._get_charm_priority(charm_name),
+            constraints=self._get_charm_constraints(refresh_info, channel),
         )
 
     def _charm_from_store_by_revision(
@@ -254,16 +257,18 @@ class CharmhubClient:
                 f"Failed to find suitable channel for charm {charm_name} revision {charm_revision} with ubuntu version {ubuntu_version} and arch {ubuntu_arch}"
             )
 
+        # Get the channel
+        channel = CharmChannel(default_refresh_info.effective_channel)
+
         return Charm(
             name=charm_name,
-            # TODO(raul): remove type: ignore in subsequent type checker-related PR
-            channel=default_refresh_info.effective_channel,  # type: ignore[arg-type]
+            channel=channel,
             revision=charm_revision,
             ubuntu_version=ubuntu_version,
             ubuntu_arch=ubuntu_arch,
             endpoints=self._all_charm_endpoints(refresh_info),
-            test_configs=self._charm_test_configs(charm_name),
             priority=self._get_charm_priority(charm_name),
+            constraints=self._get_charm_constraints(refresh_info, channel),
         )
 
     def _charm_from_store_by_channel(
@@ -304,16 +309,18 @@ class CharmhubClient:
                 f"Refresh info for charm {charm_name} in channel {charm_channel} returned no revision"
             )
 
+        # Get the channel
+        channel = CharmChannel(charm_channel)
+
         return Charm(
             name=charm_name,
-            # TODO(raul): remove type: ignore in subsequent type checker-related PR
-            channel=charm_channel,  # type: ignore[arg-type]
+            channel=channel,
             revision=refresh_info.charm.revision,
             ubuntu_version=ubuntu_version,
             ubuntu_arch=ubuntu_arch,
             endpoints=self._all_charm_endpoints(refresh_info),
-            test_configs=self._charm_test_configs(charm_name),
             priority=self._get_charm_priority(charm_name),
+            constraints=self._get_charm_constraints(refresh_info, channel),
         )
 
     def _charm_from_store_default(
@@ -345,15 +352,18 @@ class CharmhubClient:
         if refresh_info.charm.revision is None:
             raise IncompleteCharmInfoException(f"Refresh info for charm {charm_name} returned no revision")
 
+        # Get the channel
+        channel = CharmChannel(refresh_info.effective_channel)
+
         return Charm(
             name=charm_name,
-            # TODO(raul): remove type: ignore in subsequent type checker-related PR
-            channel=refresh_info.effective_channel,  # type: ignore[arg-type]
+            channel=channel,
             revision=refresh_info.charm.revision,
             ubuntu_version=ubuntu_version,
             ubuntu_arch=ubuntu_arch,
             endpoints=self._all_charm_endpoints(refresh_info),
             priority=self._get_charm_priority(charm_name),
+            constraints=self._get_charm_constraints(refresh_info, channel),
         )
 
     def _get_ubuntu_version_from_bases(
@@ -514,3 +524,24 @@ class CharmhubClient:
 
     def _get_charm_priority(self, charm_name: str) -> float:
         return self.overrides_client.get_charm_priorities().get(charm_name, 1.0)
+    
+    def _get_charm_constraints(self, refresh_info: RefreshResponse) -> dict[str, str]:
+        if refresh_info.charm is None:
+            raise IncompleteCharmInfoException(
+                f"Refresh info for charm {refresh_info.name} returned no charm and no error"
+            )
+        metadata = refresh_info.charm.metadata
+
+        # Get constraints from overrides if present
+        constraints_override = self.overrides_client.get_charm_metadata_overrides(refresh_info.name)
+        if constraints_override is not None:
+            for variant in constraints_override:
+                if variant.track is not None and variant.track != refresh_info.effective_channel:
+                    continue
+                if variant.risk is not None and variant.risk not in refresh_info.effective_channel:
+                    continue
+                return variant.constraints
+        
+        # Create constraints use metadata
+        # TODO
+        pass

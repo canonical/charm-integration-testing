@@ -13,8 +13,10 @@ requires:
     optional: true
   nginx-route:
     optional: true
-  receive-ca-cert:
-    # TODO: this needs to be the same cert-transfer bridge as the oauth's ingress certs
-    # Currently the bundle builder sometimes makes the wrong choice.
-    # See: https://github.com/canonical/charm-integration-testing/issues/306
+  oauth:
     optional: false
+    capabilities: [tls]
+  receive-ca-cert:
+    optional_if:
+      - none_of:
+          - endpoint_feature: [oauth, tls]

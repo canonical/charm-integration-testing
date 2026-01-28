@@ -16,7 +16,9 @@ provides:
         limit: 0
     limit: 1
     optional: true
-    features: [tls]
+    modes:
+      - [""]
+      - [tls]
   db:
     limit_if:
       - criteria:
@@ -26,7 +28,7 @@ provides:
         limit: 0
     limit: 1
     optional: true
-    features: [tls]
+    modes: [[tls], [""]]
   db-admin:
     limit_if:
       - criteria:
@@ -36,7 +38,7 @@ provides:
         limit: 0
     limit: 1
     optional: true
-    features: [tls]
+    modes: [[tls], [""]]
 requires:
   certificates:
     optional_if:
@@ -44,10 +46,10 @@ requires:
           - any_of:
               - all_of:
                   - endpoint_integrated: database
-                  - endpoint_feature: database:tls
+                  - endpoint_feature: [database, tls]
               - all_of:
                   - endpoint_integrated: db
-                  - endpoint_feature: db:tls
+                  - endpoint_feature: [db, tls]
               - all_of:
                   - endpoint_integrated: db-admin
-                  - endpoint_feature: db-admin:tls
+                  - endpoint_feature: [db-admin, tls]

@@ -15,12 +15,14 @@
 
 
 import yaml
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from .charm import Charm
 
 
 class Application(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     charm: Charm
 
     def __repr__(self) -> str:
@@ -31,6 +33,8 @@ class Application(BaseModel):
 
 
 class ApplicationEndpoint(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     application: str
     endpoint: str
 
@@ -42,6 +46,8 @@ class ApplicationEndpoint(BaseModel):
 
 
 class Integration(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     requirer: ApplicationEndpoint
     provider: ApplicationEndpoint
 
@@ -54,6 +60,8 @@ class Integration(BaseModel):
 
 
 class Bundle(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     applications: dict[str, Application]
     integrations: set[Integration]
     platform: str

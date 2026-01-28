@@ -11,17 +11,21 @@ provides:
     optional: true
 requires:
   public-route:
-    features: [tls]
+    modes: [[tls], ['']]
     optional: false
   internal-route:
-    features: [tls]
+    modes: [[tls], ['']]
     optional: true
   public-ingress:
-    features: [tls]
+    modes: [[tls], ['']]
     optional: false
   internal-ingress:
-    features: [tls]
+    modes: [[tls], ['']]
     optional: true
   admin-ingress:
-    features: [tls]
+    modes: [[tls], ['']]
     optional: true
+bridges:
+  - interface: certificate_transfer
+    requires: public-route
+    provides: oauth

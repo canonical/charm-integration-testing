@@ -1,0 +1,23 @@
+---
+version: 1
+metadata_source: juju-jimm-k8s
+channel_rules:
+  - track: '*/*'
+    constraints:
+      required_endpoints: [database, oauth, openfga, receive-ca-cert]
+      optional_endpoints:
+        - ingress
+        - ingress-ssh
+        - nginx-route
+        - vault
+        - certificates
+        - logging
+      implications:
+        - if: oauth
+          with_provider_capability: tls
+          then_require: [receive-ca-cert]
+          same_application_as: oauth
+      provider_filters:
+        oauth:
+          requires_capability: [tls]
+      acyclic: true

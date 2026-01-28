@@ -20,9 +20,16 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, Field
 
+from .charm import CharmConstraints
 
-class CharmMetadataOverride(BaseModel):
-    pass
+
+class CharmMetadataVariant(BaseModel):
+    track: str | None = None
+    risk: str | None = None
+    constraints: CharmConstraints
+
+class CharmMetadataOverrides(BaseModel):
+    variants: list[CharmMetadataVariant] | None = None
 
 
 class CharmPlatformOverride(BaseModel):
@@ -33,7 +40,7 @@ class CharmListingOverrides(BaseModel):
     unlisted_charms: set[str] = Field(default_factory=set)
 
 
-class CharmPrioritiesMapping(BaseModel):
+class CharmPriorities(BaseModel):
     priorities: dict[str, float] = Field(default_factory=dict)  # charm name -> priority
 
 
@@ -72,8 +79,8 @@ class OverridesClient:
             return yaml.safe_load(file)
 
     @cache
-    def get_charm_metadata_overrides(self, charm: str) -> CharmMetadataOverride:
-        return CharmMetadataOverride(**self._read_yaml_file(self.charm_metadata_overrides, f"{charm}.yaml"))
+    def get_charm_metadata_overrides(self, charm: str) -> list[CharmMetadataVariant] | None:
+        return CharmMetadataOverrides(**self._read_yaml_file(self.charm_metadata_overrides, f"{charm}.yaml")).variants
 
     @cache
     def get_charm_platform_overrides(self, charm: str) -> set[str] | None:
@@ -85,4 +92,4 @@ class OverridesClient:
 
     @cache
     def get_charm_priorities(self) -> dict[str, float]:
-        return CharmPrioritiesMapping(**self._read_yaml_file(self.charm_priorities, None)).priorities
+        return CharmPriorities(**self._read_yaml_file(self.charm_priorities, None)).priorities
