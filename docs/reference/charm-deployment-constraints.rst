@@ -341,39 +341,31 @@ This constraint type is common when one service provides both a primary capabili
 
 **Example**: postgresql-k8s replication requires all database instances in the replication set to be from the same charm channel (e.g., all from ``latest/edge`` or all from ``latest/stable``).
 
-**Valid Configuration - All from latest/edge**:
+**Valid Configuration - Same Channel**:
 
 .. mermaid::
 
    graph LR
        pg1[postgresql-k8s-1<br/>channel: latest/edge]
        pg2[postgresql-k8s-2<br/>channel: latest/edge]
-       pg3[postgresql-k8s-3<br/>channel: latest/edge]
        
        pg1 <-->|replication| pg2
-       pg2 <-->|replication| pg3
-       pg1 <-->|replication| pg3
        
        style pg1 fill:#d4edda
        style pg2 fill:#d4edda
-       style pg3 fill:#d4edda
 
-**Invalid Configuration - Mixed Channels**:
+**Invalid Configuration - Different Channels**:
 
 .. mermaid::
 
    graph LR
        pg1[postgresql-k8s-1<br/>channel: latest/stable]
        pg2[postgresql-k8s-2<br/>channel: latest/edge]
-       pg3[postgresql-k8s-3<br/>channel: latest/stable]
        
        pg1 -.->|replication<br/>✗ channel mismatch| pg2
-       pg2 -.->|replication<br/>✗ channel mismatch| pg3
-       pg1 <-->|replication<br/>same channel| pg3
        
        style pg1 fill:#ffebee
        style pg2 fill:#ffebee
-       style pg3 fill:#ffebee
 
 **Behavior**:
 
@@ -389,53 +381,37 @@ This constraint type ensures that all instances in a cluster run compatible vers
 
 **Definition**: A capability required by a charm can be satisfied transitively through a chain of integrations, where intermediate charms bridge the capability from the original provider to the final consumer.
 
-**Example**: juju-jimm-k8s requires TLS certificates for its oauth integration. The certificates flow through this chain:
+**Example**: juju-jimm-k8s requires certificates from self-signed-certificates. The certificates flow through this integration chain:
 
-1. self-signed-certificates provides certificates
-2. traefik-k8s receives certificates and bridges them to its ingress providers
-3. hydra receives TLS capability through its ingress integration with traefik
-4. juju-jimm-k8s receives TLS capability through its oauth integration with hydra
+1. self-signed-certificates provides certificates to traefik-k8s
+2. traefik-k8s bridges certificates to hydra through ingress integration
+3. hydra bridges certificates to juju-jimm-k8s through oauth integration
 
 .. mermaid::
 
    graph LR
-       jimm[juju-jimm-k8s<br/>requires: oauth<br/>needs: tls capability]
-       hydra[hydra<br/>provides: oauth<br/>requires: public-ingress<br/>bridges: tls]
-       traefik[traefik-k8s<br/>provides: ingress<br/>requires: certificates<br/>bridges: tls]
-       ssc[self-signed-certificates<br/>provides: certificates<br/>source: tls]
+       jimm[juju-jimm-k8s<br/>requires: oauth<br/>requires: receive-ca-cert]
+       hydra[hydra<br/>provides: oauth<br/>requires: public-ingress]
+       traefik[traefik-k8s<br/>provides: ingress<br/>requires: certificates]
+       ssc[self-signed-certificates<br/>provides: certificates]
        
-       ssc -->|provides certificates| traefik
-       traefik -->|provides ingress + tls| hydra
-       hydra -->|provides oauth + tls| jimm
+       ssc -->|certificates| traefik
+       traefik -->|ingress| hydra
+       hydra -->|oauth| jimm
+       ssc -.->|receive-ca-cert<br/>REQUIRED| jimm
        
        style jimm fill:#e1f5ff
        style hydra fill:#fff4e1
        style traefik fill:#fff4e1
        style ssc fill:#d4edda
 
-**Invalid Configuration - Missing Certificate Source**:
-
-.. mermaid::
-
-   graph LR
-       jimm[juju-jimm-k8s<br/>requires: oauth<br/>needs: tls capability]
-       hydra[hydra<br/>provides: oauth<br/>requires: public-ingress<br/>no tls capability]
-       traefik[traefik-k8s<br/>provides: ingress<br/>NO certificates<br/>no tls capability]
-       
-       traefik -.->|provides ingress<br/>✗ no tls| hydra
-       hydra -.->|provides oauth<br/>✗ no tls| jimm
-       
-       style jimm fill:#ffebee
-       style hydra fill:#ffebee
-       style traefik fill:#ffebee
-
 **Behavior**:
 
-- juju-jimm-k8s requires its oauth provider (hydra) to have TLS capability
-- hydra can obtain TLS capability by integrating its ingress endpoint with a provider that has TLS
-- traefik-k8s obtains TLS capability by integrating with self-signed-certificates
-- traefik bridges the TLS capability to any charm it provides ingress to (like hydra)
-- hydra bridges the TLS capability to any charm it provides oauth to (like juju-jimm-k8s)
-- The capability flows through the integration chain without each charm needing direct access to the certificate provider
+- juju-jimm-k8s integrates with hydra for oauth
+- hydra integrates with traefik-k8s for ingress
+- traefik-k8s integrates with self-signed-certificates for certificates
+- The certificates flow through the chain: self-signed-certificates → traefik → hydra → juju-jimm
+- **Additionally, juju-jimm-k8s must have a direct integration with self-signed-certificates** (receive-ca-cert endpoint)
+- This integration is required even though certificates already flow through the chain
 
-This constraint type allows capabilities to propagate through integration chains, enabling charms to satisfy requirements without direct integrations to every capability provider.
+This constraint type shows that capabilities can propagate through integration chains, but certain charms may still require direct integrations to capability providers for their own operational needs.
