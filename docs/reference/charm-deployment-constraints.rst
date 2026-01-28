@@ -237,8 +237,8 @@ Both providers offer the same ``temporal`` interface, but temporal-k8s needs to 
 **Behavior**: 
 
 - Both temporal-admin-k8s and temporal-ui-k8s provide the same ``temporal`` interface
-- Temporal-k8s's ``admin`` endpoint must integrate specifically with temporal-admin-k8s
-- Temporal-k8s's ``ui`` endpoint must integrate specifically with temporal-ui-k8s
+- The ``admin`` endpoint of temporal-k8s must integrate specifically with temporal-admin-k8s
+- The ``ui`` endpoint of temporal-k8s must integrate specifically with temporal-ui-k8s
 - Interface matching alone is insufficient - the charm must be able to specify which provider is acceptable
 
 This constraint type allows a charm to distinguish between different providers of the same interface based on the specific capabilities or functionality each provider offers.
@@ -262,28 +262,28 @@ This constraint type allows a charm to distinguish between different providers o
        style pgb1 fill:#ffebee
        style pgb2 fill:#ffebee
 
-**Valid Example**: grafana-agent-k8s with bidirectional relationships to the same charm
+**Valid Example**: grafana-agent-k8s with bidirectional relationships to postgresql-k8s
 
 .. mermaid::
 
    graph LR
        ga[grafana-agent-k8s<br/>requires: grafana-dashboards<br/>provides: logging]
-       grafana[grafana-k8s<br/>provides: grafana-dashboards<br/>requires: logging]
+       pg[postgresql-k8s<br/>provides: grafana-dashboards<br/>requires: logging]
        
-       ga -->|requires grafana-dashboards| grafana
-       grafana -->|requires logging| ga
+       ga -->|requires grafana-dashboards| pg
+       pg -->|requires logging| ga
        
        style ga fill:#d4edda
-       style grafana fill:#d4edda
+       style pg fill:#d4edda
 
 **Behavior**:
 
 - **pgbouncer-k8s cycle is invalid**: If pgbouncer-1 provides database to pgbouncer-2, and pgbouncer-2 provides database to pgbouncer-1, the integration graph contains a cycle
-- **grafana-agent-k8s bidirectional is valid**: grafana-agent requires grafana-dashboards FROM grafana-k8s, and grafana-k8s requires logging FROM grafana-agent. This creates two separate directed edges but no cycle:
+- **grafana-agent-k8s bidirectional is valid**: grafana-agent requires grafana-dashboards FROM postgresql-k8s, and postgresql-k8s requires logging FROM grafana-agent. This creates two separate directed edges but no cycle:
 
-  - Edge 1: grafana-agent → grafana (for dashboards)
-  - Edge 2: grafana → grafana-agent (for logging)
-  - Following edges: grafana-agent → grafana → grafana-agent would require following both "requires dashboards" and "requires logging" from the same application, which doesn't happen
+  - Edge 1: grafana-agent → postgresql (for dashboards)
+  - Edge 2: postgresql → grafana-agent (for logging)
+  - Following edges: grafana-agent → postgresql → grafana-agent would require following both "requires dashboards" and "requires logging" from the same application, which doesn't happen
 
 7. Same Application Constraints
 --------------------------------
@@ -327,7 +327,7 @@ When mongodb-k8s integrates its ``ldap`` endpoint with a provider (like glauth-k
 
 **Behavior**:
 
-- mongodb-k8s's ``ldap`` and ``ldap-certificate-transfer`` endpoints must integrate with the same application instance
+- The ``ldap`` and ``ldap-certificate-transfer`` endpoints of mongodb-k8s must integrate with the same application instance
 - If mongodb integrates ``ldap`` with glauth-k8s-1, then ``ldap-certificate-transfer`` must also integrate with glauth-k8s-1 (not glauth-k8s-2 or any other provider)
 - This ensures that the certificates received match the LDAP service being used
 - The constraint is mutual: if either endpoint is integrated, the other must be integrated with the same provider
@@ -412,6 +412,6 @@ This constraint type ensures that all instances in a cluster run compatible vers
 - traefik-k8s integrates with self-signed-certificates for certificates
 - The certificates flow through the chain: self-signed-certificates → traefik → hydra → juju-jimm
 - **Additionally, juju-jimm-k8s must have a direct integration with self-signed-certificates** (receive-ca-cert endpoint)
-- This integration is required even though certificates already flow through the chain
+- This direct integration is required so juju-jimm can receive the CA certificate to verify the certificate chain it receives through the oauth integration
 
-This constraint type shows that capabilities can propagate through integration chains, but certain charms may still require direct integrations to capability providers for their own operational needs.
+This constraint type shows that capabilities can propagate through integration chains, but charms may still need direct access to the root capability provider to verify or validate the transitive capabilities they receive.

@@ -85,7 +85,8 @@ pytest
 deduplicate
 serialization
 UUIDs
-IPvnginx
+IPv
+nginx
 Traefik
 traefik
 ui
@@ -94,3 +95,8 @@ pgbouncer
 grafana
 jimm
 oauth
+LDAP
+mongodb
+glauth
+postgresql
+
