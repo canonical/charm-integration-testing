@@ -334,20 +334,26 @@ When mongodb-k8s integrates its ``ldap`` endpoint with a provider (like glauth-k
 
 This constraint type is common when one service provides both a primary capability and supporting resources (like certificates) that must come from the same source.
 
-8. Same Channel Constraints
-----------------------------
+8. Version Compatibility Constraints
+-------------------------------------
 
-**Definition**: When multiple instances of a charm integrate with each other (forming a cluster or replication set), they must all be deployed from the same charm channel.
+**Definition**: When multiple instances of a charm integrate with each other (forming a cluster or replication set), they must all be deployed from compatible charm versions.
 
-**Example**: postgresql-k8s replication requires all database instances in the replication set to be from the same charm channel (e.g., all from ``latest/edge`` or all from ``latest/stable``).
+**Version Components**:
+
+- **Track**: Major version line (e.g., ``14``, ``1.0``)
+- **Risk**: Stability level (``stable``, ``candidate``, ``beta``, ``edge``)
+- **Revision**: Specific build number
+
+**Example**: postgresql-k8s replication requires all database instances in the replication set to be from the same channel (track + risk combination).
 
 **Valid Configuration - Same Channel**:
 
 .. mermaid::
 
    graph LR
-       pg1[postgresql-k8s-1<br/>channel: latest/edge]
-       pg2[postgresql-k8s-2<br/>channel: latest/edge]
+       pg1[postgresql-k8s-1<br/>14/stable]
+       pg2[postgresql-k8s-2<br/>14/stable]
        
        pg1 <-->|replication| pg2
        
@@ -359,24 +365,76 @@ This constraint type is common when one service provides both a primary capabili
 .. mermaid::
 
    graph LR
-       pg1[postgresql-k8s-1<br/>channel: latest/stable]
-       pg2[postgresql-k8s-2<br/>channel: latest/edge]
+       pg1[postgresql-k8s-1<br/>14/stable]
+       pg2[postgresql-k8s-2<br/>14/edge]
        
-       pg1 -.->|replication<br/>✗ channel mismatch| pg2
+       pg1 -.->|replication<br/>✗ risk mismatch| pg2
        
        style pg1 fill:#ffebee
        style pg2 fill:#ffebee
 
 **Behavior**:
 
-- All postgresql instances participating in replication must be deployed from the same charm channel
-- Mixing channels (e.g., latest/stable with latest/edge) in a replication cluster is invalid
-- This ensures version compatibility across the replication set
-- Different channels may contain different charm versions with incompatible replication protocols or features
+- All postgresql instances participating in replication must be deployed from compatible versions
+- Mixing different risks (e.g., stable with edge) in a replication cluster can cause incompatibilities
+- Different tracks (e.g., 12/stable vs 14/stable) are typically incompatible for replication
+- Version constraints ensure protocol compatibility and prevent split-brain scenarios
+- The specific constraint level (track, risk, or revision) depends on the charm's compatibility guarantees
 
 This constraint type ensures that all instances in a cluster run compatible versions, preventing issues from version mismatches during replication or clustering operations.
 
-9. Transitive Capabilities
+9. Minimum Observability Constraints
+-------------------------------------
+
+**Definition**: A charm must provide at least N endpoints from a set of M possible observability or monitoring endpoints.
+
+**Example**: grafana-agent-k8s requires at least one of: ``metrics-endpoint``, ``logging-provider``, ``tracing-provider``, or ``grafana-dashboards-consumer`` to be integrated.
+
+.. mermaid::
+
+   graph LR
+       ga[grafana-agent-k8s<br/>At least 1 of:<br/>- metrics<br/>- logging<br/>- tracing<br/>- dashboards]
+       prom[prometheus<br/>provides: metrics]
+       
+       ga -->|metrics ✓| prom
+       
+       style ga fill:#d4edda
+       style prom fill:#fff4e1
+
+**Invalid Configuration - None Integrated**:
+
+.. mermaid::
+
+   graph LR
+       ga[grafana-agent-k8s<br/>At least 1 of:<br/>- metrics<br/>- logging<br/>- tracing<br/>- dashboards]
+       
+       style ga fill:#ffebee
+
+**Behavior**:
+
+- grafana-agent-k8s must have at least one observability integration to be useful
+- All four endpoints are individually optional
+- But at least one must be satisfied for a valid bundle
+- This ensures the agent has data to collect and forward
+
+This constraint type is useful for charms that aggregate or relay data from multiple optional sources, where having zero sources makes the charm non-functional.
+
+10. Minimum Cardinality Constraints
+------------------------------------
+
+**Definition**: An endpoint requires a minimum number of integrations to function properly.
+
+**Example**: A load balancer might require at least 2 backend integrations to provide high availability.
+
+**Behavior**:
+
+- An endpoint must have at least N integrations (where N > 0)
+- Different from "required" which only ensures N ≥ 1
+- Useful for clustering, redundancy, or quorum requirements
+
+**Note**: This constraint type has not been observed in current charm deployments but may be needed for future high-availability patterns.
+
+11. Transitive Capabilities
 ---------------------------
 
 **Definition**: A capability required by a charm can be satisfied transitively through a chain of integrations, where intermediate charms bridge the capability from the original provider to the final consumer.
