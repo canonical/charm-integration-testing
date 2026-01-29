@@ -71,11 +71,13 @@ class ParsedConstraint(BaseModel):
     # Constraint-specific fields (populated based on constraint_type)
     conflicting_endpoints: list[str] | None = None
     required_endpoint: str | None = None
+    min: int | None = None  # Minimum cardinality for required constraint
     acceptable_endpoints: list[str] | None = None
     endpoint: str | None = None
     max: int | None = None
     current: int | None = None
     validation_issues: list[str] | None = None
+    required_charms: list[str] | None = None  # For capability constraint
 
 
 class ValidateEvent:
@@ -84,18 +86,21 @@ class ValidateEvent:
 
     Attributes:
         relations: Dict mapping endpoint names to lists of related application names
+        charm_names: Dict mapping application names to charm names
         rejected: Whether the event was rejected by a scriptlet
         rejection: The Rejection object if rejected, None otherwise
     """
 
-    def __init__(self, relations: dict[str, list[str]]) -> None:
+    def __init__(self, relations: dict[str, list[str]], charm_names: dict[str, str] | None = None) -> None:
         """
         Initialize the validation event.
 
         Args:
             relations: Dict mapping endpoint names to lists of related application names
+            charm_names: Optional dict mapping application names to charm names
         """
         self.relations = relations
+        self.charm_names = charm_names or {}
         self._rejected = False
         self._rejection: Rejection | None = None
 
@@ -207,13 +212,17 @@ class ScriptletInvoker:
             self.logger.error(f"Failed to initialize scriptlet: {e}")
             raise RuntimeError(f"Scriptlet initialization failed: {e}") from e
 
-    def fire_validate_event(self, relations: dict[str, list[str]]) -> Rejection | None:
+    def fire_validate_event(
+        self, relations: dict[str, list[str]], charm_names: dict[str, str] | None = None
+    ) -> Rejection | None:
         """
         Fire a validate event with the given bundle topology state.
 
         Args:
             relations: Dict mapping endpoint names to lists of related application names
                       Example: {'db': ['mysql-k8s', 'postgresql-k8s'], 'cache': ['redis-k8s']}
+            charm_names: Optional dict mapping application names to charm names
+                        Example: {'mysql-k8s': 'mysql-k8s', 'wordpress': 'wordpress-k8s'}
 
         Returns:
             Rejection object if scriptlet rejected, None otherwise
@@ -226,7 +235,7 @@ class ScriptletInvoker:
         self.logger.debug(f"Firing validate event with relations: {relations}")
 
         # Create validate event with complete bundle state
-        event = ValidateEvent(relations)
+        event = ValidateEvent(relations, charm_names)
 
         # Fire the validate event through the registry
         self._juju_registry.fire_event("validate", event)
@@ -287,7 +296,28 @@ def parse_error_code_rejection(rejection: Rejection) -> ParsedConstraint | None:
                 raise ValueError(f"mutual_exclusion expects list, got {type(details).__name__}")
 
         elif error_code == "required":
-            constraint_data["required_endpoint"] = details if isinstance(details, str) else details[0]
+            if isinstance(details, str):
+                if ":" in details:
+                    # Format: "endpoint:min"
+                    endpoint, min_val = details.split(":", 1)
+                    constraint_data["required_endpoint"] = endpoint
+                    constraint_data["min"] = int(min_val)
+                else:
+                    # Format: "endpoint" (defaults to min=1)
+                    constraint_data["required_endpoint"] = details
+                    constraint_data["min"] = 1
+            elif isinstance(details, list) and details:
+                # Format: ["endpoint", "min:N"]
+                constraint_data["required_endpoint"] = details[0]
+                constraint_data["min"] = 1  # Default
+                for item in details[1:]:
+                    if isinstance(item, str) and ":" in item:
+                        key, value = item.split(":", 1)
+                        if key == "min":
+                            constraint_data["min"] = int(value)
+            else:
+                constraint_data["required_endpoint"] = details if isinstance(details, str) else details[0]
+                constraint_data["min"] = 1
 
         elif error_code == "limit":
             if isinstance(details, str) and ":" in details:
@@ -317,6 +347,14 @@ def parse_error_code_rejection(rejection: Rejection) -> ParsedConstraint | None:
                 constraint_data["validation_issues"] = details
             else:
                 raise ValueError(f"data_validation expects list, got {type(details).__name__}")
+
+        elif error_code == "capability":
+            if isinstance(details, list) and len(details) >= 2:
+                # Format: ['endpoint', 'charm1', 'charm2', ...]
+                constraint_data["endpoint"] = details[0]
+                constraint_data["required_charms"] = details[1:]
+            else:
+                raise ValueError(f"capability expects ['endpoint', 'charm1', ...], got {details}")
 
         return ParsedConstraint(**constraint_data)
 

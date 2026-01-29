@@ -291,11 +291,15 @@ class BundleBuilder:
             try:
                 # Build relations dict for this app from bundle integrations
                 relations = self._build_relations_for_app(app_name, bundle)
+                
+                # Build charm names dict for capability checking
+                charm_names = {app_name: app.charm.name for app_name, app in bundle.applications.items()}
+                
                 self.logger.debug(f"    Relations: {relations}")
                 
                 # Create invoker and fire validate event
                 invoker = ScriptletInvoker(charm.scriptlet, logger=self.logger)
-                rejection = invoker.fire_validate_event(relations)
+                rejection = invoker.fire_validate_event(relations, charm_names)
                 
                 if not rejection:
                     self.logger.info(f"    {app_name}: ACCEPTED")
@@ -353,8 +357,10 @@ class BundleBuilder:
         constraint_type = constraint.constraint_type
 
         if constraint_type == "required":
-            # Required endpoint must have at least one integration
+            # Required endpoint must have at least N integrations (default N=1)
             required_endpoint = constraint.required_endpoint
+            min_count = constraint.min or 1  # Default to 1 if not specified
+            
             if not required_endpoint:
                 self.logger.warning(f"Required constraint missing endpoint for {app_name}")
                 return
@@ -365,8 +371,10 @@ class BundleBuilder:
                 count_var = problem_space.endpoint_integration_counts[app_endpoint]
                 # Create a named constraint for unsat core tracking
                 constraint_name = f"required_{app_name}_{required_endpoint}"
-                constraint = count_var >= 1
-                solver.assert_and_track(constraint, constraint_name)
+                z3_constraint = count_var >= min_count
+                solver.assert_and_track(z3_constraint, constraint_name)
+                
+                self.logger.debug(f"Added required constraint: {app_name}:{required_endpoint} >= {min_count}")
                 
                 # Store constraint metadata
                 problem_space.constraint_names[constraint_name] = (
@@ -429,6 +437,18 @@ class BundleBuilder:
 
             if count_vars:
                 solver.add(z3.Or(*count_vars))
+
+        elif constraint_type == "capability":
+            # Capability requirement - endpoint must integrate with specific charms
+            # This is enforced by scriptlet validation, but we log it for visibility
+            endpoint = constraint.endpoint
+            required_charms = constraint.required_charms or []
+            self.logger.info(
+                f"Capability constraint for {app_name}:{endpoint} requires charms: {required_charms}"
+            )
+            # Note: The actual enforcement happens during scriptlet validation
+            # We could add Z3 constraints to filter integration variables, but that would require
+            # knowing capabilities ahead of time. Current approach: validate after Z3 proposes solution.
 
         else:
             self.logger.debug(f"Skipping unsupported constraint type: {constraint_type}")
