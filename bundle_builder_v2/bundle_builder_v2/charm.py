@@ -64,17 +64,6 @@ class CharmEndpoint(BaseModel):
     interface: str
 
 
-class CharmConstraints(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    # Things to include:
-    # * Endpoint is non-optional
-    # * Endpoint has limit
-    # * Mutual exclusion with other endpoints
-    # * Endpoint must be integrated with same application as other endpoint
-    # * 
-
-
 class Charm(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -85,7 +74,7 @@ class Charm(BaseModel):
     ubuntu_arch: str
     endpoints: dict[str, CharmEndpoint]
     priority: int = Field(default=1)
-    constraints: CharmConstraints = Field(default_factory=CharmConstraints)
+    scriptlet: str | None = Field(default=None)
 
     def __repr__(self) -> str:
         return self.name

@@ -21,8 +21,8 @@ from .charm import (
     ENDPOINT_PROVIDES,
     ENDPOINT_REQUIRES,
     Charm,
-    CharmEndpoint,
     CharmChannel,
+    CharmEndpoint,
 )
 from .charmhub_http import (
     CharmhubBase,
@@ -94,11 +94,11 @@ class CharmhubClient:
     def find_charms(
         self, provides: str | None = None, requires: str | None = None, platform: str | None = None
     ) -> set[str]:
-        # Call find API
-        response = set(self.http_client.find(provides=provides, requires=requires))
+        # Call find API (returns list of FindResponse)
+        response = list(self.http_client.find(provides=provides, requires=requires))
 
         # Add charms from listing overrides
-        response |= self._find_charms_get_listing_overrides(provides=provides, requires=requires)
+        response.extend(self._find_charms_get_listing_overrides(provides=provides, requires=requires))
 
         # Add platform overrides
         response = self._find_charms_add_platform_overrides(response)
@@ -108,16 +108,16 @@ class CharmhubClient:
 
         # Filter response by platform
         if platform is not None:
-            response = {charm for charm in response if platform in charm.result.deployable_on}
+            response = [charm for charm in response if platform in charm.result.deployable_on]
 
-        # Return charms
+        # Return charm names as a set
         return {charm.name for charm in response}
 
     def _find_charms_get_listing_overrides(
         self, provides: str | None = None, requires: str | None = None
-    ) -> set[FindResponse]:
+    ) -> list[FindResponse]:
         # Get charm info for each listing overridden charm
-        charms: set[FindResponse] = set()
+        charms: list[FindResponse] = []
         for charm in self.overrides_client.get_charm_listing_overrides():
             # Get charm info
             charm_info = self.http_client.info(charm)
@@ -133,7 +133,7 @@ class CharmhubClient:
                 continue
 
             # Add find response
-            charms.add(
+            charms.append(
                 FindResponse(
                     name=charm,
                     result=FindResponse.Result(deployable_on=charm_info.result.deployable_on),
@@ -142,35 +142,55 @@ class CharmhubClient:
 
         return charms
 
-    def _find_charms_add_platform_overrides(self, response: set[FindResponse]) -> set[FindResponse]:
-        updated_response = set()
+    def _find_charms_add_platform_overrides(self, response: list[FindResponse]) -> list[FindResponse]:
+        updated_response = []
         for charm in response:
             platform_overrides = self.overrides_client.get_charm_platform_overrides(charm.name)
             if platform_overrides is not None:
-                updated_response.add(
+                updated_response.append(
                     FindResponse(
                         name=charm.name,
                         result=FindResponse.Result(deployable_on=platform_overrides),
                     )
                 )
             else:
-                updated_response.add(charm)
+                updated_response.append(charm)
         return updated_response
 
-    def _find_charms_initialize_deployable_on(self, response: set[FindResponse]) -> set[FindResponse]:
+    def _find_charms_initialize_deployable_on(self, response: list[FindResponse]) -> list[FindResponse]:
         # Initialize deployable_on to "machine" if empty
-        updated_response = set()
+        updated_response = []
         for charm in response:
             if len(charm.result.deployable_on) == 0:
-                updated_response.add(
+                updated_response.append(
                     FindResponse(
                         name=charm.name,
                         result=FindResponse.Result(deployable_on={"machine"}),
                     )
                 )
             else:
-                updated_response.add(charm)
+                updated_response.append(charm)
         return updated_response
+
+    def _build_charm(
+        self,
+        charm_name: str,
+        channel: str,
+        revision: int,
+        ubuntu_version: str,
+        ubuntu_arch: str,
+        refresh_info: RefreshResponse,
+    ) -> Charm:
+        return Charm(
+            name=charm_name,
+            channel=channel,
+            revision=revision,
+            ubuntu_version=ubuntu_version,
+            ubuntu_arch=ubuntu_arch,
+            endpoints=self._all_charm_endpoints(refresh_info),
+            priority=self._get_charm_priority(charm_name),
+            scriptlet=self.overrides_client.get_charm_scriptlet(charm_name),
+        )
 
     def _charm_from_store_by_channel_and_revision(
         self,
@@ -198,19 +218,14 @@ class CharmhubClient:
                 f"Charm {charm_name} channel {charm_channel} does not support ubuntu version {ubuntu_version} for arch {ubuntu_arch}"
             )
 
-        # Get the channel
-        channel = CharmChannel(charm_channel)
-
         # Return Charm from refresh info
-        return Charm(
-            name=charm_name,
-            channel=channel,
+        return self._build_charm(
+            charm_name=charm_name,
+            channel=charm_channel,
             revision=charm_revision,
             ubuntu_version=ubuntu_version,
             ubuntu_arch=ubuntu_arch,
-            endpoints=self._all_charm_endpoints(refresh_info),
-            priority=self._get_charm_priority(charm_name),
-            constraints=self._get_charm_constraints(refresh_info, channel),
+            refresh_info=refresh_info,
         )
 
     def _charm_from_store_by_revision(
@@ -257,18 +272,13 @@ class CharmhubClient:
                 f"Failed to find suitable channel for charm {charm_name} revision {charm_revision} with ubuntu version {ubuntu_version} and arch {ubuntu_arch}"
             )
 
-        # Get the channel
-        channel = CharmChannel(default_refresh_info.effective_channel)
-
-        return Charm(
-            name=charm_name,
-            channel=channel,
+        return self._build_charm(
+            charm_name=charm_name,
+            channel=default_refresh_info.effective_channel,
             revision=charm_revision,
             ubuntu_version=ubuntu_version,
             ubuntu_arch=ubuntu_arch,
-            endpoints=self._all_charm_endpoints(refresh_info),
-            priority=self._get_charm_priority(charm_name),
-            constraints=self._get_charm_constraints(refresh_info, channel),
+            refresh_info=refresh_info,
         )
 
     def _charm_from_store_by_channel(
@@ -309,18 +319,13 @@ class CharmhubClient:
                 f"Refresh info for charm {charm_name} in channel {charm_channel} returned no revision"
             )
 
-        # Get the channel
-        channel = CharmChannel(charm_channel)
-
-        return Charm(
-            name=charm_name,
-            channel=channel,
+        return self._build_charm(
+            charm_name=charm_name,
+            channel=charm_channel,
             revision=refresh_info.charm.revision,
             ubuntu_version=ubuntu_version,
             ubuntu_arch=ubuntu_arch,
-            endpoints=self._all_charm_endpoints(refresh_info),
-            priority=self._get_charm_priority(charm_name),
-            constraints=self._get_charm_constraints(refresh_info, channel),
+            refresh_info=refresh_info,
         )
 
     def _charm_from_store_default(
@@ -352,18 +357,13 @@ class CharmhubClient:
         if refresh_info.charm.revision is None:
             raise IncompleteCharmInfoException(f"Refresh info for charm {charm_name} returned no revision")
 
-        # Get the channel
-        channel = CharmChannel(refresh_info.effective_channel)
-
-        return Charm(
-            name=charm_name,
-            channel=channel,
+        return self._build_charm(
+            charm_name=charm_name,
+            channel=refresh_info.effective_channel,
             revision=refresh_info.charm.revision,
             ubuntu_version=ubuntu_version,
             ubuntu_arch=ubuntu_arch,
-            endpoints=self._all_charm_endpoints(refresh_info),
-            priority=self._get_charm_priority(charm_name),
-            constraints=self._get_charm_constraints(refresh_info, channel),
+            refresh_info=refresh_info,
         )
 
     def _get_ubuntu_version_from_bases(
@@ -524,24 +524,3 @@ class CharmhubClient:
 
     def _get_charm_priority(self, charm_name: str) -> float:
         return self.overrides_client.get_charm_priorities().get(charm_name, 1.0)
-    
-    def _get_charm_constraints(self, refresh_info: RefreshResponse) -> dict[str, str]:
-        if refresh_info.charm is None:
-            raise IncompleteCharmInfoException(
-                f"Refresh info for charm {refresh_info.name} returned no charm and no error"
-            )
-        metadata = refresh_info.charm.metadata
-
-        # Get constraints from overrides if present
-        constraints_override = self.overrides_client.get_charm_metadata_overrides(refresh_info.name)
-        if constraints_override is not None:
-            for variant in constraints_override:
-                if variant.track is not None and variant.track != refresh_info.effective_channel:
-                    continue
-                if variant.risk is not None and variant.risk not in refresh_info.effective_channel:
-                    continue
-                return variant.constraints
-        
-        # Create constraints use metadata
-        # TODO
-        pass

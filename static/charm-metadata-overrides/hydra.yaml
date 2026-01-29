@@ -11,19 +11,29 @@ provides:
     optional: true
 requires:
   public-route:
-    modes: [[tls], ['']]
+    modes:
+      - [tls]
+      - ['']
     optional: false
   internal-route:
-    modes: [[tls], ['']]
+    modes:
+      - [tls]
+      - ['']
     optional: true
   public-ingress:
-    modes: [[tls], ['']]
+    modes:
+      - [tls]
+      - ['']
     optional: false
   internal-ingress:
-    modes: [[tls], ['']]
+    modes:
+      - [tls]
+      - ['']
     optional: true
   admin-ingress:
-    modes: [[tls], ['']]
+    modes:
+      - [tls]
+      - ['']
     optional: true
 bridges:
   - interface: certificate_transfer

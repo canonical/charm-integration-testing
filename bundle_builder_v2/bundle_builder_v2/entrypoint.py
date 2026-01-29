@@ -75,7 +75,10 @@ def add_args_to_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--output-file", type=str, help="Where to save the generated bundle.")
     parser.add_argument("--output-mermaid", type=str, help="Where to save the generated mermaid diagram.")
     parser.add_argument(
-        "--charm-metadata-overrides", type=Path, help="Path to folder containing charm metadata overrides", default=None
+        "--charm-scriptlet-overrides",
+        type=Path,
+        help="Path to folder containing charm scriptlet overrides (.star files)",
+        default=None,
     )
     parser.add_argument(
         "--charm-platform-overrides", type=Path, help="Path to folder containing charm platform overrides", default=None
@@ -83,9 +86,7 @@ def add_args_to_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--charm-listing-overrides", type=Path, help="Path to file containing charm listing overrides", default=None
     )
-    parser.add_argument(
-        "--charm-priorities", type=Path, help="Path to file containing charm priorities", default=None
-    )
+    parser.add_argument("--charm-priorities", type=Path, help="Path to file containing charm priorities", default=None)
     parser.add_argument(
         "--log-level", type=str.upper, choices=["INFO", "DEBUG", "WARNING", "ERROR", "CRITICAL"], default="INFO"
     )
@@ -135,7 +136,7 @@ def applications_from_args(
             parser.error(f"Charm release not found for '{spec}': {e}")
 
         # Add application
-        applications[name] = Application(name=name, charm=charm)
+        applications[name] = Application(charm=charm)
     return applications
 
 
@@ -215,8 +216,8 @@ def main() -> None:
     logger = setup_logging(args.log_level)
 
     # Create override client
-    if args.charm_metadata_overrides is not None and not args.charm_metadata_overrides.is_dir():
-        parser.error(f"The charm metadata overrides path '{args.charm_metadata_overrides}' is not a valid directory.")
+    if args.charm_scriptlet_overrides is not None and not args.charm_scriptlet_overrides.is_dir():
+        parser.error(f"The charm scriptlet overrides path '{args.charm_scriptlet_overrides}' is not a valid directory.")
     if args.charm_platform_overrides is not None and not args.charm_platform_overrides.is_dir():
         parser.error(f"The charm platform overrides path '{args.charm_platform_overrides}' is not a valid directory.")
     if args.charm_listing_overrides is not None and not args.charm_listing_overrides.is_file():
@@ -224,7 +225,7 @@ def main() -> None:
     if args.charm_priorities is not None and not args.charm_priorities.is_file():
         parser.error(f"The charm priorities file '{args.charm_priorities}' is not a valid file.")
     overrides_client = OverridesClient(
-        charm_metadata_overrides=args.charm_metadata_overrides,
+        charm_scriptlet_overrides=args.charm_scriptlet_overrides,
         charm_platform_overrides=args.charm_platform_overrides,
         charm_listing_overrides=args.charm_listing_overrides,
         charm_priorities=args.charm_priorities,

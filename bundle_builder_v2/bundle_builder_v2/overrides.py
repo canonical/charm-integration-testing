@@ -13,23 +13,13 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import logging
 from functools import cache
 from pathlib import Path
 from typing import Any
 
 import yaml
 from pydantic import BaseModel, Field
-
-from .charm import CharmConstraints
-
-
-class CharmMetadataVariant(BaseModel):
-    track: str | None = None
-    risk: str | None = None
-    constraints: CharmConstraints
-
-class CharmMetadataOverrides(BaseModel):
-    variants: list[CharmMetadataVariant] | None = None
 
 
 class CharmPlatformOverride(BaseModel):
@@ -45,19 +35,22 @@ class CharmPriorities(BaseModel):
 
 
 class OverridesClient:
-    charm_metadata_overrides: Path | None = None
+    logger: logging.Logger
+    charm_scriptlet_overrides: Path | None = None
     charm_platform_overrides: Path | None = None
     charm_listing_overrides: Path | None = None
     charm_priorities: Path | None = None
 
     def __init__(
         self,
-        charm_metadata_overrides: Path | None = None,
+        logger: logging.Logger = logging.getLogger(__name__),
+        charm_scriptlet_overrides: Path | None = None,
         charm_platform_overrides: Path | None = None,
         charm_listing_overrides: Path | None = None,
         charm_priorities: Path | None = None,
     ):
-        self.charm_metadata_overrides = charm_metadata_overrides
+        self.logger = logger
+        self.charm_scriptlet_overrides = charm_scriptlet_overrides
         self.charm_platform_overrides = charm_platform_overrides
         self.charm_listing_overrides = charm_listing_overrides
         self.charm_priorities = charm_priorities
@@ -79,8 +72,22 @@ class OverridesClient:
             return yaml.safe_load(file)
 
     @cache
-    def get_charm_metadata_overrides(self, charm: str) -> list[CharmMetadataVariant] | None:
-        return CharmMetadataOverrides(**self._read_yaml_file(self.charm_metadata_overrides, f"{charm}.yaml")).variants
+    def get_charm_scriptlet(self, charm: str) -> str | None:
+        # Return None if no scriptlet overrides path given
+        if self.charm_scriptlet_overrides is None:
+            return None
+
+        # Load scriptlet file
+        scriptlet_file = self.charm_scriptlet_overrides / f"{charm}.star"
+        if not scriptlet_file.exists():
+            return None
+
+        # Read scriptlet content
+        try:
+            return scriptlet_file.read_text(encoding="utf-8")
+        except Exception as e:
+            self.logger.error(f"Failed to read scriptlet for charm '{charm}': {e}")
+            return None
 
     @cache
     def get_charm_platform_overrides(self, charm: str) -> set[str] | None:

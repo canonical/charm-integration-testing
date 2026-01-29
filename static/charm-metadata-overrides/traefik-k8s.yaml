@@ -31,15 +31,21 @@ requires:
 provides:
   ingress:
     optional: true
-    modes: [[tls], [""]]
+    modes:
+      - [tls]
+      - ['']
   ingress-per-unit:
     optional: true
-    modes: [[tls], [""]]
+    modes:
+      - [tls]
+      - ['']
   metrics-endpoint:
     optional: true
   traefik-route:
     optional: true
-    modes: [[tls], [""]]
+    modes:
+      - [tls]
+      - ['']
   grafana-dashboard:
     optional: true
 bridges:

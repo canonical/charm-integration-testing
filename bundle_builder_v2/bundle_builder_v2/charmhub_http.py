@@ -71,7 +71,7 @@ class CharmMetadata(BaseModel):
 
     class Endpoint(BaseModel):
         model_config = ConfigDict(frozen=True)
-        
+
         interface: str
         optional: bool | None = None
         limit: int | None = None
@@ -138,7 +138,7 @@ class InfoResponse(BaseModel):
 
         class Revision(BaseModel):
             model_config = ConfigDict(frozen=True)
-            
+
             metadata: CharmMetadata = Field(default_factory=CharmMetadata, alias="metadata-yaml")
 
             @field_validator("metadata", mode="before")

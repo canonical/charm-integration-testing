@@ -4,7 +4,7 @@
 
 cd "$(dirname "$0")/.."
 poetry run bundle-builder-v2 \
-    --charm-metadata-overrides ./static/charm-metadata-overrides/ \
+    --charm-scriptlet-overrides ./static/charm-scriptlet-overrides/ \
     --charm-platform-overrides ./static/charm-platform-overrides/ \
     --charm-listing-overrides ./static/charm-listing-overrides.yaml \
     --charm-priorities ./static/charm-priorities.yaml \
