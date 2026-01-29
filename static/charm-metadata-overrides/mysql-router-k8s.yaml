@@ -1,7 +1,27 @@
 ---
 # Remove after: https://github.com/canonical/mysql-router-k8s-operator/pull/448
 provides:
+  database:
+    interface: mysql_client
   metrics-endpoint:
+    interface: prometheus_scrape
     optional: true
   grafana-dashboard:
+    interface: grafana_dashboard
     optional: true
+requires:
+  backend-database:
+    interface: mysql_client
+    limit: 1
+  certificates:
+    interface: tls-certificates
+    limit: 1
+    optional: true
+  logging:
+    interface: loki_push_api
+    limit: 1
+    optional: true
+  tracing:
+    interface: tracing
+    optional: true
+    limit: 1

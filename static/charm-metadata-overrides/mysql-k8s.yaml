@@ -34,3 +34,26 @@ provides:
     optional: true
   replication-offer:
     optional: true
+
+
+requires:
+  certificates:
+    interface: tls-certificates
+    limit: 1
+    optional: true
+  s3-parameters:
+    interface: s3
+    limit: 1
+    optional: true
+  logging:
+    interface: loki_push_api
+    limit: 1
+    optional: true
+  replication:
+    interface: mysql_async
+    limit: 1
+    optional: true
+  tracing:
+    interface: tracing
+    limit: 1
+    optional: true
