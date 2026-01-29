@@ -12,30 +12,3 @@
 
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-
-[project]
-name = "bundle-builder-v2"
-version = "2.0.0"
-description = "Framework to generate Juju compatible bundles from charmhub."
-authors = [
-    {name = "SQA Team",email = "solutionsqa@canonical.com"}
-]
-
-requires-python = ">=3.10"
-dependencies = [
-    "z3-solver (>=4.15.4.0,<5.0.0.0)",
-    "pydantic (>=2.12.5,<3.0.0)",
-    "requests (>=2.32.5,<3.0.0)"
-]
-
-[tool.poetry]
-packages = [
-    { include = "bundle_builder_v2" },
-]
-
-[build-system]
-requires = ["poetry-core>=2.0.0,<3.0.0"]
-build-backend = "poetry.core.masonry.api"
-
-[project.scripts]
-bundle-builder-v2 = "bundle_builder_v2.entrypoint:main"

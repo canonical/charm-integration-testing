@@ -34,8 +34,6 @@ provides:
     optional: true
   replication-offer:
     optional: true
-
-
 requires:
   certificates:
     interface: tls-certificates

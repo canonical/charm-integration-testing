@@ -248,6 +248,7 @@ class ScriptletInvoker:
 
         return result
 
+
 def parse_error_code_rejection(rejection: Rejection) -> ParsedConstraint | None:
     """
     Parse a rejection with error code encoding into structured constraint data.

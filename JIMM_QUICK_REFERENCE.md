@@ -3,6 +3,7 @@
 ## The Big Picture
 
 juju-jimm-k8s needs to:
+
 1. **Get the root CA certificate** (directly from self-signed-certificates)
 2. **Get certificates through OAuth** (from hydra, which got them through traefik from self-signed-certificates)
 3. **Validate** that both sources originate from the same root
@@ -25,6 +26,7 @@ juju-jimm-k8s needs to:
 ```
 
 **API**:
+
 ```python
 event.relations.get('receive-ca-cert')       # Get relations on endpoint
 event.get_relation_remote_app(endpoint, idx)  # Get provider app name
@@ -89,6 +91,7 @@ if ca_provider != chain_root:
 ## Decomposition
 
 ### Structural Layer (Endpoint Presence)
+
 **Constraints**: Required, Limit, Mutual Exclusion
 
 ```
@@ -104,6 +107,7 @@ oauth: REQUIRED
 ```
 
 ### Topological Layer (Chain Existence)
+
 **Constraints**: Transitive Capability, Same-Application Mandate
 
 ```
@@ -118,6 +122,7 @@ Provider Consistency: SAME-APPLICATION MANDATE (#7)
 ```
 
 ### Cryptographic Layer (Signature Validation)
+
 **Constraints**: Custom validation (Pre-deployment check)
 
 ```
