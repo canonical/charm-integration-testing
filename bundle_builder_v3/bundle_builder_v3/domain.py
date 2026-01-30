@@ -17,7 +17,6 @@ import z3
 from pydantic import BaseModel, ConfigDict, Field
 
 from .charm import Charm, CharmChannel, EndpointType
-from .charmhub import CharmhubClient
 
 
 class IntegrationConstraint(BaseModel):
@@ -260,36 +259,5 @@ def add_charm_to_domain(charm: Charm, domain: Domain) -> Domain:
                     domain.application_integration_to_charm_integration[(app_integration, charm_integration)] = z3.Bool(
                         f"app_integration_{app_integration.endpoint1.application}:{app_integration.endpoint1.endpoint}__{app_integration.endpoint2.application}:{app_integration.endpoint2.endpoint}_maps_to_charm_integration_{charm_req_ep.charm_id}:{charm_req_ep.endpoint}__{charm_prov_ep.charm_id}:{charm_prov_ep.endpoint}"
                     )
-
-    return domain
-
-
-def add_charms_for_endpoint_to_domain(
-    charm_id: int, endpoint_name: str, domain: Domain, charmhub_client: CharmhubClient
-) -> Domain:
-    endpoint = domain.charms[charm_id].spec.endpoints[endpoint_name]
-
-    fulfilling_charms: set[str] = set()
-    if endpoint.type == EndpointType.REQUIRES:
-        fulfilling_charms = charmhub_client.find_charms(
-            provides=endpoint.interface, platform=domain.platform_constraint
-        )
-    elif endpoint.type == EndpointType.PROVIDES:
-        fulfilling_charms = charmhub_client.find_charms(
-            requires=endpoint.interface, platform=domain.platform_constraint
-        )
-
-    if len(fulfilling_charms) == 0:
-        charm_name = domain.charms[charm_id].spec.name
-        raise ValueError(
-            f"No charms found that expose interface '{endpoint.interface}' to satisfy {charm_name}:{endpoint_name}"
-        )
-
-    for charm in fulfilling_charms:
-        spec = charmhub_client.charm_from_store(
-            charm_name=charm,
-            ubuntu_arch=domain.arch_constraint,
-        )
-        domain = add_charm_to_domain(spec, domain)
 
     return domain

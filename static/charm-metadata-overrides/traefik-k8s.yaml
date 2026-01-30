@@ -32,21 +32,12 @@ overrides:
     provides:
       ingress:
         optional: true
-        modes:
-          - [tls]
-          - ['']
       ingress-per-unit:
         optional: true
-        modes:
-          - [tls]
-          - ['']
       metrics-endpoint:
         optional: true
       traefik-route:
         optional: true
-        modes:
-          - [tls]
-          - ['']
       grafana-dashboard:
         optional: true
     bridges:

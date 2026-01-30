@@ -19,6 +19,8 @@ from typing import cast
 
 import z3
 
+from bundle_builder_v3.charm import EndpointType
+
 from .assertion_tags import (
     ApplicationExistsTag,
     Assertions,
@@ -33,7 +35,6 @@ from .domain import (
     Domain,
     IntegrationConstraint,
     add_charm_to_domain,
-    add_charms_for_endpoint_to_domain,
     initialize_domain,
 )
 from .extract import extract_bundle
@@ -130,7 +131,7 @@ class BundleBuilder:
 
         if not modified_domain:
             raise UnresolvableBundleError(f"Cannot handle failed assertions: {failed_assertions}")
-        
+
         return domain
 
     def _add_charm_for_application(self, application: str, domain: Domain) -> Domain:
@@ -144,14 +145,36 @@ class BundleBuilder:
             ubuntu_version=constraints.base,
         )
 
-        # Add the charm to the domain
+        # Add the charm to the domain for application existence (exempt from cycle detection)
         return add_charm_to_domain(charm, domain)
 
     def _add_charms_for_endpoint(self, charm_id: int, endpoint_name: str, domain: Domain) -> Domain:
-        try:
-            return add_charms_for_endpoint_to_domain(charm_id, endpoint_name, domain, self.charmhub_client)
-        except ValueError as exc:
-            raise UnresolvableBundleError(str(exc)) from exc
+        endpoint = domain.charms[charm_id].spec.endpoints[endpoint_name]
+        requesting_charm_name = domain.charms[charm_id].spec.name
+
+        fulfilling_charms: set[str] = set()
+        if endpoint.type == EndpointType.REQUIRES:
+            fulfilling_charms = self.charmhub_client.find_charms(
+                provides=endpoint.interface, platform=domain.platform_constraint
+            )
+        elif endpoint.type == EndpointType.PROVIDES:
+            fulfilling_charms = self.charmhub_client.find_charms(
+                requires=endpoint.interface, platform=domain.platform_constraint
+            )
+
+        if len(fulfilling_charms) == 0:
+            raise UnresolvableBundleError(
+                f"No charms found that expose interface '{endpoint.interface}' to satisfy {requesting_charm_name}:{endpoint_name}"
+            )
+
+        for charm in fulfilling_charms:
+            spec = self.charmhub_client.charm_from_store(
+                charm_name=charm,
+                ubuntu_arch=domain.arch_constraint,
+            )
+            domain = add_charm_to_domain(spec, domain)
+
+        return domain
 
     def _optimize_solution(self, domain: Domain) -> z3.ModelRef:
         optimizer = z3.Optimize()
