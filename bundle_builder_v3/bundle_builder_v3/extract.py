@@ -17,13 +17,13 @@ import logging
 
 import z3
 
-from .bundle import Application, ApplicationEndpoint, Bundle
-from .problem_space import ProblemSpace
+from .bundle import Application, ApplicationEndpoint, Bundle, Integration
+from .domain import Domain
 
 
-def extract_bundle(model: z3.ModelRef, problem_space: ProblemSpace, logger: logging.Logger) -> Bundle:
+def extract_bundle(model: z3.ModelRef, domain: Domain, logger: logging.Logger) -> Bundle:
     existing_charm_ids = []
-    for charm_id, charm in enumerate(problem_space.charms):
+    for charm_id, charm in enumerate(domain.charms):
         if model.evaluate(charm.exists, model_completion=True):
             existing_charm_ids.append(charm_id)
 
@@ -31,19 +31,19 @@ def extract_bundle(model: z3.ModelRef, problem_space: ProblemSpace, logger: logg
     used_names: set[str] = set()
 
     for charm_id in existing_charm_ids:
-        for (application, mapped_charm_id), mapping_var in problem_space.application_to_charm.items():
-            if mapped_charm_id == charm_id and model.evaluate(mapping_var, model_completion=True):
-                charm_id_to_app_name[charm_id] = application
-                used_names.add(application)
+        for mapping, mapping_var in domain.application_to_charm.items():
+            if mapping.charm_id == charm_id and model.evaluate(mapping_var, model_completion=True):
+                charm_id_to_app_name[charm_id] = mapping.application
+                used_names.add(mapping.application)
                 logger.info(
-                    f"Application {application} mapped to charm {problem_space.charms[charm_id].spec.name} (id={charm_id})"
+                    f"Application {mapping.application} mapped to charm {domain.charms[charm_id].spec.name} (id={charm_id})"
                 )
                 break
 
     for charm_id in existing_charm_ids:
         if charm_id in charm_id_to_app_name:
             continue
-        base_name = problem_space.charms[charm_id].spec.name
+        base_name = domain.charms[charm_id].spec.name
         app_name = base_name
         suffix_ord = ord("a")
         while app_name in used_names:
@@ -51,37 +51,38 @@ def extract_bundle(model: z3.ModelRef, problem_space: ProblemSpace, logger: logg
             suffix_ord += 1
         charm_id_to_app_name[charm_id] = app_name
         used_names.add(app_name)
-        logger.info(f"Application {app_name} generated for unmapped charm {base_name} (id={charm_id})")
 
     applications = {}
     for charm_id, app_name in charm_id_to_app_name.items():
         applications[app_name] = Application(
-            charm=problem_space.charms[charm_id].spec,
+            charm=domain.charms[charm_id].spec,
         )
 
     integrations = set()
-    for integration_key, integration_var in problem_space.charm_integrations.items():
+    for charm_integration, integration_var in domain.charm_integrations.items():
         if model.evaluate(integration_var.exists, model_completion=True):
-            charm_ep_1, charm_ep_2 = sorted(integration_key)
-            charm_id_1, endpoint_1 = charm_ep_1
-            charm_id_2, endpoint_2 = charm_ep_2
+            # Extract endpoints from CharmIntegration model
+            charm_id_1 = charm_integration.requires_endpoint.charm_id
+            endpoint_1 = charm_integration.requires_endpoint.endpoint
+            charm_id_2 = charm_integration.provides_endpoint.charm_id
+            endpoint_2 = charm_integration.provides_endpoint.endpoint
 
             app_name_1 = charm_id_to_app_name.get(charm_id_1)
             app_name_2 = charm_id_to_app_name.get(charm_id_2)
 
             if app_name_1 and app_name_2:
-                integration = frozenset(
-                    {
-                        ApplicationEndpoint(application=app_name_1, endpoint=endpoint_1),
-                        ApplicationEndpoint(application=app_name_2, endpoint=endpoint_2),
-                    }
+                integrations.add(
+                    Integration(
+                        {
+                            ApplicationEndpoint(application=app_name_1, endpoint=endpoint_1),
+                            ApplicationEndpoint(application=app_name_2, endpoint=endpoint_2),
+                        }
+                    )
                 )
-                integrations.add(integration)
-                logger.info(f"Integration {app_name_1}:{endpoint_1} -- {app_name_2}:{endpoint_2}")
 
     return Bundle(
         applications=applications,
         integrations=integrations,
-        platform=problem_space.platform_constraint,
-        arch=problem_space.arch_constraint,
+        platform=domain.platform_constraint,
+        arch=domain.arch_constraint,
     )

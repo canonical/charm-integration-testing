@@ -17,9 +17,9 @@ import argparse
 import logging
 from pathlib import Path
 
-from .bundle import ApplicationEndpoint, Integration
 from .bundle_builder import ApplicationConstraint, BundleBuilder, UnresolvableBundleError
 from .charmhub import CharmhubClient
+from .domain import IntegrationConstraint
 from .overrides import OverridesClient
 
 
@@ -120,26 +120,20 @@ def applications_from_args(parser: argparse.ArgumentParser, specs: list[str]) ->
 
 
 # Get integrations from args
-def integrations_from_args(parser: argparse.ArgumentParser, specs: list[str]) -> set[Integration]:
+def integrations_from_args(parser: argparse.ArgumentParser, specs: list[str]) -> set[IntegrationConstraint]:
     constraints = set()
     for spec in specs:
         # Split specs
         try:
-            application_1, application_2 = spec.split("::")
-            application_1_name, application_1_endpoint = application_1.split(":")
-            application_2_name, application_2_endpoint = application_2.split(":")
+            endpoint1, endpoint2 = spec.split("::")
+            # Validate format
+            if ":" not in endpoint1 or ":" not in endpoint2:
+                raise ValueError("Missing colon in endpoint")
         except ValueError:
-            parser.error(f"Invalid integration format: '{spec}'")
+            parser.error(f"Invalid integration format: '{spec}' - expected format app1:endpoint1::app2:endpoint2")
 
         # Add constraints
-        constraints.add(
-            Integration(
-                {
-                    ApplicationEndpoint(application=application_1_name, endpoint=application_1_endpoint),
-                    ApplicationEndpoint(application=application_2_name, endpoint=application_2_endpoint),
-                }
-            )
-        )
+        constraints.add(IntegrationConstraint(endpoint1=endpoint1, endpoint2=endpoint2))
     return constraints
 
 
