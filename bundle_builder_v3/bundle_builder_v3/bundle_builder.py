@@ -108,6 +108,7 @@ class BundleBuilder:
             raise UnresolvableBundleError("Solver returned unsat but unsat core was empty")
 
         # Handle an assertions that have not been previously handled
+        modified_domain = False
         for assertion in failed_assertions:
             if assertion in domain.handled_failed_assertions:
                 continue
@@ -119,14 +120,18 @@ class BundleBuilder:
             if tag.kind == Assertions.CHARM_ENDPOINT_NON_OPTIONAL:
                 domain.handled_failed_assertions.add(assertion)
                 non_optional = cast(CharmEndpointNonOptionalTag, tag)
-                assert non_optional.charm.endpoint is not None
-                return self._add_charms_for_endpoint(non_optional.charm.charm_id, non_optional.charm.endpoint, domain)
+                domain = self._add_charms_for_endpoint(non_optional.charm.charm_id, non_optional.charm.endpoint, domain)
+                modified_domain = True
             if tag.kind == Assertions.APPLICATION_EXISTS:
                 domain.handled_failed_assertions.add(assertion)
                 app_exists = cast(ApplicationExistsTag, tag)
-                return self._add_charm_for_application(app_exists.application, domain)
+                domain = self._add_charm_for_application(app_exists.application, domain)
+                modified_domain = True
 
-        raise UnresolvableBundleError(f"Cannot handle failed assertions: {failed_assertions}")
+        if not modified_domain:
+            raise UnresolvableBundleError(f"Cannot handle failed assertions: {failed_assertions}")
+        
+        return domain
 
     def _add_charm_for_application(self, application: str, domain: Domain) -> Domain:
         # Get the charm matching the application constraints
