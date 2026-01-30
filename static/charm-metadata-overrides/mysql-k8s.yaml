@@ -4,30 +4,12 @@ overrides:
   - provides:
       database:
         optional: true
-        # limit_if:
-        #   - criteria:
-        #       - any_of:
-        #           - endpoint_integrated: mysql
-        #           - endpoint_integrated: mysql-root
-        #     limit: 0
-        # limit: 1
+        limit: 1
       mysql:
         optional: true
-        # limits:
-        #   - criteria:
-        #       - any_of:
-        #           - endpoint_integrated: database
-        #           - endpoint_integrated: mysql-root
-        #     limit: 0
-        # limit: 1
+        limit: 1
       mysql-root:
         optional: true
-        # limit_if:
-        #   - criteria:
-        #       - any_of:
-        #           - endpoint_integrated: database
-        #           - endpoint_integrated: mysql
-        #     limit: 0
         limit: 1
       metrics-endpoint:
         optional: true

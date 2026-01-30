@@ -20,7 +20,7 @@ from enum import Enum
 import z3
 from pydantic import BaseModel, ConfigDict, Field
 
-from .bundle import Bundle, Integration
+from .bundle import Application, ApplicationEndpoint, Bundle, Integration
 from .charm import Charm, CharmChannel, EndpointType
 from .charmhub import CharmhubClient
 
@@ -30,7 +30,9 @@ class Assertions(str, Enum):
     APPLICATION_INTEGRATION_EXISTS = "application_integration_exists"
     CHARM_ENDPOINT_NON_OPTIONAL = "charm_endpoint_non_optional"
     CHARM_MAPPED_TO_SINGLE_APPLICATION = "charm_mapped_to_single_application"
-    CHARM_INTEGRATION_MAPPED_TO_SINGLE_APPLICATION_INTEGRATION = "charm_integration_mapped_to_single_application_integration"
+    CHARM_INTEGRATION_MAPPED_TO_SINGLE_APPLICATION_INTEGRATION = (
+        "charm_integration_mapped_to_single_application_integration"
+    )
     CHARM_EXISTS_FROM_APPLICATION = "charm_exists_from_application"
     CHARM_INTEGRATION_EXISTS_FROM_APPLICATION_INTEGRATION = "charm_integration_exists_from_application_integration"
     CHARM_EXISTS_FROM_INTEGRATION = "charm_exists_from_integration"
@@ -145,23 +147,18 @@ class BundleBuilder:
 
             if result == z3.sat:
                 self.logger.info("Problem is satisfiable!")
-                raise NotImplementedError("Bundle extraction is not implemented")
-                # return self._extract_bundle(solver.model(), problem_space)
-                # # Phase 2: Re-solve with optimization to get minimal bundle
-                # self.logger.info("Re-solving with optimization to minimize applications and integrations...")
-                # model = self._optimize_solution(
-                #     problem_space=problem_space,
-                #     application_constraints=application_constraints,
-                #     integration_constraints=integration_constraints,
-                # )
-                # return self._extract_bundle(model, problem_space)
+                self.logger.info("Re-solving with optimization to minimize charms and integrations...")
+                model = self._optimize_solution(problem_space)
+                return self._extract_bundle(model, problem_space)
 
             elif result == z3.unsat:
                 self.logger.info("Problem is unsatisfiable, failed assertions")
                 unsat_core = solver.unsat_core()
                 for assertion in unsat_core:
                     self.logger.debug(f"  - {assertion}")
-                problem_space = self._handle_failed_assertions([str(assertion) for assertion in unsat_core], problem_space)
+                problem_space = self._handle_failed_assertions(
+                    [str(assertion) for assertion in unsat_core], problem_space
+                )
             else:
                 raise UnresolvableBundleError("Solver returned unknown")
 
@@ -226,14 +223,20 @@ class BundleBuilder:
         # Request charms from charmhub that can fulfill this endpoint
         fulfilling_charms: set[str] = set()
         if endpoint.type == EndpointType.REQUIRES:
-            fulfilling_charms = self.charmhub_client.find_charms(provides=endpoint.interface, platform=problem_space.platform_constraint)
+            fulfilling_charms = self.charmhub_client.find_charms(
+                provides=endpoint.interface, platform=problem_space.platform_constraint
+            )
         elif endpoint.type == EndpointType.PROVIDES:
-            fulfilling_charms = self.charmhub_client.find_charms(requires=endpoint.interface, platform=problem_space.platform_constraint)
+            fulfilling_charms = self.charmhub_client.find_charms(
+                requires=endpoint.interface, platform=problem_space.platform_constraint
+            )
 
         # If no fulfilling charms abort
         if len(fulfilling_charms) == 0:
-            raise UnresolvableBundleError(f"No charms found that can fulfill interface {endpoint.interface} for charm endpoint {problem_space.charms[charm_id].spec.name}:{endpoint}")
-        
+            raise UnresolvableBundleError(
+                f"No charms found that can fulfill interface {endpoint.interface} for charm endpoint {problem_space.charms[charm_id].spec.name}:{endpoint}"
+            )
+
         # Fetch each charm and add to problem space
         for charm in fulfilling_charms:
             spec = self.charmhub_client.charm_from_store(
@@ -241,7 +244,7 @@ class BundleBuilder:
                 ubuntu_arch=problem_space.arch_constraint,
             )
             problem_space = self._add_charm_to_problem_space(spec, problem_space)
-        
+
         return problem_space
 
     def _add_charm_to_problem_space(self, charm: Charm, problem_space: ProblemSpace) -> ProblemSpace:
@@ -251,7 +254,10 @@ class BundleBuilder:
             ProblemSpaceCharm(
                 exists=z3.Bool(f"charm_{charm.name}_{charm_id}_exists"),
                 spec=charm,
-                endpoints={name: ProblemSpaceEndpoint(count=z3.Int(f"charm_{charm.name}_{charm_id}_endpoint_{name}_count")) for name, endpoint in charm.endpoints.items()},
+                endpoints={
+                    name: ProblemSpaceEndpoint(count=z3.Int(f"charm_{charm.name}_{charm_id}_endpoint_{name}_count"))
+                    for name, endpoint in charm.endpoints.items()
+                },
             )
         )
 
@@ -294,7 +300,7 @@ class BundleBuilder:
             problem_space.application_to_charm[(application, charm_id)] = z3.Bool(
                 f"app_{application}_maps_to_charm_{charm.name}_{charm_id}"
             )
-        
+
         # Add possible application integration mappings
         for integration in problem_space.integration_constraints:
             app_ep_1, app_ep_2 = sorted(integration)
@@ -302,9 +308,7 @@ class BundleBuilder:
                 charm_ep_1, charm_ep_2 = sorted(charm_integration)
                 if {app_ep_1[1], app_ep_2[1]} != {charm_ep_1[1], charm_ep_2[1]}:
                     continue
-                problem_space.application_integration_to_charm_integration[
-                    (integration, charm_integration)
-                ] = z3.Bool(
+                problem_space.application_integration_to_charm_integration[(integration, charm_integration)] = z3.Bool(
                     f"app_integration_{app_ep_1[0]}:{app_ep_1[1]}__{app_ep_2[0]}:{app_ep_2[1]}_maps_to_charm_integration_{charm_ep_1[0]}:{charm_ep_1[1]}__{charm_ep_2[0]}:{charm_ep_2[1]}"
                 )
 
@@ -339,7 +343,10 @@ class BundleBuilder:
         # Ensure charms mapped from applications exist
         for (application, charm_id), mapping_var in problem_space.application_to_charm.items():
             charm_var = problem_space.charms[charm_id].exists
-            solver.assert_and_track(z3.Implies(mapping_var, charm_var), f"{Assertions.CHARM_EXISTS_FROM_APPLICATION}::{application}::{problem_space.charms[charm_id].spec.name}:{charm_id}")
+            solver.assert_and_track(
+                z3.Implies(mapping_var, charm_var),
+                f"{Assertions.CHARM_EXISTS_FROM_APPLICATION}::{application}::{problem_space.charms[charm_id].spec.name}:{charm_id}",
+            )
         # Ensure application integrations map to one and only one charm integration
         for application_integration in problem_space.integration_constraints:
             solver.assert_and_track(
@@ -352,7 +359,7 @@ class BundleBuilder:
                     + [z3.IntVal(0)]
                 )
                 == 1,
-                f"{Assertions.APPLICATION_INTEGRATION_EXISTS}::{application_integration}"
+                f"{Assertions.APPLICATION_INTEGRATION_EXISTS}::{application_integration}",
             )
         # Ensure charm integrations are only mapped to at most one application integration
         for charm_integration in problem_space.charm_integrations.keys():
@@ -366,16 +373,19 @@ class BundleBuilder:
                     + [z3.IntVal(0)]
                 )
                 <= 1,
-                f"{Assertions.CHARM_INTEGRATION_MAPPED_TO_SINGLE_APPLICATION_INTEGRATION}::{charm_integration}"
+                f"{Assertions.CHARM_INTEGRATION_MAPPED_TO_SINGLE_APPLICATION_INTEGRATION}::{charm_integration}",
             )
         # Ensure integrations mapped from applications exist
-        for (application_integration, charm_integration), mapping_var in problem_space.application_integration_to_charm_integration.items():
+        for (
+            application_integration,
+            charm_integration,
+        ), mapping_var in problem_space.application_integration_to_charm_integration.items():
             charm_integration_var = problem_space.charm_integrations[charm_integration].exists
             app_ep_1, app_ep_2 = sorted(application_integration)
             charm_ep_1, charm_ep_2 = sorted(charm_integration)
             solver.assert_and_track(
                 z3.Implies(mapping_var, charm_integration_var),
-                f"{Assertions.CHARM_INTEGRATION_EXISTS_FROM_APPLICATION_INTEGRATION}::{app_ep_1[0]}:{app_ep_1[1]}--{app_ep_2[0]}:{app_ep_2[1]}::{charm_ep_1[0]}:{charm_ep_1[1]}--{charm_ep_2[0]}:{charm_ep_2[1]}"
+                f"{Assertions.CHARM_INTEGRATION_EXISTS_FROM_APPLICATION_INTEGRATION}::{app_ep_1[0]}:{app_ep_1[1]}--{app_ep_2[0]}:{app_ep_2[1]}::{charm_ep_1[0]}:{charm_ep_1[1]}--{charm_ep_2[0]}:{charm_ep_2[1]}",
             )
 
     def _add_charm_constraints(self, solver: z3.Solver, problem_space: ProblemSpace) -> None:
@@ -387,7 +397,7 @@ class BundleBuilder:
                 charm_ep_1, charm_ep_2 = sorted(integration_key)
                 solver.assert_and_track(
                     z3.Implies(integration_var.exists, charm_var),
-                    f"{Assertions.CHARM_EXISTS_FROM_INTEGRATION}::{problem_space.charms[charm_id].spec.name}:{charm_id}::{charm_ep_1[0]}:{charm_ep_1[1]}--{charm_ep_2[0]}:{charm_ep_2[1]}"
+                    f"{Assertions.CHARM_EXISTS_FROM_INTEGRATION}::{problem_space.charms[charm_id].spec.name}:{charm_id}::{charm_ep_1[0]}:{charm_ep_1[1]}--{charm_ep_2[0]}:{charm_ep_2[1]}",
                 )
         # Calculate charm endpoint count from integrations
         for charm_id, charm in enumerate(problem_space.charms):
@@ -398,26 +408,135 @@ class BundleBuilder:
                     if (charm_id, endpoint_name) in integration_key:
                         integrations_using_endpoint.append(integration_var.exists)
                 solver.assert_and_track(
-                    endpoint.count
-                    == z3.Sum([z3.If(i, 1, 0) for i in integrations_using_endpoint] + [z3.IntVal(0)]),
-                    f"{Assertions.ENDPOINT_COUNT_MATCHES_INTEGRATIONS}::{charm.spec.name}:{charm_id}:{endpoint_name}"
+                    endpoint.count == z3.Sum([z3.If(i, 1, 0) for i in integrations_using_endpoint] + [z3.IntVal(0)]),
+                    f"{Assertions.ENDPOINT_COUNT_MATCHES_INTEGRATIONS}::{charm.spec.name}:{charm_id}:{endpoint_name}",
                 )
         # Add non-optional endpoints from metadata (if charm exists)
         for charm_id, charm in enumerate(problem_space.charms):
             for endpoint_name, endpoint in charm.spec.endpoints.items():
                 if not endpoint.optional:
-                    solver.assert_and_track(z3.Implies(
-                        charm.exists,
-                        charm.endpoints[endpoint_name].count >= 1
-                    ), f"{Assertions.CHARM_ENDPOINT_NON_OPTIONAL}::{charm.spec.name}:{charm_id}:{endpoint_name}")
+                    solver.assert_and_track(
+                        z3.Implies(charm.exists, charm.endpoints[endpoint_name].count >= 1),
+                        f"{Assertions.CHARM_ENDPOINT_NON_OPTIONAL}::{charm.spec.name}:{charm_id}:{endpoint_name}",
+                    )
         # Add limits from metadata (if charm exists)
         for charm_id, charm in enumerate(problem_space.charms):
             for endpoint_name, endpoint in charm.spec.endpoints.items():
                 if endpoint.limit is not None:
                     solver.assert_and_track(
-                        z3.Implies(
-                            charm.exists,
-                            charm.endpoints[endpoint_name].count <= endpoint.limit
-                        ),
-                        f"{Assertions.ENDPOINT_RESPECTS_LIMIT}::{charm.spec.name}:{charm_id}:{endpoint_name}:{endpoint.limit}"
+                        z3.Implies(charm.exists, charm.endpoints[endpoint_name].count <= endpoint.limit),
+                        f"{Assertions.ENDPOINT_RESPECTS_LIMIT}::{charm.spec.name}:{charm_id}:{endpoint_name}:{endpoint.limit}",
                     )
+
+    def _optimize_solution(self, problem_space: ProblemSpace) -> z3.ModelRef:
+        """Re-solve with optimization to minimize the number of charms and integrations."""
+        optimizer = z3.Optimize()
+
+        # Add all constraints
+        self._add_constraints(optimizer, problem_space)
+
+        # Minimize weighted charm cost: higher priority => lower cost (1 / priority)
+        optimizer.minimize(
+            z3.Sum(
+                [
+                    z3.If(
+                        charm.exists,
+                        z3.RealVal(1.0 / max(charm.spec.priority, 1e-6)),
+                        z3.RealVal(0),
+                    )
+                    for charm in problem_space.charms
+                ]
+                + [z3.RealVal(0)]
+            )
+        )
+
+        # Then minimize number of integrations that exist
+        optimizer.minimize(
+            z3.Sum(
+                [z3.If(integration.exists, 1, 0) for integration in problem_space.charm_integrations.values()]
+                + [z3.IntVal(0)]
+            )
+        )
+
+        # Solve
+        result = optimizer.check()
+        if result != z3.sat:
+            raise UnresolvableBundleError("Optimization failed - problem became unsatisfiable")
+
+        return optimizer.model()
+
+    def _extract_bundle(self, model: z3.ModelRef, problem_space: ProblemSpace) -> Bundle:
+        """Extract a Bundle from the Z3 model solution."""
+
+        # Find all charms that exist in the solution
+        existing_charm_ids = []
+        for charm_id, charm in enumerate(problem_space.charms):
+            if model.evaluate(charm.exists, model_completion=True):
+                existing_charm_ids.append(charm_id)
+
+        # Build mapping from charm_id to application name
+        charm_id_to_app_name = {}
+        used_names = set()
+
+        # First, assign names from explicit application mappings
+        for charm_id in existing_charm_ids:
+            for (application, mapped_charm_id), mapping_var in problem_space.application_to_charm.items():
+                if mapped_charm_id == charm_id and model.evaluate(mapping_var, model_completion=True):
+                    charm_id_to_app_name[charm_id] = application
+                    used_names.add(application)
+                    self.logger.info(
+                        f"Application '{application}' mapped to charm {problem_space.charms[charm_id].spec.name} (id={charm_id})"
+                    )
+                    break
+
+        # Then, generate names for unmapped charms
+        for charm_id in existing_charm_ids:
+            if charm_id in charm_id_to_app_name:
+                continue
+
+            # Generate unique name: charm-name, charm-name-a, charm-name-b, etc.
+            base_name = problem_space.charms[charm_id].spec.name
+            app_name = base_name
+            suffix_ord = ord("a")
+            while app_name in used_names:
+                app_name = f"{base_name}-{chr(suffix_ord)}"
+                suffix_ord += 1
+
+            charm_id_to_app_name[charm_id] = app_name
+            used_names.add(app_name)
+            self.logger.info(f"Application '{app_name}' generated for unmapped charm {base_name} (id={charm_id})")
+
+        # Build applications dict
+        applications = {}
+        for charm_id, app_name in charm_id_to_app_name.items():
+            applications[app_name] = Application(
+                charm=problem_space.charms[charm_id].spec,
+            )
+
+        # Extract all integrations that exist
+        integrations = set()
+        for integration_key, integration_var in problem_space.charm_integrations.items():
+            if model.evaluate(integration_var.exists, model_completion=True):
+                charm_ep_1, charm_ep_2 = sorted(integration_key)
+                charm_id_1, endpoint_1 = charm_ep_1
+                charm_id_2, endpoint_2 = charm_ep_2
+
+                app_name_1 = charm_id_to_app_name.get(charm_id_1)
+                app_name_2 = charm_id_to_app_name.get(charm_id_2)
+
+                if app_name_1 and app_name_2:
+                    integration = frozenset(
+                        {
+                            ApplicationEndpoint(application=app_name_1, endpoint=endpoint_1),
+                            ApplicationEndpoint(application=app_name_2, endpoint=endpoint_2),
+                        }
+                    )
+                    integrations.add(integration)
+                    self.logger.info(f"Integration {app_name_1}:{endpoint_1} -- {app_name_2}:{endpoint_2}")
+
+        return Bundle(
+            applications=applications,
+            integrations=integrations,
+            platform=problem_space.platform_constraint,
+            arch=problem_space.arch_constraint,
+        )

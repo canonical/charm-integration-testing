@@ -83,10 +83,14 @@ class Bundle(BaseModel):
                         sorted(
                             [
                                 f"{application_endpoint.application}:{application_endpoint.endpoint}"
-                                for application_endpoint in sorted(integration)
+                                for application_endpoint in sorted(
+                                    integration, key=lambda ep: (ep.application, ep.endpoint)
+                                )
                             ]
                         )
-                        for integration in sorted(self.integrations)
+                        for integration in sorted(
+                            self.integrations, key=lambda i: tuple(sorted((ep.application, ep.endpoint) for ep in i))
+                        )
                     ]
                 ),
             },
