@@ -79,6 +79,7 @@ class CharmMetadata:
     provides: dict[str, Endpoint] = Field(default_factory=dict)
 
     if TYPE_CHECKING:  # so mypy knows the class can be constructed from a dict
+
         def __init__(
             self,
             peers: dict[str, Endpoint | dict[str, Any]] = ...,

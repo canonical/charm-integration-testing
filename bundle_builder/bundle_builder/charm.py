@@ -14,7 +14,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
-from typing import TYPE_CHECKING, Any, TypeAlias, TypedDict
+from typing import TYPE_CHECKING, Any, TypeAlias
 
 from pydantic import Field, field_validator, model_serializer, model_validator
 from pydantic_core import ArgsKwargs
@@ -270,16 +270,6 @@ class CharmConfigCriteria:
             return cls(all_of=frozenset())
         else:
             return cls(any_of=frozenset())
-
-
-class CharmConfigCriteriaDict(TypedDict, total=False):
-    """TypedDict for CharmConfigCriteria constructor arguments."""
-
-    all_of: frozenset[CharmConfigCriteria] | None
-    any_of: frozenset[CharmConfigCriteria] | None
-    none_of: frozenset[CharmConfigCriteria] | None
-    track: str | None
-    endpoint_integrated: str | None
 
 
 @immutable_dataclass

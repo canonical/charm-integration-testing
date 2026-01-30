@@ -14,7 +14,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
-from typing import Any
+from typing import Any, TypedDict
 
 import pytest
 from pydantic import Field, TypeAdapter
@@ -27,13 +27,22 @@ from bundle_builder.charm import (
     CharmChannel,
     CharmConfig,
     CharmConfigCriteria,
-    CharmConfigCriteriaDict,
     CharmEndpoint,
     CharmEndpointOptionality,
     CharmLimit,
     CharmLimitCriteria,
     CharmTestConfig,
 )
+
+
+class CharmConfigCriteriaDict(TypedDict, total=False):
+    """TypedDict for CharmConfigCriteria constructor arguments."""
+
+    all_of: frozenset[CharmConfigCriteria] | None
+    any_of: frozenset[CharmConfigCriteria] | None
+    none_of: frozenset[CharmConfigCriteria] | None
+    track: str | None
+    endpoint_integrated: str | None
 
 
 def channel_from_string(channel_str: str) -> CharmChannel:

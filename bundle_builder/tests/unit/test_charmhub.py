@@ -514,17 +514,19 @@ class TestCharmhubClient:
                 info_response={
                     "charm-a": InfoResponse(
                         default_release=InfoResponse.DefaultRelease(
-                            revision=TypeAdapter(InfoResponse.DefaultRelease.Revision).validate_python({
-                                "metadata-yaml": yaml.dump(
-                                    {
-                                        "provides": {
-                                            "endpoint-a": {
-                                                "interface": "interface-a",
+                            revision=TypeAdapter(InfoResponse.DefaultRelease.Revision).validate_python(
+                                {
+                                    "metadata-yaml": yaml.dump(
+                                        {
+                                            "provides": {
+                                                "endpoint-a": {
+                                                    "interface": "interface-a",
+                                                }
                                             }
                                         }
-                                    }
-                                ),
-                            })
+                                    ),
+                                }
+                            )
                         ),
                         result=InfoResponse.Result(deployable_on=frozenset({"kubernetes"})),
                     ),
@@ -543,15 +545,19 @@ class TestCharmhubClient:
                 info_response={
                     "charm-a": InfoResponse(
                         default_release=InfoResponse.DefaultRelease(
-                            revision=TypeAdapter(InfoResponse.DefaultRelease.Revision).validate_python({
-                                "metadata-yaml": yaml.dump({
-                                        "requires": {
-                                            "endpoint-a": {
-                                                "interface": "interface-a",
+                            revision=TypeAdapter(InfoResponse.DefaultRelease.Revision).validate_python(
+                                {
+                                    "metadata-yaml": yaml.dump(
+                                        {
+                                            "requires": {
+                                                "endpoint-a": {
+                                                    "interface": "interface-a",
+                                                }
                                             }
                                         }
-                                }),
-                            })
+                                    ),
+                                }
+                            )
                         ),
                         result=InfoResponse.Result(deployable_on=frozenset({"kubernetes"})),
                     ),
