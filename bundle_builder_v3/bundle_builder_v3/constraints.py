@@ -96,17 +96,18 @@ def add_application_constraints(solver: z3.Solver, domain: Domain) -> None:
         )
 
     for app_integration in domain.integration_constraints:
-        relevant_mappings = [
-            z3.If(m, 1, 0)
-            for (a_int, c_int), m in domain.application_integration_to_charm_integration.items()
-            if a_int == app_integration
-        ]
-        # Only add constraint if mappings exist; otherwise let application_exists fail
-        if len(relevant_mappings) > 0:
-            solver.assert_and_track(
-                z3.Sum(relevant_mappings + [z3.IntVal(0)]) == 1,
-                ApplicationIntegrationExistsTag(integration=_app_endpoints_from_integration(app_integration)).encode(),
+        solver.assert_and_track(
+            z3.Sum(
+                [
+                    z3.If(m, 1, 0)
+                    for (a_int, c_int), m in domain.application_integration_to_charm_integration.items()
+                    if a_int == app_integration
+                ]
+                + [z3.IntVal(0)]
             )
+            == 1,
+            ApplicationIntegrationExistsTag(integration=_app_endpoints_from_integration(app_integration)).encode(),
+        )
 
     for charm_integration in domain.charm_integrations.keys():
         solver.assert_and_track(

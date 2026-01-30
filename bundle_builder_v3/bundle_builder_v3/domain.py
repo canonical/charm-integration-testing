@@ -16,6 +16,8 @@
 import z3
 from pydantic import BaseModel, ConfigDict, Field
 
+from bundle_builder_v3.assertion_tags import AssertionTag
+
 from .charm import Charm, CharmChannel, EndpointType
 
 
@@ -125,7 +127,7 @@ class Domain(BaseModel):
     charms: list[DomainCharm] = Field(default_factory=list)
     charm_integrations: dict[CharmIntegration, DomainCharmIntegration] = Field(default_factory=dict)
 
-    handled_failed_assertions: set[str] = Field(default_factory=set)
+    handled_failed_assertions: set[AssertionTag] = Field(default_factory=set)
 
 
 def initialize_domain(
