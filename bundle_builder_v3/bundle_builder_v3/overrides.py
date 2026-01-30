@@ -56,13 +56,8 @@ class CharmMetadataOverrides(BaseModel):
     overrides: list[CharmMetadataOverride] = Field(default_factory=list)
 
 
-class CharmPlatformOverride(BaseModel):
-    criteria: CharmOverrideCriteria = Field(default_factory=CharmOverrideCriteria)
-    platforms: set[str] | None = None
-
-
 class CharmPlatformOverrides(BaseModel):
-    overrides: list[CharmPlatformOverride] = Field(default_factory=list)
+    platforms: set[str] | None = None
 
 
 class CharmListingOverrides(BaseModel):
@@ -124,17 +119,16 @@ class OverridesClient:
 
     @cache
     def get_charm_metadata_overrides(self, charm: str, channel: CharmChannel) -> CharmMetadataOverride:
-        for override in CharmMetadataOverrides(**self._read_yaml_file(self.charm_metadata_overrides, f"{charm}.yaml")):
+        for override in CharmMetadataOverrides(
+            **self._read_yaml_file(self.charm_metadata_overrides, f"{charm}.yaml")
+        ).overrides:
             if override.criteria.meets(channel):
                 return override
         return CharmMetadataOverride()
 
     @cache
-    def get_charm_platform_overrides(self, charm: str, channel: CharmChannel) -> set[str] | None:
-        for override in CharmPlatformOverrides(**self._read_yaml_file(self.charm_platform_overrides, f"{charm}.yaml")):
-            if override.criteria.meets(channel):
-                return override.platforms
-        return None
+    def get_charm_platform_overrides(self, charm: str) -> set[str] | None:
+        return CharmPlatformOverrides(**self._read_yaml_file(self.charm_platform_overrides, f"{charm}.yaml")).platforms
 
     @cache
     def get_charm_listing_overrides(self) -> set[str]:

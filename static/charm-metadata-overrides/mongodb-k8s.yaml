@@ -1,33 +1,34 @@
----
+
 # Remove after: https://github.com/canonical/mongodb-k8s-operator/pull/408
-provides:
-  database:
-    optional: true
-  obsolete:
-    optional: true
-  metrics-endpoint:
-    optional: true
-  grafana-dashboard:
-    optional: true
-  config-server:
-    optional: true
-    limit_if:
-      - criteria:
-          - endpoint_integrated: sharding
-        limit: 0
-  cluster:
-    optional: true
-requires:
-  certificates:
-    optional: true
-  s3-credentials:
-    optional: true
-  sharding:
-    limit_if:
-      - criteria:
-          - endpoint_integrated: config-server
-        limit: 0
-    limit: 1
+overrides:
+  - provides:
+      database:
+        optional: true
+      obsolete:
+        optional: true
+      metrics-endpoint:
+        optional: true
+      grafana-dashboard:
+        optional: true
+      config-server:
+        optional: true
+        limit_if:
+          - criteria:
+              - endpoint_integrated: sharding
+            limit: 0
+      cluster:
+        optional: true
+    requires:
+      certificates:
+        optional: true
+      s3-credentials:
+        optional: true
+      sharding:
+        limit_if:
+          - criteria:
+              - endpoint_integrated: config-server
+            limit: 0
+        limit: 1
   ldap:
     optional_if:
       - none_of:

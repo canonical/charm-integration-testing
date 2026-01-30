@@ -1,8 +1,9 @@
----
+
 # Training Operator - distributed training on Kubernetes
-provides:
-  # Remove after: https://github.com/canonical/charm-integration-testing/issues/282
-  metrics-endpoint:
-    optional: true
-  grafana-dashboard:
-    optional: true
+overrides:
+  - provides:
+      # Remove after: https://github.com/canonical/charm-integration-testing/issues/282
+      metrics-endpoint:
+        optional: true
+      grafana-dashboard:
+        optional: true

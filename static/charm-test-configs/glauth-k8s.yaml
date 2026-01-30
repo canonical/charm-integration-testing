@@ -1,6 +1,4 @@
 ---
 configs:
-  - criteria:
-      endpoint_integrated: send-ca-cert
-    config:
+  - config:
       ldaps_enabled: true

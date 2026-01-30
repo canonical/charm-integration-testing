@@ -17,7 +17,8 @@ import argparse
 import logging
 from pathlib import Path
 
-from .bundle_builder import ApplicationConstraint, BundleBuilder, IntegrationConstraint, UnresolvableBundleError
+from .bundle import ApplicationEndpoint, Integration
+from .bundle_builder import ApplicationConstraint, BundleBuilder, UnresolvableBundleError
 from .charmhub import CharmhubClient
 from .overrides import OverridesClient
 
@@ -87,8 +88,8 @@ def add_args_to_parser(parser: argparse.ArgumentParser) -> None:
 
 
 # Get charms from args
-def application_constraints_from_args(parser: argparse.ArgumentParser, specs: list[str]) -> set[ApplicationConstraint]:
-    constraints = set()
+def applications_from_args(parser: argparse.ArgumentParser, specs: list[str]) -> dict[str, ApplicationConstraint]:
+    constraints = {}
     for spec in specs:
         # Get charm specs
         try:
@@ -112,14 +113,14 @@ def application_constraints_from_args(parser: argparse.ArgumentParser, specs: li
         base = None if base_str == "default" else base_str
 
         # Add application constraint
-        constraints.add(
-            ApplicationConstraint(name=name, charm=charm_str, channel=channel, revision=revision, base=base)
+        constraints[name] = ApplicationConstraint(
+            name=name, charm=charm_str, channel=channel, revision=revision, base=base
         )
     return constraints
 
 
 # Get integrations from args
-def integration_constraints_from_args(parser: argparse.ArgumentParser, specs: list[str]) -> set[IntegrationConstraint]:
+def integrations_from_args(parser: argparse.ArgumentParser, specs: list[str]) -> set[Integration]:
     constraints = set()
     for spec in specs:
         # Split specs
@@ -132,12 +133,10 @@ def integration_constraints_from_args(parser: argparse.ArgumentParser, specs: li
 
         # Add constraints
         constraints.add(
-            IntegrationConstraint(
-                application_1=application_1_name,
-                endpoint_1=application_1_endpoint,
-                application_2=application_2_name,
-                endpoint_2=application_2_endpoint,
-            )
+            Integration({
+                ApplicationEndpoint(application=application_1_name, endpoint=application_1_endpoint),
+                ApplicationEndpoint(application=application_2_name, endpoint=application_2_endpoint),
+            })
         )
     return constraints
 
@@ -184,20 +183,14 @@ def main() -> None:
     # Create Charmhub client
     charmhub_client = CharmhubClient(logger=logger, overrides_client=overrides_client)
 
-    # Get the base constraints
-    application_constraints = application_constraints_from_args(parser, args.charms)
-    integration_constraints = integration_constraints_from_args(parser, args.integrations)
-    platform_constraint = args.platform
-    arch_constraint = args.arch
-
     # Build the bundle
     bundle_builder = BundleBuilder(charmhub_client=charmhub_client, logger=logger)
     try:
         bundle = bundle_builder.build(
-            application_constraints=application_constraints,
-            integration_constraints=integration_constraints,
-            platform_constraint=platform_constraint,
-            arch_constraint=arch_constraint,
+            applications=applications_from_args(parser, args.charms),
+            integrations=integrations_from_args(parser, args.integrations),
+            platform=args.platform,
+            arch=args.arch,
         )
     except UnresolvableBundleError as e:
         parser.error(f"Unresolvable bundle: {e}")

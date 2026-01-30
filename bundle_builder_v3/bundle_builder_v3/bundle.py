@@ -15,9 +15,9 @@
 
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
-from .charm import Charm, CharmConfig
+from .charm import Charm, CharmConfig, EndpointType
 
 
 class Application(BaseModel):
@@ -32,6 +32,8 @@ class Application(BaseModel):
 
 
 class ApplicationEndpoint(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     application: str
     endpoint: str
 
@@ -42,16 +44,7 @@ class ApplicationEndpoint(BaseModel):
         return self.__str__()
 
 
-class Integration(BaseModel):
-    requirer: ApplicationEndpoint
-    provider: ApplicationEndpoint
-
-    def __iter__(self):
-        yield self.requirer
-        yield self.provider
-
-    def __repr__(self) -> str:
-        return f"{self.requirer} <-> {self.provider}"
+Integration = frozenset[ApplicationEndpoint]
 
 
 class Bundle(BaseModel):
@@ -87,11 +80,13 @@ class Bundle(BaseModel):
                 "bundle": self.platform,
                 "relations": sorted(
                     [
-                        [
-                            f"{integration.provider.application}:{integration.provider.endpoint}",
-                            f"{integration.requirer.application}:{integration.requirer.endpoint}",
-                        ]
-                        for integration in self.integrations
+                        sorted(
+                            [
+                                f"{application_endpoint.application}:{application_endpoint.endpoint}"
+                                for application_endpoint in sorted(integration)
+                            ]
+                        )
+                        for integration in sorted(self.integrations)
                     ]
                 ),
             },
@@ -104,29 +99,34 @@ class Bundle(BaseModel):
         lines = ["graph TB"]
 
         # Add application nodes with detailed information
-        for application in sorted(self.applications, key=lambda a: a.name):
-            charm_info = f"{application.charm.channel} rev:{application.charm.revision}"
-            if application.name == application.charm.name:
+        for application in sorted(self.applications):
+            info = self.applications[application]
+            charm_info = f"{info.charm.channel} rev:{info.charm.revision}"
+            if application == info.charm.name:
                 # Application name matches charm name
-                lines.append(f'    {application.name}["{application.name}<br/>{charm_info}"]')
+                lines.append(f'    {application}["{application}<br/>{charm_info}"]')
             else:
                 # Application has custom name
-                lines.append(
-                    f'    {application.name}["{application.name}<br/>({application.charm.name})<br/>{charm_info}"]'
-                )
+                lines.append(f'    {application}["{application}<br/>({info.charm.name})<br/>{charm_info}"]')
 
         lines.append("")  # Blank line for readability
 
         # Add integrations with endpoint names as labels
         for integration in sorted(self.integrations):
-            interface = (
-                self.applications[integration.requirer.application]
-                .charm.endpoints[integration.requirer.endpoint]
-                .interface
-            )
+            ep1, ep2 = sorted(integration)
+            charm_ep1 = self.applications[ep1.application].charm.endpoints[ep1.endpoint]
+            interface = charm_ep1.interface
+
+            # Determine which endpoint is requirers
+            if charm_ep1.type == EndpointType.REQUIRES:
+                requirer_ep = ep1
+                provider_ep = ep2
+            else:
+                requirer_ep = ep2
+                provider_ep = ep1
 
             # Escape angle brackets for Mermaid
-            label = f"{integration.provider.endpoint}&lt;{interface}&gt;{integration.requirer.endpoint}"
-            lines.append(f"    {integration.provider.application} -->|{label}| {integration.requirer.application}")
+            label = f"{provider_ep.endpoint}&lt;{interface}&gt;{requirer_ep.endpoint}"
+            lines.append(f"    {provider_ep.application} -->|{label}| {requirer_ep.application}")
 
         return "\n".join(lines) + "\n"

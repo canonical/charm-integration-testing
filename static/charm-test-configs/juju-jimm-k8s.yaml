@@ -1,17 +1,12 @@
 ---
 configs:
-  - criteria:
-      - none_of:
-          - endpoint_integrated: vault
-    config:
+  - config:
       uuid: aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa
       public-key: pE8oX25fmNPzg7i195spacUxTPLpioiSv/BG9FLgtDY=
       private-key: SdAKRHy3LW7vkmXFhOPTM43kwhgcot0mZrHX8rkHDlM=
       dns-name: jimm-test.local
       postgres-secret-storage: true
-  - criteria:
-      - endpoint_integrated: vault
-    config:
+  - config:
       uuid: aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa
       public-key: pE8oX25fmNPzg7i195spacUxTPLpioiSv/BG9FLgtDY=
       private-key: SdAKRHy3LW7vkmXFhOPTM43kwhgcot0mZrHX8rkHDlM=

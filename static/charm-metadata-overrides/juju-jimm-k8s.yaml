@@ -1,22 +1,23 @@
 ---
-provides:
-  dashboard:
-    optional: true
-  grafana-dashboard:
-    optional: true
-  metrics-endpoint:
-    optional: true
-requires:
-  ingress:
-    optional: true
-  ingress-ssh:
-    optional: true
-  nginx-route:
-    optional: true
-  oauth:
-    optional: false
-    capabilities: [tls]
-  receive-ca-cert:
-    optional_if:
-      - none_of:
-          - endpoint_feature: [oauth, tls]
+overrides:
+  - provides:
+      dashboard:
+        optional: true
+      grafana-dashboard:
+        optional: true
+      metrics-endpoint:
+        optional: true
+    requires:
+      ingress:
+        optional: true
+      ingress-ssh:
+        optional: true
+      nginx-route:
+        optional: true
+      oauth:
+        optional: false
+        capabilities: [tls]
+      receive-ca-cert:
+        optional_if:
+          - none_of:
+              - endpoint_feature: [oauth, tls]

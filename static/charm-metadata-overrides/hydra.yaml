@@ -1,41 +1,27 @@
----
+
 # Remove after: https://github.com/canonical/hydra-operator/pull/358
-provides:
-  hydra-endpoint-info:
-    optional: true
-  oauth:
-    optional: true
-  metrics-endpoint:
-    optional: true
-  grafana-dashboard:
-    optional: true
-requires:
-  public-route:
-    modes:
-      - [tls]
-      - ['']
-    optional: false
-  internal-route:
-    modes:
-      - [tls]
-      - ['']
-    optional: true
-  public-ingress:
-    modes:
-      - [tls]
-      - ['']
-    optional: false
-  internal-ingress:
-    modes:
-      - [tls]
-      - ['']
-    optional: true
-  admin-ingress:
-    modes:
-      - [tls]
-      - ['']
-    optional: true
-bridges:
-  - interface: certificate_transfer
-    requires: public-route
-    provides: oauth
+overrides:
+  - provides:
+      hydra-endpoint-info:
+        optional: true
+      oauth:
+        optional: true
+      metrics-endpoint:
+        optional: true
+      grafana-dashboard:
+        optional: true
+    requires:
+      public-route:
+        optional: false
+      internal-route:
+        optional: true
+      public-ingress:
+        optional: false
+      internal-ingress:
+        optional: true
+      admin-ingress:
+        optional: true
+    bridges:
+      - interface: certificate_transfer
+        requires: public-route
+        provides: oauth

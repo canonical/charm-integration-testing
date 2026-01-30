@@ -1,15 +1,16 @@
 ---
 # Remove after: https://github.com/canonical/content-cache-k8s-operator/pull/106
-provides:
-  metrics-endpoint:
-    optional: true
-  grafana-dashboard:
-    optional: true
-  # Remove after: https://github.com/canonical/content-cache-k8s-operator/pull/151
-  nginx-proxy:
-    limit: 1
-requires:
-  logging:
-    optional: true
-  nginx-route:
-    optional: true
+overrides:
+  - provides:
+      metrics-endpoint:
+        optional: true
+      grafana-dashboard:
+        optional: true
+      # Remove after: https://github.com/canonical/content-cache-k8s-operator/pull/151
+      nginx-proxy:
+        limit: 1
+    requires:
+      logging:
+        optional: true
+      nginx-route:
+        optional: true

@@ -1,5 +1,6 @@
----
+
 # KFP Persistence Agent - syncs pipeline execution state to API server
-requires:
-  kfp-api:
-    features: [kfp-api]
+overrides:
+  - requires:
+      kfp-api:
+        features: [kfp-api]

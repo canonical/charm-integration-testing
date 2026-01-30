@@ -15,7 +15,7 @@
 
 from enum import Enum
 
-from pydantic import BaseModel, Field, model_serializer, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_serializer, model_validator
 
 
 class EndpointType(str, Enum):
@@ -25,6 +25,8 @@ class EndpointType(str, Enum):
 
 
 class CharmChannel(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     track: str
     risk: str
     branch: str

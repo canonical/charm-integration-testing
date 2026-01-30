@@ -1,19 +1,14 @@
 ---
 configs:
   - criteria:
-      - track: '4'
-      - none_of:
-          - endpoint_integrated: peer-cluster
-          - endpoint_integrated: peer-cluster-orchestrator
+      track: '4'
     config:
       roles: broker,controller
   - criteria:
-      - track: '4'
-      - endpoint_integrated: peer-cluster
+      track: '4'
     config:
       roles: broker
   - criteria:
-      - track: '4'
-      - endpoint_integrated: peer-cluster-orchestrator
+      track: '4'
     config:
       roles: broker,controller

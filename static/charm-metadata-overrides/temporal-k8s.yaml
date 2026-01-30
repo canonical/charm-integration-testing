@@ -1,33 +1,34 @@
----
-# Remove after: https://github.com/canonical/temporal-k8s-operator/pull/117
-requires:
-  frontend-certificates:
-    interface: tls-certificates
-    optional: true
-    limit: 1
-  nginx-route:
-    interface: nginx-route
-    optional: true
-    limit: 1
-  openfga:
-    interface: openfga
-    optional: true
-    limit: 1
-  s3-parameters:
-    interface: s3
-    optional: true
-    limit: 1
 
-  # https://github.com/canonical/temporal-k8s-operator/issues/120
-  admin:
-    features: [admin]
-    optional: false
-  ui:
-    features: [ui]
-    optional: true
-provides:
-  metrics-endpoint:
-    interface: prometheus_scrape
+# Remove after: https://github.com/canonical/temporal-k8s-operator/pull/117
+overrides:
+  - requires:
+      frontend-certificates:
+        interface: tls-certificates
+        optional: true
+        limit: 1
+      nginx-route:
+        interface: nginx-route
+        optional: true
+        limit: 1
+      openfga:
+        interface: openfga
+        optional: true
+        limit: 1
+      s3-parameters:
+        interface: s3
+        optional: true
+        limit: 1
+
+      # https://github.com/canonical/temporal-k8s-operator/issues/120
+      admin:
+        features: [admin]
+        optional: false
+      ui:
+        features: [ui]
+        optional: true
+    provides:
+      metrics-endpoint:
+        interface: prometheus_scrape
     optional: true
   grafana-dashboard:
     interface: grafana_dashboard

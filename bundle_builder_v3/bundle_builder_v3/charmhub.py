@@ -151,22 +151,22 @@ class CharmhubClient:
     def _build_charm(
         self,
         charm_name: str,
-        channel_str: str,
+        channel: str,
         revision: int,
         ubuntu_version: str,
         ubuntu_arch: str,
         metadata: CharmMetadata,
     ) -> Charm:
-        channel = CharmChannel.model_validate(channel_str)
+        channel_obj = CharmChannel.model_validate(channel)
         return Charm(
             name=charm_name,
-            channel=channel,
+            channel=channel_obj,
             revision=revision,
             ubuntu_version=ubuntu_version,
             ubuntu_arch=ubuntu_arch,
-            endpoints=self._get_charm_endpoints(charm_name, metadata, channel),
+            endpoints=self._get_charm_endpoints(charm_name, metadata, channel_obj),
             priority=self._get_charm_priority(charm_name),
-            configs=self._get_charm_configs(charm_name, channel),
+            configs=self._get_charm_configs(charm_name, channel_obj),
         )
 
     def _charm_from_store_by_channel_and_revision(
@@ -479,9 +479,11 @@ class CharmhubClient:
             raise IncompleteCharmInfoException(f"Refresh info for charm {refresh_info.name} returned no bases")
         return next(iter(refresh_info.charm.bases))
 
-    def _get_charm_endpoints(self, metadata: CharmMetadata, channel: CharmChannel) -> dict[str, CharmEndpoint]:
+    def _get_charm_endpoints(
+        self, charm_name: str, metadata: CharmMetadata, channel: CharmChannel
+    ) -> dict[str, CharmEndpoint]:
         # Get overrides
-        metadata_overrides = self.overrides_client.get_charm_metadata_overrides(metadata.name, channel)
+        metadata_overrides = self.overrides_client.get_charm_metadata_overrides(charm_name, channel)
 
         # Gather endpoints
         endpoints = {}
@@ -498,6 +500,8 @@ class CharmhubClient:
                     optional = endpoint_override.optional
                 elif endpoint.optional is not None:
                     optional = endpoint.optional
+                elif endpoint_type == EndpointType.PEERS:
+                    optional = True
                 else:
                     optional = False
 
