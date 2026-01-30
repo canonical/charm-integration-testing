@@ -1,4 +1,4 @@
-
+---
 # KFP Visualization Server - renders pipeline graphs and metrics
 overrides:
   - provides:

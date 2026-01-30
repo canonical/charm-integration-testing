@@ -1,4 +1,4 @@
-
+---
 overrides:
   - provides:
       # https://github.com/canonical/temporal-k8s-operator/issues/120

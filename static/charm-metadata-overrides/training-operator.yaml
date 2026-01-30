@@ -1,4 +1,4 @@
-
+---
 # Training Operator - distributed training on Kubernetes
 overrides:
   - provides:

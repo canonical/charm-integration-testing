@@ -1,4 +1,4 @@
-
+---
 # Metacontroller Operator - custom controller framework
 overrides:
   - provides:

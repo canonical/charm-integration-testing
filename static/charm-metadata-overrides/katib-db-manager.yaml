@@ -1,4 +1,4 @@
-
+---
 # Katib DB Manager - manages database schema and migrations
 overrides:
   - provides:

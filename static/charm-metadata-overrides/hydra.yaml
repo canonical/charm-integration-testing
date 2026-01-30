@@ -1,4 +1,4 @@
-
+---
 # Remove after: https://github.com/canonical/hydra-operator/pull/358
 overrides:
   - provides:

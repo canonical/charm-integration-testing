@@ -1,4 +1,4 @@
-
+---
 # Katib Controller - orchestrates hyperparameter tuning experiments
 overrides:
   - provides:

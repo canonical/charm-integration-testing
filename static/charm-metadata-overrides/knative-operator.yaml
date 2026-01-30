@@ -1,4 +1,4 @@
-
+---
 # Knative Operator - manages Knative components
 overrides:
   - provides:

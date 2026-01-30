@@ -1,4 +1,4 @@
-
+---
 # Remove after: https://github.com/canonical/openfga-operator/pull/265
 overrides:
   - provides:

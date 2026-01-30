@@ -2,59 +2,60 @@
 # Traefik optional flags have been added: https://github.com/canonical/traefik-k8s-operator/pull/474
 # But there has been no release
 # And appears in limbo due to being handed off to IS
-requires:
-  certificates:
-    optional_if:
-      - none_of:
-          - any_of:
-              - all_of:
-                  - endpoint_integrated: traefik-route
-                  - endpoint_feature: [traefik-route, tls]
-              - all_of:
-                  - endpoint_integrated: ingress
-                  - endpoint_feature: ingress:tls
-              - all_of:
-                  - endpoint_integrated: ingress-per-unit
-                  - endpoint_feature: [ingress-per-unit, tls]
-  experimental-forward-auth:
-    optional: true
-  logging:
-    optional: true
-  charm-tracing:
-    optional: true
-  workload-tracing:
-    optional: true
-  receive-ca-cert:
-    optional: true
-  upstream-ingress:
-    optional: true
-provides:
-  ingress:
-    optional: true
-    modes:
-      - [tls]
-      - ['']
-  ingress-per-unit:
-    optional: true
-    modes:
-      - [tls]
-      - ['']
-  metrics-endpoint:
-    optional: true
-  traefik-route:
-    optional: true
-    modes:
-      - [tls]
-      - ['']
-  grafana-dashboard:
-    optional: true
-bridges:
-  - interface: certificate_transfer
-    requires: certificates
-    provides: ingress
-  - interface: certificate_transfer
-    requires: certificates
-    provides: ingress-per-unit
-  - interface: certificate_transfer
-    requires: certificates
-    provides: traefik-route
+overrides:
+  - requires:
+      certificates:
+        optional_if:
+          - none_of:
+              - any_of:
+                  - all_of:
+                      - endpoint_integrated: traefik-route
+                      - endpoint_feature: [traefik-route, tls]
+                  - all_of:
+                      - endpoint_integrated: ingress
+                      - endpoint_feature: ingress:tls
+                  - all_of:
+                      - endpoint_integrated: ingress-per-unit
+                      - endpoint_feature: [ingress-per-unit, tls]
+      experimental-forward-auth:
+        optional: true
+      logging:
+        optional: true
+      charm-tracing:
+        optional: true
+      workload-tracing:
+        optional: true
+      receive-ca-cert:
+        optional: true
+      upstream-ingress:
+        optional: true
+    provides:
+      ingress:
+        optional: true
+        modes:
+          - [tls]
+          - ['']
+      ingress-per-unit:
+        optional: true
+        modes:
+          - [tls]
+          - ['']
+      metrics-endpoint:
+        optional: true
+      traefik-route:
+        optional: true
+        modes:
+          - [tls]
+          - ['']
+      grafana-dashboard:
+        optional: true
+    bridges:
+      - interface: certificate_transfer
+        requires: certificates
+        provides: ingress
+      - interface: certificate_transfer
+        requires: certificates
+        provides: ingress-per-unit
+      - interface: certificate_transfer
+        requires: certificates
+        provides: traefik-route

@@ -1,4 +1,4 @@
-
+---
 # KServe Controller - model serving on Kubernetes
 overrides:
   - provides:

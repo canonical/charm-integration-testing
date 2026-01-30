@@ -1,4 +1,4 @@
-
+---
 # Kubeflow Profiles - manages user namespaces and access control
 overrides:
   - provides:

@@ -1,4 +1,4 @@
-
+---
 # Remove after: https://github.com/canonical/temporal-worker-k8s-operator/pull/88
 overrides:
   - provides:

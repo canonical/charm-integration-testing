@@ -1,4 +1,4 @@
-
+---
 # Istio Pilot - control plane for service mesh
 overrides:
   - provides:

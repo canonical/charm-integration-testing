@@ -1,4 +1,4 @@
-
+---
 # KFP Metadata Writer - records pipeline execution metadata to MLMD
 overrides:
   - requires:

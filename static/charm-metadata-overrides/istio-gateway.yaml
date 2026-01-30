@@ -1,4 +1,4 @@
-
+---
 # Istio Ingress Gateway - entry point for external traffic
 overrides:
   - provides:

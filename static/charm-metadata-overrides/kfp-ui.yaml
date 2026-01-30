@@ -1,4 +1,4 @@
-
+---
 # Kubeflow Pipelines UI - web interface for pipeline management
 overrides:
   - provides:

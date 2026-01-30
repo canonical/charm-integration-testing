@@ -1,4 +1,4 @@
-
+---
 # Kubeflow Central Dashboard - main UI entry point
 overrides:
   - provides:

@@ -1,4 +1,4 @@
-
+---
 # PVCViewer Operator - file browser for persistent volumes
 overrides:
   - provides:
