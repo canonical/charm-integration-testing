@@ -18,7 +18,7 @@ from typing import Any
 
 import pytest
 import yaml
-from pydantic import Field
+from pydantic import Field, TypeAdapter
 from pydantic.dataclasses import dataclass
 
 from bundle_builder.charm import CharmConfigCriteria, CharmTestConfig
@@ -514,8 +514,8 @@ class TestCharmhubClient:
                 info_response={
                     "charm-a": InfoResponse(
                         default_release=InfoResponse.DefaultRelease(
-                            revision=InfoResponse.DefaultRelease.Revision(
-                                metadata=yaml.dump(
+                            revision=TypeAdapter(InfoResponse.DefaultRelease.Revision).validate_python({
+                                "metadata-yaml": yaml.dump(
                                     {
                                         "provides": {
                                             "endpoint-a": {
@@ -524,7 +524,7 @@ class TestCharmhubClient:
                                         }
                                     }
                                 ),
-                            )
+                            })
                         ),
                         result=InfoResponse.Result(deployable_on=frozenset({"kubernetes"})),
                     ),
@@ -543,17 +543,15 @@ class TestCharmhubClient:
                 info_response={
                     "charm-a": InfoResponse(
                         default_release=InfoResponse.DefaultRelease(
-                            revision=InfoResponse.DefaultRelease.Revision(
-                                metadata=CharmMetadata(
-                                    **{
+                            revision=TypeAdapter(InfoResponse.DefaultRelease.Revision).validate_python({
+                                "metadata-yaml": yaml.dump({
                                         "requires": {
                                             "endpoint-a": {
                                                 "interface": "interface-a",
                                             }
                                         }
-                                    }
-                                ),
-                            )
+                                }),
+                            })
                         ),
                         result=InfoResponse.Result(deployable_on=frozenset({"kubernetes"})),
                     ),

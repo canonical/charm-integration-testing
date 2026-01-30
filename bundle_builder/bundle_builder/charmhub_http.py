@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any
 
 import requests
 import yaml
-from pydantic import Field, TypeAdapter, field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 

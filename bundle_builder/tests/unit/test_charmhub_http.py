@@ -18,7 +18,7 @@ from typing import Any
 
 import pytest
 import yaml
-from pydantic import Field
+from pydantic import Field, TypeAdapter
 from pydantic.dataclasses import dataclass
 from requests import Session
 
@@ -145,7 +145,7 @@ def sample_refresh_response() -> RefreshResponse:
     return RefreshResponse(**sample_refresh_json()["results"][0])
 
 
-def sample_info_json() -> dict[str, dict[str, Any]]:
+def sample_info_json() -> dict[str, Any]:
     return {
         "default-release": {
             "revision": {
@@ -168,7 +168,7 @@ def sample_info_json() -> dict[str, dict[str, Any]]:
 
 
 def sample_info_response() -> InfoResponse:
-    return InfoResponse(**sample_info_json())
+    return TypeAdapter(InfoResponse).validate_python(sample_info_json())
 
 
 class TestRefreshResponse:
