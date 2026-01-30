@@ -64,6 +64,7 @@ class CharmEndpoint(BaseModel):
     interface: str
     optional: bool = Field(default=False)
     limit: int | None = Field(default=None)
+    acyclic: bool = Field(default=False)
     modes: set[str] = Field(default_factory=set)
 
 

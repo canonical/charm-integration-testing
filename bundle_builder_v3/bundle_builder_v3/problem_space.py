@@ -133,8 +133,29 @@ def add_charm_to_problem_space(charm: Charm, problem_space: ProblemSpace) -> Pro
         app_ep_1, app_ep_2 = sorted(integration)
         for charm_integration in problem_space.charm_integrations:
             charm_ep_1, charm_ep_2 = sorted(charm_integration)
+            # Check endpoint names match
             if {app_ep_1[1], app_ep_2[1]} != {charm_ep_1[1], charm_ep_2[1]}:
                 continue
+            
+            # Check that valid application-to-charm mappings exist for at least one orientation
+            # Option A: app1 maps to charm1 AND app2 maps to charm2
+            option_a_valid = (
+                (app_ep_1[0], charm_ep_1[0]) in problem_space.application_to_charm
+                and (app_ep_2[0], charm_ep_2[0]) in problem_space.application_to_charm
+                and app_ep_1[1] == charm_ep_1[1]
+                and app_ep_2[1] == charm_ep_2[1]
+            )
+            # Option B: app1 maps to charm2 AND app2 maps to charm1
+            option_b_valid = (
+                (app_ep_1[0], charm_ep_2[0]) in problem_space.application_to_charm
+                and (app_ep_2[0], charm_ep_1[0]) in problem_space.application_to_charm
+                and app_ep_1[1] == charm_ep_2[1]
+                and app_ep_2[1] == charm_ep_1[1]
+            )
+            
+            if not (option_a_valid or option_b_valid):
+                continue
+                
             problem_space.application_integration_to_charm_integration[(integration, charm_integration)] = z3.Bool(
                 f"app_integration_{app_ep_1[0]}:{app_ep_1[1]}__{app_ep_2[0]}:{app_ep_2[1]}_maps_to_charm_integration_{charm_ep_1[0]}:{charm_ep_1[1]}__{charm_ep_2[0]}:{charm_ep_2[1]}"
             )

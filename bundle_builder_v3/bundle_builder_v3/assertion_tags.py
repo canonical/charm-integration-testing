@@ -23,6 +23,7 @@ from pydantic import BaseModel, ConfigDict
 class Assertions(str, Enum):
     APPLICATION_EXISTS = "application_exists"
     APPLICATION_INTEGRATION_EXISTS = "application_integration_exists"
+    CHARM_DEPENDENCY_ACYCLIC = "charm_dependency_acyclic"
     CHARM_ENDPOINT_NON_OPTIONAL = "charm_endpoint_non_optional"
     CHARM_MAPPED_TO_SINGLE_APPLICATION = "charm_mapped_to_single_application"
     CHARM_INTEGRATION_MAPPED_TO_SINGLE_APPLICATION_INTEGRATION = (
@@ -95,6 +96,12 @@ class ApplicationIntegrationExistsTag(AssertionTag):
     integration: list[AppEndpointPayload]
 
 
+class CharmDependencyAcyclicTag(AssertionTag):
+    kind: Assertions = Assertions.CHARM_DEPENDENCY_ACYCLIC
+    requiring_charm: CharmEndpointPayload
+    providing_charm: CharmEndpointPayload
+
+
 class CharmIntegrationMappedToSingleApplicationIntegrationTag(AssertionTag):
     kind: Assertions = Assertions.CHARM_INTEGRATION_MAPPED_TO_SINGLE_APPLICATION_INTEGRATION
     charm_integration: list[CharmEndpointPayload]
@@ -111,6 +118,8 @@ class ApplicationIntegrationAppsMapToCharmsTag(AssertionTag):
     application: str
     application_endpoint: str
     charm: CharmEndpointPayload
+    application_integration: list[AppEndpointPayload]
+    charm_integration: list[CharmEndpointPayload]
 
 
 class CharmExistsFromIntegrationTag(AssertionTag):
@@ -139,6 +148,7 @@ class EndpointRespectsLimitTag(AssertionTag):
 _ASSERTION_TYPE_REGISTRY: dict[Assertions, Type[AssertionTag]] = {
     Assertions.APPLICATION_EXISTS: ApplicationExistsTag,
     Assertions.APPLICATION_INTEGRATION_EXISTS: ApplicationIntegrationExistsTag,
+    Assertions.CHARM_DEPENDENCY_ACYCLIC: CharmDependencyAcyclicTag,
     Assertions.CHARM_ENDPOINT_NON_OPTIONAL: CharmEndpointNonOptionalTag,
     Assertions.CHARM_MAPPED_TO_SINGLE_APPLICATION: CharmMappedToSingleApplicationTag,
     Assertions.CHARM_INTEGRATION_MAPPED_TO_SINGLE_APPLICATION_INTEGRATION: CharmIntegrationMappedToSingleApplicationIntegrationTag,

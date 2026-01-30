@@ -19,7 +19,12 @@ from typing import cast
 
 import z3
 
-from .assertion_tags import ApplicationExistsTag, Assertions, AssertionTag, CharmEndpointNonOptionalTag
+from .assertion_tags import (
+    ApplicationExistsTag,
+    Assertions,
+    AssertionTag,
+    CharmEndpointNonOptionalTag,
+)
 from .bundle import Bundle, Integration
 from .charmhub import CharmhubClient
 from .constraints import add_constraints

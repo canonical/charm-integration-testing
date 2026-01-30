@@ -134,8 +134,10 @@ def integrations_from_args(parser: argparse.ArgumentParser, specs: list[str]) ->
         # Add constraints
         constraints.add(
             Integration(
-                ApplicationEndpoint(application=application_1_name, endpoint=application_1_endpoint),
-                ApplicationEndpoint(application=application_2_name, endpoint=application_2_endpoint),
+                {
+                    ApplicationEndpoint(application=application_1_name, endpoint=application_1_endpoint),
+                    ApplicationEndpoint(application=application_2_name, endpoint=application_2_endpoint),
+                }
             )
         )
     return constraints
