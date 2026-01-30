@@ -1,4 +1,4 @@
-# Copyright (C) 2025 Canonical Ltd
+# Copyright (C) 2026 Canonical Ltd
 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -248,21 +248,21 @@ def add_charm_constraints(solver: z3.Solver, domain: Domain) -> None:
             )
 
     for charm_id, charm in enumerate(domain.charms):
-        for endpoint_name, endpoint in charm.spec.endpoints.items():
-            if not endpoint.optional:
+        for endpoint_name, spec_endpoint in charm.spec.endpoints.items():
+            if not spec_endpoint.optional:
                 solver.assert_and_track(
                     z3.Implies(charm.exists, charm.endpoints[endpoint_name].count >= 1),
                     CharmEndpointNonOptionalTag(charm=_charm_endpoint_payload(charm, charm_id, endpoint_name)).encode(),
                 )
 
     for charm_id, charm in enumerate(domain.charms):
-        for endpoint_name, endpoint in charm.spec.endpoints.items():
-            if endpoint.limit is not None:
+        for endpoint_name, spec_endpoint in charm.spec.endpoints.items():
+            if spec_endpoint.limit is not None:
                 solver.assert_and_track(
-                    z3.Implies(charm.exists, charm.endpoints[endpoint_name].count <= endpoint.limit),
+                    z3.Implies(charm.exists, charm.endpoints[endpoint_name].count <= spec_endpoint.limit),
                     EndpointRespectsLimitTag(
                         charm=_charm_endpoint_payload(charm, charm_id, endpoint_name),
-                        limit=endpoint.limit,
+                        limit=spec_endpoint.limit,
                     ).encode(),
                 )
 

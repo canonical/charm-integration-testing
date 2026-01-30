@@ -29,9 +29,11 @@ poetry run bandit \
         charm_integration_testing/serializeable_dataclass \
         charm_integration_testing/test_suite \
         bundle_builder/bundle_builder \
+        bundle_builder/bundle_builder_v3 \
         scripts \
     || die 'Failed on "bandit"'
 poetry run mypy bundle_builder || die 'Failed on "mypy bundle_builder"'
+poetry run mypy bundle_builder_v3 || die 'Failed on "mypy bundle_builder_v3"'
 poetry run mypy charm_integration_testing || die 'Failed on "mypy charm_integration_testing"'
 poetry run yamlfix --check $(find . -name '*.yaml' -o -name '*.yml') \
     || die 'Failed on "yamlfix"; consider running: poetry run yamlfix $(find . -name '\''*.yaml'\'' -o -name '\''*.yml'\'')'

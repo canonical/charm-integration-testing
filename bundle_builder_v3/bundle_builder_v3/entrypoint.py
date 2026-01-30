@@ -1,4 +1,4 @@
-# Copyright (C) 2025 Canonical Ltd
+# Copyright (C) 2026 Canonical Ltd
 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -17,9 +17,9 @@ import argparse
 import logging
 from pathlib import Path
 
-from .bundle_builder import ApplicationConstraint, BundleBuilder, UnresolvableBundleError
+from .bundle_builder import BundleBuilder, UnresolvableBundleError
 from .charmhub import CharmhubClient
-from .domain import IntegrationConstraint
+from .domain import ApplicationConstraint, IntegrationConstraint
 from .overrides import OverridesClient
 
 

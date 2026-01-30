@@ -1,4 +1,4 @@
-# Copyright (C) 2025 Canonical Ltd
+# Copyright (C) 2026 Canonical Ltd
 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -33,7 +33,7 @@ class CharmChannel(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def validate_from_string(cls, value):
+    def validate_from_string(cls, value: str | dict[str, str]) -> dict[str, str]:
         if isinstance(value, str):
             parts = value.split("/")
             match len(parts):

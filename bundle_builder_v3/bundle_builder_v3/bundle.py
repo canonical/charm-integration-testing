@@ -1,4 +1,4 @@
-# Copyright (C) 2025 Canonical Ltd
+# Copyright (C) 2026 Canonical Ltd
 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -25,10 +25,7 @@ class Application(BaseModel):
     config: CharmConfig = Field(default_factory=CharmConfig)
 
     def __repr__(self) -> str:
-        if self.name == self.charm.name:
-            return f"{self.name}"
-        else:
-            return f"{self.name}({self.charm.name})"
+        return f"{self.charm.name}"
 
 
 class ApplicationEndpoint(BaseModel):
@@ -116,8 +113,14 @@ class Bundle(BaseModel):
         lines.append("")  # Blank line for readability
 
         # Add integrations with endpoint names as labels
-        for integration in sorted(self.integrations):
-            ep1, ep2 = sorted(integration)
+        for integration in sorted(
+            self.integrations,
+            key=lambda i: (
+                min((e.application, e.endpoint) for e in i),
+                max((e.application, e.endpoint) for e in i),
+            ),
+        ):
+            ep1, ep2 = sorted(integration, key=lambda e: (e.application, e.endpoint))
             charm_ep1 = self.applications[ep1.application].charm.endpoints[ep1.endpoint]
             interface = charm_ep1.interface
 

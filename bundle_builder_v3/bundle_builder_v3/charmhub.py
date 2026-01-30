@@ -1,4 +1,4 @@
-# Copyright (C) 2025 Canonical Ltd
+# Copyright (C) 2026 Canonical Ltd
 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -138,7 +138,7 @@ class CharmhubClient:
             # Add find response
             charms[charm] = charm_info.result.deployable_on
 
-        return charms
+        return charms  # type: ignore[return-value]
 
     def _find_charms_platform_overrides(self, charms: set[str]) -> dict[str, set[str]]:
         overrides = {}
@@ -506,6 +506,7 @@ class CharmhubClient:
                     optional = False
 
                 # Calculate limit
+                limit: int | None
                 if endpoint_override.limit is not None:
                     limit = endpoint_override.limit
                 else:

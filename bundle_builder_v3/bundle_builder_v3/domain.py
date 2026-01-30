@@ -1,4 +1,4 @@
-# Copyright (C) 2025 Canonical Ltd
+# Copyright (C) 2026 Canonical Ltd
 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -22,7 +22,7 @@ from .charmhub import CharmhubClient
 
 class IntegrationConstraint(BaseModel):
     """User-provided constraint specifying an integration between two application endpoints.
-    
+
     This is an input constraint, not to be confused with Integration which is the output format.
     """
 
