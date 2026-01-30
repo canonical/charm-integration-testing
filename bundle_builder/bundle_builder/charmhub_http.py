@@ -78,12 +78,7 @@ class CharmMetadata:
     requires: dict[str, Endpoint] = Field(default_factory=dict)
     provides: dict[str, Endpoint] = Field(default_factory=dict)
 
-    @classmethod
-    def from_dict(cls, data: dict[str, dict[str, str]]) -> "CharmMetadata":
-        return TypeAdapter(cls).validate_python(data)
-
     if TYPE_CHECKING:  # so mypy knows the class can be constructed from a dict
-
         def __init__(
             self,
             peers: dict[str, Endpoint | dict[str, Any]] = ...,
