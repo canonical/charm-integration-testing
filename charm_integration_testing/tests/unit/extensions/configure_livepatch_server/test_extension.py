@@ -2,9 +2,7 @@
 # See LICENSE file for licensing details.
 
 import logging
-from collections.abc import KeysView
 from dataclasses import dataclass, field
-from datetime import timedelta
 
 import pytest
 from extensions.configure_livepatch_server.extensions import (
@@ -14,43 +12,13 @@ from extensions.configure_livepatch_server.extensions import (
 )
 from juju.backend import JujuBackend
 
+from ..shared import JujuStub as JujuStubBase
+
 
 @dataclass
-class JujuStub(JujuBackend):
+class JujuStub(JujuStubBase):
     applications: dict[str, str] = field(default_factory=lambda: {"livepatch": LIVEPATCH_SERVER_CHARM})
-    waited_scaled: list[tuple[str, str, str]] = field(default_factory=list)
-    waited_settled: list[tuple[str, str, str]] = field(default_factory=list)
-    waited_messages: list[tuple[str, str, str, str]] = field(default_factory=list)
-    actions: list[tuple[str, str, str, dict[str, str]]] = field(default_factory=list)
-    configured: list[tuple[str, str, dict[str, str]]] = field(default_factory=list)
     unit_ips: dict[str, str] = field(default_factory=lambda: {"livepatch/leader": "10.1.2.157"})
-
-    def list_applications(self, model: str) -> KeysView[str]:  # type: ignore[override]
-        return self.applications.keys()
-
-    def application_charm(self, model: str, application: str) -> str:
-        return self.applications[application]
-
-    def wait_application_scaled(self, model: str, application: str, timeout: timedelta) -> None:  # type: ignore[override]
-        self.waited_scaled.append((model, application, str(timeout)))
-
-    def wait_application_settled(self, model: str, application: str, timeout: timedelta) -> None:  # type: ignore[override]
-        self.waited_settled.append((model, application, str(timeout)))
-
-    def wait_for_unit_message(self, model: str, unit: str, message: str, timeout: timedelta) -> None:  # type: ignore[override]
-        self.waited_messages.append((model, unit, message, str(timeout)))
-
-    def run_action(self, model: str, unit: str, action: str, params: dict[str, str]) -> None:
-        self.actions.append((model, unit, action, params))
-
-    def configure_application(self, model: str, application: str, values: dict[str, str]) -> None:
-        self.configured.append((model, application, values))
-
-    def unit_ip(self, model: str, unit: str) -> str:
-        return self.unit_ips[unit]
-
-    def scale_application(self) -> None:  # type: ignore[override]
-        pass
 
     def num_units(self) -> None:  # type: ignore[override]
         pass
@@ -115,9 +83,6 @@ class JujuStub(JujuBackend):
     def ssh(self) -> None:  # type: ignore[override]
         pass
 
-    def get_charm_revisions(self) -> None:  # type: ignore[override]
-        pass
-
     def version(self) -> None:  # type: ignore[override]
         pass
 
@@ -161,7 +126,7 @@ class TestConfigureLivepatchServerExtension:
             # THEN the livepatch server is configured
             assert len(juju.waited_scaled) > 0
             assert len(juju.actions) > 0
-            assert len(juju.configured) > 0
+            assert len(juju.configured_applications) > 0
 
         def test_ignores_non_livepatch_apps(self, extension_with_token: ConfigureLivepatchServerExtension) -> None:
             # GIVEN a model with no livepatch server applications
@@ -174,7 +139,7 @@ class TestConfigureLivepatchServerExtension:
             # THEN no configuration happens
             assert juju_stub.waited_scaled == []
             assert juju_stub.actions == []
-            assert juju_stub.configured == []
+            assert juju_stub.configured_applications == []
 
         def test_skips_configuration_without_token(
             self, extension_without_token: ConfigureLivepatchServerExtension, juju: JujuStub, logger: LoggerStub
@@ -187,7 +152,7 @@ class TestConfigureLivepatchServerExtension:
             assert any("No Ubuntu Pro token provided" in msg for msg in logger.messages["warning"])
             assert juju.waited_scaled == []
             assert juju.actions == []
-            assert juju.configured == []
+            assert juju.configured_applications == []
 
     class TestConfigureLivepatchServer:
         def test_complete_configuration_flow(
@@ -225,7 +190,7 @@ class TestConfigureLivepatchServerExtension:
                 "test-model",
                 "livepatch",
                 {"server.url-template": "http://10.1.2.157:8080/v1/patches/{filename}"},
-            ) in juju.configured
+            ) in juju.configured_applications
 
         def test_skips_when_no_token(
             self, extension_without_token: ConfigureLivepatchServerExtension, juju: JujuStub, logger: LoggerStub
@@ -238,7 +203,7 @@ class TestConfigureLivepatchServerExtension:
             assert any("No Ubuntu Pro token provided" in msg for msg in logger.messages["warning"])
             assert juju.waited_scaled == []
             assert juju.actions == []
-            assert juju.configured == []
+            assert juju.configured_applications == []
 
         def test_uses_correct_unit_ip(self, juju: JujuStub, logger: LoggerStub) -> None:
             # GIVEN an extension with a specific unit IP
@@ -252,7 +217,7 @@ class TestConfigureLivepatchServerExtension:
                 "test-model",
                 "livepatch",
                 {"server.url-template": "http://192.168.1.100:8080/v1/patches/{filename}"},
-            ) in juju.configured
+            ) in juju.configured_applications
 
     class TestInitialization:
         def test_stores_token(self, juju: JujuStub, logger: LoggerStub) -> None:

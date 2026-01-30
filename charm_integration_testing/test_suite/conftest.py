@@ -17,6 +17,7 @@ from extensions import (
     PostgresqlDatabaseReplicationExtension,
     PostgresqlK8sDatabaseReplicationExtension,
     S3IntegratorMinIOBackendExtension,
+    TemporalExtension,
     UnsealVaultJujuExtension,
     UnsealVaultK8sJujuExtension,
 )
@@ -24,6 +25,11 @@ from juju import JujuBackend, JujuClient, JujuWaitTimeoutError
 from juju_jubilant import JubilantBackend
 from pytest import StashKey
 from utils import normalize_string, normalize_string_multiline
+
+KNOWN_FAILURE_EXCEPTIONS = (
+    JujuWaitTimeoutError,
+    AssertionError,
+)
 
 
 @pytest.fixture
@@ -54,6 +60,7 @@ def juju_client(
             PostgresqlDatabaseReplicationExtension(juju_backend, logger),
             PostgresqlK8sDatabaseReplicationExtension(juju_backend, logger),
             S3IntegratorMinIOBackendExtension(juju_backend, logger, minio_client_file),
+            TemporalExtension(juju_backend, logger),
             UnsealVaultJujuExtension(juju_backend, logger),
             UnsealVaultK8sJujuExtension(juju_backend, logger),
         ],
@@ -88,6 +95,7 @@ def ubuntu_pro_token() -> str | None:
 
 
 failure_message = StashKey[str]()
+error_message = StashKey[str]()
 skipped_message = StashKey[str]()
 failure_exception = StashKey[BaseException]()
 
@@ -99,6 +107,17 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[Any]) -> 
     assert result is not None
     report = result.get_result()
 
+    unexpected_error = False
+
+    if call.excinfo is not None:
+        exception_type = call.excinfo.type
+        # Don't interfere with pytest's built-in exceptions (skip, xfail, etc.)
+        if exception_type.__name__ in ("Skipped", "XFailed", "Exit"):
+            pass
+        elif exception_type not in KNOWN_FAILURE_EXCEPTIONS:
+            # Unexpected errors: set flag to modify message
+            unexpected_error = True
+
     # Save failure message
     if report.failed:
         # Adapted from https://docs.pytest.org/en/stable/_modules/_pytest/junitxml.html
@@ -107,7 +126,8 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[Any]) -> 
             item.stash[failure_message] = reprcrash.message
         else:
             item.stash[failure_message] = str(report.longrepr)
-
+        if unexpected_error:
+            item.stash[error_message] = item.stash[failure_message]
     # Save skip message
     if report.skipped:
         # Adapted from https://docs.pytest.org/en/stable/_modules/_pytest/junitxml.html
@@ -145,7 +165,9 @@ def print_setup_and_teardown_info(
     yield
 
     # Log error
-    if failure_message in request.node.stash:
+    if error_message in request.node.stash:
+        logger.error(f"Error in {request.node.name}: {request.node.stash[error_message]}")
+    elif failure_message in request.node.stash:
         logger.error(f"Failure in {request.node.name}: {request.node.stash[failure_message]}")
     elif skipped_message in request.node.stash:
         logger.info(f"Skipped {request.node.name}: {request.node.stash[skipped_message]}")
@@ -236,11 +258,22 @@ def record_charms_and_revisions_execution_metadata_instantaneous(
     juju_client: JujuClient, model: str, execution_metadata: Callable[[str, str | int], None]
 ) -> None:
     # Get all charm revisions
-    for charm, revision in juju_client.get_charm_revisions(model=model):
+    applications = juju_client.list_applications(model=model)
+    for application_info in applications.values():
         # Save the charm
-        execution_metadata("charm", charm)
+        execution_metadata("charm", application_info.charm)
         # Save the revision
-        execution_metadata(f"charm:{charm}:revision", str(revision))
+        execution_metadata(f"charm:{application_info.charm}:revision", str(application_info.revision))
+
+    # Get all integrations and record them
+    for integration in juju_client.list_integrations(model=model):
+        # Record integration in format: provider:endpoint/interface/requirer:endpoint
+        integration_str = (
+            f"{applications[integration.provider.application].charm}:{integration.provider.endpoint}/"
+            f"{integration.interface}/"
+            f"{applications[integration.requirer.application].charm}:{integration.requirer.endpoint}"
+        )
+        execution_metadata("integration", integration_str)
 
 
 @pytest.fixture
@@ -276,7 +309,6 @@ def record_failure_execution_metadata(
     if failure_exception in request.node.stash:
         exc = request.node.stash[failure_exception]
 
-        # Save state from wait timeout
         if isinstance(exc, JujuWaitTimeoutError):
             for application in exc.wait_state.noncompliant_applications.values():
                 if application is None:
@@ -309,6 +341,12 @@ def record_failure_execution_metadata(
             if exc.stderr:
                 for line in normalize_string_multiline(exc.stderr):
                     execution_metadata("failure:cli:stderr", line)
+
+        if error_message in request.node.stash:
+            # toggle expected failure flag
+            execution_metadata("failure:expected", "false")
+        else:
+            execution_metadata("failure:expected", "true")
 
 
 @pytest.fixture

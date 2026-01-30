@@ -13,6 +13,85 @@ from juju_jubilant.backend import JubilantBackend
 from juju_jubilant.client import JubilantClient
 from pydantic.dataclasses import dataclass
 
+# Shared status outputs for integration tests
+STATUS_WITH_SINGLE_INTEGRATION = """Model  Controller  Cloud/Region  Version    SLA          Timestamp
+test   microk8s    microk8s      3.1.9      unsupported  12:34:56+00:00
+
+App       Version  Status  Scale  Charm     Channel  Rev  Address        Exposed  Message
+database  14       active      1  database  stable    12  10.1.2.3       no       ready
+webapp              active      1  webapp    edge      45  10.1.2.4       no       ready
+
+Unit           Workload  Agent  Address   Ports     Message
+database/0*    active    idle   10.1.2.3  5432/tcp  ready
+webapp/0*      active    idle   10.1.2.4  80/tcp    ready
+
+Integration provider  Requirer         Interface  Type     Message
+database:db           webapp:database  pgsql      regular
+
+"""
+
+STATUS_WITH_PEER_INTEGRATION = """Model  Controller  Cloud/Region  Version    SLA          Timestamp
+test   microk8s    microk8s      3.1.9      unsupported  12:34:56+00:00
+
+App       Version  Status  Scale  Charm     Channel  Rev  Address        Exposed  Message
+database  14       active      3  database  stable    12  10.1.2.3       no       ready
+
+Unit           Workload  Agent  Address   Ports     Message
+database/0*    active    idle   10.1.2.3  5432/tcp  ready
+database/1     active    idle   10.1.2.5  5432/tcp  ready
+database/2     active    idle   10.1.2.6  5432/tcp  ready
+
+Integration provider    Requirer            Interface  Type  Message
+database:cluster-peers  database:cluster    cluster    peer
+
+"""
+
+STATUS_WITH_MULTIPLE_INTEGRATIONS = """Model  Controller  Cloud/Region  Version    SLA          Timestamp
+test   microk8s    microk8s      3.1.9      unsupported  12:34:56+00:00
+
+App       Version  Status  Scale  Charm     Channel  Rev  Address        Exposed  Message
+database  14       active      1  database  stable    12  10.1.2.3       no       ready
+webapp              active      1  webapp    edge      45  10.1.2.4       no       ready
+cache               active      1  redis     stable     8  10.1.2.5       no       ready
+
+Unit           Workload  Agent  Address   Ports     Message
+database/0*    active    idle   10.1.2.3  5432/tcp  ready
+webapp/0*      active    idle   10.1.2.4  80/tcp    ready
+cache/0*       active    idle   10.1.2.5  6379/tcp  ready
+
+Integration provider  Requirer         Interface  Type     Message
+database:db           webapp:database  pgsql      regular
+cache:cache           webapp:redis     redis      regular
+
+"""
+
+STATUS_WITH_NO_INTEGRATIONS = """Model  Controller  Cloud/Region  Version    SLA          Timestamp
+test   microk8s    microk8s      3.1.9      unsupported  12:34:56+00:00
+
+App       Version  Status  Scale  Charm     Channel  Rev  Address        Exposed  Message
+webapp              active      1  webapp    edge      45  10.1.2.4       no       ready
+
+Unit           Workload  Agent  Address   Ports     Message
+webapp/0*      active    idle   10.1.2.4  80/tcp    ready
+
+"""
+
+STATUS_EMPTY_MODEL = """Model     Controller  Cloud/Region  Version  SLA          Timestamp
+ryan-stg  ryan-stg    ps6-k8s-stg   3.6.13   unsupported  17:41:32Z
+
+Model "admin/ryan-stg" is empty.
+"""
+
+STATUS_NO_INTEGRATION_SECTION = """Model       Controller  Cloud/Region  Version  SLA          Timestamp
+ryan-stg-2  ryan-stg    ps6-k8s-stg   3.6.13   unsupported  17:43:28Z
+
+App                       Version  Status   Scale  Charm                     Channel   Rev  Address         Exposed  Message
+self-signed-certificates           waiting      1  self-signed-certificates  1/stable  317  10.152.183.188  no       installing agent
+
+Unit                         Workload  Agent  Address     Ports  Message
+self-signed-certificates/0*  running   idle   10.1.2.103         
+"""
+
 
 class JubilantClientStub(JubilantClient):
     client: Any
@@ -51,10 +130,13 @@ class StatusStub:
     """Stub for status() method"""
 
     call_count: int = 0
+    application_statuses: dict[str, str] = field(default_factory=dict)
+    unit_workload_statuses: dict[str, str] = field(default_factory=dict)
+    unit_juju_statuses: dict[str, str] = field(default_factory=dict)
 
     def status(self) -> jubilant.Status:
         self.call_count += 1
-        return jubilant.Status(
+        status = jubilant.Status(
             model=jubilant.statustypes.ModelStatus(
                 name="test-model",
                 type="caas",
@@ -65,6 +147,48 @@ class StatusStub:
             machines={},
             apps={},
         )
+
+        # If statuses are provided, populate the apps dictionary for any apps/units supplied.
+
+        # 1. Collect all application and unit names from application statuses and unit statuses.
+        app_names = set(self.application_statuses.keys())
+        unit_derived_app_names = set()
+        for status_dict in (self.unit_workload_statuses, self.unit_juju_statuses):
+            for unit_id in status_dict.keys():
+                app_name = unit_id.split("/")[0]
+                unit_derived_app_names.add(app_name)
+        app_names.update(unit_derived_app_names)
+
+        units_by_app_name: dict[str, set[str]] = {}
+        for status_dict in (self.unit_workload_statuses, self.unit_juju_statuses):
+            for unit_id in status_dict.keys():
+                units_by_app_name.setdefault(unit_id.split("/")[0], set()).add(unit_id)
+
+        # 2. For each application, create AppStatus with relevant UnitStatus entries.
+        for app in app_names:
+            unit_names = units_by_app_name.get(app, set())
+            units = {
+                unit_name: jubilant.statustypes.UnitStatus(
+                    workload_status=jubilant.statustypes.StatusInfo(
+                        self.unit_workload_statuses.get(unit_name, "unknown")
+                    ),
+                    juju_status=jubilant.statustypes.StatusInfo(self.unit_juju_statuses.get(unit_name, "unknown")),
+                )
+                for unit_name in unit_names
+            }
+            status.apps[app] = jubilant.statustypes.AppStatus(
+                # Required - just supplying some dummy values
+                charm="test-charm",
+                charm_origin="charmhub",
+                charm_name="test-charm",
+                charm_rev=1,
+                exposed=False,
+                # These are the parameters we actually care about:
+                app_status=jubilant.statustypes.StatusInfo(current=self.application_statuses.get(app, "unknown")),
+                units=units,
+            )
+
+        return status
 
 
 @dataclass
@@ -342,6 +466,23 @@ class TestJubilantBackend:
             # THEN it completed all 10 checks despite short timeout
             assert stub.call_count == 10
 
+        def test_wait_idle_on_subset_of_model(self) -> None:
+            # GIVEN
+            stub = StatusStub(application_statuses={"app1": "active", "app2": "active", "app3": "blocked"})
+            client = JubilantClientStub(client=stub)
+            backend = JubilantBackend(client)
+
+            # WHEN wait_idle is called with specific applications/units
+            backend.wait_idle(
+                "test-model",
+                timedelta(seconds=3),
+                count=3,
+                applications=["app1", "app2"],
+            )
+
+            # THEN status was called 3 times
+            assert stub.call_count == 3
+
     class TestWaitApplicationSettled:
         def test_application_settled(self) -> None:
             # GIVEN
@@ -572,9 +713,10 @@ class TestJubilantBackend:
             charm: str | None = None
             app: str | None = None
 
-            def deploy(self, charm: str, app: str | None = None) -> None:
+            def deploy(self, charm: str, app: str | None = None, config: Any = None) -> None:
                 self.charm = charm
                 self.app = app
+                self.config = config
 
         def test(self) -> None:
             # GIVEN
@@ -582,11 +724,14 @@ class TestJubilantBackend:
             client = JubilantClientStub(client=stub)
 
             # WHEN
-            JubilantBackend(client).deploy_application("test-model", charm="my-charm", application="my-app")
+            JubilantBackend(client).deploy_application(
+                "test-model", charm="my-charm", application="my-app", config={"setting": "value"}
+            )
 
             # THEN
             assert stub.charm == "my-charm"
             assert stub.app == "my-app"
+            assert stub.config == {"setting": "value"}
 
     class TestConfigureApplication:
         @dataclass
@@ -714,7 +859,7 @@ class TestJubilantBackend:
             else:
                 assert False, "Expected KeyError"
 
-    class TestGetCharmRevisions:
+    class TestListApplications:
         class StatusStub:
             def __init__(self, charm: str, charm_rev: int) -> None:
                 self.apps = {
@@ -729,27 +874,279 @@ class TestJubilantBackend:
 
         class ModelStatus:
             def __init__(self, charm: str, charm_rev: int) -> None:
-                self.apps = TestJubilantBackend.TestGetCharmRevisions.StatusStub(charm, charm_rev).apps
+                self.apps = TestJubilantBackend.TestListApplications.StatusStub(charm, charm_rev).apps
 
         class StatusStubClient:
-            def status(self) -> "TestJubilantBackend.TestGetCharmRevisions.ModelStatus":
-                return TestJubilantBackend.TestGetCharmRevisions.ModelStatus("my-charm", 1)
+            def status(self) -> "TestJubilantBackend.TestListApplications.ModelStatus":
+                return TestJubilantBackend.TestListApplications.ModelStatus("my-charm", 1)
 
         class ModelStub:
-            client: "TestJubilantBackend.TestGetCharmRevisions.StatusStubClient"
+            client: "TestJubilantBackend.TestListApplications.StatusStubClient"
 
-            def __init__(self, client: "TestJubilantBackend.TestGetCharmRevisions.StatusStubClient") -> None:
+            def __init__(self, client: "TestJubilantBackend.TestListApplications.StatusStubClient") -> None:
                 self.client = client
 
-            def status(self) -> "TestJubilantBackend.TestGetCharmRevisions.ModelStatus":
+            def status(self) -> "TestJubilantBackend.TestListApplications.ModelStatus":
                 return self.client.status()
 
-        def test_get_charm_revisions(self) -> None:
+        def test(self) -> None:
             # GIVEN
             client = JubilantClientStub(client=self.ModelStub(client=self.StatusStubClient()))
 
             # WHEN
-            charm_revisions = JubilantBackend(client).get_charm_revisions("test-model")
+            applications = JubilantBackend(client).list_applications("test-model")
 
             # THEN
-            assert charm_revisions == {("my-charm", 1)}
+            assert len(applications) == 1
+            app_info = applications["my-app"]
+            assert app_info.charm == "my-charm"
+            assert app_info.revision == 1
+
+    class TestListIntegrations:
+        class CliStub:
+            def __init__(self, status_output: str) -> None:
+                self.status_output = status_output
+
+            def cli(self, *args: str) -> str:
+                if args == ("status", "--integrations", "--format", "tabular"):
+                    return self.status_output
+                return ""
+
+        @dataclass
+        class Params:
+            label: str
+            status_output: str
+            expected_count: int
+            expected_integrations: list[dict[str, str]] = field(default_factory=list)
+
+        test_cases = [
+            Params(
+                label="parses_tabular_status",
+                status_output=STATUS_WITH_SINGLE_INTEGRATION,
+                expected_count=1,
+                expected_integrations=[
+                    {
+                        "provider_app": "database",
+                        "provider_endpoint": "db",
+                        "requirer_app": "webapp",
+                        "requirer_endpoint": "database",
+                        "interface": "pgsql",
+                    }
+                ],
+            ),
+            Params(
+                label="skips_peer_integrations",
+                status_output=STATUS_WITH_PEER_INTEGRATION,
+                expected_count=0,
+            ),
+            Params(
+                label="handles_multiple_integrations",
+                status_output=STATUS_WITH_MULTIPLE_INTEGRATIONS,
+                expected_count=2,
+                expected_integrations=[
+                    {
+                        "provider_app": "cache",
+                        "provider_endpoint": "cache",
+                        "requirer_app": "webapp",
+                        "requirer_endpoint": "redis",
+                        "interface": "redis",
+                    },
+                    {
+                        "provider_app": "database",
+                        "provider_endpoint": "db",
+                        "requirer_app": "webapp",
+                        "requirer_endpoint": "database",
+                        "interface": "pgsql",
+                    },
+                ],
+            ),
+            Params(
+                label="returns_empty_set_when_no_integrations",
+                status_output=STATUS_WITH_NO_INTEGRATIONS,
+                expected_count=0,
+            ),
+            Params(
+                label="empty_model",
+                status_output=STATUS_EMPTY_MODEL,
+                expected_count=0,
+            ),
+            Params(
+                label="model_with_app_but_no_integration_section",
+                status_output=STATUS_NO_INTEGRATION_SECTION,
+                expected_count=0,
+            ),
+        ]
+
+        @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
+        def test(self, params: Params) -> None:
+            # GIVEN a client with status output
+            client = JubilantClientStub(client=self.CliStub(params.status_output))
+
+            # WHEN list_integrations is called
+            integrations = JubilantBackend(client).list_integrations("test-model")
+
+            # THEN count matches expected
+            assert len(integrations) == params.expected_count
+            assert isinstance(integrations, set)
+
+            # AND integration details match expected (if any)
+            if params.expected_integrations:
+                integrations_list = sorted(integrations, key=lambda i: i.provider.application)
+                for i, expected in enumerate(params.expected_integrations):
+                    assert integrations_list[i].provider.application == expected["provider_app"]
+                    assert integrations_list[i].provider.endpoint == expected["provider_endpoint"]
+                    assert integrations_list[i].requirer.application == expected["requirer_app"]
+                    assert integrations_list[i].requirer.endpoint == expected["requirer_endpoint"]
+                    assert integrations_list[i].interface == expected["interface"]
+
+    class TestIntegrationExists:
+        class CliStub:
+            def __init__(self, status_output: str) -> None:
+                self.status_output = status_output
+
+            def cli(self, *args: str) -> str:
+                if args == ("status", "--integrations", "--format", "tabular"):
+                    return self.status_output
+                return ""
+
+        @dataclass
+        class Params:
+            label: str
+            status_output: str
+            app1: str
+            endpoint1: str
+            app2: str
+            endpoint2: str
+            expected_exists: bool
+
+        test_cases = [
+            Params(
+                label="integration_exists",
+                status_output=STATUS_WITH_SINGLE_INTEGRATION,
+                app1="database",
+                endpoint1="db",
+                app2="webapp",
+                endpoint2="database",
+                expected_exists=True,
+            ),
+            Params(
+                label="integration_exists_reversed_direction",
+                status_output=STATUS_WITH_SINGLE_INTEGRATION,
+                app1="webapp",
+                endpoint1="database",
+                app2="database",
+                endpoint2="db",
+                expected_exists=True,
+            ),
+            Params(
+                label="integration_does_not_exist",
+                status_output=STATUS_WITH_SINGLE_INTEGRATION,
+                app1="cache",
+                endpoint1="cache",
+                app2="webapp",
+                endpoint2="redis",
+                expected_exists=False,
+            ),
+            Params(
+                label="partial_match_wrong_endpoint",
+                status_output=STATUS_WITH_SINGLE_INTEGRATION,
+                app1="database",
+                endpoint1="wrong-endpoint",
+                app2="webapp",
+                endpoint2="database",
+                expected_exists=False,
+            ),
+            Params(
+                label="empty_model",
+                status_output=STATUS_EMPTY_MODEL,
+                app1="database",
+                endpoint1="db",
+                app2="webapp",
+                endpoint2="database",
+                expected_exists=False,
+            ),
+            Params(
+                label="multiple_integrations_finds_correct_one",
+                status_output=STATUS_WITH_MULTIPLE_INTEGRATIONS,
+                app1="cache",
+                endpoint1="cache",
+                app2="webapp",
+                endpoint2="redis",
+                expected_exists=True,
+            ),
+        ]
+
+        @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
+        def test(self, params: Params) -> None:
+            # GIVEN a client with status output
+            client = JubilantClientStub(client=self.CliStub(params.status_output))
+
+            # WHEN integration_exists is called
+            exists = JubilantBackend(client).integration_exists(
+                params.app1, params.endpoint1, params.app2, params.endpoint2, "test-model"
+            )
+
+            # THEN result matches expected
+            assert exists == params.expected_exists
+
+    class TestRunAction:
+        @dataclass
+        class ActionStub:
+            unit: str = ""
+            action: str = ""
+            params: dict[str, Any] = field(default_factory=dict)
+
+            def run(self, unit: str, action: str, params: dict[str, Any]) -> jubilant.Task:
+                self.unit = unit
+                self.action = action
+                self.params = params
+                return jubilant.Task(
+                    id="123", status="failed", return_code=1, message="error", results={"output": "error output"}
+                )
+
+        def test(self) -> None:
+            # This test does two things:
+            # * Verifies basic plumbing of run_action via our backend class.
+            # * Verifies that we correctly transform from jubilant.Task to our own JujuTask.
+
+            # GIVEN
+            stub = self.ActionStub()
+            client = JubilantClientStub(client=stub)
+
+            # WHEN
+            task = JubilantBackend(client).run_action(
+                "test-model", unit="my-app/0", action="restart-service", params={"force": True}
+            )
+
+            # THEN
+            assert stub.unit == "my-app/0"
+            assert stub.action == "restart-service"
+            assert stub.params == {"force": True}
+
+            # The following just verifies that we transform from the jubilant.Task to our own JujuTask as expected.
+            assert task.id == "123"
+            assert task.return_code == 1
+            assert task.status == "failed"
+            assert task.message == "error"
+            assert task.output == "error output"
+
+    class TestGetApplicationConfig:
+        @dataclass
+        class ConfigStub:
+            app: str = ""
+
+            def config(self, app: str) -> dict[str, Any]:
+                self.app = app
+                return {"setting1": "value1", "setting2": "value2"}
+
+        def test(self) -> None:
+            # GIVEN
+            stub = self.ConfigStub()
+            client = JubilantClientStub(client=stub)
+
+            # WHEN
+            config = JubilantBackend(client).get_application_config("test-model", "my-app")
+
+            # THEN
+            assert stub.app == "my-app"
+            assert config == {"setting1": "value1", "setting2": "value2"}

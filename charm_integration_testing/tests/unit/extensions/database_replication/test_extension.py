@@ -3,13 +3,14 @@
 
 import logging
 from dataclasses import dataclass, field
-from datetime import timedelta
 
 import pytest
 from extensions.database_replication.database_client import DatabaseClient
 from extensions.database_replication.database_replicator import CharmInfo
 from extensions.database_replication.extension import GenericDatabaseReplicationExtension
-from juju.backend import JujuBackend
+from juju.models import JujuIntegrationApplication
+
+from ..shared import JujuStub as JujuStubBase
 
 
 @dataclass
@@ -35,122 +36,17 @@ class DatabaseClientStub(DatabaseClient):
 
 
 @dataclass
-class JujuStub(JujuBackend):
+class JujuStub(JujuStubBase):
     """Stub implementation of JujuBackend for testing DatabaseReplicator"""
 
     applications: dict[str, str] = field(
         default_factory=lambda: {"postgresql-1": "postgresql", "postgresql-2": "postgresql"}
     )
-    integrations: list[tuple[str, str, str, str]] = field(default_factory=list)
-    waited_scaled: list[tuple[str, str, str]] = field(default_factory=list)
-    waited_settled: list[tuple[str, str, str]] = field(default_factory=list)
     units: dict[str, int] = field(default_factory=lambda: {"postgresql-1": 3, "postgresql-2": 3})
-    configured_applications: list[tuple[str, str, dict[str, str]]] = field(default_factory=list)
-
-    def scale_application(self) -> None:  # type: ignore[override]
-        pass
-
-    def list_integrations(self) -> None:  # type: ignore[override]
-        pass
-
-    def wait_idle(self) -> None:  # type: ignore[override]
-        pass
-
-    def wait_for_unit_message(self) -> None:  # type: ignore[override]
-        pass
-
-    def juju_status_text(self) -> None:  # type: ignore[override]
-        pass
-
-    def integrate(self) -> None:  # type: ignore[override]
-        pass
-
-    def remove_integration(self) -> None:  # type: ignore[override]
-        pass
-
-    def deploy_bundle_file(self) -> None:  # type: ignore[override]
-        pass
-
-    def remove_applications(self) -> None:  # type: ignore[override]
-        pass
-
-    def wait_for_removal(self) -> None:  # type: ignore[override]
-        pass
-
-    def wait_for_removal_of_integration(self) -> None:  # type: ignore[override]
-        pass
-
-    def wait_for_removal_of_units(self) -> None:  # type: ignore[override]
-        pass
-
-    def application_units(self) -> None:  # type: ignore[override]
-        pass
-
-    def exec_unit(self) -> None:  # type: ignore[override]
-        pass
-
-    def run_action(self) -> None:  # type: ignore[override]
-        pass
-
-    def add_secret(self) -> None:  # type: ignore[override]
-        pass
-
-    def read_secret(self) -> None:  # type: ignore[override]
-        pass
-
-    def grant_secret(self) -> None:  # type: ignore[override]
-        pass
-
-    def remove_secret(self) -> None:  # type: ignore[override]
-        pass
-
-    def deploy_application(self) -> None:  # type: ignore[override]
-        pass
-
-    def scp(self) -> None:  # type: ignore[override]
-        pass
-
-    def ssh(self) -> None:  # type: ignore[override]
-        pass
-
-    def unit_ip(self) -> None:  # type: ignore[override]
-        pass
-
-    def get_charm_revisions(self) -> None:  # type: ignore[override]
-        pass
-
-    def version(self) -> None:  # type: ignore[override]
-        pass
-
-    def list_applications(self, model: str) -> list[str]:  # type: ignore[override]
-        """Return list of application names in the model"""
-        return list(self.applications.keys())
-
-    def application_charm(self, model: str, application: str) -> str:
-        """Return the charm name for a given application"""
-        return self.applications[application]
-
-    def integration_exists(
-        self, application1: str, endpoint1: str, application2: str, endpoint2: str, model: str
-    ) -> bool:
-        """Check if an integration exists between two applications"""
-        return (application1, endpoint1, application2, endpoint2) in self.integrations
-
-    def wait_application_scaled(self, model: str, application: str, timeout: timedelta) -> None:  # type: ignore[override]
-        """Wait for application to be scaled (captures call for verification)"""
-        self.waited_scaled.append((model, application, str(timeout)))
-
-    def wait_application_settled(self, model: str, application: str, timeout: timedelta) -> None:  # type: ignore[override]
-        """Wait for application to settle (captures call for verification)"""
-        self.waited_settled.append((model, application, str(timeout)))
 
     def num_units(self, model: str, application: str) -> int:
         """Return the number of units for an application"""
         return self.units.get(application, 0)
-
-    def configure_application(self, model: str, application: str, values: dict[str, str]) -> None:
-        """Mock configuring an application (captures call for verification)"""
-        self.configured_applications.append((model, application, values))
 
 
 class TestPostgreSQLDatabaseReplicationExtension:
@@ -224,7 +120,11 @@ class TestPostgreSQLDatabaseReplicationExtension:
             self, extension: GenericDatabaseReplicationExtension, juju: JujuStub
         ) -> None:
             # GIVEN a model with 2+ postgresql applications and an integration
-            juju.integrations = [("postgresql-1", "logical-replication-offer", "postgresql-2", "logical-replication")]
+            juju.integrate(
+                "test-model",
+                JujuIntegrationApplication("postgresql-1", "logical-replication-offer"),
+                JujuIntegrationApplication("postgresql-2", "logical-replication"),
+            )
 
             # WHEN post_deploy is called
             extension.post_deploy("test-model")
@@ -237,7 +137,6 @@ class TestPostgreSQLDatabaseReplicationExtension:
             self, extension: GenericDatabaseReplicationExtension, juju: JujuStub
         ) -> None:
             # GIVEN a model with 2+ postgresql applications but no integrations
-            juju.integrations = []
 
             # WHEN post_deploy is called
             extension.post_deploy("test-model")
@@ -284,7 +183,11 @@ class TestPostgreSQLDatabaseReplicationExtension:
             self, extension: GenericDatabaseReplicationExtension, juju: JujuStub
         ) -> None:
             # GIVEN a model with postgresql applications that have common databases and tables
-            juju.integrations = [("postgresql-1", "logical-replication-offer", "postgresql-2", "logical-replication")]
+            juju.integrate(
+                "test-model",
+                JujuIntegrationApplication("postgresql-1", "logical-replication-offer"),
+                JujuIntegrationApplication("postgresql-2", "logical-replication"),
+            )
             database_replicator = extension.database_replicator
 
             # WHEN try_replicate_database_cluster is called

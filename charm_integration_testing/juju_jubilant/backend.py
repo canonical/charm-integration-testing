@@ -5,13 +5,16 @@
 import dataclasses
 import time
 from datetime import datetime, timedelta
-from typing import Callable
+from typing import Any, Callable
 
 import jubilant
 import yaml
 from juju import (
+    JujuApplicationInfo,
+    JujuIntegration,
     JujuIntegrationApplication,
     JujuStatusPerformanceWarning,
+    JujuTask,
     JujuWaitState,
     JujuWaitTimeoutError,
     warn_performance,
@@ -24,7 +27,6 @@ from .wait import (
     applications_are_removed,
     applications_are_scaled,
     applications_have_no_units,
-    get_integrations,
     integrations_are_removed,
     units_have_message,
 )
@@ -113,10 +115,21 @@ class JubilantBackend(JujuCmdBackend):
             )
         raise JujuWaitTimeoutError(wait_state=noncompliant_wait_state)
 
-    def wait_idle(self, model: str, timeout: timedelta | None, count: int | None, strict_timeout: bool = False) -> None:
+    def wait_idle(
+        self,
+        model: str,
+        timeout: timedelta | None,
+        count: int | None,
+        strict_timeout: bool = False,
+        applications: list[str] | None = None,
+    ) -> None:
+        if applications is None:
+            applications = []
         self.wait(
             model,
-            lambda status: all_statuses_are_in(status, application_statuses={"active"}, unit_statuses={"active"}),
+            lambda status: all_statuses_are_in(
+                status, *applications, application_statuses={"active"}, unit_statuses={"active"}
+            ),
             timeout=timeout,
             successes=count,
             strict_timeout=strict_timeout,
@@ -155,6 +168,19 @@ class JubilantBackend(JujuCmdBackend):
 
     def wait_for_removal_of_units(self, model: str, applications: list[str], timeout: timedelta | None) -> None:
         self.wait(model, lambda status: applications_have_no_units(status, *applications), timeout=timeout)
+
+    def run_action(self, model: str, unit: str, action: str, params: dict[str, Any]) -> JujuTask:
+        try:
+            task = self.client.model(model).run(
+                unit=unit,
+                action=action,
+                params=params,
+            )
+        except jubilant._task.TaskError as e:
+            # Just extract the task from the exception
+            task = e.task
+
+        return JujuTask(task.id, task.return_code, task.status, task.message, task.results.get("output", ""))
 
     def add_secret(self, model: str, name: str, values: dict[str, str]) -> str:
         return (
@@ -197,10 +223,13 @@ class JubilantBackend(JujuCmdBackend):
             name_or_id,
         )
 
-    def deploy_application(self, model: str, charm: str, application: str | None = None) -> None:
+    def deploy_application(
+        self, model: str, charm: str, application: str | None = None, config: dict[str, Any] | None = None
+    ) -> None:
         self.client.model(model).deploy(
             charm=charm,
             app=application,
+            config=config,
         )
 
     def configure_application(self, model: str, application: str, values: dict[str, str]) -> None:
@@ -208,6 +237,11 @@ class JubilantBackend(JujuCmdBackend):
             app=application,
             values=values,
         )
+
+    def get_application_config(self, model: str, application: str) -> dict[str, Any]:
+        # I'd rather just pass this through, but to follow the return type correctly,
+        # we'll convert to a dict.
+        return {k: v for k, v in self.client.model(model).config(application).items()}
 
     def scp(self, model: str, source: str, destination: str) -> None:
         self.client.model(model).scp(
@@ -229,21 +263,56 @@ class JubilantBackend(JujuCmdBackend):
                 return unit_status.address
         raise KeyError(f"Unit '{unit}' not found")
 
-    def get_charm_revisions(self, model: str) -> set[tuple[str, int]]:
-        return {(app_info.charm, app_info.charm_rev) for app_info in self.status(model).apps.values()}
+    def list_applications(self, model: str) -> dict[str, JujuApplicationInfo]:
+        return {
+            app_name: JujuApplicationInfo(charm=app_info.charm, revision=app_info.charm_rev)
+            for app_name, app_info in self.status(model).apps.items()
+        }
+
+    def list_integrations(self, model: str) -> set[JujuIntegration]:
+        # Juju status yaml format doesn't expose provider/requirer information or
+        # neighbor endpoint information, meaning the only way to get integrations
+        # is by using the tabular format, which gives a complete picture.
+        tabular_status = self.juju_status_text(model)
+        integrations = set()
+        in_integration_section = False
+        for line in tabular_status.split("\n"):
+            # Look for the integration section
+            if line.startswith("Integration provider"):
+                in_integration_section = True
+                continue
+            elif not in_integration_section:
+                continue
+            elif not line.strip():
+                break
+
+            # Split by whitespace, but the first two columns might have spaces
+            parts = line.split()
+            if len(parts) != 4:
+                continue
+            provider_str, requirer_str, interface, type = parts
+
+            # Skip peer integrations
+            if type == "peer":
+                continue
+
+            # Parse provider and requirer
+            integrations.add(
+                JujuIntegration(
+                    provider=JujuIntegrationApplication.from_str(provider_str),
+                    requirer=JujuIntegrationApplication.from_str(requirer_str),
+                    interface=interface,
+                )
+            )
+        return integrations
 
     def integration_exists(
         self, application_1: str, endpoint_1: str, application_2: str, endpoint_2: str, model: str
     ) -> bool:
-        status = self.status(model)
-        integrations = get_integrations(status)
-
-        target_applications = {
-            JujuIntegrationApplication(application_1, endpoint_1),
-            JujuIntegrationApplication(application_2, endpoint_2),
-        }
-
-        return target_applications in {integration.applications for integration in integrations}
+        return {
+            JujuIntegrationApplication(application=application_1, endpoint=endpoint_1),
+            JujuIntegrationApplication(application=application_2, endpoint=endpoint_2),
+        } in [{integration.provider, integration.requirer} for integration in self.list_integrations(model)]
 
     def version(self, model: str) -> str:
         return str(self.client.model(model).version())

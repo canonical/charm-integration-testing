@@ -7,9 +7,11 @@ from collections.abc import Callable
 from dataclasses import field
 from datetime import datetime, timedelta
 from functools import wraps
-from typing import ParamSpec, TypeVar
+from typing import Any, ParamSpec, TypeVar
 
 from pydantic.dataclasses import dataclass
+
+from .models import JujuApplicationInfo, JujuIntegration, JujuIntegrationApplication
 
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
@@ -111,26 +113,26 @@ class JujuWaitTimeoutError(TimeoutError):
         return str(self)
 
 
-@dataclass(frozen=True)
-class JujuIntegrationApplication:
-    application: str
-    endpoint: str
-
-    def __str__(self) -> str:
-        return f"{self.application}:{self.endpoint}"
-
-
-@dataclass(frozen=True)
-class JujuIntegration:
-    interface: str
-    applications: frozenset[JujuIntegrationApplication]
-
-
 @dataclass
 class JujuExecOutput:
     return_code: int
     stdout: str
     stderr: str
+
+
+@dataclass
+class JujuTask:
+    """Represents a Juju task, as used by Juju Actions to represent action results."""
+
+    # For now, keeping this somewhat minimal and opinionated.
+    # Not doing a full wrapper of jubilant.Task.
+    id: str
+    return_code: int
+    status: str
+    message: str
+    output: str  # from results.output
+    # Omitting log, stdout and stderr for now.  During testing these were blank or empty.
+    # We can always add them later.
 
 
 class JujuBackend(ABC):
@@ -143,7 +145,7 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def list_applications(self, model: str) -> set[str]:
+    def list_applications(self, model: str) -> dict[str, JujuApplicationInfo]:
         raise NotImplementedError
 
     @abstractmethod
@@ -157,7 +159,14 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def wait_idle(self, model: str, timeout: timedelta | None, count: int | None, strict_timeout: bool = False) -> None:
+    def wait_idle(
+        self,
+        model: str,
+        timeout: timedelta | None,
+        count: int | None,
+        strict_timeout: bool = False,
+        applications: list[str] | None = None,
+    ) -> None:
         raise NotImplementedError
 
     @abstractmethod
@@ -225,7 +234,7 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def run_action(self, model: str, unit: str, action: str, arguments: dict[str, str]) -> None:
+    def run_action(self, model: str, unit: str, action: str, arguments: dict[str, Any]) -> JujuTask:
         raise NotImplementedError
 
     @abstractmethod
@@ -245,11 +254,17 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def deploy_application(self, model: str, charm: str, application: str | None = None) -> None:
+    def deploy_application(
+        self, model: str, charm: str, application: str | None = None, config: dict[str, Any] | None = None
+    ) -> None:
         raise NotImplementedError
 
     @abstractmethod
     def configure_application(self, model: str, application: str, values: dict[str, str]) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_application_config(self, model: str, application: str) -> dict[str, Any]:
         raise NotImplementedError
 
     @abstractmethod
@@ -262,10 +277,6 @@ class JujuBackend(ABC):
 
     @abstractmethod
     def unit_ip(self, model: str, unit: str) -> str:
-        raise NotImplementedError
-
-    @abstractmethod
-    def get_charm_revisions(self, model: str) -> set[tuple[str, int]]:
         raise NotImplementedError
 
     @abstractmethod

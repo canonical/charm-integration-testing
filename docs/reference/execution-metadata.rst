@@ -70,6 +70,22 @@ Charm Information
      - No
      - ``123``
 
+Integration Information
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 40 15 20
+
+   * - Category
+     - Description
+     - Normalized
+     - Example Value
+   * - ``integration``
+     - Integrations between charms deployed in the test model. Each integration is recorded in the format ``<provider>:<provider_endpoint>/<interface>/<requirer>:<requirer_endpoint>``. Collected at start and end of test. Peer integrations are automatically excluded.
+     - No
+     - ``postgresql:db/postgresql/app:database``
+
 Pipeline Information
 ~~~~~~~~~~~~~~~~~~~~
 
@@ -110,8 +126,15 @@ Warning Information
      - Yes
      - ``UserWarning: Deprecated function``
 
-Failure Information
-~~~~~~~~~~~~~~~~~~~
+Failure and Error Information
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The framework distinguishes between expected failures and unexpected errors, using different metadata prefixes for each category. All metadata keys use either ``failure:*`` or ``error:*`` prefixes depending on the exception type classification.
+
+Failure Metadata (Expected Failures)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Collected when the exception type is in ``KNOWN_FAILURE_EXCEPTIONS`` (``JujuWaitTimeoutError``, ``AssertionError``, ``CalledProcessError``):
 
 .. list-table::
    :header-rows: 1
@@ -122,7 +145,7 @@ Failure Information
      - Normalized
      - Example Value
    * - ``failure:message``
-     - Failure message when a test fails. Contains the error message from failed tests.
+     - Failure message when a test fails with a known exception. Contains the error message from failed tests.
      - Yes
      - ``AssertionError: Expected 'active'``
    * - ``failure:charm:<name>:status``
@@ -146,6 +169,24 @@ Failure Information
      - Yes, multi-line normalized
      - ``ERROR connection refused``
 
+Error Metadata (Unexpected Errors)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Collected when the exception type is **not** in ``KNOWN_FAILURE_EXCEPTIONS``:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 40 15 20
+
+   * - Category
+     - Description
+     - Normalized
+     - Example Value
+   * - ``failure:expected``
+     - Flag indicating the failure was unexpected
+     - No
+     - ``false``
+   
 Skip Information
 ~~~~~~~~~~~~~~~~
 
@@ -197,6 +238,7 @@ Execution metadata is written to JUnit XML files as properties:
         <properties>
             <property name="charm" value="[&quot;postgresql&quot;, &quot;vault&quot;]"/>
             <property name="charm:postgresql:revision" value="[&quot;123&quot;]"/>
+            <property name="integration" value="[&quot;postgresql:db/postgresql/app:database&quot;]"/>
             <property name="warning:message" value="[&quot;DeprecationWarning: ...&quot;]"/>
         </properties>
     </testcase>

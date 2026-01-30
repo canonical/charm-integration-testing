@@ -8,7 +8,6 @@ import jubilant
 from jubilant.statustypes import AppStatusRelation
 from juju import (
     JujuApplicationState,
-    JujuIntegration,
     JujuIntegrationApplication,
     JujuUnitAgentState,
     JujuUnitState,
@@ -33,17 +32,9 @@ def generate_endpoint_integrations(status: jubilant.Status) -> Iterator[tuple[st
                 yield (application, endpoint, integration)
 
 
-def get_integrations(status: jubilant.Status) -> set[JujuIntegration]:
+def get_integrations(status: jubilant.Status) -> set[tuple[JujuIntegrationApplication, JujuIntegrationApplication]]:
     return {
-        JujuIntegration(
-            interface=integration_1.interface,
-            applications=frozenset(
-                {
-                    JujuIntegrationApplication(application_1, endpoint_1),
-                    JujuIntegrationApplication(application_2, endpoint_2),
-                }
-            ),
-        )
+        (JujuIntegrationApplication(application_1, endpoint_1), JujuIntegrationApplication(application_2, endpoint_2))
         # Iterate over every integration on every endpoint
         for application_1, endpoint_1, integration_1 in generate_endpoint_integrations(status)
         # Then for each also iterate over every integration on every endpoint again
@@ -221,12 +212,12 @@ def applications_are_removed(status: jubilant.Status, *application_args: str) ->
 def integrations_are_removed(
     status: jubilant.Status, *integrations_args: tuple[JujuIntegrationApplication, JujuIntegrationApplication]
 ) -> tuple[bool, JujuWaitState]:
-    existing_integrations = {integration.applications for integration in get_integrations(status)}
+    existing_integrations = get_integrations(status)
     integrations = integrations_args if integrations_args else existing_integrations
 
     noncompliant_applications: dict[str, JujuApplicationState | None] = {}
     for integration in integrations:
-        if set(integration) in existing_integrations:
+        if integration in existing_integrations:
             for endpoint in integration:
                 noncompliant_applications[endpoint.application] = get_application_state(status, endpoint.application)
 
