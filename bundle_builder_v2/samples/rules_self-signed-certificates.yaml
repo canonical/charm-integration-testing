@@ -1,7 +1,0 @@
----
-version: 1
-metadata_source: self-signed-certificates
-channel_rules:
-  - track: '*/*'
-    constraints:
-      acyclic: true

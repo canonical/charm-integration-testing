@@ -1,9 +1,0 @@
----
-version: 1
-metadata_source: hydra
-channel_rules:
-  - track: '*/*'
-    constraints:
-      required_endpoints: [pg-database, oauth]
-      optional_endpoints: [ingress]
-      acyclic: true

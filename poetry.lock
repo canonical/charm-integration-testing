@@ -58,25 +58,6 @@ type = "directory"
 url = "bundle_builder"
 
 [[package]]
-name = "bundle-builder-v2"
-version = "2.0.0"
-description = "Framework to generate Juju compatible bundles from charmhub."
-optional = false
-python-versions = ">=3.10"
-groups = ["main"]
-files = []
-develop = true
-
-[package.dependencies]
-pydantic = ">=2.12.5,<3.0.0"
-requests = ">=2.32.5,<3.0.0"
-z3-solver = ">=4.15.4.0,<5.0.0.0"
-
-[package.source]
-type = "directory"
-url = "bundle_builder_v2"
-
-[[package]]
 name = "bundle-builder-v3"
 version = "3.0.0"
 description = "Framework to generate Juju compatible bundles from charmhub."
@@ -1398,4 +1379,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<4.0"
-content-hash = "46b1e1cd26f4f5a9a9a28cbd18854a44fb9807ab2ca29fa908e8d291cf95a835"
+content-hash = "30f6c3246dea660385561e5e4c27e6499aa29dacecb90e1fce5d78ffd80b2f6a"

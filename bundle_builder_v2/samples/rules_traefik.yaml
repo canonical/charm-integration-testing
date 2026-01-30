@@ -1,8 +1,0 @@
----
-version: 1
-metadata_source: traefik-k8s
-channel_rules:
-  - track: '*/*'
-    constraints:
-      optional_endpoints: [certificates]
-      acyclic: true
