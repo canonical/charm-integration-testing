@@ -14,6 +14,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
+from datetime import timedelta
 import logging
 from typing import cast
 
@@ -84,8 +85,12 @@ class BundleBuilder:
 
             if result == z3.sat:
                 self.logger.info("Problem is satisfiable")
-                self.logger.info("Re-solving with optimization to minimize charms and integrations")
-                model = self._optimize_solution(domain)
+                model = solver.model()
+                try:
+                    self.logger.info("Re-solving with optimization to minimize charms and integrations")
+                    model = self._optimize_solution(domain)
+                except TimeoutError:
+                    self.logger.warning("Optimization timed out; using unoptimized solution")
                 return extract_bundle(model, domain, logger=self.logger)
 
             elif result == z3.unsat:
@@ -146,6 +151,7 @@ class BundleBuilder:
         )
 
         # Add the charm to the domain for application existence (exempt from cycle detection)
+        self.logger.debug(f"Adding charm '{charm.name}' for application '{application}'")
         return add_charm_to_domain(charm, domain)
 
     def _add_charms_for_endpoint(self, charm_id: int, endpoint_name: str, domain: Domain) -> Domain:
@@ -172,12 +178,14 @@ class BundleBuilder:
                 charm_name=charm,
                 ubuntu_arch=domain.arch_constraint,
             )
+            self.logger.debug(f"Adding charm '{spec.name}' to satisfy {requesting_charm_name}:{endpoint_name}")
             domain = add_charm_to_domain(spec, domain)
 
         return domain
 
-    def _optimize_solution(self, domain: Domain) -> z3.ModelRef:
+    def _optimize_solution(self, domain: Domain, timeout: timedelta = timedelta(seconds=30)) -> z3.ModelRef:
         optimizer = z3.Optimize()
+        optimizer.set("timeout", int(timeout.total_seconds() * 1000))
         add_constraints(optimizer, domain)
 
         scale = 1_000_000
@@ -203,6 +211,8 @@ class BundleBuilder:
         )
 
         result = optimizer.check()
+        if result == z3.unknown:
+            raise TimeoutError("Optimization timed out")
         if result != z3.sat:
             raise UnresolvableBundleError("Optimization failed - problem became unsatisfiable")
 
