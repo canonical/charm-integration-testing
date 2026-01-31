@@ -1,17 +1,10 @@
 ---
 configs:
   - criteria:
-      track: '1.15'
-    config:
-      # NOTE: "charmqa" is just random value
-      common_name: charmqa
-  - criteria:
-      track: '1.16'
-    config:
-      # NOTE: "charmqa" is just random value
-      common_name: charmqa
-  - criteria:
-      track: '1.17'
+      any_of:
+        - track: '1.15'
+        - track: '1.16'
+        - track: '1.17'
     config:
       # NOTE: "charmqa" is just random value
       common_name: charmqa

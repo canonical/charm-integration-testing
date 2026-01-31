@@ -25,15 +25,22 @@ from .charm import CharmChannel, CharmConfig
 
 
 class CharmOverrideCriteria(BaseModel):
+    any_of: list["CharmOverrideCriteria"] | None = None
+    all_of: list["CharmOverrideCriteria"] | None = None
+    none_of: list["CharmOverrideCriteria"] | None = None
     track: str | None = None
     risk: str | None = None
 
     def meets(self, channel: CharmChannel) -> bool:
-        if self.track is not None and self.track != channel.explicit_track:
-            return False
-        if self.risk is not None and self.risk != channel.risk:
-            return False
-        return True
+        return all(
+            (
+                all(criterion.meets(channel) for criterion in self.all_of) if self.all_of else True,
+                not any(criterion.meets(channel) for criterion in self.none_of) if self.none_of else True,
+                any(criterion.meets(channel) for criterion in self.any_of) if self.any_of else True,
+                channel.explicit_track == self.track if self.track else True,
+                channel.risk == self.risk if self.risk else True,
+            )
+        )
 
 
 class CharmEndpointOverride(BaseModel):
