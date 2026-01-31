@@ -39,7 +39,7 @@ class CharmOverrideCriteria(BaseModel):
 class CharmEndpointOverride(BaseModel):
     optional: bool | None = None
     limit: int | None = None
-    modes: set[str] = Field(default_factory=set)
+    constraints: str | None = None
 
 
 class CharmMetadataOverride(BaseModel):
@@ -47,9 +47,9 @@ class CharmMetadataOverride(BaseModel):
     peers: dict[str, CharmEndpointOverride] = Field(default_factory=dict)
     requires: dict[str, CharmEndpointOverride] = Field(default_factory=dict)
     provides: dict[str, CharmEndpointOverride] = Field(default_factory=dict)
+    constraints: str | None = None
     # TODO
     # bridges: ...
-    # constraints: ...
 
 
 class CharmMetadataOverrides(BaseModel):

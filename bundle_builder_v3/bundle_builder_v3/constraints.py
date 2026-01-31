@@ -61,6 +61,7 @@ def _charm_endpoints_from_integration(integration: CharmIntegration, domain: Dom
 
 
 def add_application_constraints(solver: z3.Solver, domain: Domain) -> None:
+    # Ensure each application maps to exactly one charm
     for application in domain.application_constraints.keys():
         solver.assert_and_track(
             z3.Sum(
@@ -75,6 +76,7 @@ def add_application_constraints(solver: z3.Solver, domain: Domain) -> None:
             ApplicationExistsTag(application=application).encode(),
         )
 
+    # Ensure each charm maps to at most one application
     for charm_id, charm in enumerate(domain.charms):
         solver.assert_and_track(
             z3.Sum(
@@ -85,6 +87,7 @@ def add_application_constraints(solver: z3.Solver, domain: Domain) -> None:
             CharmMappedToSingleApplicationTag(charm=_charm_endpoint_payload(charm, charm_id, None)).encode(),
         )
 
+    # Ensure charm exists if application-to-charm mapping is active
     for mapping, mapping_var in domain.application_to_charm.items():
         charm_var = domain.charms[mapping.charm_id].exists
         solver.assert_and_track(
@@ -95,6 +98,7 @@ def add_application_constraints(solver: z3.Solver, domain: Domain) -> None:
             ).encode(),
         )
 
+    # Ensure each user-specified application integration maps to exactly one charm integration
     for app_integration in domain.integration_constraints:
         solver.assert_and_track(
             z3.Sum(
@@ -109,6 +113,7 @@ def add_application_constraints(solver: z3.Solver, domain: Domain) -> None:
             ApplicationIntegrationExistsTag(integration=_app_endpoints_from_integration(app_integration)).encode(),
         )
 
+    # Ensure each charm integration maps to at most one application integration
     for charm_integration in domain.charm_integrations.keys():
         solver.assert_and_track(
             z3.Sum(
@@ -125,6 +130,7 @@ def add_application_constraints(solver: z3.Solver, domain: Domain) -> None:
             ).encode(),
         )
 
+    # Ensure charm integration exists if application-to-charm integration mapping is active
     for (
         app_integration,
         charm_integration,
@@ -138,7 +144,7 @@ def add_application_constraints(solver: z3.Solver, domain: Domain) -> None:
             ).encode(),
         )
 
-    # Ensure that if an integration mapping is active, the corresponding application-to-charm mappings are active
+    # Ensure application-to-charm mappings are active when integration mapping is active
     for (
         app_integration,
         charm_integration,
@@ -214,6 +220,7 @@ def add_application_constraints(solver: z3.Solver, domain: Domain) -> None:
 
 
 def add_charm_constraints(solver: z3.Solver, domain: Domain) -> None:
+    # Ensure both charms exist if integration exists
     for charm_integration, integration_var in domain.charm_integrations.items():
         charm_ids = [charm_integration.requires_endpoint.charm_id, charm_integration.provides_endpoint.charm_id]
         for charm_id in charm_ids:
@@ -226,6 +233,7 @@ def add_charm_constraints(solver: z3.Solver, domain: Domain) -> None:
                 ).encode(),
             )
 
+    # Ensure endpoint count equals number of integrations using that endpoint
     for charm_id, charm in enumerate(domain.charms):
         for endpoint_name, endpoint in charm.endpoints.items():
             integrations_using_endpoint = []
@@ -248,6 +256,9 @@ def add_charm_constraints(solver: z3.Solver, domain: Domain) -> None:
                 ).encode(),
             )
 
+
+def add_charm_config_constraints(solver: z3.Solver, domain: Domain) -> None:
+    # Ensure non-optional endpoints have at least one integration if charm exists
     for charm_id, charm in enumerate(domain.charms):
         for endpoint_name, spec_endpoint in charm.spec.endpoints.items():
             if not spec_endpoint.optional:
@@ -256,6 +267,7 @@ def add_charm_constraints(solver: z3.Solver, domain: Domain) -> None:
                     CharmEndpointNonOptionalTag(charm=_charm_endpoint_payload(charm, charm_id, endpoint_name)).encode(),
                 )
 
+    # Ensure endpoint count respects limit if charm exists
     for charm_id, charm in enumerate(domain.charms):
         for endpoint_name, spec_endpoint in charm.spec.endpoints.items():
             if spec_endpoint.limit is not None:
@@ -267,9 +279,23 @@ def add_charm_constraints(solver: z3.Solver, domain: Domain) -> None:
                     ).encode(),
                 )
 
+    # Add custom constraints from override files
+    for charm_id, charm in enumerate(domain.charms):
+        if not charm.spec.constraints:
+            continue
+
+        # Build declaration mapping: variable names to actual Z3 variables
+        decls = {
+            f"{endpoint_name}_count": endpoint_var.count for endpoint_name, endpoint_var in charm.endpoints.items()
+        }
+
+        # Parse SMT-Lib with existing variables
+        constraints = z3.parse_smt2_string(charm.spec.constraints, decls=decls)
+        solver.add(constraints)
+
 
 def add_charm_dependency_constraints(solver: z3.Solver, domain: Domain) -> None:
-    # Create an integer rank variable for each charm to establish topological ordering
+    # Create rank variables for topological ordering to prevent cycles
     charm_count = len(domain.charms)
     ranks: list[z3.ArithRef] = [z3.Int(f"charm_{idx}_rank") for idx in range(charm_count)]
 
@@ -278,7 +304,8 @@ def add_charm_dependency_constraints(solver: z3.Solver, domain: Domain) -> None:
         solver.add(rank_var >= 0)
         solver.add(rank_var <= charm_count)
 
-    # For each integration, enforce that requiring charm has higher rank than providing charm
+    # Enforce acyclic dependencies: requiring charm must have higher rank than providing charm
+    # Skip if either endpoint is marked as acyclic (allows intentional cycles)
     for charm_integration, integration_var in domain.charm_integrations.items():
         # With semantic ordering, we can directly access requires and provides endpoints
         charm_req = charm_integration.requires_endpoint
@@ -309,4 +336,5 @@ def add_charm_dependency_constraints(solver: z3.Solver, domain: Domain) -> None:
 def add_constraints(solver: z3.Solver, domain: Domain) -> None:
     add_application_constraints(solver, domain)
     add_charm_constraints(solver, domain)
+    add_charm_config_constraints(solver, domain)
     add_charm_dependency_constraints(solver, domain)

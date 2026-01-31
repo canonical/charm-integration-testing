@@ -35,6 +35,7 @@ class Assertions(str, Enum):
     ENDPOINT_COUNT_MATCHES_INTEGRATIONS = "endpoint_count_matches_integrations"
     ENDPOINT_RESPECTS_LIMIT = "endpoint_respects_limit"
     APPLICATION_INTEGRATION_APPS_MAP_TO_CHARMS = "application_integration_apps_map_to_charms"
+    CHARM_CUSTOM_CONSTRAINT = "charm_custom_constraint"
 
 
 class AssertionTag(BaseModel):
@@ -145,6 +146,11 @@ class EndpointRespectsLimitTag(AssertionTag):
     limit: int
 
 
+class CharmCustomConstraintTag(AssertionTag):
+    kind: Assertions = Assertions.CHARM_CUSTOM_CONSTRAINT
+    charm: CharmEndpointPayload
+
+
 _ASSERTION_TYPE_REGISTRY: dict[Assertions, Type[AssertionTag]] = {
     Assertions.APPLICATION_EXISTS: ApplicationExistsTag,
     Assertions.APPLICATION_INTEGRATION_EXISTS: ApplicationIntegrationExistsTag,
@@ -158,4 +164,5 @@ _ASSERTION_TYPE_REGISTRY: dict[Assertions, Type[AssertionTag]] = {
     Assertions.ENDPOINT_COUNT_MATCHES_INTEGRATIONS: EndpointCountMatchesIntegrationsTag,
     Assertions.ENDPOINT_RESPECTS_LIMIT: EndpointRespectsLimitTag,
     Assertions.APPLICATION_INTEGRATION_APPS_MAP_TO_CHARMS: ApplicationIntegrationAppsMapToCharmsTag,
+    Assertions.CHARM_CUSTOM_CONSTRAINT: CharmCustomConstraintTag,
 }

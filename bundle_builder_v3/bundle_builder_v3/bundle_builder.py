@@ -28,6 +28,7 @@ from .assertion_tags import (
     Assertions,
     AssertionTag,
     CharmEndpointNonOptionalTag,
+    EndpointCountMatchesIntegrationsTag,
 )
 from .bundle import Bundle
 from .charmhub import CharmhubClient
@@ -141,8 +142,23 @@ class BundleBuilder:
                     app_exists_assertion = ApplicationExistsTag(application=endpoint.application).encode()
                     if app_exists_assertion in domain.handled_failed_assertions:
                         continue
+                    domain.handled_failed_assertions.add(app_exists_assertion)
                     domain = self._add_charm_for_application(endpoint.application, domain)
                     modified_domain = True
+            if tag.kind == Assertions.ENDPOINT_COUNT_MATCHES_INTEGRATIONS:
+                endpoint_count_matches_integrations = cast(EndpointCountMatchesIntegrationsTag, tag)
+                non_optional_assertion = CharmEndpointNonOptionalTag(
+                    charm=endpoint_count_matches_integrations.charm
+                ).encode()
+                if non_optional_assertion in domain.handled_failed_assertions:
+                    continue
+                domain.handled_failed_assertions.add(non_optional_assertion)
+                domain = self._add_charms_for_endpoint(
+                    endpoint_count_matches_integrations.charm.charm_id,
+                    endpoint_count_matches_integrations.charm.endpoint,
+                    domain,
+                )
+                modified_domain = True
 
         if not modified_domain:
             raise UnresolvableBundleError(f"Cannot handle failed assertions: {failed_assertions}")

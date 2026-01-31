@@ -65,7 +65,6 @@ class CharmEndpoint(BaseModel):
     optional: bool = Field(default=False)
     limit: int | None = Field(default=None)
     acyclic: bool = Field(default=False)
-    modes: set[str] = Field(default_factory=set)
 
 
 CharmConfig = dict[str, str | int | bool]
@@ -79,10 +78,8 @@ class Charm(BaseModel):
     ubuntu_arch: str
     endpoints: dict[str, CharmEndpoint]
     priority: int = Field(default=1)
+    constraints: str | None = None
     configs: list[CharmConfig] = Field(default_factory=list)
-    # TODO: SMT language
-    constraints: None = None
-    bridges: None = None
 
     def __repr__(self) -> str:
         return self.name

@@ -166,6 +166,7 @@ class CharmhubClient:
             ubuntu_arch=ubuntu_arch,
             endpoints=self._get_charm_endpoints(charm_name, metadata, channel_obj),
             priority=self._get_charm_priority(charm_name),
+            constraints=self._get_charm_constraints(charm_name, metadata, channel_obj),
             configs=self._get_charm_configs(charm_name, channel_obj),
         )
 
@@ -518,13 +519,15 @@ class CharmhubClient:
                     interface=endpoint.interface,
                     optional=optional,
                     limit=limit,
-                    modes=endpoint_override.modes,
                 )
 
         return endpoints
 
     def _get_charm_configs(self, charm: str, channel: CharmChannel) -> list[CharmConfig]:
         return self.overrides_client.get_charm_test_configs(charm, channel)
+
+    def _get_charm_constraints(self, charm_name: str, metadata: CharmMetadata, channel: CharmChannel) -> str | None:
+        return self.overrides_client.get_charm_metadata_overrides(charm_name, channel).constraints
 
     def _get_charm_priority(self, charm_name: str) -> float:
         return self.overrides_client.get_charm_priorities().get(charm_name, 1.0)

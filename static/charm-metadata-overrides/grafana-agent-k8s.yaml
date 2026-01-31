@@ -19,79 +19,36 @@
 overrides:
   - provides:
       grafana-dashboards-provider:
-        optional_if:
-          - any_of:
-              - none_of:
-                  - endpoint_integrated: grafana-dashboards-consumer
-              - all_of:
-                  - endpoint_integrated: grafana-dashboards-consumer
-                  - endpoint_integrated: grafana-cloud-config
+        optional: true
       logging-provider:
-        optional_if:
-          - any_of:
-              - endpoint_integrated: metrics-endpoint
-              - endpoint_integrated: tracing-provider
-              - endpoint_integrated: grafana-dashboards-consumer
+        optional: true
       tracing-provider:
-        optional_if:
-          - any_of:
-              - endpoint_integrated: metrics-endpoint
-              - endpoint_integrated: logging-provider
-              - endpoint_integrated: grafana-dashboards-consumer
+        optional: true
     requires:
       send-remote-write:
-        optional_if:
-          - any_of:
-              - none_of:
-                  - endpoint_integrated: metrics-endpoint
-              - all_of:
-                  - endpoint_integrated: metrics-endpoint
-                  - endpoint_integrated: grafana-cloud-config
+        optional: true
       tracing:
-        optional_if:
-          - any_of:
-              - none_of:
-                  - endpoint_integrated: tracing-provider
-              - all_of:
-                  - endpoint_integrated: tracing-provider
-                  - endpoint_integrated: grafana-cloud-config
+        optional: true
       logging-consumer:
-        optional_if:
-          - any_of:
-              - none_of:
-                  - endpoint_integrated: logging-provider
-              - all_of:
-                  - endpoint_integrated: logging-provider
-                  - endpoint_integrated: grafana-cloud-config
+        optional: true
       grafana-cloud-config:
-        optional_if:
-          - none_of:
-              - any_of:
-                  - all_of:
-                      - endpoint_integrated: metrics-endpoint
-                      - none_of:
-                          - endpoint_integrated: send-remote-write
-                  - all_of:
-                      - endpoint_integrated: logging-provider
-                      - none_of:
-                          - endpoint_integrated: logging-consumer
-                  - all_of:
-                      - endpoint_integrated: tracing-provider
-                      - none_of:
-                          - endpoint_integrated: tracing
-                  - all_of:
-                      - endpoint_integrated: grafana-dashboards-consumer
-                      - none_of:
-                          - endpoint_integrated: grafana-dashboards-provider
+        optional: true
       metrics-endpoint:
-        optional_if:
-          - any_of:
-              - endpoint_integrated: logging-provider
-              - endpoint_integrated: tracing-provider
-              - endpoint_integrated: grafana-dashboards-consumer
+        optional: true
       grafana-dashboards-consumer:
-        optional_if:
-          - any_of:
-              - endpoint_integrated: metrics-endpoint
-              - endpoint_integrated: logging-provider
-              - endpoint_integrated: tracing-provider
+        optional: true
+    constraints: |
+      ; At least one incoming integration must be present
+      (assert (>= (+ metrics-endpoint_count logging-provider_count tracing-provider_count grafana-dashboards-consumer_count) 1))
+      
+      ; If metrics-endpoint is used, need send-remote-write OR grafana-cloud-config
+      (assert (=> (>= metrics-endpoint_count 1) (>= (+ send-remote-write_count grafana-cloud-config_count) 1)))
+      
+      ; If logging-provider is used, need logging-consumer OR grafana-cloud-config
+      (assert (=> (>= logging-provider_count 1) (>= (+ logging-consumer_count grafana-cloud-config_count) 1)))
+      
+      ; If tracing-provider is used, need tracing OR grafana-cloud-config
+      (assert (=> (>= tracing-provider_count 1) (>= (+ tracing_count grafana-cloud-config_count) 1)))
+      
+      ; If grafana-dashboards-consumer is used, need grafana-dashboards-provider OR grafana-cloud-config
+      (assert (=> (>= grafana-dashboards-consumer_count 1) (>= (+ grafana-dashboards-provider_count grafana-cloud-config_count) 1)))
