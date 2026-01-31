@@ -61,7 +61,7 @@ def extract_bundle(model: z3.ModelRef, domain: Domain, logger: logging.Logger) -
         selected_config = charm.spec.configs[config_index]
 
         # Filter out None values to get only explicitly set config
-        config = {key: option.value for key, option in selected_config.items() if option.value is not None}
+        config = {key: value for key, value in selected_config.items() if value is not None}
 
         applications[app_name] = Application(
             charm=charm.spec,

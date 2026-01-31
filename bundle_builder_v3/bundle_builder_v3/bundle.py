@@ -17,12 +17,12 @@
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
-from .charm import Charm, EndpointType
+from .charm import Charm, CharmConfig, EndpointType
 
 
 class Application(BaseModel):
     charm: Charm
-    config: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
+    config: CharmConfig = Field(default_factory=dict)
 
     def __repr__(self) -> str:
         return f"{self.charm.name}"

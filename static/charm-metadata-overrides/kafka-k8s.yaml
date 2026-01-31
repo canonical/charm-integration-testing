@@ -25,12 +25,12 @@ overrides:
       ; If client-cas is integrated, certificates must also be integrated
       (assert (=> client-cas certificates))
       ; Configuration constraints based on peer integrations
-      ; If peer-cluster is integrated, roles must contain "broker" and not "controller"
-      (assert (=> peer-cluster (and (str.contains config_roles "broker") (not (str.contains config_roles "controller")))))
-      ; If peer-cluster-orchestrator is integrated, roles must contain "controller"
-      (assert (=> peer-cluster-orchestrator (str.contains config_roles "controller")))
-      ; If neither peer-cluster nor peer-cluster-orchestrator is integrated, roles must contain "broker" and "controller"
-      (assert (=> (and (not peer-cluster) (not peer-cluster-orchestrator)) (and (str.contains config_roles "broker") (str.contains config_roles "controller"))))
+      ; If peer-cluster is integrated, must have broker role but NOT controller
+      (assert (=> peer-cluster (=  config_roles "broker")))
+      ; If peer-cluster-orchestrator is integrated, must have controller role
+      (assert (=> peer-cluster-orchestrator (or (= config_roles "broker,controller") (= config_roles "controller,broker"))))
+      ; If standalone (neither peer integration), must have both broker and controller
+      (assert (=> (not (or peer-cluster peer-cluster-orchestrator)) (or (= config_roles "broker,controller") (= config_roles "controller,broker"))))
   - provides:
       kafka-client:
         optional: true

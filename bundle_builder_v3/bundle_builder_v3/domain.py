@@ -178,15 +178,17 @@ def add_charm_to_domain(charm: Charm, domain: Domain) -> Domain:
 
     # Create config variables based on schema types
     config_vars = {}
-    for key, option in next(iter(charm.configs)).items():
-        if option.type == "string" or option.type == "secret":
+    for key, type in charm.config_schema.items():
+        if type == "string" or type == "secret":
             config_vars[key] = z3.String(f"charm_{charm.name}_{charm_id}_config_{key}")
-        elif option.type == "int":
+        elif type == "int":
             config_vars[key] = z3.Int(f"charm_{charm.name}_{charm_id}_config_{key}")
-        elif option.type == "float":
+        elif type == "float":
             config_vars[key] = z3.Real(f"charm_{charm.name}_{charm_id}_config_{key}")
-        elif option.type == "boolean":
+        elif type == "boolean":
             config_vars[key] = z3.Bool(f"charm_{charm.name}_{charm_id}_config_{key}")
+        else:
+            raise ValueError(f"Unsupported config type '{type}' for key '{key}' in charm '{charm.name}'")
 
     domain.charms.append(
         DomainCharm(

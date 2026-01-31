@@ -19,7 +19,7 @@ from functools import cache
 from .charm import (
     Charm,
     CharmChannel,
-    CharmConfigOption,
+    CharmConfig,
     CharmEndpoint,
     EndpointType,
 )
@@ -168,6 +168,7 @@ class CharmhubClient:
             endpoints=self._get_charm_endpoints(charm_name, metadata, channel),
             priority=self._get_charm_priority(charm_name),
             constraints=self._get_charm_constraints(charm_name, metadata, channel),
+            config_schema=self._get_charm_config_schema(config_schema),
             configs=self._get_charm_configs(charm_name, config_schema, channel),
         )
 
@@ -536,21 +537,23 @@ class CharmhubClient:
     def _get_charm_priority(self, charm_name: str) -> float:
         return self.overrides_client.get_charm_priorities().get(charm_name, 1.0)
 
+    def _get_charm_config_schema(self, config_schema: CharmConfigSchema) -> dict[str, str]:
+        return {key: option.type for key, option in config_schema.options.items()}
+
     def _get_charm_configs(
         self, charm: str, config_schema: CharmConfigSchema, channel: CharmChannel
-    ) -> list[dict[str, CharmConfigOption]]:
+    ) -> list[CharmConfig]:
         # Get test configs from overrides
-        test_configs = self.overrides_client.get_charm_test_configs(charm, channel)
+        configs = self.overrides_client.get_charm_test_configs(charm, channel)
 
         # If no test configs provided, use one empty config
-        if len(test_configs) == 0:
-            test_configs = [{}]
+        if len(configs) == 0:
+            configs = [{}]
 
-        # Normalize: ensure each test config has all schema keys (None for unspecified)
-        key_to_type = {key: option.type for key, option in config_schema.options.items()}
-        normalized = [
-            {key: CharmConfigOption(type=type, value=config.get(key, None)) for key, type in key_to_type.items()}
-            for config in test_configs
-        ]
+        # Ensure schema keys are found
+        for config in configs:
+            for key in config:
+                if key not in config_schema.options:
+                    raise ValueError(f"Config key '{key}' not found in config schema for charm '{charm}'")
 
-        return normalized
+        return configs

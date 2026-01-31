@@ -303,20 +303,20 @@ def add_charm_config_constraints(solver: z3.Solver, domain: Domain) -> None:
         # Link config_index to config values
         for i, config in enumerate(charm.spec.configs):
             config_num = i
-            for key, option in config.items():
-                if option.value is None:
+            for key, value in config.items():
+                if value is None:
                     continue  # Skip unspecified values
 
                 var = charm.config_vars[key]
                 # Add constraint linking config_index to value
-                if isinstance(option.value, str):
-                    solver.add(z3.Implies(charm.config_index == config_num, var == z3.StringVal(option.value)))
-                elif isinstance(option.value, bool):
-                    solver.add(z3.Implies(charm.config_index == config_num, var == option.value))
-                elif isinstance(option.value, int):
-                    solver.add(z3.Implies(charm.config_index == config_num, var == option.value))
-                elif isinstance(option.value, float):
-                    solver.add(z3.Implies(charm.config_index == config_num, var == z3.RealVal(option.value)))
+                if isinstance(value, str):
+                    solver.add(z3.Implies(charm.config_index == config_num, var == z3.StringVal(value)))
+                elif isinstance(value, bool):
+                    solver.add(z3.Implies(charm.config_index == config_num, var == value))
+                elif isinstance(value, int):
+                    solver.add(z3.Implies(charm.config_index == config_num, var == value))
+                elif isinstance(value, float):
+                    solver.add(z3.Implies(charm.config_index == config_num, var == z3.RealVal(value)))
 
     # Add custom constraints from override files
     for charm_id, charm in enumerate(domain.charms):
