@@ -26,7 +26,7 @@ overrides:
       (assert (=> client-cas certificates))
       ; Configuration constraints based on peer integrations
       ; If peer-cluster is integrated, must have broker role but NOT controller
-      (assert (=> peer-cluster (=  config_roles "broker")))
+      (assert (=> peer-cluster (= config_roles "broker")))
       ; If peer-cluster-orchestrator is integrated, must have controller role
       (assert (=> peer-cluster-orchestrator (or (= config_roles "broker,controller") (= config_roles "controller,broker"))))
       ; If standalone (neither peer integration), must have both broker and controller

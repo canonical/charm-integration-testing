@@ -290,6 +290,7 @@ def add_charm_config_constraints(solver: z3.Solver, domain: Domain) -> None:
     # Add config constraints
     for charm_id, charm in enumerate(domain.charms):
         # Config index must be in valid range if charm exists
+        # TODO: add assertion tracking (would help with debugging)
         solver.add(
             z3.Implies(
                 charm.exists,

@@ -547,6 +547,13 @@ class CharmhubClient:
         configs = self.overrides_client.get_charm_test_configs(charm, channel)
 
         # If no test configs provided, use one empty config
+        # TODO: This has a bug where constraints on required config options are not enforced
+        # Maybe we initialize with the default options instead?
+        # If we omit this charms without test configs fail to deploy
+        # TODO: Also randomized test configs? Also do we even need to define test configs?
+        # Probably a good idea to test different config combinations
+        # TODO: Is there a way to make the config constraints one way? Probably doesn't make sense actually
+        # If we set test config to something special and that makes an integration always required, that would be useful
         if len(configs) == 0:
             configs = [{}]
 
