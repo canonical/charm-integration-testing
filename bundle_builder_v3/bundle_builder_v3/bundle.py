@@ -137,8 +137,8 @@ class Bundle(BaseModel):
             lines.append(f"    {provider_ep.application} -->|{label}| {requirer_ep.application}")
 
         result = "\n".join(lines) + "\n"
-        
+
         if markdown:
             result = f"```mermaid\n{result}```\n"
-        
+
         return result

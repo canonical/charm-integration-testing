@@ -291,7 +291,10 @@ def add_charm_config_constraints(solver: z3.Solver, domain: Domain) -> None:
 
         # Parse SMT-Lib with existing variables
         constraints = z3.parse_smt2_string(charm.spec.constraints, decls=decls)
-        solver.add(constraints)
+
+        # Guard each constraint with "if charm exists"
+        for constraint in constraints:
+            solver.add(z3.Implies(charm.exists, constraint))
 
 
 def add_charm_dependency_constraints(solver: z3.Solver, domain: Domain) -> None:

@@ -31,6 +31,7 @@ from .assertion_tags import (
     EndpointCountMatchesIntegrationsTag,
 )
 from .bundle import Bundle
+from .charm import Charm
 from .charmhub import CharmhubClient
 from .constraints import add_constraints
 from .domain import (
@@ -116,7 +117,7 @@ class BundleBuilder:
             raise UnresolvableBundleError("Solver returned unsat but unsat core was empty")
 
         # Handle an assertions that have not been previously handled
-        modified_domain = False
+        charms_to_add: list[Charm] = []
         for assertion in failed_assertions:
             if assertion in domain.handled_failed_assertions:
                 continue
@@ -130,12 +131,16 @@ class BundleBuilder:
 
             if tag.kind == Assertions.CHARM_ENDPOINT_NON_OPTIONAL:
                 non_optional = cast(CharmEndpointNonOptionalTag, tag)
-                domain = self._add_charms_for_endpoint(non_optional.charm.charm_id, non_optional.charm.endpoint, domain)
-                modified_domain = True
+                for charm in self._get_charms_for_endpoint(
+                    non_optional.charm.charm_id, non_optional.charm.endpoint, domain
+                ):
+                    if charm not in charms_to_add:
+                        charms_to_add.append(charm)
             if tag.kind == Assertions.APPLICATION_EXISTS:
                 app_exists = cast(ApplicationExistsTag, tag)
-                domain = self._add_charm_for_application(app_exists.application, domain)
-                modified_domain = True
+                charm = self._get_charm_for_application(app_exists.application, domain)
+                if charm not in charms_to_add:
+                    charms_to_add.append(charm)
             if tag.kind == Assertions.APPLICATION_INTEGRATION_EXISTS:
                 app_integration_exists = cast(ApplicationIntegrationExistsTag, tag)
                 for endpoint in app_integration_exists.integration:
@@ -143,8 +148,9 @@ class BundleBuilder:
                     if app_exists_assertion in domain.handled_failed_assertions:
                         continue
                     domain.handled_failed_assertions.add(app_exists_assertion)
-                    domain = self._add_charm_for_application(endpoint.application, domain)
-                    modified_domain = True
+                    charm = self._get_charm_for_application(endpoint.application, domain)
+                    if charm not in charms_to_add:
+                        charms_to_add.append(charm)
             if tag.kind == Assertions.ENDPOINT_COUNT_MATCHES_INTEGRATIONS:
                 endpoint_count_matches_integrations = cast(EndpointCountMatchesIntegrationsTag, tag)
                 non_optional_assertion = CharmEndpointNonOptionalTag(
@@ -153,22 +159,27 @@ class BundleBuilder:
                 if non_optional_assertion in domain.handled_failed_assertions:
                     continue
                 domain.handled_failed_assertions.add(non_optional_assertion)
-                domain = self._add_charms_for_endpoint(
+                for charm in self._get_charms_for_endpoint(
                     endpoint_count_matches_integrations.charm.charm_id,
                     endpoint_count_matches_integrations.charm.endpoint,
                     domain,
-                )
-                modified_domain = True
+                ):
+                    if charm not in charms_to_add:
+                        charms_to_add.append(charm)
 
-        if not modified_domain:
+        if len(charms_to_add) == 0:
             raise UnresolvableBundleError(f"Cannot handle failed assertions: {failed_assertions}")
+
+        for charm in charms_to_add:
+            self.logger.info(f"Adding charm '{charm.name}' to domain to resolve failed assertions")
+            domain = add_charm_to_domain(charm, domain)
 
         return domain
 
-    def _add_charm_for_application(self, application: str, domain: Domain) -> Domain:
+    def _get_charm_for_application(self, application: str, domain: Domain) -> Charm:
         # Get the charm matching the application constraints
         constraints = domain.application_constraints[application]
-        charm = self.charmhub_client.charm_from_store(
+        return self.charmhub_client.charm_from_store(
             charm_name=constraints.charm,
             ubuntu_arch=domain.arch_constraint,
             charm_channel=constraints.channel,
@@ -176,13 +187,9 @@ class BundleBuilder:
             ubuntu_version=constraints.base,
         )
 
-        # Add the charm to the domain for application existence (exempt from cycle detection)
-        self.logger.debug(f"Adding charm '{charm.name}' for application '{application}'")
-        return add_charm_to_domain(charm, domain)
-
-    def _add_charms_for_endpoint(self, charm_id: int, endpoint_name: str, domain: Domain) -> Domain:
+    def _get_charms_for_endpoint(self, charm_id: int, endpoint_name: str, domain: Domain) -> set[Charm]:
         endpoint = domain.charms[charm_id].spec.endpoints[endpoint_name]
-        requesting_charm_name = domain.charms[charm_id].spec.name
+        # requesting_charm_name = domain.charms[charm_id].spec.name
 
         fulfilling_charms: set[str] = set()
         if endpoint.type == EndpointType.REQUIRES:
@@ -194,20 +201,18 @@ class BundleBuilder:
                 requires=endpoint.interface, platform=domain.platform_constraint
             )
 
-        if len(fulfilling_charms) == 0:
-            raise UnresolvableBundleError(
-                f"No charms found that expose interface '{endpoint.interface}' to satisfy {requesting_charm_name}:{endpoint_name}"
-            )
+        # if len(fulfilling_charms) == 0:
+        #     raise UnresolvableBundleError(
+        #         f"No charms found that expose interface '{endpoint.interface}' to satisfy {requesting_charm_name}:{endpoint_name}"
+        #     )
 
-        for charm in fulfilling_charms:
-            spec = self.charmhub_client.charm_from_store(
+        return [
+            self.charmhub_client.charm_from_store(
                 charm_name=charm,
                 ubuntu_arch=domain.arch_constraint,
             )
-            self.logger.debug(f"Adding charm '{spec.name}' to satisfy {requesting_charm_name}:{endpoint_name}")
-            domain = add_charm_to_domain(spec, domain)
-
-        return domain
+            for charm in fulfilling_charms
+        ]
 
     def _optimize_solution(self, domain: Domain, timeout: timedelta = timedelta(seconds=30)) -> z3.ModelRef:
         optimizer = z3.Optimize()
