@@ -95,7 +95,7 @@ class Bundle(BaseModel):
             sort_keys=True,
         )
 
-    def export_mermaid(self) -> str:
+    def export_mermaid(self, markdown: bool = False) -> str:
         """Export bundle to mermaid graph string."""
         lines = ["graph TB"]
 
@@ -136,4 +136,9 @@ class Bundle(BaseModel):
             label = f"{provider_ep.endpoint}&lt;{interface}&gt;{requirer_ep.endpoint}"
             lines.append(f"    {provider_ep.application} -->|{label}| {requirer_ep.application}")
 
-        return "\n".join(lines) + "\n"
+        result = "\n".join(lines) + "\n"
+        
+        if markdown:
+            result = f"```mermaid\n{result}```\n"
+        
+        return result
