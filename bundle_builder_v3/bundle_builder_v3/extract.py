@@ -54,8 +54,18 @@ def extract_bundle(model: z3.ModelRef, domain: Domain, logger: logging.Logger) -
 
     applications = {}
     for charm_id, app_name in charm_id_to_app_name.items():
+        charm = domain.charms[charm_id]
+
+        # Extract config from model
+        config_index = model.evaluate(charm.config_index, model_completion=True).as_long()
+        selected_config = charm.spec.configs[config_index]
+
+        # Filter out None values to get only explicitly set config
+        config = {key: option.value for key, option in selected_config.items() if option.value is not None}
+
         applications[app_name] = Application(
-            charm=domain.charms[charm_id].spec,
+            charm=charm.spec,
+            config=config,
         )
 
     integrations = set()

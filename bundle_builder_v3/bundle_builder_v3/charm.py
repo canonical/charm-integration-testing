@@ -67,7 +67,9 @@ class CharmEndpoint(BaseModel):
     acyclic: bool = Field(default=False)
 
 
-CharmConfig = dict[str, str | int | bool]
+class CharmConfigOption(BaseModel):
+    type: str
+    value: str | int | bool | float | None = None
 
 
 class Charm(BaseModel):
@@ -79,7 +81,7 @@ class Charm(BaseModel):
     endpoints: dict[str, CharmEndpoint]
     priority: int = Field(default=1)
     constraints: str | None = None
-    configs: list[CharmConfig] = Field(default_factory=list)
+    configs: list[dict[str, CharmConfigOption]] = Field(default_factory=list)
 
     def __repr__(self) -> str:
         return self.name

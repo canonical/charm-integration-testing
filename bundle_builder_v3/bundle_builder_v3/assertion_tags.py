@@ -68,12 +68,19 @@ class AppEndpointPayload(BaseModel):
     endpoint: str
 
 
+class CharmPayload(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    charm_name: str
+    charm_id: int
+
+
 class CharmEndpointPayload(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     charm_name: str
     charm_id: int
-    endpoint: str | None = None
+    endpoint: str
 
 
 class ApplicationExistsTag(AssertionTag):
@@ -83,13 +90,13 @@ class ApplicationExistsTag(AssertionTag):
 
 class CharmMappedToSingleApplicationTag(AssertionTag):
     kind: Assertions = Assertions.CHARM_MAPPED_TO_SINGLE_APPLICATION
-    charm: CharmEndpointPayload
+    charm: CharmPayload
 
 
 class CharmExistsFromApplicationTag(AssertionTag):
     kind: Assertions = Assertions.CHARM_EXISTS_FROM_APPLICATION
     application: str
-    charm: CharmEndpointPayload
+    charm: CharmPayload
 
 
 class ApplicationIntegrationExistsTag(AssertionTag):
@@ -125,7 +132,7 @@ class ApplicationIntegrationAppsMapToCharmsTag(AssertionTag):
 
 class CharmExistsFromIntegrationTag(AssertionTag):
     kind: Assertions = Assertions.CHARM_EXISTS_FROM_INTEGRATION
-    charm: CharmEndpointPayload
+    charm: CharmPayload
     integration: list[CharmEndpointPayload]
 
 
@@ -148,7 +155,8 @@ class EndpointRespectsLimitTag(AssertionTag):
 
 class CharmCustomConstraintTag(AssertionTag):
     kind: Assertions = Assertions.CHARM_CUSTOM_CONSTRAINT
-    charm: CharmEndpointPayload
+    charm: CharmPayload
+    assertion_idx: int
 
 
 _ASSERTION_TYPE_REGISTRY: dict[Assertions, Type[AssertionTag]] = {

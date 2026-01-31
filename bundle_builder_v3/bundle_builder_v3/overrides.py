@@ -21,7 +21,7 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, Field
 
-from .charm import CharmChannel, CharmConfig
+from .charm import CharmChannel
 
 
 class CharmOverrideCriteria(BaseModel):
@@ -73,7 +73,7 @@ class CharmListingOverrides(BaseModel):
 
 class CharmTestConfig(BaseModel):
     criteria: CharmOverrideCriteria = Field(default_factory=CharmOverrideCriteria)
-    config: CharmConfig
+    config: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
 
 
 class CharmTestConfigs(BaseModel):
@@ -142,7 +142,9 @@ class OverridesClient:
         return CharmListingOverrides(**self._read_yaml_file(self.charm_listing_overrides, None)).unlisted_charms
 
     @cache
-    def get_charm_test_configs(self, charm: str, channel: CharmChannel) -> list[CharmConfig]:
+    def get_charm_test_configs(
+        self, charm: str, channel: CharmChannel
+    ) -> list[dict[str, str | int | float | bool | None]]:
         return [
             config.config
             for config in CharmTestConfigs(**self._read_yaml_file(self.charm_test_configs, f"{charm}.yaml")).configs

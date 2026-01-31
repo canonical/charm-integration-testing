@@ -39,12 +39,12 @@ overrides:
         optional: true
     constraints: |-
       ; At least one incoming integration must be present
-      (assert (>= (+ metrics-endpoint_count logging-provider_count tracing-provider_count grafana-dashboards-consumer_count) 1))
+      (assert (or metrics-endpoint logging-provider tracing-provider grafana-dashboards-consumer))
       ; If metrics-endpoint is used, need send-remote-write OR grafana-cloud-config
-      (assert (=> (>= metrics-endpoint_count 1) (>= (+ send-remote-write_count grafana-cloud-config_count) 1)))
+      (assert (=> metrics-endpoint (or send-remote-write grafana-cloud-config)))
       ; If logging-provider is used, need logging-consumer OR grafana-cloud-config
-      (assert (=> (>= logging-provider_count 1) (>= (+ logging-consumer_count grafana-cloud-config_count) 1)))
+      (assert (=> logging-provider (or logging-consumer grafana-cloud-config)))
       ; If tracing-provider is used, need tracing OR grafana-cloud-config
-      (assert (=> (>= tracing-provider_count 1) (>= (+ tracing_count grafana-cloud-config_count) 1)))
+      (assert (=> tracing-provider (or tracing grafana-cloud-config)))
       ; If grafana-dashboards-consumer is used, need grafana-dashboards-provider OR grafana-cloud-config
-      (assert (=> (>= grafana-dashboards-consumer_count 1) (>= (+ grafana-dashboards-provider_count grafana-cloud-config_count) 1)))
+      (assert (=> grafana-dashboards-consumer (or grafana-dashboards-provider grafana-cloud-config)))

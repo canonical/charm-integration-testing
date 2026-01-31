@@ -19,11 +19,12 @@ from functools import cache
 from .charm import (
     Charm,
     CharmChannel,
-    CharmConfig,
+    CharmConfigOption,
     CharmEndpoint,
     EndpointType,
 )
 from .charmhub_http import (
+    CharmConfigSchema,
     CharmhubBase,
     CharmhubHttpClient,
     CharmMetadata,
@@ -55,7 +56,7 @@ class CharmhubClient:
         self,
         charm_name: str,
         ubuntu_arch: str,
-        charm_channel: str | None = None,
+        charm_channel: CharmChannel | None = None,
         charm_revision: int | None = None,
         ubuntu_version: str | None = None,
     ) -> Charm:
@@ -151,30 +152,30 @@ class CharmhubClient:
     def _build_charm(
         self,
         charm_name: str,
-        channel: str,
+        channel: CharmChannel,
         revision: int,
         ubuntu_version: str,
         ubuntu_arch: str,
         metadata: CharmMetadata,
+        config_schema: CharmConfigSchema,
     ) -> Charm:
-        channel_obj = CharmChannel.model_validate(channel)
         return Charm(
             name=charm_name,
-            channel=channel_obj,
+            channel=channel,
             revision=revision,
             ubuntu_version=ubuntu_version,
             ubuntu_arch=ubuntu_arch,
-            endpoints=self._get_charm_endpoints(charm_name, metadata, channel_obj),
+            endpoints=self._get_charm_endpoints(charm_name, metadata, channel),
             priority=self._get_charm_priority(charm_name),
-            constraints=self._get_charm_constraints(charm_name, metadata, channel_obj),
-            configs=self._get_charm_configs(charm_name, channel_obj),
+            constraints=self._get_charm_constraints(charm_name, metadata, channel),
+            configs=self._get_charm_configs(charm_name, config_schema, channel),
         )
 
     def _charm_from_store_by_channel_and_revision(
         self,
         charm_name: str,
         ubuntu_arch: str,
-        charm_channel: str,
+        charm_channel: CharmChannel,
         charm_revision: int,
         ubuntu_version: str | None = None,
     ) -> Charm:
@@ -204,6 +205,7 @@ class CharmhubClient:
             ubuntu_version=ubuntu_version,
             ubuntu_arch=ubuntu_arch,
             metadata=refresh_info.charm.metadata,
+            config_schema=refresh_info.charm.config,
         )
 
     def _charm_from_store_by_revision(
@@ -252,18 +254,19 @@ class CharmhubClient:
 
         return self._build_charm(
             charm_name=charm_name,
-            channel=default_refresh_info.effective_channel,
+            channel=CharmChannel.model_validate(default_refresh_info.effective_channel),
             revision=charm_revision,
             ubuntu_version=ubuntu_version,
             ubuntu_arch=ubuntu_arch,
             metadata=refresh_info.charm.metadata,
+            config_schema=refresh_info.charm.config,
         )
 
     def _charm_from_store_by_channel(
         self,
         charm_name: str,
         ubuntu_arch: str,
-        charm_channel: str,
+        charm_channel: CharmChannel,
         ubuntu_version: str | None = None,
     ) -> Charm:
         # Get default ubuntu version if not provided
@@ -274,7 +277,7 @@ class CharmhubClient:
         refresh_info = self.http_client.refresh(
             RefreshAction(
                 charm_name=charm_name,
-                charm_channel=charm_channel,
+                charm_channel=str(charm_channel),
                 base=CharmhubBase(
                     channel=ubuntu_version,
                     architecture=ubuntu_arch,
@@ -304,6 +307,7 @@ class CharmhubClient:
             ubuntu_version=ubuntu_version,
             ubuntu_arch=ubuntu_arch,
             metadata=refresh_info.charm.metadata,
+            config_schema=refresh_info.charm.config,
         )
 
     def _charm_from_store_default(
@@ -337,11 +341,12 @@ class CharmhubClient:
 
         return self._build_charm(
             charm_name=charm_name,
-            channel=refresh_info.effective_channel,
+            channel=CharmChannel.model_validate(refresh_info.effective_channel),
             revision=refresh_info.charm.revision,
             ubuntu_version=ubuntu_version,
             ubuntu_arch=ubuntu_arch,
             metadata=refresh_info.charm.metadata,
+            config_schema=refresh_info.charm.config,
         )
 
     def _get_ubuntu_version_from_bases(
@@ -388,14 +393,14 @@ class CharmhubClient:
         return refresh_info
 
     def _supported_ubuntu_versions(
-        self, charm_name: str, ubuntu_arch: str, charm_channel: str | None = None
+        self, charm_name: str, ubuntu_arch: str, charm_channel: CharmChannel | None = None
     ) -> list[str]:
         # Juju passes "NA" to get the secret "default-bases" error field
         # https://github.com/juju/juju/blob/ed42a9975f6676210e81029b8c0d9c9bd9b152e5/internal/charmhub/refresh.go#L417
         refresh_info = self.http_client.refresh(
             RefreshAction(
                 charm_name=charm_name,
-                charm_channel=charm_channel,
+                charm_channel=str(charm_channel),
                 base=CharmhubBase(
                     name="NA",
                     channel="NA",
@@ -426,7 +431,9 @@ class CharmhubClient:
         # Return supported ubuntu versions
         return [base.channel for base in bases if base.name == "ubuntu"]
 
-    def _default_ubuntu_version(self, charm_name: str, ubuntu_arch: str, charm_channel: str | None = None) -> str:
+    def _default_ubuntu_version(
+        self, charm_name: str, ubuntu_arch: str, charm_channel: CharmChannel | None = None
+    ) -> str:
         # Get supported ubuntu versions
         versions = self._supported_ubuntu_versions(charm_name, ubuntu_arch, charm_channel=charm_channel)
 
@@ -523,11 +530,27 @@ class CharmhubClient:
 
         return endpoints
 
-    def _get_charm_configs(self, charm: str, channel: CharmChannel) -> list[CharmConfig]:
-        return self.overrides_client.get_charm_test_configs(charm, channel)
-
     def _get_charm_constraints(self, charm_name: str, metadata: CharmMetadata, channel: CharmChannel) -> str | None:
         return self.overrides_client.get_charm_metadata_overrides(charm_name, channel).constraints
 
     def _get_charm_priority(self, charm_name: str) -> float:
         return self.overrides_client.get_charm_priorities().get(charm_name, 1.0)
+
+    def _get_charm_configs(
+        self, charm: str, config_schema: CharmConfigSchema, channel: CharmChannel
+    ) -> list[dict[str, CharmConfigOption]]:
+        # Get test configs from overrides
+        test_configs = self.overrides_client.get_charm_test_configs(charm, channel)
+
+        # If no test configs provided, use one empty config
+        if len(test_configs) == 0:
+            test_configs = [{}]
+
+        # Normalize: ensure each test config has all schema keys (None for unspecified)
+        key_to_type = {key: option.type for key, option in config_schema.options.items()}
+        normalized = [
+            {key: CharmConfigOption(type=type, value=config.get(key, None)) for key, type in key_to_type.items()}
+            for config in test_configs
+        ]
+
+        return normalized

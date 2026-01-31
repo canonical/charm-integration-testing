@@ -81,6 +81,17 @@ class CharmMetadata(BaseModel):
     provides: dict[str, Endpoint] = Field(default_factory=dict)
 
 
+class CharmConfigSchema(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    class Option(BaseModel):
+        model_config = ConfigDict(frozen=True)
+
+        type: str
+
+    options: dict[str, "Option"] = Field(default_factory=dict)
+
+
 class RefreshResponse(BaseModel):
     model_config = ConfigDict(frozen=True, validate_by_name=True)
 
@@ -90,11 +101,17 @@ class RefreshResponse(BaseModel):
         bases: list[CharmhubBase] | None = None
         revision: int | None = None
         metadata: CharmMetadata = Field(default_factory=CharmMetadata, alias="metadata-yaml")
+        config: CharmConfigSchema = Field(default_factory=CharmConfigSchema, alias="config-yaml")
 
         @field_validator("metadata", mode="before")
         @classmethod
-        def parse_yaml(cls, metadata_yaml: str) -> CharmMetadata:
+        def parse_metadata_yaml(cls, metadata_yaml: str) -> CharmMetadata:
             return CharmMetadata(**yaml.safe_load(metadata_yaml))
+
+        @field_validator("config", mode="before")
+        @classmethod
+        def parse_config_yaml(cls, config_yaml: str) -> CharmConfigSchema:
+            return CharmConfigSchema(**yaml.safe_load(config_yaml))
 
     class Error(BaseModel):
         model_config = ConfigDict(frozen=True)
@@ -241,7 +258,7 @@ class CharmhubHttpClient:
         request_body = {
             "context": [],
             "actions": [{"action": "install", "instance-key": "1", **action_dict}],
-            "fields": ["bases", "metadata-yaml", "revision"],
+            "fields": ["bases", "metadata-yaml", "revision", "config-yaml"],
         }
 
         # Execute request

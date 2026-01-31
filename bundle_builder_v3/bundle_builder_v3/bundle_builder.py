@@ -187,7 +187,7 @@ class BundleBuilder:
             ubuntu_version=constraints.base,
         )
 
-    def _get_charms_for_endpoint(self, charm_id: int, endpoint_name: str, domain: Domain) -> set[Charm]:
+    def _get_charms_for_endpoint(self, charm_id: int, endpoint_name: str, domain: Domain) -> list[Charm]:
         endpoint = domain.charms[charm_id].spec.endpoints[endpoint_name]
         # requesting_charm_name = domain.charms[charm_id].spec.name
 
@@ -201,11 +201,6 @@ class BundleBuilder:
                 requires=endpoint.interface, platform=domain.platform_constraint
             )
 
-        # if len(fulfilling_charms) == 0:
-        #     raise UnresolvableBundleError(
-        #         f"No charms found that expose interface '{endpoint.interface}' to satisfy {requesting_charm_name}:{endpoint_name}"
-        #     )
-
         return [
             self.charmhub_client.charm_from_store(
                 charm_name=charm,
@@ -214,7 +209,7 @@ class BundleBuilder:
             for charm in fulfilling_charms
         ]
 
-    def _optimize_solution(self, domain: Domain, timeout: timedelta = timedelta(seconds=30)) -> z3.ModelRef:
+    def _optimize_solution(self, domain: Domain, timeout: timedelta = timedelta(minutes=3)) -> z3.ModelRef:
         optimizer = z3.Optimize()
         optimizer.set("timeout", int(timeout.total_seconds() * 1000))
         add_constraints(optimizer, domain)

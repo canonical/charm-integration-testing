@@ -16,8 +16,6 @@
 import z3
 from pydantic import BaseModel, ConfigDict, Field
 
-from bundle_builder_v3.assertion_tags import AssertionTag
-
 from .charm import Charm, CharmChannel, EndpointType
 
 
@@ -95,6 +93,7 @@ class DomainEndpoint(BaseModel):
     model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
     count: z3.ArithRef
+    integrated: z3.BoolRef
 
 
 class DomainCharm(BaseModel):
@@ -103,6 +102,8 @@ class DomainCharm(BaseModel):
     exists: z3.BoolRef
     spec: Charm
     endpoints: dict[str, DomainEndpoint]
+    config_index: z3.ArithRef
+    config_vars: dict[str, z3.ExprRef]
 
 
 class DomainCharmIntegration(BaseModel):
@@ -127,7 +128,10 @@ class Domain(BaseModel):
     charms: list[DomainCharm] = Field(default_factory=list)
     charm_integrations: dict[CharmIntegration, DomainCharmIntegration] = Field(default_factory=dict)
 
-    handled_failed_assertions: set[AssertionTag] = Field(default_factory=set)
+    handled_failed_assertions: set[str] = Field(default_factory=set)
+    # TODO: try tracking what charm instances are responsible adding charms
+    # Don't add a charm if it a charm instance wants it that was added for that charm
+    # Should be a good speed up
 
 
 def initialize_domain(
@@ -171,14 +175,32 @@ def initialize_domain(
 
 def add_charm_to_domain(charm: Charm, domain: Domain) -> Domain:
     charm_id = len(domain.charms)
+
+    # Create config variables based on schema types
+    config_vars = {}
+    for key, option in next(iter(charm.configs)).items():
+        if option.type == "string" or option.type == "secret":
+            config_vars[key] = z3.String(f"charm_{charm.name}_{charm_id}_config_{key}")
+        elif option.type == "int":
+            config_vars[key] = z3.Int(f"charm_{charm.name}_{charm_id}_config_{key}")
+        elif option.type == "float":
+            config_vars[key] = z3.Real(f"charm_{charm.name}_{charm_id}_config_{key}")
+        elif option.type == "boolean":
+            config_vars[key] = z3.Bool(f"charm_{charm.name}_{charm_id}_config_{key}")
+
     domain.charms.append(
         DomainCharm(
             exists=z3.Bool(f"charm_{charm.name}_{charm_id}_exists"),
             spec=charm,
             endpoints={
-                name: DomainEndpoint(count=z3.Int(f"charm_{charm.name}_{charm_id}_endpoint_{name}_count"))
+                name: DomainEndpoint(
+                    count=z3.Int(f"charm_{charm.name}_{charm_id}_endpoint_{name}_count"),
+                    integrated=z3.Bool(f"charm_{charm.name}_{charm_id}_endpoint_{name}_integrated"),
+                )
                 for name, endpoint in charm.endpoints.items()
             },
+            config_index=z3.Int(f"charm_{charm.name}_{charm_id}_config_index"),
+            config_vars=config_vars,
         )
     )
 

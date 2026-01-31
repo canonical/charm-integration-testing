@@ -14,5 +14,5 @@ overrides:
       metrics-endpoint:
         optional: true
     constraints: |-
-      ; Mutually exclusive, and one must be present
+      ; Mutually exclusive, and one database connection must be present
       (assert (= (+ database-legacy_count database_count) 1))

@@ -20,6 +20,7 @@ from .assertion_tags import (
     ApplicationExistsTag,
     ApplicationIntegrationAppsMapToCharmsTag,
     ApplicationIntegrationExistsTag,
+    CharmCustomConstraintTag,
     CharmDependencyAcyclicTag,
     CharmEndpointNonOptionalTag,
     CharmEndpointPayload,
@@ -28,6 +29,7 @@ from .assertion_tags import (
     CharmIntegrationExistsFromApplicationIntegrationTag,
     CharmIntegrationMappedToSingleApplicationIntegrationTag,
     CharmMappedToSingleApplicationTag,
+    CharmPayload,
     EndpointCountMatchesIntegrationsTag,
     EndpointRespectsLimitTag,
 )
@@ -39,6 +41,10 @@ def _app_endpoints_from_integration(integration: ApplicationIntegration) -> list
         AppEndpointPayload(application=integration.endpoint1.application, endpoint=integration.endpoint1.endpoint),
         AppEndpointPayload(application=integration.endpoint2.application, endpoint=integration.endpoint2.endpoint),
     ]
+
+
+def _charm_payload(charm: DomainCharm, charm_id: int) -> CharmPayload:
+    return CharmPayload(charm_name=charm.spec.name, charm_id=charm_id)
 
 
 def _charm_endpoint_payload(charm: DomainCharm, charm_id: int, endpoint: str | None) -> CharmEndpointPayload:
@@ -84,7 +90,7 @@ def add_application_constraints(solver: z3.Solver, domain: Domain) -> None:
                 + [z3.IntVal(0)]
             )
             <= 1,
-            CharmMappedToSingleApplicationTag(charm=_charm_endpoint_payload(charm, charm_id, None)).encode(),
+            CharmMappedToSingleApplicationTag(charm=_charm_payload(charm, charm_id)).encode(),
         )
 
     # Ensure charm exists if application-to-charm mapping is active
@@ -94,7 +100,7 @@ def add_application_constraints(solver: z3.Solver, domain: Domain) -> None:
             z3.Implies(mapping_var, charm_var),
             CharmExistsFromApplicationTag(
                 application=mapping.application,
-                charm=_charm_endpoint_payload(domain.charms[mapping.charm_id], mapping.charm_id, None),
+                charm=_charm_payload(domain.charms[mapping.charm_id], mapping.charm_id),
             ).encode(),
         )
 
@@ -228,7 +234,7 @@ def add_charm_constraints(solver: z3.Solver, domain: Domain) -> None:
             solver.assert_and_track(
                 z3.Implies(integration_var.exists, charm_var),
                 CharmExistsFromIntegrationTag(
-                    charm=_charm_endpoint_payload(domain.charms[charm_id], charm_id, None),
+                    charm=_charm_payload(domain.charms[charm_id], charm_id),
                     integration=_charm_endpoints_from_integration(charm_integration, domain),
                 ).encode(),
             )
@@ -255,6 +261,8 @@ def add_charm_constraints(solver: z3.Solver, domain: Domain) -> None:
                     usage_count=usage_count,
                 ).encode(),
             )
+            # Link integrated boolean to count
+            solver.add(endpoint.integrated == (endpoint.count >= 1))
 
 
 def add_charm_config_constraints(solver: z3.Solver, domain: Domain) -> None:
@@ -279,6 +287,37 @@ def add_charm_config_constraints(solver: z3.Solver, domain: Domain) -> None:
                     ).encode(),
                 )
 
+    # Add config constraints
+    for charm_id, charm in enumerate(domain.charms):
+        # Config index must be in valid range if charm exists
+        solver.add(
+            z3.Implies(
+                charm.exists,
+                z3.And(
+                    charm.config_index >= 0,
+                    charm.config_index < len(charm.spec.configs),
+                ),
+            )
+        )
+
+        # Link config_index to config values
+        for i, config in enumerate(charm.spec.configs):
+            config_num = i
+            for key, option in config.items():
+                if option.value is None:
+                    continue  # Skip unspecified values
+
+                var = charm.config_vars[key]
+                # Add constraint linking config_index to value
+                if isinstance(option.value, str):
+                    solver.add(z3.Implies(charm.config_index == config_num, var == z3.StringVal(option.value)))
+                elif isinstance(option.value, bool):
+                    solver.add(z3.Implies(charm.config_index == config_num, var == option.value))
+                elif isinstance(option.value, int):
+                    solver.add(z3.Implies(charm.config_index == config_num, var == option.value))
+                elif isinstance(option.value, float):
+                    solver.add(z3.Implies(charm.config_index == config_num, var == z3.RealVal(option.value)))
+
     # Add custom constraints from override files
     for charm_id, charm in enumerate(domain.charms):
         if not charm.spec.constraints:
@@ -288,13 +327,21 @@ def add_charm_config_constraints(solver: z3.Solver, domain: Domain) -> None:
         decls = {
             f"{endpoint_name}_count": endpoint_var.count for endpoint_name, endpoint_var in charm.endpoints.items()
         }
+        decls.update(
+            {endpoint_name: endpoint_var.integrated for endpoint_name, endpoint_var in charm.endpoints.items()}
+        )
+        # Add config variables (with config_ prefix for SMT-Lib)
+        decls.update({f"config_{key}": var for key, var in charm.config_vars.items()})
 
         # Parse SMT-Lib with existing variables
         constraints = z3.parse_smt2_string(charm.spec.constraints, decls=decls)
 
         # Guard each constraint with "if charm exists"
-        for constraint in constraints:
-            solver.add(z3.Implies(charm.exists, constraint))
+        for idx, constraint in enumerate(constraints):
+            solver.assert_and_track(
+                z3.Implies(charm.exists, constraint),
+                CharmCustomConstraintTag(charm=_charm_payload(charm, charm_id), assertion_idx=idx).encode(),
+            )
 
 
 def add_charm_dependency_constraints(solver: z3.Solver, domain: Domain) -> None:

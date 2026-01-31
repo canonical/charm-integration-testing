@@ -17,12 +17,12 @@
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
-from .charm import Charm, CharmConfig, EndpointType
+from .charm import Charm, EndpointType
 
 
 class Application(BaseModel):
     charm: Charm
-    config: CharmConfig = Field(default_factory=CharmConfig)
+    config: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
 
     def __repr__(self) -> str:
         return f"{self.charm.name}"
@@ -70,7 +70,7 @@ class Bundle(BaseModel):
                         "base": f"ubuntu@{info.charm.ubuntu_version}",
                         scale_key: 1,
                         "trust": True,
-                        # "options": {key: value for key, value in application.config},
+                        "options": {key: value for key, value in info.config.items() if value is not None},
                     }
                     for application, info in self.applications.items()
                 },

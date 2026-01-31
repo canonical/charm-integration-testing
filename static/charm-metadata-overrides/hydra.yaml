@@ -21,7 +21,7 @@ overrides:
         optional: true
       admin-ingress:
         optional: true
-    bridges:
-      - interface: certificate_transfer
-        requires: public-route
-        provides: oauth
+      tracing:
+        optional: true
+      logging:
+        optional: true
