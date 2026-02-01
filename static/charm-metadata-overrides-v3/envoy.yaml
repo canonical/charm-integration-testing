@@ -7,6 +7,6 @@ overrides:
         optional: true
       grafana-dashboard:
         optional: true
-    constraints: |
+    constraints: |-
       ; grpc endpoint must use mlmd-grpc mode
       (assert (=> grpc (= grpc_mode "mlmd-grpc")))

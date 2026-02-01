@@ -77,7 +77,7 @@ class Charm(BaseModel):
     ubuntu_version: str
     ubuntu_arch: str
     endpoints: dict[str, CharmEndpoint]
-    priority: int = Field(default=1)
+    priority: float = Field(default=1)
     constraints: str | None = None
     config_schema: dict[str, str] = Field(default_factory=dict)
     configs: list[CharmConfig] = Field(default_factory=list)

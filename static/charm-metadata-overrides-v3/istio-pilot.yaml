@@ -7,6 +7,6 @@ overrides:
         optional: true
       grafana-dashboard:
         optional: true
-    constraints: |
+    constraints: |-
       ; istio-pilot endpoint must use istio-pilot mode
       (assert (=> istio-pilot (= istio-pilot_mode "istio-pilot")))

@@ -7,6 +7,6 @@ overrides:
         optional: true
       grafana-dashboard:
         optional: true
-    constraints: |
+    constraints: |-
       ; k8s-service-info endpoint must use katib-service mode
       (assert (=> k8s-service-info (= k8s-service-info_mode "katib-service")))

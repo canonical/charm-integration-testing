@@ -5,18 +5,7 @@
 overrides:
   - requires:
       certificates:
-        optional_if:
-          - none_of:
-              - any_of:
-                  - all_of:
-                      - endpoint_integrated: traefik-route
-                      - endpoint_feature: [traefik-route, tls]
-                  - all_of:
-                      - endpoint_integrated: ingress
-                      - endpoint_feature: ingress:tls
-                  - all_of:
-                      - endpoint_integrated: ingress-per-unit
-                      - endpoint_feature: [ingress-per-unit, tls]
+        optional: true
       experimental-forward-auth:
         optional: true
       logging:
@@ -50,3 +39,10 @@ overrides:
       - interface: certificate_transfer
         requires: certificates
         provides: traefik-route
+    constraints: |-
+      ; If traefik-route uses tls mode, certificates is required
+      (assert (=> (and traefik-route (= traefik-route_mode "tls")) certificates))
+      ; If ingress uses tls mode, certificates is required
+      (assert (=> (and ingress (= ingress_mode "tls")) certificates))
+      ; If ingress-per-unit uses tls mode, certificates is required
+      (assert (=> (and ingress-per-unit (= ingress-per-unit_mode "tls")) certificates))

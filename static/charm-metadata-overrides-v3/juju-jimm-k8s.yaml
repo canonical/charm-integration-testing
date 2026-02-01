@@ -18,6 +18,7 @@ overrides:
         optional: false
         capabilities: [tls]
       receive-ca-cert:
-        optional_if:
-          - none_of:
-              - endpoint_feature: [oauth, tls]
+        optional: true
+    constraints: |-
+      ; If oauth uses tls mode, receive-ca-cert is required
+      (assert (=> (= oauth_mode "tls") receive-ca-cert))

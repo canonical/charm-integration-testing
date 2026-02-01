@@ -7,9 +7,8 @@ overrides:
         optional: true
       grafana-dashboard:
         optional: true
-    constraints: |
+    constraints: |-
       ; kfp-api must have kfp-api mode
       (assert (=> kfp-api (= kfp-api_mode "kfp-api")))
       ; kfp-viz must have kfp-viz mode
       (assert (=> kfp-viz (= kfp-viz_mode "kfp-viz")))
-

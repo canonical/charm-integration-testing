@@ -8,6 +8,6 @@ overrides:
     requires:
       nginx-route:
         optional: true
-    constraints: |
+    constraints: |-
       ; ui endpoint must use ui mode
       (assert (=> ui (= ui_mode "ui")))

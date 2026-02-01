@@ -12,10 +12,6 @@ overrides:
         optional: true
       config-server:
         optional: true
-        limit_if:
-          - criteria:
-              - endpoint_integrated: sharding
-            limit: 0
       cluster:
         optional: true
     requires:
@@ -24,16 +20,16 @@ overrides:
       s3-credentials:
         optional: true
       sharding:
-        limit_if:
-          - criteria:
-              - endpoint_integrated: config-server
-            limit: 0
         limit: 1
+        optional: true
       ldap:
-        optional_if:
-          - none_of:
-              - endpoint_integrated: ldap-certificate-transfer
+        optional: true
       ldap-certificate-transfer:
-        optional_if:
-          - none_of:
-              - endpoint_integrated: ldap
+        optional: true
+    constraints: |-
+      ; config-server and sharding are mutually exclusive
+      (assert (not (and config-server sharding)))
+      ; ldap requires ldap-certificate-transfer
+      (assert (=> ldap ldap-certificate-transfer))
+      ; ldap-certificate-transfer requires ldap
+      (assert (=> ldap-certificate-transfer ldap))

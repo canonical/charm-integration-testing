@@ -7,6 +7,6 @@ overrides:
         optional: true
       grafana-dashboard:
         optional: true
-    constraints: |
+    constraints: |-
       ; kubeflow-profiles endpoint must use kubeflow-profiles mode
       (assert (=> kubeflow-profiles (= kubeflow-profiles_mode "kubeflow-profiles")))

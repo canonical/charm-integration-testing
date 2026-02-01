@@ -38,3 +38,6 @@ overrides:
         interface: tracing
         limit: 1
         optional: true
+    constraints: |-
+      ; Exactly one of database, mysql, or mysql-root must be integrated
+      (assert (= (+ database_count mysql_count mysql-root_count) 1))

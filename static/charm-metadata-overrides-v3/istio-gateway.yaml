@@ -5,6 +5,6 @@ overrides:
       # Remove after: https://github.com/canonical/charm-integration-testing/issues/282
       metrics-endpoint:
         optional: true
-    constraints: |
+    constraints: |-
       ; istio-pilot endpoint must use istio-pilot mode
       (assert (=> istio-pilot (= istio-pilot_mode "istio-pilot")))

@@ -1,6 +1,6 @@
 ---
 # KFP Visualization Server - renders pipeline graphs and metrics
 overrides:
-  - constraints: |
+  - constraints: |-
       ; kfp-viz endpoint must use kfp-viz mode
       (assert (=> kfp-viz (= kfp-viz_mode "kfp-viz")))

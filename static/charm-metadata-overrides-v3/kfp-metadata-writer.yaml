@@ -1,6 +1,6 @@
 ---
 # KFP Metadata Writer - records pipeline execution metadata to MLMD
 overrides:
-  - constraints: |
+  - constraints: |-
       ; grpc endpoint must use mlmd-grpc mode
       (assert (=> grpc (= grpc_mode "mlmd-grpc")))

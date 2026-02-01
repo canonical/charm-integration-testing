@@ -1,14 +1,29 @@
 ---
 overrides:
+  - criteria:
+      track: '3'
+      risk: 'edge'
+    requires:
+      s3-credentials:
+        optional: true
+      azure-storage-credentials:
+        optional: true
+      ingress:
+        optional: true
+    constraints: |-
+      ; At least one storage backend is required (s3 or azure)
+      (assert (or s3-credentials azure-storage-credentials))
+      ; If an auth method is integrated, ingress is required
+      (assert (=> (or auth-proxy oauth2-proxy) ingress))
   - requires:
       s3-credentials:
-        optional_if:
-          - endpoint_integrated: azure-storage-credentials
+        optional: true
       azure-storage-credentials:
-        optional_if:
-          - endpoint_integrated: s3-credentials
+        optional: true
       ingress:
-        optional_if:
-          - none_of:
-              - endpoint_integrated: auth-proxy
-              - endpoint_integrated: oauth2-proxy
+        optional: true
+    constraints: |-
+      ; At least one storage backend is required (s3 or azure)
+      (assert (or s3-credentials azure-storage-credentials))
+      ; If auth-proxy is integrated, ingress is required
+      (assert (=> auth-proxy ingress))

@@ -25,6 +25,6 @@ overrides:
         optional: true
       logging:
         optional: true
-      constraints: |
-        ; If public-ingress uses TLS mode, oauth must also use TLS mode
-        (assert (=> (= public-ingress_mode "tls") (= oauth_mode "tls")))
+    constraints: |-
+      ; If public-ingress uses TLS mode, oauth must also use TLS mode
+      (assert (=> (= public-ingress_mode "tls") (= oauth_mode "tls")))
