@@ -33,9 +33,14 @@ class Assertions(str, Enum):
     CHARM_INTEGRATION_EXISTS_FROM_APPLICATION_INTEGRATION = "charm_integration_exists_from_application_integration"
     CHARM_EXISTS_FROM_INTEGRATION = "charm_exists_from_integration"
     ENDPOINT_COUNT_MATCHES_INTEGRATIONS = "endpoint_count_matches_integrations"
+    ENDPOINT_INTEGRATED_MATCHES_COUNT = "endpoint_integrated_matches_count"
+    ENDPOINT_MODE_MATCHES = "endpoint_mode_matches"
     ENDPOINT_RESPECTS_LIMIT = "endpoint_respects_limit"
     APPLICATION_INTEGRATION_APPS_MAP_TO_CHARMS = "application_integration_apps_map_to_charms"
     CHARM_CUSTOM_CONSTRAINT = "charm_custom_constraint"
+    CHARM_CONFIG_INDEX_IN_RANGE = "charm_config_index_in_range"
+    CHARM_CONFIG_VALUE_MATCHES_INDEX = "charm_config_value_matches_index"
+    CHARM_RANK_BOUNDED = "charm_rank_bounded"
 
 
 class AssertionTag(BaseModel):
@@ -142,6 +147,16 @@ class EndpointCountMatchesIntegrationsTag(AssertionTag):
     usage_count: int
 
 
+class EndpointIntegratedMatchesCountTag(AssertionTag):
+    kind: Assertions = Assertions.ENDPOINT_INTEGRATED_MATCHES_COUNT
+    charm: CharmEndpointPayload
+
+
+class EndpointModeMatchesTag(AssertionTag):
+    kind: Assertions = Assertions.ENDPOINT_MODE_MATCHES
+    integration: list[CharmEndpointPayload]
+
+
 class CharmEndpointNonOptionalTag(AssertionTag):
     kind: Assertions = Assertions.CHARM_ENDPOINT_NON_OPTIONAL
     charm: CharmEndpointPayload
@@ -159,6 +174,23 @@ class CharmCustomConstraintTag(AssertionTag):
     assertion_idx: int
 
 
+class CharmConfigIndexInRangeTag(AssertionTag):
+    kind: Assertions = Assertions.CHARM_CONFIG_INDEX_IN_RANGE
+    charm: CharmPayload
+
+
+class CharmConfigValueMatchesIndexTag(AssertionTag):
+    kind: Assertions = Assertions.CHARM_CONFIG_VALUE_MATCHES_INDEX
+    charm: CharmPayload
+    config_key: str
+    config_index: int
+
+
+class CharmRankBoundedTag(AssertionTag):
+    kind: Assertions = Assertions.CHARM_RANK_BOUNDED
+    charm: CharmPayload
+
+
 _ASSERTION_TYPE_REGISTRY: dict[Assertions, Type[AssertionTag]] = {
     Assertions.APPLICATION_EXISTS: ApplicationExistsTag,
     Assertions.APPLICATION_INTEGRATION_EXISTS: ApplicationIntegrationExistsTag,
@@ -170,7 +202,12 @@ _ASSERTION_TYPE_REGISTRY: dict[Assertions, Type[AssertionTag]] = {
     Assertions.CHARM_INTEGRATION_EXISTS_FROM_APPLICATION_INTEGRATION: CharmIntegrationExistsFromApplicationIntegrationTag,
     Assertions.CHARM_EXISTS_FROM_INTEGRATION: CharmExistsFromIntegrationTag,
     Assertions.ENDPOINT_COUNT_MATCHES_INTEGRATIONS: EndpointCountMatchesIntegrationsTag,
+    Assertions.ENDPOINT_INTEGRATED_MATCHES_COUNT: EndpointIntegratedMatchesCountTag,
+    Assertions.ENDPOINT_MODE_MATCHES: EndpointModeMatchesTag,
     Assertions.ENDPOINT_RESPECTS_LIMIT: EndpointRespectsLimitTag,
     Assertions.APPLICATION_INTEGRATION_APPS_MAP_TO_CHARMS: ApplicationIntegrationAppsMapToCharmsTag,
     Assertions.CHARM_CUSTOM_CONSTRAINT: CharmCustomConstraintTag,
+    Assertions.CHARM_CONFIG_INDEX_IN_RANGE: CharmConfigIndexInRangeTag,
+    Assertions.CHARM_CONFIG_VALUE_MATCHES_INDEX: CharmConfigValueMatchesIndexTag,
+    Assertions.CHARM_RANK_BOUNDED: CharmRankBoundedTag,
 }
