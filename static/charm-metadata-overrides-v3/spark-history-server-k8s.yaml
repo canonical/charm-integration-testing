@@ -2,7 +2,7 @@
 overrides:
   - criteria:
       track: '3'
-      risk: 'edge'
+      risk: edge
     requires:
       s3-credentials:
         optional: true

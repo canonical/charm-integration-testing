@@ -38,7 +38,7 @@ from .assertion_tags import (
     EndpointModeMatchesTag,
     EndpointRespectsLimitTag,
 )
-from .domain import ApplicationIntegration, CharmIntegration, Domain, DomainCharm
+from .domain import ApplicationIntegration, ApplicationToCharmMapping, CharmIntegration, Domain, DomainCharm
 
 
 def _app_endpoints_from_integration(integration: ApplicationIntegration) -> list[AppEndpointPayload]:
@@ -161,73 +161,45 @@ def add_application_constraints(solver: z3.Solver, domain: Domain) -> None:
         charm_integration,
     ), mapping_var in domain.application_integration_to_charm_integration.items():
         # ApplicationIntegration is unordered, CharmIntegration is ordered
-        # Figure out which endpoint in app_integration corresponds to requires/provides in charm_integration
+        # Find the correct application-to-charm mappings by checking which actually exist
         charm_req = charm_integration.requires_endpoint
         charm_prov = charm_integration.provides_endpoint
 
-        # Try both orderings to find which matches
-        if (
-            app_integration.endpoint1.endpoint == charm_req.endpoint
-            and app_integration.endpoint2.endpoint == charm_prov.endpoint
-        ):
-            # endpoint1 = requires, endpoint2 = provides
-            app_req = app_integration.endpoint1
-            app_prov = app_integration.endpoint2
-        elif (
-            app_integration.endpoint1.endpoint == charm_prov.endpoint
-            and app_integration.endpoint2.endpoint == charm_req.endpoint
-        ):
-            # endpoint1 = provides, endpoint2 = requires
-            app_req = app_integration.endpoint2
-            app_prov = app_integration.endpoint1
-        else:
-            raise ValueError(
-                f"Integration mapping exists but endpoint names don't match: "
-                f"{app_integration} -> {charm_integration}"
+        # Try both orderings: (req_app, prov_app, req_endpoint, prov_endpoint)
+        for req_app_ep, prov_app_ep in [
+            (
+                app_integration.endpoint1,
+                app_integration.endpoint2,
+            ),
+            (
+                app_integration.endpoint2,
+                app_integration.endpoint1,
+            ),
+        ]:
+            req_mapping_key = ApplicationToCharmMapping(application=req_app_ep.application, charm_id=charm_req.charm_id)
+            prov_mapping_key = ApplicationToCharmMapping(
+                application=prov_app_ep.application, charm_id=charm_prov.charm_id
             )
 
-        # Find the mappings we need
-        req_mapping_key = next(
-            (
-                m
-                for m in domain.application_to_charm.keys()
-                if m.application == app_req.application and m.charm_id == charm_req.charm_id
-            ),
-            None,
-        )
-        prov_mapping_key = next(
-            (
-                m
-                for m in domain.application_to_charm.keys()
-                if m.application == app_prov.application and m.charm_id == charm_prov.charm_id
-            ),
-            None,
-        )
-
-        if req_mapping_key is None or prov_mapping_key is None:
+            if req_mapping_key in domain.application_to_charm and prov_mapping_key in domain.application_to_charm:
+                solver.assert_and_track(
+                    z3.Implies(
+                        mapping_var,
+                        z3.And(
+                            domain.application_to_charm[req_mapping_key], domain.application_to_charm[prov_mapping_key]
+                        ),
+                    ),
+                    ApplicationIntegrationAppsMapToCharmsTag(
+                        application_integration=_app_endpoints_from_integration(app_integration),
+                        charm_integration=_charm_endpoints_from_integration(charm_integration, domain),
+                    ).encode(),
+                )
+                break
+        else:
             raise ValueError(
                 f"Integration mapping exists but application-to-charm mappings don't exist: "
                 f"{app_integration} -> {charm_integration}"
             )
-
-        req_mapping = domain.application_to_charm[req_mapping_key]
-        prov_mapping = domain.application_to_charm[prov_mapping_key]
-
-        solver.assert_and_track(
-            z3.Implies(
-                mapping_var,
-                z3.And(req_mapping, prov_mapping),
-            ),
-            ApplicationIntegrationAppsMapToCharmsTag(
-                application=app_req.application,
-                application_endpoint=app_req.endpoint,
-                application_integration=_app_endpoints_from_integration(app_integration),
-                charm_integration=_charm_endpoints_from_integration(charm_integration, domain),
-                charm=_charm_endpoint_payload(
-                    domain.charms[charm_req.charm_id], charm_req.charm_id, charm_req.endpoint
-                ),
-            ).encode(),
-        )
 
 
 def add_charm_constraints(solver: z3.Solver, domain: Domain) -> None:
@@ -285,7 +257,9 @@ def add_charm_constraints(solver: z3.Solver, domain: Domain) -> None:
             # Link integrated boolean to count
             solver.assert_and_track(
                 endpoint.integrated == (endpoint.count >= 1),
-                EndpointIntegratedMatchesCountTag(charm=_charm_endpoint_payload(charm, charm_id, endpoint_name)).encode(),
+                EndpointIntegratedMatchesCountTag(
+                    charm=_charm_endpoint_payload(charm, charm_id, endpoint_name)
+                ).encode(),
             )
 
 

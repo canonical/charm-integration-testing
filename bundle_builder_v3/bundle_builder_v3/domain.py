@@ -254,34 +254,29 @@ def add_charm_to_domain(charm: Charm, domain: Domain) -> Domain:
             charm_req_ep = charm_integration.requires_endpoint
             charm_prov_ep = charm_integration.provides_endpoint
 
-            # Try ordering 1: endpoint1=requires, endpoint2=provides
-            if (
-                app_integration.endpoint1.endpoint == charm_req_ep.endpoint
-                and app_integration.endpoint2.endpoint == charm_prov_ep.endpoint
-            ):
-                req_mapping = ApplicationToCharmMapping(
-                    application=app_integration.endpoint1.application, charm_id=charm_req_ep.charm_id
-                )
-                prov_mapping = ApplicationToCharmMapping(
-                    application=app_integration.endpoint2.application, charm_id=charm_prov_ep.charm_id
-                )
+            # Check if endpoints match by name and try both orderings
+            orderings = [
+                # (req_app, prov_app, endpoint_names_match)
+                (
+                    app_integration.endpoint1.application,
+                    app_integration.endpoint2.application,
+                    app_integration.endpoint1.endpoint == charm_req_ep.endpoint
+                    and app_integration.endpoint2.endpoint == charm_prov_ep.endpoint,
+                ),
+                (
+                    app_integration.endpoint2.application,
+                    app_integration.endpoint1.application,
+                    app_integration.endpoint2.endpoint == charm_req_ep.endpoint
+                    and app_integration.endpoint1.endpoint == charm_prov_ep.endpoint,
+                ),
+            ]
 
-                if req_mapping in domain.application_to_charm and prov_mapping in domain.application_to_charm:
-                    domain.application_integration_to_charm_integration[(app_integration, charm_integration)] = z3.Bool(
-                        f"app_integration_{app_integration.endpoint1.application}:{app_integration.endpoint1.endpoint}__{app_integration.endpoint2.application}:{app_integration.endpoint2.endpoint}_maps_to_charm_integration_{charm_req_ep.charm_id}:{charm_req_ep.endpoint}__{charm_prov_ep.charm_id}:{charm_prov_ep.endpoint}"
-                    )
+            for req_app, prov_app, matches in orderings:
+                if not matches:
+                    continue
 
-            # Try ordering 2: endpoint1=provides, endpoint2=requires
-            elif (
-                app_integration.endpoint1.endpoint == charm_prov_ep.endpoint
-                and app_integration.endpoint2.endpoint == charm_req_ep.endpoint
-            ):
-                req_mapping = ApplicationToCharmMapping(
-                    application=app_integration.endpoint2.application, charm_id=charm_req_ep.charm_id
-                )
-                prov_mapping = ApplicationToCharmMapping(
-                    application=app_integration.endpoint1.application, charm_id=charm_prov_ep.charm_id
-                )
+                req_mapping = ApplicationToCharmMapping(application=req_app, charm_id=charm_req_ep.charm_id)
+                prov_mapping = ApplicationToCharmMapping(application=prov_app, charm_id=charm_prov_ep.charm_id)
 
                 if req_mapping in domain.application_to_charm and prov_mapping in domain.application_to_charm:
                     domain.application_integration_to_charm_integration[(app_integration, charm_integration)] = z3.Bool(

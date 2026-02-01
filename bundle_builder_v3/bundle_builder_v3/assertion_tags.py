@@ -128,9 +128,6 @@ class CharmIntegrationExistsFromApplicationIntegrationTag(AssertionTag):
 
 class ApplicationIntegrationAppsMapToCharmsTag(AssertionTag):
     kind: Assertions = Assertions.APPLICATION_INTEGRATION_APPS_MAP_TO_CHARMS
-    application: str
-    application_endpoint: str
-    charm: CharmEndpointPayload
     application_integration: list[AppEndpointPayload]
     charm_integration: list[CharmEndpointPayload]
 
