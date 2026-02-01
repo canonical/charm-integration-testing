@@ -1,9 +1,8 @@
 ---
 # Kubeflow Pipelines UI - web interface for pipeline management
 overrides:
-  - provides:
-      kfp-ui:
-        features: [kfp-ui]
-    requires:
-      kfp-api:
-        features: [kfp-api]
+  - constraints: |
+      ; kfp-ui endpoint must use kfp-ui mode
+      (assert (=> kfp-ui (= kfp-ui_mode "kfp-ui")))
+      ; kfp-api endpoint must use kfp-api mode
+      (assert (=> kfp-api (= kfp-api_mode "kfp-api")))

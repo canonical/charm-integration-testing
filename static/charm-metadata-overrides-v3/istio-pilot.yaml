@@ -2,10 +2,11 @@
 # Istio Pilot - control plane for service mesh
 overrides:
   - provides:
-      istio-pilot:
-        features: [istio-pilot]
       # Remove after: https://github.com/canonical/charm-integration-testing/issues/282
       metrics-endpoint:
         optional: true
       grafana-dashboard:
         optional: true
+    constraints: |
+      ; istio-pilot endpoint must use istio-pilot mode
+      (assert (=> istio-pilot (= istio-pilot_mode "istio-pilot")))

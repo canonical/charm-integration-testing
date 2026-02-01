@@ -26,16 +26,20 @@ overrides:
       grafana-dashboard:
         interface: grafana_dashboard
         optional: true
-    # constraints: |-
-    #   ; num-history-shards must be a power of 2
-    #   (assert (or (= config_num-history-shards 1)
-    #               (= config_num-history-shards 2)
-    #               (= config_num-history-shards 4)
-    #               (= config_num-history-shards 8)
-    #               (= config_num-history-shards 16)
-    #               (= config_num-history-shards 32)
-    #               (= config_num-history-shards 64)
-    #               (= config_num-history-shards 128)
-    #               (= config_num-history-shards 256)
-    #               (= config_num-history-shards 512)
-    #               (= config_num-history-shards 1024)))
+    constraints: |-
+      ; num-history-shards must be a power of 2
+      (assert (or (= config_num-history-shards 1)
+                  (= config_num-history-shards 2)
+                  (= config_num-history-shards 4)
+                  (= config_num-history-shards 8)
+                  (= config_num-history-shards 16)
+                  (= config_num-history-shards 32)
+                  (= config_num-history-shards 64)
+                  (= config_num-history-shards 128)
+                  (= config_num-history-shards 256)
+                  (= config_num-history-shards 512)
+                  (= config_num-history-shards 1024)))
+      ; admin endpoint must use admin mode
+      (assert (=> admin (= admin_mode "admin")))
+      ; ui endpoint must use ui mode
+      (assert (=> ui (= ui_mode "ui")))

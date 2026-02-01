@@ -37,4 +37,3 @@ overrides:
         optional_if:
           - none_of:
               - endpoint_integrated: ldap
-        features: [ldap-certificates]

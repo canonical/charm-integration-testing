@@ -5,7 +5,9 @@ overrides:
       ui:
         limit: 1
         optional: false
-        features: [ui]
     requires:
       nginx-route:
         optional: true
+    constraints: |
+      ; ui endpoint must use ui mode
+      (assert (=> ui (= ui_mode "ui")))

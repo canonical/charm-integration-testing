@@ -1,6 +1,6 @@
 ---
 # ML Metadata - stores metadata for ML workflows
 overrides:
-  - provides:
-      grpc:
-        features: [mlmd-grpc]
+  - constraints: |
+      ; grpc endpoint must use mlmd-grpc mode
+      (assert (=> grpc (= grpc_mode "mlmd-grpc")))

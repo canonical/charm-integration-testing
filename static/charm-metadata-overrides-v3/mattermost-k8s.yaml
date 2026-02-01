@@ -1,8 +1,6 @@
 ---
 overrides:
-  - requires:
-      # https://github.com/canonical/mattermost-k8s-operator/issues/42
-      db:
-        limit: 1
-        optional: false
-        features: [tls]
+  - # https://github.com/canonical/mattermost-k8s-operator/issues/42
+    constraints: |
+      ; db endpoint must use tls mode
+      (assert (=> db (= db_mode "tls")))

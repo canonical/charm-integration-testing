@@ -1,12 +1,12 @@
 ---
 # Envoy proxy - HTTP/gRPC access to ML Metadata
 overrides:
-  - requires:
-      grpc:
-        features: [mlmd-grpc]
-    provides:
+  - provides:
       # Remove after: https://github.com/canonical/charm-integration-testing/issues/282
       metrics-endpoint:
         optional: true
       grafana-dashboard:
         optional: true
+    constraints: |
+      ; grpc endpoint must use mlmd-grpc mode
+      (assert (=> grpc (= grpc_mode "mlmd-grpc")))

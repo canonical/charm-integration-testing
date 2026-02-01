@@ -239,6 +239,19 @@ def add_charm_constraints(solver: z3.Solver, domain: Domain) -> None:
                 ).encode(),
             )
 
+    # Ensure both endpoints in an integration have the same mode
+    for charm_integration, integration_var in domain.charm_integrations.items():
+        req_charm_id = charm_integration.requires_endpoint.charm_id
+        req_endpoint = charm_integration.requires_endpoint.endpoint
+        prov_charm_id = charm_integration.provides_endpoint.charm_id
+        prov_endpoint = charm_integration.provides_endpoint.endpoint
+
+        req_mode = domain.charms[req_charm_id].endpoints[req_endpoint].mode
+        prov_mode = domain.charms[prov_charm_id].endpoints[prov_endpoint].mode
+
+        # If integration exists, modes must match
+        solver.add(z3.Implies(integration_var.exists, req_mode == prov_mode))
+
     # Ensure endpoint count equals number of integrations using that endpoint
     for charm_id, charm in enumerate(domain.charms):
         for endpoint_name, endpoint in charm.endpoints.items():
