@@ -55,8 +55,6 @@ class CharmMetadataOverride(BaseModel):
     requires: dict[str, CharmEndpointOverride] = Field(default_factory=dict)
     provides: dict[str, CharmEndpointOverride] = Field(default_factory=dict)
     constraints: str | None = None
-    # TODO
-    # bridges: ...
 
 
 class CharmMetadataOverrides(BaseModel):

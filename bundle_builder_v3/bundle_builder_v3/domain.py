@@ -133,6 +133,7 @@ class Domain(BaseModel):
     # TODO: try tracking what charm instances are responsible adding charms
     # Don't add a charm if it a charm instance wants it that was added for that charm
     # Should be a good speed up
+    # Also will prevent infinite recursion loops
 
 
 def initialize_domain(
