@@ -16,35 +16,81 @@
 # 3. grafana-cloud-config acts as a universal outgoing integration that satisfies any incoming integration's requirement
 #
 # Logic sourced from https://github.com/canonical/grafana-agent-k8s-operator/blob/6705b4483c0498ab6913e79d340388ca165e5524/src/charm.py#L42
-overrides:
-  - provides:
-      grafana-dashboards-provider:
-        optional: true
-      logging-provider:
-        optional: true
-      tracing-provider:
-        optional: true
-    requires:
-      send-remote-write:
-        optional: true
-      tracing:
-        optional: true
-      logging-consumer:
-        optional: true
-      grafana-cloud-config:
-        optional: true
-      metrics-endpoint:
-        optional: true
-      grafana-dashboards-consumer:
-        optional: true
-    constraints: |-
-      ; At least one incoming integration must be present
-      (assert (or metrics-endpoint logging-provider tracing-provider grafana-dashboards-consumer))
-      ; If metrics-endpoint is used, need send-remote-write OR grafana-cloud-config
-      (assert (=> metrics-endpoint (or send-remote-write grafana-cloud-config)))
-      ; If logging-provider is used, need logging-consumer OR grafana-cloud-config
-      (assert (=> logging-provider (or logging-consumer grafana-cloud-config)))
-      ; If tracing-provider is used, need tracing OR grafana-cloud-config
-      (assert (=> tracing-provider (or tracing grafana-cloud-config)))
-      ; If grafana-dashboards-consumer is used, need grafana-dashboards-provider OR grafana-cloud-config
-      (assert (=> grafana-dashboards-consumer (or grafana-dashboards-provider grafana-cloud-config)))
+provides:
+  grafana-dashboards-provider:
+    optional_if:
+      - any_of:
+          - none_of:
+              - endpoint_integrated: grafana-dashboards-consumer
+          - all_of:
+              - endpoint_integrated: grafana-dashboards-consumer
+              - endpoint_integrated: grafana-cloud-config
+  logging-provider:
+    optional_if:
+      - any_of:
+          - endpoint_integrated: metrics-endpoint
+          - endpoint_integrated: tracing-provider
+          - endpoint_integrated: grafana-dashboards-consumer
+  tracing-provider:
+    optional_if:
+      - any_of:
+          - endpoint_integrated: metrics-endpoint
+          - endpoint_integrated: logging-provider
+          - endpoint_integrated: grafana-dashboards-consumer
+requires:
+  send-remote-write:
+    optional_if:
+      - any_of:
+          - none_of:
+              - endpoint_integrated: metrics-endpoint
+          - all_of:
+              - endpoint_integrated: metrics-endpoint
+              - endpoint_integrated: grafana-cloud-config
+  tracing:
+    optional_if:
+      - any_of:
+          - none_of:
+              - endpoint_integrated: tracing-provider
+          - all_of:
+              - endpoint_integrated: tracing-provider
+              - endpoint_integrated: grafana-cloud-config
+  logging-consumer:
+    optional_if:
+      - any_of:
+          - none_of:
+              - endpoint_integrated: logging-provider
+          - all_of:
+              - endpoint_integrated: logging-provider
+              - endpoint_integrated: grafana-cloud-config
+  grafana-cloud-config:
+    optional_if:
+      - none_of:
+          - any_of:
+              - all_of:
+                  - endpoint_integrated: metrics-endpoint
+                  - none_of:
+                      - endpoint_integrated: send-remote-write
+              - all_of:
+                  - endpoint_integrated: logging-provider
+                  - none_of:
+                      - endpoint_integrated: logging-consumer
+              - all_of:
+                  - endpoint_integrated: tracing-provider
+                  - none_of:
+                      - endpoint_integrated: tracing
+              - all_of:
+                  - endpoint_integrated: grafana-dashboards-consumer
+                  - none_of:
+                      - endpoint_integrated: grafana-dashboards-provider
+  metrics-endpoint:
+    optional_if:
+      - any_of:
+          - endpoint_integrated: logging-provider
+          - endpoint_integrated: tracing-provider
+          - endpoint_integrated: grafana-dashboards-consumer
+  grafana-dashboards-consumer:
+    optional_if:
+      - any_of:
+          - endpoint_integrated: metrics-endpoint
+          - endpoint_integrated: logging-provider
+          - endpoint_integrated: tracing-provider

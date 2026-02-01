@@ -1,8 +1,7 @@
 ---
-overrides:
-  - requires:
-      # https://github.com/canonical/mattermost-k8s-operator/issues/42
-      db:
-        limit: 1
-        optional: false
-        features: [tls]
+requires:
+  # https://github.com/canonical/mattermost-k8s-operator/issues/42
+  db:
+    limit: 1
+    optional: false
+    features: [tls]

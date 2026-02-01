@@ -1,0 +1,9 @@
+---
+overrides:
+  - requires:
+      s3-credentials:
+        optional_if:
+          - endpoint_integrated: azure-storage-credentials
+      azure-storage-credentials:
+        optional_if:
+          - endpoint_integrated: s3-credentials

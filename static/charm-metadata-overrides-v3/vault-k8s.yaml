@@ -1,0 +1,32 @@
+---
+# Remove after: https://github.com/canonical/vault-k8s-operator/pull/659
+overrides:
+  - provides:
+      vault-autounseal-provides:
+        optional: true
+      vault-kv:
+        optional: true
+      vault-pki:
+        optional: true
+      metrics-endpoint:
+        optional: true
+      send-ca-cert:
+        optional: true
+      grafana-dashboard:
+        optional: true
+    requires:
+      ingress:
+        optional: true
+      ingress-per-unit:
+        optional: true
+      # Vault provides certificates as an intermediate CA authority.
+      # This means it needs a parent CA integration.
+      # Unfortunately the default release of vault requires one to set the
+      # `common_name` configuration to specific domains to issue certificates.
+      # In the future the `pki_allow_any_name` will let us bypass that issue.
+      # So while vault will still fail to provide certificates, this update lets the bundle builder
+      # generally opt for just self-signed-certificates instead of vault-k8s + self-signed-certificates
+      # See https://github.com/canonical/vault-k8s-operator/blob/4f7d0d148959bad05890cea7cdd9b20903022eaa/k8s/charmcraft.yaml#L355
+      # And https://canonical-vault-charms.readthedocs-hosted.com/en/latest/how-to/use_as_intermediate_ca/
+      tls-certificates-pki:
+        optional: true

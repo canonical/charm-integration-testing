@@ -1,6 +1,5 @@
 ---
 # KFP Visualization Server - renders pipeline graphs and metrics
-overrides:
-  - provides:
-      kfp-viz:
-        features: [kfp-viz]
+provides:
+  kfp-viz:
+    features: [kfp-viz]

@@ -1,0 +1,7 @@
+---
+# KServe Controller - model serving on Kubernetes
+overrides:
+  - provides:
+      # Remove after: https://github.com/canonical/charm-integration-testing/issues/282
+      metrics-endpoint:
+        optional: true

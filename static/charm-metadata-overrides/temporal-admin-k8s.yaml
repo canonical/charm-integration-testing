@@ -1,6 +1,6 @@
 ---
-overrides:
-  - provides:
-      admin:
-        limit: 1
-        optional: false
+provides:
+  admin:
+    limit: 1
+    optional: false
+    features: [admin]

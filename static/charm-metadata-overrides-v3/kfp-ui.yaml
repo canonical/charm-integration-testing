@@ -1,0 +1,9 @@
+---
+# Kubeflow Pipelines UI - web interface for pipeline management
+overrides:
+  - provides:
+      kfp-ui:
+        features: [kfp-ui]
+    requires:
+      kfp-api:
+        features: [kfp-api]

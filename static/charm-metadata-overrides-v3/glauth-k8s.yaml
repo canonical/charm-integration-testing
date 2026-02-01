@@ -1,0 +1,15 @@
+---
+# Remove after: https://github.com/canonical/glauth-k8s-operator/pull/151
+overrides:
+  - provides:
+      metrics-endpoint:
+        optional: true
+      grafana-dashboard:
+        optional: true
+      ldap:
+        optional: true
+      glauth-auxiliary:
+        optional: true
+      send-ca-cert:
+        optional: true
+        features: [ldap-certificates]

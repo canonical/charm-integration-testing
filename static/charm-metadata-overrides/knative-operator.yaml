@@ -1,7 +1,6 @@
 ---
 # Knative Operator - manages Knative components
-overrides:
-  - provides:
-      # Remove after: https://github.com/canonical/charm-integration-testing/issues/282
-      metrics-endpoint:
-        optional: true
+provides:
+  # Remove after: https://github.com/canonical/charm-integration-testing/issues/282
+  metrics-endpoint:
+    optional: true

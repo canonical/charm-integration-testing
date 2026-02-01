@@ -1,0 +1,18 @@
+---
+overrides:
+  - requires:
+      database-legacy:
+        optional: true
+        limit: 1
+      database:
+        optional: true
+        limit: 1
+    # Remove after: https://github.com/canonical/livepatch-k8s-operator/pull/76
+    provides:
+      grafana-dashboard:
+        optional: true
+      metrics-endpoint:
+        optional: true
+    constraints: |-
+      ; Mutually exclusive, and one database connection must be present
+      (assert (= (+ database-legacy_count database_count) 1))

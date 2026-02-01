@@ -1,14 +1,13 @@
 ---
 # Remove after: https://github.com/canonical/temporal-worker-k8s-operator/pull/88
-overrides:
-  - provides:
-      metrics-endpoint:
-        interface: prometheus_scrape
-        optional: true
-      grafana-dashboard:
-        interface: grafana_dashboard
-        optional: true
-    requires:
-      logging:
-        interface: loki_push_api
-        optional: true
+provides:
+  metrics-endpoint:
+    interface: prometheus_scrape
+    optional: true
+  grafana-dashboard:
+    interface: grafana_dashboard
+    optional: true
+requires:
+  logging:
+    interface: loki_push_api
+    optional: true

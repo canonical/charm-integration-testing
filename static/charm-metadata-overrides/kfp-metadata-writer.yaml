@@ -1,6 +1,5 @@
 ---
 # KFP Metadata Writer - records pipeline execution metadata to MLMD
-overrides:
-  - requires:
-      grpc:
-        features: [mlmd-grpc]
+requires:
+  grpc:
+    features: [mlmd-grpc]

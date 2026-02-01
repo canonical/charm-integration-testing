@@ -1,10 +1,9 @@
 ---
 # Remove after: https://github.com/canonical/openfga-operator/pull/265
-overrides:
-  - provides:
-      grafana-dashboard:
-        optional: true
-      metrics-endpoint:
-        optional: true
-      send-ca-cert:
-        optional: true
+provides:
+  grafana-dashboard:
+    optional: true
+  metrics-endpoint:
+    optional: true
+  send-ca-cert:
+    optional: true

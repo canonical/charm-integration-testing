@@ -331,6 +331,9 @@ def add_charm_config_constraints(solver: z3.Solver, domain: Domain) -> None:
         decls.update(
             {endpoint_name: endpoint_var.integrated for endpoint_name, endpoint_var in charm.endpoints.items()}
         )
+        decls.update(
+            {f"{endpoint_name}_mode": endpoint_var.mode for endpoint_name, endpoint_var in charm.endpoints.items()}
+        )
         # Add config variables (with config_ prefix for SMT-Lib)
         decls.update({f"config_{key}": var for key, var in charm.config_vars.items()})
 

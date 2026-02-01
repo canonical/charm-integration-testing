@@ -94,6 +94,7 @@ class DomainEndpoint(BaseModel):
 
     count: z3.ArithRef
     integrated: z3.BoolRef
+    mode: z3.SeqRef
 
 
 class DomainCharm(BaseModel):
@@ -198,6 +199,7 @@ def add_charm_to_domain(charm: Charm, domain: Domain) -> Domain:
                 name: DomainEndpoint(
                     count=z3.Int(f"charm_{charm.name}_{charm_id}_endpoint_{name}_count"),
                     integrated=z3.Bool(f"charm_{charm.name}_{charm_id}_endpoint_{name}_integrated"),
+                    mode=z3.String(f"charm_{charm.name}_{charm_id}_endpoint_{name}_mode"),
                 )
                 for name, endpoint in charm.endpoints.items()
             },

@@ -1,40 +1,36 @@
 ---
 # Remove after: https://github.com/canonical/mysql-k8s-operator/pull/626
-overrides:
-  - provides:
-      database:
-        optional: true
-        limit: 1
-      mysql:
-        optional: true
-        limit: 1
-      mysql-root:
-        optional: true
-        limit: 1
-      metrics-endpoint:
-        optional: true
-      grafana-dashboard:
-        optional: true
-      replication-offer:
-        optional: true
-    requires:
-      certificates:
-        interface: tls-certificates
-        limit: 1
-        optional: true
-      s3-parameters:
-        interface: s3
-        limit: 1
-        optional: true
-      logging:
-        interface: loki_push_api
-        limit: 1
-        optional: true
-      replication:
-        interface: mysql_async
-        limit: 1
-        optional: true
-      tracing:
-        interface: tracing
-        limit: 1
-        optional: true
+provides:
+  database:
+    optional: true
+    limit_if:
+      - criteria:
+          - any_of:
+              - endpoint_integrated: mysql
+              - endpoint_integrated: mysql-root
+        limit: 0
+    limit: 1
+  mysql:
+    optional: true
+    limits:
+      - criteria:
+          - any_of:
+              - endpoint_integrated: database
+              - endpoint_integrated: mysql-root
+        limit: 0
+    limit: 1
+  mysql-root:
+    optional: true
+    limit_if:
+      - criteria:
+          - any_of:
+              - endpoint_integrated: database
+              - endpoint_integrated: mysql
+        limit: 0
+    limit: 1
+  metrics-endpoint:
+    optional: true
+  grafana-dashboard:
+    optional: true
+  replication-offer:
+    optional: true

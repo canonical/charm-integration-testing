@@ -1,10 +1,9 @@
 ---
 # Remove after: https://github.com/canonical/zookeeper-k8s-operator/pull/136
-overrides:
-  - provides:
-      zookeeper:
-        optional: true
-      metrics-endpoint:
-        optional: true
-      grafana-dashboard:
-        optional: true
+provides:
+  zookeeper:
+    optional: true
+  metrics-endpoint:
+    optional: true
+  grafana-dashboard:
+    optional: true

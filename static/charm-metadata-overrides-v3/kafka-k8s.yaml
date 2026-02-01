@@ -1,0 +1,42 @@
+---
+# Remove after: https://github.com/canonical/kafka-k8s-operator/pull/189
+overrides:
+  - criteria:
+      track: '4'
+    provides:
+      kafka-client:
+        optional: true
+      metrics-endpoint:
+        optional: true
+      grafana-dashboard:
+        optional: true
+      peer-cluster-orchestrator:
+        optional: true
+    requires:
+      # The `client-cas` integration creates a hard dependency on the `certificates` 
+      # integration - when `client-cas` is present, the charm 
+      # [defers processing indefinitely](https://github.com/canonical/kafka-k8s-operator/blob/main/src/events/tls.py#L247-L270) 
+      # until `certificates` is also integrated to provide signed certificates.
+      certificates:
+        optional: true
+      client-cas:
+        optional: true
+    constraints: |-
+      ; If client-cas is integrated, certificates must also be integrated
+      (assert (=> client-cas certificates))
+      ; Configuration constraints based on peer integrations
+      ; If peer-cluster is integrated, must have broker role but NOT controller
+      (assert (=> peer-cluster (= config_roles "broker")))
+      ; If peer-cluster-orchestrator is integrated, must have controller role
+      (assert (=> peer-cluster-orchestrator (or (= config_roles "broker,controller") (= config_roles "controller,broker"))))
+      ; If standalone (neither peer integration), must have both broker and controller
+      (assert (=> (not (or peer-cluster peer-cluster-orchestrator)) (or (= config_roles "broker,controller") (= config_roles "controller,broker"))))
+  - provides:
+      kafka-client:
+        optional: true
+      metrics-endpoint:
+        optional: true
+      grafana-dashboard:
+        optional: true
+      peer-cluster-orchestrator:
+        optional: true

@@ -1,10 +1,9 @@
 ---
-overrides:
-  - provides:
-      certificates:
-        optional: true
-      send-ca-cert:
-        optional: true
-    requires:
-      tracing:
-        optional: true
+provides:
+  certificates:
+    optional: true
+  send-ca-cert:
+    optional: true
+requires:
+  tracing:
+    optional: true

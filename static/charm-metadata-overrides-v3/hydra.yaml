@@ -1,0 +1,30 @@
+---
+# Remove after: https://github.com/canonical/hydra-operator/pull/358
+overrides:
+  - provides:
+      hydra-endpoint-info:
+        optional: true
+      oauth:
+        optional: true
+      metrics-endpoint:
+        optional: true
+      grafana-dashboard:
+        optional: true
+    requires:
+      public-route:
+        optional: false
+      internal-route:
+        optional: true
+      public-ingress:
+        optional: false
+      internal-ingress:
+        optional: true
+      admin-ingress:
+        optional: true
+      tracing:
+        optional: true
+      logging:
+        optional: true
+      constraints: |
+        ; If public-ingress uses TLS mode, oauth must also use TLS mode
+        (assert (=> (= public-ingress_mode "tls") (= oauth_mode "tls")))
