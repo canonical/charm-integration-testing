@@ -91,6 +91,10 @@ def add_args_to_parser(parser: argparse.ArgumentParser) -> None:
 def applications_from_args(parser: argparse.ArgumentParser, specs: list[str]) -> dict[str, ApplicationConstraint]:
     constraints = {}
     for spec in specs:
+        # Ensure spec is lowercase
+        if spec != spec.lower():
+            parser.error(f"Charm spec must be lowercase: '{spec}'")
+
         # Get charm specs
         try:
             name, charm_str, channel_str, revision_str, base_str = spec.split("::")
@@ -98,6 +102,10 @@ def applications_from_args(parser: argparse.ArgumentParser, specs: list[str]) ->
             parser.error(
                 f"Invalid charm format: '{spec}' - expected format <name>::<charm>::<channel>::<revision>::<base>"
             )
+
+        # Ensure name is unique
+        if name in constraints:
+            parser.error(f"Duplicate application name in charm specs: '{name}'")
 
         # Parse channel
         channel = None if channel_str == "default" else channel_str
@@ -123,6 +131,10 @@ def applications_from_args(parser: argparse.ArgumentParser, specs: list[str]) ->
 def integrations_from_args(parser: argparse.ArgumentParser, specs: list[str]) -> set[IntegrationConstraint]:
     constraints = set()
     for spec in specs:
+        # Ensure spec is lowercase
+        if spec != spec.lower():
+            parser.error(f"Integration spec must be lowercase: '{spec}'")
+
         # Split specs
         try:
             endpoint1, endpoint2 = spec.split("::")

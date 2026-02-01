@@ -380,6 +380,7 @@ def add_charm_dependency_constraints(solver: z3.Solver, domain: Domain) -> None:
         provides_spec = domain.charms[charm_prov.charm_id].spec.endpoints[charm_prov.endpoint]
 
         # Skip rank constraint if either endpoint is marked as acyclic (allows cycles)
+        # TODO: I don't think this actually works. Examples dex-auth and oidc-gatekeeper. Also grafana-agent dashboards
         if requires_spec.acyclic or provides_spec.acyclic:
             continue
 
