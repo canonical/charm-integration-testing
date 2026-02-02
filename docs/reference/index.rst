@@ -10,5 +10,3 @@ Contents
    :maxdepth: 1
 
    execution-metadata
-   charm-deployment-constraints
-   charm-deployment-scriptlets
