@@ -129,11 +129,9 @@ class Domain(BaseModel):
     charms: list[DomainCharm] = Field(default_factory=list)
     charm_integrations: dict[CharmIntegration, DomainCharmIntegration] = Field(default_factory=dict)
 
-    handled_failed_assertions: set[str] = Field(default_factory=set)
-    # TODO: try tracking what charm instances are responsible adding charms
-    # Don't add a charm if it a charm instance wants it that was added for that charm
-    # Should be a good speed up
-    # Also will prevent infinite recursion loops
+    # Dependency tracking to avoid redundant charm additions
+    charms_added_for_application: dict[str, list[int]] = Field(default_factory=dict)
+    charms_added_for_charm: dict[int, list[int]] = Field(default_factory=dict)
 
 
 def initialize_domain(
@@ -175,7 +173,7 @@ def initialize_domain(
     )
 
 
-def add_charm_to_domain(charm: Charm, domain: Domain) -> Domain:
+def add_charm_to_domain(charm: Charm, domain: Domain) -> int:
     charm_id = len(domain.charms)
 
     # Create config variables based on schema types
@@ -284,4 +282,4 @@ def add_charm_to_domain(charm: Charm, domain: Domain) -> Domain:
                         f"app_integration_{app_integration.endpoint1.application}:{app_integration.endpoint1.endpoint}__{app_integration.endpoint2.application}:{app_integration.endpoint2.endpoint}_maps_to_charm_integration_{charm_req_ep.charm_id}:{charm_req_ep.endpoint}__{charm_prov_ep.charm_id}:{charm_prov_ep.endpoint}"
                     )
 
-    return domain
+    return charm_id

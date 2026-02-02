@@ -46,7 +46,7 @@ class CharmOverrideCriteria(BaseModel):
 class CharmEndpointOverride(BaseModel):
     optional: bool | None = None
     limit: int | None = None
-    constraints: str | None = None
+    acyclic: bool | None = None
 
 
 class CharmMetadataOverride(BaseModel):
