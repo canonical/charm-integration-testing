@@ -57,7 +57,11 @@ def get_test_observer_issue_id(issue_number: int, project: str) -> int | None:
 
 def get_test_result_input(test_observer_issue_id: int) -> tuple[CharmEndpoint, CharmEndpoint]:
     """Returns the inputs needed to trigger a workflow for a test result
-    that failed with this issue id"""
+    that failed with this issue id.
+
+    The returned tuple is (target, neighbor), where the first element is the
+    charm under test (target) and the second element is the neighbor charm.
+    """
     endpoint = "test-results"
     endpoint_url = BASE_URL + endpoint
 
