@@ -1,0 +1,10 @@
+---
+configs:
+  - criteria:
+      track: '4'
+    config:
+      roles: broker,controller
+  - criteria:
+      track: '4'
+    config:
+      roles: broker

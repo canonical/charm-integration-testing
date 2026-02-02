@@ -1,0 +1,6 @@
+---
+configs:
+  - config:
+      role: config-server
+  - config:
+      role: shard

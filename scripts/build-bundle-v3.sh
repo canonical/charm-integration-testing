@@ -7,6 +7,6 @@ poetry run bundle-builder-v3 \
     --charm-metadata-overrides ./static/charm-metadata-overrides-v3/ \
     --charm-platform-overrides ./static/charm-platform-overrides/ \
     --charm-listing-overrides ./static/charm-listing-overrides.yaml \
-    --charm-test-configs ./static/charm-test-configs/ \
+    --charm-test-configs ./static/charm-test-configs-v3/ \
     --charm-priorities ./static/charm-priorities.yaml \
     "$@"
