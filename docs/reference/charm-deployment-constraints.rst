@@ -67,7 +67,7 @@ These constraints define how charms can integrate with each other, what requirem
 
 **Behavior**: Endpoint can have at most one active integration.
 
-**Example**: Content-cache-k8s nginx-proxy has limit: 1
+**Example**: ``content-cache-k8s:nginx-proxy`` has limit: 1
 
 .. mermaid::
 
