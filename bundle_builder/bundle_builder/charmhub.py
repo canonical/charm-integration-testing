@@ -498,11 +498,6 @@ class CharmhubClient:
             raise IncompleteCharmInfoException(f"Refresh info for charm {refresh_info.name} returned no bases")
         return next(iter(refresh_info.charm.bases))
 
-    def _filter_none_values(self, value: _T | None, error_message: str) -> _T:
-        if value is None:
-            raise AssertionError(error_message)
-        return value
-
     def _all_charm_endpoints(self, refresh_info: RefreshResponse) -> frozenset[CharmEndpoint]:
         if refresh_info.charm is None:
             raise IncompleteCharmInfoException(
@@ -548,20 +543,15 @@ class CharmhubClient:
                     endpoint_name in metadata_overrides_map
                     and metadata_overrides_map[endpoint_name].optionality is not None
                 ):
-                    optionality = self._filter_none_values(
-                        metadata_overrides_map[endpoint_name].optionality,
-                        f"optionality for endpoint {endpoint_name} in charm {refresh_info.name} is none",
-                    )
+                    optionality = metadata_overrides_map[endpoint_name].optionality
                 elif endpoint.optional is not None:
-                    optionality = self._filter_none_values(
-                        CharmEndpointOptionality.from_bool(endpoint.optional),
-                        f"optionality for endpoint {endpoint_name} in charm {refresh_info.name} is none",
-                    )
+                    optionality = CharmEndpointOptionality.from_bool(endpoint.optional)
                 elif endpoint_name in edge_endpoint_map and edge_endpoint_map[endpoint_name].optional is not None:
-                    optional = self._filter_none_values(
-                        edge_endpoint_map[endpoint_name].optional,
-                        f"optionality for endpoint {endpoint_name} in charm {refresh_info.name} is none",
-                    )
+                    optional = edge_endpoint_map[endpoint_name].optional
+                    if optional is None:
+                        raise IncompleteCharmInfoException(
+                            f"Boolean source for optionality of endpoint {endpoint_name} in charm {refresh_info.name} is none"
+                        )
                     optionality = CharmEndpointOptionality.from_bool(optional)
                 elif endpoint_type in {ENDPOINT_PROVIDES, ENDPOINT_REQUIRES}:
                     optionality = CharmEndpointOptionality.from_bool(False)
@@ -570,10 +560,11 @@ class CharmhubClient:
 
                 # Determine endpoint limit from overrides
                 if endpoint_name in metadata_overrides_map and metadata_overrides_map[endpoint_name].limits is not None:
-                    limits = self._filter_none_values(
-                        metadata_overrides_map[endpoint_name].limits,
-                        f"limits for endpoint {endpoint_name} in charm {refresh_info.name} are none",
-                    )
+                    limits = metadata_overrides_map[endpoint_name].limits
+                    if limits is None:
+                        raise IncompleteCharmInfoException(
+                            f"limits for endpoint {endpoint_name} in charm {refresh_info.name} is none"
+                        )
                 elif endpoint.limit is not None:
                     limits = (CharmLimit(limit=endpoint.limit),)
                 elif endpoint_name in edge_endpoint_map and edge_endpoint_map[endpoint_name].limit is not None:
@@ -586,12 +577,17 @@ class CharmhubClient:
                     endpoint_name in metadata_overrides_map
                     and metadata_overrides_map[endpoint_name].features is not None
                 ):
-                    features = self._filter_none_values(
-                        metadata_overrides_map[endpoint_name].features,
-                        f"features for endpoint {endpoint_name} in charm {refresh_info.name} are none",
+                    features = metadata_overrides_map[endpoint_name].features
+                    raise IncompleteCharmInfoException(
+                        f"features for endpoint {endpoint_name} in charm {refresh_info.name} is none"
                     )
                 else:
                     features = frozenset()
+
+                if optionality is None:
+                    raise IncompleteCharmInfoException(
+                        f"Could not determine optionality for endpoint {endpoint_name} in charm {refresh_info.name}"
+                    )
 
                 # Add endpoint
                 endpoints.add(
