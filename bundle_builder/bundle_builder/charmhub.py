@@ -547,8 +547,7 @@ class CharmhubClient:
                 elif endpoint.optional is not None:
                     optionality = CharmEndpointOptionality.from_bool(endpoint.optional)
                 elif endpoint_name in edge_endpoint_map and edge_endpoint_map[endpoint_name].optional is not None:
-                    optional = edge_endpoint_map[endpoint_name].optional
-                    if optional is None:
+                    if (optional := edge_endpoint_map[endpoint_name].optional) is None:
                         raise IncompleteCharmInfoException(
                             f"Boolean source for optionality of endpoint {endpoint_name} in charm {refresh_info.name} is none"
                         )
@@ -560,8 +559,7 @@ class CharmhubClient:
 
                 # Determine endpoint limit from overrides
                 if endpoint_name in metadata_overrides_map and metadata_overrides_map[endpoint_name].limits is not None:
-                    limits = metadata_overrides_map[endpoint_name].limits
-                    if limits is None:
+                    if (limits := metadata_overrides_map[endpoint_name].limits) is None:
                         raise IncompleteCharmInfoException(
                             f"limits for endpoint {endpoint_name} in charm {refresh_info.name} is none"
                         )
