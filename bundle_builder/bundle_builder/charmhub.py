@@ -16,6 +16,7 @@
 import dataclasses
 import logging
 from functools import cache
+from typing import TypeVar
 
 from .charm import (
     ENDPOINT_PEERS,
@@ -39,6 +40,8 @@ from .charmhub_http import (
     RefreshResponse,
 )
 from .overrides import CharmMetadataOverride, OverridesClient
+
+_T = TypeVar("_T")
 
 
 class CharmhubClient:
@@ -495,6 +498,11 @@ class CharmhubClient:
             raise IncompleteCharmInfoException(f"Refresh info for charm {refresh_info.name} returned no bases")
         return next(iter(refresh_info.charm.bases))
 
+    def _filter_none_values(self, value: _T | None, error_message: str) -> _T:
+        if value is None:
+            raise AssertionError(error_message)
+        return value
+
     def _all_charm_endpoints(self, refresh_info: RefreshResponse) -> frozenset[CharmEndpoint]:
         if refresh_info.charm is None:
             raise IncompleteCharmInfoException(
@@ -540,13 +548,20 @@ class CharmhubClient:
                     endpoint_name in metadata_overrides_map
                     and metadata_overrides_map[endpoint_name].optionality is not None
                 ):
-                    optionality = metadata_overrides_map[endpoint_name].optionality
-                    assert optionality is not None
+                    optionality = self._filter_none_values(
+                        metadata_overrides_map[endpoint_name].optionality,
+                        f"optionality for endpoint {endpoint_name} in charm {refresh_info.name} is none",
+                    )
                 elif endpoint.optional is not None:
-                    optionality = CharmEndpointOptionality.from_bool(endpoint.optional)
+                    optionality = self._filter_none_values(
+                        CharmEndpointOptionality.from_bool(endpoint.optional),
+                        f"optionality for endpoint {endpoint_name} in charm {refresh_info.name} is none",
+                    )
                 elif endpoint_name in edge_endpoint_map and edge_endpoint_map[endpoint_name].optional is not None:
-                    optional = edge_endpoint_map[endpoint_name].optional
-                    assert optional is not None
+                    optional = self._filter_none_values(
+                        edge_endpoint_map[endpoint_name].optional,
+                        f"optionality for endpoint {endpoint_name} in charm {refresh_info.name} is none",
+                    )
                     optionality = CharmEndpointOptionality.from_bool(optional)
                 elif endpoint_type in {ENDPOINT_PROVIDES, ENDPOINT_REQUIRES}:
                     optionality = CharmEndpointOptionality.from_bool(False)
@@ -555,8 +570,10 @@ class CharmhubClient:
 
                 # Determine endpoint limit from overrides
                 if endpoint_name in metadata_overrides_map and metadata_overrides_map[endpoint_name].limits is not None:
-                    limits = metadata_overrides_map[endpoint_name].limits
-                    assert limits is not None
+                    limits = self._filter_none_values(
+                        metadata_overrides_map[endpoint_name].limits,
+                        f"limits for endpoint {endpoint_name} in charm {refresh_info.name} are none",
+                    )
                 elif endpoint.limit is not None:
                     limits = (CharmLimit(limit=endpoint.limit),)
                 elif endpoint_name in edge_endpoint_map and edge_endpoint_map[endpoint_name].limit is not None:
@@ -569,8 +586,10 @@ class CharmhubClient:
                     endpoint_name in metadata_overrides_map
                     and metadata_overrides_map[endpoint_name].features is not None
                 ):
-                    features = metadata_overrides_map[endpoint_name].features
-                    assert features is not None
+                    features = self._filter_none_values(
+                        metadata_overrides_map[endpoint_name].features,
+                        f"features for endpoint {endpoint_name} in charm {refresh_info.name} are none",
+                    )
                 else:
                     features = frozenset()
 
