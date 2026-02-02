@@ -148,6 +148,7 @@ These constraints define how charms can integrate with each other, what requirem
        database -.->|✗ mutex| mysql
        database-legacy -->|✓ Option B| mysql
        
+       style livepatch font-size:80%
        style database fill:#ffebee
        style database-legacy fill:#e1f5ff
        style mysql fill:#fff4e1
