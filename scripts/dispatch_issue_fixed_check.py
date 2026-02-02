@@ -160,7 +160,13 @@ if __name__ == "__main__":
 
         github_token = os.getenv("GITHUB_TOKEN")
         if not github_token:
-            print("Error: GITHUB_TOKEN environment variable is not set. Please set it before running this script.")
+            print(
+                "Error: GITHUB_TOKEN environment variable is not set.\n"
+                "Set it in your shell, for example:\n"
+                "  export GITHUB_TOKEN=your_token_here\n"
+                "If you are running this in GitHub Actions, define GITHUB_TOKEN (or a PAT) as a repository/organization secret\n"
+                "and reference it in your workflow (see https://docs.github.com/actions/security-guides/encrypted-secrets)."
+            )
             exit(1)
 
         data = {
