@@ -521,8 +521,8 @@ class CharmhubClient:
                 else:
                     limit = endpoint.limit
 
-                # Calculate acyclic
-                acyclic = endpoint_override.acyclic if endpoint_override.acyclic is not None else False
+                # Calculate cyclic
+                cyclic = endpoint_override.cyclic if endpoint_override.cyclic is not None else False
 
                 # Add endpoint
                 endpoints[endpoint_name] = CharmEndpoint(
@@ -530,7 +530,7 @@ class CharmhubClient:
                     interface=endpoint.interface,
                     optional=optional,
                     limit=limit,
-                    acyclic=acyclic,
+                    cyclic=cyclic,
                 )
 
         return endpoints

@@ -23,7 +23,7 @@ from .assertion_tags import (
     CharmConfigIndexInRangeTag,
     CharmConfigValueMatchesIndexTag,
     CharmCustomConstraintTag,
-    CharmDependencyAcyclicTag,
+    CharmDependencyCyclicTag,
     CharmEndpointNonOptionalTag,
     CharmEndpointPayload,
     CharmExistsFromApplicationTag,
@@ -368,8 +368,8 @@ def add_charm_dependency_constraints(solver: z3.Solver, domain: Domain) -> None:
             CharmRankBoundedTag(charm=_charm_payload(domain.charms[charm_id], charm_id)).encode(),
         )
 
-    # Enforce acyclic dependencies: requiring charm must have higher rank than providing charm
-    # Skip if either endpoint is marked as acyclic (allows intentional cycles)
+    # Enforce cyclic dependencies: requiring charm must have higher rank than providing charm
+    # Skip if either endpoint is marked as cyclic (allows intentional cycles)
     for charm_integration, integration_var in domain.charm_integrations.items():
         # With semantic ordering, we can directly access requires and provides endpoints
         charm_req = charm_integration.requires_endpoint
@@ -379,14 +379,15 @@ def add_charm_dependency_constraints(solver: z3.Solver, domain: Domain) -> None:
         requires_spec = domain.charms[charm_req.charm_id].spec.endpoints[charm_req.endpoint]
         provides_spec = domain.charms[charm_prov.charm_id].spec.endpoints[charm_prov.endpoint]
 
-        # Skip rank constraint if either endpoint is marked as acyclic (allows cycles)
-        if requires_spec.acyclic or provides_spec.acyclic:
+        # Skip rank constraint if either endpoint is marked as cyclic (allows cycles)
+        # TODO: cyclic means allows cycles
+        if requires_spec.cyclic or provides_spec.cyclic:
             continue
 
         # Assert: if integration exists, requiring charm must have higher rank than providing charm
         solver.assert_and_track(
             z3.Implies(integration_var.exists, ranks[charm_req.charm_id] > ranks[charm_prov.charm_id]),
-            CharmDependencyAcyclicTag(
+            CharmDependencyCyclicTag(
                 requiring_charm=_charm_endpoint_payload(
                     domain.charms[charm_req.charm_id], charm_req.charm_id, charm_req.endpoint
                 ),

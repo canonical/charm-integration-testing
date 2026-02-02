@@ -37,7 +37,7 @@ overrides:
         optional: true
       grafana-dashboards-consumer:
         optional: true
-        acyclic: true
+        cyclic: true
     constraints: |-
       ; At least one incoming integration must be present
       (assert (or metrics-endpoint logging-provider tracing-provider grafana-dashboards-consumer))

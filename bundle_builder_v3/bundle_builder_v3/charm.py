@@ -64,7 +64,7 @@ class CharmEndpoint(BaseModel):
     interface: str
     optional: bool = Field(default=False)
     limit: int | None = Field(default=None)
-    acyclic: bool = Field(default=False)
+    cyclic: bool = Field(default=False)
 
 
 CharmConfig = dict[str, str | int | float | bool | None]

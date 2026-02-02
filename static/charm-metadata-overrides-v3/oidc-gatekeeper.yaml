@@ -2,4 +2,4 @@
 overrides:
   - requires:
       dex-oidc-config:
-        acyclic: true
+        cyclic: true
