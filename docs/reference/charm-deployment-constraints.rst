@@ -128,6 +128,7 @@ These constraints define how charms can integrate with each other, what requirem
        database -->|✓ Option A| postgresql
        database-legacy -.->|✗ mutex| postgresql
        
+       style livepatch font-size:80%
        style database fill:#e1f5ff
        style database-legacy fill:#ffebee
        style postgresql fill:#fff4e1
