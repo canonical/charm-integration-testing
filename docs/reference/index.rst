@@ -10,3 +10,5 @@ Contents
    :maxdepth: 1
 
    execution-metadata
+   bundle-builder-v3-algorithm
+
