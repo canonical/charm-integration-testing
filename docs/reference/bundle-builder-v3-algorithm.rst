@@ -1,5 +1,5 @@
 Bundle Builder V3 Algorithm
-=========================
+===========================
 
 This document explains the algorithmic foundation of **Bundle Builder V3**, the Proof of Concept (POC) implementation for constraint-based bundle generation.
 
