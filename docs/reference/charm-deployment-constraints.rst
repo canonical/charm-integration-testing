@@ -162,32 +162,33 @@ These constraints define how charms can integrate with each other, what requirem
 **Example**: Vault's ``tls-certificates-pki`` endpoint becomes required when ``vault-pki`` is integrated
 
 .. mermaid::
+    :title: "Scenario A: Vault without PKI"
+    
+    graph LR
+        vault1[vault-k8s]
+        app1[some-app]
+        
+        vault1 -->|vault-kv| app1
+        vault1 -.->|tls-certificates-pki<br/>OPTIONAL| none1[ ]
+        
+        style vault1 fill:#e1f5ff
+        style app1 fill:#fff4e1
+        style none1 fill:#ffffff,stroke:#ffffff
 
-   graph TB
-       subgraph Scenario A: Vault without PKI
-           vault1[vault-k8s]
-           app1[some-app]
-           
-           vault1 -->|vault-kv| app1
-           vault1 -.->|tls-certificates-pki<br/>OPTIONAL| none1[ ]
-           
-           style vault1 fill:#e1f5ff
-           style app1 fill:#fff4e1
-           style none1 fill:#ffffff,stroke:#ffffff
-       end
-       
-       subgraph Scenario B: Vault with PKI
-           vault2[vault-k8s]
-           consumer[certificate-consumer]
-           parent-ca[self-signed-certificates]
-           
-           vault2 -->|vault-pki| consumer
-           vault2 -->|tls-certificates-pki<br/>REQUIRED| parent-ca
-           
-           style vault2 fill:#e1f5ff
-           style consumer fill:#fff4e1
-           style parent-ca fill:#fff4e1
-       end
+.. mermaid::
+  :title: "Scenario B: Vault with PKI"
+
+    graph LR
+        vault2[vault-k8s]
+        consumer[certificate-consumer]
+        parent-ca[self-signed-certificates]
+        
+        vault2 -->|vault-pki| consumer
+        vault2 -->|tls-certificates-pki<br/>REQUIRED| parent-ca
+        
+        style vault2 fill:#e1f5ff
+        style consumer fill:#fff4e1
+        style parent-ca fill:#fff4e1
 
 **Behavior**: 
 
