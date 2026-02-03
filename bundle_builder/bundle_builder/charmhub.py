@@ -575,10 +575,10 @@ class CharmhubClient:
                     endpoint_name in metadata_overrides_map
                     and metadata_overrides_map[endpoint_name].features is not None
                 ):
-                    features = metadata_overrides_map[endpoint_name].features
-                    raise IncompleteCharmInfoException(
-                        f"features for endpoint {endpoint_name} in charm {refresh_info.name} is none"
-                    )
+                    if (features := metadata_overrides_map[endpoint_name].features) is None:
+                        raise IncompleteCharmInfoException(
+                            f"features for endpoint {endpoint_name} in charm {refresh_info.name} is none"
+                        )
                 else:
                     features = frozenset()
 
