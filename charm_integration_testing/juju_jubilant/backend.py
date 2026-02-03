@@ -224,12 +224,13 @@ class JubilantBackend(JujuCmdBackend):
         )
 
     def deploy_application(
-        self, model: str, charm: str, application: str | None = None, config: dict[str, Any] | None = None
+        self, model: str, charm: str, application: str | None = None, config: dict[str, Any] | None = None, trust: bool = False
     ) -> None:
         self.client.model(model).deploy(
             charm=charm,
             app=application,
             config=config,
+            trust=trust,
         )
 
     def configure_application(self, model: str, application: str, values: dict[str, str]) -> None:
