@@ -1,0 +1,40 @@
+---
+name: Run Integration from fixed branch
+permissions:
+  contents: read
+on:
+  issue_comment:
+    types: [created]
+jobs:
+  check_issue_fixed:
+    name: issue_checker
+    runs-on: [self-hosted, charm_qa]
+    if: ${{ github.event.issue.pull_request }}
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Get PR details
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
+        id: pr-details
+        with:
+          script: |
+            const pr = await github.rest.pulls.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: context.issue.number
+            });
+            core.setOutput('sha', pr.data.head.sha);
+      - name: dispatch test to check if issue is fixed
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_REF: ${{ steps.pr-details.outputs.sha }}
+          PROJECT: canonical/charm-integration-testing
+          ENVIRONMENT: staging
+        run: |-
+          python3 ./scripts/dispatch_issue_fixed_check.py ${{ github.event.issue.number }} ${PR_REF} --project ${PROJECT} --environment ${ENVIRONMENT}
