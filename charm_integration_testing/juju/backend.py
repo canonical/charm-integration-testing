@@ -252,7 +252,12 @@ class JujuBackend(ABC):
 
     @abstractmethod
     def deploy_application(
-        self, model: str, charm: str, application: str | None = None, config: dict[str, Any] | None = None, trust: bool = False
+        self,
+        model: str,
+        charm: str,
+        application: str | None = None,
+        config: dict[str, Any] | None = None,
+        trust: bool = False,
     ) -> None:
         raise NotImplementedError
 
