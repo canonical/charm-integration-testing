@@ -1,0 +1,4 @@
+---
+configs:
+  - config:
+      external_hostname: discourse.example.com
