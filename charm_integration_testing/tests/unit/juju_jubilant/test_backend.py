@@ -713,7 +713,7 @@ class TestJubilantBackend:
             charm: str | None = None
             app: str | None = None
 
-            def deploy(self, charm: str, app: str | None = None, config: Any = None) -> None:
+            def deploy(self, charm: str, app: str | None = None, config: Any = None, trust: bool = False) -> None:
                 self.charm = charm
                 self.app = app
                 self.config = config

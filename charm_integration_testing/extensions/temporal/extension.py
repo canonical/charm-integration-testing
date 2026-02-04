@@ -23,6 +23,8 @@ class TemporalExtension(JujuExtension, ABC):
         "temporal-worker-k8s": "host",
     }
 
+    CHARMS_REQUIRING_TRUST = {"postgresql-k8s"}
+
     TEMPORAL_WAIT_TIMEOUT = timedelta(minutes=15)
     BOOTSTRAP_MAX_RETRIES = 10
     BOOTSTRAP_RETRY_INTERVAL = 10  # seconds
@@ -74,7 +76,7 @@ class TemporalExtension(JujuExtension, ABC):
         for charm, config in required_charms_and_config.items():
             if charm not in deployed_apps:
                 self._log(f"Deploying {charm} to model {model}")
-                self.juju.deploy_application(model, charm, config=config)
+                self.juju.deploy_application(model, charm, config=config, trust=charm in self.CHARMS_REQUIRING_TRUST)
                 deployed_apps[charm] = charm  # Assume application name is same as charm name
 
         # Set up relations (if not already related)
