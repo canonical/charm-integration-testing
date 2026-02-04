@@ -19,6 +19,7 @@ requires:
     optional_if:
       - none_of:
           - endpoint_integrated: client-cas
+          - endpoint_integrated: oauth
   client-cas:
     interface: certificate_transfer
     optional: true
