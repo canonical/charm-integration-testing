@@ -31,7 +31,7 @@ jobs:
             });
             core.setOutput('sha', pr.data.head.sha);
             const comment = context.payload.comment.body;
-            const issuePattern = /Fixes:\s*#(\d+)/i;
+            const issuePattern = /Fixes:?\s*#(\d+)/i;
             const commentMatch = comment.match(issuePattern);
             console.log(`Comment Body: ${comment}`);
             if (commentMatch) {
