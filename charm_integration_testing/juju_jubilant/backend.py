@@ -224,12 +224,18 @@ class JubilantBackend(JujuCmdBackend):
         )
 
     def deploy_application(
-        self, model: str, charm: str, application: str | None = None, config: dict[str, Any] | None = None
+        self,
+        model: str,
+        charm: str,
+        application: str | None = None,
+        config: dict[str, Any] | None = None,
+        trust: bool = False,
     ) -> None:
         self.client.model(model).deploy(
             charm=charm,
             app=application,
             config=config,
+            trust=trust,
         )
 
     def configure_application(self, model: str, application: str, values: dict[str, str]) -> None:
@@ -290,10 +296,10 @@ class JubilantBackend(JujuCmdBackend):
             parts = line.split()
             if len(parts) != 4:
                 continue
-            provider_str, requirer_str, interface, type = parts
+            provider_str, requirer_str, interface, integration_type = parts
 
             # Skip peer integrations
-            if type == "peer":
+            if integration_type == "peer":
                 continue
 
             # Parse provider and requirer

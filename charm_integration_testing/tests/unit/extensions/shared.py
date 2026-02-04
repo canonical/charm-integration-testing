@@ -56,10 +56,15 @@ class JujuStub(JujuBackend):
         return False
 
     def deploy_application(
-        self, model: str, charm: str, application: str | None = None, config: dict[str, Any] | None = None
+        self,
+        model: str,
+        charm: str,
+        application: str | None = None,
+        config: dict[str, Any] | None = None,
+        trust: bool = False,
     ) -> None:
         """Mock deploying an application (captures call for verification)"""
-        self.deployed.append((model, charm, application))  # Ignoring config for simplicity
+        self.deployed.append((model, charm, application))  # Ignoring config and trust for simplicity
 
     def configure_application(self, model: str, application: str, values: dict[str, Any]) -> None:
         """Mock configuring an application (captures call for verification)"""
@@ -160,9 +165,6 @@ class JujuStub(JujuBackend):
         pass
 
     def remove_secret(self) -> None:  # type: ignore[override]
-        pass
-
-    def get_charm_revisions(self) -> None:
         pass
 
     def version(self) -> None:  # type: ignore[override]

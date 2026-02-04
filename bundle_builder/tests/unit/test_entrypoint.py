@@ -22,7 +22,8 @@ import pytest
 from pydantic.dataclasses import dataclass
 
 from bundle_builder.bundle import Application, ApplicationEndpoint, Integration
-from bundle_builder.charm import Charm
+from bundle_builder.charm import Charm, CharmChannel
+from bundle_builder.charmhub import CharmhubClient
 from bundle_builder.charmhub_http import CharmReleaseNotFoundException
 from bundle_builder.entrypoint import (
     add_args_to_parser,
@@ -109,14 +110,14 @@ class TestAddArgsToParser:
             assert not params.fail
 
 
-class ArgumentParserStub:
-    def error(self, message: str) -> None:
+class ArgumentParserStub(argparse.ArgumentParser):
+    def error(self, message: str) -> None:  # type: ignore[override]
         raise RuntimeError
 
 
 class TestApplicationFromArgs:
-    class CharmhubClientStub:
-        def charm_from_store(
+    class CharmhubClientStub(CharmhubClient):
+        def charm_from_store(  # type: ignore[override]
             self,
             charm_name: str,
             ubuntu_arch: str,
@@ -134,8 +135,7 @@ class TestApplicationFromArgs:
             return dataclasses.replace(
                 charm,
                 ubuntu_arch=ubuntu_arch,
-                # TODO(raul): remove type: ignore in subsequent type checker-related PR
-                channel=charm_channel if charm_channel is not None else charm.channel,  # type: ignore[arg-type]
+                channel=CharmChannel(charm_channel) if charm_channel is not None else charm.channel,
                 revision=charm_revision or charm.revision,
                 ubuntu_version=ubuntu_version or charm.ubuntu_version,
             )
@@ -167,8 +167,7 @@ class TestApplicationFromArgs:
             applications={
                 Application(
                     name="target",
-                    # TODO(raul): remove type: ignore in subsequent type checker-related PR
-                    charm=dataclasses.replace(sample_charm_postgresql_k8s(), channel="edge"),  # type: ignore[arg-type]
+                    charm=dataclasses.replace(sample_charm_postgresql_k8s(), channel=CharmChannel("edge")),
                 )
             },
         ),
@@ -209,8 +208,9 @@ class TestApplicationFromArgs:
             applications={
                 Application(
                     name="target",
-                    # TODO(raul): remove type: ignore in subsequent type checker-related PR
-                    charm=dataclasses.replace(sample_charm_postgresql_k8s(), channel="edge", revision=111),  # type: ignore
+                    charm=dataclasses.replace(
+                        sample_charm_postgresql_k8s(), channel=CharmChannel("edge"), revision=111
+                    ),
                 )
             },
         ),
@@ -220,8 +220,9 @@ class TestApplicationFromArgs:
             applications={
                 Application(
                     name="target",
-                    # TODO(raul): remove type ignore in subsequent type checker PRs
-                    charm=dataclasses.replace(sample_charm_postgresql_k8s(), channel="stable", ubuntu_version="24.04"),  # type: ignore
+                    charm=dataclasses.replace(
+                        sample_charm_postgresql_k8s(), channel=CharmChannel("stable"), ubuntu_version="24.04"
+                    ),
                 )
             },
         ),
@@ -233,8 +234,7 @@ class TestApplicationFromArgs:
                     name="target",
                     charm=dataclasses.replace(
                         sample_charm_postgresql_k8s(),
-                        # TODO(raul): remove type: ignore in subsequent type checker-related PR
-                        channel="edge",  # type: ignore[arg-type]
+                        channel=CharmChannel("edge"),
                         revision=111,
                         ubuntu_version="24.04",
                     ),
@@ -252,7 +252,7 @@ class TestApplicationFromArgs:
 
         # WHEN called with the specs
         try:
-            applications = applications_from_args(parser, charmhub_client, params.specs, params.arch)  # type: ignore[arg-type]
+            applications = applications_from_args(parser, charmhub_client, params.specs, params.arch)
         except RuntimeError:
             threw = True
         else:
@@ -310,7 +310,7 @@ class TestIntegrationFromArgs:
 
         # WHEN called with the specs
         try:
-            integrations = integrations_from_args(parser, params.specs)  # type: ignore[arg-type]
+            integrations = integrations_from_args(parser, params.specs)
         except RuntimeError:
             threw = True
         else:
@@ -352,7 +352,7 @@ class TestPlatformFromArgs:
 
         # WHEN called with the specs
         try:
-            platform = platform_from_args(parser, params.substrate)  # type: ignore[arg-type]
+            platform = platform_from_args(parser, params.substrate)
         except RuntimeError:
             threw = True
         else:

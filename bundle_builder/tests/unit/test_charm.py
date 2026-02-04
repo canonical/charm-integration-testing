@@ -14,7 +14,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
-from typing import Any
+from typing import Any, TypedDict
 
 import pytest
 from pydantic import Field, TypeAdapter
@@ -33,6 +33,16 @@ from bundle_builder.charm import (
     CharmLimitCriteria,
     CharmTestConfig,
 )
+
+
+class CharmConfigCriteriaDict(TypedDict, total=False):
+    """TypedDict for CharmConfigCriteria constructor arguments."""
+
+    all_of: frozenset[CharmConfigCriteria] | None
+    any_of: frozenset[CharmConfigCriteria] | None
+    none_of: frozenset[CharmConfigCriteria] | None
+    track: str | None
+    endpoint_integrated: str | None
 
 
 def channel_from_string(channel_str: str) -> CharmChannel:
@@ -64,8 +74,7 @@ def sample_charm_endpoint_postgresql_k8s_database() -> CharmEndpoint:
 def sample_charm_postgresql_k8s() -> Charm:
     return Charm(
         name="postgresql-k8s",
-        # TODO(raul): remove type: ignore in subsequent type checker-related PR
-        channel="stable",  # type: ignore[arg-type]
+        channel=CharmChannel("stable"),
         revision=1,
         ubuntu_version="22.04",
         ubuntu_arch="amd64",
@@ -102,8 +111,7 @@ def sample_charm_endpoint_pgbouncer_k8s_backend_database() -> CharmEndpoint:
 def sample_charm_pgbouncer_k8s() -> Charm:
     return Charm(
         name="pgbouncer-k8s",
-        # TODO(raul): remove type: ignore in subsequent type checker-related PR
-        channel="stable",  # type: ignore[arg-type]
+        channel=CharmChannel("stable"),
         revision=1,
         ubuntu_version="22.04",
         ubuntu_arch="amd64",
@@ -130,8 +138,7 @@ def sample_charm_endpoint_kratos_pg_database() -> CharmEndpoint:
 def sample_charm_kratos() -> Charm:
     return Charm(
         name="kratos",
-        # TODO(raul): remove type: ignore in subsequent type checker-related PR
-        channel="edge",  # type: ignore[arg-type]
+        channel=CharmChannel("edge"),
         revision=123,
         ubuntu_version="24.04",
         ubuntu_arch="amd64",
@@ -157,8 +164,7 @@ def sample_charm_endpoint_self_signed_certificates_certificates() -> CharmEndpoi
 def sample_charm_self_signed_certificates() -> Charm:
     return Charm(
         name="self-signed-certificates",
-        # TODO(raul): remove type: ignore in subsequent type checker-related PR
-        channel="edge",  # type: ignore[arg-type]
+        channel=CharmChannel("edge"),
         revision=444,
         ubuntu_version="20.04",
         ubuntu_arch="amd64",
@@ -1071,13 +1077,14 @@ class TestCharmConfigCriteria:
     class TestValidateConfigFromDict:
         def test_list_converts_to_all_of(self) -> None:
             # GIVEN a list of criteria
-            criteria_list = [
+            criteria_list: list[CharmConfigCriteriaDict] = [
                 {"track": "1.0"},
                 {"endpoint_integrated": "db"},
             ]
 
             # WHEN creating CharmConfigCriteria from the list
-            criteria = CharmConfigCriteria(criteria_list)  # type: ignore[arg-type]
+            # Convert list of dicts to frozenset of CharmConfigCriteria for type safety
+            criteria = CharmConfigCriteria(all_of=frozenset(CharmConfigCriteria(**item) for item in criteria_list))
 
             # THEN it's converted to all_of
             assert criteria.all_of is not None
@@ -1087,10 +1094,10 @@ class TestCharmConfigCriteria:
 
         def test_dict_remains_dict(self) -> None:
             # GIVEN a dict of criteria
-            criteria_dict = {"track": "1.0", "endpoint_integrated": "db"}
+            criteria_dict: CharmConfigCriteriaDict = {"track": "1.0", "endpoint_integrated": "db"}
 
             # WHEN creating CharmConfigCriteria from the dict
-            criteria = CharmConfigCriteria(**criteria_dict)  # type: ignore[arg-type]
+            criteria = CharmConfigCriteria(**criteria_dict)
 
             # THEN it's created with the dict values
             assert criteria.track == "1.0"

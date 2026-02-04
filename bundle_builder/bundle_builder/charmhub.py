@@ -16,12 +16,14 @@
 import dataclasses
 import logging
 from functools import cache
+from typing import TypeVar
 
 from .charm import (
     ENDPOINT_PEERS,
     ENDPOINT_PROVIDES,
     ENDPOINT_REQUIRES,
     Charm,
+    CharmChannel,
     CharmEndpoint,
     CharmEndpointOptionality,
     CharmLimit,
@@ -38,6 +40,8 @@ from .charmhub_http import (
     RefreshResponse,
 )
 from .overrides import CharmMetadataOverride, OverridesClient
+
+_T = TypeVar("_T")
 
 
 class CharmhubClient:
@@ -205,8 +209,7 @@ class CharmhubClient:
         # Return Charm from refresh info
         return Charm(
             name=charm_name,
-            # TODO(raul): remove type: ignore in subsequent type checker-related PR
-            channel=charm_channel,  # type: ignore[arg-type]
+            channel=CharmChannel(charm_channel),
             revision=charm_revision,
             ubuntu_version=ubuntu_version,
             ubuntu_arch=ubuntu_arch,
@@ -261,8 +264,7 @@ class CharmhubClient:
 
         return Charm(
             name=charm_name,
-            # TODO(raul): remove type: ignore in subsequent type checker-related PR
-            channel=default_refresh_info.effective_channel,  # type: ignore[arg-type]
+            channel=CharmChannel(default_refresh_info.effective_channel),
             revision=charm_revision,
             ubuntu_version=ubuntu_version,
             ubuntu_arch=ubuntu_arch,
@@ -311,8 +313,7 @@ class CharmhubClient:
 
         return Charm(
             name=charm_name,
-            # TODO(raul): remove type: ignore in subsequent type checker-related PR
-            channel=charm_channel,  # type: ignore[arg-type]
+            channel=CharmChannel(charm_channel),
             revision=refresh_info.charm.revision,
             ubuntu_version=ubuntu_version,
             ubuntu_arch=ubuntu_arch,
@@ -352,8 +353,7 @@ class CharmhubClient:
 
         return Charm(
             name=charm_name,
-            # TODO(raul): remove type: ignore in subsequent type checker-related PR
-            channel=refresh_info.effective_channel,  # type: ignore[arg-type]
+            channel=CharmChannel(refresh_info.effective_channel),
             revision=refresh_info.charm.revision,
             ubuntu_version=ubuntu_version,
             ubuntu_arch=ubuntu_arch,
@@ -547,7 +547,11 @@ class CharmhubClient:
                 elif endpoint.optional is not None:
                     optionality = CharmEndpointOptionality.from_bool(endpoint.optional)
                 elif endpoint_name in edge_endpoint_map and edge_endpoint_map[endpoint_name].optional is not None:
-                    optionality = CharmEndpointOptionality.from_bool(edge_endpoint_map[endpoint_name].optional)  # type: ignore[arg-type]
+                    if (optional := edge_endpoint_map[endpoint_name].optional) is None:
+                        raise IncompleteCharmInfoException(
+                            f"Boolean source for optionality of endpoint {endpoint_name} in charm {refresh_info.name} is none"
+                        )
+                    optionality = CharmEndpointOptionality.from_bool(optional)
                 elif endpoint_type in {ENDPOINT_PROVIDES, ENDPOINT_REQUIRES}:
                     optionality = CharmEndpointOptionality.from_bool(False)
                 else:
@@ -555,7 +559,10 @@ class CharmhubClient:
 
                 # Determine endpoint limit from overrides
                 if endpoint_name in metadata_overrides_map and metadata_overrides_map[endpoint_name].limits is not None:
-                    limits = metadata_overrides_map[endpoint_name].limits
+                    if (limits := metadata_overrides_map[endpoint_name].limits) is None:
+                        raise IncompleteCharmInfoException(
+                            f"limits for endpoint {endpoint_name} in charm {refresh_info.name} is none"
+                        )
                 elif endpoint.limit is not None:
                     limits = (CharmLimit(limit=endpoint.limit),)
                 elif endpoint_name in edge_endpoint_map and edge_endpoint_map[endpoint_name].limit is not None:
@@ -568,10 +575,17 @@ class CharmhubClient:
                     endpoint_name in metadata_overrides_map
                     and metadata_overrides_map[endpoint_name].features is not None
                 ):
-                    # TODO(raul): remove type: ignore in subsequent type checker-related PR
-                    features = frozenset(metadata_overrides_map[endpoint_name].features)  # type: ignore[arg-type]
+                    if (features := metadata_overrides_map[endpoint_name].features) is None:
+                        raise IncompleteCharmInfoException(
+                            f"features for endpoint {endpoint_name} in charm {refresh_info.name} is none"
+                        )
                 else:
                     features = frozenset()
+
+                if optionality is None:
+                    raise IncompleteCharmInfoException(
+                        f"Could not determine optionality for endpoint {endpoint_name} in charm {refresh_info.name}"
+                    )
 
                 # Add endpoint
                 endpoints.add(
@@ -579,10 +593,8 @@ class CharmhubClient:
                         type=endpoint_type,
                         name=endpoint_name,
                         interface=endpoint.interface,
-                        # TODO(raul): remove type: ignore in subsequent type checker-related PR
-                        optionality=optionality,  # type: ignore
-                        # TODO(raul): remove type: ignore in subsequent type checker-related PR
-                        limits=limits,  # type: ignore
+                        optionality=optionality,
+                        limits=limits,
                         features=features,
                     )
                 )

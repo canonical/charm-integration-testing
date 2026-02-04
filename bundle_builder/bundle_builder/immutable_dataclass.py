@@ -16,7 +16,7 @@
 
 from dataclasses import field
 from functools import wraps
-from typing import Any, Callable, Type, TypeVar, get_type_hints, overload
+from typing import Any, Callable, TypeVar, cast, get_type_hints
 
 from pydantic.dataclasses import dataclass
 from typing_extensions import dataclass_transform
@@ -28,8 +28,7 @@ _Return = TypeVar("_Return")
 
 def computed_property(func: Callable[[_Self], _Return]) -> _Return:
     setattr(func, "_is_computed_property", True)
-    # TODO(raul): remove type: ignore in subsequent type checker-related PR
-    return func  # type: ignore
+    return cast(_Return, func)  # the immutable_dataclass logic below will change the type of func
 
 
 # Sentinel value for uninitialized computed fields
@@ -78,24 +77,6 @@ def make_cached_method(cached_field_name: str, method: Callable[..., Any]) -> Ca
     return wrapped
 
 
-_T = TypeVar("_T", bound=Type[Any])
-
-
-@dataclass_transform(frozen_default=True)
-@overload
-def immutable_dataclass(_cls: _T, **dataclass_kwargs: Any) -> _T: ...
-
-
-@dataclass_transform(frozen_default=True, order_default=True)
-@overload
-def immutable_dataclass(*, order: bool = True) -> Callable[[_T], _T]: ...
-
-
-@dataclass_transform(frozen_default=True)
-@overload
-def immutable_dataclass(**dataclass_kwargs: Any) -> Callable[[_T], _T]: ...
-
-
 # Create an immutable dataclass using frozen=True
 # and defaults slots=True
 @dataclass_transform(frozen_default=True)
@@ -118,7 +99,9 @@ def immutable_dataclass(_cls: type | None = None, **dataclass_kwargs: Any) -> An
             # Modify the class in place to add the private field
             private_name = f"_{name}"
             annotations[private_name] = get_type_hints(method).get("return", Any)
-            setattr(cls, name, make_lazy_property(private_name, method))  # type: ignore[arg-type]
+            if method is None:
+                raise ValueError(f"Computed property method for '{name}' is None")
+            setattr(cls, name, make_lazy_property(private_name, method))
             setattr(cls, private_name, field(init=False, repr=False, hash=False, compare=False, default=_UNINITIALIZED))
 
         # Create a private slot for the cache of each computed field, similar to above

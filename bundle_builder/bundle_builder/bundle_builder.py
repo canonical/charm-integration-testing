@@ -35,7 +35,6 @@ class Node:
         # Prioritize fewer applications, accounting for charm priorities
         weight_applications = sum(1.0 / app.charm.priority for app in self.bundle.applications)
         # Prioritize fewer unfulfilled endpoints
-        # TODO(raul): remove type: ignore in subsequent type checker-related PR
         weight_unfulfilled_endpoints = self.aggression * len(self.bundle.unfulfilled_endpoints)
         # Prioritize more integrations, scaled by aggression
         # As aggression increases (expected to be between 0 and 1) the weight of integrations increases
