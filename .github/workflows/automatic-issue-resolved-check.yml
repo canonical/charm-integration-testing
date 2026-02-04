@@ -36,7 +36,7 @@ jobs:
               return;
             }
             const comment = context.payload.comment.body;
-            const issuePattern = /(?:Fixes|Resolves|Closes):?\s*#(\d+)/i;
+            const issuePattern = /^Dispatch test for #(\d+)$/i;
             const commentMatch = comment.match(issuePattern);
             console.log(`Comment Body: ${comment}`);
             if (commentMatch) {
@@ -46,7 +46,7 @@ jobs:
               console.log(`Found issue number ${issueNumber} in comment`);
             } else {
               core.setOutput('has_issue', 'false');
-              console.log('No "Fixes: #<number>" found in comment. Skipping dispatch.');
+              console.log('No "Dispatch test for #<number>" command found in comment. Skipping dispatch.');
             }
       - name: dispatch test to check if issue is fixed
         if: steps.pr-details.outputs.has_issue == 'true'
