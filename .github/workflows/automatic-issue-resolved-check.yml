@@ -34,20 +34,13 @@ jobs:
             const body = pr.data.body || '';
             const issueUrlPattern = /issues\/(\d+)/;
             const match = body.match(issueUrlPattern);
-            let issueNumber = null;
-            for (const pattern of issuePatterns) {
-              const match = pattern.exec(body);
-              if (match) {
-                issueNumber = match[1];
-                break;
-              }
-            }
-            if (issueNumber) {
+            if (match) {
+              const issueNumber = match[1];
               core.setOutput('issue_number', issueNumber);
               core.setOutput('has_issue', 'true');
             } else {
               core.setOutput('has_issue', 'false');
-              console.log('No issue number found in PR body. Skipping dispatch.');
+              console.log('No issue URL found in PR body. Skipping dispatch.');
             }
 
       - name: dispatch test to check if issue is fixed
