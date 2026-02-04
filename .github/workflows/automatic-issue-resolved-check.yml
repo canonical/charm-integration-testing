@@ -30,13 +30,10 @@ jobs:
                 pull_number: context.issue.number
             });
             core.setOutput('sha', pr.data.head.sha);
-
             const comment = context.payload.comment ? context.payload.comment.body : '';
             const issuePattern = /Fixes:\s*#(\d+)/i;
             const commentMatch = comment.match(issuePattern);
-
             console.log(`Comment Body: ${comment}`);
-
             if (commentMatch) {
               const issueNumber = commentMatch[1];
               core.setOutput('issue_number', issueNumber);
@@ -46,7 +43,6 @@ jobs:
               core.setOutput('has_issue', 'false');
               console.log('No "Fixes: #<number>" found in comment. Skipping dispatch.');
             }
-
       - name: dispatch test to check if issue is fixed
         if: steps.pr-details.outputs.has_issue == 'true'
         env:
