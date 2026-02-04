@@ -36,7 +36,7 @@ jobs:
               return;
             }
             const comment = context.payload.comment.body;
-            const issuePattern = /Fixes:?\s*#(\d+)/i;
+            const issuePattern = /(?:Fixes|Resolves|Closes):?\s*#(\d+)/i;
             const commentMatch = comment.match(issuePattern);
             console.log(`Comment Body: ${comment}`);
             if (commentMatch) {
