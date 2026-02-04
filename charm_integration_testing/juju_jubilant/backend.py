@@ -296,10 +296,10 @@ class JubilantBackend(JujuCmdBackend):
             parts = line.split()
             if len(parts) != 4:
                 continue
-            provider_str, requirer_str, interface, type = parts
+            provider_str, requirer_str, interface, integration_type = parts
 
             # Skip peer integrations
-            if type == "peer":
+            if integration_type == "peer":
                 continue
 
             # Parse provider and requirer

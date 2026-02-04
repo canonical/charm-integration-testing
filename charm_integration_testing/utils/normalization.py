@@ -4,6 +4,16 @@
 import re
 from typing import Any
 
+# Exceptions for numeric normalization - common technical terms that contain numbers
+# These should not be normalized by _normalize_numeric_sequences
+NUMERIC_NORMALIZATION_EXCEPTIONS = [
+    "k8s",
+    "K8s",
+    "K8S",
+    "s3",
+    "S3",
+]
+
 
 def _convert_to_string(value: Any) -> str:
     """Convert a value to a string.
@@ -23,14 +33,44 @@ def _normalize_numeric_sequences(text: str) -> str:
     """Replace all numeric sequences with 'XXX'.
 
     This normalizes timestamps, IP addresses, and other variable numeric data.
+    Excludes common technical terms that contain numbers (e.g., k8s, s3).
 
     Args:
         text: The text to normalize
 
     Returns:
-        Text with all numeric sequences replaced
+        Text with all numeric sequences replaced, except for exceptions
     """
-    return re.sub(r"\d+", "XXX", text)
+    # Store exceptions temporarily with placeholders to protect them
+    # We need to track the actual matches to preserve case
+    placeholder_to_original: dict[str, str] = {}
+
+    def replace_with_placeholder(match: re.Match[str], exception_idx: int) -> str:
+        """Replace a match with a placeholder and store the original."""
+        original = match.group(0)
+        placeholder = f"__NUMERIC_EXCEPTION_{chr(65 + exception_idx)}__"
+        placeholder_to_original[placeholder] = original
+        return placeholder
+
+    # Replace exceptions with placeholders
+    for i, exception in enumerate(NUMERIC_NORMALIZATION_EXCEPTIONS):
+        # Find all matches with case-insensitive search using word boundaries
+        # to avoid partial matches (e.g., 's3' in 's3210' should not match)
+        text = re.sub(
+            r"\b" + re.escape(exception) + r"\b",
+            lambda match: replace_with_placeholder(match, i),
+            text,
+            flags=re.IGNORECASE,
+        )
+
+    # Apply numeric normalization
+    text = re.sub(r"\d+", "XXX", text)
+
+    # Restore exceptions with their original case
+    for placeholder, original in placeholder_to_original.items():
+        text = text.replace(placeholder, original)
+
+    return text
 
 
 def _normalize_ip_addresses(text: str) -> str:
@@ -197,6 +237,54 @@ def _normalize_oci_image_digests(text: str) -> str:
     return re.sub(r"((?:sha256|sha512|blake3)(?:[+._-][a-z0-9]+)*):[a-zA-Z0-9=_-]+", r"\1:<DIGEST>", text)
 
 
+def _normalize_container_names(text: str) -> str:
+    """Normalize container names in error messages.
+
+    Matches the pattern container=<name> and replaces the name with <CONTAINER>.
+    This groups errors that occur in different containers but are otherwise identical.
+
+    Args:
+        text: The text containing container references
+
+    Returns:
+        Text with container names normalized
+    """
+    return re.sub(r"container=[a-z0-9-]+", r"container=<CONTAINER>", text)
+
+
+def _normalize_hook_failure_apps(text: str) -> str:
+    """Normalize application and endpoint names in hook failure messages.
+
+    Matches the pattern 'hook failed: "..." for app:endpoint' and replaces
+    the application and endpoint with placeholders while keeping the hook name intact.
+
+    Args:
+        text: The text containing hook failure messages
+
+    Returns:
+        Text with app/endpoint names normalized
+    """
+    return re.sub(r'(hook failed: "[^"]+") for [a-z0-9-]+:[a-z0-9-]+', r"\1 for <APP>:<ENDPOINT>", text)
+
+
+def _normalize_relation_version_apps(text: str) -> str:
+    """Normalize application names in relation version error messages.
+
+    Matches the pattern 'versions not found for apps: app-name' and replaces
+    the application name with a placeholder while keeping the relation name intact.
+
+    This error is raised by the serialized-data-interface library:
+    https://github.com/canonical/serialized-data-interface/blob/8ab9b715898db535c087b795bcefb6d17ea9e025/serialized_data_interface/errors.py#L120
+
+    Args:
+        text: The text containing relation version error messages
+
+    Returns:
+        Text with app names normalized
+    """
+    return re.sub(r"(versions not found for apps:) [a-z0-9-]+", r"\1 <APP>", text)
+
+
 def _truncate_string(text: str, max_length: int) -> str:
     """Truncate a string to a maximum length.
 
@@ -224,7 +312,10 @@ def normalize_string(message: Any, max_length: int = 150) -> str:
     - Normalizes OCI image digests
     - Normalizes IP addresses (IPv4 and IPv6)
     - Normalizes timestamps
-    - Replaces all numeric sequences
+    - Normalizes container names
+    - Normalizes hook failure app/endpoint names
+    - Normalizes relation version app names
+    - Replaces all numeric sequences (except technical terms like k8s, s3)
     - Truncates to maximum length
 
     Args:
@@ -242,6 +333,9 @@ def normalize_string(message: Any, max_length: int = 150) -> str:
     text = _normalize_oci_image_digests(text)
     text = _normalize_ip_addresses(text)
     text = _normalize_timestamps(text)
+    text = _normalize_container_names(text)
+    text = _normalize_hook_failure_apps(text)
+    text = _normalize_relation_version_apps(text)
     text = _normalize_numeric_sequences(text)
     text = _truncate_string(text, max_length)
     return text
