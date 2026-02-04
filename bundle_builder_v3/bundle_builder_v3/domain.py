@@ -90,15 +90,16 @@ class ApplicationConstraint(BaseModel):
 
 
 class DomainEndpoint(BaseModel):
-    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     count: z3.ArithRef
     integrated: z3.BoolRef
     mode: z3.SeqRef
+    integrated_charm_ids: z3.ExprRef
 
 
 class DomainCharm(BaseModel):
-    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     exists: z3.BoolRef
     spec: Charm
@@ -108,7 +109,7 @@ class DomainCharm(BaseModel):
 
 
 class DomainCharmIntegration(BaseModel):
-    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     exists: z3.BoolRef
 
@@ -199,6 +200,7 @@ def add_charm_to_domain(charm: Charm, domain: Domain) -> int:
                     count=z3.Int(f"charm_{charm.name}_{charm_id}_endpoint_{name}_count"),
                     integrated=z3.Bool(f"charm_{charm.name}_{charm_id}_endpoint_{name}_integrated"),
                     mode=z3.String(f"charm_{charm.name}_{charm_id}_endpoint_{name}_mode"),
+                    integrated_charm_ids=z3.EmptySet(z3.IntSort()),
                 )
                 for name, endpoint in charm.endpoints.items()
             },
@@ -214,27 +216,39 @@ def add_charm_to_domain(charm: Charm, domain: Domain) -> int:
             for other_endpoint_name, other_endpoint in other_charm.spec.endpoints.items():
                 if endpoint.interface != other_endpoint.interface:
                     continue
-                # Create CharmIntegration with semantic ordering: requires before provides
+
+                # Create integration based on endpoint types
                 if endpoint.type == EndpointType.REQUIRES and other_endpoint.type == EndpointType.PROVIDES:
                     charm_integration = CharmIntegration(
                         requires_endpoint=CharmEndpoint(charm_id=charm_id, endpoint=endpoint_name),
                         provides_endpoint=CharmEndpoint(charm_id=other_charm_id, endpoint=other_endpoint_name),
-                    )
-                    domain.charm_integrations[charm_integration] = DomainCharmIntegration(
-                        exists=z3.Bool(
-                            f"charm_integration_{charm.name}_{charm_id}:{endpoint_name}__{other_charm.spec.name}_{other_charm_id}:{other_endpoint_name}_exists"
-                        )
                     )
                 elif endpoint.type == EndpointType.PROVIDES and other_endpoint.type == EndpointType.REQUIRES:
                     charm_integration = CharmIntegration(
                         requires_endpoint=CharmEndpoint(charm_id=other_charm_id, endpoint=other_endpoint_name),
                         provides_endpoint=CharmEndpoint(charm_id=charm_id, endpoint=endpoint_name),
                     )
-                    domain.charm_integrations[charm_integration] = DomainCharmIntegration(
-                        exists=z3.Bool(
-                            f"charm_integration_{other_charm.spec.name}_{other_charm_id}:{other_endpoint_name}__{charm.name}_{charm_id}:{endpoint_name}_exists"
-                        )
+                else:
+                    continue
+
+                # Add to domain's charm_integrations
+                domain.charm_integrations[charm_integration] = DomainCharmIntegration(
+                    exists=z3.Bool(
+                        f"charm_integration_{charm_integration.provides_endpoint.charm_id}:{charm_integration.provides_endpoint.endpoint}__{charm_integration.requires_endpoint.charm_id}:{charm_integration.requires_endpoint.endpoint}_exists"
                     )
+                )
+                domain.charms[charm_id].endpoints[endpoint_name].integrated_charm_ids = z3.If(
+                    domain.charm_integrations[charm_integration].exists,
+                    z3.SetAdd(domain.charms[charm_id].endpoints[endpoint_name].integrated_charm_ids, other_charm_id),
+                    domain.charms[charm_id].endpoints[endpoint_name].integrated_charm_ids,
+                )
+                domain.charms[other_charm_id].endpoints[other_endpoint_name].integrated_charm_ids = z3.If(
+                    domain.charm_integrations[charm_integration].exists,
+                    z3.SetAdd(
+                        domain.charms[other_charm_id].endpoints[other_endpoint_name].integrated_charm_ids, charm_id
+                    ),
+                    domain.charms[other_charm_id].endpoints[other_endpoint_name].integrated_charm_ids,
+                )
 
     for application, constraints in domain.application_constraints.items():
         if (

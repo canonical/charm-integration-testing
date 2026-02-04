@@ -40,9 +40,11 @@ overrides:
         requires: certificates
         provides: traefik-route
     constraints: |-
-      ; If traefik-route uses tls mode, certificates is required
-      (assert (=> (and traefik-route (= traefik-route_mode "tls")) certificates))
-      ; If ingress uses tls mode, certificates is required
-      (assert (=> (and ingress (= ingress_mode "tls")) certificates))
-      ; If ingress-per-unit uses tls mode, certificates is required
-      (assert (=> (and ingress-per-unit (= ingress-per-unit_mode "tls")) certificates))
+      ; If tls mode, certificates is required
+      (assert (=> (= traefik-route_mode "tls") certificates))
+      (assert (=> (= ingress_mode "tls") certificates))
+      (assert (=> (= ingress-per-unit_mode "tls") certificates))
+      ; If certificates is integrated, endpoints must use tls mode
+      (assert (=> certificates (= traefik-route_mode "tls")))
+      (assert (=> certificates (= ingress_mode "tls")))
+      (assert (=> certificates (= ingress-per-unit_mode "tls")))

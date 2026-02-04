@@ -342,6 +342,14 @@ def add_charm_config_constraints(solver: z3.Solver, domain: Domain) -> None:
         decls.update(
             {f"{endpoint_name}_mode": endpoint_var.mode for endpoint_name, endpoint_var in charm.endpoints.items()}
         )
+        # decls doesn't support sets built with z3.If, need to map to a constant
+        for endpoint_name, endpoint_var in charm.endpoints.items():
+            integrated_charm_id_const = z3.Const(
+                f"charm_{charm.spec.name}_{charm_id}_endpoint_{endpoint_name}_applications",
+                z3.SetSort(z3.IntSort()),
+            )
+            solver.add(integrated_charm_id_const == endpoint_var.integrated_charm_ids)
+            decls[f"{endpoint_name}_applications"] = integrated_charm_id_const
         # Add config variables (with config_ prefix for SMT-Lib)
         decls.update({f"config_{key}": var for key, var in charm.config_vars.items()})
 

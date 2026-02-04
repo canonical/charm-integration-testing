@@ -16,9 +16,8 @@ overrides:
         optional: true
       oauth:
         optional: false
-        capabilities: [tls]
       receive-ca-cert:
         optional: true
     constraints: |-
-      ; If oauth uses tls mode, receive-ca-cert is required
-      (assert (=> (= oauth_mode "tls") receive-ca-cert))
+      ; If oauth uses tls mode, receive-ca-cert must come from the same provider as oauth
+      (assert (=> (= oauth_mode "tls") (subset oauth_applications receive-ca-cert_applications)))
