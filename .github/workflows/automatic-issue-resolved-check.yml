@@ -49,13 +49,14 @@ jobs:
               core.setOutput('has_issue', 'false');
               console.log('No issue number found in PR body. Skipping dispatch.');
             }
-              
+
       - name: dispatch test to check if issue is fixed
         if: steps.pr-details.outputs.has_issue == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ steps.pr-details.outputs.issue_number }}
           PR_REF: ${{ steps.pr-details.outputs.sha }}
           PROJECT: canonical/charm-integration-testing
           ENVIRONMENT: staging
         run: |-
-          python3 ./scripts/dispatch_issue_fixed_check.py ${{ steps.pr-details.outputs.issue_number }} ${PR_REF} --project ${PROJECT} --environment ${ENVIRONMENT}
+          python3 ./scripts/dispatch_issue_fixed_check.py ${ISSUE_NUMBER} ${PR_REF} --project ${PROJECT} --environment ${ENVIRONMENT}
