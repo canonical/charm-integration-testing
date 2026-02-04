@@ -18,7 +18,7 @@ from typing import Any
 
 import pytest
 import yaml
-from pydantic import Field
+from pydantic import Field, TypeAdapter
 from pydantic.dataclasses import dataclass
 
 from bundle_builder.charm import CharmConfigCriteria, CharmTestConfig
@@ -26,6 +26,7 @@ from bundle_builder.charmhub import CharmhubClient
 from bundle_builder.charmhub_http import (
     CharmhubBase,
     CharmhubHttpClient,
+    CharmMetadata,
     CharmReleaseNotFoundException,
     FindResponse,
     InfoResponse,
@@ -70,8 +71,7 @@ class OverridesStub(OverridesClient):
     def get_charm_test_configs(self, charm: str) -> list[CharmTestConfig]:  # type: ignore[override]
         configs = self.charm_test_configs.get(charm, [])
         # Use CharmTestConfigs wrapper to let Pydantic validate the list properly
-        # TODO(raul): remove type: ignore in subsequent type checker-related PR
-        return CharmTestConfigs(configs=configs).configs  # type: ignore[arg-type]
+        return CharmTestConfigs(configs=[CharmTestConfig(**c) for c in configs]).configs
 
 
 matching_base = CharmhubBase(name="ubuntu", architecture="amd64", channel="20.04")
@@ -514,16 +514,18 @@ class TestCharmhubClient:
                 info_response={
                     "charm-a": InfoResponse(
                         default_release=InfoResponse.DefaultRelease(
-                            revision=InfoResponse.DefaultRelease.Revision(
-                                metadata=yaml.dump(  # type: ignore[arg-type]
-                                    {
-                                        "provides": {
-                                            "endpoint-a": {
-                                                "interface": "interface-a",
+                            revision=TypeAdapter(InfoResponse.DefaultRelease.Revision).validate_python(
+                                {
+                                    "metadata-yaml": yaml.dump(
+                                        {
+                                            "provides": {
+                                                "endpoint-a": {
+                                                    "interface": "interface-a",
+                                                }
                                             }
                                         }
-                                    }
-                                ),
+                                    ),
+                                }
                             )
                         ),
                         result=InfoResponse.Result(deployable_on=frozenset({"kubernetes"})),
@@ -543,16 +545,18 @@ class TestCharmhubClient:
                 info_response={
                     "charm-a": InfoResponse(
                         default_release=InfoResponse.DefaultRelease(
-                            revision=InfoResponse.DefaultRelease.Revision(
-                                metadata=yaml.dump(  # type: ignore[arg-type]
-                                    {
-                                        "requires": {
-                                            "endpoint-a": {
-                                                "interface": "interface-a",
+                            revision=TypeAdapter(InfoResponse.DefaultRelease.Revision).validate_python(
+                                {
+                                    "metadata-yaml": yaml.dump(
+                                        {
+                                            "requires": {
+                                                "endpoint-a": {
+                                                    "interface": "interface-a",
+                                                }
                                             }
                                         }
-                                    }
-                                ),
+                                    ),
+                                }
                             )
                         ),
                         result=InfoResponse.Result(deployable_on=frozenset({"kubernetes"})),
@@ -1056,8 +1060,7 @@ class TestCharmhubClient:
                         revision=42,
                         bases=[matching_base],
                         config=yaml.dump({"provides": {"endpoint-a": {"interface": "interface-a"}}}),
-                        # TODO(raul): remove type: ignore in subsequent type checker-related PR
-                        metadata=yaml.dump({"provides": {"endpoint-a": {"interface": "interface-a"}}}),  # type: ignore[arg-type]
+                        metadata=CharmMetadata({"provides": {"endpoint-a": {"interface": "interface-a"}}}),
                     ),
                 ),
                 supported_versions_refresh_response=RefreshResponse(
@@ -1083,8 +1086,7 @@ class TestCharmhubClient:
                         revision=99,
                         bases=[matching_base],
                         config=yaml.dump({}),
-                        # TODO(raul): remove type: ignore in subsequent type checker-related PR
-                        metadata=yaml.dump({}),  # type: ignore[arg-type]
+                        metadata=CharmMetadata({}),
                     ),
                 ),
                 supported_versions_refresh_response=RefreshResponse(
@@ -1111,8 +1113,7 @@ class TestCharmhubClient:
                         revision=50,
                         bases=[matching_base, other_base],
                         config=yaml.dump({}),
-                        # TODO(raul): remove type: ignore in subsequent type checker-related PR
-                        metadata=yaml.dump({}),  # type: ignore[arg-type]
+                        metadata=CharmMetadata({}),
                     ),
                 ),
                 supported_versions_refresh_response=RefreshResponse(
