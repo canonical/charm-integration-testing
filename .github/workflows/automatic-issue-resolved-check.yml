@@ -30,6 +30,11 @@ jobs:
                 pull_number: context.issue.number
             });
             core.setOutput('sha', pr.data.head.sha);
+            if (!context.payload.comment || !context.payload.comment.body) {
+              core.setOutput('has_issue', 'false');
+              console.log('No comment body available in payload. Skipping dispatch.');
+              return;
+            }
             const comment = context.payload.comment.body;
             const issuePattern = /Fixes:?\s*#(\d+)/i;
             const commentMatch = comment.match(issuePattern);
