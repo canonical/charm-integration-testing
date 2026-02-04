@@ -30,17 +30,21 @@ jobs:
                 pull_number: context.issue.number
             });
             core.setOutput('sha', pr.data.head.sha);
-            // Extract issue number from PR body by looking for issue URL
-            const body = pr.data.body || '';
-            const issueUrlPattern = /issues\/(\d+)/;
-            const match = body.match(issueUrlPattern);
-            if (match) {
-              const issueNumber = match[1];
+
+            const comment = context.payload.comment ? context.payload.comment.body : '';
+            const issuePattern = /Fixes:\s*#(\d+)/i;
+            const commentMatch = comment.match(issuePattern);
+
+            console.log(`Comment Body: ${comment}`);
+
+            if (commentMatch) {
+              const issueNumber = commentMatch[1];
               core.setOutput('issue_number', issueNumber);
               core.setOutput('has_issue', 'true');
+              console.log(`Found issue number ${issueNumber} in comment`);
             } else {
               core.setOutput('has_issue', 'false');
-              console.log('No issue URL found in PR body. Skipping dispatch.');
+              console.log('No "Fixes: #<number>" found in comment. Skipping dispatch.');
             }
 
       - name: dispatch test to check if issue is fixed
