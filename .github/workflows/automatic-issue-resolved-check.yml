@@ -19,7 +19,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
-      - name: Get PR details
+      - name: Get PR details and extract issue number
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
         id: pr-details
         with:
@@ -30,11 +30,31 @@ jobs:
                 pull_number: context.issue.number
             });
             core.setOutput('sha', pr.data.head.sha);
+            if (!context.payload.comment || !context.payload.comment.body) {
+              core.setOutput('has_issue', 'false');
+              console.log('No comment body available in payload. Skipping dispatch.');
+              return;
+            }
+            const comment = context.payload.comment.body;
+            const issuePattern = /^Dispatch test for #(\d+)$/i;  # Whole comment should match "Dispatch test for #<number>"
+            const commentMatch = comment.match(issuePattern);
+            console.log(`Comment Body: ${comment}`);
+            if (commentMatch) {
+              const issueNumber = commentMatch[1];
+              core.setOutput('issue_number', issueNumber);
+              core.setOutput('has_issue', 'true');
+              console.log(`Found issue number ${issueNumber} in comment`);
+            } else {
+              core.setOutput('has_issue', 'false');
+              console.log('No "Dispatch test for #<number>" command found in comment. Skipping dispatch.');
+            }
       - name: dispatch test to check if issue is fixed
+        if: steps.pr-details.outputs.has_issue == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ steps.pr-details.outputs.issue_number }}
           PR_REF: ${{ steps.pr-details.outputs.sha }}
           PROJECT: canonical/charm-integration-testing
           ENVIRONMENT: staging
         run: |-
-          python3 ./scripts/dispatch_issue_fixed_check.py ${{ github.event.issue.number }} ${PR_REF} --project ${PROJECT} --environment ${ENVIRONMENT}
+          python3 ./scripts/dispatch_issue_fixed_check.py ${ISSUE_NUMBER} ${PR_REF} --project ${PROJECT} --environment ${ENVIRONMENT}
