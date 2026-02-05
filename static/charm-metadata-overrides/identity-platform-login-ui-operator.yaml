@@ -7,3 +7,15 @@ provides:
     optional: true
   grafana-dashboard:
     optional: true
+requires:
+  public-route:
+    interface: traefik_route
+    optional_if:
+      - none_of:
+          - endpoint_integrated: ui-endpoint-info
+  hydra-endpoint-info:
+    interface: hydra_endpoints
+    optional: true
+  kratos-info:
+    interface: kratos_info
+    optional: true
