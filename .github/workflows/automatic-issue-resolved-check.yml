@@ -36,7 +36,7 @@ jobs:
               return;
             }
             const comment = context.payload.comment.body;
-            const issuePattern = /^Dispatch test for #(\d+)$/i;  //# Whole comment should match "Dispatch test for #<number>"
+            const issuePattern = /^Dispatch test for #(\d+)$/i;  /*  # Whole comment should match "Dispatch test for #<number>" */
             const commentMatch = comment.match(issuePattern);
             console.log(`Comment Body: ${comment}`);
             if (commentMatch) {
