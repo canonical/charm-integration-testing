@@ -95,7 +95,6 @@ class DomainEndpoint(BaseModel):
     count: z3.ArithRef
     integrated: z3.BoolRef
     mode: z3.SeqRef
-    integrated_charm_ids: z3.ExprRef
 
 
 class DomainCharm(BaseModel):
@@ -200,7 +199,6 @@ def add_charm_to_domain(charm: Charm, domain: Domain) -> int:
                     count=z3.Int(f"charm_{charm.name}_{charm_id}_endpoint_{name}_count"),
                     integrated=z3.Bool(f"charm_{charm.name}_{charm_id}_endpoint_{name}_integrated"),
                     mode=z3.String(f"charm_{charm.name}_{charm_id}_endpoint_{name}_mode"),
-                    integrated_charm_ids=z3.EmptySet(z3.IntSort()),
                 )
                 for name, endpoint in charm.endpoints.items()
             },
@@ -236,18 +234,6 @@ def add_charm_to_domain(charm: Charm, domain: Domain) -> int:
                     exists=z3.Bool(
                         f"charm_integration_{charm_integration.provides_endpoint.charm_id}:{charm_integration.provides_endpoint.endpoint}__{charm_integration.requires_endpoint.charm_id}:{charm_integration.requires_endpoint.endpoint}_exists"
                     )
-                )
-                domain.charms[charm_id].endpoints[endpoint_name].integrated_charm_ids = z3.If(
-                    domain.charm_integrations[charm_integration].exists,
-                    z3.SetAdd(domain.charms[charm_id].endpoints[endpoint_name].integrated_charm_ids, other_charm_id),
-                    domain.charms[charm_id].endpoints[endpoint_name].integrated_charm_ids,
-                )
-                domain.charms[other_charm_id].endpoints[other_endpoint_name].integrated_charm_ids = z3.If(
-                    domain.charm_integrations[charm_integration].exists,
-                    z3.SetAdd(
-                        domain.charms[other_charm_id].endpoints[other_endpoint_name].integrated_charm_ids, charm_id
-                    ),
-                    domain.charms[other_charm_id].endpoints[other_endpoint_name].integrated_charm_ids,
                 )
 
     for application, constraints in domain.application_constraints.items():
