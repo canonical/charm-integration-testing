@@ -10,6 +10,12 @@ provides:
   grafana-dashboard:
     optional: true
 requires:
+  pg-database:
+    interface: postgresql_client
+    optional: false
+  ui-endpoint-info:
+    interface: login_ui_endpoints
+    optional: false
   public-route:
     features: [tls]
     optional: false
