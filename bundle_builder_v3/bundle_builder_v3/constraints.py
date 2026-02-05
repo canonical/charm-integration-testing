@@ -342,7 +342,7 @@ def add_charm_config_constraints(solver: z3.Solver, domain: Domain) -> None:
         decls.update(
             {f"{endpoint_name}_mode": endpoint_var.mode for endpoint_name, endpoint_var in charm.endpoints.items()}
         )
-        # decls doesn't support sets built with z3.If, need to map to a constant
+        # Map integrated applications into sets
         for endpoint_name in charm.endpoints:
             integrated_charm_ids = z3.EmptySet(z3.IntSort())
             for integration_key, integration in domain.charm_integrations.items():
@@ -352,23 +352,19 @@ def add_charm_config_constraints(solver: z3.Solver, domain: Domain) -> None:
                     and integration_key.requires_endpoint.endpoint == endpoint_name
                 ):
                     other_charm_id = integration_key.provides_endpoint.charm_id
-                    integrated_charm_ids = z3.If(
-                        integration.exists,
-                        z3.SetAdd(integrated_charm_ids, other_charm_id),
-                        integrated_charm_ids,
-                    )
                 elif (
                     integration_key.provides_endpoint.charm_id == charm_id
                     and integration_key.provides_endpoint.endpoint == endpoint_name
                 ):
                     other_charm_id = integration_key.requires_endpoint.charm_id
-                    integrated_charm_ids = z3.If(
-                        integration.exists,
-                        z3.SetAdd(integrated_charm_ids, other_charm_id),
-                        integrated_charm_ids,
-                    )
                 else:
                     continue
+                integrated_charm_ids = z3.If(
+                    integration.exists,
+                    z3.SetAdd(integrated_charm_ids, other_charm_id),
+                    integrated_charm_ids,
+                )
+            # decls doesn't support sets built with z3.If, need to map to a constant
             integrated_charm_id_const = z3.Const(
                 f"charm_{charm.spec.name}_{charm_id}_endpoint_{endpoint_name}_applications",
                 z3.SetSort(z3.IntSort()),
