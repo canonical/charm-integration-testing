@@ -5,15 +5,14 @@ permissions:
 on:
   issue_comment:
     types: [created]
-  
   workflow_dispatch:
     inputs:
       issue_number:
-        description: 'The issue number to check'
+        description: The issue number to check
         required: true
         type: string
       pr_ref:
-        description: 'The PR ref (SHA) to check against'
+        description: The PR ref (SHA) to check against
         required: true
         type: string
 jobs:
@@ -25,7 +24,7 @@ jobs:
       contents: read
       pull-requests: read
       issues: read
-      actions: write #needed to dispatch workflow
+      actions: write  # needed to dispatch workflow
     steps:
       - name: Checkout repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
