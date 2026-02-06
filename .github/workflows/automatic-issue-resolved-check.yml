@@ -30,7 +30,7 @@ jobs:
                 repo: context.repo.repo,
                 pull_number: context.issue.number
             });
-            core.setOutput('sha', pr.data.head.sha);
+            core.setOutput('ref', pr.data.head.ref);
             if (!context.payload.comment || !context.payload.comment.body) {
               core.setOutput('has_issue', 'false');
               console.log('No comment body available in payload. Skipping dispatch.');
@@ -54,7 +54,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ISSUE_NUMBER: ${{ steps.pr-details.outputs.issue_number }}
-          PR_REF: ${{ steps.pr-details.outputs.sha }}
+          PR_REF: ${{ steps.pr-details.outputs.ref }}
           PROJECT: canonical/charm-integration-testing
           ENVIRONMENT: staging
         run: |-
