@@ -33,7 +33,7 @@ from bundle_builder.charmhub_http import (
     RefreshAction,
     RefreshResponse,
 )
-from bundle_builder.overrides import CharmTestConfigs, OverridesClient
+from bundle_builder.overrides import CharmMetadataOverride, CharmTestConfigs, OverridesClient
 
 
 @dataclass
@@ -73,20 +73,18 @@ class OverridesStub(OverridesClient):
         # Use CharmTestConfigs wrapper to let Pydantic validate the list properly
         return CharmTestConfigs(configs=[CharmTestConfig(**c) for c in configs]).configs
 
-    charm_default_channels: dict[str, str | None] = Field(default_factory=dict)  # type: ignore[assignment]
+    charm_default_channels: dict[str, str | None] = Field(default_factory=dict)
 
     def get_charm_default_channel(self, charm: str) -> str | None:  # type: ignore[override]
         return self.charm_default_channels.get(charm, None)
 
-    charm_default_revisions: dict[str, int | None] = Field(default_factory=dict)  # type: ignore[assignment]
+    charm_default_revisions: dict[str, int | None] = Field(default_factory=dict)
 
     def get_charm_default_revision(self, charm: str) -> int | None:  # type: ignore[override]
         return self.charm_default_revisions.get(charm, None)
 
-    def get_charm_metadata_overrides(self, charm: str):  # type: ignore[override]
+    def get_charm_metadata_overrides(self, charm: str) -> CharmMetadataOverride:  # type: ignore[override]
         # Override to avoid caching issues with stub
-        from bundle_builder.overrides import CharmMetadataOverride
-
         return CharmMetadataOverride()
 
     def get_charm_priorities_mapping(self) -> dict[str, float]:  # type: ignore[override]
@@ -1350,6 +1348,7 @@ class TestCharmhubClient:
 
             # AND an http client with appropriate refresh responses
             refresh_actions = {}
+            assert params.ubuntu_version is not None  # All test cases provide ubuntu_version
 
             # Add response for channel lookup if default channel is provided
             if params.default_channel:
@@ -1465,7 +1464,11 @@ class TestCharmhubClient:
                     )
                 ] = params.refresh_response
 
-            http_client = CharmhubHttpStub(refresh_response=refresh_actions)
+            # Type assertion for mypy - all test responses are non-None
+            typed_refresh_actions: dict[RefreshAction, RefreshResponse] = {
+                k: v for k, v in refresh_actions.items() if v is not None
+            }
+            http_client = CharmhubHttpStub(refresh_response=typed_refresh_actions)
 
             # AND a CharmhubClient
             client = CharmhubClient(http_client=http_client, overrides_client=overrides_client)
