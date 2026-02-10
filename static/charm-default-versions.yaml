@@ -1,0 +1,4 @@
+---
+defaults:
+  redis-k8s:
+    channel: latest/edge
