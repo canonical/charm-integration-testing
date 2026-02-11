@@ -1346,7 +1346,7 @@ class TestCharmhubClient:
                 charm_default_revisions={params.charm_name: params.default_revision},
             )
 
-            # AND an http client with appropriate refresh responses
+            # AND an appropriate refresh responses
             refresh_actions = {}
             assert params.ubuntu_version is not None  # All test cases provide ubuntu_version
 
@@ -1468,6 +1468,7 @@ class TestCharmhubClient:
             typed_refresh_actions: dict[RefreshAction, RefreshResponse] = {
                 k: v for k, v in refresh_actions.items() if v is not None
             }
+            # AND an http client with appropriate refresh responses
             http_client = CharmhubHttpStub(refresh_response=typed_refresh_actions)
 
             # AND a CharmhubClient
