@@ -10,7 +10,7 @@ from typing import Any
 from extensions.unseal_vault.vault_client import VaultClient, VaultStatus, VaultTokenSecret
 from extensions.unseal_vault.vault_unsealer import CharmInfo, VaultUnsealer
 from juju.backend import JujuBackend, JujuTask
-from juju.models import JujuApplicationInfo
+from juju.models import JujuApplicationInfo, JujuIntegration, JujuIntegrationApplication
 
 
 @dataclass
@@ -24,6 +24,7 @@ class JujuStub(JujuBackend):
     secrets: dict[str, dict[str, str]] = field(default_factory=dict)
     secrets_granted: list[tuple[str, str]] = field(default_factory=list)
     actions_run: list[tuple[str, str, dict[str, str]]] = field(default_factory=list)
+    integrations: set[JujuIntegration] = field(default_factory=set)
 
     def list_applications(self, model: str) -> dict[str, JujuApplicationInfo]:
         return {app: JujuApplicationInfo(charm=self.charm_name, revision=0) for app in self.apps}
@@ -69,8 +70,25 @@ class JujuStub(JujuBackend):
     def scale_application(self) -> None:  # type: ignore[override]
         pass
 
-    def list_integrations(self) -> None:  # type: ignore[override]
-        pass
+    def list_integrations(self, model: str) -> set[JujuIntegration]:
+        _ = model
+        return self.integrations
+
+    def set_integrations(self, integrations: set[tuple[str, str]]) -> None:
+        for provider, requirer in integrations:
+            self.integrations.add(
+                JujuIntegration(
+                    provider=JujuIntegrationApplication(
+                        application=provider,
+                        endpoint=f"{provider}_endpoint",
+                    ),
+                    requirer=JujuIntegrationApplication(
+                        application=requirer,
+                        endpoint=f"endpoint_{requirer}",
+                    ),
+                    interface=f"{provider}-to-{requirer}",
+                )
+            )
 
     def integration_exists(self) -> None:  # type: ignore[override]
         pass
@@ -171,6 +189,29 @@ class TestVaultUnsealer:
         # THEN
         assert "vault" in juju.scaled_apps
         assert "vault/leader" in vault.inits
+
+    def test_try_init_or_unseal_all_vaults_will_order_provider_first(self) -> None:
+        # GIVEN
+        juju = JujuStub(
+            apps=["vault1", "vault2"],
+            charm_name="vault",
+            units={"vault1": ["vault1/leader"], "vault2": ["vault2/leader"]},
+        )
+        juju.set_integrations({("vault2", "vault1")})  # using convenience method
+
+        vault = VaultStub(initialized_units={"vault1/leader": False, "vault2/leader": False})
+        logger = LoggerStub()
+        charm = CharmInfo(name="vault")
+
+        # WHEN
+        VaultUnsealer(charm, vault, juju, logger).try_init_or_unseal_all_vaults("test-model")
+
+        # THEN
+        assert "vault1" in juju.scaled_apps
+        assert "vault2" in juju.scaled_apps
+        assert "vault1/leader" in vault.inits
+        assert "vault2/leader" in vault.inits
+        assert vault.inits.index("vault2/leader") < vault.inits.index("vault1/leader")
 
     def test_try_init_vault_skips_if_already_initialized(self) -> None:
         # GIVEN
