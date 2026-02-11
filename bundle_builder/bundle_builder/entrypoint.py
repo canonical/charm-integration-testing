@@ -88,6 +88,9 @@ def add_args_to_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--charm-priorities-config", type=Path, help="Path to file containing charm priorities", default=None
     )
+    parser.add_argument(
+        "--charm-default-versions", type=Path, help="Path to file containing charm default versions", default=None
+    )
 
 
 # Get charms from args
@@ -198,12 +201,15 @@ def main() -> None:
         parser.error(f"The charm test configs path '{args.charm_test_configs}' is not a valid directory.")
     if args.charm_priorities_config is not None and not args.charm_priorities_config.is_file():
         parser.error(f"The charm priorities path '{args.charm_priorities_config}' is not a valid file.")
+    if args.charm_default_versions is not None and not args.charm_default_versions.is_file():
+        parser.error(f"The charm default versions file '{args.charm_default_versions}' is not a valid file.")
     overrides_client = OverridesClient(
         charm_metadata_overrides=args.charm_metadata_overrides,
         charm_platform_overrides=args.charm_platform_overrides,
         charm_listing_overrides=args.charm_listing_overrides,
         charm_test_configs=args.charm_test_configs,
         charm_priorities_config=args.charm_priorities_config,
+        charm_default_versions=args.charm_default_versions,
     )
 
     # Create Charmhub client

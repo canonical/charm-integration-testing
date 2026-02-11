@@ -9,4 +9,5 @@ poetry run bundle-builder \
     --charm-listing-overrides ./static/charm-listing-overrides.yaml \
     --charm-test-configs ./static/charm-test-configs/ \
     --charm-priorities ./static/charm-priorities.yaml \
+    --charm-default-versions ./static/charm-default-versions.yaml \
     "$@"

@@ -68,6 +68,11 @@ class CharmhubClient:
         charm_revision: int | None = None,
         ubuntu_version: str | None = None,
     ) -> Charm:
+        # Get default version from overrides if not provided
+        if charm_channel is None and charm_revision is None:
+            charm_channel = self.overrides_client.get_charm_default_channel(charm_name)
+            charm_revision = self.overrides_client.get_charm_default_revision(charm_name)
+
         # Figure out how to look up charm information
         if charm_channel and charm_revision:
             return self._charm_from_store_by_channel_and_revision(

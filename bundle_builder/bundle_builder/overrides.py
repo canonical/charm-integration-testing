@@ -79,12 +79,24 @@ class CharmPrioritiesMapping:
     priorities: dict[str, float] = Field(default_factory=dict)  # charm name -> priority
 
 
+@immutable_dataclass
+class CharmDefaultVersion:
+    channel: str | None = None
+    revision: int | None = None
+
+
+@immutable_dataclass
+class CharmDefaultVersions:
+    defaults: dict[str, CharmDefaultVersion] = Field(default_factory=dict)  # charm name -> default version
+
+
 class OverridesClient:
     charm_metadata_overrides: Path | None = None
     charm_platform_overrides: Path | None = None
     charm_listing_overrides: Path | None = None
     charm_test_configs: Path | None = None
     charm_priorities_config: Path | None = None
+    charm_default_versions: Path | None = None
 
     def __init__(
         self,
@@ -93,12 +105,14 @@ class OverridesClient:
         charm_listing_overrides: Path | None = None,
         charm_test_configs: Path | None = None,
         charm_priorities_config: Path | None = None,
-    ):
+        charm_default_versions: Path | None = None,
+    ) -> None:
         self.charm_metadata_overrides = charm_metadata_overrides
         self.charm_platform_overrides = charm_platform_overrides
         self.charm_listing_overrides = charm_listing_overrides
         self.charm_test_configs = charm_test_configs
         self.charm_priorities_config = charm_priorities_config
+        self.charm_default_versions = charm_default_versions
 
     @cache
     def _read_yaml_file(self, path: Path | None, file_name: str | None) -> Any:
@@ -135,3 +149,15 @@ class OverridesClient:
     @cache
     def get_charm_priorities_mapping(self) -> dict[str, float]:
         return CharmPrioritiesMapping(**self._read_yaml_file(self.charm_priorities_config, None)).priorities
+
+    @cache
+    def _get_charm_default_versions(self) -> dict[str, CharmDefaultVersion]:
+        return CharmDefaultVersions(**self._read_yaml_file(self.charm_default_versions, None)).defaults
+
+    @cache
+    def get_charm_default_channel(self, charm: str) -> str | None:
+        return self._get_charm_default_versions().get(charm, CharmDefaultVersion()).channel
+
+    @cache
+    def get_charm_default_revision(self, charm: str) -> int | None:
+        return self._get_charm_default_versions().get(charm, CharmDefaultVersion()).revision

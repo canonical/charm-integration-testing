@@ -33,7 +33,7 @@ from bundle_builder.charmhub_http import (
     RefreshAction,
     RefreshResponse,
 )
-from bundle_builder.overrides import CharmTestConfigs, OverridesClient
+from bundle_builder.overrides import CharmMetadataOverride, CharmTestConfigs, OverridesClient
 
 
 @dataclass
@@ -72,6 +72,24 @@ class OverridesStub(OverridesClient):
         configs = self.charm_test_configs.get(charm, [])
         # Use CharmTestConfigs wrapper to let Pydantic validate the list properly
         return CharmTestConfigs(configs=[CharmTestConfig(**c) for c in configs]).configs
+
+    charm_default_channels: dict[str, str | None] = Field(default_factory=dict)
+
+    def get_charm_default_channel(self, charm: str) -> str | None:  # type: ignore[override]
+        return self.charm_default_channels.get(charm, None)
+
+    charm_default_revisions: dict[str, int | None] = Field(default_factory=dict)
+
+    def get_charm_default_revision(self, charm: str) -> int | None:  # type: ignore[override]
+        return self.charm_default_revisions.get(charm, None)
+
+    def get_charm_metadata_overrides(self, charm: str) -> CharmMetadataOverride:  # type: ignore[override]
+        # Override to avoid caching issues with stub
+        return CharmMetadataOverride()
+
+    def get_charm_priorities_mapping(self) -> dict[str, float]:  # type: ignore[override]
+        # Override to avoid caching issues with stub
+        return {}
 
 
 matching_base = CharmhubBase(name="ubuntu", architecture="amd64", channel="20.04")
@@ -1169,3 +1187,304 @@ class TestCharmhubClient:
                 assert str(charm.channel) == params.charm_channel
                 assert charm.revision == params.charm_revision
                 assert charm.ubuntu_arch == params.ubuntu_arch
+
+    class TestCharmFromStore:
+        @dataclass
+        class Params:
+            label: str
+            charm_name: str
+            ubuntu_arch: str
+            charm_channel: str | None
+            charm_revision: int | None
+            ubuntu_version: str | None
+            default_channel: str | None = None
+            default_revision: int | None = None
+            refresh_response: RefreshResponse | None = None
+            expected_channel_used: str | None = None
+            expected_revision_used: int | None = None
+
+        test_cases = [
+            Params(
+                label="uses_default_channel_when_not_provided",
+                charm_name="redis-k8s",
+                ubuntu_arch="amd64",
+                charm_channel=None,
+                charm_revision=None,
+                ubuntu_version="22.04",
+                default_channel="latest/edge",
+                default_revision=None,
+                refresh_response=RefreshResponse(
+                    name="redis-k8s",
+                    effective_channel="latest/edge",
+                    charm=RefreshResponse.Charm(
+                        revision=100,
+                        bases=[other_base],
+                        config=yaml.dump({}),
+                        metadata=CharmMetadata({}),
+                    ),
+                ),
+                expected_channel_used="latest/edge",
+                expected_revision_used=100,
+            ),
+            Params(
+                label="uses_default_revision_when_not_provided",
+                charm_name="redis-k8s",
+                ubuntu_arch="amd64",
+                charm_channel=None,
+                charm_revision=None,
+                ubuntu_version="22.04",
+                default_channel=None,
+                default_revision=50,
+                refresh_response=RefreshResponse(
+                    name="redis-k8s",
+                    effective_channel="stable",
+                    charm=RefreshResponse.Charm(
+                        revision=50,
+                        bases=[other_base],
+                        config=yaml.dump({}),
+                        metadata=CharmMetadata({}),
+                    ),
+                ),
+                expected_channel_used="stable",
+                expected_revision_used=50,
+            ),
+            Params(
+                label="uses_both_default_channel_and_revision",
+                charm_name="redis-k8s",
+                ubuntu_arch="amd64",
+                charm_channel=None,
+                charm_revision=None,
+                ubuntu_version="22.04",
+                default_channel="latest/stable",
+                default_revision=75,
+                refresh_response=RefreshResponse(
+                    name="redis-k8s",
+                    effective_channel="latest/stable",
+                    charm=RefreshResponse.Charm(
+                        revision=75,
+                        bases=[other_base],
+                        config=yaml.dump({}),
+                        metadata=CharmMetadata({}),
+                    ),
+                ),
+                expected_channel_used="latest/stable",
+                expected_revision_used=75,
+            ),
+            Params(
+                label="provided_channel_overrides_default",
+                charm_name="redis-k8s",
+                ubuntu_arch="amd64",
+                charm_channel="latest/candidate",
+                charm_revision=None,
+                ubuntu_version="22.04",
+                default_channel="latest/edge",
+                default_revision=None,
+                refresh_response=RefreshResponse(
+                    name="redis-k8s",
+                    effective_channel="latest/candidate",
+                    charm=RefreshResponse.Charm(
+                        revision=99,
+                        bases=[other_base],
+                        config=yaml.dump({}),
+                        metadata=CharmMetadata({}),
+                    ),
+                ),
+                expected_channel_used="latest/candidate",
+                expected_revision_used=99,
+            ),
+            Params(
+                label="provided_revision_overrides_default",
+                charm_name="redis-k8s",
+                ubuntu_arch="amd64",
+                charm_channel=None,
+                charm_revision=88,
+                ubuntu_version="22.04",
+                default_channel=None,
+                default_revision=50,
+                refresh_response=RefreshResponse(
+                    name="redis-k8s",
+                    effective_channel="stable",
+                    charm=RefreshResponse.Charm(
+                        revision=88,
+                        bases=[other_base],
+                        config=yaml.dump({}),
+                        metadata=CharmMetadata({}),
+                    ),
+                ),
+                expected_channel_used="stable",
+                expected_revision_used=88,
+            ),
+            Params(
+                label="no_defaults_falls_back_to_default_behavior",
+                charm_name="postgresql-k8s",
+                ubuntu_arch="amd64",
+                charm_channel=None,
+                charm_revision=None,
+                ubuntu_version="22.04",
+                default_channel=None,
+                default_revision=None,
+                refresh_response=RefreshResponse(
+                    name="postgresql-k8s",
+                    effective_channel="stable",
+                    charm=RefreshResponse.Charm(
+                        revision=200,
+                        bases=[other_base],
+                        config=yaml.dump({}),
+                        metadata=CharmMetadata({}),
+                    ),
+                ),
+                expected_channel_used="stable",
+                expected_revision_used=200,
+            ),
+        ]
+
+        @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
+        def test(self, params: Params) -> None:
+            # GIVEN an overrides client with default channel and/or revision
+            overrides_client = OverridesStub(
+                charm_default_channels={params.charm_name: params.default_channel},
+                charm_default_revisions={params.charm_name: params.default_revision},
+            )
+
+            # AND an appropriate refresh responses
+            refresh_actions = {}
+            assert params.ubuntu_version is not None  # All test cases provide ubuntu_version
+
+            # Add response for channel lookup if default channel is provided
+            if params.default_channel:
+                refresh_actions[
+                    RefreshAction(
+                        charm_name=params.charm_name,
+                        charm_channel=params.default_channel,
+                        base=CharmhubBase(
+                            name="ubuntu",
+                            architecture=params.ubuntu_arch,
+                            channel=params.ubuntu_version,
+                        ),
+                    )
+                ] = params.refresh_response
+
+            # Add response for revision lookup if default revision is provided
+            if params.default_revision:
+                refresh_actions[
+                    RefreshAction(
+                        charm_name=params.charm_name,
+                        charm_revision=params.default_revision,
+                        always_include_base=True,
+                    )
+                ] = params.refresh_response
+                # Also add response for finding suitable channel
+                refresh_actions[
+                    RefreshAction(
+                        charm_name=params.charm_name,
+                        base=CharmhubBase(
+                            name="ubuntu",
+                            architecture=params.ubuntu_arch,
+                            channel=params.ubuntu_version,
+                        ),
+                    )
+                ] = params.refresh_response
+
+            # Add response for channel and revision lookup if both are provided
+            if params.default_channel and params.default_revision:
+                refresh_actions[
+                    RefreshAction(
+                        charm_name=params.charm_name,
+                        charm_channel=params.default_channel,
+                        charm_revision=params.default_revision,
+                        always_include_base=True,
+                    )
+                ] = params.refresh_response
+                # Also add response for supported versions check
+                refresh_actions[
+                    RefreshAction(
+                        charm_name=params.charm_name,
+                        charm_channel=params.default_channel,
+                        base=CharmhubBase(name="NA", architecture=params.ubuntu_arch, channel="NA"),
+                    )
+                ] = RefreshResponse(
+                    name=params.charm_name,
+                    error=RefreshResponse.Error(
+                        code="invalid-charm-base",
+                        message="Invalid base",
+                        extra=RefreshResponse.Error.Extra(default_bases=[other_base]),
+                    ),
+                )
+
+            # Add response for provided channel
+            if params.charm_channel:
+                refresh_actions[
+                    RefreshAction(
+                        charm_name=params.charm_name,
+                        charm_channel=params.charm_channel,
+                        base=CharmhubBase(
+                            name="ubuntu",
+                            architecture=params.ubuntu_arch,
+                            channel=params.ubuntu_version,
+                        ),
+                    )
+                ] = params.refresh_response
+
+            # Add response for provided revision
+            if params.charm_revision:
+                refresh_actions[
+                    RefreshAction(
+                        charm_name=params.charm_name,
+                        charm_revision=params.charm_revision,
+                        always_include_base=True,
+                    )
+                ] = params.refresh_response
+                # Also add response for finding suitable channel
+                refresh_actions[
+                    RefreshAction(
+                        charm_name=params.charm_name,
+                        base=CharmhubBase(
+                            name="ubuntu",
+                            architecture=params.ubuntu_arch,
+                            channel=params.ubuntu_version,
+                        ),
+                    )
+                ] = params.refresh_response
+
+            # Add response for no defaults (default behavior)
+            if (
+                not params.default_channel
+                and not params.default_revision
+                and not params.charm_channel
+                and not params.charm_revision
+            ):
+                refresh_actions[
+                    RefreshAction(
+                        charm_name=params.charm_name,
+                        base=CharmhubBase(
+                            name="ubuntu",
+                            architecture=params.ubuntu_arch,
+                            channel=params.ubuntu_version,
+                        ),
+                    )
+                ] = params.refresh_response
+
+            # Type assertion for mypy - all test responses are non-None
+            typed_refresh_actions: dict[RefreshAction, RefreshResponse] = {
+                k: v for k, v in refresh_actions.items() if v is not None
+            }
+            # AND an http client with appropriate refresh responses
+            http_client = CharmhubHttpStub(refresh_response=typed_refresh_actions)
+
+            # AND a CharmhubClient
+            client = CharmhubClient(http_client=http_client, overrides_client=overrides_client)
+
+            # WHEN charm_from_store is called
+            charm = client.charm_from_store(
+                charm_name=params.charm_name,
+                ubuntu_arch=params.ubuntu_arch,
+                charm_channel=params.charm_channel,
+                charm_revision=params.charm_revision,
+                ubuntu_version=params.ubuntu_version,
+            )
+
+            # THEN the charm uses the expected channel and revision
+            assert charm.name == params.charm_name
+            assert str(charm.channel) == params.expected_channel_used
+            assert charm.revision == params.expected_revision_used
+            assert charm.ubuntu_arch == params.ubuntu_arch
