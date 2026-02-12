@@ -23,7 +23,6 @@ from pydantic import Field
 from pydantic.dataclasses import dataclass
 
 from bundle_builder.charm import (
-    CharmConfigCriteria,
     CharmEndpointOptionality,
     CharmLimit,
     CharmLimitCriteria,
@@ -303,7 +302,7 @@ class TestOverridesClient:
             label: str
             charm: str = "charm-a"
             overrides: dict[str, Any] = Field(default_factory=dict)
-            expected: list[CharmTestConfig] = Field(default_factory=list)
+            expected: list[tuple[tuple[str, Any], ...]] = Field(default_factory=list)
             overrides_directory: bool = True
 
         test_cases = [
@@ -316,18 +315,14 @@ class TestOverridesClient:
                         "configs": [
                             {"config": {"a": 1, "b": "x"}},
                             {"config": {"c": 2}},
+                            {"config": {"c": True}},
                         ]
                     }
                 },
                 expected=[
-                    CharmTestConfig(
-                        criteria=CharmConfigCriteria.from_bool(True),
-                        config=(("a", 1), ("b", "x")),
-                    ),
-                    CharmTestConfig(
-                        criteria=CharmConfigCriteria.from_bool(True),
-                        config=(("c", 2),),
-                    ),
+                    (("a", 1), ("b", "x")),
+                    (("c", 2),),
+                    (("c", True),),
                 ],
             ),
         ]
@@ -346,7 +341,13 @@ class TestOverridesClient:
             actual = overrides_client.get_charm_test_configs(params.charm)
 
             # THEN
-            assert actual == params.expected
+            assert actual == [CharmTestConfig(config=config) for config in params.expected]
+            # AND types match
+            for expected_config, actual_config in zip(params.expected, actual):
+                for (expected_key, expected_value), (_, actual_value) in zip(expected_config, actual_config.config):
+                    assert (
+                        type(expected_value) is type(actual_value)
+                    ), f"Expected type {type(expected_value)} for key '{expected_key}', but got type {type(actual_value)}"
 
     class TestGetCharmPrioritiesMapping:
         @dataclass
