@@ -5,10 +5,11 @@ import logging
 import subprocess
 from dataclasses import dataclass, field
 from datetime import timedelta
-from typing import Any
+from typing import Any, NamedTuple
 
+import pytest
 from extensions.unseal_vault.vault_client import VaultClient, VaultStatus, VaultTokenSecret
-from extensions.unseal_vault.vault_unsealer import CharmInfo, VaultUnsealer
+from extensions.unseal_vault.vault_unsealer import CharmInfo, VaultUnsealer, order_apps_by_dependency
 from juju.backend import JujuBackend, JujuTask
 from juju.models import JujuApplicationInfo, JujuIntegration, JujuIntegrationApplication
 
@@ -373,3 +374,169 @@ class TestVaultUnsealer:
             assert "some other error occurred" in str(e).lower()
         else:
             assert False, "Expected RuntimeError was not raised"
+
+
+class TestOrderAppsByDependency:
+    class Params(NamedTuple):
+        label: str
+        applications: list[str]
+        integrations: set[tuple[str, str]]
+        expected: list[str]
+
+    test_cases = [
+        # no changes to original order
+        Params(
+            label="no integrations between 2",
+            applications=["vault1", "vault2"],
+            integrations=set(),
+            expected=["vault1", "vault2"],
+        ),
+        Params(
+            label="irrelevant integrations",
+            applications=["vault1", "vault2"],
+            integrations={("something1", "something2")},
+            expected=["vault1", "vault2"],
+        ),
+        Params(
+            label="no integrations preordered",
+            applications=["vault2", "vault1", "vault3"],
+            integrations=set(),
+            expected=["vault2", "vault1", "vault3"],
+        ),
+        Params(
+            label="irrelevant integrations preordered",
+            applications=["vault2", "vault1", "vault3"],
+            integrations={("something1", "something2")},
+            expected=["vault2", "vault1", "vault3"],
+        ),
+        # flip order between 2 inter-dependents
+        Params(
+            label="direct dependency between 2",
+            applications=["vault1", "vault2"],
+            integrations={("vault2", "vault1")},
+            expected=["vault2", "vault1"],
+        ),
+        Params(
+            label="transient dependency between 2",
+            applications=["vault1", "vault2"],
+            integrations={("vault2", "something"), ("something", "vault1")},
+            expected=["vault2", "vault1"],
+        ),
+        # flip order between 2 inter-dependents, moving duplicates along
+        Params(
+            label="direct dependency between 2 with many duplicates",
+            applications=["vault1", "vault1", "vault2", "vault1"],
+            integrations={("vault2", "vault1")},
+            expected=["vault2", "vault1", "vault1", "vault1"],
+        ),
+        Params(
+            label="transient dependency between 2 with 1 duplicate",
+            applications=["vault1", "vault1", "vault2"],
+            integrations={("vault2", "something"), ("something", "vault1")},
+            expected=["vault2", "vault1", "vault1"],
+        ),
+        # flip order between 2 when the other has more dependencies
+        Params(
+            label="when 1 has dependencies but the other doesn't",
+            applications=["vault1", "vault2"],
+            integrations={("something", "vault1")},
+            expected=["vault2", "vault1"],
+        ),
+        Params(
+            label="when 1 has more direct dependencies than other",
+            applications=["vault1", "vault2"],
+            integrations={("something1", "vault2"), ("something1", "vault1"), ("something2", "vault1")},
+            expected=["vault2", "vault1"],
+        ),
+        Params(
+            label="when 1 has more transitive dependencies than other",
+            applications=["vault1", "vault2"],
+            integrations={("something1", "vault2"), ("something2", "vault1"), ("that", "something2")},
+            expected=["vault2", "vault1"],
+        ),
+        # order dependent after keeping rest same order
+        Params(
+            label="direct dependency between first and last of 3",
+            applications=["vault1", "vault2", "vault3"],
+            integrations={("vault1", "vault3")},
+            expected=["vault1", "vault2", "vault3"],
+        ),
+        Params(
+            label="direct dependency between first and last of 3 preordered",
+            applications=["vault3", "vault2", "vault1"],
+            integrations={("vault1", "vault3")},
+            expected=["vault2", "vault1", "vault3"],
+        ),
+        Params(
+            label="direct dependency between first and last of 4 preordered",
+            applications=["vault4", "vault3", "vault2", "vault1"],
+            integrations={("vault1", "vault4")},
+            expected=["vault3", "vault2", "vault1", "vault4"],
+        ),
+        Params(
+            label="transient dependency between first and last of 3 preordered",
+            applications=["vault3", "vault2", "vault1"],
+            integrations={("vault1", "something"), ("something", "vault3")},
+            expected=["vault2", "vault1", "vault3"],
+        ),
+        Params(
+            label="2 level transient dependency between first and last of 3 preordered",
+            applications=["vault3", "vault2", "vault1"],
+            integrations={("vault1", "something"), ("something", "other"), ("other", "vault3")},
+            expected=["vault2", "vault1", "vault3"],
+        ),
+        Params(
+            label="transient dependency between first and last of 4 preordered",
+            applications=["vault4", "vault3", "vault2", "vault1"],
+            integrations={("vault1", "something"), ("something", "vault4")},
+            expected=["vault3", "vault2", "vault1", "vault4"],
+        ),
+        Params(
+            label="2 level transient dependency between first and last of 4 preordered",
+            applications=["vault4", "vault3", "vault2", "vault1"],
+            integrations={("vault1", "something"), ("something", "other"), ("other", "vault4")},
+            expected=["vault3", "vault2", "vault1", "vault4"],
+        ),
+        Params(
+            label="direct dependency between first and second-last of 4 preordered",
+            applications=["vault4", "vault3", "vault2", "vault1"],
+            integrations={("vault1", "vault3")},
+            expected=["vault4", "vault2", "vault1", "vault3"],
+        ),
+        Params(
+            label="transient dependency between first and second last of 4 preordered",
+            applications=["vault4", "vault3", "vault2", "vault1"],
+            integrations={("vault1", "something"), ("something", "vault3")},
+            expected=["vault4", "vault2", "vault1", "vault3"],
+        ),
+        Params(
+            label="2 level transient dependency between first and second last of 4 preordered",
+            applications=["vault4", "vault3", "vault2", "vault1"],
+            integrations={("vault1", "something"), ("something", "other"), ("other", "vault3")},
+            expected=["vault4", "vault2", "vault1", "vault3"],
+        ),
+        # order multiple dependents after original order
+        Params(
+            label="direct dependency between 1,3 and 1,4 of 4 preordered",
+            applications=["vault4", "vault3", "vault2", "vault1"],
+            integrations={("vault1", "vault3"), ("vault1", "vault4")},
+            expected=["vault2", "vault1", "vault4", "vault3"],
+        ),
+        Params(
+            label="direct dependency between 1,3 and 3,4 of 4 preordered",
+            applications=["vault4", "vault3", "vault2", "vault1"],
+            integrations={("vault1", "vault3"), ("vault3", "vault4")},
+            expected=["vault2", "vault1", "vault3", "vault4"],
+        ),
+        Params(
+            label="transient dependency between 1,3 and 4,3 of 4 preordered",
+            applications=["vault4", "vault3", "vault2", "vault1"],
+            integrations={("vault1", "something"), ("something", "vault3"), ("that", "something"), ("that", "vault4")},
+            expected=["vault2", "vault1", "vault4", "vault3"],
+        ),
+    ]
+
+    @pytest.mark.parametrize("params", test_cases, ids=[p.label for p in test_cases])
+    def test(self, params: Params) -> None:
+        result = order_apps_by_dependency(params.applications, params.integrations)
+        assert result == params.expected
