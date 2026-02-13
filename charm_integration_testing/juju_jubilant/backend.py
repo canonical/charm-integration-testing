@@ -5,6 +5,7 @@
 import dataclasses
 import time
 from datetime import datetime, timedelta
+import re
 from typing import Any, Callable
 
 import jubilant
@@ -292,11 +293,13 @@ class JubilantBackend(JujuCmdBackend):
             elif not line.strip():
                 break
 
-            # Split by whitespace, but the first two columns might have spaces
-            parts = line.split()
-            if len(parts) != 4:
+            # Split by 2+ whitespace that split the tabular column
+            #   Takes care of spaces in a column as long as there are no 2+ consecutively
+            parts = re.split(r"\s\s+", line)
+            if len(parts) < 4 or len(parts) > 5:
+                # we don't know how to parse the column
                 continue
-            provider_str, requirer_str, interface, integration_type = parts
+            provider_str, requirer_str, interface, integration_type = parts[:4]
 
             # Skip peer integrations
             if integration_type == "peer":
