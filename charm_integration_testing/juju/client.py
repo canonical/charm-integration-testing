@@ -100,7 +100,7 @@ class JujuClient:
         #   Not waiting enough can lead to the Juju status not yet reflecting any apps or
         #   integrations that the extensions may need to know about to start working.
         self.logger.info(f"{self._waiting_timeout_log(wait_after_deploy)} for bundle to propagate.")
-        sleep(wait_after_deploy.seconds)
+        sleep(wait_after_deploy.total_seconds())
 
         # Call extensions
         for extension in self.extensions:
