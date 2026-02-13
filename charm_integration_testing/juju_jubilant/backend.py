@@ -3,9 +3,9 @@
 
 
 import dataclasses
+import re
 import time
 from datetime import datetime, timedelta
-import re
 from typing import Any, Callable
 
 import jubilant

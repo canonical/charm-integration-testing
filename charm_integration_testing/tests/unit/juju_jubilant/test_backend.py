@@ -115,6 +115,7 @@ cache:cache           webapp:redis     redis      regular  broken  \
 # TODO(@motjuste): consider adding integration names with spaces
 #   but is that even possible?
 
+
 class JubilantClientStub(JubilantClient):
     client: Any
 
@@ -1017,7 +1018,7 @@ class TestJubilantBackend:
                         "interface": "pgsql",
                     },
                 ],
-            )
+            ),
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
