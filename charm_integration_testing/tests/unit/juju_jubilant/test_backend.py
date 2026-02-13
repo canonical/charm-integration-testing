@@ -92,7 +92,7 @@ Unit                         Workload  Agent  Address     Ports  Message
 self-signed-certificates/0*  running   idle   10.1.2.103
 """
 
-STATUS_WITH_MULTIPLE_INTEGRATIONS_JOINING = """Model  Controller  Cloud/Region  Version    SLA          Timestamp
+STATUS_WITH_MULTIPLE_INTEGRATIONS_MESSAGE = """Model  Controller  Cloud/Region  Version    SLA          Timestamp
 test   microk8s    microk8s      3.1.9      unsupported  12:34:56+00:00
 
 App       Version  Status  Scale  Charm     Channel  Rev  Address        Exposed  Message
@@ -106,9 +106,11 @@ webapp/0*      active    idle   10.1.2.4  80/tcp    ready
 cache/0*       active    idle   10.1.2.5  6379/tcp  ready
 
 Integration provider  Requirer         Interface  Type     Message
-database:db           webapp:database  pgsql      regular  joining
-cache:cache           webapp:redis     redis      regular  broken
-"""
+database:db           webapp:database  pgsql      regular  joining  \
+
+cache:cache           webapp:redis     redis      regular  broken  \
+
+"""  # those extra spaces at the end are intentional and REAL OMG!
 
 # TODO(@motjuste): consider adding integration names with spaces
 #   but is that even possible?
@@ -997,7 +999,7 @@ class TestJubilantBackend:
             ),
             Params(
                 label="collects_multiple_integrations_with_message",
-                status_output=STATUS_WITH_MULTIPLE_INTEGRATIONS_JOINING,
+                status_output=STATUS_WITH_MULTIPLE_INTEGRATIONS_MESSAGE,
                 expected_count=2,
                 expected_integrations=[
                     {

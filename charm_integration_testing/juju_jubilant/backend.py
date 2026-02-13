@@ -295,7 +295,7 @@ class JubilantBackend(JujuCmdBackend):
 
             # Split by 2+ whitespace that split the tabular column
             #   Takes care of spaces in a column as long as there are no 2+ consecutively
-            parts = re.split(r"\s\s+", line)
+            parts = re.split(r"\s\s+", line.strip())
             if len(parts) < 4 or len(parts) > 5:
                 # we don't know how to parse the column
                 continue
