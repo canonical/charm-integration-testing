@@ -217,7 +217,7 @@ class CharmEndpoint:
         return smallest_limit
 
 
-CharmConfig: TypeAlias = tuple[tuple[str, str | int], ...]
+CharmConfig: TypeAlias = tuple[tuple[str, str | int | bool], ...]
 
 
 @immutable_dataclass
