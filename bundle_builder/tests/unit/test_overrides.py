@@ -343,6 +343,8 @@ class TestOverridesClient:
             # THEN
             assert actual == [CharmTestConfig(config=config) for config in params.expected]
             # AND types match
+            # Pydantic automatically converts True to 1, so this can assertion pass even
+            # if the types of the values don't match, hence the explicit check.
             for expected_config, actual_config in zip(params.expected, actual):
                 for (expected_key, expected_value), (_, actual_value) in zip(expected_config, actual_config.config):
                     assert (
