@@ -293,13 +293,15 @@ class JubilantBackend(JujuCmdBackend):
             elif not line.strip():
                 break
 
-            # Split by 2+ whitespace that split the tabular column
-            #   Takes care of spaces in a column as long as there are no 2+ consecutively
-            parts = re.split(r"\s\s+", line.strip())
-            if len(parts) < 4 or len(parts) > 5:
-                # we don't know how to parse the column
+            # We are expecting 4 or 5 columns, the 5th one may have spaces, the first 4 shouldn't
+            parts = re.match(
+                r"(?P<provider>\S+)\s+(?P<requirer>\S+)\s+(?P<integration>\S+)\s+(?P<type>\S+)\s*(?P<message>.*)",
+                line.strip(),
+            )
+            if parts is None:
                 continue
-            provider_str, requirer_str, interface, integration_type = parts[:4]
+            provider_str, requirer_str = parts.group("provider", "requirer")
+            interface, integration_type = parts.group("integration", "type")
 
             # Skip peer integrations
             if integration_type == "peer":

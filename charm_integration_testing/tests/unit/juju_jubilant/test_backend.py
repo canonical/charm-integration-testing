@@ -1118,6 +1118,15 @@ class TestJubilantBackend:
                 endpoint2="redis",
                 expected_exists=True,
             ),
+            Params(
+                label="multiple_integrations_with_messages",
+                status_output=STATUS_WITH_MULTIPLE_INTEGRATIONS_MESSAGE,
+                app1="cache",
+                endpoint1="cache",
+                app2="webapp",
+                endpoint2="redis",
+                expected_exists=True,
+            ),
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
