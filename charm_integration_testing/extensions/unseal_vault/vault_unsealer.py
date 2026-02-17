@@ -21,6 +21,7 @@ class CharmInfo:
     init_message: str = "Please initialize Vault"
     unseal_message: str = "Please unseal Vault"
     authorize_message: str = "Please authorize charm"
+    auto_unseal_requirer_endpoint: str = "vault-autounseal-requires"
 
 
 def order_apps_by_dependency(applications: list[str], integrations: set[tuple[str, str]]) -> list[str]:
@@ -139,6 +140,13 @@ class VaultUnsealer:
             )  # will log exception
             return vault_apps
 
+    def vault_app_should_auto_unseal(self, model: str, application: str) -> bool:
+        for integration in self.juju.list_integrations(model):
+            requirer = integration.requirer
+            if requirer.application == application and requirer.endpoint == self.charm.auto_unseal_requirer_endpoint:
+                return True
+        return False
+
     def try_init_or_unseal_vault(self, model: str, application: str, authorize_charm: bool = True) -> None:
         # Wait for application to be scaled
         self.logger.info(f"Waiting for vault charm '{self.charm.name}' application '{application}' to be scaled")
@@ -167,24 +175,33 @@ class VaultUnsealer:
         if self.vault.status(model, leader_unit).initialized:
             return
 
+        should_auto_unseal = self.vault_app_should_auto_unseal(model, application)
+        if should_auto_unseal:
+            # Wait for auto-unseal to finish
+            self.logger.info(f"Waiting for vault charm '{self.charm.name}' unit '{leader_unit}' to accept auto-unseal")
+            self.wait_for_auto_unseal_acceptance(
+                model, leader_unit, timeout=timedelta(minutes=10), poll_interval=timedelta(seconds=10)
+            )
+
         # Wait for initialization message
         self.logger.info(f"Waiting for vault charm '{self.charm.name}' unit '{leader_unit}' init message")
         self.juju.wait_for_unit_message(model, leader_unit, self.charm.init_message, timedelta(minutes=10))
 
         # Initialize vault
         self.logger.info(f"Initializing vault charm '{self.charm.name}' unit '{leader_unit}'")
-        tokens = self.vault.init(model, leader_unit)
+        tokens = self.vault.init(model, leader_unit, will_auto_unseal=should_auto_unseal)
 
         # Save the token as a secret
         self.save_vault_tokens(model, application, tokens)
 
-        # Wait for unseal message
-        self.logger.info(f"Waiting for vault charm '{self.charm.name}' unit '{leader_unit}' unseal message")
-        self.juju.wait_for_unit_message(model, leader_unit, self.charm.unseal_message, timedelta(minutes=10))
+        if not should_auto_unseal:
+            # Wait for unseal message
+            self.logger.info(f"Waiting for vault charm '{self.charm.name}' unit '{leader_unit}' unseal message")
+            self.juju.wait_for_unit_message(model, leader_unit, self.charm.unseal_message, timedelta(minutes=10))
 
-        # Unseal the leader
-        self.logger.info(f"Unsealing vault charm '{self.charm.name}' unit '{leader_unit}'")
-        self.vault.unseal(model, leader_unit, tokens)
+            # Unseal the leader
+            self.logger.info(f"Unsealing vault charm '{self.charm.name}' unit '{leader_unit}'")
+            self.vault.unseal(model, leader_unit, tokens)
 
         if not authorize_charm:
             self.logger.info(f"Skipping authorizing vault charm '{self.charm.name}' unit '{leader_unit}'")
@@ -196,6 +213,17 @@ class VaultUnsealer:
 
         # Authorize the charm
         self.authorize_vault_charm(model, application, tokens)
+
+    def wait_for_auto_unseal_acceptance(
+        self, model: str, unit: str, timeout: timedelta, poll_interval: timedelta
+    ) -> None:
+        remaining = timeout
+        while remaining.total_seconds() > 0:
+            remaining -= poll_interval
+            if self.vault.status(model, unit).will_auto_unseal:
+                return
+            time.sleep(poll_interval.total_seconds())
+        raise TimeoutError(f"Timed out while waiting for '{self.charm}' unit {unit} to auto-unseal")
 
     def try_unseal_vault(self, model: str, application: str) -> None:
         # Get vault tokens
