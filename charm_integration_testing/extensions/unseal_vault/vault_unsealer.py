@@ -223,7 +223,7 @@ class VaultUnsealer:
             if self.vault.status(model, unit).will_auto_unseal:
                 return
             time.sleep(poll_interval.total_seconds())
-        raise TimeoutError(f"Timed out while waiting for '{self.charm}' unit {unit} to auto-unseal")
+        raise TimeoutError(f"Timed out while waiting for '{self.charm.name}' unit {unit} to auto-unseal")
 
     def try_unseal_vault(self, model: str, application: str) -> None:
         # Get vault tokens
