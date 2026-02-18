@@ -89,8 +89,31 @@ App                       Version  Status   Scale  Charm                     Cha
 self-signed-certificates           waiting      1  self-signed-certificates  1/stable  317  10.152.183.188  no       installing agent
 
 Unit                         Workload  Agent  Address     Ports  Message
-self-signed-certificates/0*  running   idle   10.1.2.103         
+self-signed-certificates/0*  running   idle   10.1.2.103
 """
+
+STATUS_WITH_MULTIPLE_INTEGRATIONS_MESSAGE = """Model  Controller  Cloud/Region  Version    SLA          Timestamp
+test   microk8s    microk8s      3.1.9      unsupported  12:34:56+00:00
+
+App       Version  Status  Scale  Charm     Channel  Rev  Address        Exposed  Message
+database  14       active      1  database  stable    12  10.1.2.3       no       ready
+webapp              active      1  webapp    edge      45  10.1.2.4       no       ready
+cache               active      1  redis     stable     8  10.1.2.5       no       ready
+
+Unit           Workload  Agent  Address   Ports     Message
+database/0*    active    idle   10.1.2.3  5432/tcp  ready
+webapp/0*      active    idle   10.1.2.4  80/tcp    ready
+cache/0*       active    idle   10.1.2.5  6379/tcp  ready
+
+Integration provider  Requirer         Interface  Type     Message
+database:db           webapp:database  pgsql      regular  joining  \
+
+cache:cache           webapp:redis     redis      regular  broken  \
+
+"""  # those extra spaces at the end are intentional and REAL OMG!
+
+# TODO(@motjuste): consider adding integration names with spaces
+#   but is that even possible?
 
 
 class JubilantClientStub(JubilantClient):
@@ -975,6 +998,27 @@ class TestJubilantBackend:
                 status_output=STATUS_NO_INTEGRATION_SECTION,
                 expected_count=0,
             ),
+            Params(
+                label="collects_multiple_integrations_with_message",
+                status_output=STATUS_WITH_MULTIPLE_INTEGRATIONS_MESSAGE,
+                expected_count=2,
+                expected_integrations=[
+                    {
+                        "provider_app": "cache",
+                        "provider_endpoint": "cache",
+                        "requirer_app": "webapp",
+                        "requirer_endpoint": "redis",
+                        "interface": "redis",
+                    },
+                    {
+                        "provider_app": "database",
+                        "provider_endpoint": "db",
+                        "requirer_app": "webapp",
+                        "requirer_endpoint": "database",
+                        "interface": "pgsql",
+                    },
+                ],
+            ),
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
@@ -1068,6 +1112,15 @@ class TestJubilantBackend:
             Params(
                 label="multiple_integrations_finds_correct_one",
                 status_output=STATUS_WITH_MULTIPLE_INTEGRATIONS,
+                app1="cache",
+                endpoint1="cache",
+                app2="webapp",
+                endpoint2="redis",
+                expected_exists=True,
+            ),
+            Params(
+                label="multiple_integrations_with_messages",
+                status_output=STATUS_WITH_MULTIPLE_INTEGRATIONS_MESSAGE,
                 app1="cache",
                 endpoint1="cache",
                 app2="webapp",

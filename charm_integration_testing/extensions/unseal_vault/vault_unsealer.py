@@ -5,7 +5,9 @@ import logging
 import time
 from dataclasses import asdict
 from datetime import timedelta
+from functools import cmp_to_key
 from subprocess import CalledProcessError  # nosec
+from typing import Literal
 
 from juju import JujuBackend
 from pydantic.dataclasses import dataclass
@@ -19,6 +21,75 @@ class CharmInfo:
     init_message: str = "Please initialize Vault"
     unseal_message: str = "Please unseal Vault"
     authorize_message: str = "Please authorize charm"
+
+
+def order_apps_by_dependency(applications: list[str], integrations: set[tuple[str, str]]) -> list[str]:
+    """Order applications by their dependency relationships.
+
+    Orders a list of applications based on their integration dependencies, ensuring that
+    provider applications come before requirer applications.
+
+    When there's no direct or transitive dependency relationship, applications with fewer
+    dependencies are ordered before those with more dependencies.
+
+    If a circular dependency is detected, the cycle is broken and ordering continues.
+
+    Original order is preserved when dependency relationships don't determine a clear ordering.
+
+    If there are duplicates in applications, they will end up grouped together.
+
+    Args:
+        applications: List of applications to order
+        integrations: Set of tuples representing integrations as (provider, requirer) pairs.
+
+    Returns:
+        List of applications ordered by dependency, with providers before requirers.
+    """
+    if len(applications) < 2:
+        return applications
+
+    direct_dependencies: dict[str, set[str]] = {}
+    for provider, requirer in integrations:
+        if (entry := direct_dependencies.get(requirer)) is None:
+            direct_dependencies[requirer] = {provider}
+        else:
+            entry.add(provider)
+
+    full_dependencies: dict[str, set[str] | Literal["visiting"]] = {}
+
+    def dependencies_of(app: str) -> set[str]:
+        if (result := full_dependencies.get(app)) is not None:
+            # there's a cycle if we hit "visiting"
+            return set() if result == "visiting" else result
+
+        full_dependencies[app] = "visiting"
+        result = direct_dependencies.get(app, set())
+        for dependency in list(result):
+            # TODO(@motjuste): consider a maximum recursion depth
+            result |= dependencies_of(dependency)
+
+        full_dependencies[app] = result
+        return result
+
+    def cmp(app1: str, app2: str) -> int:
+        if app1 == app2:
+            return 0
+
+        if app1 in (deps2 := dependencies_of(app2)):
+            return -1  # order app1 before app2
+        if app2 in (deps1 := dependencies_of(app1)):
+            return 1  # order app2 before app1
+
+        if len(deps2) > len(deps1):
+            return -1  # order app1 before app2 due to fewer dependencies
+        if len(deps1) > len(deps2):
+            return 1  # order app2 before app1 due to fewer dependencies
+
+        # returning 0 _should_ keep original order
+        return 0
+
+    result = sorted(applications, key=cmp_to_key(cmp))
+    return result
 
 
 class VaultUnsealer:
@@ -35,9 +106,38 @@ class VaultUnsealer:
 
     def try_init_or_unseal_all_vaults(self, model: str, authorize_charm: bool = True) -> None:
         # Look for vault charms
-        for application in self.juju.list_applications(model):
-            if self.juju.application_charm(model, application) == self.charm.name:
-                self.try_init_or_unseal_vault(model, application, authorize_charm)
+        for application in self.ordered_vaults(model):
+            self.try_init_or_unseal_vault(model, application, authorize_charm)
+
+    def ordered_vaults(self, model: str) -> list[str]:
+        # collect all vault apps
+        vault_apps = sorted(
+            (
+                app
+                for app, info in self.juju.list_applications(model).items()
+                if info.charm == self.charm.name
+                or (
+                    # info.charm may be empty, then we need the expensive request to juju
+                    info.charm == "" and self.juju.application_charm(model, app) == self.charm.name
+                )
+            ),
+            reverse=True,  # bias descending order by name (vault, target, neighbor)
+        )
+
+        # not enough vaults to bother ordering
+        if len(vault_apps) < 2:
+            return vault_apps
+
+        # all integrations as tuples: (provider, requirer)
+        integrations = set((i.provider.application, i.requirer.application) for i in self.juju.list_integrations(model))
+        try:
+            return order_apps_by_dependency(vault_apps, integrations)
+        except Exception:
+            # probably RecursionError but who knows
+            self.logger.error(
+                "Failed to order applications by dependencies, falling back to reverse alphabetical order"
+            )  # will log exception
+            return vault_apps
 
     def try_init_or_unseal_vault(self, model: str, application: str, authorize_charm: bool = True) -> None:
         # Wait for application to be scaled

@@ -3,6 +3,7 @@
 
 
 import dataclasses
+import re
 import time
 from datetime import datetime, timedelta
 from typing import Any, Callable
@@ -292,11 +293,15 @@ class JubilantBackend(JujuCmdBackend):
             elif not line.strip():
                 break
 
-            # Split by whitespace, but the first two columns might have spaces
-            parts = line.split()
-            if len(parts) != 4:
+            # We are expecting 4 or 5 columns, the 5th one may have spaces, the first 4 shouldn't
+            parts = re.match(
+                r"(?P<provider>\S+)\s+(?P<requirer>\S+)\s+(?P<integration>\S+)\s+(?P<type>\S+)\s*(?P<message>.*)",
+                line.strip(),
+            )
+            if parts is None:
                 continue
-            provider_str, requirer_str, interface, integration_type = parts
+            provider_str, requirer_str = parts.group("provider", "requirer")
+            interface, integration_type = parts.group("integration", "type")
 
             # Skip peer integrations
             if integration_type == "peer":

@@ -14,8 +14,9 @@ def test_deploy(
     integrations: list[tuple[tuple[str, str], tuple[str, str]]],
 ) -> None:
     # Deploy each bundle
+    wait_after_deploy = timedelta(seconds=10)
     for bundle in bundles:
-        juju_client.deploy_bundle_file(bundle, model=model)
+        juju_client.deploy_bundle_file(bundle, model=model, wait_after_deploy=wait_after_deploy)
 
     # Create additional integrations
     for integration in integrations:
