@@ -451,7 +451,7 @@ jobs:
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
           event_name: test_teardown_end
           detail: Test teardown phase finished.
-      - name: Post 'test_idempotent_redeploy_start'
+      - name: Post 'test_idempotent_redeploy_start' event
         if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-events
         with:
@@ -475,7 +475,7 @@ jobs:
             --applications "target" \
             --bundles "${bundle}" \
             --junit-xml=junit-idempotent-redeploy.xml
-      - name: Post 'test_idempotent_redeploy_end'
+      - name: Post 'test_idempotent_redeploy_end' event
         if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-events
         with:
