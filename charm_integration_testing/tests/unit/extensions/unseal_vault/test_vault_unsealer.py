@@ -1,15 +1,24 @@
 # Copyright 2025 Canonical Ltd.
 # See LICENSE file for licensing details.
-
 import logging
 import subprocess
 from dataclasses import dataclass, field
 from datetime import timedelta
+from io import StringIO
 from typing import Any, NamedTuple
+from unittest import mock
 
 import pytest
-from extensions.unseal_vault.vault_client import VaultClient, VaultStatus, VaultTokenSecret
+import yaml
+from extensions.unseal_vault.vault_client import (
+    VaultClient,
+    VaultClientJujuExec,
+    VaultClientJujuExecPebble,
+    VaultStatus,
+    VaultTokenSecret,
+)
 from extensions.unseal_vault.vault_unsealer import CharmInfo, VaultUnsealer, order_apps_by_dependency
+from juju import JujuExecOutput
 from juju.backend import JujuBackend, JujuTask
 from juju.models import JujuApplicationInfo, JujuIntegration, JujuIntegrationApplication
 
@@ -26,6 +35,8 @@ class JujuStub(JujuBackend):
     secrets_granted: list[tuple[str, str]] = field(default_factory=list)
     actions_run: list[tuple[str, str, dict[str, str]]] = field(default_factory=list)
     integrations: set[JujuIntegration] = field(default_factory=set)
+    exec_unit_calls: list[tuple[str, str, str]] = field(default_factory=list)
+    exec_units_output: list[JujuExecOutput] = field(default_factory=list)
 
     def list_applications(self, model: str) -> dict[str, JujuApplicationInfo]:
         return {app: JujuApplicationInfo(charm=self.charm_name, revision=0) for app in self.apps}
@@ -121,8 +132,9 @@ class JujuStub(JujuBackend):
     def wait_for_removal_of_units(self) -> None:  # type: ignore[override]
         pass
 
-    def exec_unit(self) -> None:  # type: ignore[override]
-        pass
+    def exec_unit(self, model: str, unit: str, task: str) -> JujuExecOutput:
+        self.exec_unit_calls.append((model, unit, task))
+        return self.exec_units_output.pop(0)
 
     def deploy_application(self) -> None:  # type: ignore[override]
         pass
@@ -151,6 +163,7 @@ class VaultStub(VaultClient):
     initialized_units: dict[str, bool] = field(default_factory=dict)
     sealed_units: dict[str, bool] = field(default_factory=dict)
     inits: list[str] = field(default_factory=list)
+    inits_auto_sealed: list[str] = field(default_factory=list)
     unseals: list[str] = field(default_factory=list)
     tokens: VaultTokenSecret = field(default_factory=lambda: VaultTokenSecret(root_token="root", unseal_key="key"))
 
@@ -158,10 +171,14 @@ class VaultStub(VaultClient):
         return VaultStatus(
             initialized=self.initialized_units.get(unit, False),
             sealed=self.sealed_units.get(unit, True),
+            type="shamir",
         )
 
-    def init(self, model: str, unit: str) -> VaultTokenSecret:
-        self.inits.append(unit)
+    def init(self, model: str, unit: str, will_auto_unseal: bool = False) -> VaultTokenSecret:
+        if will_auto_unseal:
+            self.inits_auto_sealed.append(unit)
+        else:
+            self.inits.append(unit)
         return self.tokens
 
     def unseal(self, model: str, unit: str, tokens: VaultTokenSecret) -> None:
@@ -176,6 +193,7 @@ class LoggerStub(logging.Logger):
         self.messages.append(message)
 
 
+@mock.patch("time.sleep", new=lambda _: None)
 class TestVaultUnsealer:
     def test_try_init_or_unseal_all_vaults(self) -> None:
         # GIVEN
@@ -540,3 +558,226 @@ class TestOrderAppsByDependency:
     def test(self, params: Params) -> None:
         result = order_apps_by_dependency(params.applications, params.integrations)
         assert result == params.expected
+
+
+def dump_to_yaml_str(**kwargs: Any) -> str:
+    buffer = StringIO()
+    yaml.dump(kwargs, buffer)
+    return buffer.getvalue()
+
+
+@mock.patch("time.sleep", new=lambda _: None)
+class TestAutoUnsealedVault:
+    @pytest.mark.parametrize(
+        "status,will_auto_unseal",
+        [
+            (VaultStatus(True, True, "shamir"), False),
+            (VaultStatus(True, False, "shamir"), False),
+            (VaultStatus(False, True, "shamir"), False),
+            (VaultStatus(False, True, "transit"), True),
+            (VaultStatus(False, True, "awskms"), True),
+            (VaultStatus(False, True, "azurekeyvault"), True),
+            (VaultStatus(False, True, "gcpckms"), True),
+            (VaultStatus(False, True, "whatever"), True),  # yeah, it's a dumb match
+        ],
+    )
+    def test_status_says_it_will_auto_unseal(self, status: VaultStatus, will_auto_unseal: bool) -> None:
+        assert status.will_auto_unseal == will_auto_unseal
+
+    @pytest.mark.parametrize("vault_impl", [VaultClientJujuExec, VaultClientJujuExecPebble])
+    def test_vault_client_init_not_auto_unsealed_vault_asks_to_create_keys(
+        self, vault_impl: type[VaultClientJujuExec] | type[VaultClientJujuExecPebble]
+    ) -> None:
+        # GIVEN exec_unit will return a usable response
+        exec_output = dump_to_yaml_str(root_token="root", unseal_keys_b64=["unseal-key"])
+        juju = JujuStub(exec_units_output=[JujuExecOutput(0, exec_output, "")])
+
+        # WHEN we ask to init vault that will NOT auto-unseal
+        vault_impl(juju).init("test-model", "vault-leader", will_auto_unseal=False)
+
+        # THEN the call was made for the unit
+        call, *_ = juju.exec_unit_calls
+        model, unit, task = call
+        assert model == "test-model"
+        assert unit == "vault-leader"
+
+        # AND vault was initialized with 1 key share and key threshold 1
+        assert "vault operator init" in task
+        assert "-key-shares=1" in task
+        assert "-key-threshold=1" in task
+
+    @pytest.mark.parametrize("vault_impl", [VaultClientJujuExec, VaultClientJujuExecPebble])
+    def test_vault_client_init_auto_unsealed_vault_does_not_create_keys(
+        self, vault_impl: type[VaultClientJujuExec] | type[VaultClientJujuExecPebble]
+    ) -> None:
+        # GIVEN exec_unit will return a usable response
+        exec_output = dump_to_yaml_str(root_token="root", unseal_keys_b64=[])
+        juju = JujuStub(exec_units_output=[JujuExecOutput(0, exec_output, "")])
+
+        # WHEN we ask to init vault that will NOT auto-unseal
+        vault_impl(juju).init("test-model", "vault-leader", will_auto_unseal=True)
+
+        # THEN the call was made for the unit
+        call, *_ = juju.exec_unit_calls
+        model, unit, task = call
+        assert model == "test-model"
+        assert unit == "vault-leader"
+
+        # AND vault was initialized without asking for
+        assert "vault operator init" in task
+        assert "-key-shares" not in task
+        assert "-key-threshold" not in task
+
+    def test_endpoint_for_auto_unsealing(self) -> None:
+        assert CharmInfo("vault").auto_unseal_requirer_endpoint == "vault-autounseal-requires"
+
+    def test_vault_with_integrated_endpoint_should_auto_unseal(self) -> None:
+        # GIVEN
+        charm = CharmInfo(name="vault")
+        juju = JujuStub(
+            apps=["vault1", "vault2", "vault3"],
+            charm_name=charm.name,
+            units={"vault1": ["vault1/leader"], "vault2": ["vault2/leader"], "vault3": ["vault2/leader"]},
+        )
+        juju.integrations.add(
+            JujuIntegration(
+                provider=JujuIntegrationApplication("vault2", "irrelevant"),
+                requirer=JujuIntegrationApplication("vault1", charm.auto_unseal_requirer_endpoint),
+                interface="not-relevant",
+            )
+        )
+        juju.integrations.add(
+            JujuIntegration(
+                provider=JujuIntegrationApplication("some-other-charm", "not-important"),
+                requirer=JujuIntegrationApplication("vault3", "anything-else"),
+                interface="again-not-relevant",
+            )
+        )
+
+        vault = VaultStub(initialized_units={"vault1/leader": False, "vault2/leader": False, "vault3/leader": False})
+        logger = LoggerStub()
+
+        # WHEN
+        vault1_should_auto_unseal = VaultUnsealer(charm, vault, juju, logger).vault_app_should_auto_unseal(
+            "test-model", "vault1"
+        )
+        vault2_should_auto_unseal = VaultUnsealer(charm, vault, juju, logger).vault_app_should_auto_unseal(
+            "test-model", "vault2"
+        )
+        vault3_should_auto_unseal = VaultUnsealer(charm, vault, juju, logger).vault_app_should_auto_unseal(
+            "test-model", "vault3"
+        )
+
+        # THEN
+        assert vault1_should_auto_unseal is True
+        assert vault2_should_auto_unseal is False
+        assert vault3_should_auto_unseal is False
+
+    def test_try_init_or_unseal_vault_indicates_auto_unseal_and_does_not_unseal(self) -> None:
+        # GIVEN vault should auto-unseal
+        charm = CharmInfo(name="vault")
+        leader = "vault/leader"
+        juju = JujuStub(units={"vault": [leader]})
+        juju.integrations.add(
+            JujuIntegration(
+                JujuIntegrationApplication("something", "irrelevant"),
+                JujuIntegrationApplication("vault", charm.auto_unseal_requirer_endpoint),
+                "not-relevant",
+            )
+        )
+        logger = LoggerStub()
+
+        # AND vault will unseal
+        def vault_status_that_will_auto_unseal(_: VaultClient, unit: str) -> VaultStatus:
+            assert unit == leader
+            return VaultStatus(False, True, "transit")
+
+        vault = VaultStub(initialized_units={leader: False})
+        vault.status = vault_status_that_will_auto_unseal  # type: ignore
+
+        # WHEN asked to init
+        VaultUnsealer(charm, vault, juju, logger).try_init_or_unseal_vault("test-model", "vault")
+
+        # THEN
+        vault.inits_auto_sealed = [leader]
+        vault.inits = []
+        vault.unseals = []
+
+    def test_try_init_or_unseal_vault_times_out_on_auto_unseal(self) -> None:
+        # GIVEN vault should unseal
+        charm = CharmInfo(name="vault")
+        leader = "vault/leader"
+        juju = JujuStub(units={"vault": [leader]})
+        juju.integrations.add(
+            JujuIntegration(
+                JujuIntegrationApplication("something", "irrelevant"),
+                JujuIntegrationApplication("vault", charm.auto_unseal_requirer_endpoint),
+                "not-relevant",
+            )
+        )
+        logger = LoggerStub()
+
+        # AND vault will never unseal
+        def vault_status_that_will_never_auto_unseal(_: VaultClient, unit: str) -> VaultStatus:
+            assert unit == leader
+            result = VaultStatus(False, True, "shamir")
+            assert result.will_auto_unseal is False
+            return result
+
+        vault = VaultStub(initialized_units={leader: False})
+        vault.status = vault_status_that_will_never_auto_unseal  # type: ignore
+
+        # WHEN asked to init
+        # THEN it will timeout
+        with pytest.raises(TimeoutError):
+            VaultUnsealer(charm, vault, juju, logger).try_init_or_unseal_vault("test-model", "vault")
+
+        # AND
+        vault.inits_auto_sealed = []
+        vault.inits = []
+        vault.unseals = []
+
+    def test_try_init_or_unseal_vault_auto_unseal_after_a_few_tries(self) -> None:
+        # GIVEN vault should unseal
+        charm = CharmInfo(name="vault")
+        leader = "vault/leader"
+        juju = JujuStub(units={"vault": [leader]})
+        juju.integrations.add(
+            JujuIntegration(
+                JujuIntegrationApplication("something", "irrelevant"),
+                JujuIntegrationApplication("vault", charm.auto_unseal_requirer_endpoint),
+                "not-relevant",
+            )
+        )
+        logger = LoggerStub()
+
+        denials = [False] * 10  # checking status for other things, and then not yet auto-unsealing
+
+        # AND vault will unseal after a few tries
+        def vault_status_that_will_auto_unseal_after_one_try(_: VaultClient, unit: str) -> VaultStatus:
+            assert unit == leader
+
+            not_ready = VaultStatus(False, True, "shamir")
+            ready = VaultStatus(False, True, "transit")
+            assert not_ready.will_auto_unseal is False
+            assert ready.will_auto_unseal is True
+
+            try:
+                if denials.pop():
+                    return not_ready
+            except IndexError:
+                # ran out of denials
+                pass
+            return ready
+
+        vault = VaultStub(initialized_units={leader: False})
+        vault.status = vault_status_that_will_auto_unseal_after_one_try  # type: ignore
+
+        # WHEN asked to init
+        # THEN it will not timeout
+        VaultUnsealer(charm, vault, juju, logger).try_init_or_unseal_vault("test-model", "vault")
+
+        # AND
+        vault.inits_auto_sealed = [leader]
+        vault.inits = []
+        vault.unseals = []
