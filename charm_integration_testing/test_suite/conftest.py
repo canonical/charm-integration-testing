@@ -19,6 +19,7 @@ from extensions import (
     TemporalExtension,
     UnsealVaultJujuExtension,
     UnsealVaultK8sJujuExtension,
+    ValidatorInjectorExtension,
 )
 from juju import JujuBackend, JujuClient, JujuWaitTimeoutError
 from juju_jubilant import JubilantBackend
@@ -62,6 +63,7 @@ def juju_client(
             TemporalExtension(juju_backend, logger),
             UnsealVaultJujuExtension(juju_backend, logger),
             UnsealVaultK8sJujuExtension(juju_backend, logger),
+            ValidatorInjectorExtension(juju_backend, logger),
         ],
     )
 

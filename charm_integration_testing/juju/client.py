@@ -163,3 +163,27 @@ class JujuClient:
     def version(self, model: str = "default") -> str:
         self.logger.info("Collecting Juju version.")
         return self.backend.version(model)
+
+    def validate_model(self, model: str = "default", level: str = "simple") -> None:
+        """Validate all applications in the model.
+
+        In Phase 2, this will trigger the Ops framework's native validation.
+        In Phase 1, this calls the backend (no-op) then extensions (actual work).
+
+        Args:
+            model: Juju model name
+            level: Validation level ("simple" or "deep", default: "simple")
+
+        Raises:
+            ValidationFailureError: If any application validation fails (from extensions)
+        """
+        for application in self.list_applications(model):
+            self.logger.info(f"Validating application '{application}' (level={level})")
+
+            # Phase 2: This will trigger Ops framework validation
+            # Phase 1: This is a no-op, just a placeholder
+            self.backend.validate_application(model, application, level)
+
+            # Call extensions (Phase 1 validation happens here)
+            for extension in self.extensions:
+                extension.post_validate(model, application, level)

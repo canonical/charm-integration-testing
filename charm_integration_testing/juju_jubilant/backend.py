@@ -5,6 +5,7 @@
 import dataclasses
 import re
 import time
+import warnings
 from datetime import datetime, timedelta
 from typing import Any, Callable
 
@@ -327,3 +328,8 @@ class JubilantBackend(JujuCmdBackend):
 
     def version(self, model: str) -> str:
         return str(self.client.model(model).version())
+
+    def validate_application(self, model: str, application: str, level: str) -> None:
+        warnings.warn(
+            f"validate_application called for {application} at level {level}, but jubilant does not support validation."
+        )

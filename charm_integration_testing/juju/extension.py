@@ -10,3 +10,6 @@ class JujuExtension(ABC):
 
     def post_scale(self, model: str) -> None:
         pass
+
+    def post_validate(self, model: str, application: str, level: str) -> None:
+        pass

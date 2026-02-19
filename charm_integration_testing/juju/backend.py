@@ -287,3 +287,10 @@ class JujuBackend(ABC):
     @abstractmethod
     def version(self, model: str) -> str:
         raise NotImplementedError
+
+    @abstractmethod
+    def validate_application(self, model: str, application: str, level: str) -> None:
+        # In Phase 2, this will trigger the Ops framework's built-in validation:
+        # In Phase 1, this is a no-op. The ValidatorInjectorExtension handles
+        # the actual validation via the post_validate hook.
+        raise NotImplementedError
