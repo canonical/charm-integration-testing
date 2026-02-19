@@ -2,7 +2,10 @@
 # See LICENSE file for licensing details.
 
 
+from datetime import timedelta
+
 import pytest
+from juju import JujuClient, JujuWaitTimeoutError
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -13,13 +16,6 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=[],
         help="Bundles to deploy",
     )
-    parser.addoption(
-        "--integrations",
-        nargs="*",
-        type=str,
-        default=[],
-        help="Additional integrations to deploy, as <application_1>:<endpoint_1>/<application_1>:<application_2>",
-    )
 
 
 @pytest.fixture
@@ -29,15 +25,12 @@ def bundles(request: pytest.FixtureRequest) -> list[str]:
     return option
 
 
-@pytest.fixture
-def integrations(request: pytest.FixtureRequest) -> list[tuple[tuple[str, str], tuple[str, str]]]:
-    result: list[tuple[tuple[str, str], tuple[str, str]]] = []
-    for integration in request.config.getoption("--integrations"):
-        targets = integration.split("/", 1)
-        assert len(targets) == 2
-        first = targets[0].split(":", 1)
-        second = targets[1].split(":", 1)
-        assert len(first) == 2
-        assert len(second) == 2
-        result.append((tuple(first), tuple(second)))
-    return result
+@pytest.fixture(autouse=True)
+def assert_idle(juju_client: JujuClient, model: str, print_setup_and_teardown_info: None) -> None:
+    # Enforce fixture execution order
+    _ = print_setup_and_teardown_info
+
+    try:
+        juju_client.idle_for_period(model=model, timeout=timedelta(seconds=30), count=5)
+    except JujuWaitTimeoutError as e:
+        pytest.skip(str(e))

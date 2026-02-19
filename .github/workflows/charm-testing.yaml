@@ -67,7 +67,13 @@ on:
         description: The stage of the workflow to sleep after. Enables SSH access.
         required: false
         type: choice
-        options: [none, setup, deployment, integration, log_collection]
+        options:
+          - none
+          - setup
+          - deployment
+          - integration
+          - idempotent_redeploy
+          - log_collection
         default: none
       debug_extra_ssh_imports:
         # The IDs take the form of lp:<value> for Launchpad and gh:<value> for GitHub.
@@ -445,6 +451,46 @@ jobs:
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
           event_name: test_teardown_end
           detail: Test teardown phase finished.
+      - name: Post 'test_idempotent_redeploy_start' event
+        if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
+        uses: ./.github/actions/test-observer/post-events
+        with:
+          test_observer_api: ${{ env.test_observer_api }}
+          test_observer_token: ${{ env.test_observer_token }}
+          test_execution_id: ${{ inputs.execution_id }}
+          job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
+          event_name: test_idempotent_redeploy_start
+          detail: Idempotent redeploy of charm under test started.
+      - name: Idempotent redeploy charm under test
+        id: test_idempotent_redeploy
+        continue-on-error: true
+        shell: bash
+        env:
+          model: ${{ steps.juju_resources.outputs.model }}
+          bundle: ${{ steps.build_bundle.outputs.bundle }}
+        run: |
+          echo "junit_xml=$(realpath junit-idempotent-redeploy.xml)" >> $GITHUB_OUTPUT
+          ./scripts/test-idempotent-redeploy.sh \
+            --model "${model}" \
+            --applications "target" \
+            --bundles "${bundle}" \
+            --junit-xml=junit-idempotent-redeploy.xml
+      - name: Post 'test_idempotent_redeploy_end' event
+        if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
+        uses: ./.github/actions/test-observer/post-events
+        with:
+          test_observer_api: ${{ env.test_observer_api }}
+          test_observer_token: ${{ env.test_observer_token }}
+          test_execution_id: ${{ inputs.execution_id }}
+          job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
+          event_name: test_idempotent_redeploy_end
+          detail: Idempotent redeploy of charm under test finished.
+      - name: Debug Idempotent Redeploy Tests
+        if: ${{ !cancelled() && inputs.debug_sleep_after == 'idempotent_redeploy' }}
+        shell: bash
+        run: |
+          echo "Sleeping to debug idempotent redeploy tests"
+          sleep ${DEBUG_SLEEP_SECONDS}
       - name: Merge JUnit output
         id: junit_results
         shell: bash
@@ -452,11 +498,13 @@ jobs:
           junit_xml_deploy: ${{ steps.test_deploy.outputs.junit_xml }}
           junit_xml_integration: ${{ steps.test_integration.outputs.junit_xml }}
           junit_xml_teardown: ${{ steps.test_teardown.outputs.junit_xml }}
+          junit_xml_idempotent_redeploy: ${{ steps.test_idempotent_redeploy.outputs.junit_xml }}
         run: |
           ./scripts/merge-junit.sh \
             "${junit_xml_deploy}" \
             "${junit_xml_integration}" \
             "${junit_xml_teardown}" \
+            "${junit_xml_idempotent_redeploy}" \
             junit.xml
           echo "junit_xml=$(realpath junit.xml)" >> $GITHUB_OUTPUT
           cat junit.xml

@@ -6,7 +6,6 @@ import json
 import logging
 import os
 import warnings
-from datetime import timedelta
 from pathlib import Path
 from subprocess import CalledProcessError, run  # nosec
 from typing import Any, Callable, Iterator
@@ -176,17 +175,6 @@ def print_setup_and_teardown_info(
 
     # Log ending state
     juju_client.print_status(model=model)
-
-
-@pytest.fixture(autouse=True)
-def assert_idle(juju_client: JujuClient, model: str, print_setup_and_teardown_info: None) -> None:
-    # Enforce fixture execution order
-    _ = print_setup_and_teardown_info
-
-    try:
-        juju_client.idle_for_period(model=model, timeout=timedelta(seconds=30), count=5)
-    except JujuWaitTimeoutError as e:
-        pytest.skip(str(e))
 
 
 @pytest.fixture
