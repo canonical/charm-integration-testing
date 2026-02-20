@@ -1,0 +1,22 @@
+---
+applications:
+  postgresql-k8s:
+    base: ubuntu@22.04
+    channel: 14/stable
+    charm: postgresql-k8s
+    options: {}
+    revision: 495
+    scale: 1
+    trust: true
+  target:
+    base: ubuntu@22.04
+    channel: stable
+    charm: kratos
+    options: {}
+    revision: 565
+    scale: 1
+    trust: true
+bundle: kubernetes
+relations:
+  -   - postgresql-k8s:database
+      - target:pg-database
