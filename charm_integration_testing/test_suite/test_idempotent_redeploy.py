@@ -5,7 +5,7 @@
 
 This is a *transition test*: it moves the environment from ``neighbor_only``
 back to ``deployed``.  Redeploying on top of a partially-populated model
-validates that the bundle is truly idempotent — existing applications are
+validates that the bundle is truly idempotent: existing applications are
 left untouched while missing ones are restored.
 """
 

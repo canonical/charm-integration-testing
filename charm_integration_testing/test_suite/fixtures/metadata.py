@@ -8,12 +8,12 @@ They attach structured metadata to each test report so that downstream tooling
 (dashboards, flakiness trackers, etc.) can filter and aggregate results.
 
 Collected metadata categories include:
-- ``charm`` / ``charm:<name>:revision`` — charms deployed during the test.
-- ``integration`` — active Juju integrations at start/end.
-- ``juju:version`` — Juju version in the tested model.
-- ``pipeline:ref`` / ``pipeline:tag`` / ``pipeline:workflow_hash`` — CI provenance.
-- ``failure:message`` / ``skipped:message`` — human-readable outcome strings.
-- ``warning:message`` — any Python warnings raised during the test.
+- ``charm`` / ``charm:<name>:revision``: charms deployed during the test.
+- ``integration``: active Juju integrations at start/end.
+- ``juju:version``: Juju version in the tested model.
+- ``pipeline:ref`` / ``pipeline:tag`` / ``pipeline:workflow_hash``: CI provenance.
+- ``failure:message`` / ``skipped:message``: human-readable outcome strings.
+- ``warning:message``: any Python warnings raised during the test.
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ from pytest import StashKey
 from utils import normalize_string, normalize_string_multiline
 
 # ---------------------------------------------------------------------------
-# Stash keys — used to pass data from the runtest hook to fixtures.
+# Stash keys: used to pass data from the runtest hook to fixtures.
 # ---------------------------------------------------------------------------
 
 #: Human-readable failure message (present when `report.failed`).

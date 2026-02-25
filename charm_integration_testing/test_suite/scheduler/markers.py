@@ -18,7 +18,7 @@ A single marker, ``@pytest.mark.state``, is used to annotate every test:
       def test_deploy(): ...
 
   The scheduler may automatically inject these tests into the execution plan
-  to bridge gaps between states — in addition to running them as normal tests.
+  to bridge gaps between states: in addition to running them as normal tests.
 """
 
 from __future__ import annotations
@@ -109,7 +109,7 @@ def read_state_marker(item: pytest.Item) -> StateMarker | None:
         if len(requires) > 1:
             raise ValueError(
                 f"Test {item.nodeid!r} has multiple requires states but no 'provides='.  "
-                "A test with multiple requires states must be a transition — "
+                "A test with multiple requires states must be a transition: "
                 "specify provides= explicitly."
             )
         raw_provides = raw_requires_seq[0]

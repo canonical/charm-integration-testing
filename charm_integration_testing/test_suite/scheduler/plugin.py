@@ -15,7 +15,7 @@ How it works
 
 2. ``pytest_collection_modifyitems`` (``trylast=True``) runs after pytest's
    own deselection, so ``items`` contains only what the user explicitly
-   selected.  The scheduler treats these as **destinations** — tests that
+   selected.  The scheduler treats these as **destinations**: tests that
    must run, in an order that respects their ``requires`` states.
 
 3. The **full** state graph is built from all items captured in step 1.
@@ -72,7 +72,7 @@ _injected_item_ids: set[int] = set()
 
 # Set to the first transition item that fails at call-time.  Once non-None,
 # all subsequent state-marked tests are skipped because the environment state
-# is unknown. Pure test failures do NOT set this — they leave the state intact.
+# is unknown. Pure test failures do NOT set this: they leave the state intact.
 _failed_state_test: pytest.Item | None = None
 
 
@@ -96,7 +96,7 @@ def pytest_configure(config: pytest.Config) -> None:
             "Tests where provides is not in requires are *transition tests*: the scheduler "
             "may inject them automatically to bridge gaps between states.  "
             "Set bridge_only=True to mark a test as a helper that is never treated as a "
-            "user-selected destination — it will only ever run as an injected bridge."
+            "user-selected destination: it will only ever run as an injected bridge."
         ),
     )
     config.addinivalue_line(
@@ -137,7 +137,7 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) ->
     """Detect failed state-marked tests and halt the state machine.
 
     When any state-marked test fails at call-time the environment state is no
-    longer known — even a "pure" test can mutate the environment before the
+    longer known: even a "pure" test can mutate the environment before the
     assertion that causes the failure.  All subsequent state-marked tests are
     skipped to prevent them from running against a broken or indeterminate
     environment.
@@ -157,7 +157,7 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) ->
         if marker is not None:
             _failed_state_test = item
             logger.error(
-                "State-marked test %r failed — environment state is unknown.  "
+                "State-marked test %r failed: environment state is unknown.  "
                 "All remaining state-marked tests will be skipped.",
                 item.nodeid,
             )
@@ -179,9 +179,7 @@ def pytest_runtest_setup(item: pytest.Item) -> None:
     except ValueError:
         marker = None
     if marker is not None:
-        pytest.skip(
-            f"Skipped: state-marked test {_failed_state_test.nodeid!r} failed — " "environment state is unknown."
-        )
+        pytest.skip(f"Skipped: state-marked test {_failed_state_test.nodeid!r} failed: environment state is unknown.")
 
 
 @pytest.hookimpl(trylast=True)
@@ -262,7 +260,7 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     for item, marker in selected_marked:
         if marker.bridge_only:
             logger.debug(
-                "Item %r is bridge_only — ignoring as a destination even though it was selected.",
+                "Item %r is bridge_only: ignoring as a destination even though it was selected.",
                 item.nodeid,
             )
             continue
@@ -381,7 +379,7 @@ def _build_execution_plan(
     def _run_selected_at(s: State) -> State:
         """Schedule all unscheduled pure tests at state *s*, then one transition.
 
-        Pure tests are appended first — they don't change state so all of them
+        Pure tests are appended first: they don't change state so all of them
         can run in one visit.  For transitions, only the first unscheduled item
         is run before returning.  This lets the outer loop re-navigate back to
         *s* (via a bridging redeploy, etc.) before running the next transition
@@ -409,7 +407,7 @@ def _build_execution_plan(
 
         For each edge, if the user selected tests for it, prefer the first
         unscheduled one (so it counts as both bridge and selected destination).
-        Otherwise use the first item from the full suite as a pure bridge —
+        Otherwise use the first item from the full suite as a pure bridge;
         these are NOT added to ``scheduled``, so the same bridging test can be
         injected again if the scheduler needs to cross the same edge a second
         time (e.g. when two selected tests share an edge and each needs a

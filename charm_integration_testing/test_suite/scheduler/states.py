@@ -3,7 +3,7 @@
 
 """Canonical environment states for the test scheduler.
 
-Import :class:`State` wherever a state name is needed — in
+Import :class:`State` wherever a state name is needed; in
 ``@pytest.mark.state(...)`` calls, in ``--current-state`` comparisons, and in
 the graph's Dijkstra traversal.  Using the enum instead of raw strings
 eliminates typos and makes valid states discoverable via IDE autocomplete.
