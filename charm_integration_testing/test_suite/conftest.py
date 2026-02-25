@@ -25,6 +25,10 @@ from juju_jubilant import JubilantBackend
 from pytest import StashKey
 from utils import normalize_string, normalize_string_multiline
 
+pytest_plugins = [
+    "test_suite.scheduler.plugin",
+]
+
 KNOWN_FAILURE_EXCEPTIONS = (
     JujuWaitTimeoutError,
     AssertionError,
