@@ -13,12 +13,9 @@ from __future__ import annotations
 
 import heapq
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from .states import State
-
-if TYPE_CHECKING:
-    pass
 
 
 @dataclass(frozen=True)
