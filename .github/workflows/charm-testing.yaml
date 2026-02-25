@@ -484,7 +484,7 @@ jobs:
           test_observer_api: ${{ env.test_observer_api }}
           test_observer_token: ${{ env.test_observer_token }}
           test_execution_id: ${{ inputs.execution_id }}
-          status: 'COMPLETED'
+          status: COMPLETED
       - name: Trigger rerun on Test Observer if failure
         if: ${{ failure() && env.test_observer_api != '' && inputs.execution_id != '' && !(steps.build_bundle.conclusion == 'failure' && steps.build_bundle.outputs.invalid_input == 'true') }}
         uses: ./.github/actions/test-observer/trigger-rerun
