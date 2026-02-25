@@ -11,9 +11,9 @@ from .scheduler.states import State
 
 
 @pytest.mark.state(requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
-def test_teardown(juju_client: JujuClient, model: str, applications: list[str]) -> None:
+def test_teardown(juju_client: JujuClient, model: str, target_application: str) -> None:
     # Remove all requested applications
-    juju_client.remove_applications(*applications, model=model)
+    juju_client.remove_applications(target_application, model=model)
 
     # Wait until application has been removed
-    juju_client.wait_for_removal(*applications, model=model, timeout=timedelta(minutes=15))
+    juju_client.wait_for_removal(target_application, model=model, timeout=timedelta(minutes=15))
