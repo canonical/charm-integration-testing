@@ -6,14 +6,19 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Generator
+from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
+from test_suite.scheduler import plugin as _plugin_module
 from test_suite.scheduler.graph import StateGraph, StateTransition
 from test_suite.scheduler.plugin import (
     _build_execution_plan,
     _mark_as_injected,
     _UnreachableStateError,
+    pytest_runtest_setup,
+    pytest_sessionfinish,
 )
 from test_suite.scheduler.states import State
 
@@ -406,3 +411,180 @@ class TestBuildExecutionPlan:
         assert plan.count(teardown_1) == 1
         assert plan.count(teardown_2) == 1
         assert redeploy in plan
+
+
+# ---------------------------------------------------------------------------
+# Helpers for hook tests
+# ---------------------------------------------------------------------------
+
+
+def _make_report(when: str = "call", failed: bool = False) -> Any:
+    """Return a minimal test report substitute."""
+    return SimpleNamespace(when=when, failed=failed)
+
+
+def _drive_makereport(item: pytest.Item, call: Any, report: Any) -> None:
+    """Drive pytest_runtest_makereport (a hookwrapper generator) to completion.
+
+    The hookwrapper yields once; we send back a mock outcome that returns
+    *report* from ``get_result()``.
+
+    The function is typed ``-> None`` for pytest's hook protocol, so we cast
+    the return value to the underlying generator type to satisfy mypy.
+    """
+    gen = cast(
+        Generator[None, Any, None],
+        _plugin_module.pytest_runtest_makereport(item, call),
+    )
+    next(gen)  # advance to the yield
+    outcome = SimpleNamespace(get_result=lambda: report)
+    try:
+        gen.send(outcome)
+    except StopIteration:
+        pass
+
+
+# ---------------------------------------------------------------------------
+# Tests for pytest_runtest_makereport (failure detection)
+# ---------------------------------------------------------------------------
+
+
+class TestPytestRuntestMakereport:
+    def test_sets_failed_state_test_on_marked_item_failure(self, make_item: Callable[..., pytest.Item]) -> None:
+        # GIVEN a state-marked item and a failing call-phase report
+        item = make_item("test_deploy", requires=State.EMPTY_MODEL, provides=State.DEPLOYED)
+        call = SimpleNamespace(excinfo=SimpleNamespace(type=AssertionError, value=AssertionError()))
+        report = _make_report(when="call", failed=True)
+
+        # WHEN the hook runs
+        _drive_makereport(item, call, report)
+
+        # THEN the item is recorded as the failed state test
+        assert _plugin_module._failed_state_test is item
+
+    def test_does_not_set_for_unmarked_item_failure(self, make_item: Callable[..., pytest.Item]) -> None:
+        # GIVEN an item with no state marker
+        item = make_item("test_something")
+        call = SimpleNamespace(excinfo=SimpleNamespace(type=AssertionError, value=AssertionError()))
+        report = _make_report(when="call", failed=True)
+
+        # WHEN the hook runs
+        _drive_makereport(item, call, report)
+
+        # THEN no failure is recorded - unmarked tests never halt the state machine
+        assert _plugin_module._failed_state_test is None
+
+    def test_does_not_set_when_report_not_failed(self, make_item: Callable[..., pytest.Item]) -> None:
+        # GIVEN a state-marked item but a passing report
+        item = make_item("test_deploy", requires=State.EMPTY_MODEL, provides=State.DEPLOYED)
+        call = SimpleNamespace(excinfo=None)
+        report = _make_report(when="call", failed=False)
+
+        _drive_makereport(item, call, report)
+
+        assert _plugin_module._failed_state_test is None
+
+    def test_does_not_set_for_non_call_phase(self, make_item: Callable[..., pytest.Item]) -> None:
+        # GIVEN a state-marked item failing in setup (not call) phase
+        item = make_item("test_deploy", requires=State.EMPTY_MODEL, provides=State.DEPLOYED)
+        call = SimpleNamespace(excinfo=SimpleNamespace(type=RuntimeError, value=RuntimeError()))
+        report = _make_report(when="setup", failed=True)
+
+        _drive_makereport(item, call, report)
+
+        assert _plugin_module._failed_state_test is None
+
+    def test_does_not_overwrite_once_already_set(self, make_item: Callable[..., pytest.Item]) -> None:
+        # GIVEN a first test has already failed
+        first = make_item("test_first", requires=State.EMPTY_MODEL, provides=State.DEPLOYED)
+        _plugin_module._failed_state_test = first
+
+        # WHEN a second state-marked test also fails
+        second = make_item("test_second", requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
+        call = SimpleNamespace(excinfo=SimpleNamespace(type=AssertionError, value=AssertionError()))
+        report = _make_report(when="call", failed=True)
+        _drive_makereport(second, call, report)
+
+        # THEN the original failing test is preserved
+        assert _plugin_module._failed_state_test is first
+
+
+# ---------------------------------------------------------------------------
+# Tests for pytest_runtest_setup (halting downstream tests)
+# ---------------------------------------------------------------------------
+
+
+class TestPytestRuntestSetup:
+    def test_skips_state_marked_test_after_failure(self, make_item: Callable[..., pytest.Item]) -> None:
+        # GIVEN a previous test has failed
+        failed = make_item("test_deploy", requires=State.EMPTY_MODEL, provides=State.DEPLOYED)
+        _plugin_module._failed_state_test = failed
+
+        # AND a subsequent state-marked test
+        subsequent = make_item("test_integration", requires=State.DEPLOYED)
+
+        # THEN running setup for the subsequent test raises skip
+        with pytest.raises(pytest.skip.Exception):
+            pytest_runtest_setup(subsequent)
+
+    def test_does_not_skip_the_failing_item_itself(self, make_item: Callable[..., pytest.Item]) -> None:
+        # GIVEN the failed item is the same item being set up
+        failed = make_item("test_deploy", requires=State.EMPTY_MODEL, provides=State.DEPLOYED)
+        _plugin_module._failed_state_test = failed
+
+        # THEN setup is allowed to proceed (no skip raised)
+        pytest_runtest_setup(failed)  # must not raise
+
+    def test_does_not_skip_unmarked_item(self, make_item: Callable[..., pytest.Item]) -> None:
+        # GIVEN a previous test has failed
+        failed = make_item("test_deploy", requires=State.EMPTY_MODEL, provides=State.DEPLOYED)
+        _plugin_module._failed_state_test = failed
+
+        # AND an unmarked test
+        unmarked = make_item("test_smoke")  # no state marker kwargs
+
+        # THEN setup is allowed to proceed for the unmarked test
+        pytest_runtest_setup(unmarked)  # must not raise
+
+    def test_does_nothing_when_no_prior_failure(self, make_item: Callable[..., pytest.Item]) -> None:
+        # GIVEN no prior failure
+        item = make_item("test_deploy", requires=State.EMPTY_MODEL, provides=State.DEPLOYED)
+
+        # THEN setup proceeds normally
+        pytest_runtest_setup(item)  # must not raise
+
+    def test_skip_message_names_the_failing_test(self, make_item: Callable[..., pytest.Item]) -> None:
+        # GIVEN a named failing test
+        failed = make_item("test_deploy", requires=State.EMPTY_MODEL, provides=State.DEPLOYED)
+        _plugin_module._failed_state_test = failed
+
+        subsequent = make_item("test_integration", requires=State.DEPLOYED)
+
+        with pytest.raises(pytest.skip.Exception) as exc_info:
+            pytest_runtest_setup(subsequent)
+
+        assert "test_deploy" in str(exc_info.value)
+
+
+# ---------------------------------------------------------------------------
+# Tests for pytest_sessionfinish (global cleanup)
+# ---------------------------------------------------------------------------
+
+
+class TestPytestSessionFinish:
+    def test_clears_all_collected(self, make_item: Callable[..., pytest.Item]) -> None:
+        _plugin_module._all_collected.append(make_item("test_foo"))
+        pytest_sessionfinish(session=SimpleNamespace(), exitstatus=0)  # type: ignore[arg-type]
+        assert _plugin_module._all_collected == []
+
+    def test_clears_injected_item_ids(self, make_item: Callable[..., pytest.Item]) -> None:
+        item = make_item("test_foo")
+        _mark_as_injected(item)
+        assert _plugin_module._injected_item_ids  # non-empty before
+        pytest_sessionfinish(session=SimpleNamespace(), exitstatus=0)  # type: ignore[arg-type]
+        assert _plugin_module._injected_item_ids == set()
+
+    def test_clears_failed_state_test(self, make_item: Callable[..., pytest.Item]) -> None:
+        _plugin_module._failed_state_test = make_item("test_deploy")
+        pytest_sessionfinish(session=SimpleNamespace(), exitstatus=0)  # type: ignore[arg-type]
+        assert _plugin_module._failed_state_test is None

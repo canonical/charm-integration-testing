@@ -163,6 +163,20 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) ->
             )
 
 
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int | pytest.ExitCode) -> None:
+    """Reset module-level state so re-running pytest in the same process starts fresh.
+
+    The three globals below are populated during a session and must be cleared
+    when the session ends; otherwise a second ``pytest.main()`` call in the
+    same Python process (e.g. from a test harness) would see stale data from
+    the previous run.
+    """
+    global _all_collected, _injected_item_ids, _failed_state_test
+    _all_collected.clear()
+    _injected_item_ids.clear()
+    _failed_state_test = None
+
+
 def pytest_runtest_setup(item: pytest.Item) -> None:
     """Skip state-marked tests after a transition failure.
 
@@ -314,6 +328,9 @@ def _mark_as_injected(item: pytest.Item) -> None:
     _injected_item_ids.add(id(item))
     item.add_marker(pytest.mark.injected)
     item.name = f"[injected] {item.name}"
+    # pytest exposes no public API to override the node ID; _nodeid is the
+    # backing attribute for the read-only ``nodeid`` property.  This is a
+    # known limitation: revisit if pytest removes or renames _nodeid.
     item._nodeid = f"[injected] {item._nodeid}"
 
 

@@ -69,11 +69,15 @@ def make_item() -> Callable[..., pytest.Item]:
 
 @pytest.fixture(autouse=True)
 def reset_injected_ids() -> Iterator[None]:
-    """Clear the module-level injected-ID set before and after every test.
+    """Clear all module-level plugin globals before and after every test.
 
-    Prevents id() reuse across tests from causing false idempotency cache hits
-    inside _mark_as_injected.
+    Prevents state leaking between unit tests that call the plugin hooks
+    directly.
     """
     _plugin_module._injected_item_ids.clear()
+    _plugin_module._all_collected.clear()
+    _plugin_module._failed_state_test = None
     yield
     _plugin_module._injected_item_ids.clear()
+    _plugin_module._all_collected.clear()
+    _plugin_module._failed_state_test = None
