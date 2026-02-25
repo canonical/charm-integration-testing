@@ -4,9 +4,13 @@
 
 from datetime import timedelta
 
+import pytest
 from juju import JujuClient
 
+from .scheduler.states import State
 
+
+@pytest.mark.state(requires=State.NEIGHBOR_ONLY, provides=State.DEPLOYED)
 def test_idempotent_redeploy(
     juju_client: JujuClient,
     model: str,
