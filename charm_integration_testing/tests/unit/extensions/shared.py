@@ -2,12 +2,139 @@ from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import Any, Iterable
 
-from juju.backend import JujuBackend, JujuTask
-from juju.models import JujuApplicationInfo, JujuIntegrationApplication
+from juju.backend import JujuBackend, JujuExecOutput, JujuTask
+from juju.models import JujuApplicationInfo, JujuIntegration, JujuIntegrationApplication
+
+
+class NullJujuBackend(JujuBackend):
+    """Concrete JujuBackend where every method raises NotImplementedError.
+
+    Extend this in tests and override only the methods you need.
+    """
+
+    def scale_application(self, model: str, application: str, num: int) -> None:
+        raise NotImplementedError
+
+    def num_units(self, model: str, application: str) -> int:
+        raise NotImplementedError
+
+    def list_applications(self, model: str) -> dict[str, JujuApplicationInfo]:
+        raise NotImplementedError
+
+    def list_integrations(self, model: str) -> set[JujuIntegration]:
+        raise NotImplementedError
+
+    def integration_exists(
+        self, application_1: str, endpoint_1: str, application_2: str, endpoint_2: str, model: str
+    ) -> bool:
+        raise NotImplementedError
+
+    def wait_idle(
+        self,
+        model: str,
+        timeout: timedelta | None,
+        count: int | None,
+        strict_timeout: bool = False,
+        applications: list[str] | None = None,
+    ) -> None:
+        raise NotImplementedError
+
+    def wait_application_settled(self, model: str, application: str, timeout: timedelta | None) -> None:
+        raise NotImplementedError
+
+    def wait_application_scaled(self, model: str, application: str, timeout: timedelta | None) -> None:
+        raise NotImplementedError
+
+    def wait_for_unit_message(self, model: str, unit: str, message: str, timeout: timedelta | None) -> None:
+        raise NotImplementedError
+
+    def juju_status_text(self, model: str) -> str:
+        raise NotImplementedError
+
+    def integrate(self, model: str, target_1: JujuIntegrationApplication, target_2: JujuIntegrationApplication) -> None:
+        raise NotImplementedError
+
+    def remove_integration(
+        self, model: str, target_1: JujuIntegrationApplication, target_2: JujuIntegrationApplication
+    ) -> None:
+        raise NotImplementedError
+
+    def deploy_bundle_file(self, model: str, bundle: str) -> None:
+        raise NotImplementedError
+
+    def remove_applications(self, model: str, *applications: str) -> None:
+        raise NotImplementedError
+
+    def wait_for_removal(self, model: str, applications: list[str], timeout: timedelta | None) -> None:
+        raise NotImplementedError
+
+    def wait_for_removal_of_integration(
+        self,
+        model: str,
+        endpoint_1: JujuIntegrationApplication,
+        endpoint_2: JujuIntegrationApplication,
+        timeout: timedelta | None,
+    ) -> None:
+        raise NotImplementedError
+
+    def wait_for_removal_of_units(self, model: str, applications: list[str], timeout: timedelta | None) -> None:
+        raise NotImplementedError
+
+    def application_charm(self, model: str, application: str) -> str | None:
+        raise NotImplementedError
+
+    def application_units(self, model: str, application: str) -> list[str]:
+        raise NotImplementedError
+
+    def exec_unit(self, model: str, unit: str, task: str) -> JujuExecOutput:
+        raise NotImplementedError
+
+    def run_action(self, model: str, unit: str, action: str, arguments: dict[str, Any]) -> JujuTask:
+        raise NotImplementedError
+
+    def add_secret(self, model: str, name: str, values: dict[str, str]) -> str:
+        raise NotImplementedError
+
+    def read_secret(self, model: str, name_or_id: str) -> dict[str, str]:
+        raise NotImplementedError
+
+    def grant_secret(self, model: str, name_or_id: str, application: str) -> None:
+        raise NotImplementedError
+
+    def remove_secret(self, model: str, name_or_id: str) -> None:
+        raise NotImplementedError
+
+    def deploy_application(
+        self,
+        model: str,
+        charm: str,
+        application: str | None = None,
+        config: dict[str, Any] | None = None,
+        trust: bool = False,
+    ) -> None:
+        raise NotImplementedError
+
+    def configure_application(self, model: str, application: str, values: dict[str, str]) -> None:
+        raise NotImplementedError
+
+    def get_application_config(self, model: str, application: str) -> dict[str, Any]:
+        raise NotImplementedError
+
+    def scp(self, model: str, source: str, destination: str) -> None:
+        raise NotImplementedError
+
+    def ssh(self, model: str, application: str, command: str) -> None:
+        raise NotImplementedError
+
+    def unit_ip(self, model: str, unit: str) -> str:
+        raise NotImplementedError
+
+    def version(self, model: str) -> str:
+        raise NotImplementedError
 
 
 @dataclass
-class JujuStub(JujuBackend):
+class JujuStub(NullJujuBackend):
     deployed: list[Any] = field(default_factory=list)
     configured: list[Any] = field(default_factory=list)
     waited_idle: list[Any] = field(default_factory=list)
@@ -71,11 +198,11 @@ class JujuStub(JujuBackend):
         self.configured_applications.append((model, application, values))
 
     def get_application_config(self, model: str, application: str) -> dict[str, Any]:
-        """Mock getting application configuration (returns empty dict)"""
+        """Mock getting application configuration (returns empty dict for unset apps)"""
         for m, app, config in self.configured_applications:
             if m == model and app == application:
                 return config
-        raise KeyError(f"Application {application} not configured in model {model}")
+        return {}
 
     def wait_idle(
         self,
@@ -117,57 +244,5 @@ class JujuStub(JujuBackend):
         """Return the IP address of a unit"""
         return self.unit_ips[unit]
 
-    # Dummy methods to satisfy abstract base class requirements
-
     def num_units(self, model: str, application: str) -> int:
         return 0
-
-    def scale_application(self) -> None:  # type: ignore[override]
-        pass
-
-    def list_integrations(self) -> None:  # type: ignore[override]
-        pass
-
-    def juju_status_text(self) -> None:  # type: ignore[override]
-        pass
-
-    def remove_integration(self) -> None:  # type: ignore[override]
-        pass
-
-    def deploy_bundle_file(self) -> None:  # type: ignore[override]
-        pass
-
-    def remove_applications(self) -> None:  # type: ignore[override]
-        pass
-
-    def wait_for_removal(self) -> None:  # type: ignore[override]
-        pass
-
-    def wait_for_removal_of_integration(self) -> None:  # type: ignore[override]
-        pass
-
-    def wait_for_removal_of_units(self) -> None:  # type: ignore[override]
-        pass
-
-    def application_units(self) -> None:  # type: ignore[override]
-        pass
-
-    def exec_unit(self) -> None:  # type: ignore[override]
-        pass
-
-    def add_secret(self) -> None:  # type: ignore[override]
-        pass
-
-    def read_secret(self) -> None:  # type: ignore[override]
-        pass
-
-    def grant_secret(self) -> None:  # type: ignore[override]
-        pass
-
-    def remove_secret(self) -> None:  # type: ignore[override]
-        pass
-
-    def version(self) -> None:  # type: ignore[override]
-        pass
-
-    # Additional methods can be added as needed for testing
