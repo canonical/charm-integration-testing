@@ -55,18 +55,23 @@ class S3IntegratorMinIOBackendExtension(JujuExtension, ABC):
             minio_application = self.minio_application(application)
             if minio_application not in all_applications:
                 continue
-            self.logger.info(
-                f"Removing MinIO application '{minio_application}' related to s3 integrator '{application}'"
-            )
-            self.juju.remove_applications(model, minio_application)
             removed_applications.append(minio_application)
 
+        # If no applications to remove do nothing
+        if not removed_applications:
+            return
+
+        # Remove applications
+        self.logger.info(
+            f"Removing MinIO applications '{removed_applications}' related to s3 integrators '{applications}'"
+        )
+        self.juju.remove_applications(model, *removed_applications)
+
         # Wait for applications to be removed
-        if removed_applications:
-            self.logger.info(
-                f"Waiting for MinIO applications related to removed s3 integrators to be removed: {removed_applications}"
-            )
-            self.juju.wait_for_removal(model, removed_applications, timeout=timedelta(minutes=15))
+        self.logger.info(
+            f"Waiting for MinIO applications related to removed s3 integrators to be removed: {removed_applications}"
+        )
+        self.juju.wait_for_removal(model, removed_applications, timeout=timedelta(minutes=15))
 
     def deploy_minio_s3_backend(self, model: str, s3_integrator_application: str) -> None:
         # Follows guide: https://discourse.charmhub.io/t/cos-lite-docs-set-up-minio-for-s3-testing/15211
