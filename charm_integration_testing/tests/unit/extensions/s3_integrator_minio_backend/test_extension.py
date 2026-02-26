@@ -57,6 +57,19 @@ class TestS3IntegratorMinIOBackendExtension:
             assert juju.deployed == []
 
     class TestDeployMinIO:
+        def test_skips_if_endpoint_already_configured(
+            self, extension: S3IntegratorMinIOBackendExtension, juju: JujuStub
+        ) -> None:
+            # GIVEN an s3-integrator application that already has an endpoint configured
+            juju.configured_applications.append(("test-model", "s3-app", {"endpoint": "http://existing:9000"}))
+
+            # WHEN deploy_minio_s3_backend is called
+            extension.deploy_minio_s3_backend("test-model", "s3-app")
+
+            # THEN nothing is deployed or additionally configured
+            assert juju.deployed == []
+            assert len(juju.configured_applications) == 1  # unchanged from pre-populated value
+
         def test_deploy_flow_sets_up_everything(
             self, extension: S3IntegratorMinIOBackendExtension, juju: JujuStub
         ) -> None:

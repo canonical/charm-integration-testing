@@ -46,6 +46,11 @@ class S3IntegratorMinIOBackendExtension(JujuExtension, ABC):
     def deploy_minio_s3_backend(self, model: str, s3_integrator_application: str) -> None:
         # Follows guide: https://discourse.charmhub.io/t/cos-lite-docs-set-up-minio-for-s3-testing/15211
 
+        # Skip if already configured
+        if self.juju.get_application_config(model, s3_integrator_application).get("endpoint"):
+            self.logger.info(f"Application '{s3_integrator_application}' already has endpoint set, skipping")
+            return
+
         # Deploy MinIO
         self.logger.info(
             f"Deploying MinIO application '{self.minio_application(s3_integrator_application)}' for s3 integrator '{s3_integrator_application}'"
