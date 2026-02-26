@@ -484,16 +484,6 @@ class TestPytestRuntestMakereport:
 
         assert _plugin_module._failed_state_test is None
 
-    def test_does_not_set_for_non_call_phase(self, make_item: Callable[..., pytest.Item]) -> None:
-        # GIVEN a state-marked item failing in setup (not call) phase
-        item = make_item("test_deploy", requires=State.EMPTY_MODEL, provides=State.DEPLOYED)
-        call = SimpleNamespace(excinfo=SimpleNamespace(type=RuntimeError, value=RuntimeError()))
-        report = _make_report(when="setup", failed=True)
-
-        _drive_makereport(item, call, report)
-
-        assert _plugin_module._failed_state_test is None
-
     def test_does_not_overwrite_once_already_set(self, make_item: Callable[..., pytest.Item]) -> None:
         # GIVEN a first test has already failed
         first = make_item("test_first", requires=State.EMPTY_MODEL, provides=State.DEPLOYED)

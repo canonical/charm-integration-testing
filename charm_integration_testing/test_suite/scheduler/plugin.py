@@ -136,11 +136,11 @@ def pytest_itemcollected(item: pytest.Item) -> None:
 def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) -> None:  # type: ignore[misc]
     """Detect failed state-marked tests and halt the state machine.
 
-    When any state-marked test fails at call-time the environment state is no
-    longer known: even a "pure" test can mutate the environment before the
-    assertion that causes the failure.  All subsequent state-marked tests are
-    skipped to prevent them from running against a broken or indeterminate
-    environment.
+    When any state-marked test fails at setup, call, or teardown time the
+    environment state is no longer known: a setup failure may leave the
+    environment partially configured, and a teardown failure may leave it in
+    an indeterminate state.  All subsequent state-marked tests are skipped to
+    prevent them from running against a broken or indeterminate environment.
 
     Unmarked tests are never affected.
     """
@@ -149,7 +149,7 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) ->
     if _failed_state_test is not None:
         return  # Already halted; no need to re-check.
     report = outcome.get_result()
-    if report.when == "call" and report.failed:
+    if report.failed:
         try:
             marker = read_state_marker(item)
         except ValueError:
