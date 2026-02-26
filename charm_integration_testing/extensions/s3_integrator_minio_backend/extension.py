@@ -43,6 +43,17 @@ class S3IntegratorMinIOBackendExtension(JujuExtension, ABC):
             if self.juju.application_charm(model, application) == S3_INTEGRATOR_CHARM:
                 self.deploy_minio_s3_backend(model, application)
 
+    def pre_remove(self, model: str, *applications: str) -> None:
+        # Remove MinIO applications related to s3 integrator applications being removed
+        for application in applications:
+            if self.juju.application_charm(model, application) == S3_INTEGRATOR_CHARM:
+                minio_application = self.minio_application(application)
+                if minio_application in self.juju.list_applications(model):
+                    self.logger.info(
+                        f"Removing MinIO application '{minio_application}' related to s3 integrator '{application}'"
+                    )
+                    self.juju.remove_applications(model, minio_application)
+
     def deploy_minio_s3_backend(self, model: str, s3_integrator_application: str) -> None:
         # Follows guide: https://discourse.charmhub.io/t/cos-lite-docs-set-up-minio-for-s3-testing/15211
 
