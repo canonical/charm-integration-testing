@@ -37,6 +37,7 @@ jobs:
               return;
             }
             const comment = context.payload.comment.body;
+            // e.g. "Dispatch test for #123" or "Dispatch test for https://github.com/canonical/charm-integration-testing/issues/123"
             const issuePattern = RegExp("^\\s*Dispatch test for (?:#|https:\\/\\/github\\.com\\/[^\\/]+\\/[^\\/]+\\/issues\\/)(\\d+)\\s*$", "i");
             const commentMatch = comment.match(issuePattern);
             console.log(`Comment Body: ${comment}`);
