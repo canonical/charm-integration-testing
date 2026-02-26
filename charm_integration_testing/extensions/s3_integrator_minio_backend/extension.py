@@ -45,14 +45,28 @@ class S3IntegratorMinIOBackendExtension(JujuExtension, ABC):
 
     def pre_remove(self, model: str, *applications: str) -> None:
         # Remove MinIO applications related to s3 integrator applications being removed
+        all_applications = self.juju.list_applications(model)
+        removed_applications: list[str] = []
         for application in applications:
-            if self.juju.application_charm(model, application) == S3_INTEGRATOR_CHARM:
-                minio_application = self.minio_application(application)
-                if minio_application in self.juju.list_applications(model):
-                    self.logger.info(
-                        f"Removing MinIO application '{minio_application}' related to s3 integrator '{application}'"
-                    )
-                    self.juju.remove_applications(model, minio_application)
+            if application not in all_applications:
+                continue
+            if all_applications[application].charm != S3_INTEGRATOR_CHARM:
+                continue
+            minio_application = self.minio_application(application)
+            if minio_application not in all_applications:
+                continue
+            self.logger.info(
+                f"Removing MinIO application '{minio_application}' related to s3 integrator '{application}'"
+            )
+            self.juju.remove_applications(model, minio_application)
+            removed_applications.append(minio_application)
+
+        # Wait for applications to be removed
+        if removed_applications:
+            self.logger.info(
+                f"Waiting for MinIO applications related to removed s3 integrators to be removed: {removed_applications}"
+            )
+            self.juju.wait_for_removal(model, removed_applications, timeout=timedelta(minutes=15))
 
     def deploy_minio_s3_backend(self, model: str, s3_integrator_application: str) -> None:
         # Follows guide: https://discourse.charmhub.io/t/cos-lite-docs-set-up-minio-for-s3-testing/15211
