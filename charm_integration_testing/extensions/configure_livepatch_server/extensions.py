@@ -38,6 +38,11 @@ class ConfigureLivepatchServerExtension(JujuExtension, ABC):
             return
         self.logger.info(f"Configuring livepatch server application '{application}'")
 
+        # Skip if already configured
+        if self.juju.get_application_config(model, application).get("server.url-template"):
+            self.logger.info(f"Application '{application}' already has server.url-template set, skipping")
+            return
+
         # Wait for application to be scaled
         self.logger.info(f"Waiting for application '{application}' to be scaled")
         self.juju.wait_application_scaled(model, application, timedelta(minutes=10))

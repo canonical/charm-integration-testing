@@ -192,6 +192,22 @@ class TestConfigureLivepatchServerExtension:
                 {"server.url-template": "http://10.1.2.157:8080/v1/patches/{filename}"},
             ) in juju.configured_applications
 
+        def test_skips_when_already_configured(
+            self, extension_with_token: ConfigureLivepatchServerExtension, juju: JujuStub, logger: LoggerStub
+        ) -> None:
+            # GIVEN the server.url-template is already set
+            juju.configured_applications.append(
+                ("test-model", "livepatch", {"server.url-template": "http://10.1.2.157:8080/v1/patches/{filename}"})
+            )
+
+            # WHEN configure_livepatch_server is called
+            extension_with_token.configure_livepatch_server("test-model", "livepatch")
+
+            # THEN no further configuration happens
+            assert any("already has server.url-template" in msg for msg in logger.messages["info"])
+            assert juju.waited_scaled == []
+            assert len(juju.configured_applications) == 1  # unchanged
+
         def test_skips_when_no_token(
             self, extension_without_token: ConfigureLivepatchServerExtension, juju: JujuStub, logger: LoggerStub
         ) -> None:
