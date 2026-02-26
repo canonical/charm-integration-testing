@@ -20,72 +20,6 @@ class JujuStub(JujuStubBase):
     applications: dict[str, str] = field(default_factory=lambda: {"livepatch": LIVEPATCH_SERVER_CHARM})
     unit_ips: dict[str, str] = field(default_factory=lambda: {"livepatch/leader": "10.1.2.157"})
 
-    def num_units(self) -> None:  # type: ignore[override]
-        pass
-
-    def list_integrations(self) -> None:  # type: ignore[override]
-        pass
-
-    def integration_exists(self) -> None:  # type: ignore[override]
-        pass
-
-    def wait_idle(self) -> None:  # type: ignore[override]
-        pass
-
-    def juju_status_text(self) -> None:  # type: ignore[override]
-        pass
-
-    def integrate(self) -> None:  # type: ignore[override]
-        pass
-
-    def remove_integration(self) -> None:  # type: ignore[override]
-        pass
-
-    def deploy_bundle_file(self) -> None:  # type: ignore[override]
-        pass
-
-    def remove_applications(self) -> None:  # type: ignore[override]
-        pass
-
-    def wait_for_removal(self) -> None:  # type: ignore[override]
-        pass
-
-    def wait_for_removal_of_integration(self) -> None:  # type: ignore[override]
-        pass
-
-    def wait_for_removal_of_units(self) -> None:  # type: ignore[override]
-        pass
-
-    def application_units(self) -> None:  # type: ignore[override]
-        pass
-
-    def exec_unit(self) -> None:  # type: ignore[override]
-        pass
-
-    def add_secret(self) -> None:  # type: ignore[override]
-        pass
-
-    def read_secret(self) -> None:  # type: ignore[override]
-        pass
-
-    def grant_secret(self) -> None:  # type: ignore[override]
-        pass
-
-    def remove_secret(self) -> None:  # type: ignore[override]
-        pass
-
-    def deploy_application(self) -> None:  # type: ignore[override]
-        pass
-
-    def scp(self) -> None:  # type: ignore[override]
-        pass
-
-    def ssh(self) -> None:  # type: ignore[override]
-        pass
-
-    def version(self) -> None:  # type: ignore[override]
-        pass
-
 
 class LoggerStub(logging.Logger):
     def __init__(self) -> None:
@@ -191,6 +125,22 @@ class TestConfigureLivepatchServerExtension:
                 "livepatch",
                 {"server.url-template": "http://10.1.2.157:8080/v1/patches/{filename}"},
             ) in juju.configured_applications
+
+        def test_skips_when_already_configured(
+            self, extension_with_token: ConfigureLivepatchServerExtension, juju: JujuStub, logger: LoggerStub
+        ) -> None:
+            # GIVEN the server.url-template is already set
+            juju.configured_applications.append(
+                ("test-model", "livepatch", {"server.url-template": "http://10.1.2.157:8080/v1/patches/{filename}"})
+            )
+
+            # WHEN configure_livepatch_server is called
+            extension_with_token.configure_livepatch_server("test-model", "livepatch")
+
+            # THEN no further configuration happens
+            assert any("already has server.url-template" in msg for msg in logger.messages["info"])
+            assert juju.waited_scaled == []
+            assert len(juju.configured_applications) == 1  # unchanged
 
         def test_skips_when_no_token(
             self, extension_without_token: ConfigureLivepatchServerExtension, juju: JujuStub, logger: LoggerStub
