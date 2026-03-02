@@ -28,9 +28,31 @@ from .wait import (
     applications_are_removed,
     applications_are_scaled,
     applications_have_no_units,
+    bundle_integrations_exist,
     integrations_are_removed,
     units_have_message,
 )
+
+
+def _parse_bundle(
+    bundle_path: str,
+) -> tuple[list[str], list[tuple[JujuIntegrationApplication, JujuIntegrationApplication]]]:
+    with open(bundle_path) as f:
+        data = yaml.safe_load(f)
+
+    app_names = list(data.get("applications", {}).keys())
+
+    integrations = []
+    for relation in data.get("relations", []):
+        # Normalise nested lists: [["app1:ep1"], ["app2:ep2"]] → ["app1:ep1", "app2:ep2"]
+        endpoints = [r[0] if isinstance(r, list) else r for r in relation]
+        left_app, left_ep = endpoints[0].split(":", 1)
+        right_app, right_ep = endpoints[1].split(":", 1)
+        integrations.append(
+            (JujuIntegrationApplication(left_app, left_ep), JujuIntegrationApplication(right_app, right_ep))
+        )
+
+    return app_names, integrations
 
 
 class JubilantBackend(JujuCmdBackend):
@@ -223,6 +245,32 @@ class JubilantBackend(JujuCmdBackend):
             "remove-secret",
             name_or_id,
         )
+
+    def deploy_bundle_file(self, model: str, bundle: str, timeout: timedelta | None = None) -> None:
+        super().deploy_bundle_file(model, bundle)
+        app_names, integrations = _parse_bundle(bundle)
+
+        if not app_names and not integrations:
+            return
+
+        def ready(status: jubilant.Status) -> tuple[bool, JujuWaitState]:
+            apps_ok, apps_state = (
+                all_statuses_are_in(
+                    status,
+                    *app_names,
+                    application_statuses={"blocked", "active"},
+                    unit_statuses={"blocked", "active"},
+                    unit_agent_statuses={"idle"},
+                )
+                if app_names
+                else (True, JujuWaitState())
+            )
+            ints_ok, ints_state = (
+                bundle_integrations_exist(status, *integrations) if integrations else (True, JujuWaitState())
+            )
+            return apps_ok and ints_ok, apps_state if not apps_ok else ints_state
+
+        self.wait(model, ready, timeout=timeout)
 
     def deploy_application(
         self,

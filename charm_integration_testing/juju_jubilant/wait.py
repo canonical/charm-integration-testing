@@ -227,6 +227,25 @@ def integrations_are_removed(
     )
 
 
+def bundle_integrations_exist(
+    status: jubilant.Status, *integrations_args: tuple[JujuIntegrationApplication, JujuIntegrationApplication]
+) -> tuple[bool, JujuWaitState]:
+    existing_integrations = get_integrations(status)
+
+    noncompliant_applications: dict[str, JujuApplicationState | None] = {}
+    for integration in integrations_args:
+        if integration not in existing_integrations:
+            for endpoint in integration:
+                noncompliant_applications[endpoint.application] = (
+                    get_application_state(status, endpoint.application) if endpoint.application in status.apps else None
+                )
+
+    return len(noncompliant_applications) == 0, JujuWaitState(
+        message="waiting for bundle integrations",
+        noncompliant_applications=noncompliant_applications,
+    )
+
+
 def applications_have_no_units(status: jubilant.Status, *application_args: str) -> tuple[bool, JujuWaitState]:
     applications = set(application_args if application_args else status.apps.keys())
 
