@@ -29,7 +29,7 @@ from test_suite.scheduler.states import State
 
 def _graph_and_all(
     *edges: tuple[State, State, pytest.Item],
-) -> tuple[StateGraph, dict[tuple[State, State], list[pytest.Item]]]:
+) -> tuple[StateGraph, dict[StateTransition, list[pytest.Item]]]:
     """Build a StateGraph and matching all_transitions dict from (from, to, item) tuples.
 
     Keeping these two data structures consistent is critical: the scheduler uses
@@ -37,10 +37,11 @@ def _graph_and_all(
     Passing them through this helper avoids divergence.
     """
     graph = StateGraph()
-    all_transitions: dict[tuple[State, State], list[pytest.Item]] = defaultdict(list)
+    all_transitions: dict[StateTransition, list[pytest.Item]] = defaultdict(list)
     for from_s, to_s, item in edges:
-        graph.register_transition(StateTransition(from_s, to_s), item)
-        all_transitions[(from_s, to_s)].append(item)
+        t = StateTransition(from_s, to_s)
+        graph.register_transition(t, item)
+        all_transitions[t].append(item)
     return graph, all_transitions
 
 
@@ -134,7 +135,7 @@ class TestBuildExecutionPlan:
         plan = _build_execution_plan(
             current_state=State.EMPTY_MODEL,
             pure_clusters=defaultdict(list),
-            selected_transitions=defaultdict(list, {(State.DEPLOYED, State.NEIGHBOR_ONLY): [teardown]}),
+            selected_transitions=defaultdict(list, {StateTransition(State.DEPLOYED, State.NEIGHBOR_ONLY): [teardown]}),
             all_transitions=all_transitions,
             full_graph=graph,
         )
@@ -157,7 +158,7 @@ class TestBuildExecutionPlan:
         _build_execution_plan(
             current_state=State.EMPTY_MODEL,
             pure_clusters=defaultdict(list),
-            selected_transitions=defaultdict(list, {(State.DEPLOYED, State.NEIGHBOR_ONLY): [teardown]}),
+            selected_transitions=defaultdict(list, {StateTransition(State.DEPLOYED, State.NEIGHBOR_ONLY): [teardown]}),
             all_transitions=all_transitions,
             full_graph=graph,
         )
@@ -179,7 +180,7 @@ class TestBuildExecutionPlan:
         _build_execution_plan(
             current_state=State.EMPTY_MODEL,
             pure_clusters=defaultdict(list),
-            selected_transitions=defaultdict(list, {(State.EMPTY_MODEL, State.DEPLOYED): [deploy]}),
+            selected_transitions=defaultdict(list, {StateTransition(State.EMPTY_MODEL, State.DEPLOYED): [deploy]}),
             all_transitions=all_transitions,
             full_graph=graph,
         )
@@ -200,7 +201,7 @@ class TestBuildExecutionPlan:
         plan = _build_execution_plan(
             current_state=State.DEPLOYED,
             pure_clusters={State.DEPLOYED: [pure]},
-            selected_transitions=defaultdict(list, {(State.DEPLOYED, State.NEIGHBOR_ONLY): [teardown]}),
+            selected_transitions=defaultdict(list, {StateTransition(State.DEPLOYED, State.NEIGHBOR_ONLY): [teardown]}),
             all_transitions=all_transitions,
             full_graph=graph,
         )
@@ -246,7 +247,7 @@ class TestBuildExecutionPlan:
             (State.NEIGHBOR_ONLY, State.DEPLOYED, redeploy),
         )
         # Both teardown variants cover the same edge in all_transitions
-        all_transitions[(State.DEPLOYED, State.NEIGHBOR_ONLY)].append(teardown_2)
+        all_transitions[StateTransition(State.DEPLOYED, State.NEIGHBOR_ONLY)].append(teardown_2)
 
         # WHEN both teardowns are user-selected
         plan = _build_execution_plan(
@@ -254,7 +255,7 @@ class TestBuildExecutionPlan:
             pure_clusters=defaultdict(list),
             selected_transitions=defaultdict(
                 list,
-                {(State.DEPLOYED, State.NEIGHBOR_ONLY): [teardown_1, teardown_2]},
+                {StateTransition(State.DEPLOYED, State.NEIGHBOR_ONLY): [teardown_1, teardown_2]},
             ),
             all_transitions=all_transitions,
             full_graph=graph,
@@ -300,8 +301,8 @@ class TestBuildExecutionPlan:
             selected_transitions=defaultdict(
                 list,
                 {
-                    (State.DEPLOYED, State.NEIGHBOR_ONLY): [teardown],
-                    (State.DEPLOYED, State.NO_CONTROLLER): [upgrade],
+                    StateTransition(State.DEPLOYED, State.NEIGHBOR_ONLY): [teardown],
+                    StateTransition(State.DEPLOYED, State.NO_CONTROLLER): [upgrade],
                 },
             ),
             all_transitions=all_transitions,
@@ -325,7 +326,9 @@ class TestBuildExecutionPlan:
             _build_execution_plan(
                 current_state=State.EMPTY_MODEL,
                 pure_clusters=defaultdict(list),
-                selected_transitions=defaultdict(list, {(State.DEPLOYED, State.NEIGHBOR_ONLY): [teardown]}),
+                selected_transitions=defaultdict(
+                    list, {StateTransition(State.DEPLOYED, State.NEIGHBOR_ONLY): [teardown]}
+                ),
                 all_transitions=defaultdict(list),
                 full_graph=StateGraph(),
             )
@@ -393,14 +396,14 @@ class TestBuildExecutionPlan:
             (State.DEPLOYED, State.NEIGHBOR_ONLY, teardown_1),
             (State.NEIGHBOR_ONLY, State.DEPLOYED, redeploy),
         )
-        all_transitions[(State.DEPLOYED, State.NEIGHBOR_ONLY)].append(teardown_2)
+        all_transitions[StateTransition(State.DEPLOYED, State.NEIGHBOR_ONLY)].append(teardown_2)
 
         plan = _build_execution_plan(
             current_state=State.EMPTY_MODEL,
             pure_clusters=defaultdict(list),
             selected_transitions=defaultdict(
                 list,
-                {(State.DEPLOYED, State.NEIGHBOR_ONLY): [teardown_1, teardown_2]},
+                {StateTransition(State.DEPLOYED, State.NEIGHBOR_ONLY): [teardown_1, teardown_2]},
             ),
             all_transitions=all_transitions,
             full_graph=graph,

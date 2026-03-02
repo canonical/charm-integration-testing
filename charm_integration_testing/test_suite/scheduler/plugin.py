@@ -222,9 +222,9 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     #    transition tests were excluded by -k.
     # ------------------------------------------------------------------
     full_graph = StateGraph()
-    # (from_state, to_state) -> [items], built from the complete collection.
+    # StateTransition -> [items], built from the complete collection.
     # Multiple tests may cover the same edge; all are recorded.
-    all_transitions: dict[tuple[State, State], list[pytest.Item]] = defaultdict(list)
+    all_transitions: dict[StateTransition, list[pytest.Item]] = defaultdict(list)
 
     for item in _all_collected:
         try:
@@ -234,11 +234,9 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
             return
         if marker is not None and marker.is_transition:
             for req_state in marker.requires:
-                full_graph.register_transition(
-                    StateTransition(from_state=req_state, to_state=marker.provides),
-                    item,
-                )
-                all_transitions[(req_state, marker.provides)].append(item)
+                t = StateTransition(from_state=req_state, to_state=marker.provides)
+                full_graph.register_transition(t, item)
+                all_transitions[t].append(item)
 
     # ------------------------------------------------------------------
     # 2. Partition the USER-SELECTED items (post -k filter) into marked
@@ -265,11 +263,11 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     # ------------------------------------------------------------------
     # 3. From the selected items, build destination clusters.
     #    - pure_clusters: state → [selected pure tests]
-    #    - selected_transitions: (from, to) → [selected transition items]
+    #    - selected_transitions: StateTransition → [selected transition items]
     #      Multiple tests may share the same edge; all must run.
     # ------------------------------------------------------------------
     pure_clusters: dict[State, list[pytest.Item]] = defaultdict(list)
-    selected_transitions: dict[tuple[State, State], list[pytest.Item]] = defaultdict(list)
+    selected_transitions: dict[StateTransition, list[pytest.Item]] = defaultdict(list)
 
     for item, marker in selected_marked:
         if marker.bridge_only:
@@ -280,7 +278,7 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
             continue
         if marker.is_transition:
             for req_state in marker.requires:
-                selected_transitions[(req_state, marker.provides)].append(item)
+                selected_transitions[StateTransition(from_state=req_state, to_state=marker.provides)].append(item)
         else:
             for req_state in marker.requires:
                 pure_clusters[req_state].append(item)
@@ -337,8 +335,8 @@ def _mark_as_injected(item: pytest.Item) -> None:
 def _build_execution_plan(
     current_state: State,
     pure_clusters: dict[State, list[pytest.Item]],
-    selected_transitions: dict[tuple[State, State], list[pytest.Item]],
-    all_transitions: dict[tuple[State, State], list[pytest.Item]],
+    selected_transitions: dict[StateTransition, list[pytest.Item]],
+    all_transitions: dict[StateTransition, list[pytest.Item]],
     full_graph: StateGraph,
 ) -> list[pytest.Item]:
     """Build a minimum-cost ordered item list.
@@ -356,7 +354,7 @@ def _build_execution_plan(
     User-selected transition tests are always included in the plan directly;
     they are never silently skipped in favour of a purely-bridging injection.
 
-    Multiple tests may share the same ``(from_state, to_state)`` edge.  When
+    Multiple tests may share the same :class:`StateTransition` edge.  When
     bridging, only one representative item is injected (the first in the list).
     When the user has explicitly selected tests on an edge, all of them run.
 
@@ -365,9 +363,9 @@ def _build_execution_plan(
         pure_clusters: Mapping from state to user-selected pure tests that
             run inside that state without changing it.
         selected_transitions: User-selected transition tests, keyed by
-            ``(from_state, to_state)``, with all items for that edge.
+            :class:`StateTransition`, with all items for that edge.
         all_transitions: Every transition test in the full suite, keyed by
-            ``(from_state, to_state)``.  Used for bridging only.
+            :class:`StateTransition`.  Used for bridging only.
         full_graph: State graph built from all collected transition tests.
 
     Returns:
@@ -384,13 +382,13 @@ def _build_execution_plan(
     def _all_selected_at(s: State) -> list[pytest.Item]:
         """All user-selected items that depart from state *s*."""
         pure = list(pure_clusters.get(s, []))
-        transitions = [it for (fs, _), items in selected_transitions.items() if fs == s for it in items]
+        transitions = [it for st, items in selected_transitions.items() if st.from_state == s for it in items]
         return pure + transitions
 
     def _unscheduled_destinations() -> set[State]:
         all_destinations: set[State] = set(pure_clusters.keys())
-        for from_state, _ in selected_transitions:
-            all_destinations.add(from_state)
+        for st in selected_transitions:
+            all_destinations.add(st.from_state)
         return {s for s in all_destinations if any(it not in scheduled for it in _all_selected_at(s))}
 
     def _run_selected_at(s: State) -> State:
@@ -410,13 +408,13 @@ def _build_execution_plan(
             if item not in scheduled:
                 plan.append(item)
                 scheduled.add(item)
-        for (from_state, to_state), items in list(selected_transitions.items()):
-            if from_state == s:
+        for st, items in list(selected_transitions.items()):
+            if st.from_state == s:
                 for item in items:
                     if item not in scheduled:
                         plan.append(item)
                         scheduled.add(item)
-                        return to_state  # one transition at a time; re-navigate for the next
+                        return st.to_state  # one transition at a time; re-navigate for the next
         return s
 
     def _inject_bridge(path: list[tuple[StateTransition, pytest.Item]]) -> None:
@@ -431,8 +429,7 @@ def _build_execution_plan(
         fresh environment).
         """
         for transition, _graph_item in path:
-            key = (transition.from_state, transition.to_state)
-            selected = selected_transitions.get(key)
+            selected = selected_transitions.get(transition)
             if selected:
                 # Use first unscheduled selected item; it will be added to
                 # scheduled inside _run_selected_at when it executes.
@@ -442,7 +439,7 @@ def _build_execution_plan(
                     scheduled.add(item)
             else:
                 # Pure bridge: always injectable, never added to scheduled.
-                candidates = all_transitions.get(key)
+                candidates = all_transitions.get(transition)
                 if candidates:
                     bridge_item = candidates[0]
                     _mark_as_injected(bridge_item)
