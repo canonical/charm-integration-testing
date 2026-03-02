@@ -377,9 +377,9 @@ def _build_execution_plan(
 
     def _all_selected_at(s: State) -> list[pytest.Item]:
         """All user-selected items that depart from state *s*."""
-        pure = list(pure_clusters.get(s, []))
-        transitions = [it for st, items in selected_transitions.items() if st.from_state == s for it in items]
-        return pure + transitions
+        pure_tests = list(pure_clusters.get(s, []))
+        transition_tests = [it for st, items in selected_transitions.items() if st.from_state == s for it in items]
+        return pure_tests + transition_tests
 
     def _unscheduled_destinations() -> set[State]:
         all_destinations: set[State] = set(pure_clusters.keys())
