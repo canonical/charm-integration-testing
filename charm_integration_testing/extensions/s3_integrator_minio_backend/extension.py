@@ -62,15 +62,11 @@ class S3IntegratorMinIOBackendExtension(JujuExtension, ABC):
             return
 
         # Remove applications
-        self.logger.info(
-            f"Removing MinIO applications '{to_remove}' related to s3 integrators '{applications}'"
-        )
+        self.logger.info(f"Removing MinIO applications '{to_remove}' related to s3 integrators '{applications}'")
         self.juju.remove_applications(model, *to_remove)
 
         # Wait for applications to be removed
-        self.logger.info(
-            f"Waiting for MinIO applications related to removed s3 integrators to be removed: {to_remove}"
-        )
+        self.logger.info(f"Waiting for MinIO applications related to removed s3 integrators to be removed: {to_remove}")
         self.juju.wait_for_removal(model, to_remove, timeout=timedelta(minutes=15))
 
     def deploy_minio_s3_backend(self, model: str, s3_integrator_application: str) -> None:
