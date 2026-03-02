@@ -426,15 +426,17 @@ def _build_execution_plan(
         """
         for transition, _graph_item in path:
             selected = selected_transitions.get(transition)
-            if selected:
-                # Use first unscheduled selected item; it will be added to
+            unscheduled = next((it for it in selected if it not in scheduled), None) if selected else None
+            if unscheduled is not None:
+                # Prefer an unscheduled selected item; it will be added to
                 # scheduled inside _run_selected_at when it executes.
-                item = next((it for it in selected if it not in scheduled), None)
-                if item is not None:
-                    plan.append(item)
-                    scheduled.add(item)
+                plan.append(unscheduled)
+                scheduled.add(unscheduled)
             else:
-                # Pure bridge: always injectable, never added to scheduled.
+                # No unscheduled selected item (either none exist, or all were
+                # already pre-injected on a prior traversal of this edge).
+                # Fall back to a pure bridge so the environment actually
+                # transitions - silently skipping would leave it in the wrong state.
                 candidates = all_transitions.get(transition)
                 if candidates:
                     bridge_item = candidates[0]
