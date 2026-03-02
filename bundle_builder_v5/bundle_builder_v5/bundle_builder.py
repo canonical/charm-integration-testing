@@ -20,7 +20,7 @@ from typing import cast
 
 import z3
 
-from bundle_builder_v3.charm import EndpointType
+from bundle_builder_v5.charm import EndpointType
 
 from .assertion_tags import (
     ApplicationExistsTag,

@@ -3,10 +3,10 @@
 # See LICENSE file for licensing details.
 
 cd "$(dirname "$0")/.."
-poetry run bundle-builder-v3 \
-    --charm-metadata-overrides ./static/charm-metadata-overrides-v3/ \
+poetry run bundle-builder-v5 \
+    --charm-metadata-overrides ./static/charm-metadata-overrides-v5/ \
     --charm-platform-overrides ./static/charm-platform-overrides/ \
     --charm-listing-overrides ./static/charm-listing-overrides.yaml \
-    --charm-test-configs ./static/charm-test-configs-v3/ \
+    --charm-test-configs ./static/charm-test-configs-v5/ \
     --charm-priorities ./static/charm-priorities.yaml \
     "$@"

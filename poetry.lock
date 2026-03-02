@@ -58,7 +58,7 @@ type = "directory"
 url = "bundle_builder"
 
 [[package]]
-name = "bundle-builder-v3"
+name = "bundle-builder-v5"
 version = "3.0.0"
 description = "Framework to generate Juju compatible bundles from charmhub."
 optional = false
@@ -74,7 +74,7 @@ z3-solver = ">=4.15.4.0,<5.0.0.0"
 
 [package.source]
 type = "directory"
-url = "bundle_builder_v3"
+url = "bundle_builder_v5"
 
 [[package]]
 name = "certifi"

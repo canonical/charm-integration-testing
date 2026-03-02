@@ -14,8 +14,8 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 [project]
-name = "bundle-builder-v3"
-version = "3.0.0"
+name = "bundle-builder-v5"
+version = "5.0.0"
 description = "Framework to generate Juju compatible bundles from charmhub."
 authors = [
     {name = "SQA Team",email = "solutionsqa@canonical.com"}
@@ -30,7 +30,7 @@ dependencies = [
 
 [tool.poetry]
 packages = [
-    { include = "bundle_builder_v3" },
+    { include = "bundle_builder_v5" },
 ]
 
 [build-system]
@@ -38,4 +38,4 @@ requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
 
 [project.scripts]
-bundle-builder-v3 = "bundle_builder_v3.entrypoint:main"
+bundle-builder-v5 = "bundle_builder_v5.entrypoint:main"

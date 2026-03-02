@@ -58,7 +58,7 @@ html_title = project + " documentation"
 #       Next, use 'curl' and 'jq' to extract the date from the API's output:
 #
 #       curl -H 'Authorization: token <TOKEN>' \
-#         -H 'Accept: application/vnd.github.v3.raw' \
+#         -H 'Accept: application/vnd.github.v5.raw' \
 #         https://api.github.com/repos/canonical/<REPO> | jq '.created_at'
 
 copyright = "%s CC-BY-SA, %s" % (datetime.date.today().year, author)
