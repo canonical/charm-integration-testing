@@ -109,7 +109,7 @@ class JujuClient:
     def remove_applications(self, *applications: str, model: str = "default") -> None:
         # Call extensions
         for extension in self.extensions:
-            extension.pre_remove(model, *applications)
+            extension.to_remove(model, *applications)
 
         self.logger.info(f"Removing applications: {', '.join(applications)}.")
         self.backend.remove_applications(model, *applications)

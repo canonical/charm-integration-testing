@@ -219,8 +219,8 @@ class TestS3IntegratorMinIOBackendExtension:
             # GIVEN a model with s3-app and its associated minio application
             juju.applications = {"s3-app": "s3-integrator", "s3-app-minio": "minio"}
 
-            # WHEN pre_remove is called for the s3 integrator
-            extension.pre_remove("test-model", "s3-app")
+            # WHEN to_remove is called for the s3 integrator
+            extension.to_remove("test-model", "s3-app")
 
             # THEN the minio app is removed
             assert ("test-model", "s3-app-minio") in juju.removed
@@ -229,8 +229,8 @@ class TestS3IntegratorMinIOBackendExtension:
             # GIVEN a model with s3-app and its associated minio application
             juju.applications = {"s3-app": "s3-integrator", "s3-app-minio": "minio"}
 
-            # WHEN pre_remove is called
-            extension.pre_remove("test-model", "s3-app")
+            # WHEN to_remove is called
+            extension.to_remove("test-model", "s3-app")
 
             # THEN it waits for the minio app to be removed
             assert any("s3-app-minio" in apps for _, apps, _ in juju.waited_removal)
@@ -241,8 +241,8 @@ class TestS3IntegratorMinIOBackendExtension:
             # GIVEN a model where the application to be removed doesn't exist
             juju.applications = {}
 
-            # WHEN pre_remove is called
-            extension.pre_remove("test-model", "s3-app")
+            # WHEN to_remove is called
+            extension.to_remove("test-model", "s3-app")
 
             # THEN nothing is removed
             assert juju.removed == []
@@ -253,8 +253,8 @@ class TestS3IntegratorMinIOBackendExtension:
             # GIVEN a model with a non-s3-integrator application
             juju.applications = {"other-app": "other-charm"}
 
-            # WHEN pre_remove is called for that application
-            extension.pre_remove("test-model", "other-app")
+            # WHEN to_remove is called for that application
+            extension.to_remove("test-model", "other-app")
 
             # THEN nothing is removed
             assert juju.removed == []
@@ -265,8 +265,8 @@ class TestS3IntegratorMinIOBackendExtension:
             # GIVEN a model with s3-app but no associated minio application
             juju.applications = {"s3-app": "s3-integrator"}
 
-            # WHEN pre_remove is called
-            extension.pre_remove("test-model", "s3-app")
+            # WHEN to_remove is called
+            extension.to_remove("test-model", "s3-app")
 
             # THEN nothing is removed
             assert juju.removed == []
@@ -277,8 +277,8 @@ class TestS3IntegratorMinIOBackendExtension:
             # GIVEN a model with s3-app but no associated minio application
             juju.applications = {"s3-app": "s3-integrator"}
 
-            # WHEN pre_remove is called
-            extension.pre_remove("test-model", "s3-app")
+            # WHEN to_remove is called
+            extension.to_remove("test-model", "s3-app")
 
             # THEN no wait for removal is triggered
             assert juju.waited_removal == []

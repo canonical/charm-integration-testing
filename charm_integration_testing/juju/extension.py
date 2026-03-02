@@ -11,5 +11,5 @@ class JujuExtension(ABC):
     def post_scale(self, model: str) -> None:
         pass
 
-    def pre_remove(self, model: str, *applications: str) -> None:
+    def to_remove(self, model: str, *applications: str) -> None:
         pass

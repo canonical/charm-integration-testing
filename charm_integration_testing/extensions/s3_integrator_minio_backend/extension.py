@@ -43,7 +43,7 @@ class S3IntegratorMinIOBackendExtension(JujuExtension, ABC):
             if self.juju.application_charm(model, application) == S3_INTEGRATOR_CHARM:
                 self.deploy_minio_s3_backend(model, application)
 
-    def pre_remove(self, model: str, *applications: str) -> None:
+    def to_remove(self, model: str, *applications: str) -> None:
         # Remove MinIO applications related to s3 integrator applications being removed
         all_applications = self.juju.list_applications(model)
         removed_applications: list[str] = []
