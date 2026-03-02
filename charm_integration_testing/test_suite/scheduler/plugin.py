@@ -214,7 +214,6 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
             f"Invalid --current-state value '{raw_state}'. Valid values: {valid}",
             returncode=3,
         )
-        return
 
     # ------------------------------------------------------------------
     # 1. Build the full state graph from ALL collected items (pre-filter).
@@ -231,7 +230,6 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
             marker = read_state_marker(item)
         except ValueError as exc:
             pytest.exit(str(exc), returncode=3)
-            return
         if marker is not None and marker.is_transition:
             for req_state in marker.requires:
                 t = StateTransition(from_state=req_state, to_state=marker.provides)
@@ -250,7 +248,6 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
             marker = read_state_marker(item)
         except ValueError as exc:
             pytest.exit(str(exc), returncode=3)
-            return
         if marker is not None:
             selected_marked.append((item, marker))
         else:
@@ -297,7 +294,6 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     except _UnreachableStateError as exc:
         logger.error("Scheduler cannot build an execution plan: %s", exc)
         pytest.exit(str(exc), returncode=3)
-        return
 
     # ------------------------------------------------------------------
     # 5. Commit new order: scheduled items first, then any unmarked items.
