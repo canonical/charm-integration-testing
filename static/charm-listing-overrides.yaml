@@ -17,3 +17,5 @@ unlisted_charms:
   - tensorboard-controller
   - tensorboards-web-app
   - training-operator
+  # Needs relisting
+  - tempo-worker-k8s
