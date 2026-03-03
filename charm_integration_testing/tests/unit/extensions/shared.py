@@ -148,6 +148,8 @@ class JujuStub(NullJujuBackend):
     applications: dict[str, str] = field(default_factory=dict)
     configured_applications: list[tuple[str, str, dict[str, Any]]] = field(default_factory=list)
     unit_ips: dict[str, str] = field(default_factory=dict)
+    removed: list[Any] = field(default_factory=list)
+    waited_removal: list[Any] = field(default_factory=list)
 
     # Implementation of methods mocking a JujuBackend
 
@@ -243,6 +245,15 @@ class JujuStub(NullJujuBackend):
     def unit_ip(self, model: str, unit: str) -> str:
         """Return the IP address of a unit"""
         return self.unit_ips[unit]
+
+    def remove_applications(self, model: str, *applications: str) -> None:
+        """Mock removing applications (captures call for verification)"""
+        for application in applications:
+            self.removed.append((model, application))
+
+    def wait_for_removal(self, model: str, applications: list[str], timeout: timedelta | None) -> None:
+        """Mock waiting for application removal (captures call for verification)"""
+        self.waited_removal.append((model, applications, str(timeout)))
 
     def num_units(self, model: str, application: str) -> int:
         return 0

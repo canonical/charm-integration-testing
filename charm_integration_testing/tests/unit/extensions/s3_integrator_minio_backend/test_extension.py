@@ -57,6 +57,19 @@ class TestS3IntegratorMinIOBackendExtension:
             assert juju.deployed == []
 
     class TestDeployMinIO:
+        def test_skips_if_endpoint_already_configured(
+            self, extension: S3IntegratorMinIOBackendExtension, juju: JujuStub
+        ) -> None:
+            # GIVEN an s3-integrator application that already has an endpoint configured
+            juju.configured_applications.append(("test-model", "s3-app", {"endpoint": "http://existing:9000"}))
+
+            # WHEN deploy_minio_s3_backend is called
+            extension.deploy_minio_s3_backend("test-model", "s3-app")
+
+            # THEN nothing is deployed or additionally configured
+            assert juju.deployed == []
+            assert len(juju.configured_applications) == 1  # unchanged from pre-populated value
+
         def test_deploy_flow_sets_up_everything(
             self, extension: S3IntegratorMinIOBackendExtension, juju: JujuStub
         ) -> None:
@@ -198,6 +211,77 @@ class TestS3IntegratorMinIOBackendExtension:
                     "secret-key": MINIO_SECRET_KEY,
                 },
             ) in juju.actions
+
+    class TestPreRemove:
+        def test_removes_minio_for_s3_integrator(
+            self, extension: S3IntegratorMinIOBackendExtension, juju: JujuStub
+        ) -> None:
+            # GIVEN a model with s3-app and its associated minio application
+            juju.applications = {"s3-app": "s3-integrator", "s3-app-minio": "minio"}
+
+            # WHEN pre_remove is called for the s3 integrator
+            extension.pre_remove("test-model", "s3-app")
+
+            # THEN the minio app is removed
+            assert ("test-model", "s3-app-minio") in juju.removed
+
+        def test_waits_for_minio_removal(self, extension: S3IntegratorMinIOBackendExtension, juju: JujuStub) -> None:
+            # GIVEN a model with s3-app and its associated minio application
+            juju.applications = {"s3-app": "s3-integrator", "s3-app-minio": "minio"}
+
+            # WHEN pre_remove is called
+            extension.pre_remove("test-model", "s3-app")
+
+            # THEN it waits for the minio app to be removed
+            assert any("s3-app-minio" in apps for _, apps, _ in juju.waited_removal)
+
+        def test_skips_application_not_in_model(
+            self, extension: S3IntegratorMinIOBackendExtension, juju: JujuStub
+        ) -> None:
+            # GIVEN a model where the application to be removed doesn't exist
+            juju.applications = {}
+
+            # WHEN pre_remove is called
+            extension.pre_remove("test-model", "s3-app")
+
+            # THEN nothing is removed
+            assert juju.removed == []
+
+        def test_skips_non_s3_integrator_apps(
+            self, extension: S3IntegratorMinIOBackendExtension, juju: JujuStub
+        ) -> None:
+            # GIVEN a model with a non-s3-integrator application
+            juju.applications = {"other-app": "other-charm"}
+
+            # WHEN pre_remove is called for that application
+            extension.pre_remove("test-model", "other-app")
+
+            # THEN nothing is removed
+            assert juju.removed == []
+
+        def test_skips_if_minio_not_in_model(
+            self, extension: S3IntegratorMinIOBackendExtension, juju: JujuStub
+        ) -> None:
+            # GIVEN a model with s3-app but no associated minio application
+            juju.applications = {"s3-app": "s3-integrator"}
+
+            # WHEN pre_remove is called
+            extension.pre_remove("test-model", "s3-app")
+
+            # THEN nothing is removed
+            assert juju.removed == []
+
+        def test_does_not_wait_if_nothing_removed(
+            self, extension: S3IntegratorMinIOBackendExtension, juju: JujuStub
+        ) -> None:
+            # GIVEN a model with s3-app but no associated minio application
+            juju.applications = {"s3-app": "s3-integrator"}
+
+            # WHEN pre_remove is called
+            extension.pre_remove("test-model", "s3-app")
+
+            # THEN no wait for removal is triggered
+            assert juju.waited_removal == []
 
     class TestGetMinioClientFile:
         def test_downloads_only_once(self, extension: S3IntegratorMinIOBackendExtension) -> None:
