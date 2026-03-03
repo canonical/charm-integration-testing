@@ -91,7 +91,7 @@ env:
 jobs:
   execute-charm-test:
     name: Execute integration tests against the charms
-    runs-on: [self-hosted, charm_qa]
+    runs-on: [self-hosted-linux-amd64-noble-private-endpoint-medium]
     env:
       TEST_OBSERVER_API: ${{ inputs.environment == 'production' && vars.PROD_TEST_OBSERVER_API || (inputs.environment == 'staging' && vars.STG_TEST_OBSERVER_API || '') }}
       TEST_OBSERVER_TOKEN: ${{ inputs.environment == 'production' && secrets.PROD_TEST_OBSERVER_TOKEN || (inputs.environment == 'staging' && secrets.STG_TEST_OBSERVER_TOKEN || '') }}
