@@ -135,35 +135,33 @@ The contents of the output file will look something like the following:
   - - neighbor:grafana-dashboard
     - target:grafana-dashboard
 
-Deploy bundles
---------------
-The first step is deploying the bundle. Do this with the following command:
+Run tests
+---------
+
+Run all tests with the following command. The state-driven scheduler
+automatically handles deploy, integration tests, and teardown in the
+correct order:
 
 .. code:: bash
 
-   ./scripts/test-deploy.sh \
+   ./scripts/run-tests.sh \
      --model "${MODEL_NAME}" \
-     --bundles "${OUTPUT_FILE}"
+     --current-state "empty_model" \
+     --bundles "${OUTPUT_FILE}" \
+     --target-application "target" \
+     --target-endpoint "${TARGET_ENDPOINT}" \
+     --neighbor-application "neighbor" \
+     --neighbor-endpoint "${NEIGHBOR_ENDPOINT}"
 
-Execute tests
--------------
-Run the following command to run the tests:
+The ``--current-state`` option tells the scheduler the current state of
+the environment so it knows which setup steps (if any) still need to run:
 
-.. code:: bash
+- ``no_controller`` — no Juju controller exists yet (default)
+- ``empty_model`` — controller and model are ready but nothing is deployed
+- ``deployed`` — the charm bundle is already deployed; skip straight to
+  integration tests and teardown
+- ``neighbor_only`` — only the neighbor application remains after teardown
 
-  ./scripts/test-integration.sh \
-    --model "${MODEL_NAME}" \
-    --target-application "target" \
-    --target-endpoint "${TARGET_ENDPOINT}" \
-    --neighbor-application "neighbor" \
-    --neighbor-endpoint "${NEIGHBOR_ENDPOINT}"
-
-Tear charm under test down
---------------------------
-Finally, execute the test teardown:
-
-.. code:: bash
-
-   ./scripts/test-teardown.sh \
-     --model "${MODEL_NAME}" \
-     --applications "target"
+Use a non-default ``--current-state`` when resuming a partial run or
+iterating locally against an already-deployed model to avoid re-running
+expensive setup transitions.

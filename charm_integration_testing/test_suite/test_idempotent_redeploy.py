@@ -4,13 +4,17 @@
 
 from datetime import timedelta
 
+import pytest
 from juju import JujuClient
 
+from .scheduler.states import State
 
+
+@pytest.mark.state(requires=State.NEIGHBOR_ONLY, provides=State.DEPLOYED)
 def test_idempotent_redeploy(
     juju_client: JujuClient,
     model: str,
-    applications: list[str],
+    target_application: str,
     bundles: list[str],
 ) -> None:
     # Redeploy the bundle, which should redeploy the target application
@@ -22,5 +26,6 @@ def test_idempotent_redeploy(
     juju_client.idle_for_period(model=model, timeout=timedelta(minutes=15))
 
     # Assert applications are present after redeploy
-    for application in applications:
-        assert juju_client.application_exists(application, model=model)
+    assert juju_client.application_exists(
+        target_application, model=model
+    ), f"Application '{target_application}' was not found after redeploy"

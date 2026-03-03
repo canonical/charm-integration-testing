@@ -1,12 +1,16 @@
-# Copyright 2024-2025 Canonical Ltd.
+# Copyright 2024-2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 
 from datetime import timedelta
 
+import pytest
 from juju import JujuClient
 
+from .scheduler.states import State
 
+
+@pytest.mark.state(requires=State.DEPLOYED)
 def test_scale_in_and_scale_out_charm(juju_client: JujuClient, model: str, target_application: str) -> None:
     # Get units
     num_units = juju_client.num_units(target_application, model=model)

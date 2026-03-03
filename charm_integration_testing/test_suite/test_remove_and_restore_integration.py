@@ -1,12 +1,16 @@
-# Copyright 2024-2025 Canonical Ltd.
+# Copyright 2024-2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 
 from datetime import timedelta
 
+import pytest
 from juju import JujuClient
 
+from .scheduler.states import State
 
+
+@pytest.mark.state(requires=State.DEPLOYED)
 def test_remove_and_restore_integration(
     juju_client: JujuClient,
     model: str,

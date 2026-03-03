@@ -25,6 +25,10 @@ from juju_jubilant import JubilantBackend
 from pytest import StashKey
 from utils import normalize_string, normalize_string_multiline
 
+pytest_plugins = [
+    "test_suite.scheduler.plugin",
+]
+
 KNOWN_FAILURE_EXCEPTIONS = (
     JujuWaitTimeoutError,
     AssertionError,
@@ -49,7 +53,10 @@ def juju_backend() -> JujuBackend:
 
 @pytest.fixture
 def juju_client(
-    juju_backend: JujuBackend, logger: logging.Logger, minio_client_file: Path | None, ubuntu_pro_token: str | None
+    juju_backend: JujuBackend,
+    logger: logging.Logger,
+    minio_client_file: Path | None,
+    ubuntu_pro_token: str | None,
 ) -> JujuClient:
     return JujuClient(
         juju_backend,
@@ -67,7 +74,38 @@ def juju_client(
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
-    parser.addoption("--model", type=str, required=True, help="Juju model to test in")
+    parser.addoption("--model", type=str, required=True, help="Juju model to test in.")
+    parser.addoption(
+        "--bundles",
+        nargs="*",
+        type=str,
+        default=[],
+        help="Bundle file paths to deploy (used by deploy and idempotent-redeploy phases).",
+    )
+    parser.addoption(
+        "--target-application",
+        type=str,
+        default=None,
+        help="Application under test (used by integration tests).",
+    )
+    parser.addoption(
+        "--target-endpoint",
+        type=str,
+        default=None,
+        help="Endpoint on the target application used for the integration under test.",
+    )
+    parser.addoption(
+        "--neighbor-application",
+        type=str,
+        default=None,
+        help="Neighbor application that integrates with the target (used by integration tests).",
+    )
+    parser.addoption(
+        "--neighbor-endpoint",
+        type=str,
+        default=None,
+        help="Endpoint on the neighbor application used for the integration under test.",
+    )
 
 
 @pytest.fixture
@@ -75,6 +113,54 @@ def model(request: pytest.FixtureRequest) -> str:
     option = request.config.getoption("--model")
     assert isinstance(option, str)
     return option
+
+
+@pytest.fixture
+def bundles(request: pytest.FixtureRequest) -> list[str]:
+    """Bundle file paths passed via ``--bundles``."""
+    option = request.config.getoption("--bundles")
+    assert isinstance(option, list)
+    return option
+
+
+@pytest.fixture
+def target_application(request: pytest.FixtureRequest) -> str:
+    """Name of the charm application under test, passed via ``--target-application``."""
+    value = request.config.getoption("--target-application")
+    if not value:
+        pytest.fail("--target-application is required by this test but was not provided.")
+    assert isinstance(value, str)
+    return value
+
+
+@pytest.fixture
+def target_endpoint(request: pytest.FixtureRequest) -> str:
+    """Juju endpoint on the target application, passed via ``--target-endpoint``."""
+    value = request.config.getoption("--target-endpoint")
+    if not value:
+        pytest.fail("--target-endpoint is required by this test but was not provided.")
+    assert isinstance(value, str)
+    return value
+
+
+@pytest.fixture
+def neighbor_application(request: pytest.FixtureRequest) -> str:
+    """Name of the neighbor application, passed via ``--neighbor-application``."""
+    value = request.config.getoption("--neighbor-application")
+    if not value:
+        pytest.fail("--neighbor-application is required by this test but was not provided.")
+    assert isinstance(value, str)
+    return value
+
+
+@pytest.fixture
+def neighbor_endpoint(request: pytest.FixtureRequest) -> str:
+    """Juju endpoint on the neighbor application, passed via ``--neighbor-endpoint``."""
+    value = request.config.getoption("--neighbor-endpoint")
+    if not value:
+        pytest.fail("--neighbor-endpoint is required by this test but was not provided.")
+    assert isinstance(value, str)
+    return value
 
 
 @pytest.fixture
@@ -93,10 +179,10 @@ def ubuntu_pro_token() -> str | None:
     return token if token else None
 
 
-failure_message = StashKey[str]()
-error_message = StashKey[str]()
-skipped_message = StashKey[str]()
-failure_exception = StashKey[BaseException]()
+failure_message: StashKey[str] = StashKey()
+error_message: StashKey[str] = StashKey()
+skipped_message: StashKey[str] = StashKey()
+failure_exception: StashKey[BaseException] = StashKey()
 
 
 # Get failure message for logging
