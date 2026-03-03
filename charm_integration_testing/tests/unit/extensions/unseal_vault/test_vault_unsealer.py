@@ -19,18 +19,20 @@ from extensions.unseal_vault.vault_client import (
 )
 from extensions.unseal_vault.vault_unsealer import CharmInfo, VaultUnsealer, order_apps_by_dependency
 from juju import JujuExecOutput
-from juju.backend import JujuBackend, JujuTask
+from juju.backend import JujuTask
 from juju.models import JujuApplicationInfo, JujuIntegration, JujuIntegrationApplication
+
+from ..shared import NullJujuBackend
 
 
 @dataclass
-class JujuStub(JujuBackend):
+class JujuStub(NullJujuBackend):
     apps: list[str] = field(default_factory=list)
     charm_name: str = ""
     scaled_apps: list[str] = field(default_factory=list)
     settled_apps: list[str] = field(default_factory=list)
     units: dict[str, list[str]] = field(default_factory=dict)
-    messages: list[tuple[str, str, timedelta]] = field(default_factory=list)
+    messages: list[tuple[str, str, timedelta | None]] = field(default_factory=list)
     secrets: dict[str, dict[str, str]] = field(default_factory=dict)
     secrets_granted: list[tuple[str, str]] = field(default_factory=list)
     actions_run: list[tuple[str, str, dict[str, str]]] = field(default_factory=list)
@@ -44,10 +46,10 @@ class JujuStub(JujuBackend):
     def application_charm(self, model: str, application: str) -> str:
         return self.charm_name
 
-    def wait_application_scaled(self, model: str, app: str, timeout: timedelta) -> None:  # type: ignore[override]
+    def wait_application_scaled(self, model: str, app: str, timeout: timedelta | None) -> None:
         self.scaled_apps.append(app)
 
-    def wait_application_settled(self, model: str, app: str, timeout: timedelta) -> None:  # type: ignore[override]
+    def wait_application_settled(self, model: str, app: str, timeout: timedelta | None) -> None:
         self.settled_apps.append(app)
 
     def application_units(self, model: str, app: str) -> list[str]:
@@ -56,7 +58,7 @@ class JujuStub(JujuBackend):
     def num_units(self, model: str, app: str) -> int:
         return len(self.units.get(app, []))
 
-    def wait_for_unit_message(self, model: str, unit: str, message: str, timeout: timedelta) -> None:  # type: ignore[override]
+    def wait_for_unit_message(self, model: str, unit: str, message: str, timeout: timedelta | None) -> None:
         self.messages.append((unit, message, timeout))
 
     def add_secret(self, model: str, name: str, content: dict[str, str]) -> str:
@@ -79,9 +81,6 @@ class JujuStub(JujuBackend):
     def read_secret(self, model: str, name: str) -> dict[str, str]:
         return self.secrets[name]
 
-    def scale_application(self) -> None:  # type: ignore[override]
-        pass
-
     def list_integrations(self, model: str) -> set[JujuIntegration]:
         _ = model
         return self.integrations
@@ -102,60 +101,9 @@ class JujuStub(JujuBackend):
                 )
             )
 
-    def integration_exists(self) -> None:  # type: ignore[override]
-        pass
-
-    def wait_idle(self) -> None:  # type: ignore[override]
-        pass
-
-    def juju_status_text(self) -> None:  # type: ignore[override]
-        pass
-
-    def integrate(self) -> None:  # type: ignore[override]
-        pass
-
-    def remove_integration(self) -> None:  # type: ignore[override]
-        pass
-
-    def deploy_bundle_file(self) -> None:  # type: ignore[override]
-        pass
-
-    def remove_applications(self) -> None:  # type: ignore[override]
-        pass
-
-    def wait_for_removal(self) -> None:  # type: ignore[override]
-        pass
-
-    def wait_for_removal_of_integration(self) -> None:  # type: ignore[override]
-        pass
-
-    def wait_for_removal_of_units(self) -> None:  # type: ignore[override]
-        pass
-
     def exec_unit(self, model: str, unit: str, task: str) -> JujuExecOutput:
         self.exec_unit_calls.append((model, unit, task))
         return self.exec_units_output.pop(0)
-
-    def deploy_application(self) -> None:  # type: ignore[override]
-        pass
-
-    def configure_application(self) -> None:  # type: ignore[override]
-        pass
-
-    def scp(self) -> None:  # type: ignore[override]
-        pass
-
-    def ssh(self) -> None:  # type: ignore[override]
-        pass
-
-    def unit_ip(self) -> None:  # type: ignore[override]
-        pass
-
-    def version(self) -> None:  # type: ignore[override]
-        pass
-
-    def get_application_config(self, model: str, application: str) -> None:  # type: ignore[override]
-        pass
 
 
 @dataclass
