@@ -11,8 +11,9 @@ import jubilant
 import pytest
 import yaml
 from juju import JujuIntegrationApplication, JujuWaitState, JujuWaitTimeoutError
-from juju_jubilant.backend import JubilantBackend, _parse_bundle
+from juju_jubilant.backend import JubilantBackend
 from juju_jubilant.client import JubilantClient
+from juju_jubilant.wait import _parse_bundle
 from pydantic.dataclasses import dataclass
 
 # Shared status outputs for integration tests
@@ -214,6 +215,9 @@ class StatusStub:
             )
 
         return status
+
+    def deploy(self, charm: Any = None, app: str | None = None, config: Any = None, trust: bool = False) -> None:
+        pass
 
 
 @dataclass
@@ -1291,24 +1295,6 @@ class TestDeployBundleFile:
 
         # THEN wait is called exactly once (combined predicate)
         assert len(wait_calls) == 1
-
-    def test_skips_wait_for_empty_bundle(self, tmp_path: Path) -> None:
-        # GIVEN an empty bundle
-        bundle_file = tmp_path / "bundle.yaml"
-        bundle_file.write_text(yaml.dump({}))
-
-        client = JubilantClientStub(client=StatusStub())
-        backend = JubilantBackend(client)
-        wait_calls: list[Any] = []
-
-        with (
-            patch("juju_jubilant.backend.JujuCmdBackend.deploy_bundle_file"),
-            patch.object(backend, "wait", side_effect=lambda *a, **kw: wait_calls.append(a)),
-        ):
-            backend.deploy_bundle_file("test-model", str(bundle_file))
-
-        # THEN wait is NOT called for an empty bundle
-        assert len(wait_calls) == 0
 
     def test_combined_predicate_passes_when_apps_active_and_integrations_present(self, tmp_path: Path) -> None:
         # GIVEN a bundle with one app and no integrations

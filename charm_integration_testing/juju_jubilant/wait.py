@@ -5,6 +5,7 @@
 from typing import Iterator
 
 import jubilant
+import yaml
 from jubilant.statustypes import AppStatusRelation
 from juju import (
     JujuApplicationState,
@@ -13,6 +14,27 @@ from juju import (
     JujuUnitState,
     JujuWaitState,
 )
+
+
+def _parse_bundle(
+    bundle_path: str,
+) -> tuple[list[str], list[tuple[JujuIntegrationApplication, JujuIntegrationApplication]]]:
+    with open(bundle_path) as f:
+        data = yaml.safe_load(f)
+
+    app_names = list(data.get("applications", {}).keys())
+
+    integrations = []
+    for relation in data.get("relations", []):
+        # Normalise nested lists: [["app1:ep1"], ["app2:ep2"]] → ["app1:ep1", "app2:ep2"]
+        endpoints = [r[0] if isinstance(r, list) else r for r in relation]
+        left_app, left_ep = endpoints[0].split(":", 1)
+        right_app, right_ep = endpoints[1].split(":", 1)
+        integrations.append(
+            (JujuIntegrationApplication(left_app, left_ep), JujuIntegrationApplication(right_app, right_ep))
+        )
+
+    return app_names, integrations
 
 
 def get_unit_info(status: jubilant.Status, unit: str) -> jubilant.statustypes.UnitStatus | None:
@@ -267,3 +289,14 @@ def applications_have_no_units(status: jubilant.Status, *application_args: str) 
         noncompliant_applications=noncompliant_applications,
         noncompliant_units=noncompliant_units,
     )
+
+
+def bundle_applications_integrations_exist(status: jubilant.Status, bundle: str) -> tuple[bool, JujuWaitState]:
+    app_names, integrations = _parse_bundle(bundle)
+
+    if not app_names and not integrations:
+        return True, JujuWaitState()
+
+    apps_ok, apps_state = all_statuses_are_in(status, *app_names) if app_names else (True, JujuWaitState())
+    ints_ok, ints_state = bundle_integrations_exist(status, *integrations) if integrations else (True, JujuWaitState())
+    return apps_ok and ints_ok, apps_state if not apps_ok else ints_state
