@@ -252,11 +252,11 @@ def integrations_are_removed(
 def bundle_integrations_exist(
     status: jubilant.Status, *integrations_args: tuple[JujuIntegrationApplication, JujuIntegrationApplication]
 ) -> tuple[bool, JujuWaitState]:
-    existing_integrations = get_integrations(status)
+    existing_integrations = {frozenset(i) for i in get_integrations(status)}
 
     noncompliant_applications: dict[str, JujuApplicationState | None] = {}
     for integration in integrations_args:
-        if integration not in existing_integrations:
+        if frozenset(integration) not in existing_integrations:
             for endpoint in integration:
                 noncompliant_applications[endpoint.application] = (
                     get_application_state(status, endpoint.application) if endpoint.application in status.apps else None
@@ -294,9 +294,13 @@ def applications_have_no_units(status: jubilant.Status, *application_args: str) 
 def bundle_applications_integrations_exist(status: jubilant.Status, bundle: str) -> tuple[bool, JujuWaitState]:
     app_names, integrations = _parse_bundle(bundle)
 
-    if not app_names and not integrations:
-        return True, JujuWaitState()
+    if app_names:
+        apps_ok, apps_state = all_statuses_are_in(status, *app_names)
+        if not apps_ok:
+            return False, apps_state
 
-    apps_ok, apps_state = all_statuses_are_in(status, *app_names) if app_names else (True, JujuWaitState())
-    ints_ok, ints_state = bundle_integrations_exist(status, *integrations) if integrations else (True, JujuWaitState())
-    return apps_ok and ints_ok, apps_state if not apps_ok else ints_state
+    if integrations:
+        ints_ok, ints_state = bundle_integrations_exist(status, *integrations)
+        return ints_ok, ints_state
+
+    return True, JujuWaitState()
