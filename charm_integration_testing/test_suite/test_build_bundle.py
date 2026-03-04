@@ -96,11 +96,11 @@ def test_build_bundle(
     logger.info(f"Bundle Mermaid diagram written to {bundle_mermaid_output}")
 
 
-@pytest.mark.state(requires=State.BUNDLE_BUILT, provides=State.NO_CONTROLLER)
+@pytest.mark.state(requires=State.BUNDLE_BUILT, provides=State.EMPTY_MODEL)
 def test_verify_bundle(bundle_output: Path) -> None:
-    # Notes(mbenzan): Stub logic just to transition from BUNDLE_BUILT to NO_CONTROLLER.
+    # Notes(mbenzan): Stub logic just to transition from BUNDLE_BUILT to EMPTY_MODEL.
     # In the future we could add any other verification we like before
-    # the controller gets created.
+    # the controller gets created and move the transition to NO_CONTROLLER.
     assert Path(bundle_output).exists()
 
 

@@ -309,7 +309,7 @@ jobs:
             --substrate "${substrate}" \
             --neighbor-charm "${neighbor}" \
             --model "${model}" \
-            --current-state "empty_model" \
+            --current-state "no_bundle" \
             --target-application "target" \
             --target-endpoint "${charm_endpoint}" \
             --neighbor-application "neighbor" \
