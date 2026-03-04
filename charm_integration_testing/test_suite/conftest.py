@@ -614,10 +614,10 @@ def record_pipeline_version_execution_metadata(
 
 
 @pytest.fixture
-def log_to_github_output():
+def log_to_github_output() -> Iterator[Callable[[str], None]]:
     GH_OUTPUT_PATH = os.environ.get("GITHUB_OUTPUT", "./mock-github-output.txt")
 
-    def _log_to_gh_output(message: str):
+    def _log_to_gh_output(message: str) -> None:
         with open(GH_OUTPUT_PATH, "a") as f:
             f.write(message)
             f.flush()
@@ -626,10 +626,10 @@ def log_to_github_output():
 
 
 @pytest.fixture
-def log_to_github_step_summary():
+def log_to_github_step_summary() -> Iterator[Callable[[str], None]]:
     GH_STEP_SUMMARY_PATH = os.environ.get("GITHUB_STEP_SUMMARY", "./mock-github-step-summary.txt")
 
-    def _log_to_gh_step_summary(message: str):
+    def _log_to_gh_step_summary(message: str) -> None:
         with open(GH_STEP_SUMMARY_PATH, "a") as f:
             f.write(message)
             f.flush()

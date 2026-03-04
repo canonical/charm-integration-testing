@@ -3,14 +3,15 @@
 
 import logging
 from pathlib import Path
+from typing import Callable
 
 import pytest
 
-from bundle_builder.bundle import Application, ApplicationEndpoint, Bundle, Integration
+from bundle_builder.bundle import Application, ApplicationEndpoint, Bundle, Integration  # type: ignore[import-untyped]
 from bundle_builder.bundle_builder import BundleBuilder, UncompletableBundleError
-from bundle_builder.charmhub import CharmhubClient
-from bundle_builder.charmhub_http import CharmReleaseNotFoundException
-from bundle_builder.overrides import OverridesClient
+from bundle_builder.charmhub import CharmhubClient  # type: ignore[import-untyped]
+from bundle_builder.charmhub_http import CharmReleaseNotFoundException  # type: ignore[import-untyped]
+from bundle_builder.overrides import OverridesClient  # type: ignore[import-untyped]
 
 from .scheduler.states import State
 
@@ -105,7 +106,9 @@ def test_verify_bundle(bundle_output: Path) -> None:
 
 
 @pytest.mark.state(requires=State.BUNDLE_BUILT)
-def test_write_bundle_to_github(bundle_output: Path, bundle_mermaid_output: Path, log_to_github_step_summary):
+def test_write_bundle_to_github(
+    bundle_output: Path, bundle_mermaid_output: Path, log_to_github_step_summary: Callable[[str], None]
+) -> None:
     mermaid_diagram = bundle_mermaid_output.read_text()
     juju_bundle = bundle_output.read_text()
 
