@@ -109,6 +109,43 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=None,
         help="Endpoint on the neighbor application used for the integration under test.",
     )
+    parser.addoption(
+        "--charm-under-test",
+        type=str,
+        required=True,
+        help="Charmhub name of the charm under test (used by bundle building).",
+    )
+    parser.addoption(
+        "--neighbor-charm",
+        type=str,
+        required=True,
+        help="Charmhub name of the neighbor charm (used by bundle building).",
+    )
+    parser.addoption(
+        "--charm-channel",
+        type=str,
+        default="default",
+        help="Channel of the charm under test, e.g. '2/stable'. Use 'default' to defer to charm-default-versions.",
+    )
+    parser.addoption(
+        "--charm-revision",
+        type=str,
+        default="default",
+        help="Revision of the charm under test (integer). Use 'default' to defer to charm-default-versions.",
+    )
+    parser.addoption(
+        "--charm-series",
+        type=str,
+        default="default",
+        help="Ubuntu base series for the charm under test, e.g. '22.04'. Use 'default' to let the builder decide.",
+    )
+    parser.addoption(
+        "--substrate",
+        type=str,
+        choices=["kubernetes", "openstack"],
+        default="kubernetes",
+        help="Substrate to deploy on (default: 'kubernetes').",
+    )
 
 
 @pytest.fixture
@@ -119,10 +156,18 @@ def model(request: pytest.FixtureRequest) -> str:
 
 
 @pytest.fixture
-def bundles(request: pytest.FixtureRequest) -> list[str]:
-    """Bundle file paths passed via ``--bundles``."""
+def bundles(request: pytest.FixtureRequest, bundle_output: Path) -> list[str]:
+    """Bundle file paths passed via ``--bundles``.
+
+    Falls back to the generated bundle at ``bundle_output`` if ``--bundles`` is
+    not provided and the file already exists (i.e. ``test_build_bundle`` has run).
+    """
     option = request.config.getoption("--bundles")
     assert isinstance(option, list)
+    if option:
+        return option
+    if bundle_output.exists():
+        return [str(bundle_output)]
     return option
 
 
@@ -174,6 +219,84 @@ def validators_path() -> Path | None:
     file_path = Path(file_path_env.strip())
     assert file_path.is_dir(), f"Validators path is invalid: {file_path}"
     return file_path
+
+
+def charm_under_test(request: pytest.FixtureRequest) -> str:
+    """Charmhub name of the charm under test, passed via ``--charm-under-test``."""
+    value = request.config.getoption("--charm-under-test")
+    assert isinstance(value, str)
+    return value
+
+
+@pytest.fixture
+def neighbor_charm(request: pytest.FixtureRequest) -> str:
+    """Charmhub name of the neighbor charm, passed via ``--neighbor-charm``."""
+    value = request.config.getoption("--neighbor-charm")
+    assert isinstance(value, str)
+    return value
+
+
+@pytest.fixture
+def charm_channel(request: pytest.FixtureRequest) -> str | None:
+    """Channel of the charm under test.
+
+    Returns ``None`` when the value is ``"default"``, which tells
+    ``CharmhubClient.charm_from_store`` to defer to ``charm-default-versions.yaml``.
+    """
+    value = request.config.getoption("--charm-channel")
+    return None if value == "default" else value
+
+
+@pytest.fixture
+def charm_revision(request: pytest.FixtureRequest) -> int | None:
+    """Revision of the charm under test.
+
+    Returns ``None`` when the value is ``"default"``, which tells
+    ``CharmhubClient.charm_from_store`` to defer to ``charm-default-versions.yaml``.
+    """
+    value = request.config.getoption("--charm-revision")
+    return None if value == "default" else int(value)
+
+
+@pytest.fixture
+def charm_series(request: pytest.FixtureRequest) -> str | None:
+    """Ubuntu base series for the charm under test.
+
+    Returns ``None`` when the value is ``"default"``, which tells
+    ``CharmhubClient.charm_from_store`` to pick a series based on the charm metadata.
+    """
+    value = request.config.getoption("--charm-series")
+    return None if value == "default" else value
+
+
+@pytest.fixture
+def substrate(request: pytest.FixtureRequest) -> str:
+    """Deployment substrate, passed via ``--substrate``."""
+    value = request.config.getoption("--substrate")
+    assert isinstance(value, str)
+    return value
+
+
+@pytest.fixture
+def bundle_output(request: pytest.FixtureRequest) -> Path:
+    """Path where the generated bundle YAML is written by ``test_build_bundle``.
+
+    If ``--bundles`` is provided, the first entry is used so that
+    ``test_build_bundle`` writes directly to the caller-specified location.
+    """
+    bundles_option: list[str] = request.config.getoption("--bundles")
+    if bundles_option:
+        return Path(bundles_option[0])
+    return Path(request.config.rootpath) / "generated-bundle.yaml"
+
+
+@pytest.fixture
+def bundle_mermaid_output(bundle_output: Path) -> Path:
+    """Path where the generated bundle Mermaid diagram is written by ``test_build_bundle``.
+
+    Uses the same base path as ``bundle_output`` with a ``.mmd`` extension.
+    """
+    return bundle_output.with_suffix(".mmd")
 
 
 @pytest.fixture
@@ -488,3 +611,27 @@ def record_pipeline_version_execution_metadata(
             warnings.warn(f"Failed to get pipeline workflow hash: {pipeline_result.stderr.strip()}")
     else:
         warnings.warn(f"Pipeline file not found: {pipeline_path}")
+
+
+@pytest.fixture
+def log_to_github_output():
+    GH_OUTPUT_PATH = os.environ.get("GITHUB_OUTPUT", "./mock-github-output.txt")
+
+    def _log_to_gh_output(message: str):
+        with open(GH_OUTPUT_PATH, "a") as f:
+            f.write(message)
+            f.flush()
+
+    yield _log_to_gh_output
+
+
+@pytest.fixture
+def log_to_github_step_summary():
+    GH_STEP_SUMMARY_PATH = os.environ.get("GITHUB_STEP_SUMMARY", "./mock-github-step-summary.txt")
+
+    def _log_to_gh_step_summary(message: str):
+        with open(GH_STEP_SUMMARY_PATH, "a") as f:
+            f.write(message)
+            f.flush()
+
+    yield _log_to_gh_step_summary

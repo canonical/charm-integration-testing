@@ -255,53 +255,6 @@ jobs:
           EOF
           pipx install poetry==2.0
           HTTPS_PROXY="http://squid.internal:3128" poetry install
-      - name: Generate dynamic bundles
-        id: build_bundle
-        shell: bash
-        env:
-          charm_under_test: ${{ inputs.charm_under_test }}
-          revision: ${{ inputs.revision }}
-          channel: ${{ inputs.channel }}
-          series: ${{ inputs.series }}
-          neighbor: ${{ inputs.neighbor }}
-          charm_endpoint: ${{ inputs.charm_endpoint }}
-          neighbor_endpoint: ${{ inputs.neighbor_endpoint }}
-          substrate: ${{ inputs.substrate }}
-        run: |
-          # Run the bundle builder
-          set +e
-          ./scripts/build-bundle.sh \
-            --charms \
-              "target::${charm_under_test}::${channel}::${revision}::${series}" \
-              "neighbor::${neighbor}::default::default::default" \
-            --integrations "target:${charm_endpoint}::neighbor:${neighbor_endpoint}" \
-            --substrate "${substrate}" \
-            --output-file generated-bundle.yaml \
-            --output-mermaid generated-bundle.mmd
-          rc=$?
-          set -e
-
-          # Handle the result
-          if [ "$rc" -ne 0 ]; then
-            if [ "$rc" -eq 2 ]; then
-              echo "Bundle generation failed due to invalid input" >&2
-              echo "invalid_input=true" >> $GITHUB_OUTPUT
-            else
-              echo "Bundle generation failed (exit code $rc)" >&2
-            fi
-            exit "$rc"
-          fi
-
-          # Note the generated bundles
-          echo "bundle=$(realpath generated-bundle.yaml)" >> $GITHUB_OUTPUT
-          echo '### Generated Bundle Mermaid Diagram' >> $GITHUB_STEP_SUMMARY
-          echo '```mermaid' >> $GITHUB_STEP_SUMMARY
-          cat generated-bundle.mmd >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          echo '### Generated Juju Bundle' >> $GITHUB_STEP_SUMMARY
-          echo '```yaml' >> $GITHUB_STEP_SUMMARY
-          cat generated-bundle.yaml >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
       - name: Post 'bundle_generated' event
         if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-events
@@ -322,16 +275,6 @@ jobs:
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
           event_name: bundle_generation_failed
           detail: Bundle generation failed.
-      - name: Post 'bundle_generation_invalid_input' event
-        if: ${{ failure() && env.test_observer_api != '' && inputs.execution_id != '' && steps.build_bundle.conclusion == 'failure' && steps.build_bundle.outputs.invalid_input == 'true' }}
-        uses: ./.github/actions/test-observer/post-events
-        with:
-          test_observer_api: ${{ env.test_observer_api }}
-          test_observer_token: ${{ env.test_observer_token }}
-          test_execution_id: ${{ inputs.execution_id }}
-          job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
-          event_name: bundle_generation_invalid_input
-          detail: Bundle generation failed due to invalid input.
       - name: Post 'test_start' event
         if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-events
@@ -348,15 +291,25 @@ jobs:
         shell: bash
         env:
           model: ${{ steps.juju_resources.outputs.model }}
-          bundle: ${{ steps.build_bundle.outputs.bundle }}
           charm_endpoint: ${{ inputs.charm_endpoint }}
           neighbor_endpoint: ${{ inputs.neighbor_endpoint }}
+          charm_under_test: ${{ inputs.charm_under_test }}
+          revision: ${{ inputs.revision }}
+          channel: ${{ inputs.channel }}
+          series: ${{ inputs.series }}
+          neighbor: ${{ inputs.neighbor }}
+          substrate: ${{ inputs.substrate }}
         run: |
           echo "junit_xml=$(realpath junit.xml)" >> $GITHUB_OUTPUT
           ./scripts/run-tests.sh \
+            --charm-under-test "${charm_under_test}" \
+            --charm-channel "${channel}" \
+            --charm-revision "${revision}" \
+            --charm-series "${series}" \
+            --substrate "${substrate}" \
+            --neighbor-charm "${neighbor}"
             --model "${model}" \
             --current-state "empty_model" \
-            --bundles "${bundle}" \
             --target-application "target" \
             --target-endpoint "${charm_endpoint}" \
             --neighbor-application "neighbor" \
