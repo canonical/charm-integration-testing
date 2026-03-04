@@ -307,7 +307,7 @@ jobs:
             --charm-revision "${revision}" \
             --charm-series "${series}" \
             --substrate "${substrate}" \
-            --neighbor-charm "${neighbor}"
+            --neighbor-charm "${neighbor}" \
             --model "${model}" \
             --current-state "empty_model" \
             --target-application "target" \
