@@ -78,6 +78,7 @@ on:
         default: ''
 env:
   DEBUG_SLEEP_SECONDS: 7200  # 2 hours
+  DEBUG_SLEEP_AFTER: ${{ inputs.debug_sleep_after }}
 jobs:
   execute-charm-test:
     name: Execute integration tests against the charms
@@ -92,19 +93,6 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
-      - name: Enable Debug Session
-        if: ${{ inputs.debug_sleep_after != 'none' }}
-        shell: bash
-        env:
-          SSH_IDS: ${{ inputs.debug_extra_ssh_imports }}
-        run: |
-          # Always include the GitHub Actor
-          mkdir --parents ~/.ssh/
-          ssh-import-id "gh:${GITHUB_ACTOR}"
-          SSH_IDS=$(echo "${SSH_IDS}" | tr ',' ' ')
-          ssh-import-id ${SSH_IDS} || true
-          echo "Debug mode enabled. SSH connection details:"
-          echo "ssh $(whoami)@$(hostname -I | cut -d ' ' -f 1)"
       - name: Create swap file
         shell: bash
         run: |
@@ -238,11 +226,8 @@ jobs:
           event_name: setup_o7k_failed
           detail: Setup of OpenStack cloud failed.
       - name: Debug Setup
-        if: ${{ !cancelled() && inputs.debug_sleep_after == 'setup' }}
-        shell: bash
-        run: |
-          echo "Sleeping to debug setup"
-          sleep ${DEBUG_SLEEP_SECONDS}
+        if: ${{ env.DEBUG_SLEEP_AFTER == 'setup' && !cancelled() }}
+        uses: canonical/action-tmate@main 
       - name: Install Repository
         shell: bash
         run: |
@@ -348,6 +333,38 @@ jobs:
         env:
           model: ${{ steps.juju_resources.outputs.model }}
           bundle: ${{ steps.build_bundle.outputs.bundle }}
+        run: |
+          echo "junit_xml=$(realpath junit-deploy.xml)" >> $GITHUB_OUTPUT
+          ./scripts/test-deploy.sh \
+            --model "${model}" \
+            --bundles "${bundle}" \
+            --junit-xml=junit-deploy.xml
+      - name: Post 'test_deploy_end' event
+        if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
+        uses: ./.github/actions/test-observer/post-events
+        with:
+          test_observer_api: ${{ env.test_observer_api }}
+          test_observer_token: ${{ env.test_observer_token }}
+          test_execution_id: ${{ inputs.execution_id }}
+          job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
+          event_name: test_deploy_end
+          detail: Test deployment finished.
+      - name: Post 'test_integration_start' event
+        if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
+        uses: ./.github/actions/test-observer/post-events
+        with:
+          test_observer_api: ${{ env.test_observer_api }}
+          test_observer_token: ${{ env.test_observer_token }}
+          test_execution_id: ${{ inputs.execution_id }}
+          job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
+          event_name: test_integration_start
+          detail: Test integration started.
+      - name: Execute Tests
+        id: test_integration
+        continue-on-error: true
+        shell: bash
+        env:
+          model: ${{ steps.juju_resources.outputs.model }}
           charm_endpoint: ${{ inputs.charm_endpoint }}
           neighbor_endpoint: ${{ inputs.neighbor_endpoint }}
         run: |
@@ -369,8 +386,91 @@ jobs:
           test_observer_token: ${{ env.test_observer_token }}
           test_execution_id: ${{ inputs.execution_id }}
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
-          event_name: test_end
-          detail: Tests finished.
+          event_name: test_integration_end
+          detail: Test integration ended.
+      - name: Post 'test_teardown_start' event
+        if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
+        uses: ./.github/actions/test-observer/post-events
+        with:
+          test_observer_api: ${{ env.test_observer_api }}
+          test_observer_token: ${{ env.test_observer_token }}
+          test_execution_id: ${{ inputs.execution_id }}
+          job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
+          event_name: test_teardown_start
+          detail: Test teardown phase started.
+      - name: Teardown charm under test
+        id: test_teardown
+        continue-on-error: true
+        shell: bash
+        env:
+          model: ${{ steps.juju_resources.outputs.model }}
+        run: |
+          echo "junit_xml=$(realpath junit-teardown.xml)" >> $GITHUB_OUTPUT
+          ./scripts/test-teardown.sh \
+            --model "${model}" \
+            --applications "target" \
+            --junit-xml=junit-teardown.xml
+      - name: Post 'test_teardown_end' event
+        if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
+        uses: ./.github/actions/test-observer/post-events
+        with:
+          test_observer_api: ${{ env.test_observer_api }}
+          test_observer_token: ${{ env.test_observer_token }}
+          test_execution_id: ${{ inputs.execution_id }}
+          job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
+          event_name: test_teardown_end
+          detail: Test teardown phase finished.
+      - name: Post 'test_idempotent_redeploy_start' event
+        if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
+        uses: ./.github/actions/test-observer/post-events
+        with:
+          test_observer_api: ${{ env.test_observer_api }}
+          test_observer_token: ${{ env.test_observer_token }}
+          test_execution_id: ${{ inputs.execution_id }}
+          job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
+          event_name: test_idempotent_redeploy_start
+          detail: Idempotent redeploy of charm under test started.
+      - name: Idempotent redeploy charm under test
+        id: test_idempotent_redeploy
+        continue-on-error: true
+        shell: bash
+        env:
+          model: ${{ steps.juju_resources.outputs.model }}
+          bundle: ${{ steps.build_bundle.outputs.bundle }}
+        run: |
+          echo "junit_xml=$(realpath junit-idempotent-redeploy.xml)" >> $GITHUB_OUTPUT
+          ./scripts/test-idempotent-redeploy.sh \
+            --model "${model}" \
+            --applications "target" \
+            --bundles "${bundle}" \
+            --junit-xml=junit-idempotent-redeploy.xml
+      - name: Post 'test_idempotent_redeploy_end' event
+        if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
+        uses: ./.github/actions/test-observer/post-events
+        with:
+          test_observer_api: ${{ env.test_observer_api }}
+          test_observer_token: ${{ env.test_observer_token }}
+          test_execution_id: ${{ inputs.execution_id }}
+          job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
+          event_name: test_idempotent_redeploy_end
+          detail: Idempotent redeploy of charm under test finished.
+      - name: Merge JUnit output
+        id: junit_results
+        shell: bash
+        env:
+          junit_xml_deploy: ${{ steps.test_deploy.outputs.junit_xml }}
+          junit_xml_integration: ${{ steps.test_integration.outputs.junit_xml }}
+          junit_xml_teardown: ${{ steps.test_teardown.outputs.junit_xml }}
+          junit_xml_idempotent_redeploy: ${{ steps.test_idempotent_redeploy.outputs.junit_xml }}
+        run: |
+          ./scripts/merge-junit.sh \
+            "${junit_xml_deploy}" \
+            "${junit_xml_integration}" \
+            "${junit_xml_teardown}" \
+            "${junit_xml_idempotent_redeploy}" \
+            junit.xml
+          echo "junit_xml=$(realpath junit.xml)" >> $GITHUB_OUTPUT
+          cat junit.xml
       - name: Post execution metadata to Test Observer
         if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-execution-metadata
@@ -454,11 +554,8 @@ jobs:
           event_name: log_collection_finished
           detail: Log collection has completed.
       - name: Debug Post Log Collection
-        if: ${{ !cancelled() && inputs.debug_sleep_after == 'log_collection' }}
-        shell: bash
-        run: |
-          echo "Sleeping to debug post log collection"
-          sleep ${DEBUG_SLEEP_SECONDS}
+        if: ${{ env.DEBUG_SLEEP_AFTER == 'log_collection' && !cancelled() }}
+        uses: canonical/action-tmate@main 
       - name: Post links to Test Observer
         if: ${{ !cancelled() && steps.post_logs_to_swift.outcome == 'success' && env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-links
