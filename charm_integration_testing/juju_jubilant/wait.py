@@ -295,12 +295,13 @@ def bundle_applications_integrations_exist(status: jubilant.Status, bundle: str)
     app_names, integrations = _parse_bundle(bundle)
 
     if app_names:
-        apps_ok, apps_state = all_statuses_are_in(status, *app_names)
-        if not apps_ok:
-            return False, apps_state
+        ok, state = all_statuses_are_in(status, *app_names)
+        if not ok:
+            return ok, state
 
     if integrations:
-        ints_ok, ints_state = bundle_integrations_exist(status, *integrations)
-        return ints_ok, ints_state
+        ok, state = bundle_integrations_exist(status, *integrations)
+        if not ok:
+            return ok, state
 
     return True, JujuWaitState()
