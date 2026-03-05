@@ -3,7 +3,6 @@
 
 import logging
 from pathlib import Path
-from typing import Callable
 
 import pytest
 
@@ -15,48 +14,42 @@ from bundle_builder.overrides import OverridesClient  # type: ignore[import-unty
 
 from .scheduler.states import State
 
-_STATIC_DIR = Path(__file__).parent.parent.parent / "static"
 
-_PLATFORM_BY_SUBSTRATE: dict[str, str] = {
-    "kubernetes": "kubernetes",
-    "openstack": "machine",
-}
-
-
-@pytest.mark.state(requires=State.NO_BUNDLE, provides=State.BUNDLE_BUILT)
+@pytest.mark.state(requires=State.NO_BUNDLE, provides=State.EMPTY_MODEL)
 def test_build_bundle(
-    charm_under_test: str,
+    target_charm: str,
     neighbor_charm: str,
-    charm_channel: str | None,
-    charm_revision: int | None,
-    charm_series: str | None,
+    target_channel: str | None,
+    target_revision: int | None,
+    target_series: str | None,
     target_endpoint: str,
     neighbor_endpoint: str,
-    substrate: str,
+    platform: str,
+    static_dir: Path,
     bundle_output: Path,
     bundle_mermaid_output: Path,
     logger: logging.Logger,
 ) -> None:
     overrides_client = OverridesClient(
-        charm_metadata_overrides=_STATIC_DIR / "charm-metadata-overrides",
-        charm_platform_overrides=_STATIC_DIR / "charm-platform-overrides",
-        charm_listing_overrides=_STATIC_DIR / "charm-listing-overrides.yaml",
-        charm_test_configs=_STATIC_DIR / "charm-test-configs",
-        charm_priorities_config=_STATIC_DIR / "charm-priorities.yaml",
-        charm_default_versions=_STATIC_DIR / "charm-default-versions.yaml",
+        charm_metadata_overrides=static_dir / "charm-metadata-overrides",
+        charm_platform_overrides=static_dir / "charm-platform-overrides",
+        charm_listing_overrides=static_dir / "charm-listing-overrides.yaml",
+        charm_test_configs=static_dir / "charm-test-configs",
+        charm_priorities_config=static_dir / "charm-priorities.yaml",
+        charm_default_versions=static_dir / "charm-default-versions.yaml",
     )
     charmhub_client = CharmhubClient(logger=logger, overrides_client=overrides_client)
 
     try:
-        target_charm = charmhub_client.charm_from_store(
-            charm_name=charm_under_test,
-            charm_channel=charm_channel,
-            charm_revision=charm_revision,
-            ubuntu_version=charm_series,
+        fetched_target_charm = charmhub_client.charm_from_store(
+            charm_name=target_charm,
+            charm_channel=target_channel,
+            charm_revision=target_revision,
+            ubuntu_version=target_series,
             ubuntu_arch="amd64",
         )
     except CharmReleaseNotFoundException as e:
-        pytest.fail(f"Charm release not found for '{charm_under_test}': {e}")
+        pytest.fail(f"Charm release not found for '{target_charm}': {e}")
 
     try:
         neighbor = charmhub_client.charm_from_store(
@@ -75,12 +68,12 @@ def test_build_bundle(
     base_bundle = Bundle(
         applications=frozenset(
             {
-                Application(name="target", charm=target_charm),
+                Application(name="target", charm=fetched_target_charm),
                 Application(name="neighbor", charm=neighbor),
             }
         ),
         integrations=frozenset({integration}),
-        platform=_PLATFORM_BY_SUBSTRATE[substrate],
+        platform=platform,
         arch="amd64",
     )
 
@@ -96,30 +89,4 @@ def test_build_bundle(
     bundle_mermaid_output.write_text(built_bundle.export_mermaid(), encoding="utf-8")
     logger.info(f"Bundle Mermaid diagram written to {bundle_mermaid_output}")
 
-
-@pytest.mark.state(requires=State.BUNDLE_BUILT, provides=State.EMPTY_MODEL)
-def test_verify_bundle(bundle_output: Path) -> None:
-    # Notes(mbenzan): Stub logic just to transition from BUNDLE_BUILT to EMPTY_MODEL.
-    # In the future we could add any other verification we like before
-    # the controller gets created and move the transition to NO_CONTROLLER.
     assert Path(bundle_output).exists()
-
-
-@pytest.mark.state(requires=State.BUNDLE_BUILT)
-def test_write_bundle_to_github(
-    bundle_output: Path, bundle_mermaid_output: Path, log_to_github_step_summary: Callable[[str], None]
-) -> None:
-    mermaid_diagram = bundle_mermaid_output.read_text()
-    juju_bundle = bundle_output.read_text()
-
-    log = f""""### Generated Bundle Mermaid Diagram"
-    ```mermaid
-    {mermaid_diagram}
-    ```
-
-    ### Generated Juju Bundle
-    ```yaml
-    {juju_bundle}
-    ```
-    """
-    log_to_github_step_summary(log)

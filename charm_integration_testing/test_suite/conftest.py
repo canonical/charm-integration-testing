@@ -110,31 +110,31 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         help="Endpoint on the neighbor application used for the integration under test.",
     )
     parser.addoption(
-        "--charm-under-test",
+        "--target-charm",
         type=str,
-        required=True,
+        default=None,
         help="Charmhub name of the charm under test (used by bundle building).",
     )
     parser.addoption(
         "--neighbor-charm",
         type=str,
-        required=True,
+        default=None,
         help="Charmhub name of the neighbor charm (used by bundle building).",
     )
     parser.addoption(
-        "--charm-channel",
+        "--target-channel",
         type=str,
         default="default",
         help="Channel of the charm under test, e.g. '2/stable'. Use 'default' to defer to charm-default-versions.",
     )
     parser.addoption(
-        "--charm-revision",
+        "--target-revision",
         type=str,
         default="default",
         help="Revision of the charm under test (integer). Use 'default' to defer to charm-default-versions.",
     )
     parser.addoption(
-        "--charm-series",
+        "--target-series",
         type=str,
         default="default",
         help="Ubuntu base series for the charm under test, e.g. '22.04'. Use 'default' to let the builder decide.",
@@ -145,6 +145,12 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         choices=["kubernetes", "openstack"],
         default="kubernetes",
         help="Substrate to deploy on (default: 'kubernetes').",
+    )
+    parser.addoption(
+        "--static-dir",
+        type=str,
+        default="./static",
+        help="File path to the static directory containing the overrides configurations.",
     )
 
 
@@ -221,9 +227,12 @@ def validators_path() -> Path | None:
     return file_path
 
 
-def charm_under_test(request: pytest.FixtureRequest) -> str:
-    """Charmhub name of the charm under test, passed via ``--charm-under-test``."""
-    value = request.config.getoption("--charm-under-test")
+@pytest.fixture
+def target_charm(request: pytest.FixtureRequest) -> str:
+    """Charmhub name of the charm under test, passed via ``--target-charm``."""
+    value = request.config.getoption("--target-charm")
+    if not value:
+        pytest.fail("--target-charm is required by this test but was not provided.")
     assert isinstance(value, str)
     return value
 
@@ -232,40 +241,42 @@ def charm_under_test(request: pytest.FixtureRequest) -> str:
 def neighbor_charm(request: pytest.FixtureRequest) -> str:
     """Charmhub name of the neighbor charm, passed via ``--neighbor-charm``."""
     value = request.config.getoption("--neighbor-charm")
+    if not value:
+        pytest.fail("--neighbor-charm is required by this test but was not provided.")
     assert isinstance(value, str)
     return value
 
 
 @pytest.fixture
-def charm_channel(request: pytest.FixtureRequest) -> str | None:
+def target_channel(request: pytest.FixtureRequest) -> str | None:
     """Channel of the charm under test.
 
     Returns ``None`` when the value is ``"default"``, which tells
     ``CharmhubClient.charm_from_store`` to defer to ``charm-default-versions.yaml``.
     """
-    value = request.config.getoption("--charm-channel")
+    value = request.config.getoption("--target-channel")
     return None if value == "default" else value
 
 
 @pytest.fixture
-def charm_revision(request: pytest.FixtureRequest) -> int | None:
+def target_revision(request: pytest.FixtureRequest) -> int | None:
     """Revision of the charm under test.
 
     Returns ``None`` when the value is ``"default"``, which tells
     ``CharmhubClient.charm_from_store`` to defer to ``charm-default-versions.yaml``.
     """
-    value = request.config.getoption("--charm-revision")
+    value = request.config.getoption("--target-revision")
     return None if value == "default" else int(value)
 
 
 @pytest.fixture
-def charm_series(request: pytest.FixtureRequest) -> str | None:
+def target_series(request: pytest.FixtureRequest) -> str | None:
     """Ubuntu base series for the charm under test.
 
     Returns ``None`` when the value is ``"default"``, which tells
     ``CharmhubClient.charm_from_store`` to pick a series based on the charm metadata.
     """
-    value = request.config.getoption("--charm-series")
+    value = request.config.getoption("--target-series")
     return None if value == "default" else value
 
 
@@ -273,8 +284,27 @@ def charm_series(request: pytest.FixtureRequest) -> str | None:
 def substrate(request: pytest.FixtureRequest) -> str:
     """Deployment substrate, passed via ``--substrate``."""
     value = request.config.getoption("--substrate")
+    if not value:
+        pytest.fail("--substrate is required by this test but was not provided.")
     assert isinstance(value, str)
     return value
+
+
+@pytest.fixture
+def platform(substrate: str) -> str:
+    return "machine" if substrate == "openstack" else substrate
+
+
+@pytest.fixture
+def static_dir(request: pytest.FixtureRequest) -> Path:
+    """File path to the static directory containing the overrides configurations passed via ``--static-dir``."""
+    value = request.config.getoption("--static-dir")
+    if not value:
+        pytest.fail("--static-dir is required by this test but was not provided.")
+    assert isinstance(value, str)
+    ppath = Path(value).resolve()
+    assert ppath.exists()
+    return ppath
 
 
 @pytest.fixture

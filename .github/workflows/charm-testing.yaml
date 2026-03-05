@@ -1,15 +1,17 @@
 ---
 name: Execute tests against two charms and their integrations
-run-name: "Testing ${{ inputs.charm_under_test }}:${{ inputs.charm_endpoint }} against\
+run-name:
+  "Testing ${{ inputs.charm_under_test }}:${{ inputs.charm_endpoint }} against\
   \ ${{ inputs.neighbor }}:${{ inputs.neighbor_endpoint }}. (environment: ${{ inputs.environment }}${{\
   \ inputs.execution_id != '' && ', test execution: ' || '' }}${{ inputs.execution_id\
   \ }}, substrate: ${{ inputs.substrate }})"
 concurrency:
-  group: ${{ github.workflow }}-${{ inputs.environment }}-${{ inputs.execution_id
+  group:
+    ${{ github.workflow }}-${{ inputs.environment }}-${{ inputs.execution_id
     || github.run_id }}
   cancel-in-progress: true
 permissions:
-  contents: read  # only needed for private repos
+  contents: read # only needed for private repos
 on:
   workflow_dispatch:
     inputs:
@@ -55,7 +57,7 @@ on:
         description: Series to run the charm tests under.
         required: false
         type: choice
-        options: [default, '20.04', '22.04', '24.04']
+        options: [default, "20.04", "22.04", "24.04"]
         default: default
       substrate:
         description: Substrate to run the tests on
@@ -72,12 +74,13 @@ on:
       debug_extra_ssh_imports:
         # The IDs take the form of lp:<value> for Launchpad and gh:<value> for GitHub.
         # The GitHub Actor's key is always included.
-        description: A comma-separated list of IDs to use with ssh-import-id in debug
+        description:
+          A comma-separated list of IDs to use with ssh-import-id in debug
           mode.
         required: false
-        default: ''
+        default: ""
 env:
-  DEBUG_SLEEP_SECONDS: 7200  # 2 hours
+  DEBUG_SLEEP_SECONDS: 7200 # 2 hours
 jobs:
   execute-charm-test:
     name: Execute integration tests against the charms
@@ -167,7 +170,8 @@ jobs:
           test_observer_token: ${{ env.test_observer_token }}
           test_execution_id: ${{ inputs.execution_id }}
           status: IN_PROGRESS
-          ci_link: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{
+          ci_link:
+            ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{
             github.run_id }}
       - name: Post 'job_start' event
         if: ${{ !cancelled() && env.test_observer_api != '' && inputs.execution_id != '' }}
@@ -302,10 +306,10 @@ jobs:
         run: |
           echo "junit_xml=$(realpath junit.xml)" >> $GITHUB_OUTPUT
           ./scripts/run-tests.sh \
-            --charm-under-test "${charm_under_test}" \
-            --charm-channel "${channel}" \
-            --charm-revision "${revision}" \
-            --charm-series "${series}" \
+            --target-charm "${charm_under_test}" \
+            --target-channel "${channel}" \
+            --target-revision "${revision}" \
+            --target-series "${series}" \
             --substrate "${substrate}" \
             --neighbor-charm "${neighbor}" \
             --model "${model}" \
@@ -314,6 +318,7 @@ jobs:
             --target-endpoint "${charm_endpoint}" \
             --neighbor-application "neighbor" \
             --neighbor-endpoint "${neighbor_endpoint}" \
+            --static-dir "./static" \
             --junit-xml=junit.xml
       - name: Post 'test_end' event
         if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
@@ -325,6 +330,19 @@ jobs:
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
           event_name: test_end
           detail: Tests finished.
+      - name: Post bundles to github
+        shell: bash
+        continue-on-error: true
+        run: |
+          # Note the generated bundles
+          echo '### Generated Bundle Mermaid Diagram' >> $GITHUB_STEP_SUMMARY
+          echo '```mermaid' >> $GITHUB_STEP_SUMMARY
+          cat generated-bundle.mmd >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo '### Generated Juju Bundle' >> $GITHUB_STEP_SUMMARY
+          echo '```yaml' >> $GITHUB_STEP_SUMMARY
+          cat generated-bundle.yaml >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
       - name: Post execution metadata to Test Observer
         if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-execution-metadata
@@ -451,5 +469,6 @@ jobs:
         shell: bash
         env:
           controller: ${{ steps.juju_resources.outputs.controller }}
-        run: timeout 15m juju kill-controller "${controller}" --no-prompt --timeout
+        run:
+          timeout 15m juju kill-controller "${controller}" --no-prompt --timeout
           2m
