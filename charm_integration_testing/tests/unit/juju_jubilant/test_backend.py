@@ -3,14 +3,17 @@
 
 from dataclasses import field
 from datetime import timedelta
+from pathlib import Path
 from typing import Any, Callable
+from unittest.mock import patch
 
 import jubilant
 import pytest
 import yaml
-from juju import JujuWaitState, JujuWaitTimeoutError
+from juju import JujuIntegrationApplication, JujuWaitState, JujuWaitTimeoutError
 from juju_jubilant.backend import JubilantBackend
 from juju_jubilant.client import JubilantClient
+from juju_jubilant.wait import _parse_bundle
 from pydantic.dataclasses import dataclass
 
 # Shared status outputs for integration tests
@@ -212,6 +215,9 @@ class StatusStub:
             )
 
         return status
+
+    def deploy(self, charm: Any = None, app: str | None = None, config: Any = None, trust: bool = False) -> None:
+        pass
 
 
 @dataclass
@@ -1203,3 +1209,125 @@ class TestJubilantBackend:
             # THEN
             assert stub.app == "my-app"
             assert config == {"setting1": "value1", "setting2": "value2"}
+
+
+class TestParseBundleFile:
+    def test_flat_relations(self, tmp_path: Path) -> None:
+        # GIVEN a bundle with flat-list relations
+        bundle_content: dict[str, Any] = {
+            "applications": {"database": {}, "webapp": {}},
+            "relations": [["database:db", "webapp:database"]],
+        }
+        bundle_file = tmp_path / "bundle.yaml"
+        bundle_file.write_text(yaml.dump(bundle_content))
+
+        # WHEN
+        app_names, integrations = _parse_bundle(str(bundle_file))
+
+        # THEN
+        assert set(app_names) == {"database", "webapp"}
+        assert integrations == [
+            (JujuIntegrationApplication("database", "db"), JujuIntegrationApplication("webapp", "database"))
+        ]
+
+    def test_nested_relations(self, tmp_path: Path) -> None:
+        # GIVEN a bundle with nested-list relations (alternative YAML format)
+        bundle_content: dict[str, Any] = {
+            "applications": {"database": {}, "webapp": {}},
+            "relations": [[["database:db"], ["webapp:database"]]],
+        }
+        bundle_file = tmp_path / "bundle.yaml"
+        bundle_file.write_text(yaml.dump(bundle_content))
+
+        # WHEN
+        _, integrations = _parse_bundle(str(bundle_file))
+
+        # THEN
+        assert integrations == [
+            (JujuIntegrationApplication("database", "db"), JujuIntegrationApplication("webapp", "database"))
+        ]
+
+    def test_no_relations(self, tmp_path: Path) -> None:
+        # GIVEN a bundle with applications but no relations key
+        bundle_content: dict[str, Any] = {"applications": {"app1": {}}}
+        bundle_file = tmp_path / "bundle.yaml"
+        bundle_file.write_text(yaml.dump(bundle_content))
+
+        # WHEN
+        app_names, integrations = _parse_bundle(str(bundle_file))
+
+        # THEN
+        assert app_names == ["app1"]
+        assert integrations == []
+
+    def test_empty_bundle(self, tmp_path: Path) -> None:
+        # GIVEN an empty bundle
+        bundle_file = tmp_path / "bundle.yaml"
+        bundle_file.write_text(yaml.dump({}))
+
+        # WHEN
+        app_names, integrations = _parse_bundle(str(bundle_file))
+
+        # THEN
+        assert app_names == []
+        assert integrations == []
+
+
+class TestDeployBundleFile:
+    def test_calls_wait_once_with_combined_predicate(self, tmp_path: Path) -> None:
+        # GIVEN a bundle with apps and one integration
+        bundle_content: dict[str, Any] = {
+            "applications": {"database": {}, "webapp": {}},
+            "relations": [["database:db", "webapp:database"]],
+        }
+        bundle_file = tmp_path / "bundle.yaml"
+        bundle_file.write_text(yaml.dump(bundle_content))
+
+        client = JubilantClientStub(client=StatusStub())
+        backend = JubilantBackend(client)
+        wait_calls: list[Any] = []
+
+        with (
+            patch("juju_jubilant.backend.JujuCmdBackend.deploy_bundle_file"),
+            patch.object(backend, "wait", side_effect=lambda *a, **kw: wait_calls.append(a)),
+        ):
+            backend.deploy_bundle_file("test-model", str(bundle_file))
+
+        # THEN wait is called exactly once (combined predicate)
+        assert len(wait_calls) == 1
+
+    def test_combined_predicate_passes_when_apps_active_and_integrations_present(self, tmp_path: Path) -> None:
+        # GIVEN a bundle with one app and no integrations
+        bundle_content: dict[str, Any] = {"applications": {"database": {}}}
+        bundle_file = tmp_path / "bundle.yaml"
+        bundle_file.write_text(yaml.dump(bundle_content))
+
+        stub = StatusStub(
+            application_statuses={"database": "active"},
+            unit_workload_statuses={"database/0": "active"},
+            unit_juju_statuses={"database/0": "idle"},
+        )
+        client = JubilantClientStub(client=stub)
+        backend = JubilantBackend(client)
+        captured_ready: Callable[[jubilant.Status], tuple[bool, JujuWaitState]] | None = None
+
+        def capture_wait(
+            model: str,
+            ready: Callable[[jubilant.Status], tuple[bool, JujuWaitState]],
+            **kwargs: Any,
+        ) -> None:
+            nonlocal captured_ready
+            captured_ready = ready
+
+        with (
+            patch("juju_jubilant.backend.JujuCmdBackend.deploy_bundle_file"),
+            patch.object(backend, "wait", side_effect=capture_wait),
+        ):
+            backend.deploy_bundle_file("test-model", str(bundle_file))
+
+        # WHEN the predicate is evaluated against a settled status
+        assert captured_ready is not None
+        result, _ = captured_ready(stub.status())
+
+        # THEN the predicate returns True
+        assert result is True

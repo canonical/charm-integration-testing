@@ -3,6 +3,7 @@
 
 
 import dataclasses
+import pathlib
 import re
 import time
 from datetime import datetime, timedelta
@@ -28,6 +29,7 @@ from .wait import (
     applications_are_removed,
     applications_are_scaled,
     applications_have_no_units,
+    bundle_applications_integrations_exist,
     integrations_are_removed,
     units_have_message,
 )
@@ -223,6 +225,13 @@ class JubilantBackend(JujuCmdBackend):
             "remove-secret",
             name_or_id,
         )
+
+    def deploy_bundle_file(self, model: str, bundle: str, timeout: timedelta | None = None) -> None:
+        if not pathlib.Path(bundle).is_file():
+            raise ValueError(f"Bundle file '{bundle}' not found.")
+        self.client.model(model).deploy(charm=pathlib.Path(bundle).resolve(), trust=True)
+
+        self.wait(model, lambda status: bundle_applications_integrations_exist(status, bundle), timeout=timeout)
 
     def deploy_application(
         self,

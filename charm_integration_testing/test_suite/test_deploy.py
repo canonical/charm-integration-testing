@@ -16,9 +16,8 @@ def test_deploy(
     bundles: list[str],
 ) -> None:
     # Deploy each bundle
-    wait_after_deploy = timedelta(seconds=10)
     for bundle in bundles:
-        juju_client.deploy_bundle_file(bundle, model=model, wait_after_deploy=wait_after_deploy)
+        juju_client.deploy_bundle_file(bundle, model=model)
 
     # Wait until idle
     juju_client.idle_for_period(model=model, timeout=timedelta(minutes=15))
