@@ -88,6 +88,7 @@ on:
         default: INFO
 env:
   DEBUG_SLEEP_SECONDS: 7200  # 2 hours
+  DEBUG_SLEEP_AFTER: ${{ inputs.debug_sleep_after }}
 jobs:
   execute-charm-test:
     name: Execute integration tests against the charms
@@ -106,19 +107,6 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
-      - name: Enable Debug Session
-        if: ${{ inputs.debug_sleep_after != 'none' }}
-        shell: bash
-        env:
-          SSH_IDS: ${{ inputs.debug_extra_ssh_imports }}
-        run: |
-          # Always include the GitHub Actor
-          mkdir --parents ~/.ssh/
-          ssh-import-id "gh:${GITHUB_ACTOR}"
-          SSH_IDS=$(echo "${SSH_IDS}" | tr ',' ' ')
-          ssh-import-id ${SSH_IDS} || true
-          echo "Debug mode enabled. SSH connection details:"
-          echo "ssh $(whoami)@$(hostname -I | cut -d ' ' -f 1)"
       - name: Create swap file
         shell: bash
         run: |
@@ -241,11 +229,8 @@ jobs:
           event_name: setup_o7k_failed
           detail: Setup of OpenStack cloud failed.
       - name: Debug Setup
-        if: ${{ !cancelled() && inputs.debug_sleep_after == 'setup' }}
-        shell: bash
-        run: |
-          echo "Sleeping to debug setup"
-          sleep ${DEBUG_SLEEP_SECONDS}
+        if: ${{ env.DEBUG_SLEEP_AFTER == 'setup' && !cancelled() }}
+        uses: canonical/action-tmate@main 
       - name: Install Repository
         shell: bash
         run: |
@@ -412,11 +397,8 @@ jobs:
           event_name: log_collection_finished
           detail: Log collection has completed.
       - name: Debug Post Log Collection
-        if: ${{ !cancelled() && inputs.debug_sleep_after == 'log_collection' }}
-        shell: bash
-        run: |
-          echo "Sleeping to debug post log collection"
-          sleep ${DEBUG_SLEEP_SECONDS}
+        if: ${{ env.DEBUG_SLEEP_AFTER == 'log_collection' && !cancelled() }}
+        uses: canonical/action-tmate@main 
       - name: Post links to Test Observer
         if: ${{ !cancelled() && steps.post_logs_to_swift.outcome == 'success' && env.TEST_OBSERVER_API != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-links
