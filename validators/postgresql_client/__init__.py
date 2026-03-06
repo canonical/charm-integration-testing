@@ -13,31 +13,6 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-[project]
-name = "validators-runner"
-version = "0.1.0"
-description = "Runs endpoint validators"
-authors = [
-    {name = "SQA Team", email = "solutionsqa@canonical.com"}
-]
+from .validator import PostgreSQLClientValidator
 
-requires-python = ">=3.10"
-dependencies = [
-    "ops>=3.3.0,<4.0.0",
-    "pydantic>=2.0.0",
-    "validators-base",
-    "validators-postgresql-client",
-]
-
-[build-system]
-requires = ["setuptools>=61.0"]
-build-backend = "setuptools.build_meta"
-
-[tool.setuptools]
-packages = ["validators.runner"]
-
-[tool.setuptools.package-dir]
-"validators.runner" = "."
-
-[project.scripts]
-run_validators = "validators.runner.runner:main"
+__all__ = ["PostgreSQLClientValidator"]
