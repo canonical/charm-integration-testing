@@ -13,9 +13,17 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+from dataclasses import dataclass
+
 import pytest
 
 from validators.base import BaseValidator, ValidationCheck, ValidationLevel, ValidationResult
+
+
+@dataclass
+class RelationStub:
+    name: str
+    id: int
 
 
 class ConcreteValidator(BaseValidator):
@@ -27,6 +35,7 @@ class ConcreteValidator(BaseValidator):
             endpoint=self.endpoint,
             interface="test-interface",
             level=level,
+            relation_id=self.relation_id,
         )
 
 
@@ -51,7 +60,9 @@ class TestValidationCheck:
 class TestValidationResult:
     def test_pass_result(self) -> None:
         # GIVEN / WHEN
-        result = ValidationResult(status="PASS", endpoint="db", interface="postgresql_client", level="simple")
+        result = ValidationResult(
+            status="PASS", endpoint="db", interface="postgresql_client", level="simple", relation_id=1
+        )
 
         # THEN
         assert result.status == "PASS"
@@ -71,6 +82,7 @@ class TestValidationResult:
             endpoint="db",
             interface="postgresql_client",
             level="simple",
+            relation_id=1,
             checks=checks,
         )
 
@@ -86,6 +98,7 @@ class TestValidationResult:
             endpoint="db",
             interface="postgresql_client",
             level="simple",
+            relation_id=1,
             error="Unexpected exception",
         )
 
@@ -100,6 +113,7 @@ class TestValidationResult:
             endpoint="db",
             interface="postgresql_client",
             level="simple",
+            relation_id=1,
         )
 
         # WHEN
@@ -114,17 +128,20 @@ class TestBaseValidator:
     def test_stores_charm_and_endpoint(self) -> None:
         # GIVEN
         charm = object()
+        relation = RelationStub(name="my-db", id=42)
 
         # WHEN
-        validator = ConcreteValidator(charm, "my-db")  # type: ignore[arg-type]
+        validator = ConcreteValidator(charm, relation)  # type: ignore[arg-type]
 
         # THEN
         assert validator.charm is charm
+        assert validator.relation is relation  # type: ignore[comparison-overlap]
         assert validator.endpoint == "my-db"
+        assert validator.relation_id == 42
 
     def test_validate_returns_result(self) -> None:
         # GIVEN
-        validator = ConcreteValidator(object(), "my-db")  # type: ignore[arg-type]
+        validator = ConcreteValidator(object(), RelationStub(name="my-db", id=0))  # type: ignore[arg-type]
 
         # WHEN
         result = validator.validate(level="simple")
@@ -137,4 +154,4 @@ class TestBaseValidator:
     def test_cannot_instantiate_abstract_class(self) -> None:
         # GIVEN / WHEN / THEN
         with pytest.raises(TypeError):
-            BaseValidator(object(), "endpoint")  # type: ignore[abstract, arg-type]
+            BaseValidator(object(), RelationStub(name="x", id=0))  # type: ignore[abstract, arg-type]

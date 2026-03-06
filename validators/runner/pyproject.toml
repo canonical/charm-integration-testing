@@ -24,6 +24,7 @@ authors = [
 requires-python = ">=3.10"
 dependencies = [
     "ops>=3.3.0,<4.0.0",
+    "pydantic>=2.0.0",
     "validators-base",
 ]
 

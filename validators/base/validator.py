@@ -33,17 +33,26 @@ class ValidationResult(BaseModel):
     endpoint: str
     interface: str
     level: ValidationLevel
+    relation_id: int
     checks: list[ValidationCheck] = Field(default_factory=list)
     error: Optional[str] = None
 
 
 class BaseValidator(ABC):
     charm: ops.CharmBase
-    endpoint: str
+    relation: ops.Relation
 
-    def __init__(self, charm: ops.CharmBase, endpoint: str) -> None:
+    def __init__(self, charm: ops.CharmBase, relation: ops.Relation) -> None:
         self.charm = charm
-        self.endpoint = endpoint
+        self.relation = relation
+
+    @property
+    def endpoint(self) -> str:
+        return self.relation.name
+
+    @property
+    def relation_id(self) -> int:
+        return self.relation.id
 
     @abstractmethod
     def validate(self, level: ValidationLevel = "simple") -> ValidationResult:

@@ -32,6 +32,7 @@ class PassingValidator(BaseValidator):
             endpoint=self.endpoint,
             interface="test-interface",
             level=level,
+            relation_id=self.relation_id,
         )
 
 
@@ -42,6 +43,7 @@ class FailingValidator(BaseValidator):
             endpoint=self.endpoint,
             interface="test-interface",
             level=level,
+            relation_id=self.relation_id,
         )
 
 
@@ -63,6 +65,7 @@ class EndpointMetadataStub:
 @dataclass
 class IntegrationStub:
     name: str
+    id: int = 0
 
 
 @dataclass
@@ -102,7 +105,9 @@ def _make_charm(requires: dict[str, Optional[str]], relations: dict[str, int]) -
     """
     return CharmStub(
         meta=MetaStub(requires={ep: EndpointMetadataStub(interface_name=iface) for ep, iface in requires.items()}),
-        model=ModelStub(relations={ep: [IntegrationStub(name=ep) for _ in range(n)] for ep, n in relations.items()}),
+        model=ModelStub(
+            relations={ep: [IntegrationStub(name=ep, id=i) for i in range(n)] for ep, n in relations.items()}
+        ),
     )
 
 
@@ -243,3 +248,4 @@ class TestValidatorRunnerRun:
 
         # THEN
         assert len(results.results) == 2
+        assert results.results[0].relation_id != results.results[1].relation_id

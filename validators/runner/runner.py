@@ -15,6 +15,7 @@
 
 import argparse
 import os
+import sys
 from importlib.metadata import entry_points
 from pathlib import Path
 from typing import get_args
@@ -46,11 +47,11 @@ class ValidatorRunner:
             try:
                 validator_cls = ep.load()
                 if not issubclass(validator_cls, BaseValidator):
-                    print(f"Entry point '{ep.name}' does not implement BaseValidator. Skipping.")
+                    print(f"Entry point '{ep.name}' does not implement BaseValidator. Skipping.", file=sys.stderr)
                     continue
                 validators.setdefault(ep.name, []).append(validator_cls)
             except Exception as exc:
-                print(f"Failed to load validator for '{ep.name}': {exc}")
+                print(f"Failed to load validator for '{ep.name}': {exc}", file=sys.stderr)
         return validators
 
     def run(self, charm: CharmBase, level: ValidationLevel) -> ValidatorRunnerResults:
@@ -67,7 +68,7 @@ class ValidatorRunner:
     ) -> list[ValidationResult]:
         results: list[ValidationResult] = []
         for validator_cls in self.validators.get(interface_name, []):
-            validator = validator_cls(charm, integration.name)
+            validator = validator_cls(charm, integration)
             try:
                 result = validator.validate(level=level)
                 results.append(result)
@@ -78,6 +79,7 @@ class ValidatorRunner:
                         endpoint=integration.name,
                         interface=interface_name,
                         level=level,
+                        relation_id=integration.id,
                         error=f"Validator '{validator_cls.__name__}' raised an exception: {exc}",
                     )
                 )
