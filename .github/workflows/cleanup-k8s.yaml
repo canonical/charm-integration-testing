@@ -36,7 +36,7 @@ on:
 jobs:
   cleanup-k8s:
     name: Clean up any leftover K8s artifacts from old Charm QA environments
-    runs-on: [self-hosted, charm_qa]
+    runs-on: [self-hosted, private-endpoint, linux]
     env:
       AGE_THRESHOLD: ${{ inputs.age_threshold }}
     steps:
