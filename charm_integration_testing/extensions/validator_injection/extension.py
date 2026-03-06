@@ -84,8 +84,8 @@ class ValidatorInjectorExtension(JujuExtension):
 
         # Install validators
         for cmd, desc in [
-            ("sudo apt-get update && sudo apt-get install -y python3-venv", "install venv"),
-            (f"sudo python3 -m venv {remote_validators_path}/.venv", "create venv"),
+            ("apt-get update && apt-get install -y python3-venv", "install venv"),
+            (f"python3 -m venv {remote_validators_path}/.venv", "create venv"),
             (
                 f"{proxy_env} {venv_python} -m pip install {remote_validators_path}/*",
                 "install validator packages",
