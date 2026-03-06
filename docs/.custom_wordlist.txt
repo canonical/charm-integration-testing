@@ -101,6 +101,7 @@ glauth
 postgresql
 Cardinality
 SCP
+SCPs
 validator
 validators
 virtualenv
