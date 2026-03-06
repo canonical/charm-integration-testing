@@ -75,6 +75,7 @@ class ValidatorRunner:
                 results.append(
                     ValidationResult(
                         status="ERROR",
+                        endpoint=integration.name,
                         interface=interface_name,
                         level=level,
                         error=f"Validator '{validator_cls.__name__}' raised an exception: {exc}",
