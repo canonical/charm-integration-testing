@@ -255,26 +255,6 @@ jobs:
           EOF
           pipx install poetry==2.0
           HTTPS_PROXY="http://squid.internal:3128" poetry install
-      - name: Post 'bundle_generated' event
-        if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
-        uses: ./.github/actions/test-observer/post-events
-        with:
-          test_observer_api: ${{ env.test_observer_api }}
-          test_observer_token: ${{ env.test_observer_token }}
-          test_execution_id: ${{ inputs.execution_id }}
-          job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
-          event_name: bundle_generated
-          detail: Bundle generated.
-      - name: Post 'bundle_generation_failed' event
-        if: ${{ failure() && env.test_observer_api != '' && inputs.execution_id != '' && steps.build_bundle.conclusion == 'failure' && steps.build_bundle.outputs.invalid_input != 'true' }}
-        uses: ./.github/actions/test-observer/post-events
-        with:
-          test_observer_api: ${{ env.test_observer_api }}
-          test_observer_token: ${{ env.test_observer_token }}
-          test_execution_id: ${{ inputs.execution_id }}
-          job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
-          event_name: bundle_generation_failed
-          detail: Bundle generation failed.
       - name: Post 'test_start' event
         if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-events
@@ -299,6 +279,7 @@ jobs:
           series: ${{ inputs.series }}
           neighbor: ${{ inputs.neighbor }}
           substrate: ${{ inputs.substrate }}
+          platform: ${{ 'machine' if inputs.substrate == 'openstack' else inputs.substrate }}
         run: |
           echo "junit_xml=$(realpath junit.xml)" >> $GITHUB_OUTPUT
           ./scripts/run-tests.sh \
@@ -314,7 +295,13 @@ jobs:
             --target-endpoint "${charm_endpoint}" \
             --neighbor-application "neighbor" \
             --neighbor-endpoint "${neighbor_endpoint}" \
-            --static-dir "./static" \
+            --platform "${platform}" \
+            --charm-metadata-overrides "./static/charm-metadata-overrides/" \
+            --charm-platform-overrides "./static/charm-platform-overrides/" \
+            --charm-listing-overrides "./static/charm-listing-overrides.yaml" \
+            --charm-test-configs "./static/charm-test-configs/" \
+            --charm-priorities-config "./static/charm-priorities.yaml" \
+            --charm-default-versions "./static/charm-default-versions.yaml" \
             --junit-xml=junit.xml
       - name: Post 'test_end' event
         if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}

@@ -147,10 +147,40 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         help="Substrate to deploy on (default: 'kubernetes').",
     )
     parser.addoption(
-        "--static-dir",
+        "--charm-metadata-overrides",
         type=str,
-        default="./static",
-        help="File path to the static directory containing the overrides configurations.",
+        default="./static/charm-metadata-overrides/",
+        help="Directory to the charm-metadata-overrides.",
+    )
+    parser.addoption(
+        "--charm-platform-overrides",
+        type=str,
+        default="./static/charm-platform-overrides/",
+        help="Directory to the charm-platform-overrides.",
+    )
+    parser.addoption(
+        "--charm-listing-overrides",
+        type=str,
+        default="./static/charm-listing-overrides.yaml",
+        help="Path to the charm-listing-overrides yaml.",
+    )
+    parser.addoption(
+        "--charm-test-configs",
+        type=str,
+        default="./static/charm-test-configs/",
+        help="Directory to the charm-test-configs.",
+    )
+    parser.addoption(
+        "--charm-priorities-config",
+        type=str,
+        default="./static/charm-priorities.yaml",
+        help="Path to the charm-priorities yaml.",
+    )
+    parser.addoption(
+        "--charm-default-versions",
+        type=str,
+        default="./static/charm-default-versions.yaml",
+        help="Path to the charm-default-versions yaml.",
     )
 
 
@@ -291,8 +321,78 @@ def substrate(request: pytest.FixtureRequest) -> str:
 
 
 @pytest.fixture
-def platform(substrate: str) -> str:
-    return "machine" if substrate == "openstack" else substrate
+def platform(request: pytest.FixtureRequest) -> str:
+    value = request.config.getoption("--platform")
+    if not value:
+        pytest.fail("--platform is required by this test but was not provided.")
+    assert isinstance(value, str)
+    return value
+
+
+@pytest.fixture
+def charm_metadata_overrides(request: pytest.FixtureRequest) -> Path:
+    value = request.config.getoption("--charm-metadata-overrides")
+    if not value:
+        pytest.fail("--charm-metadata-overrides is required by this test but was not provided.")
+    assert isinstance(value, str)
+    ppath = Path(value).resolve()
+    assert ppath.exists()
+    return ppath
+
+
+@pytest.fixture
+def charm_platform_overrides(request: pytest.FixtureRequest) -> Path:
+    value = request.config.getoption("--charm-platform-overrides")
+    if not value:
+        pytest.fail("--charm-platform-overrides is required by this test but was not provided.")
+    assert isinstance(value, str)
+    ppath = Path(value).resolve()
+    assert ppath.exists()
+    return ppath
+
+
+@pytest.fixture
+def charm_listing_overrides(request: pytest.FixtureRequest) -> Path:
+    value = request.config.getoption("--charm-listing-overrides")
+    if not value:
+        pytest.fail("--charm-listing-overrides is required by this test but was not provided.")
+    assert isinstance(value, str)
+    ppath = Path(value).resolve()
+    assert ppath.exists()
+    return ppath
+
+
+@pytest.fixture
+def charm_test_configs(request: pytest.FixtureRequest) -> Path:
+    value = request.config.getoption("--charm-test-configs")
+    if not value:
+        pytest.fail("--charm-test-configs is required by this test but was not provided.")
+    assert isinstance(value, str)
+    ppath = Path(value).resolve()
+    assert ppath.exists()
+    return ppath
+
+
+@pytest.fixture
+def charm_priorities_config(request: pytest.FixtureRequest) -> Path:
+    value = request.config.getoption("--charm-priorities-config")
+    if not value:
+        pytest.fail("--charm-priorities-config is required by this test but was not provided.")
+    assert isinstance(value, str)
+    ppath = Path(value).resolve()
+    assert ppath.exists()
+    return ppath
+
+
+@pytest.fixture
+def charm_default_versions(request: pytest.FixtureRequest) -> Path:
+    value = request.config.getoption("--charm-default-versions")
+    if not value:
+        pytest.fail("--charm-default-versions is required by this test but was not provided.")
+    assert isinstance(value, str)
+    ppath = Path(value).resolve()
+    assert ppath.exists()
+    return ppath
 
 
 @pytest.fixture
@@ -641,27 +741,3 @@ def record_pipeline_version_execution_metadata(
             warnings.warn(f"Failed to get pipeline workflow hash: {pipeline_result.stderr.strip()}")
     else:
         warnings.warn(f"Pipeline file not found: {pipeline_path}")
-
-
-@pytest.fixture
-def log_to_github_output() -> Iterator[Callable[[str], None]]:
-    GH_OUTPUT_PATH = os.environ.get("GITHUB_OUTPUT", "./mock-github-output.txt")
-
-    def _log_to_gh_output(message: str) -> None:
-        with open(GH_OUTPUT_PATH, "a") as f:
-            f.write(message)
-            f.flush()
-
-    yield _log_to_gh_output
-
-
-@pytest.fixture
-def log_to_github_step_summary() -> Iterator[Callable[[str], None]]:
-    GH_STEP_SUMMARY_PATH = os.environ.get("GITHUB_STEP_SUMMARY", "./mock-github-step-summary.txt")
-
-    def _log_to_gh_step_summary(message: str) -> None:
-        with open(GH_STEP_SUMMARY_PATH, "a") as f:
-            f.write(message)
-            f.flush()
-
-    yield _log_to_gh_step_summary
