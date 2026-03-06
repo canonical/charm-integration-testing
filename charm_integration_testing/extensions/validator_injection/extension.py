@@ -24,11 +24,11 @@ venv_runner = f"{remote_validators_path}/.venv/bin/run_validators"
 
 
 class ValidatorInjectorExtension(JujuExtension):
-    validators_path: Path
+    validators_path: Path | None
     juju: JujuBackend
     logger: logging.Logger
 
-    def __init__(self, validators_path: Path, juju: JujuBackend, logger: logging.Logger) -> None:
+    def __init__(self, validators_path: Path | None, juju: JujuBackend, logger: logging.Logger) -> None:
         self.validators_path = validators_path
         self.juju = juju
         self.logger = logger
@@ -40,7 +40,11 @@ class ValidatorInjectorExtension(JujuExtension):
 
     def _run_validators_on_unit(self, model: str, unit: str, level: str) -> None:
         # Inject validators
-        self._inject_validators(model, unit)
+        if self.juju.exec_unit(model, unit, f"test -f {venv_runner}").return_code != 0:
+            if not self.validators_path:
+                self.logger.warning(f"Validators path not provided, skipping injection on {unit}")
+                return
+            self._inject_validators(model, unit)
 
         # Run validators
         self.logger.debug(f"Running validation on unit {unit}")
@@ -70,9 +74,6 @@ class ValidatorInjectorExtension(JujuExtension):
             raise RuntimeError(f"Validation failures on {unit}: {', '.join(failures)}")
 
     def _inject_validators(self, model: str, unit: str) -> None:
-        # Check if validators are already installed
-        if self.juju.exec_unit(model, unit, f"test -f {venv_runner}").return_code == 0:
-            return
         self.logger.debug(f"Injecting validators on unit {unit}")
 
         # Copy validators
