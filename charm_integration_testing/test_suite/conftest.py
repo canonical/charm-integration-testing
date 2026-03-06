@@ -19,6 +19,7 @@ from extensions import (
     TemporalExtension,
     UnsealVaultJujuExtension,
     UnsealVaultK8sJujuExtension,
+    ValidatorInjectorExtension,
 )
 from juju import JujuBackend, JujuClient, JujuWaitTimeoutError
 from juju_jubilant import JubilantBackend
@@ -57,6 +58,7 @@ def juju_client(
     logger: logging.Logger,
     minio_client_file: Path | None,
     ubuntu_pro_token: str | None,
+    validators_path: Path | None,
 ) -> JujuClient:
     return JujuClient(
         juju_backend,
@@ -69,6 +71,7 @@ def juju_client(
             TemporalExtension(juju_backend, logger),
             UnsealVaultJujuExtension(juju_backend, logger),
             UnsealVaultK8sJujuExtension(juju_backend, logger),
+            ValidatorInjectorExtension(validators_path, juju_backend, logger),
         ],
     )
 
@@ -161,6 +164,16 @@ def neighbor_endpoint(request: pytest.FixtureRequest) -> str:
         pytest.fail("--neighbor-endpoint is required by this test but was not provided.")
     assert isinstance(value, str)
     return value
+
+
+@pytest.fixture
+def validators_path() -> Path | None:
+    file_path_env = os.environ.get("VALIDATORS_PATH")
+    if not file_path_env:
+        return None
+    file_path = Path(file_path_env.strip())
+    assert file_path.is_dir(), f"Validators path is invalid: {file_path}"
+    return file_path
 
 
 @pytest.fixture

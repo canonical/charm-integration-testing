@@ -42,6 +42,8 @@ The following environment variables are optional and only needed when testing sp
   Path to the MinIO client configuration file. Will be downloaded automatically by the test scripts if not provided. Used when deploying the `minio-k8s` charm with `s3-integrator`.
 ``UBUNTU_PRO_TOKEN``:
   Ubuntu Pro token for configuring the livepatch server. Required when testing the `canonical-livepatch-server-k8s`` charms.
+``VALIDATORS_PATH``:
+  Path to a local directory containing the validator packages (each a sub-directory with its own ``pyproject.toml``). When set, the test framework will SCP the directory to each unit under test, install the validators in a virtualenv, and run them after each validation phase. If not provided, validator injection is skipped. For example, ``${PWD}/validators``.
 
 Set up Juju and k8s
 -------------------

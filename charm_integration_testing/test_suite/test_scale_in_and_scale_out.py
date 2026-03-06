@@ -26,3 +26,6 @@ def test_scale_in_and_scale_out_charm(juju_client: JujuClient, model: str, targe
 
     # Wait for return to idle
     juju_client.idle_for_period(model=model, timeout=timedelta(minutes=15))
+
+    # Validate all applications and relations
+    juju_client.validate_model(model=model, level="simple")

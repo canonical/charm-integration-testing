@@ -6,6 +6,7 @@ from .database_replication import PostgresqlDatabaseReplicationExtension, Postgr
 from .s3_integrator_minio_backend import S3IntegratorMinIOBackendExtension
 from .temporal import TemporalExtension
 from .unseal_vault import UnsealVaultJujuExtension, UnsealVaultK8sJujuExtension
+from .validator_injection import ValidatorInjectorExtension
 
 __all__ = [
     "ConfigureLivepatchServerExtension",
@@ -15,4 +16,5 @@ __all__ = [
     "TemporalExtension",
     "UnsealVaultJujuExtension",
     "UnsealVaultK8sJujuExtension",
+    "ValidatorInjectorExtension",
 ]

@@ -29,3 +29,6 @@ def test_idempotent_redeploy(
     assert juju_client.application_exists(
         target_application, model=model
     ), f"Application '{target_application}' was not found after redeploy"
+
+    # Validate all applications and relations
+    juju_client.validate_model(model=model, level="simple")
