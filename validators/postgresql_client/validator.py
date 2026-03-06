@@ -13,8 +13,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import ops
-import psycopg2  # type: ignore[import-untyped]
+import psycopg2
 
 from validators.base import BaseValidator, ValidationCheck, ValidationLevel, ValidationResult
 

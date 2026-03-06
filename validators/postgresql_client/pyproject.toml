@@ -27,6 +27,11 @@ dependencies = [
     "validators-base",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "types-psycopg2",
+]
+
 [project.entry-points."endpoint_validators"]
 postgresql_client = "validators.postgresql_client:PostgreSQLClientValidator"
 

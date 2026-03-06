@@ -18,7 +18,7 @@ from typing import cast
 from unittest.mock import patch
 
 import ops
-import psycopg2  # type: ignore[import-untyped]
+import psycopg2
 
 from validators.postgresql_client.validator import PostgreSQLClientValidator
 
@@ -41,11 +41,6 @@ class RelationStub:
 
 class CharmStub:
     pass
-
-
-def _make_charm(databag: dict[str, str], name: str = "db") -> ops.CharmBase:
-    app = AppStub()
-    return cast(ops.CharmBase, CharmStub())
 
 
 def _make_validator(databag: dict[str, str], endpoint: str = "db") -> PostgreSQLClientValidator:
