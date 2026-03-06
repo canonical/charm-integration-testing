@@ -227,7 +227,7 @@ jobs:
           detail: Setup of OpenStack cloud failed.
       - name: Debug Setup
         if: ${{ env.DEBUG_SLEEP_AFTER == 'setup' && !cancelled() }}
-        uses: canonical/action-tmate@main 
+        uses: canonical/action-tmate@main # zizmor: ignore[unpinned-uses] no releases in the repo
       - name: Install Repository
         shell: bash
         run: |
@@ -550,7 +550,7 @@ jobs:
           detail: Log collection has completed.
       - name: Debug Post Log Collection
         if: ${{ env.DEBUG_SLEEP_AFTER == 'log_collection' && !cancelled() }}
-        uses: canonical/action-tmate@main 
+        uses: canonical/action-tmate@main # zizmor: ignore[unpinned-uses] no releases in the repo
       - name: Post links to Test Observer
         if: ${{ !cancelled() && steps.post_logs_to_swift.outcome == 'success' && env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-links
