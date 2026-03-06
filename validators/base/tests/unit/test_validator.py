@@ -113,7 +113,7 @@ class TestValidationResult:
 class TestBaseValidator:
     def test_stores_charm_and_endpoint(self) -> None:
         # GIVEN
-        charm = object()  # type: ignore[assignment]
+        charm = object()
 
         # WHEN
         validator = ConcreteValidator(charm, "my-db")  # type: ignore[arg-type]
