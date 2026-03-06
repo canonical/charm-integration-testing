@@ -32,27 +32,27 @@ class AppStub:
 
 
 class RelationStub:
-    def __init__(self, app: AppStub | None, databag: dict[str, str]) -> None:
+    def __init__(self, app: AppStub | None, databag: dict[str, str], name: str = "db", id: int = 0) -> None:
         self.app = app
+        self.name = name
+        self.id = id
         self.data: dict[AppStub | None, dict[str, str]] = {app: databag}
 
 
-class ModelStub:
-    def __init__(self, relation: RelationStub | None = None) -> None:
-        self._relation = relation
-
-    def get_relation(self, endpoint: str) -> RelationStub | None:
-        return self._relation
-
-
 class CharmStub:
-    def __init__(self, model: ModelStub) -> None:
-        self.model = model
+    pass
 
 
-def _make_charm(databag: dict[str, str]) -> ops.CharmBase:
+def _make_charm(databag: dict[str, str], name: str = "db") -> ops.CharmBase:
     app = AppStub()
-    return cast(ops.CharmBase, CharmStub(model=ModelStub(relation=RelationStub(app=app, databag=databag))))
+    return cast(ops.CharmBase, CharmStub())
+
+
+def _make_validator(databag: dict[str, str], endpoint: str = "db") -> PostgreSQLClientValidator:
+    app = AppStub()
+    relation = RelationStub(app=app, databag=databag, name=endpoint)
+    charm = cast(ops.CharmBase, CharmStub())
+    return PostgreSQLClientValidator(charm, cast(ops.Relation, relation))
 
 
 @dataclass
@@ -104,7 +104,7 @@ VALID_DATABAG: dict[str, str] = {
 class TestPostgreSQLClientValidatorSimple:
     def test_returns_error_for_unsupported_level(self) -> None:
         # GIVEN
-        validator = PostgreSQLClientValidator(_make_charm(VALID_DATABAG), "db")
+        validator = _make_validator(VALID_DATABAG)
 
         # WHEN
         result = validator.validate(level="deep")
@@ -114,22 +114,10 @@ class TestPostgreSQLClientValidatorSimple:
         assert result.error is not None
         assert "not yet implemented" in result.error
 
-    def test_returns_error_when_relation_is_none(self) -> None:
-        # GIVEN a charm with no relation
-        charm = cast(ops.CharmBase, CharmStub(model=ModelStub(relation=None)))
-        validator = PostgreSQLClientValidator(charm, "db")
-
-        # WHEN
-        result = validator.validate(level="simple")
-
-        # THEN
-        assert result.status == "ERROR"
-        assert result.error is not None
-
     def test_returns_error_when_relation_app_is_none(self) -> None:
         # GIVEN a relation whose remote app is not yet known
-        charm = cast(ops.CharmBase, CharmStub(model=ModelStub(relation=RelationStub(app=None, databag={}))))
-        validator = PostgreSQLClientValidator(charm, "db")
+        relation = RelationStub(app=None, databag={})
+        validator = PostgreSQLClientValidator(cast(ops.CharmBase, CharmStub()), cast(ops.Relation, relation))
 
         # WHEN
         result = validator.validate(level="simple")
@@ -139,7 +127,7 @@ class TestPostgreSQLClientValidatorSimple:
 
     def test_fails_schema_check_when_required_fields_missing(self) -> None:
         # GIVEN a databag with missing required fields
-        validator = PostgreSQLClientValidator(_make_charm({"endpoints": "10.1.2.3:5432"}), "db")
+        validator = _make_validator({"endpoints": "10.1.2.3:5432"})
 
         # WHEN
         result = validator.validate(level="simple")
@@ -154,7 +142,7 @@ class TestPostgreSQLClientValidatorSimple:
 
     def test_passes_schema_check_with_all_required_fields(self) -> None:
         # GIVEN a complete databag and a successful DB connection
-        validator = PostgreSQLClientValidator(_make_charm(VALID_DATABAG), "db")
+        validator = _make_validator(VALID_DATABAG)
 
         with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=ConnStub()):
             # WHEN
@@ -167,7 +155,7 @@ class TestPostgreSQLClientValidatorSimple:
 
     def test_fails_connect_check_when_db_unreachable(self) -> None:
         # GIVEN a complete databag but a DB that refuses connections
-        validator = PostgreSQLClientValidator(_make_charm(VALID_DATABAG), "db")
+        validator = _make_validator(VALID_DATABAG)
 
         with patch(
             "validators.postgresql_client.validator.psycopg2.connect",
@@ -184,7 +172,7 @@ class TestPostgreSQLClientValidatorSimple:
 
     def test_fails_query_check_when_select_raises(self) -> None:
         # GIVEN a connection that succeeds but the canary query raises
-        validator = PostgreSQLClientValidator(_make_charm(VALID_DATABAG), "db")
+        validator = _make_validator(VALID_DATABAG)
         conn = ConnStub(cursor_stub=CursorStub(execute_error=psycopg2.DatabaseError("query error")))
 
         with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn):
@@ -198,7 +186,7 @@ class TestPostgreSQLClientValidatorSimple:
 
     def test_sets_endpoint_and_interface_on_result(self) -> None:
         # GIVEN
-        validator = PostgreSQLClientValidator(_make_charm(VALID_DATABAG), "my-endpoint")
+        validator = _make_validator(VALID_DATABAG, endpoint="my-endpoint")
 
         with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=ConnStub()):
             # WHEN

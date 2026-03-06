@@ -22,9 +22,6 @@ from validators.base import BaseValidator, ValidationCheck, ValidationLevel, Val
 class PostgreSQLClientValidator(BaseValidator):
     interface = "postgresql_client"
 
-    def __init__(self, charm: ops.CharmBase, endpoint: str) -> None:
-        super().__init__(charm, endpoint)
-
     def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
         if level != "simple":
             return ValidationResult(
@@ -32,23 +29,24 @@ class PostgreSQLClientValidator(BaseValidator):
                 endpoint=self.endpoint,
                 interface=self.interface,
                 level=level,
+                relation_id=self.relation_id,
                 error=f"Level '{level}' is not yet implemented.",
             )
 
         checks: list[ValidationCheck] = []
 
-        # --- 1. Relation exists ---
-        relation = self.charm.model.get_relation(self.endpoint)
-        if relation is None or relation.app is None:
+        # --- 1. Remote app presence ---
+        if self.relation.app is None:
             return ValidationResult(
                 status="ERROR",
                 endpoint=self.endpoint,
                 interface=self.interface,
                 level="simple",
-                error=f"No relation found for '{self.endpoint}'.",
+                relation_id=self.relation_id,
+                error=f"No remote application on relation '{self.endpoint}'.",
             )
 
-        databag = dict(relation.data[relation.app])
+        databag = dict(self.relation.data[self.relation.app])
 
         # --- 2. Resolve credentials (plain fields or Juju secrets) ---
         def resolve_secret(uri_key: str, *fields: str) -> dict[str, str]:
@@ -72,7 +70,12 @@ class PostgreSQLClientValidator(BaseValidator):
         )
         if missing:
             return ValidationResult(
-                status="FAIL", endpoint=self.endpoint, interface=self.interface, level="simple", checks=checks
+                status="FAIL",
+                endpoint=self.endpoint,
+                interface=self.interface,
+                level="simple",
+                relation_id=self.relation_id,
+                checks=checks,
             )
 
         # --- 4. Connect ---
@@ -91,7 +94,12 @@ class PostgreSQLClientValidator(BaseValidator):
         except Exception as exc:
             checks.append(ValidationCheck(name="connect", passed=False, message=str(exc)))
             return ValidationResult(
-                status="FAIL", endpoint=self.endpoint, interface=self.interface, level="simple", checks=checks
+                status="FAIL",
+                endpoint=self.endpoint,
+                interface=self.interface,
+                level="simple",
+                relation_id=self.relation_id,
+                checks=checks,
             )
 
         # --- 5. Canary query ---
@@ -106,5 +114,10 @@ class PostgreSQLClientValidator(BaseValidator):
 
         status = "PASS" if all(c.passed for c in checks) else "FAIL"
         return ValidationResult(
-            status=status, endpoint=self.endpoint, interface=self.interface, level="simple", checks=checks
+            status=status,
+            endpoint=self.endpoint,
+            interface=self.interface,
+            level="simple",
+            relation_id=self.relation_id,
+            checks=checks,
         )
