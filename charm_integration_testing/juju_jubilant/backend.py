@@ -251,10 +251,9 @@ class JubilantBackend(JujuCmdBackend):
         return {k: v for k, v in self.client.model(model).config(application).items()}
 
     def scp(self, model: str, source: str, destination: str) -> None:
-        self.client.model(model).scp(
-            source=source,
-            destination=destination,
-        )
+        # Jubilant scp doesn't work for directories
+        # https://github.com/canonical/jubilant/issues/266
+        self.client.model(model).cli("scp", source, destination)
 
     def ssh(self, model: str, application: str, command: str) -> None:
         self.client.model(model).ssh(
@@ -327,3 +326,7 @@ class JubilantBackend(JujuCmdBackend):
 
     def version(self, model: str) -> str:
         return str(self.client.model(model).version())
+
+    def validate_application(self, model: str, application: str, level: str) -> None:
+        # Phase 2 endpoint validation will be done here
+        pass

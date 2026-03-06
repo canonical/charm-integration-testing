@@ -29,6 +29,7 @@ poetry run bandit \
         charm_integration_testing/serializeable_dataclass \
         charm_integration_testing/test_suite \
         bundle_builder/bundle_builder \
+        validators \
         scripts \
     || die 'Failed on "bandit"'
 poetry run mypy bundle_builder || die 'Failed on "mypy bundle_builder"'

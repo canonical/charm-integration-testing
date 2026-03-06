@@ -13,3 +13,6 @@ class JujuExtension(ABC):
 
     def pre_remove(self, model: str, *applications: str) -> None:
         pass
+
+    def post_validate(self, model: str, application: str, level: str) -> None:
+        pass
