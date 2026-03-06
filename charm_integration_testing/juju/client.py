@@ -168,9 +168,6 @@ class JujuClient:
         Args:
             model: Juju model name
             level: Validation level ("simple" or "deep", default: "simple")
-
-        Raises:
-            ValidationFailureError: If any application validation fails (from extensions)
         """
         for application in self.list_applications(model):
             self.logger.info(f"Validating application '{application}' (level={level})")
