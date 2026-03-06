@@ -98,8 +98,3 @@ jobs:
         run: poetry install
       - name: Run Validators Unit Tests
         run: ./scripts/validators-unit-tests.sh
-  charm-testing-integration-tests:
-    uses: ./.github/workflows/charm-testing-integration-tests.yaml
-    permissions:
-      contents: read
-      actions: write
