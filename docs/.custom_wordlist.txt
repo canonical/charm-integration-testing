@@ -100,3 +100,7 @@ mongodb
 glauth
 postgresql
 Cardinality
+SCP
+validator
+validators
+virtualenv
