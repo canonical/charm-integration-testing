@@ -781,12 +781,10 @@ class TestJubilantBackend:
     class TestScp:
         @dataclass
         class ScpStub:
-            source: str = ""
-            destination: str = ""
+            args: list[str] = field(default_factory=list)
 
-            def scp(self, source: str, destination: str) -> None:
-                self.source = source
-                self.destination = destination
+            def cli(self, *args: str) -> None:
+                self.args = list(args)
 
         def test(self) -> None:
             # GIVEN
@@ -797,8 +795,7 @@ class TestJubilantBackend:
             JubilantBackend(client).scp("test-model", source="a", destination="b")
 
             # THEN
-            assert stub.source == "a"
-            assert stub.destination == "b"
+            assert stub.args == ["scp", "a", "b"]
 
     class TestSsh:
         @dataclass
