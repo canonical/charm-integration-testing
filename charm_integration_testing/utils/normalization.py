@@ -195,6 +195,7 @@ def _normalize_temp_files(text: str) -> str:
     Returns:
         Text with temp file suffixes normalized
     """
+    # nosec B108 - not creating a temp file; just matching "/tmp..." in a string for normalization
     return re.sub(r"/tmp[a-zA-Z0-9_]+", "/tmp<TEMP>", text)
 
 

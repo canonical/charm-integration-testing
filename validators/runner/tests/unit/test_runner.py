@@ -13,12 +13,16 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from importlib.metadata import EntryPoint
-from typing import Any
-from unittest.mock import MagicMock, patch
+from dataclasses import dataclass, field
+from typing import Optional
+from unittest.mock import patch
 
 from validators.base import BaseValidator, ValidationLevel, ValidationResult
 from validators.runner.runner import ValidatorRunner, ValidatorRunnerResults
+
+# ---------------------------------------------------------------------------
+# Validator stubs
+# ---------------------------------------------------------------------------
 
 
 class PassingValidator(BaseValidator):
@@ -46,19 +50,60 @@ class ExplodingValidator(BaseValidator):
         raise RuntimeError("something went wrong")
 
 
-def _make_charm_stub(requires: dict[str, str], relations: dict[str, list[Any]]) -> MagicMock:
-    """Build a minimal CharmBase stub with requires metadata and model relations."""
-    charm = MagicMock()
-    charm.meta.requires = {endpoint: MagicMock(interface_name=interface) for endpoint, interface in requires.items()}
-    charm.model.relations = {}
-    for endpoint, integrations in relations.items():
-        mocks = []
-        for _ in integrations:
-            m = MagicMock()
-            m.name = endpoint
-            mocks.append(m)
-        charm.model.relations[endpoint] = mocks
-    return charm
+# ---------------------------------------------------------------------------
+# Charm / entry-point stubs
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class EndpointMetadataStub:
+    interface_name: Optional[str]
+
+
+@dataclass
+class IntegrationStub:
+    name: str
+
+
+@dataclass
+class ModelStub:
+    relations: dict[str, list[IntegrationStub]]
+
+
+@dataclass
+class MetaStub:
+    requires: dict[str, EndpointMetadataStub]
+
+
+@dataclass
+class CharmStub:
+    meta: MetaStub
+    model: ModelStub
+
+
+@dataclass
+class EntryPointStub:
+    name: str
+    _load_result: type = field(default=PassingValidator)
+    _load_error: Optional[Exception] = field(default=None)
+
+    def load(self) -> type:
+        if self._load_error is not None:
+            raise self._load_error
+        return self._load_result
+
+
+def _make_charm(requires: dict[str, Optional[str]], relations: dict[str, int]) -> CharmStub:
+    """Build a CharmStub.
+
+    Args:
+        requires: mapping of endpoint name -> interface name (or None for fallback test).
+        relations: mapping of endpoint name -> number of integrations.
+    """
+    return CharmStub(
+        meta=MetaStub(requires={ep: EndpointMetadataStub(interface_name=iface) for ep, iface in requires.items()}),
+        model=ModelStub(relations={ep: [IntegrationStub(name=ep) for _ in range(n)] for ep, n in relations.items()}),
+    )
 
 
 class TestValidatorRunnerLoadValidators:
@@ -67,9 +112,7 @@ class TestValidatorRunnerLoadValidators:
         class NotAValidator:
             pass
 
-        ep = MagicMock(spec=EntryPoint)
-        ep.name = "test-interface"
-        ep.load.return_value = NotAValidator
+        ep = EntryPointStub(name="test-interface", _load_result=NotAValidator)
 
         with patch("validators.runner.runner.entry_points", return_value=[ep]):
             # WHEN
@@ -80,9 +123,7 @@ class TestValidatorRunnerLoadValidators:
 
     def test_skips_entry_points_that_fail_to_load(self) -> None:
         # GIVEN an entry point that raises on load
-        ep = MagicMock(spec=EntryPoint)
-        ep.name = "test-interface"
-        ep.load.side_effect = ImportError("missing dep")
+        ep = EntryPointStub(name="test-interface", _load_error=ImportError("missing dep"))
 
         with patch("validators.runner.runner.entry_points", return_value=[ep]):
             # WHEN
@@ -93,9 +134,7 @@ class TestValidatorRunnerLoadValidators:
 
     def test_loads_valid_validator(self) -> None:
         # GIVEN a well-formed entry point
-        ep = MagicMock(spec=EntryPoint)
-        ep.name = "test-interface"
-        ep.load.return_value = PassingValidator
+        ep = EntryPointStub(name="test-interface", _load_result=PassingValidator)
 
         with patch("validators.runner.runner.entry_points", return_value=[ep]):
             # WHEN
@@ -107,13 +146,8 @@ class TestValidatorRunnerLoadValidators:
 
     def test_groups_multiple_validators_under_same_interface(self) -> None:
         # GIVEN two entry points for the same interface name
-        ep1 = MagicMock(spec=EntryPoint)
-        ep1.name = "test-interface"
-        ep1.load.return_value = PassingValidator
-
-        ep2 = MagicMock(spec=EntryPoint)
-        ep2.name = "test-interface"
-        ep2.load.return_value = FailingValidator
+        ep1 = EntryPointStub(name="test-interface", _load_result=PassingValidator)
+        ep2 = EntryPointStub(name="test-interface", _load_result=FailingValidator)
 
         with patch("validators.runner.runner.entry_points", return_value=[ep1, ep2]):
             # WHEN
@@ -132,13 +166,10 @@ class TestValidatorRunnerRun:
     def test_returns_pass_result(self) -> None:
         # GIVEN
         runner = self._runner_with("test-interface", PassingValidator)
-        charm = _make_charm_stub(
-            requires={"db": "test-interface"},
-            relations={"db": [MagicMock()]},
-        )
+        charm = _make_charm(requires={"db": "test-interface"}, relations={"db": 1})
 
         # WHEN
-        results = runner.run(charm, level="simple")
+        results = runner.run(charm, level="simple")  # type: ignore[arg-type]
 
         # THEN
         assert isinstance(results, ValidatorRunnerResults)
@@ -148,13 +179,10 @@ class TestValidatorRunnerRun:
     def test_returns_fail_result(self) -> None:
         # GIVEN
         runner = self._runner_with("test-interface", FailingValidator)
-        charm = _make_charm_stub(
-            requires={"db": "test-interface"},
-            relations={"db": [MagicMock()]},
-        )
+        charm = _make_charm(requires={"db": "test-interface"}, relations={"db": 1})
 
         # WHEN
-        results = runner.run(charm, level="simple")
+        results = runner.run(charm, level="simple")  # type: ignore[arg-type]
 
         # THEN
         assert results.results[0].status == "FAIL"
@@ -162,13 +190,10 @@ class TestValidatorRunnerRun:
     def test_captures_validator_exception_as_error(self) -> None:
         # GIVEN
         runner = self._runner_with("test-interface", ExplodingValidator)
-        charm = _make_charm_stub(
-            requires={"db": "test-interface"},
-            relations={"db": [MagicMock()]},
-        )
+        charm = _make_charm(requires={"db": "test-interface"}, relations={"db": 1})
 
         # WHEN
-        results = runner.run(charm, level="simple")
+        results = runner.run(charm, level="simple")  # type: ignore[arg-type]
 
         # THEN
         assert results.results[0].status == "ERROR"
@@ -178,13 +203,10 @@ class TestValidatorRunnerRun:
         # GIVEN a runner with no validators for the endpoint's interface
         runner = ValidatorRunner.__new__(ValidatorRunner)
         runner.validators = {}
-        charm = _make_charm_stub(
-            requires={"db": "test-interface"},
-            relations={"db": [MagicMock()]},
-        )
+        charm = _make_charm(requires={"db": "test-interface"}, relations={"db": 1})
 
         # WHEN
-        results = runner.run(charm, level="simple")
+        results = runner.run(charm, level="simple")  # type: ignore[arg-type]
 
         # THEN
         assert results.results == []
@@ -192,14 +214,10 @@ class TestValidatorRunnerRun:
     def test_uses_endpoint_name_as_fallback_when_interface_is_none(self) -> None:
         # GIVEN an endpoint whose interface_name is None
         runner = self._runner_with("db", PassingValidator)
-        integration = MagicMock()
-        integration.name = "db"
-        charm = MagicMock()
-        charm.meta.requires = {"db": MagicMock(interface_name=None)}
-        charm.model.relations = {"db": [integration]}
+        charm = _make_charm(requires={"db": None}, relations={"db": 1})
 
         # WHEN
-        results = runner.run(charm, level="simple")
+        results = runner.run(charm, level="simple")  # type: ignore[arg-type]
 
         # THEN
         assert results.results[0].status == "PASS"
@@ -207,13 +225,10 @@ class TestValidatorRunnerRun:
     def test_passes_level_to_validator(self) -> None:
         # GIVEN
         runner = self._runner_with("test-interface", PassingValidator)
-        charm = _make_charm_stub(
-            requires={"db": "test-interface"},
-            relations={"db": [MagicMock()]},
-        )
+        charm = _make_charm(requires={"db": "test-interface"}, relations={"db": 1})
 
         # WHEN
-        results = runner.run(charm, level="deep")
+        results = runner.run(charm, level="deep")  # type: ignore[arg-type]
 
         # THEN
         assert results.results[0].level == "deep"
@@ -221,13 +236,10 @@ class TestValidatorRunnerRun:
     def test_runs_across_multiple_integrations(self) -> None:
         # GIVEN two integrations on the same endpoint
         runner = self._runner_with("test-interface", PassingValidator)
-        charm = _make_charm_stub(
-            requires={"db": "test-interface"},
-            relations={"db": [MagicMock(), MagicMock()]},
-        )
+        charm = _make_charm(requires={"db": "test-interface"}, relations={"db": 2})
 
         # WHEN
-        results = runner.run(charm, level="simple")
+        results = runner.run(charm, level="simple")  # type: ignore[arg-type]
 
         # THEN
         assert len(results.results) == 2

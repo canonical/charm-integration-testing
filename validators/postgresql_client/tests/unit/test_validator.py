@@ -13,23 +13,79 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from unittest.mock import MagicMock, patch
+from dataclasses import dataclass, field
+from unittest.mock import patch
 
 import psycopg2
 
 from validators.postgresql_client.validator import PostgreSQLClientValidator
 
+# ---------------------------------------------------------------------------
+# Stubs
+# ---------------------------------------------------------------------------
 
-def _make_charm(databag: dict[str, str], endpoint: str = "db") -> MagicMock:
-    """Build a minimal charm stub with a single relation app databag."""
-    relation = MagicMock()
-    relation.app = MagicMock()
-    relation.data = {relation.app: databag}
 
-    charm = MagicMock()
-    charm.model.get_relation.return_value = relation
-    return charm
+class AppStub:
+    """Minimal stand-in for ops.Application.  Must be hashable (dict key)."""
 
+
+class RelationStub:
+    def __init__(self, app: AppStub | None, databag: dict[str, str]) -> None:
+        self.app = app
+        self.data: dict[AppStub | None, dict[str, str]] = {app: databag}
+
+
+class ModelStub:
+    def __init__(self, relation: RelationStub | None = None) -> None:
+        self._relation = relation
+
+    def get_relation(self, endpoint: str) -> RelationStub | None:
+        return self._relation
+
+
+class CharmStub:
+    def __init__(self, model: ModelStub) -> None:
+        self.model = model
+
+
+def _make_charm(databag: dict[str, str]) -> CharmStub:
+    app = AppStub()
+    return CharmStub(model=ModelStub(relation=RelationStub(app=app, databag=databag)))
+
+
+@dataclass
+class CursorStub:
+    """Minimal cursor context manager; raises execute_error if set."""
+
+    execute_error: Exception | None = None
+
+    def execute(self, query: str) -> None:
+        if self.execute_error:
+            raise self.execute_error
+
+    def __enter__(self) -> "CursorStub":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        pass
+
+
+@dataclass
+class ConnStub:
+    """Minimal connection stub; cursor_stub is returned by cursor()."""
+
+    cursor_stub: CursorStub = field(default_factory=CursorStub)
+
+    def cursor(self) -> CursorStub:
+        return self.cursor_stub
+
+    def close(self) -> None:
+        pass
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
 
 VALID_DATABAG: dict[str, str] = {
     "endpoints": "10.1.2.3:5432",
@@ -38,12 +94,15 @@ VALID_DATABAG: dict[str, str] = {
     "password": "mypassword",
 }
 
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+
 
 class TestPostgreSQLClientValidatorSimple:
     def test_returns_error_for_unsupported_level(self) -> None:
         # GIVEN
-        charm = _make_charm(VALID_DATABAG)
-        validator = PostgreSQLClientValidator(charm, "db")
+        validator = PostgreSQLClientValidator(_make_charm(VALID_DATABAG), "db")
 
         # WHEN
         result = validator.validate(level="deep")
@@ -55,8 +114,7 @@ class TestPostgreSQLClientValidatorSimple:
 
     def test_returns_error_when_relation_is_none(self) -> None:
         # GIVEN a charm with no relation
-        charm = MagicMock()
-        charm.model.get_relation.return_value = None
+        charm = CharmStub(model=ModelStub(relation=None))
         validator = PostgreSQLClientValidator(charm, "db")
 
         # WHEN
@@ -67,11 +125,8 @@ class TestPostgreSQLClientValidatorSimple:
         assert result.error is not None
 
     def test_returns_error_when_relation_app_is_none(self) -> None:
-        # GIVEN a relation with no app
-        relation = MagicMock()
-        relation.app = None
-        charm = MagicMock()
-        charm.model.get_relation.return_value = relation
+        # GIVEN a relation whose remote app is not yet known
+        charm = CharmStub(model=ModelStub(relation=RelationStub(app=None, databag={})))
         validator = PostgreSQLClientValidator(charm, "db")
 
         # WHEN
@@ -82,8 +137,7 @@ class TestPostgreSQLClientValidatorSimple:
 
     def test_fails_schema_check_when_required_fields_missing(self) -> None:
         # GIVEN a databag with missing required fields
-        charm = _make_charm({"endpoints": "10.1.2.3:5432"})
-        validator = PostgreSQLClientValidator(charm, "db")
+        validator = PostgreSQLClientValidator(_make_charm({"endpoints": "10.1.2.3:5432"}), "db")
 
         # WHEN
         result = validator.validate(level="simple")
@@ -98,18 +152,9 @@ class TestPostgreSQLClientValidatorSimple:
 
     def test_passes_schema_check_with_all_required_fields(self) -> None:
         # GIVEN a complete databag and a successful DB connection
-        charm = _make_charm(VALID_DATABAG)
-        validator = PostgreSQLClientValidator(charm, "db")
+        validator = PostgreSQLClientValidator(_make_charm(VALID_DATABAG), "db")
 
-        mock_conn = MagicMock()
-        mock_cursor = MagicMock()
-        mock_conn.__enter__ = MagicMock(return_value=mock_conn)
-        mock_conn.__exit__ = MagicMock(return_value=False)
-        mock_cursor.__enter__ = MagicMock(return_value=mock_cursor)
-        mock_cursor.__exit__ = MagicMock(return_value=False)
-        mock_conn.cursor.return_value = mock_cursor
-
-        with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=mock_conn):
+        with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=ConnStub()):
             # WHEN
             result = validator.validate(level="simple")
 
@@ -120,8 +165,7 @@ class TestPostgreSQLClientValidatorSimple:
 
     def test_fails_connect_check_when_db_unreachable(self) -> None:
         # GIVEN a complete databag but a DB that refuses connections
-        charm = _make_charm(VALID_DATABAG)
-        validator = PostgreSQLClientValidator(charm, "db")
+        validator = PostgreSQLClientValidator(_make_charm(VALID_DATABAG), "db")
 
         with patch(
             "validators.postgresql_client.validator.psycopg2.connect",
@@ -137,17 +181,11 @@ class TestPostgreSQLClientValidatorSimple:
         assert "Connection refused" in connect_check.message
 
     def test_fails_query_check_when_select_raises(self) -> None:
-        # GIVEN a connection that succeeds but raises on SELECT 1
-        charm = _make_charm(VALID_DATABAG)
-        validator = PostgreSQLClientValidator(charm, "db")
+        # GIVEN a connection that succeeds but the canary query raises
+        validator = PostgreSQLClientValidator(_make_charm(VALID_DATABAG), "db")
+        conn = ConnStub(cursor_stub=CursorStub(execute_error=psycopg2.DatabaseError("query error")))
 
-        mock_conn = MagicMock()
-        mock_cursor = MagicMock()
-        mock_cursor.execute.side_effect = psycopg2.DatabaseError("query error")
-        mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
-        mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
-
-        with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=mock_conn):
+        with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn):
             # WHEN
             result = validator.validate(level="simple")
 
@@ -158,15 +196,9 @@ class TestPostgreSQLClientValidatorSimple:
 
     def test_sets_endpoint_and_interface_on_result(self) -> None:
         # GIVEN
-        charm = _make_charm(VALID_DATABAG)
-        validator = PostgreSQLClientValidator(charm, "my-endpoint")
+        validator = PostgreSQLClientValidator(_make_charm(VALID_DATABAG), "my-endpoint")
 
-        mock_conn = MagicMock()
-        mock_cursor = MagicMock()
-        mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
-        mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
-
-        with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=mock_conn):
+        with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=ConnStub()):
             # WHEN
             result = validator.validate(level="simple")
 

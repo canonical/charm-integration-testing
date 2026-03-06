@@ -74,6 +74,9 @@ class ValidatorInjectorExtension(JujuExtension):
             raise RuntimeError(f"Validation failures on {unit}: {', '.join(failures)}")
 
     def _inject_validators(self, model: str, unit: str) -> None:
+        # Ensure validators path is provided
+        if self.validators_path is None:
+            raise ValueError("validators_path must be provided to inject validators")
         self.logger.debug(f"Injecting validators on unit {unit}")
 
         # Copy validators
@@ -81,8 +84,8 @@ class ValidatorInjectorExtension(JujuExtension):
 
         # Install validators
         for cmd, desc in [
-            (f"{proxy_env} pip3 install virtualenv", "install virtualenv"),
-            (f"sudo virtualenv {remote_validators_path}/.venv", "create virtualenv"),
+            ("sudo apt-get update && sudo apt-get install -y python3-venv", "install venv"),
+            (f"sudo python3 -m venv {remote_validators_path}/.venv", "create venv"),
             (
                 f"{proxy_env} {venv_python} -m pip install {remote_validators_path}/*",
                 "install validator packages",
