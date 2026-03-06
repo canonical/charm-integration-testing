@@ -43,7 +43,7 @@ class ValidatorInjectorExtension(JujuExtension):
         self._inject_validators(model, unit)
 
         # Run validators
-        self.logger.info(f"Running validation on unit {unit}")
+        self.logger.debug(f"Running validation on unit {unit}")
         run_result = self.juju.exec_unit(model, unit, f"{venv_runner} --level {level}")
         if run_result.return_code != 0:
             raise RuntimeError(f"Validators failed on {unit} (rc={run_result.return_code}): {run_result.stderr}")
@@ -53,9 +53,15 @@ class ValidatorInjectorExtension(JujuExtension):
         failures = []
         for r in validator_results.results:
             if r.status == "PASS":
-                self.logger.info(f"[{unit}] endpoint {r.endpoint}: PASS")
+                self.logger.debug(f"[{unit}] endpoint {r.endpoint}: PASS")
             else:
-                msg = r.error or r.status
+                if r.error:
+                    msg = r.error
+                elif r.checks:
+                    failed_checks = [c for c in r.checks if not c.passed]
+                    msg = f"{len(failed_checks)}/{len(r.checks)} checks failed: {[c.name for c in failed_checks]}"
+                else:
+                    msg = r.status
                 self.logger.error(f"[{unit}] endpoint {r.endpoint}: {msg}")
                 failures.append(r.endpoint)
 
@@ -67,7 +73,7 @@ class ValidatorInjectorExtension(JujuExtension):
         # Check if validators are already installed
         if self.juju.exec_unit(model, unit, f"test -f {venv_runner}").return_code == 0:
             return
-        self.logger.info(f"Injecting validators on unit {unit}")
+        self.logger.debug(f"Injecting validators on unit {unit}")
 
         # Copy validators
         self.juju.scp(model, str(self.validators_path.resolve()), f"{unit}:{remote_validators_path}")

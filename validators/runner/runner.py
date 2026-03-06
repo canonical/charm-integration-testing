@@ -36,7 +36,7 @@ class ValidatorRunnerResults(BaseModel):
 class ValidatorRunner:
     validators: dict[str, list[type[BaseValidator]]]
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.validators = self._load_validators()
 
     @staticmethod
@@ -57,8 +57,9 @@ class ValidatorRunner:
         # Get the list of requires endpoints
         results = []
         for required_endpoint, endpoint_metadata in charm.meta.requires.items():
+            interface_name = endpoint_metadata.interface_name or required_endpoint
             for integration in charm.model.relations[required_endpoint]:
-                results += self._run_for_integration(charm, endpoint_metadata.interface_name, integration, level)
+                results += self._run_for_integration(charm, interface_name, integration, level)
         return ValidatorRunnerResults(results=results)
 
     def _run_for_integration(
@@ -74,7 +75,7 @@ class ValidatorRunner:
                 results.append(
                     ValidationResult(
                         status="ERROR",
-                        interface=integration.interface_name,
+                        interface=interface_name,
                         level=level,
                         error=f"Validator '{validator_cls.__name__}' raised an exception: {exc}",
                     )

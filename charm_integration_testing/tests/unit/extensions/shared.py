@@ -132,6 +132,9 @@ class NullJujuBackend(JujuBackend):
     def version(self, model: str) -> str:
         raise NotImplementedError
 
+    def validate_application(self, model: str, application: str, level: str) -> None:
+        raise NotImplementedError
+
 
 @dataclass
 class JujuStub(NullJujuBackend):
