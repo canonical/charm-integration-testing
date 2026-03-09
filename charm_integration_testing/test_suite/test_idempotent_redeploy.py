@@ -3,6 +3,7 @@
 
 
 from datetime import timedelta
+from pathlib import Path
 
 import pytest
 from juju import JujuClient
@@ -15,12 +16,11 @@ def test_idempotent_redeploy(
     juju_client: JujuClient,
     model: str,
     target_application: str,
-    bundles: list[str],
+    bundle: Path,
 ) -> None:
     # Redeploy the bundle, which should redeploy the target application
     # existing applications will be ignored
-    for bundle in bundles:
-        juju_client.deploy_bundle_file(bundle, model=model)
+    juju_client.deploy_bundle_file(str(bundle), model=model)
 
     # Wait to become idle
     juju_client.idle_for_period(model=model, timeout=timedelta(minutes=15))

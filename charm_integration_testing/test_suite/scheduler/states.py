@@ -34,7 +34,6 @@ class State(str, Enum):
     """
 
     NO_BUNDLE = "no_bundle"
-    BUNDLE_BUILT = "bundle_built"
     NO_CONTROLLER = "no_controller"
     EMPTY_MODEL = "empty_model"
     DEPLOYED = "deployed"

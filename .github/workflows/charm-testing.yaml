@@ -1,15 +1,17 @@
 ---
 name: Execute tests against two charms and their integrations
-run-name: "Testing ${{ inputs.charm_under_test }}:${{ inputs.charm_endpoint }} against\
+run-name:
+  "Testing ${{ inputs.charm_under_test }}:${{ inputs.charm_endpoint }} against\
   \ ${{ inputs.neighbor }}:${{ inputs.neighbor_endpoint }}. (environment: ${{ inputs.environment }}${{\
   \ inputs.execution_id != '' && ', test execution: ' || '' }}${{ inputs.execution_id\
   \ }}, substrate: ${{ inputs.substrate }})"
 concurrency:
-  group: ${{ github.workflow }}-${{ inputs.environment }}-${{ inputs.execution_id
+  group:
+    ${{ github.workflow }}-${{ inputs.environment }}-${{ inputs.execution_id
     || github.run_id }}
   cancel-in-progress: true
 permissions:
-  contents: read  # only needed for private repos
+  contents: read # only needed for private repos
 on:
   workflow_dispatch:
     inputs:
@@ -55,7 +57,7 @@ on:
         description: Series to run the charm tests under.
         required: false
         type: choice
-        options: [default, '20.04', '22.04', '24.04']
+        options: [default, "20.04", "22.04", "24.04"]
         default: default
       substrate:
         description: Substrate to run the tests on
@@ -72,12 +74,13 @@ on:
       debug_extra_ssh_imports:
         # The IDs take the form of lp:<value> for Launchpad and gh:<value> for GitHub.
         # The GitHub Actor's key is always included.
-        description: A comma-separated list of IDs to use with ssh-import-id in debug
+        description:
+          A comma-separated list of IDs to use with ssh-import-id in debug
           mode.
         required: false
-        default: ''
+        default: ""
 env:
-  DEBUG_SLEEP_SECONDS: 7200  # 2 hours
+  DEBUG_SLEEP_SECONDS: 7200 # 2 hours
 jobs:
   execute-charm-test:
     name: Execute integration tests against the charms
@@ -167,7 +170,8 @@ jobs:
           test_observer_token: ${{ env.test_observer_token }}
           test_execution_id: ${{ inputs.execution_id }}
           status: IN_PROGRESS
-          ci_link: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{
+          ci_link:
+            ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{
             github.run_id }}
       - name: Post 'job_start' event
         if: ${{ !cancelled() && env.test_observer_api != '' && inputs.execution_id != '' }}
@@ -287,9 +291,9 @@ jobs:
             --target-channel "${channel}" \
             --target-revision "${revision}" \
             --target-series "${series}" \
-            --substrate "${substrate}" \
             --neighbor-charm "${neighbor}" \
             --model "${model}" \
+            --bundle "./generated-bundle.yaml" \
             --current-state "no_bundle" \
             --target-application "target" \
             --target-endpoint "${charm_endpoint}" \
@@ -372,7 +376,7 @@ jobs:
         env:
           crashdump: ${{ steps.juju_k8s_crashdump.outputs.crashdump_path }}
           junit_xml: ${{ steps.run_tests.outputs.junit_xml }}
-          generated_bundle: ${{ steps.build_bundle.outputs.bundle }}
+          generated_bundle: "./generated-bundle.yaml"
           openstack_model_crashdump: ${{ steps.juju_crashdump.outputs.OS_MODEL_CRASHDUMP }}
           openstack_controller_crashdump: ${{ steps.juju_crashdump.outputs.OS_CONTROLLER_CRASHDUMP }}
         run: |
@@ -441,7 +445,7 @@ jobs:
           test_execution_id: ${{ inputs.execution_id }}
           status: COMPLETED
       - name: Trigger rerun on Test Observer if failure
-        if: ${{ failure() && env.test_observer_api != '' && inputs.execution_id != '' && !(steps.build_bundle.conclusion == 'failure' && steps.build_bundle.outputs.invalid_input == 'true') }}
+        if: ${{ failure() && env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/trigger-rerun
         with:
           test_observer_api: ${{ env.test_observer_api }}
@@ -452,5 +456,6 @@ jobs:
         shell: bash
         env:
           controller: ${{ steps.juju_resources.outputs.controller }}
-        run: timeout 15m juju kill-controller "${controller}" --no-prompt --timeout
+        run:
+          timeout 15m juju kill-controller "${controller}" --no-prompt --timeout
           2m

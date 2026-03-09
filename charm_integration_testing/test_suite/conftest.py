@@ -79,11 +79,10 @@ def juju_client(
 def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption("--model", type=str, required=True, help="Juju model to test in.")
     parser.addoption(
-        "--bundles",
-        nargs="*",
+        "--bundle",
         type=str,
-        default=[],
-        help="Bundle file paths to deploy (used by deploy and idempotent-redeploy phases).",
+        default=None,
+        help="Bundle file path to deploy (used by deploy and idempotent-redeploy phases).",
     )
     parser.addoption(
         "--target-application",
@@ -140,13 +139,6 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         help="Ubuntu base series for the charm under test, e.g. '22.04'. Use 'default' to let the builder decide.",
     )
     parser.addoption(
-        "--substrate",
-        type=str,
-        choices=["kubernetes", "openstack"],
-        default="kubernetes",
-        help="Substrate to deploy on (default: 'kubernetes').",
-    )
-    parser.addoption(
         "--platform",
         type=str,
         default="kubernetes",
@@ -198,19 +190,18 @@ def model(request: pytest.FixtureRequest) -> str:
 
 
 @pytest.fixture
-def bundles(request: pytest.FixtureRequest, bundle_output: Path) -> list[str]:
-    """Bundle file paths passed via ``--bundles``.
+def bundle(request: pytest.FixtureRequest) -> Path:
+    """Bundle file path passed via ``--bundle``."""
+    value = request.config.getoption("--bundle")
+    assert isinstance(value, str)
 
-    Falls back to the generated bundle at ``bundle_output`` if ``--bundles`` is
-    not provided and the file already exists (i.e. ``test_build_bundle`` has run).
-    """
-    option = request.config.getoption("--bundles")
-    assert isinstance(option, list)
-    if option:
-        return option
-    if bundle_output.exists():
-        return [str(bundle_output)]
-    return option
+    if not value:
+        return Path(request.config.rootpath) / "generated-bundle.yaml"
+
+    value = Path(value).resolve()
+    # Ensures parents path exists for the output when calling .write_text
+    value.parent.mkdir(parents=True, exist_ok=True)
+    return value
 
 
 @pytest.fixture
@@ -317,16 +308,6 @@ def target_series(request: pytest.FixtureRequest) -> str | None:
 
 
 @pytest.fixture
-def substrate(request: pytest.FixtureRequest) -> str:
-    """Deployment substrate, passed via ``--substrate``."""
-    value = request.config.getoption("--substrate")
-    if not value:
-        pytest.fail("--substrate is required by this test but was not provided.")
-    assert isinstance(value, str)
-    return value
-
-
-@pytest.fixture
 def platform(request: pytest.FixtureRequest) -> str:
     value = request.config.getoption("--platform")
     if not value:
@@ -342,7 +323,8 @@ def charm_metadata_overrides(request: pytest.FixtureRequest) -> Path:
         pytest.fail("--charm-metadata-overrides is required by this test but was not provided.")
     assert isinstance(value, str)
     ppath = Path(value).resolve()
-    assert ppath.exists()
+    if not ppath.exists():
+        pytest.fail("Provided path for --charm-metadata-overrides does not exist.")
     return ppath
 
 
@@ -353,7 +335,8 @@ def charm_platform_overrides(request: pytest.FixtureRequest) -> Path:
         pytest.fail("--charm-platform-overrides is required by this test but was not provided.")
     assert isinstance(value, str)
     ppath = Path(value).resolve()
-    assert ppath.exists()
+    if not ppath.exists():
+        pytest.fail("Provided path for --charm-platform-overrides does not exist.")
     return ppath
 
 
@@ -364,7 +347,8 @@ def charm_listing_overrides(request: pytest.FixtureRequest) -> Path:
         pytest.fail("--charm-listing-overrides is required by this test but was not provided.")
     assert isinstance(value, str)
     ppath = Path(value).resolve()
-    assert ppath.exists()
+    if not ppath.exists():
+        pytest.fail("Provided path for --charm-listing-overrides does not exist.")
     return ppath
 
 
@@ -375,7 +359,8 @@ def charm_test_configs(request: pytest.FixtureRequest) -> Path:
         pytest.fail("--charm-test-configs is required by this test but was not provided.")
     assert isinstance(value, str)
     ppath = Path(value).resolve()
-    assert ppath.exists()
+    if not ppath.exists():
+        pytest.fail("Provided path for --charm-test-configs does not exist.")
     return ppath
 
 
@@ -386,7 +371,8 @@ def charm_priorities_config(request: pytest.FixtureRequest) -> Path:
         pytest.fail("--charm-priorities-config is required by this test but was not provided.")
     assert isinstance(value, str)
     ppath = Path(value).resolve()
-    assert ppath.exists()
+    if not ppath.exists():
+        pytest.fail("Provided path for --charm-priorities-config does not exist.")
     return ppath
 
 
@@ -397,7 +383,8 @@ def charm_default_versions(request: pytest.FixtureRequest) -> Path:
         pytest.fail("--charm-default-versions is required by this test but was not provided.")
     assert isinstance(value, str)
     ppath = Path(value).resolve()
-    assert ppath.exists()
+    if not ppath.exists():
+        pytest.fail("Provided path for --charm-default-versions does not exist.")
     return ppath
 
 
@@ -409,30 +396,20 @@ def static_dir(request: pytest.FixtureRequest) -> Path:
         pytest.fail("--static-dir is required by this test but was not provided.")
     assert isinstance(value, str)
     ppath = Path(value).resolve()
-    assert ppath.exists()
+    if not ppath.exists():
+        pytest.fail("Provided path for --static-dir does not exist.")
     return ppath
 
 
 @pytest.fixture
-def bundle_output(request: pytest.FixtureRequest) -> Path:
-    """Path where the generated bundle YAML is written by ``test_build_bundle``.
-
-    If ``--bundles`` is provided, the first entry is used so that
-    ``test_build_bundle`` writes directly to the caller-specified location.
-    """
-    bundles_option: list[str] = request.config.getoption("--bundles")
-    if bundles_option:
-        return Path(bundles_option[0])
-    return Path(request.config.rootpath) / "generated-bundle.yaml"
-
-
-@pytest.fixture
-def bundle_mermaid_output(bundle_output: Path) -> Path:
+def bundle_mermaid_output(bundle: Path) -> Path:
     """Path where the generated bundle Mermaid diagram is written by ``test_build_bundle``.
 
     Uses the same base path as ``bundle_output`` with a ``.mmd`` extension.
     """
-    return bundle_output.with_suffix(".mmd")
+    # Ensures parents path exists for the output when calling .write_text
+    bundle.parent.mkdir(parents=True, exist_ok=True)
+    return bundle.with_suffix(".mmd")
 
 
 @pytest.fixture

@@ -30,7 +30,9 @@ def test_build_bundle(
     charm_test_configs: Path,
     charm_priorities_config: Path,
     charm_default_versions: Path,
-    bundle_output: Path,
+    target_application: str,
+    neighbor_application: str,
+    bundle: Path,
     bundle_mermaid_output: Path,
     logger: logging.Logger,
 ) -> None:
@@ -59,15 +61,15 @@ def test_build_bundle(
 
     integration: Integration = frozenset(
         {
-            ApplicationEndpoint("target", target_endpoint),
-            ApplicationEndpoint("neighbor", neighbor_endpoint),
+            ApplicationEndpoint(target_application, target_endpoint),
+            ApplicationEndpoint(neighbor_application, neighbor_endpoint),
         }
     )
     base_bundle = Bundle(
         applications=frozenset(
             {
-                Application(name="target", charm=fetched_target_charm),
-                Application(name="neighbor", charm=neighbor),
+                Application(name=target_application, charm=fetched_target_charm),
+                Application(name=neighbor_application, charm=neighbor),
             }
         ),
         integrations=frozenset({integration}),
@@ -78,10 +80,10 @@ def test_build_bundle(
     bundle_builder = BundleBuilder(charmhub_client=charmhub_client, logger=logger)
     built_bundle = bundle_builder.build(base_bundle)
 
-    bundle_output.write_text(built_bundle.export(), encoding="utf-8")
-    logger.info(f"Bundle written to {bundle_output}")
+    bundle.write_text(built_bundle.export(), encoding="utf-8")
+    logger.info(f"Bundle written to {bundle}")
 
     bundle_mermaid_output.write_text(built_bundle.export_mermaid(), encoding="utf-8")
     logger.info(f"Bundle Mermaid diagram written to {bundle_mermaid_output}")
 
-    assert Path(bundle_output).exists()
+    assert Path(bundle).exists()
