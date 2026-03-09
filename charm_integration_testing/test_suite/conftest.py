@@ -147,6 +147,12 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         help="Substrate to deploy on (default: 'kubernetes').",
     )
     parser.addoption(
+        "--platform",
+        type=str,
+        default="kubernetes",
+        help="Platform to deploy on (default: 'kubernetes').",
+    )
+    parser.addoption(
         "--charm-metadata-overrides",
         type=str,
         default="./static/charm-metadata-overrides/",
