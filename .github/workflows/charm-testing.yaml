@@ -279,7 +279,7 @@ jobs:
           series: ${{ inputs.series }}
           neighbor: ${{ inputs.neighbor }}
           substrate: ${{ inputs.substrate }}
-          platform: ${{ 'machine' if inputs.substrate == 'openstack' else inputs.substrate }}
+          platform: ${{ inputs.substrate == 'openstack' && 'machine' || inputs.substrate }}
         run: |
           echo "junit_xml=$(realpath junit.xml)" >> $GITHUB_OUTPUT
           ./scripts/run-tests.sh \
