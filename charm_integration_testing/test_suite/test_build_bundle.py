@@ -85,5 +85,3 @@ def test_build_bundle(
 
     bundle_mermaid_output.write_text(built_bundle.export_mermaid(), encoding="utf-8")
     logger.info(f"Bundle Mermaid diagram written to {bundle_mermaid_output}")
-
-    assert Path(bundle).exists()

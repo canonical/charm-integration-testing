@@ -389,19 +389,6 @@ def charm_default_versions(request: pytest.FixtureRequest) -> Path:
 
 
 @pytest.fixture
-def static_dir(request: pytest.FixtureRequest) -> Path:
-    """File path to the static directory containing the overrides configurations passed via ``--static-dir``."""
-    value = request.config.getoption("--static-dir")
-    if not value:
-        pytest.fail("--static-dir is required by this test but was not provided.")
-    assert isinstance(value, str)
-    ppath = Path(value).resolve()
-    if not ppath.exists():
-        pytest.fail("Provided path for --static-dir does not exist.")
-    return ppath
-
-
-@pytest.fixture
 def bundle_mermaid_output(bundle: Path) -> Path:
     """Path where the generated bundle Mermaid diagram is written by ``test_build_bundle``.
 
