@@ -193,11 +193,11 @@ def model(request: pytest.FixtureRequest) -> str:
 def bundle(request: pytest.FixtureRequest) -> Path:
     """Bundle file path passed via ``--bundle``."""
     value = request.config.getoption("--bundle")
-    assert isinstance(value, str)
 
     if not value:
         return Path(request.config.rootpath) / "generated-bundle.yaml"
 
+    assert isinstance(value, str)
     value = Path(value).resolve()
     # Ensures parents path exists for the output when calling .write_text
     value.parent.mkdir(parents=True, exist_ok=True)
@@ -405,7 +405,7 @@ def static_dir(request: pytest.FixtureRequest) -> Path:
 def bundle_mermaid_output(bundle: Path) -> Path:
     """Path where the generated bundle Mermaid diagram is written by ``test_build_bundle``.
 
-    Uses the same base path as ``bundle_output`` with a ``.mmd`` extension.
+    Uses the same base path as ``bundle`` with a ``.mmd`` extension.
     """
     # Ensures parents path exists for the output when calling .write_text
     bundle.parent.mkdir(parents=True, exist_ok=True)

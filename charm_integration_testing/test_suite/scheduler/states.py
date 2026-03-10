@@ -13,7 +13,7 @@ Example::
     @pytest.mark.state(requires=State.DEPLOYED)
     def test_something(): ...
 
-    @pytest.mark.state(requires=State.NO_BUNDLE, provides=State.BUNDLE_BUILT)
+    @pytest.mark.state(requires=State.NO_BUNDLE, provides=State.EMPTY_MODEL)
     def test_build_bundle(): ...
 
     @pytest.mark.state(requires=State.EMPTY_MODEL, provides=State.DEPLOYED)

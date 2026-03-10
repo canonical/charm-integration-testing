@@ -16,7 +16,7 @@ def test_deploy(
     model: str,
     bundle: Path,
 ) -> None:
-    # Deploy each bundle
+    # Deploy the bundle
     juju_client.deploy_bundle_file(str(bundle), model=model)
 
     # Wait until idle
