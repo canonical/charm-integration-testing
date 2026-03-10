@@ -57,7 +57,6 @@ runs:
         test_observer_token: ${{ inputs.test_observer_token }}
         method_type: POST
         request_body: '@${{ steps.request-body.outputs.file }}'
-    
     - name: tmate session
-      if: ${{ format('test_{0}_end', inputs.event_name) == env.DEBUG_SLEEP_AFTER && !cancelled() }} 
-      uses: canonical/action-tmate@main # zizmor: ignore[unpinned-uses] no releases in the repo
+      if: ${{ format('test_{0}_end', inputs.event_name) == env.DEBUG_SLEEP_AFTER && !cancelled() }}
+      uses: canonical/action-tmate@main  # zizmor: ignore[unpinned-uses] no releases in the repo
