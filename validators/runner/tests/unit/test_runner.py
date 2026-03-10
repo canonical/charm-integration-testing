@@ -117,9 +117,9 @@ class TestValidatorRunnerLoadValidators:
         class NotAValidator:
             pass
 
-        ep = EntryPointStub(name="test-interface", _load_result=NotAValidator)
+        entry_point = EntryPointStub(name="test-interface", _load_result=NotAValidator)
 
-        with patch("validators.runner.runner.entry_points", return_value=[ep]):
+        with patch("validators.runner.runner.entry_points", return_value=[entry_point]):
             # WHEN
             validators = ValidatorRunner._load_validators()
 
@@ -128,9 +128,9 @@ class TestValidatorRunnerLoadValidators:
 
     def test_skips_entry_points_that_fail_to_load(self) -> None:
         # GIVEN an entry point that raises on load
-        ep = EntryPointStub(name="test-interface", _load_error=ImportError("missing dep"))
+        entry_point = EntryPointStub(name="test-interface", _load_error=ImportError("missing dep"))
 
-        with patch("validators.runner.runner.entry_points", return_value=[ep]):
+        with patch("validators.runner.runner.entry_points", return_value=[entry_point]):
             # WHEN
             validators = ValidatorRunner._load_validators()
 
@@ -139,9 +139,9 @@ class TestValidatorRunnerLoadValidators:
 
     def test_loads_valid_validator(self) -> None:
         # GIVEN a well-formed entry point
-        ep = EntryPointStub(name="test-interface", _load_result=PassingValidator)
+        entry_point = EntryPointStub(name="test-interface", _load_result=PassingValidator)
 
-        with patch("validators.runner.runner.entry_points", return_value=[ep]):
+        with patch("validators.runner.runner.entry_points", return_value=[entry_point]):
             # WHEN
             validators = ValidatorRunner._load_validators()
 

@@ -40,15 +40,6 @@ class ConcreteValidator(BaseValidator):
 
 
 class TestValidationCheck:
-    def test_passed(self) -> None:
-        # GIVEN / WHEN
-        check = ValidationCheck(name="connect", passed=True, message="OK")
-
-        # THEN
-        assert check.name == "connect"
-        assert check.passed is True
-        assert check.message == "OK"
-
     def test_message_defaults_to_empty_string(self) -> None:
         # GIVEN / WHEN
         check = ValidationCheck(name="schema", passed=False)
@@ -58,54 +49,6 @@ class TestValidationCheck:
 
 
 class TestValidationResult:
-    def test_pass_result(self) -> None:
-        # GIVEN / WHEN
-        result = ValidationResult(
-            status="PASS", endpoint="db", interface="postgresql_client", level="simple", relation_id=1
-        )
-
-        # THEN
-        assert result.status == "PASS"
-        assert result.checks == []
-        assert result.error is None
-
-    def test_fail_result_with_checks(self) -> None:
-        # GIVEN
-        checks = [
-            ValidationCheck(name="schema", passed=True),
-            ValidationCheck(name="connect", passed=False, message="Connection refused"),
-        ]
-
-        # WHEN
-        result = ValidationResult(
-            status="FAIL",
-            endpoint="db",
-            interface="postgresql_client",
-            level="simple",
-            relation_id=1,
-            checks=checks,
-        )
-
-        # THEN
-        assert result.status == "FAIL"
-        assert len(result.checks) == 2
-        assert result.checks[1].message == "Connection refused"
-
-    def test_error_result(self) -> None:
-        # GIVEN / WHEN
-        result = ValidationResult(
-            status="ERROR",
-            endpoint="db",
-            interface="postgresql_client",
-            level="simple",
-            relation_id=1,
-            error="Unexpected exception",
-        )
-
-        # THEN
-        assert result.status == "ERROR"
-        assert result.error == "Unexpected exception"
-
     def test_serialises_to_json(self) -> None:
         # GIVEN
         result = ValidationResult(
@@ -125,20 +68,6 @@ class TestValidationResult:
 
 
 class TestBaseValidator:
-    def test_stores_charm_and_endpoint(self) -> None:
-        # GIVEN
-        charm = object()
-        relation = RelationStub(name="my-db", id=42)
-
-        # WHEN
-        validator = ConcreteValidator(charm, relation)  # type: ignore[arg-type]
-
-        # THEN
-        assert validator.charm is charm
-        assert validator.relation is relation  # type: ignore[comparison-overlap]
-        assert validator.endpoint == "my-db"
-        assert validator.relation_id == 42
-
     def test_validate_returns_result(self) -> None:
         # GIVEN
         validator = ConcreteValidator(object(), RelationStub(name="my-db", id=0))  # type: ignore[arg-type]

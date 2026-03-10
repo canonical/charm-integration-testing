@@ -22,7 +22,7 @@ How validators are injected
 
 When ``VALIDATORS_PATH`` is set, the ``ValidatorInjectorExtension`` is active. After each validation phase it:
 
-1. SCPs the ``validators/`` directory to ``/var/lib/validators/`` on the unit.
+1. Uses ``scp`` to copy the ``validators/`` directory to ``/var/lib/validators/`` on the unit.
 2. Creates a virtualenv and installs every package found there.
 3. Runs ``run_validators --level <level>`` and parses the JSON output.
 4. Raises an error (failing the test) if any result has status ``FAIL`` or ``ERROR``.
