@@ -456,3 +456,51 @@ jobs:
           controller: ${{ steps.juju_resources.outputs.controller }}
         run: timeout 15m juju kill-controller "${controller}" --no-prompt --timeout
           2m
+      - name: Logs Privacy Check
+        id: logs_privacy_check
+        if: ${{ always() && steps.collect_logs.outputs.directory_path != '' }}
+        continue-on-error: true
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ${{ steps.collect_logs.outputs.directory_path }}
+          extra_args: --no-update --fail
+      - name: Generate Privacy Check JUnit Report
+        id: privacy_junit
+        if: ${{ always() && steps.logs_privacy_check.conclusion != 'skipped' && env.test_observer_api != '' && inputs.execution_id != '' }}
+        shell: bash
+        run: |
+          STATUS="${{ steps.logs_privacy_check.outcome }}"
+          JUNIT_OUTPUT="privacy-check-junit.xml"
+          
+          # Capture TruffleHog output for the report
+          TRUFFLEHOG_OUTPUT=$(cat <<'TFOUT'
+          ${{ steps.logs_privacy_check.outputs.stdout }}
+          TFOUT
+          )
+          
+          cat > "${JUNIT_OUTPUT}" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <testsuites>
+            <testsuite name="Logs Privacy Check" tests="1" failures="$([ "$STATUS" = "failure" ] && echo "1" || echo "0")" errors="0" skipped="0">
+              <testcase name="logs privacy check" classname="privacy">
+          EOF
+          if [ "$STATUS" = "failure" ]; then
+            echo '        <failure message="Secrets detected in logs"/>' >> "${JUNIT_OUTPUT}"
+          fi
+          cat >> "${JUNIT_OUTPUT}" <<EOF
+                <system-out>TruffleHog scan status: ${STATUS}
+          
+          ${TRUFFLEHOG_OUTPUT}</system-out>
+              </testcase>
+            </testsuite>
+          </testsuites>
+          EOF
+          echo "junit_xml=$(realpath ${JUNIT_OUTPUT})" >> $GITHUB_OUTPUT
+      - name: Post Privacy Check Results to Test Observer
+        if: ${{ always() && steps.privacy_junit.outputs.junit_xml != '' && env.test_observer_api != '' && inputs.execution_id != '' }}
+        uses: ./.github/actions/test-observer/post-results
+        with:
+          test_observer_api: ${{ env.test_observer_api }}
+          test_observer_token: ${{ env.test_observer_token }}
+          test_execution_id: ${{ inputs.execution_id }}
+          junit_xml: ${{ steps.privacy_junit.outputs.junit_xml }}
