@@ -49,7 +49,7 @@ def test_pod_deletion(juju_client: JujuClient, model: str, target_application: s
         pytest.fail(f"Exception when trying to delete pod: {e}")
 
     # Wait for the pod to be recreated
-
+    sleep(5)  # give some time for the pod to be deleted before checking for its recreation
     start_time = datetime.now()
     while start_time + timedelta(minutes=5) > datetime.now():
         # get juju status first to make sure there's no race condition between calling the action and the pod being recreated
