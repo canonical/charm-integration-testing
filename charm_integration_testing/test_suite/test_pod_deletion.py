@@ -54,6 +54,7 @@ def test_pod_deletion(juju_client: JujuClient, model: str, target_application: s
         try:
             new_pod = v1.read_namespaced_pod(name=target_pod_name, namespace=namespace)
             if new_pod.metadata.uid == target_pod.metadata.uid:
+                sleep(1)
                 continue # The pod has not been recreated yet, it's the same pod with the same UID
         except ApiException as e:
             if e.status == 404:
