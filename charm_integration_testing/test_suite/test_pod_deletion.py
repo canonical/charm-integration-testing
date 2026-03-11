@@ -34,12 +34,11 @@ def test_pod_deletion(juju_client: JujuClient, model: str, target_application: s
 
     target_pod_name = f"{target_application}-0"  # built off of the assumption that the charm is named target_application and the pod is named target_application-0
     namespace = model
-    target_pod = None
+    old_pod = None
     try:
-        target_pod = v1.read_namespaced_pod(name=target_pod_name, namespace=namespace)
+        old_pod = v1.read_namespaced_pod(name=target_pod_name, namespace=namespace)
     except ApiException as e:
         pytest.fail(f"Exception when trying to read pod: {e}")
-
 
     logger.info(f"Found target pod {target_pod_name} in namespace {namespace}. Deleting pod...")
 
@@ -53,9 +52,9 @@ def test_pod_deletion(juju_client: JujuClient, model: str, target_application: s
     while start_time + timedelta(minutes=5) > datetime.now():
         try:
             new_pod = v1.read_namespaced_pod(name=target_pod_name, namespace=namespace)
-            if new_pod.metadata.uid == target_pod.metadata.uid:
+            if new_pod.metadata.uid == old_pod.metadata.uid:
                 sleep(1)
-                continue # The pod has not been recreated yet, it's the same pod with the same UID
+                continue  # The pod has not been recreated yet, it's the same pod with the same UID
         except ApiException as e:
             if e.status == 404:
                 # Pod has not been recreated yet
