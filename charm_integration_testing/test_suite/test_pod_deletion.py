@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timedelta
 from time import sleep
 
@@ -8,6 +9,8 @@ from kubernetes import config as k8s_config
 from kubernetes.client.rest import ApiException
 
 from .scheduler.states import State
+
+logger = logging.getLogger(__name__)
 
 
 @pytest.mark.state(requires=State.DEPLOYED, provides=State.DEPLOYED)
@@ -37,6 +40,8 @@ def test_pod_deletion(juju_client: JujuClient, model: str, target_application: s
 
     namespace = target_pod.metadata.namespace
 
+    logger.info(f"Found target pod {target_pod_name} in namespace {namespace}. Deleting pod...")
+
     # Delete the target pod
     try:
         v1.delete_namespaced_pod(name=target_pod_name, namespace=namespace)
@@ -49,6 +54,7 @@ def test_pod_deletion(juju_client: JujuClient, model: str, target_application: s
     while start_time + timedelta(minutes=5) > datetime.now():
         # get juju status first to make sure there's no race condition between calling the action and the pod being recreated
         application_status = juju_client.backend.get_application_status(model=model, application=target_application)
+        logger.info(f"Current application status: {application_status}")
 
         try:
             target_pod = v1.read_namespaced_pod(name=target_pod_name, namespace=namespace)
@@ -61,9 +67,11 @@ def test_pod_deletion(juju_client: JujuClient, model: str, target_application: s
                 pytest.fail(f"Exception when trying to read pod: {e}")
 
         if target_pod.status.phase == "Running":
+            logger.info(f"Pod {target_pod_name} is running.")
             break
         else:
             if application_status == "active":
+                logger.warning(f"Pod {target_pod_name} is not running, but application status is active.")
                 pytest.fail(f"Pod {target_pod_name} is not running, but application status is active.")
 
         sleep(10)
