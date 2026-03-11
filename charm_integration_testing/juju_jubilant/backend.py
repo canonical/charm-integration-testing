@@ -348,7 +348,7 @@ class JubilantBackend(JujuCmdBackend):
         pass
 
     def get_model_type(self, model: str) -> str:
-        # hacky way ti determine model type but cloud is just a user provided string for juju cloud
+        # hacky way to determine model type but cloud is just a user provided string for juju cloud
         if "k8s" in self.client.model(model).cloud:
             return "k8s"
         else:
