@@ -17,9 +17,8 @@ import argparse
 import logging
 from pathlib import Path
 
-from .bundle_builder import BundleBuilder, UnresolvableBundleError
+from .bundle_builder import BundleBuilder, UnresolvableBundleError, ApplicationConstraint, IntegrationConstraint
 from .charmhub import CharmhubClient
-from .constraints import ApplicationConstraint, IntegrationConstraint
 from .overrides import OverridesClient
 
 
@@ -73,18 +72,10 @@ def add_args_to_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--output-file", type=str, help="Where to save the generated bundle.")
     parser.add_argument("--output-mermaid", type=str, help="Where to save the generated mermaid diagram.")
     parser.add_argument(
-        "--charm-overrides", type=Path, help="Path to folder containing per-charm override directories", default=None
+        "--overrides", type=Path, help="Path to folder containing per-charm override directories", default=None
     )
     parser.add_argument(
         "--log-level", type=str.upper, choices=["INFO", "DEBUG", "WARNING", "ERROR", "CRITICAL"], default="INFO"
-    )
-    parser.add_argument(
-        "--probes",
-        type=str,
-        nargs="+",
-        help="Probe URLs to run via juju-doctor (file:// or github://). "
-        "When provided, fuzzes the bundle strategy against the probes.",
-        default=[],
     )
 
 
@@ -122,9 +113,7 @@ def applications_from_args(parser: argparse.ArgumentParser, specs: list[str]) ->
         base = None if base_str == "default" else base_str
 
         # Add application constraint
-        constraints[name] = ApplicationConstraint(
-            name=name, charm=charm_str, channel=channel, revision=revision, base=base
-        )
+        constraints[name] = ApplicationConstraint(charm=charm_str, channel=channel, revision=revision, base=base)
     return constraints
 
 
@@ -146,7 +135,14 @@ def integrations_from_args(parser: argparse.ArgumentParser, specs: list[str]) ->
             parser.error(f"Invalid integration format: '{spec}' - expected format app1:endpoint1::app2:endpoint2")
 
         # Add constraints
-        constraints.add(IntegrationConstraint(endpoint1=endpoint1, endpoint2=endpoint2))
+        app1, ep1 = endpoint1.split(":", 1)
+        app2, ep2 = endpoint2.split(":", 1)
+        constraints.add(IntegrationConstraint(
+            application_1=app1,
+            endpoint_1=ep1,
+            application_2=app2,
+            endpoint_2=ep2,
+        ))
     return constraints
 
 
@@ -171,10 +167,10 @@ def main() -> None:
     logger = setup_logging(args.log_level)
 
     # Create override client
-    if args.charm_overrides is not None and not args.charm_overrides.is_dir():
-        parser.error(f"The charm overrides path '{args.charm_overrides}' is not a valid directory.")
+    if args.overrides is not None and not args.overrides.is_dir():
+        parser.error(f"The charm overrides path '{args.overrides}' is not a valid directory.")
     overrides_client = OverridesClient(
-        charm_overrides=args.charm_overrides,
+        overrides=args.overrides,
     )
 
     # Create Charmhub client
@@ -184,28 +180,15 @@ def main() -> None:
     applications = applications_from_args(parser, args.charms)
     integrations = integrations_from_args(parser, args.integrations)
 
-    # Fuzz the bundle strategy against the provided probes, or draw one example
-    if args.probes:
-        try:
-            bundle = bundle_builder.fuzz(
-                applications=applications,
-                integrations=integrations,
-                platform=args.platform,
-                arch=args.arch,
-                probe_urls=args.probes,
-            )
-        except UnresolvableBundleError as e:
-            parser.error(f"Unresolvable bundle: {e}")
-    else:
-        try:
-            bundle = bundle_builder.build(
-                applications=applications,
-                integrations=integrations,
-                platform=args.platform,
-                arch=args.arch,
-            ).example()
-        except UnresolvableBundleError as e:
-            parser.error(f"Unresolvable bundle: {e}")
+    try:
+        bundle = bundle_builder.build(
+            applications=applications,
+            integrations=integrations,
+            platform=args.platform,
+            arch=args.arch,
+        )
+    except UnresolvableBundleError as e:
+        parser.error(f"Unresolvable bundle: {e}")
 
     logger.info(f"Generated bundle: \n{'-' * 80}\n{bundle.export()}{'-' * 80}")
 

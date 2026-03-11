@@ -349,7 +349,6 @@ class CharmhubClient:
             ubuntu_version=ubuntu_version,
             ubuntu_arch=ubuntu_arch,
             metadata=refresh_info.charm.metadata,
-            config_schema=refresh_info.charm.config,
         )
 
     def _get_ubuntu_version_from_bases(

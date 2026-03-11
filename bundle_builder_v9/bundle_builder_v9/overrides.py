@@ -84,15 +84,15 @@ class CharmOverrideFile(BaseModel):
 
 class OverridesClient:
     logger: logging.Logger
-    charm_overrides: Path | None = None
+    overrides: Path | None = None
 
     def __init__(
         self,
         logger: logging.Logger = logging.getLogger(__name__),
-        charm_overrides: Path | None = None,
+        overrides: Path | None = None,
     ):
         self.logger = logger
-        self.charm_overrides = charm_overrides
+        self.overrides = overrides
 
     @cache
     def _read_yaml_file(self, path: Path) -> Any:
@@ -103,9 +103,9 @@ class OverridesClient:
 
     @cache
     def _get_charm_override_file(self, charm: str) -> CharmOverrideFile:
-        if self.charm_overrides is None:
+        if self.overrides is None:
             return CharmOverrideFile()
-        path = self.charm_overrides / charm / "overrides.yaml"
+        path = self.overrides / charm / "overrides.yaml"
         return CharmOverrideFile(**self._read_yaml_file(path))
 
     @cache
@@ -117,12 +117,12 @@ class OverridesClient:
 
     def _resolve_relative(self, charm: str, relative_path: str) -> Path:
         """Resolve a path declared in overrides.yaml relative to the charm's directory."""
-        return (self.charm_overrides / charm / relative_path).resolve()
+        return (self.overrides / charm / relative_path).resolve()
 
     @cache
     def get_charm_metadata_overrides(self, charm: str, channel: CharmChannel) -> CharmMetadataFile:
         entry = self._get_charm_override_entry(charm, channel)
-        if entry.metadata is None or self.charm_overrides is None:
+        if entry.metadata is None or self.overrides is None:
             return CharmMetadataFile()
         return CharmMetadataFile(**self._read_yaml_file(self._resolve_relative(charm, entry.metadata)))
 
@@ -132,10 +132,10 @@ class OverridesClient:
 
     @cache
     def get_charm_listing_overrides(self) -> set[str]:
-        if self.charm_overrides is None:
+        if self.overrides is None:
             return set()
         unlisted = set()
-        for charm_dir in self.charm_overrides.iterdir():
+        for charm_dir in self.overrides.iterdir():
             if not charm_dir.is_dir():
                 continue
             override_file = self._get_charm_override_file(charm_dir.name)
@@ -146,7 +146,7 @@ class OverridesClient:
     @cache
     def get_charm_configs(self, charm: str, channel: CharmChannel) -> list[CharmConfig]:
         entry = self._get_charm_override_entry(charm, channel)
-        if entry.configs is None or self.charm_overrides is None:
+        if entry.configs is None or self.overrides is None:
             return []
         return CharmConfigsFile(**self._read_yaml_file(self._resolve_relative(charm, entry.configs))).configs
 
@@ -157,7 +157,7 @@ class OverridesClient:
     @cache
     def get_charm_ruleset_url(self, charm: str, channel: CharmChannel) -> str | None:
         entry = self._get_charm_override_entry(charm, channel)
-        if entry.ruleset is None or self.charm_overrides is None:
+        if entry.ruleset is None or self.overrides is None:
             return None
         return str(self._resolve_relative(charm, entry.ruleset))
     

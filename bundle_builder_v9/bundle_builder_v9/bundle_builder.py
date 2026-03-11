@@ -19,6 +19,7 @@ import tempfile
 from collections.abc import Callable
 from pathlib import Path
 
+from pydantic import BaseModel, ConfigDict
 import yaml
 from hypothesis import find
 from hypothesis import strategies as st
@@ -29,16 +30,27 @@ from juju_doctor.probes import Probe
 from .bundle import Application, ApplicationEndpoint, Bundle, Integration
 from .charm import Charm, CharmChannel, EndpointType
 from .charmhub import CharmhubClient
-from .constraints import (
-    ApplicationConstraint,
-    IntegrationConstraint,
-)
 from .exceptions import is_channel_mismatch, is_missing_relation
 
 
 class UnresolvableBundleError(Exception):
     def __init__(self, message: str):
         super().__init__(message)
+
+
+class ApplicationConstraint(BaseModel):
+    charm: str
+    channel: CharmChannel | None = None
+    revision: int | None = None
+    base: str | None = None
+
+class IntegrationConstraint(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    application_1: str
+    endpoint_1: str
+    application_2: str
+    endpoint_2: str
 
 
 class BundleBuilder:
@@ -59,9 +71,8 @@ class BundleBuilder:
         integrations: set[IntegrationConstraint],
         platform: str,
         arch: str,
-    ) -> "st.SearchStrategy[Bundle]":
-        # Initialize domain given the constraints
-        return self._initialize_domain(applications, integrations, platform, arch)
+    ) -> Bundle:
+        return self._initialize_domain(applications, integrations, platform, arch).example()
 
     def _initialize_domain(
         self,
@@ -85,13 +96,11 @@ class BundleBuilder:
         # Build the fixed set of user-required integrations
         required_integrations: list[Integration] = []
         for ic in integrations:
-            app1, ep1 = ic.endpoint1.split(":", 1)
-            app2, ep2 = ic.endpoint2.split(":", 1)
             required_integrations.append(
                 frozenset(
                     [
-                        ApplicationEndpoint(application=app1, endpoint=ep1),
-                        ApplicationEndpoint(application=app2, endpoint=ep2),
+                        ApplicationEndpoint(application=ic.application_1, endpoint=ic.endpoint_1),
+                        ApplicationEndpoint(application=ic.application_2, endpoint=ic.endpoint_2),
                     ]
                 )
             )
@@ -563,9 +572,12 @@ class BundleBuilder:
             for ep_name, ep in charm.endpoints.items()
             if ep.type == EndpointType.REQUIRES
         }
-        from_metadata_url = str(
-            Path(__file__).parent.parent.parent / "static" / "juju-doctor-probes" / "shared" / "from-metadata.py"
-        )
+        provides = {
+            ep_name: {"optional": ep.optional, "limit": ep.limit}
+            for ep_name, ep in charm.endpoints.items()
+            if ep.type == EndpointType.PROVIDES
+        }
+        from_metadata_url = str(Path(__file__).parent / "probes" / "from-metadata.py")
         ruleset = {
             "name": f"{charm.name}-metadata-constraints",
             "probes": [
@@ -573,7 +585,7 @@ class BundleBuilder:
                     "name": "Metadata endpoint constraints",
                     "type": "scriptlet",
                     "url": from_metadata_url,
-                    "with": {"charm": charm.name, "requires": requires},
+                    "with": {"charm": charm.name, "requires": requires, "provides": provides},
                 }
             ],
         }

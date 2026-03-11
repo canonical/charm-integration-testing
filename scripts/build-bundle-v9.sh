@@ -4,5 +4,5 @@
 
 cd "$(dirname "$0")/.."
 poetry run bundle-builder-v9 \
-    --charm-overrides ./static/charm-overrides/ \
+    --overrides ./static/charm-overrides/ \
     "$@"
