@@ -14,7 +14,9 @@ configs:
       common_name: charmqa
   - criteria:
       all_of:
-        - track: '1.18'
+        - any_of:
+            - track: '1.18'
+            - track: '1.19'
         - any_of:
             - endpoint_integrated: vault-pki
             - endpoint_integrated: tls-certificates-pki
