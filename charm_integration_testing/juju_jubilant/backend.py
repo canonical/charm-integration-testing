@@ -54,6 +54,13 @@ class JubilantBackend(JujuCmdBackend):
     def juju_status_text(self, model: str) -> str:
         return self.client.model(model).cli("status", "--integrations", "--format", "tabular")
 
+    @warn_performance(category=JujuStatusPerformanceWarning, threshold=timedelta(seconds=5))
+    def juju_application_status(self, model: str, application: str) -> jubilant.Status:
+        status = self.client.model(model).status()
+        if application not in status.apps:
+            raise KeyError(f"Application '{application}' not found in model '{model}'")
+        return status.apps[application]
+
     def wait(
         self,
         model: str,
@@ -339,3 +346,10 @@ class JubilantBackend(JujuCmdBackend):
     def validate_application(self, model: str, application: str, level: str) -> None:
         # Phase 2 endpoint validation will be done here
         pass
+
+    def get_model_type(self, model: str) -> str:
+        # hacky way ti determine model type but cloud is just a user provided string for juju cloud
+        if "k8s" in self.client.model(model).cloud:
+            return "k8s"
+        else:
+            return "machine"
