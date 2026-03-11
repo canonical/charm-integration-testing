@@ -159,7 +159,7 @@ class OverridesClient:
         entry = self._get_charm_override_entry(charm, channel)
         if entry.ruleset is None or self.overrides is None:
             return None
-        return str(self._resolve_relative(charm, entry.ruleset))
+        return self._resolve_relative(charm, entry.ruleset).as_uri()
     
     @cache
     def get_charm_default_channel(self, charm: str) -> str | None:

@@ -3,7 +3,7 @@ name: canonical-livepatch-server-k8s
 probes:
   - name: Exactly one database endpoint
     type: scriptlet
-    url: ../../juju-doctor-probes/exactly-one-of.py
+    url: file://static/juju-doctor-probes/exactly-one-of.py
     with:
       charm: canonical-livepatch-server-k8s
       endpoints: [database, database-legacy]

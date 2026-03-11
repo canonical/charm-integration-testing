@@ -14,8 +14,8 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
+import importlib.util
 import logging
-import tempfile
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
@@ -23,13 +23,46 @@ import yaml
 from hypothesis import find
 from hypothesis import strategies as st
 from hypothesis.errors import NoSuchExample
-from juju_doctor.artifacts import Artifacts, ModelArtifact
-from juju_doctor.probes import Probe
 
 from .bundle import Application, ApplicationEndpoint, Bundle, Integration
 from .charm import Charm, CharmChannel, EndpointType
 from .charmhub import CharmhubClient
 from .exceptions import is_channel_mismatch, is_missing_relation
+
+
+def _url_to_path(url: str) -> Path:
+    """Convert a file:// URL or plain path string to a Path."""
+    if url.startswith("file://"):
+        return Path(url[7:])
+    return Path(url)
+
+
+def _load_scriptlet(path: Path):
+    """Dynamically load a Python scriptlet from disk and return its module."""
+    spec = importlib.util.spec_from_file_location(path.stem, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _parse_ruleset_path(path: Path) -> list[tuple]:
+    """Parse a ruleset YAML and return (module, with_args) pairs for each probe."""
+    data = yaml.safe_load(path.read_text())
+    probes = []
+    for entry in data.get("probes", []):
+        url = entry.get("url")
+        if not url:
+            continue
+        probes.append((_load_scriptlet(_url_to_path(url)), entry.get("with", {})))
+    return probes
+
+
+def _parse_probe_url(url: str) -> list[tuple]:
+    """Load a probe URL: .py files are scriptlets, anything else is a ruleset YAML."""
+    path = _url_to_path(url)
+    if path.suffix.lower() == ".py":
+        return [(_load_scriptlet(path), {})]
+    return _parse_ruleset_path(path)
 
 
 class UnresolvableBundleError(Exception):
@@ -178,126 +211,110 @@ class BundleBuilder:
             arch: target architecture.
             probe_urls: optional probe URLs (file:// or github://) to also run.
         """
-        with tempfile.TemporaryDirectory() as probes_root_str:
-            probes_root = Path(probes_root_str)
+        # Probe signals captured by _satisfies_probes across runs
+        expansion_signals: list = []
+        channel_constraints: list = []
 
-            # Probe signals captured by _satisfies_probes across runs
-            expansion_signals: list = []
-            channel_constraints: list = []
+        # Ancestry tracking for cycle detection; persists across iterations
+        added_by: dict[str, str] = {}
 
-            # Ancestry tracking for cycle detection; persists across iterations
-            added_by: dict[str, str] = {}
+        current_applications = dict(applications)
+        current_probes: list[tuple] = []
 
-            current_applications = dict(applications)
-            current_probes: list[Probe] = []
-
-            def _load_probes() -> list[Probe]:
-                """Load all probes for the current application set."""
-                # Collect unique charms present in current_applications
-                seen_charm_names: set[str] = set()
-                all_probes: list[Probe] = []
-
-                # Static per-charm ruleset URLs from override files
-                for app_name, constraint in current_applications.items():
-                    charm_obj = self.charmhub_client.charm_from_store(
-                        charm_name=constraint.charm,
-                        ubuntu_arch=arch,
-                        charm_channel=constraint.channel,
-                        charm_revision=constraint.revision,
-                        ubuntu_version=constraint.base,
-                    )
-                    if charm_obj.name not in seen_charm_names:
-                        seen_charm_names.add(charm_obj.name)
-                        # Write metadata probe for this charm
-                        metadata_probe_path = self._write_metadata_probe(charm_obj, probes_root)
-                        probe_tree = Probe.from_url(metadata_probe_path.as_uri(), probes_root)
-                        all_probes.extend(probe_tree.probes)
-                        # Load static ruleset if declared
-                        if charm_obj.ruleset_url:
-                            probe_tree = Probe.from_url(charm_obj.ruleset_url, probes_root)
-                            all_probes.extend(probe_tree.probes)
-
-                # User-provided probe URLs
-                for url in probe_urls:
-                    probe_tree = Probe.from_url(url, probes_root)
-                    all_probes.extend(probe_tree.probes)
-
-                return all_probes
-
-            def _satisfies_probes(bundle: Bundle) -> bool:
-                expansion_signals.clear()
-                channel_constraints.clear()
-                bundle_dict = yaml.safe_load(bundle.export())
-                artifacts = Artifacts({"model": ModelArtifact(status=None, bundle=bundle_dict, show_units=None)})
-                passed = True
-                for probe in current_probes:
-                    probe.results = []
-                    probe.run(artifacts)
-                    for result in probe.results:
-                        if not result.passed:
-                            passed = False
-                            for exc in result.exceptions:
-                                if exc is None:
-                                    continue
-                                if is_missing_relation(exc):
-                                    expansion_signals.append(exc)
-                                elif is_channel_mismatch(exc):
-                                    channel_constraints.append(exc)
-                return passed
-
-            max_iterations = 10
-            for iteration in range(max_iterations):
-                self.logger.info(
-                    f"Fuzz iteration {iteration + 1}/{max_iterations} "
-                    f"with {len(current_applications)} application(s): {sorted(current_applications)}"
+        def _load_probes() -> list[tuple]:
+            """Load all (module, with_args) probe pairs for the current application set."""
+            seen: set[str] = set()
+            probes: list[tuple] = []
+            for constraint in current_applications.values():
+                charm_obj = self.charmhub_client.charm_from_store(
+                    charm_name=constraint.charm,
+                    ubuntu_arch=arch,
+                    charm_channel=constraint.channel,
+                    charm_revision=constraint.revision,
+                    ubuntu_version=constraint.base,
                 )
-                current_probes[:] = _load_probes()
-                strategy = self._initialize_domain(current_applications, integrations, platform, arch)
+                if charm_obj.name not in seen:
+                    seen.add(charm_obj.name)
+                    probes.extend(self._metadata_probe_definitions(charm_obj))
+                    if charm_obj.ruleset_url:
+                        probes.extend(_parse_ruleset_path(_url_to_path(charm_obj.ruleset_url)))
+            for url in probe_urls:
+                probes.extend(_parse_probe_url(url))
+            return probes
+
+        def _satisfies_probes(bundle: Bundle) -> bool:
+            expansion_signals.clear()
+            channel_constraints.clear()
+            bundle_dict = yaml.safe_load(bundle.export())
+            juju_bundles = {"model": bundle_dict}
+            passed = True
+            for module, with_args in current_probes:
+                bundle_fn = getattr(module, "bundle", None)
+                if bundle_fn is None:
+                    continue
                 try:
-                    find(strategy, _satisfies_probes)
-                except NoSuchExample:
-                    made_progress = False
+                    bundle_fn(juju_bundles=juju_bundles, **with_args)
+                except Exception as exc:
+                    passed = False
+                    if is_missing_relation(exc):
+                        expansion_signals.append(exc)
+                    elif is_channel_mismatch(exc):
+                        channel_constraints.append(exc)
+            return passed
 
-                    # Re-pin existing apps to satisfy channel constraints (no new charms added)
-                    for constraint in channel_constraints:
-                        if constraint.app in current_applications:
-                            old = current_applications[constraint.app]
-                            current_applications[constraint.app] = ApplicationConstraint(
-                                charm=old.charm,
-                                channel=CharmChannel(track=constraint.track, risk="stable", branch=""),
-                                revision=None,
-                                base=old.base,
-                            )
-                            self.logger.info(f"Re-pinned '{constraint.app}' to track {constraint.track}/stable")
-                            made_progress = True
+        max_iterations = 10
+        for iteration in range(max_iterations):
+            self.logger.info(
+                f"Fuzz iteration {iteration + 1}/{max_iterations} "
+                f"with {len(current_applications)} application(s): {sorted(current_applications)}"
+            )
+            current_probes[:] = _load_probes()
+            strategy = self._initialize_domain(current_applications, integrations, platform, arch)
+            try:
+                find(strategy, _satisfies_probes)
+            except NoSuchExample:
+                made_progress = False
 
-                    # Add new charms to satisfy missing-relation signals
-                    added = self._expand_applications(
-                        current_applications,
-                        platform,
-                        arch,
-                        expansion_signals=expansion_signals,
-                        added_by=added_by,
-                    )
-                    if added:
-                        current_applications.update(added)
+                # Re-pin existing apps to satisfy channel constraints (no new charms added)
+                for constraint in channel_constraints:
+                    if constraint.app in current_applications:
+                        old = current_applications[constraint.app]
+                        current_applications[constraint.app] = ApplicationConstraint(
+                            charm=old.charm,
+                            channel=CharmChannel(track=constraint.track, risk="stable", branch=""),
+                            revision=None,
+                            base=old.base,
+                        )
+                        self.logger.info(f"Re-pinned '{constraint.app}' to track {constraint.track}/stable")
                         made_progress = True
 
-                    if not made_progress:
-                        self.logger.info("No progress made; giving up")
-                        break
-                    continue
-
-                # TODO: minimize the application set before returning
-                # (greedily remove non-user-specified applications that aren't needed)
-                return find(
-                    self._initialize_domain(current_applications, integrations, platform, arch),
-                    _satisfies_probes,
+                # Add new charms to satisfy missing-relation signals
+                added = self._expand_applications(
+                    current_applications,
+                    platform,
+                    arch,
+                    expansion_signals=expansion_signals,
+                    added_by=added_by,
                 )
+                if added:
+                    current_applications.update(added)
+                    made_progress = True
 
-            raise UnresolvableBundleError(
-                "No bundle satisfying all probes could be found after expanding the charm pool"
+                if not made_progress:
+                    self.logger.info("No progress made; giving up")
+                    break
+                continue
+
+            # TODO: minimize the application set before returning
+            # (greedily remove non-user-specified applications that aren't needed)
+            return find(
+                self._initialize_domain(current_applications, integrations, platform, arch),
+                _satisfies_probes,
             )
+
+        raise UnresolvableBundleError(
+            "No bundle satisfying all probes could be found after expanding the charm pool"
+        )
 
     def _expand_applications(
         self,
@@ -367,7 +384,12 @@ class BundleBuilder:
                 interface = ep.interface
 
                 self.logger.info(f"Expanding for '{requesting_app}:{endpoint_name}' (interface '{interface}')")
-                candidates = self.charmhub_client.find_charms(provides=interface, platform=platform)
+                # If the missing endpoint is REQUIRES, find a charm that PROVIDES;
+                # if it is PROVIDES, find a charm that REQUIRES.
+                if ep.type == EndpointType.REQUIRES:
+                    candidates = self.charmhub_client.find_charms(provides=interface, platform=platform)
+                else:
+                    candidates = self.charmhub_client.find_charms(requires=interface, platform=platform)
 
                 for charm_name in self._scored_candidates(
                     candidates,
@@ -511,25 +533,11 @@ class BundleBuilder:
             node = added_by.get(node)
         return False
 
-    def _write_metadata_probe(self, charm: Charm, probes_root: Path) -> Path:
-        """Write a synthetic ruleset YAML with one probe per non-peer endpoint."""
-        from_metadata_url = str(Path(__file__).parent / "probes" / "from-metadata.py")
-        probes = [
-            {
-                "name": f"{ep_name} endpoint constraint",
-                "type": "scriptlet",
-                "url": from_metadata_url,
-                "with": {
-                    "charm": charm.name,
-                    "endpoint": ep_name,
-                    "optional": ep.optional,
-                    "limit": ep.limit,
-                },
-            }
+    def _metadata_probe_definitions(self, charm: Charm) -> list[tuple]:
+        """Return (module, with_args) probe pairs for each non-peer endpoint of this charm."""
+        module = _load_scriptlet(Path(__file__).parent / "probes" / "from-metadata.py")
+        return [
+            (module, {"charm": charm.name, "endpoint": ep_name, "optional": ep.optional, "limit": ep.limit})
             for ep_name, ep in charm.endpoints.items()
             if ep.type != EndpointType.PEERS
         ]
-        ruleset = {"name": f"{charm.name}-metadata-constraints", "probes": probes}
-        out = probes_root / f"{charm.name}-metadata.yaml"
-        out.write_text(yaml.dump(ruleset))
-        return out

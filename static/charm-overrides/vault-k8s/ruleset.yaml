@@ -3,7 +3,7 @@ name: vault-k8s
 probes:
   - name: vault-pki requires tls-certificates-pki
     type: scriptlet
-    url: ../../juju-doctor-probes/requires-if.py
+    url: file://static/juju-doctor-probes/requires-if.py
     with:
       charm: vault-k8s
       if_endpoint: vault-pki
