@@ -13,6 +13,9 @@ Example::
     @pytest.mark.state(requires=State.DEPLOYED)
     def test_something(): ...
 
+    @pytest.mark.state(requires=State.NO_BUNDLE, provides=State.EMPTY_MODEL)
+    def test_build_bundle(): ...
+
     @pytest.mark.state(requires=State.EMPTY_MODEL, provides=State.DEPLOYED)
     def test_deploy(): ...
 """
@@ -30,6 +33,7 @@ class State(str, Enum):
     the ``--current-state`` CLI option (whose value arrives as a plain string).
     """
 
+    NO_BUNDLE = "no_bundle"
     NO_CONTROLLER = "no_controller"
     EMPTY_MODEL = "empty_model"
     DEPLOYED = "deployed"

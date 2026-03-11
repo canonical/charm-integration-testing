@@ -88,6 +88,8 @@ jobs:
       MINIO_CLIENT_FILE: ${{ github.workspace }}/static/mc
       UBUNTU_PRO_TOKEN: ${{ secrets.UBUNTU_PRO_TOKEN }}
       VALIDATORS_PATH: ${{ github.workspace }}/validators
+      BUNDLE_OUTPUT: ./generated-bundle.yaml
+      BUNDLE_MERMAID_OUTPUT: ./generated-bundle.mmd
     steps:
       - name: Clone Repo
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -255,83 +257,6 @@ jobs:
           EOF
           pipx install poetry==2.0
           HTTPS_PROXY="http://squid.internal:3128" poetry install
-      - name: Generate dynamic bundles
-        id: build_bundle
-        shell: bash
-        env:
-          charm_under_test: ${{ inputs.charm_under_test }}
-          revision: ${{ inputs.revision }}
-          channel: ${{ inputs.channel }}
-          series: ${{ inputs.series }}
-          neighbor: ${{ inputs.neighbor }}
-          charm_endpoint: ${{ inputs.charm_endpoint }}
-          neighbor_endpoint: ${{ inputs.neighbor_endpoint }}
-          substrate: ${{ inputs.substrate }}
-        run: |
-          # Run the bundle builder
-          set +e
-          ./scripts/build-bundle.sh \
-            --charms \
-              "target::${charm_under_test}::${channel}::${revision}::${series}" \
-              "neighbor::${neighbor}::default::default::default" \
-            --integrations "target:${charm_endpoint}::neighbor:${neighbor_endpoint}" \
-            --substrate "${substrate}" \
-            --output-file generated-bundle.yaml \
-            --output-mermaid generated-bundle.mmd
-          rc=$?
-          set -e
-
-          # Handle the result
-          if [ "$rc" -ne 0 ]; then
-            if [ "$rc" -eq 2 ]; then
-              echo "Bundle generation failed due to invalid input" >&2
-              echo "invalid_input=true" >> $GITHUB_OUTPUT
-            else
-              echo "Bundle generation failed (exit code $rc)" >&2
-            fi
-            exit "$rc"
-          fi
-
-          # Note the generated bundles
-          echo "bundle=$(realpath generated-bundle.yaml)" >> $GITHUB_OUTPUT
-          echo '### Generated Bundle Mermaid Diagram' >> $GITHUB_STEP_SUMMARY
-          echo '```mermaid' >> $GITHUB_STEP_SUMMARY
-          cat generated-bundle.mmd >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          echo '### Generated Juju Bundle' >> $GITHUB_STEP_SUMMARY
-          echo '```yaml' >> $GITHUB_STEP_SUMMARY
-          cat generated-bundle.yaml >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-      - name: Post 'bundle_generated' event
-        if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
-        uses: ./.github/actions/test-observer/post-events
-        with:
-          test_observer_api: ${{ env.test_observer_api }}
-          test_observer_token: ${{ env.test_observer_token }}
-          test_execution_id: ${{ inputs.execution_id }}
-          job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
-          event_name: bundle_generated
-          detail: Bundle generated.
-      - name: Post 'bundle_generation_failed' event
-        if: ${{ failure() && env.test_observer_api != '' && inputs.execution_id != '' && steps.build_bundle.conclusion == 'failure' && steps.build_bundle.outputs.invalid_input != 'true' }}
-        uses: ./.github/actions/test-observer/post-events
-        with:
-          test_observer_api: ${{ env.test_observer_api }}
-          test_observer_token: ${{ env.test_observer_token }}
-          test_execution_id: ${{ inputs.execution_id }}
-          job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
-          event_name: bundle_generation_failed
-          detail: Bundle generation failed.
-      - name: Post 'bundle_generation_invalid_input' event
-        if: ${{ failure() && env.test_observer_api != '' && inputs.execution_id != '' && steps.build_bundle.conclusion == 'failure' && steps.build_bundle.outputs.invalid_input == 'true' }}
-        uses: ./.github/actions/test-observer/post-events
-        with:
-          test_observer_api: ${{ env.test_observer_api }}
-          test_observer_token: ${{ env.test_observer_token }}
-          test_execution_id: ${{ inputs.execution_id }}
-          job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
-          event_name: bundle_generation_invalid_input
-          detail: Bundle generation failed due to invalid input.
       - name: Post 'test_start' event
         if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-events
@@ -348,19 +273,37 @@ jobs:
         shell: bash
         env:
           model: ${{ steps.juju_resources.outputs.model }}
-          bundle: ${{ steps.build_bundle.outputs.bundle }}
           charm_endpoint: ${{ inputs.charm_endpoint }}
           neighbor_endpoint: ${{ inputs.neighbor_endpoint }}
+          charm_under_test: ${{ inputs.charm_under_test }}
+          revision: ${{ inputs.revision }}
+          channel: ${{ inputs.channel }}
+          series: ${{ inputs.series }}
+          neighbor: ${{ inputs.neighbor }}
+          platform: ${{ inputs.substrate == 'openstack' && 'machine' || inputs.substrate }}
         run: |
           echo "junit_xml=$(realpath junit.xml)" >> $GITHUB_OUTPUT
           ./scripts/run-tests.sh \
+            --target-charm "${charm_under_test}" \
+            --target-channel "${channel}" \
+            --target-revision "${revision}" \
+            --target-series "${series}" \
+            --neighbor-charm "${neighbor}" \
             --model "${model}" \
-            --current-state "empty_model" \
-            --bundles "${bundle}" \
+            --bundle "${BUNDLE_OUTPUT}" \
+            --mermaid-output "${BUNDLE_MERMAID_OUTPUT}" \
+            --current-state "no_bundle" \
             --target-application "target" \
             --target-endpoint "${charm_endpoint}" \
             --neighbor-application "neighbor" \
             --neighbor-endpoint "${neighbor_endpoint}" \
+            --platform "${platform}" \
+            --charm-metadata-overrides "./static/charm-metadata-overrides/" \
+            --charm-platform-overrides "./static/charm-platform-overrides/" \
+            --charm-listing-overrides "./static/charm-listing-overrides.yaml" \
+            --charm-test-configs "./static/charm-test-configs/" \
+            --charm-priorities-config "./static/charm-priorities.yaml" \
+            --charm-default-versions "./static/charm-default-versions.yaml" \
             --junit-xml=junit.xml
       - name: Post 'test_end' event
         if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
@@ -372,6 +315,19 @@ jobs:
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
           event_name: test_end
           detail: Tests finished.
+      - name: Post bundles to github
+        shell: bash
+        continue-on-error: true
+        run: |
+          # Note the generated bundles
+          echo '### Generated Bundle Mermaid Diagram' >> $GITHUB_STEP_SUMMARY
+          echo '```mermaid' >> $GITHUB_STEP_SUMMARY
+          cat ${BUNDLE_MERMAID_OUTPUT} >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo '### Generated Juju Bundle' >> $GITHUB_STEP_SUMMARY
+          echo '```yaml' >> $GITHUB_STEP_SUMMARY
+          cat ${BUNDLE_OUTPUT} >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
       - name: Post execution metadata to Test Observer
         if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-execution-metadata
@@ -418,7 +374,7 @@ jobs:
         env:
           crashdump: ${{ steps.juju_k8s_crashdump.outputs.crashdump_path }}
           junit_xml: ${{ steps.run_tests.outputs.junit_xml }}
-          generated_bundle: ${{ steps.build_bundle.outputs.bundle }}
+          generated_bundle: ./generated-bundle.yaml
           openstack_model_crashdump: ${{ steps.juju_crashdump.outputs.OS_MODEL_CRASHDUMP }}
           openstack_controller_crashdump: ${{ steps.juju_crashdump.outputs.OS_CONTROLLER_CRASHDUMP }}
         run: |
@@ -487,7 +443,7 @@ jobs:
           test_execution_id: ${{ inputs.execution_id }}
           status: COMPLETED
       - name: Trigger rerun on Test Observer if failure
-        if: ${{ failure() && env.test_observer_api != '' && inputs.execution_id != '' && !(steps.build_bundle.conclusion == 'failure' && steps.build_bundle.outputs.invalid_input == 'true') }}
+        if: ${{ failure() && env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/trigger-rerun
         with:
           test_observer_api: ${{ env.test_observer_api }}
