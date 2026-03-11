@@ -85,6 +85,12 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         help="Bundle file path to deploy (used by deploy and idempotent-redeploy phases).",
     )
     parser.addoption(
+        "--mermaid-output",
+        type=str,
+        default=None,
+        help="File path to save the generated mermaid output.",
+    )
+    parser.addoption(
         "--target-application",
         type=str,
         default=None,
@@ -389,14 +395,16 @@ def charm_default_versions(request: pytest.FixtureRequest) -> Path:
 
 
 @pytest.fixture
-def bundle_mermaid_output(bundle: Path) -> Path:
-    """Path where the generated bundle Mermaid diagram is written by ``test_build_bundle``.
-
-    Uses the same base path as ``bundle`` with a ``.mmd`` extension.
-    """
+def bundle_mermaid_output(request: pytest.FixtureRequest) -> Path:
+    """Path where the generated bundle Mermaid diagram is written by ``test_build_bundle``."""
+    value = request.config.getoption("--mermaid-output")
+    if not value:
+        pytest.fail("--mermaid-output is required by this test but was not provided.")
+    assert isinstance(value, str)
+    ppath = Path(value).resolve()
     # Ensures parents path exists for the output when calling .write_text
-    bundle.parent.mkdir(parents=True, exist_ok=True)
-    return bundle.with_suffix(".mmd")
+    ppath.parent.mkdir(parents=True, exist_ok=True)
+    return ppath
 
 
 @pytest.fixture

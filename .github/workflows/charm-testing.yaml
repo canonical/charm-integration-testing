@@ -88,6 +88,8 @@ jobs:
       MINIO_CLIENT_FILE: ${{ github.workspace }}/static/mc
       UBUNTU_PRO_TOKEN: ${{ secrets.UBUNTU_PRO_TOKEN }}
       VALIDATORS_PATH: ${{ github.workspace }}/validators
+      BUNDLE_OUTPUT: ./generated-bundle.yaml
+      BUNDLE_MERMAID_OUTPUT: ./generated-bundle.mmd
     steps:
       - name: Clone Repo
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -278,7 +280,6 @@ jobs:
           channel: ${{ inputs.channel }}
           series: ${{ inputs.series }}
           neighbor: ${{ inputs.neighbor }}
-          substrate: ${{ inputs.substrate }}
           platform: ${{ inputs.substrate == 'openstack' && 'machine' || inputs.substrate }}
         run: |
           echo "junit_xml=$(realpath junit.xml)" >> $GITHUB_OUTPUT
@@ -289,7 +290,8 @@ jobs:
             --target-series "${series}" \
             --neighbor-charm "${neighbor}" \
             --model "${model}" \
-            --bundle "./generated-bundle.yaml" \
+            --bundle "${BUNDLE_OUTPUT}" \
+            --mermaid-output "${BUNDLE_MERMAID_OUTPUT}" \
             --current-state "no_bundle" \
             --target-application "target" \
             --target-endpoint "${charm_endpoint}" \
@@ -320,11 +322,11 @@ jobs:
           # Note the generated bundles
           echo '### Generated Bundle Mermaid Diagram' >> $GITHUB_STEP_SUMMARY
           echo '```mermaid' >> $GITHUB_STEP_SUMMARY
-          cat generated-bundle.mmd >> $GITHUB_STEP_SUMMARY
+          cat ${BUNDLE_MERMAID_OUTPUT} >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
           echo '### Generated Juju Bundle' >> $GITHUB_STEP_SUMMARY
           echo '```yaml' >> $GITHUB_STEP_SUMMARY
-          cat generated-bundle.yaml >> $GITHUB_STEP_SUMMARY
+          cat ${BUNDLE_OUTPUT} >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
       - name: Post execution metadata to Test Observer
         if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
