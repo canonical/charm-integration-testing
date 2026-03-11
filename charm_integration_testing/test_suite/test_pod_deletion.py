@@ -4,9 +4,9 @@ from time import sleep
 
 import pytest
 from juju import JujuClient
-from kubernetes import client
+from kubernetes import client  # type: ignore[import-untyped]
 from kubernetes import config as k8s_config
-from kubernetes.client.rest import ApiException
+from kubernetes.client.rest import ApiException  # type: ignore[import-untyped]
 
 from .scheduler.states import State
 
