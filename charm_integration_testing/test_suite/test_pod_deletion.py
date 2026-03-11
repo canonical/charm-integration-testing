@@ -48,18 +48,6 @@ def test_pod_deletion(juju_client: JujuClient, model: str, target_application: s
     except ApiException as e:
         pytest.fail(f"Exception when trying to delete pod: {e}")
 
-    # Wait for the pod to be recreated
-    while True:
-        try:
-            target_pod = v1.read_namespaced_pod(name=target_pod_name, namespace=namespace)
-        except ApiException as e:
-            logger.info(f"Pod {target_pod_name} successfully deleted")
-            if e.status == 404:
-                break
-            else:
-                sleep(0.25)
-                continue
-
     start_time = datetime.now()
     while start_time + timedelta(minutes=5) > datetime.now():
         try:
