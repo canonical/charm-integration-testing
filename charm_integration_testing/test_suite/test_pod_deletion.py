@@ -22,7 +22,7 @@ def test_pod_deletion(juju_client: JujuClient, model: str, target_application: s
     4. validate that the model is idle and healthy
     """
 
-    if juju_client.backend.get_model_type(model) != "k8s":
+    if not juju_client.backend.is_k8s_model(model):
         pytest.skip("This test is only applicable for Kubernetes models.")
 
     k8s_config.load_kube_config()
@@ -48,7 +48,7 @@ def test_pod_deletion(juju_client: JujuClient, model: str, target_application: s
     start_time = datetime.now()
     while start_time + timedelta(minutes=5) > datetime.now():
         # get juju status first to make sure there's no race condition between calling the action and the pod being recreated
-        application_status = juju_client.backend.juju_application_status(model=model, application=target_application)
+        application_status = juju_client.backend.get_application_status(model=model, application=target_application)
 
         try:
             target_pod = v1.read_namespaced_pod(name=target_pod_name, namespace=namespace)
@@ -63,7 +63,7 @@ def test_pod_deletion(juju_client: JujuClient, model: str, target_application: s
         if target_pod.status.phase == "Running":
             break
         else:
-            if application_status.status.current == "active":
+            if application_status == "active":
                 pytest.fail(f"Pod {target_pod_name} is not running, but application status is active.")
 
         sleep(10)
