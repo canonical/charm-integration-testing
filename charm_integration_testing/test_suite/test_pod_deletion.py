@@ -70,6 +70,7 @@ def test_pod_deletion(juju_client: JujuClient, model: str, target_application: s
             logger.info(f"Pod {target_pod_name} is running.")
             break
         else:
+            application_status = juju_client.backend.get_application_status(model=model, application=target_application)
             if application_status == "active":
                 logger.warning(f"Pod {target_pod_name} is not running, but application status is active.")
                 pytest.fail(f"Pod {target_pod_name} is not running, but application status is active.")
