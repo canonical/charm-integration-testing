@@ -71,7 +71,7 @@ def test_pod_deletion(juju_client: JujuClient, model: str, target_application: s
         except ApiException as e:
             if e.status == 404:
                 # Pod has not been recreated yet
-                sleep(10)
+                sleep(0.25)
                 continue
             else:
                 pytest.fail(f"Exception when trying to read pod: {e}")
