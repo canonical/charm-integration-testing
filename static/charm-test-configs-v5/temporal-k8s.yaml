@@ -1,0 +1,8 @@
+---
+configs:
+  - config:
+      num-history-shards: 1
+  - config:
+      num-history-shards: 2
+  - config:
+      num-history-shards: 4

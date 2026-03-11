@@ -1,0 +1,9 @@
+---
+overrides:
+  - provides:
+      admin:
+        limit: 1
+        optional: false
+    constraints: |-
+      ; admin endpoint must use admin mode
+      (assert (=> admin (= admin_mode "admin")))

@@ -1,0 +1,4 @@
+---
+configs:
+  # NOTE: the config key changed in 1.18
+  - pki_ca_common_name: charmqa

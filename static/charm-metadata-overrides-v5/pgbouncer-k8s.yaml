@@ -1,0 +1,24 @@
+---
+# pgbouncer needs at least one of these to exit blocked state
+# (db and db-admin are legacy endpoints)
+# https://github.com/canonical/pgbouncer-operator/pull/548
+overrides:
+  - provides:
+      database:
+        optional: true
+      db:
+        optional: true
+      db-admin:
+        optional: true
+    requires:
+      certificates:
+        optional: true
+    constraints: |-
+      ; At least one database endpoint must be integrated
+      (assert (or database db db-admin))
+      ; If database endpoint uses tls mode, certificates is required
+      (assert (=> (and database (= database_mode "tls")) certificates))
+      ; If db endpoint uses tls mode, certificates is required
+      (assert (=> (and db (= db_mode "tls")) certificates))
+      ; If db-admin endpoint uses tls mode, certificates is required
+      (assert (=> (and db-admin (= db-admin_mode "tls")) certificates))

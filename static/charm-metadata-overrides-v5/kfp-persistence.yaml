@@ -1,0 +1,6 @@
+---
+# KFP Persistence Agent - syncs pipeline execution state to API server
+overrides:
+  - constraints: |-
+      ; kfp-api must have kfp-api mode
+      (assert (=> kfp-api (= kfp-api_mode "kfp-api")))

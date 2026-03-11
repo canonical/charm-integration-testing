@@ -1,0 +1,4 @@
+---
+configs:
+  # NOTE: "charmqa" is just a random value
+  - common_name: charmqa

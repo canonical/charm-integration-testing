@@ -1,0 +1,50 @@
+---
+# Traefik optional flags have been added: https://github.com/canonical/traefik-k8s-operator/pull/474
+# But there has been no release
+# And appears in limbo due to being handed off to IS
+overrides:
+  - requires:
+      certificates:
+        optional: true
+      experimental-forward-auth:
+        optional: true
+      logging:
+        optional: true
+      charm-tracing:
+        optional: true
+      workload-tracing:
+        optional: true
+      receive-ca-cert:
+        optional: true
+      upstream-ingress:
+        optional: true
+    provides:
+      ingress:
+        optional: true
+      ingress-per-unit:
+        optional: true
+      metrics-endpoint:
+        optional: true
+      traefik-route:
+        optional: true
+      grafana-dashboard:
+        optional: true
+    bridges:
+      - interface: certificate_transfer
+        requires: certificates
+        provides: ingress
+      - interface: certificate_transfer
+        requires: certificates
+        provides: ingress-per-unit
+      - interface: certificate_transfer
+        requires: certificates
+        provides: traefik-route
+    constraints: |-
+      ; If tls mode, certificates is required
+      (assert (=> (= traefik-route_mode "tls") certificates))
+      (assert (=> (= ingress_mode "tls") certificates))
+      (assert (=> (= ingress-per-unit_mode "tls") certificates))
+      ; If certificates is integrated, endpoints must use tls mode
+      (assert (=> certificates (= traefik-route_mode "tls")))
+      (assert (=> certificates (= ingress_mode "tls")))
+      (assert (=> certificates (= ingress-per-unit_mode "tls")))

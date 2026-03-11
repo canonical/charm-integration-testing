@@ -1,0 +1,5 @@
+---
+overrides:
+  - requires:
+      dex-oidc-config:
+        cyclic: true

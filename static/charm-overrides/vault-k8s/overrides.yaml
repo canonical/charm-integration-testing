@@ -1,0 +1,24 @@
+---
+platforms:
+priority:
+listed:
+overrides:
+  - criteria:
+      any_of:
+        - track: '1.15'
+        - track: '1.16'
+        - track: '1.17'
+    metadata: ./metadata.yaml
+    configs: ./configs-1.15-1.17.yaml
+    ruleset: ./ruleset.yaml
+  - criteria:
+      any_of:
+        - track: '1.18'
+        - track: '1.19'
+    metadata: ./metadata.yaml
+    configs: ./configs-1.18-1.19.yaml
+    ruleset: ./ruleset.yaml
+  - criteria: {}
+    metadata: ./metadata.yaml
+    configs:
+    ruleset: ./ruleset.yaml

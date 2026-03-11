@@ -1,0 +1,9 @@
+---
+platforms: []
+priority: 1
+listed: true
+overrides:
+  - criteria: {}
+    metadata: ./metadata.yaml
+    configs:
+    ruleset: ./ruleset.yaml

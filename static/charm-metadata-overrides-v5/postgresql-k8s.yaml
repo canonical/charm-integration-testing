@@ -1,0 +1,38 @@
+---
+# Remove after: https://github.com/canonical/postgresql-k8s-operator/pull/1018
+overrides:
+  - criteria:
+      track: '16'
+    provides:
+      metrics-endpoint:
+        optional: true
+      grafana-dashboard:
+        optional: true
+  - provides:
+      replication-offer:
+        optional: true
+      metrics-endpoint:
+        optional: true
+      grafana-dashboard:
+        optional: true
+      database:
+        limit: 1
+        optional: true
+      db:
+        limit: 1
+        optional: true
+      db-admin:
+        limit: 1
+        optional: true
+    requires:
+      certificates:
+        optional: true
+    constraints: |-
+      ; database, db, and db-admin are mutually exclusive (at most one can be used at a time)
+      (assert (<= (+ database_count db_count db-admin_count) 1))
+      ; If database endpoint uses tls mode, certificates is required
+      ; (assert (=> (and database (= database_mode "tls")) certificates))
+      ; If db endpoint uses tls mode, certificates is required
+      ; (assert (=> (and db (= db_mode "tls")) certificates))
+      ; If db-admin endpoint uses tls mode, certificates is required
+      ; (assert (=> (and db-admin (= db-admin_mode "tls")) certificates))

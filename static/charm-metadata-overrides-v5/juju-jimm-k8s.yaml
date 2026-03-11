@@ -1,0 +1,23 @@
+---
+overrides:
+  - provides:
+      dashboard:
+        optional: true
+      grafana-dashboard:
+        optional: true
+      metrics-endpoint:
+        optional: true
+    requires:
+      ingress:
+        optional: true
+      ingress-ssh:
+        optional: true
+      nginx-route:
+        optional: true
+      oauth:
+        optional: false
+      receive-ca-cert:
+        optional: true
+    constraints: |-
+      ; If oauth uses tls mode, receive-ca-cert must come from the same provider as oauth
+      (assert (=> (= oauth_mode "tls") (subset oauth_applications receive-ca-cert_applications)))

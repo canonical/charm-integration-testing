@@ -1,0 +1,10 @@
+---
+overrides:
+  - requires:
+      s3-credentials:
+        optional: true
+      azure-storage-credentials:
+        optional: true
+    constraints: |-
+      ; At least one storage backend is required (s3 or azure)
+      (assert (or s3-credentials azure-storage-credentials))

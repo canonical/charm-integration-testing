@@ -1,0 +1,13 @@
+---
+overrides:
+  - provides:
+      # https://github.com/canonical/temporal-k8s-operator/issues/120
+      ui:
+        limit: 1
+        optional: false
+    requires:
+      nginx-route:
+        optional: true
+    constraints: |-
+      ; ui endpoint must use ui mode
+      (assert (=> ui (= ui_mode "ui")))

@@ -1,0 +1,4 @@
+---
+configs:
+  - config:
+      ldaps_enabled: true

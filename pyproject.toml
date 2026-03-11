@@ -11,6 +11,8 @@ package-mode = false
 [tool.poetry.dependencies]
 charm-integration-testing = { path = "./charm_integration_testing", develop = true }
 bundle-builder = { path = "./bundle_builder", develop = true }
+bundle-builder-v5 = { path = "./bundle_builder_v5", develop = true }
+bundle-builder-v9 = { path = "./bundle_builder_v9", develop = true }
 validators-base = { path = "./validators/base", develop = true }
 validators-runner = { path = "./validators/runner", develop = true }
 validators-postgresql-client = { path = "./validators/postgresql_client", develop = true, extras = ["dev", "deep", "uat"] }
