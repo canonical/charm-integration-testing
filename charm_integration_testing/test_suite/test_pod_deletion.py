@@ -43,7 +43,9 @@ def test_pod_deletion(juju_client: JujuClient, model: str, target_application: s
     except ApiException as e:
         pytest.fail(f"Exception when trying to read pod: {e}")
 
-    logger.info(f"Found target pod {target_pod_name} in namespace {namespace}. Deleting pod...")
+    logger.info(
+        f"Found target pod {target_pod_name} in namespace {namespace}, UID {old_pod.metadata.uid}. Deleting pod..."
+    )
 
     # Delete the target pod
     try:
@@ -67,7 +69,7 @@ def test_pod_deletion(juju_client: JujuClient, model: str, target_application: s
                 pytest.fail(f"Exception when trying to read pod: {e}")
 
         if new_pod.status.phase == "Running":
-            logger.info(f"Pod {target_pod_name} is running.")
+            logger.info(f"Pod {target_pod_name} is running. UID {new_pod.metadata.uid}.")
             break
 
     else:
