@@ -54,13 +54,6 @@ class JubilantBackend(JujuCmdBackend):
     def juju_status_text(self, model: str) -> str:
         return self.client.model(model).cli("status", "--integrations", "--format", "tabular")
 
-    @warn_performance(category=JujuStatusPerformanceWarning, threshold=timedelta(seconds=5))
-    def get_application_status(self, model: str, application: str) -> str:
-        status = self.client.model(model).status()
-        if application not in status.apps:
-            raise KeyError(f"Application '{application}' not found in model '{model}'")
-        return status.apps[application].app_status.current
-
     def wait(
         self,
         model: str,

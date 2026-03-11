@@ -138,9 +138,6 @@ class NullJujuBackend(JujuBackend):
     def is_k8s_model(self, model: str) -> bool:
         raise NotImplementedError
 
-    def get_application_status(self, model: str, application: str) -> str:
-        raise NotImplementedError
-
 
 @dataclass
 class JujuStub(NullJujuBackend):

@@ -388,6 +388,3 @@ class JujuCmdBackend(JujuBackend):
 
     def version(self, model: str) -> str:
         raise NotImplementedError
-
-    def get_application_status(self, model: str, application: str) -> str:
-        raise NotImplementedError
