@@ -30,7 +30,7 @@ def test_pod_deletion(juju_client: JujuClient, model: str, target_application: s
 
     if not juju_client.backend.is_k8s_model(model):
         pytest.skip("This test is only applicable for Kubernetes models.")
-        
+
     try:
         k8s_config.load_kube_config()
     except k8s_config.ConfigException:
