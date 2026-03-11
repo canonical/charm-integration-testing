@@ -346,6 +346,3 @@ class JubilantBackend(JujuCmdBackend):
     def validate_application(self, model: str, application: str, level: str) -> None:
         # Phase 2 endpoint validation will be done here
         pass
-
-    def is_k8s_model(self, model: str) -> bool:
-        return self.show_model(model).type == "kubernetes"
