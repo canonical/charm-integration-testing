@@ -49,7 +49,17 @@ def test_pod_deletion(juju_client: JujuClient, model: str, target_application: s
         pytest.fail(f"Exception when trying to delete pod: {e}")
 
     # Wait for the pod to be recreated
-    sleep(5)  # give some time for the pod to be deleted before checking for its recreation
+    while True:
+        try:
+            target_pod = v1.read_namespaced_pod(name=target_pod_name, namespace=namespace)
+        except ApiException as e:
+            logger.info(f"Pod {target_pod_name} successfully deleted")
+            if e.status == 404:
+                break
+            else:
+                sleep(0.25)
+                continue
+
     start_time = datetime.now()
     while start_time + timedelta(minutes=5) > datetime.now():
         # get juju status first to make sure there's no race condition between calling the action and the pod being recreated
@@ -70,19 +80,20 @@ def test_pod_deletion(juju_client: JujuClient, model: str, target_application: s
             logger.info(f"Pod {target_pod_name} is running.")
             break
         else:
+            # kubernetes charms are defined as stateful sets, so the pod will be recreated. The check is if the charm is running correctly.
             application_status = juju_client.backend.get_application_status(model=model, application=target_application)
+            logger.info(f"Pod {target_pod_name} is in phase {target_pod.status.phase}. Current application status: {application_status}")
             if application_status == "active":
                 logger.warning(f"Pod {target_pod_name} is not running, but application status is active.")
                 pytest.fail(f"Pod {target_pod_name} is not running, but application status is active.")
 
-        sleep(10)
-    # kubernetes charms are defined as stateful sets, so the pod will be recreated. The check is if the charm is running correctly.
+   
 
     else:
         pytest.fail(f"Pod {target_pod_name} was not recreated and running within the expected time.")
 
     # Wait for return to idle
-    juju_client.idle_for_period(model=model, timeout=timedelta(minutes=15))
+    juju_client.idle_for_period(model=model, timeout=timedelta(minutes=5))
 
     # Validate all applications and relations
     juju_client.validate_model(model=model, level="simple")
