@@ -59,6 +59,11 @@ class CharmhubClient:
         charm_revision: int | None = None,
         ubuntu_version: str | None = None,
     ) -> Charm:
+        # Get default version from overrides if not provided
+        if charm_channel is None and charm_revision is None:
+            charm_channel = self.overrides_client.get_charm_default_channel(charm_name)
+            charm_revision = self.overrides_client.get_charm_default_revision(charm_name)
+
         # Figure out how to look up charm information
         if charm_channel and charm_revision:
             return self._charm_from_store_by_channel_and_revision(
@@ -164,8 +169,8 @@ class CharmhubClient:
             ubuntu_version=ubuntu_version,
             ubuntu_arch=ubuntu_arch,
             endpoints=self._get_charm_endpoints(charm_name, metadata, channel),
-            priority=self._get_charm_priority(charm_name),
-            configs=self._get_charm_configs(charm_name, config_schema, channel),
+            priority=self.overrides_client.get_charm_priority(charm_name),
+            configs=self.overrides_client.get_charm_configs(charm_name, channel),
             ruleset_url=self.overrides_client.get_charm_ruleset_url(charm_name, channel),
         )
 
@@ -527,9 +532,3 @@ class CharmhubClient:
                 )
 
         return endpoints
-
-    def _get_charm_priority(self, charm_name: str) -> float:
-        return self.overrides_client.get_charm_priority(charm_name)
-
-    def _get_charm_configs(self, charm: str, channel: CharmChannel) -> list[CharmConfig]:
-        return self.overrides_client.get_charm_configs(charm, channel)

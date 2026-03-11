@@ -2,6 +2,7 @@
 platforms: []
 priority: 1
 listed: true
+default_channel: null
 overrides:
   - criteria: {}
     metadata: ./metadata.yaml

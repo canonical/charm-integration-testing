@@ -77,6 +77,8 @@ class CharmOverrideFile(BaseModel):
     platforms: list[str] | None = None
     priority: float | None = None
     listed: bool | None = None
+    default_channel: str | None = None
+    default_revision: int | None = None
     overrides: list[CharmOverrideEntry] = Field(default_factory=list)
 
 
@@ -158,3 +160,11 @@ class OverridesClient:
         if entry.ruleset is None or self.charm_overrides is None:
             return None
         return str(self._resolve_relative(charm, entry.ruleset))
+    
+    @cache
+    def get_charm_default_channel(self, charm: str) -> str | None:
+        return self._get_charm_override_file(charm).default_channel
+    
+    @cache
+    def get_charm_default_revision(self, charm: str) -> int | None:
+        return self._get_charm_override_file(charm).default_revision
