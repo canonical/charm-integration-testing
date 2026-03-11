@@ -16,7 +16,6 @@
 
 import logging
 import tempfile
-from collections.abc import Callable
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
@@ -64,15 +63,6 @@ class BundleBuilder:
     ):
         self.charmhub_client = charmhub_client
         self.logger = logger
-
-    def build(
-        self,
-        applications: dict[str, ApplicationConstraint],
-        integrations: set[IntegrationConstraint],
-        platform: str,
-        arch: str,
-    ) -> Bundle:
-        return self._initialize_domain(applications, integrations, platform, arch).example()
 
     def _initialize_domain(
         self,
@@ -167,26 +157,26 @@ class BundleBuilder:
             )
         )
 
-    def fuzz(
+    def build(
         self,
         applications: dict[str, ApplicationConstraint],
         integrations: set[IntegrationConstraint],
         platform: str,
         arch: str,
-        probe_urls: list[str],
+        probe_urls: list[str] = [],
     ) -> Bundle:
-        """Search for a bundle satisfying all juju-doctor probes, expanding the charm pool as needed.
+        """Build a bundle satisfying all constraints and probes.
 
-        Iteratively widens the set of applications by discovering charms from
-        charmhub that can satisfy unsatisfied REQUIRES endpoints, retrying
-        hypothesis.find() each time until a valid bundle is found.
+        Always runs metadata endpoint constraints derived from charm metadata.
+        If probe_urls are provided, also runs those probes and expands the charm
+        pool as needed to satisfy them.
 
         Args:
             applications: user-specified application constraints.
             integrations: user-specified integration constraints.
             platform: target platform (kubernetes or machine).
             arch: target architecture.
-            probe_urls: probe URLs (file:// or github://) to load and run.
+            probe_urls: optional probe URLs (file:// or github://) to also run.
         """
         with tempfile.TemporaryDirectory() as probes_root_str:
             probes_root = Path(probes_root_str)
@@ -199,9 +189,10 @@ class BundleBuilder:
             added_by: dict[str, str] = {}
 
             current_applications = dict(applications)
+            current_probes: list[Probe] = []
 
             def _load_probes() -> list[Probe]:
-                """(Re-)load all probes including freshly written metadata probes."""
+                """Load all probes for the current application set."""
                 # Collect unique charms present in current_applications
                 seen_charm_names: set[str] = set()
                 all_probes: list[Probe] = []
@@ -219,7 +210,7 @@ class BundleBuilder:
                         seen_charm_names.add(charm_obj.name)
                         # Write metadata probe for this charm
                         metadata_probe_path = self._write_metadata_probe(charm_obj, probes_root)
-                        probe_tree = Probe.from_url(str(metadata_probe_path), probes_root)
+                        probe_tree = Probe.from_url(metadata_probe_path.as_uri(), probes_root)
                         all_probes.extend(probe_tree.probes)
                         # Load static ruleset if declared
                         if charm_obj.ruleset_url:
@@ -239,7 +230,7 @@ class BundleBuilder:
                 bundle_dict = yaml.safe_load(bundle.export())
                 artifacts = Artifacts({"model": ModelArtifact(status=None, bundle=bundle_dict, show_units=None)})
                 passed = True
-                for probe in _load_probes():
+                for probe in current_probes:
                     probe.results = []
                     probe.run(artifacts)
                     for result in probe.results:
@@ -260,6 +251,7 @@ class BundleBuilder:
                     f"Fuzz iteration {iteration + 1}/{max_iterations} "
                     f"with {len(current_applications)} application(s): {sorted(current_applications)}"
                 )
+                current_probes[:] = _load_probes()
                 strategy = self._initialize_domain(current_applications, integrations, platform, arch)
                 try:
                     find(strategy, _satisfies_probes)
@@ -296,62 +288,16 @@ class BundleBuilder:
                         break
                     continue
 
-                # A satisfying application set was found — now minimize it by
-                # greedily removing non-user-specified applications that aren't needed.
-                self.logger.info("Minimizing application set")
-                minimal_applications = self._minimize_applications(
-                    current_applications, applications, integrations, platform, arch, _satisfies_probes
-                )
-                self.logger.info(
-                    f"Minimized to {len(minimal_applications)} application(s): {sorted(minimal_applications)}"
-                )
+                # TODO: minimize the application set before returning
+                # (greedily remove non-user-specified applications that aren't needed)
                 return find(
-                    self._initialize_domain(minimal_applications, integrations, platform, arch),
+                    self._initialize_domain(current_applications, integrations, platform, arch),
                     _satisfies_probes,
                 )
 
             raise UnresolvableBundleError(
                 "No bundle satisfying all probes could be found after expanding the charm pool"
             )
-
-    def _minimize_applications(
-        self,
-        current_applications: dict[str, ApplicationConstraint],
-        user_applications: dict[str, ApplicationConstraint],
-        integrations: set[IntegrationConstraint],
-        platform: str,
-        arch: str,
-        satisfies_probes: "Callable[[Bundle], bool]",
-    ) -> dict[str, ApplicationConstraint]:
-        """Greedily remove non-user-specified applications that aren't needed.
-
-        Tries removing each added application one at a time. If a satisfying
-        bundle still exists without it (via hypothesis.find), the removal sticks.
-        Repeats until no further reductions are possible.
-        """
-        minimal = dict(current_applications)
-        # Only try removing applications the user didn't ask for
-        removable = [app for app in minimal if app not in user_applications]
-
-        changed = True
-        while changed:
-            changed = False
-            for app_name in list(removable):
-                if app_name not in minimal:
-                    continue
-                candidate = {k: v for k, v in minimal.items() if k != app_name}
-                if len(candidate) == 0:
-                    continue
-                strategy = self._initialize_domain(candidate, integrations, platform, arch)
-                try:
-                    find(strategy, satisfies_probes)
-                except NoSuchExample:
-                    continue
-                self.logger.info(f"Removed unnecessary application '{app_name}'")
-                minimal = candidate
-                changed = True
-
-        return minimal
 
     def _expand_applications(
         self,
@@ -566,29 +512,24 @@ class BundleBuilder:
         return False
 
     def _write_metadata_probe(self, charm: Charm, probes_root: Path) -> Path:
-        """Write a synthetic ruleset YAML calling from-metadata.py with endpoint data."""
-        requires = {
-            ep_name: {"optional": ep.optional, "limit": ep.limit}
-            for ep_name, ep in charm.endpoints.items()
-            if ep.type == EndpointType.REQUIRES
-        }
-        provides = {
-            ep_name: {"optional": ep.optional, "limit": ep.limit}
-            for ep_name, ep in charm.endpoints.items()
-            if ep.type == EndpointType.PROVIDES
-        }
+        """Write a synthetic ruleset YAML with one probe per non-peer endpoint."""
         from_metadata_url = str(Path(__file__).parent / "probes" / "from-metadata.py")
-        ruleset = {
-            "name": f"{charm.name}-metadata-constraints",
-            "probes": [
-                {
-                    "name": "Metadata endpoint constraints",
-                    "type": "scriptlet",
-                    "url": from_metadata_url,
-                    "with": {"charm": charm.name, "requires": requires, "provides": provides},
-                }
-            ],
-        }
+        probes = [
+            {
+                "name": f"{ep_name} endpoint constraint",
+                "type": "scriptlet",
+                "url": from_metadata_url,
+                "with": {
+                    "charm": charm.name,
+                    "endpoint": ep_name,
+                    "optional": ep.optional,
+                    "limit": ep.limit,
+                },
+            }
+            for ep_name, ep in charm.endpoints.items()
+            if ep.type != EndpointType.PEERS
+        ]
+        ruleset = {"name": f"{charm.name}-metadata-constraints", "probes": probes}
         out = probes_root / f"{charm.name}-metadata.yaml"
         out.write_text(yaml.dump(ruleset))
         return out
