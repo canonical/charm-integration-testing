@@ -72,6 +72,7 @@ def test_pod_deletion(juju_client: JujuClient, model: str, target_application: s
             logger.info(f"Pod {target_pod_name} is running. UID {new_pod.metadata.uid}.")
             break
 
+        sleep(0.1)
     else:
         pytest.fail(f"Pod {target_pod_name} was not recreated and running within the expected time.")
 
