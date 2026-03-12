@@ -825,6 +825,76 @@ class TestJubilantBackend:
             assert stub.target == "my-app"
             assert stub.command == "ls -l"
 
+    class TestExecUnit:
+        @staticmethod
+        def _exec_yaml(unit: str, return_code: int, stdout: str = "", stderr: str = "") -> str:
+            return yaml.dump(
+                {
+                    unit: {
+                        "id": "1",
+                        "status": "completed",
+                        "results": {
+                            "return-code": return_code,
+                            "stdout": stdout,
+                            "stderr": stderr,
+                        },
+                    }
+                }
+            )
+
+        @dataclass
+        class ExecCliStub:
+            calls: list[tuple[str, ...]] = field(default_factory=list)
+            response: str = ""
+            fail_with_task_error: bool = False
+
+            def cli(self, *args: str) -> str:
+                self.calls.append(tuple(args))
+                if self.fail_with_task_error:
+                    raise jubilant.CLIError(1, ["juju"], self.response, "ERROR the following task failed")
+                return self.response
+
+        def test_exec_success(self) -> None:
+            # GIVEN a successful exec
+            stub = self.ExecCliStub(response=self._exec_yaml("myapp/0", 0, stdout="hello\n"))
+            client = JubilantClientStub(client=stub)
+
+            # WHEN
+            result = JubilantBackend(client).exec_unit("test-model", "myapp/0", "echo hello")
+
+            # THEN the CLI args include exec, unit, format, and the command
+            assert stub.calls == [("exec", "--unit", "myapp/0", "--format", "yaml", "--", "echo hello")]
+            assert result.return_code == 0
+            assert result.stdout == "hello\n"
+            assert result.stderr == ""
+
+        def test_exec_with_operator(self) -> None:
+            # GIVEN
+            stub = self.ExecCliStub(response=self._exec_yaml("myapp/0", 0, stdout="hello\n"))
+            client = JubilantClientStub(client=stub)
+
+            # WHEN operator=True is passed
+            result = JubilantBackend(client).exec_unit("test-model", "myapp/0", "echo hello", operator=True)
+
+            # THEN --operator is inserted before --format
+            assert stub.calls == [("exec", "--unit", "myapp/0", "--operator", "--format", "yaml", "--", "echo hello")]
+            assert result.return_code == 0
+
+        def test_exec_nonzero_return_code(self) -> None:
+            # GIVEN a command that exits non-zero (juju exec raises CLIError with "task failed")
+            stub = self.ExecCliStub(
+                response=self._exec_yaml("myapp/0", 1, stderr="command not found"),
+                fail_with_task_error=True,
+            )
+            client = JubilantClientStub(client=stub)
+
+            # WHEN
+            result = JubilantBackend(client).exec_unit("test-model", "myapp/0", "bad-cmd")
+
+            # THEN the non-zero return code is returned, not raised
+            assert result.return_code == 1
+            assert result.stderr == "command not found"
+
     class TestUnitIp:
         class Unit:
             def __init__(self, address: str, leader: bool = False) -> None:

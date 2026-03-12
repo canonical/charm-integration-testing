@@ -13,6 +13,7 @@ import jubilant
 import yaml
 from juju import (
     JujuApplicationInfo,
+    JujuExecOutput,
     JujuIntegration,
     JujuIntegrationApplication,
     JujuStatusPerformanceWarning,
@@ -24,6 +25,7 @@ from juju import (
 from juju_cmd import JujuCmdBackend
 
 from .client import JubilantClient
+from .structures import JujuExecTask
 from .wait import (
     all_statuses_are_in,
     applications_are_removed,
@@ -258,6 +260,31 @@ class JubilantBackend(JujuCmdBackend):
         # I'd rather just pass this through, but to follow the return type correctly,
         # we'll convert to a dict.
         return {k: v for k, v in self.client.model(model).config(application).items()}
+
+    def exec_unit(self, model: str, unit: str, task: str, operator: bool = False) -> JujuExecOutput:
+        args = ["exec", "--unit", unit]
+        if operator:
+            args.append("--operator")
+        args += ["--format", "yaml", "--", task]
+
+        # Call juju exec
+        try:
+            exec_output = self.client.model(model).cli(*args)
+        except jubilant.CLIError as e:
+            if "ERROR the following task failed" not in e.stderr:
+                raise
+            exec_output = e.stdout
+
+        # Parse output
+        parsed_output = {unit: JujuExecTask(**result) for unit, result in yaml.safe_load(exec_output).items()}
+
+        # Return unit stdout
+        task_result = next(iter(parsed_output.values()))
+        return JujuExecOutput(
+            return_code=task_result.results.return_code,
+            stdout=task_result.results.stdout,
+            stderr=task_result.results.stderr,
+        )
 
     def scp(self, model: str, source: str, destination: str) -> None:
         # Jubilant scp doesn't work for directories
