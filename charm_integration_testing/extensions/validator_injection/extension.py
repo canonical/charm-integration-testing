@@ -21,8 +21,8 @@ proxy_env = " ".join(
     ]
 )
 remote_validators_path = "/var/lib/validators"
-venv_runner = f"{remote_validators_path}/.venv/bin/run_validators"
-uv_bin = "/usr/local/bin/uv"
+venv_runner = f"{remote_validators_path}/venv/bin/run_validators"
+uv_bin = f"{remote_validators_path}/uv"
 uv_url = "https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-unknown-linux-musl.tar.gz"
 
 
@@ -92,7 +92,8 @@ class ValidatorInjectorExtension(JujuExtension):
 
         # Copy validators
         self.logger.debug(f"[{unit}] copying validators to {remote_validators_path}")
-        self.juju.scp(model, str(self.validators_path.resolve()), f"{unit}:{remote_validators_path}")
+        self.juju.ssh(model, unit, f"mkdir -p {remote_validators_path}")
+        self.juju.scp(model, str(self.validators_path.resolve()), f"{unit}:{remote_validators_path}/packages")
 
         # Copy uv binary
         uv_file = self._get_uv_file()
@@ -103,12 +104,12 @@ class ValidatorInjectorExtension(JujuExtension):
         for cmd, desc in [
             (f"chmod +x {uv_bin}", "make uv executable"),
             (
-                f"{proxy_env} {uv_bin} venv --python '>=3.10' {remote_validators_path}/.venv",
+                f"{proxy_env} {uv_bin} venv --python '>=3.10' {remote_validators_path}/venv",
                 "create venv with python 3.10+",
             ),
             (
-                f"{proxy_env} {uv_bin} pip install --python {remote_validators_path}/.venv"
-                f" {remote_validators_path}/*",
+                f"{proxy_env} {uv_bin} pip install --python {remote_validators_path}/venv"
+                f" {remote_validators_path}/packages/*",
                 "install validator packages",
             ),
         ]:
