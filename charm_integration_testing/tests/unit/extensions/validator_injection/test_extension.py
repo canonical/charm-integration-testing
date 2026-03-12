@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from extensions.validator_injection.extension import (
     ValidatorInjectorExtension,
-    remote_packages_path,
+    remote_validators_path,
 )
 from juju.backend import JujuExecOutput
 
@@ -321,7 +321,7 @@ class TestValidatorInjectorExtension:
             assert len(juju.scp_calls) == 2  # validators + uv
             _, source, dest = juju.scp_calls[0]
             assert source == str(validators_path.resolve())
-            assert dest == f"myapp/0:{remote_packages_path}"
+            assert dest == f"myapp/0:{remote_validators_path}"
 
         def test_runs_three_install_commands(self, extension: ValidatorInjectorExtension, juju: JujuStub) -> None:
             # GIVEN all install commands succeed
