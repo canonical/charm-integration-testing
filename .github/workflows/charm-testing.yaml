@@ -463,7 +463,7 @@ jobs:
         uses: trufflesecurity/trufflehog@main
         with:
           path: ${{ steps.collect_logs.outputs.directory_path }}
-          extra_args: --no-update --fail
+          extra_args: --fail
       - name: Generate Privacy Check JUnit Report
         id: privacy_junit
         if: ${{ always() && steps.logs_privacy_check.conclusion != 'skipped' && env.test_observer_api != '' && inputs.execution_id != '' }}
