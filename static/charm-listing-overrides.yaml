@@ -20,4 +20,3 @@ unlisted_charms:
   - data-integrator
   # Needs relisting
   - tempo-worker-k8s
-  
