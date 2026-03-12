@@ -82,3 +82,11 @@ runs:
           sleep 10
         done
         echo "conclusion=$(gh run view $run_id --json conclusion --jq '.conclusion')" >> "$GITHUB_OUTPUT"
+    - name: Cancel Triggered Workflow on Cancellation
+      if: cancelled() && steps.trigger.outputs.run_id != ''
+      shell: bash
+      env:
+        run_id: ${{ steps.trigger.outputs.run_id }}
+      run: |-
+        echo "Cancelling triggered workflow run $run_id"
+        gh run cancel "$run_id"
