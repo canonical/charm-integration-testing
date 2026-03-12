@@ -1,0 +1,18 @@
+---
+# pgbouncer needs at least one of these to exit blocked state
+# (db and db-admin are legacy endpoints)
+# https://github.com/canonical/pgbouncer-operator/pull/548
+# optional_if conditions (mutually exclusive endpoints) not yet supported in v9;
+# simplified to unconditionally optional
+provides:
+  database:
+    optional: true
+  db:
+    optional: true
+  db-admin:
+    optional: true
+requires:
+  # optional_if condition (tls feature flags) not yet supported in v9;
+  # simplified to unconditionally optional
+  certificates:
+    optional: true

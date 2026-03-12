@@ -1,0 +1,5 @@
+---
+priority: 2.0
+overrides:
+  - criteria: {}
+    metadata: ./metadata.yaml

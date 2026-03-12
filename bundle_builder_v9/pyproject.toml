@@ -27,7 +27,8 @@ dependencies = [
     "pydantic (>=2.12.5,<3.0.0)",
     "requests (>=2.32.5,<3.0.0)",
     "juju-doctor @ git+https://github.com/canonical/juju-doctor.git",
-    "hypothesis (>=6.151.9,<7.0.0)"
+    "hypothesis[crosshair] (>=6.151.9,<7.0.0)",
+    "hypofuzz (>=25.11.1,<26.0.0)"
 ]
 
 [tool.poetry]

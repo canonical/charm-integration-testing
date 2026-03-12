@@ -1,0 +1,25 @@
+---
+# Remove after: https://github.com/canonical/postgresql-k8s-operator/pull/1018
+provides:
+  replication-offer:
+    optional: true
+  metrics-endpoint:
+    optional: true
+  grafana-dashboard:
+    optional: true
+  # limit_if conditions (mutually exclusive endpoints) not yet supported in v9;
+  # simplified to static limit: 1
+  database:
+    optional: true
+    limit: 1
+  db:
+    optional: true
+    limit: 1
+  db-admin:
+    optional: true
+    limit: 1
+requires:
+  # optional_if condition (tls feature flags) not yet supported in v9;
+  # simplified to unconditionally optional
+  certificates:
+    optional: true

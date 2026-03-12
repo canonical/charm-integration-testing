@@ -41,12 +41,24 @@ class ApplicationEndpoint(BaseModel):
         return self.__str__()
 
 
-Integration = frozenset[ApplicationEndpoint]
+class Integration(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    endpoints: tuple[ApplicationEndpoint, ApplicationEndpoint]
+
+    @classmethod
+    def create(cls, ep1: ApplicationEndpoint, ep2: ApplicationEndpoint) -> "Integration":
+        """Create an Integration, sorting endpoints canonically so equality is order-independent."""
+        eps = sorted([ep1, ep2], key=lambda ep: (ep.application, ep.endpoint))
+        return cls(endpoints=(eps[0], eps[1]))
+
+    def __iter__(self):
+        return iter(self.endpoints)
 
 
 class Bundle(BaseModel):
     applications: dict[str, Application]
-    integrations: set[Integration]
+    integrations: list[Integration]
     platform: str
     arch: str
 

@@ -1,0 +1,5 @@
+---
+overrides:
+  - criteria: {}
+    metadata: ./metadata.yaml
+    configs: ./configs.yaml
