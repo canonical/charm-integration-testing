@@ -40,6 +40,8 @@ The following environment variables are optional and only needed when testing sp
 
 ``MINIO_CLIENT_FILE``:
   Path to the MinIO client configuration file. Will be downloaded automatically by the test scripts if not provided. Used when deploying the `minio-k8s` charm with `s3-integrator`.
+``UV_FILE``:
+  Path to a pre-downloaded ``uv`` binary. Will be downloaded automatically if not provided. Used when injecting validators onto units to create the Python virtualenv.
 ``UBUNTU_PRO_TOKEN``:
   Ubuntu Pro token for configuring the livepatch server. Required when testing the `canonical-livepatch-server-k8s`` charms.
 ``VALIDATORS_PATH``:

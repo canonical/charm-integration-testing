@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from extensions.validator_injection.extension import (
     ValidatorInjectorExtension,
-    remote_validators_path,
+    remote_packages_path,
 )
 from juju.backend import JujuExecOutput
 
@@ -44,6 +44,9 @@ class JujuStub(NullJujuBackend):
     def scp(self, model: str, source: str, destination: str) -> None:
         self.scp_calls.append((model, source, destination))
 
+    def ssh(self, model: str, unit: str, cmd: str) -> None:
+        pass
+
 
 class LoggerStub(logging.Logger):
     def __init__(self) -> None:
@@ -59,6 +62,9 @@ class LoggerStub(logging.Logger):
 
     def error(self, msg: str, *args: object, **kwargs: object) -> None:  # type: ignore[override]
         self.errors.append(str(msg))
+
+    def getChild(self, suffix: str) -> "LoggerStub":
+        return self
 
 
 # ---------------------------------------------------------------------------
@@ -134,12 +140,20 @@ class TestValidatorInjectorExtension:
         return tmp_path / "validators"
 
     @pytest.fixture
-    def extension(self, juju: JujuStub, logger: LoggerStub, validators_path: Path) -> ValidatorInjectorExtension:
-        return ValidatorInjectorExtension(validators_path=validators_path, juju=juju, logger=logger)
+    def uv_file(self, tmp_path: Path) -> Path:
+        path = tmp_path / "uv"
+        path.write_bytes(b"")
+        return path
 
     @pytest.fixture
-    def extension_no_path(self, juju: JujuStub, logger: LoggerStub) -> ValidatorInjectorExtension:
-        return ValidatorInjectorExtension(validators_path=None, juju=juju, logger=logger)
+    def extension(
+        self, juju: JujuStub, logger: LoggerStub, validators_path: Path, uv_file: Path
+    ) -> ValidatorInjectorExtension:
+        return ValidatorInjectorExtension(validators_path=validators_path, juju=juju, logger=logger, uv_file=uv_file)
+
+    @pytest.fixture
+    def extension_no_path(self, juju: JujuStub, logger: LoggerStub, uv_file: Path) -> ValidatorInjectorExtension:
+        return ValidatorInjectorExtension(validators_path=None, juju=juju, logger=logger, uv_file=uv_file)
 
     class TestPostValidate:
         def test_runs_validators_on_each_unit(self, extension: ValidatorInjectorExtension, juju: JujuStub) -> None:
@@ -218,7 +232,7 @@ class TestValidatorInjectorExtension:
                 extension._run_validators_on_unit("mymodel", "myapp/0", "simple")
 
                 # THEN scp + 3 install commands + run_validators all happened
-                assert len(juju.scp_calls) == 1
+                assert len(juju.scp_calls) == 2  # validators + uv
                 assert len(juju.exec_calls) == 5  # test-f + 3 installs + run
 
         class TestResultHandling:
@@ -304,10 +318,10 @@ class TestValidatorInjectorExtension:
             extension._inject_validators("mymodel", "myapp/0")
 
             # THEN scp is called with the resolved source path and correct destination
-            assert len(juju.scp_calls) == 1
+            assert len(juju.scp_calls) == 2  # validators + uv
             _, source, dest = juju.scp_calls[0]
             assert source == str(validators_path.resolve())
-            assert dest == f"myapp/0:{remote_validators_path}"
+            assert dest == f"myapp/0:{remote_packages_path}"
 
         def test_runs_three_install_commands(self, extension: ValidatorInjectorExtension, juju: JujuStub) -> None:
             # GIVEN all install commands succeed
@@ -320,11 +334,11 @@ class TestValidatorInjectorExtension:
             assert len(juju.exec_calls) == 3
 
         def test_raises_when_apt_install_fails(self, extension: ValidatorInjectorExtension, juju: JujuStub) -> None:
-            # GIVEN apt-get install fails
-            juju.exec_responses.append(_fail(stderr="apt error"))
+            # GIVEN chmod +x uv fails
+            juju.exec_responses.append(_fail(stderr="chmod error"))
 
             # WHEN / THEN
-            with pytest.raises(RuntimeError, match="install venv"):
+            with pytest.raises(RuntimeError, match="make uv executable"):
                 extension._inject_validators("mymodel", "myapp/0")
 
         def test_raises_when_venv_creation_fails(self, extension: ValidatorInjectorExtension, juju: JujuStub) -> None:
