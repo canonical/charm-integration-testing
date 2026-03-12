@@ -68,7 +68,30 @@ class BaseValidator(ABC):
             relation_id=self.relation_id,
             error=f"Level '{level}' is not supported by {self.__class__.__name__}.",
         )
+    def databag(self) -> dict[str, str]:
+        if self.relation.app is None:
+            return {}
+        return dict(self.relation.data[self.relation.app])
 
     @abstractmethod
     def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
         pass
+
+    def relation_exists(self) -> bool:
+        return self.relation.app is not None
+
+    def resolve_secret(self, uri_key: str, *fields: str) -> dict[str, str]:
+        if uri := self.databag.get(uri_key):
+            return self.charm.model.get_secret(id=uri).get_content()
+        return {f: self.databag[f] for f in fields if f in self.databag}
+
+    def validate_schema(self, required_fields: list[str], creds: dict[str, str] | None = None) -> ValidationCheck:
+        data = self.databag.copy()
+        if creds:
+            data.update(creds)
+        missing = [f for f in required_fields if not data.get(f)]
+        return ValidationCheck(
+            name="schema",
+            passed=not missing,
+            message="OK" if not missing else f"Missing: {', '.join(missing)}",
+        )
