@@ -324,7 +324,7 @@ class TestValidatorInjectorExtension:
             juju.exec_responses.append(_fail(stderr="apt error"))
 
             # WHEN / THEN
-            with pytest.raises(RuntimeError, match="install venv"):
+            with pytest.raises(RuntimeError, match="Failed to install python3.10 and venv"):
                 extension._inject_validators("mymodel", "myapp/0")
 
         def test_raises_when_venv_creation_fails(self, extension: ValidatorInjectorExtension, juju: JujuStub) -> None:

@@ -19,8 +19,10 @@ proxy_env = " ".join(
     ]
 )
 remote_validators_path = "/var/lib/validators"
-venv_python = f"{remote_validators_path}/.venv/bin/python"
+remote_packages_path = f"{remote_validators_path}/packages"
 venv_runner = f"{remote_validators_path}/.venv/bin/run_validators"
+uv_bin = f"{remote_validators_path}/uv"
+uv_url = "https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-unknown-linux-musl.tar.gz"
 
 
 class ValidatorInjectorExtension(JujuExtension):
@@ -31,7 +33,7 @@ class ValidatorInjectorExtension(JujuExtension):
     def __init__(self, validators_path: Path | None, juju: JujuBackend, logger: logging.Logger) -> None:
         self.validators_path = validators_path
         self.juju = juju
-        self.logger = logger
+        self.logger = logger.getChild("ValidatorInjectorExtension")
 
     def post_validate(self, model: str, application: str, level: str) -> None:
         units = self.juju.application_units(model, application)
@@ -80,17 +82,27 @@ class ValidatorInjectorExtension(JujuExtension):
         self.logger.debug(f"Injecting validators on unit {unit}")
 
         # Copy validators
-        self.juju.scp(model, str(self.validators_path.resolve()), f"{unit}:{remote_validators_path}")
+        self.logger.debug(f"[{unit}] copying validators to {remote_packages_path}")
+        self.juju.ssh(model, unit, f"mkdir -p {remote_validators_path}")
+        self.juju.scp(model, str(self.validators_path.resolve()), f"{unit}:{remote_packages_path}")
 
         # Install validators
         for cmd, desc in [
-            ("apt-get update && apt-get install -y python3-venv", "install venv"),
-            (f"python3 -m venv {remote_validators_path}/.venv", "create venv"),
             (
-                f"{proxy_env} {venv_python} -m pip install {remote_validators_path}/*",
+                f"{proxy_env} curl -LsSf {uv_url}" f" | tar -xz -C {remote_validators_path} --strip-components=1",
+                "install uv",
+            ),
+            (
+                f"{proxy_env} {uv_bin} venv --python 3.10 {remote_validators_path}/.venv",
+                "create venv with python 3.10",
+            ),
+            (
+                f"{proxy_env} {uv_bin} pip install --python {remote_validators_path}/.venv"
+                f" {remote_packages_path}/*",
                 "install validator packages",
             ),
         ]:
+            self.logger.debug(f"[{unit}] {desc} with command: {cmd}")
             result = self.juju.exec_unit(model, unit, cmd)
             if result.return_code != 0:
                 raise RuntimeError(f"Failed to {desc} on {unit} (rc={result.return_code}): {result.stderr}")
