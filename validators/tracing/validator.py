@@ -22,8 +22,6 @@ from validators.base import BaseValidator, ValidationCheck, ValidationLevel, Val
 
 
 class TracingValidator(BaseValidator):
-    interface = "tracing"
-
     def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
         if level not in ("simple", "deep"):
             return self._skipped_result(level)
