@@ -52,6 +52,21 @@ class ExplodingValidator(BaseValidator):
         raise RuntimeError("something went wrong")
 
 
+class SkippingValidator(BaseValidator):
+    """Validator that only supports 'simple'; returns SKIPPED for anything else."""
+
+    def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
+        if level != "simple":
+            return self._skipped_result(level)
+        return ValidationResult(
+            status="PASS",
+            endpoint=self.endpoint,
+            interface="test-interface",
+            level=level,
+            relation_id=self.relation_id,
+        )
+
+
 # ---------------------------------------------------------------------------
 # Charm / entry-point stubs
 # ---------------------------------------------------------------------------
@@ -76,6 +91,11 @@ class ModelStub:
 @dataclass
 class MetaStub:
     requires: dict[str, EndpointMetadataStub]
+
+    def __post_init__(self) -> None:
+        # charm.meta.relations is the merged view of all relations; in tests
+        # we only have requires, so alias it so the interface property works.
+        self.relations = self.requires
 
 
 @dataclass
@@ -248,4 +268,44 @@ class TestValidatorRunnerRun:
 
         # THEN
         assert len(results.results) == 2
+
+    def test_falls_back_to_simple_when_deep_is_skipped(self) -> None:
+        # GIVEN a validator that only supports simple
+        runner = self._runner_with("test-interface", SkippingValidator)
+        charm = _make_charm(requires={"db": "test-interface"}, relations={"db": 1})
+
+        # WHEN the runner is asked for deep
+        results = runner.run(charm, level="deep")  # type: ignore[arg-type]
+
+        # THEN it fell back and got a real result at simple
+        assert results.results[0].status == "PASS"
+        assert results.results[0].level == "simple"
+
+    def test_falls_back_through_two_levels(self) -> None:
+        # GIVEN a validator that only supports simple, but uat is requested
+        runner = self._runner_with("test-interface", SkippingValidator)
+        charm = _make_charm(requires={"db": "test-interface"}, relations={"db": 1})
+
+        # WHEN the runner is asked for uat
+        results = runner.run(charm, level="uat")  # type: ignore[arg-type]
+
+        # THEN it fell back through deep → simple and got a real result
+        assert results.results[0].status == "PASS"
+        assert results.results[0].level == "simple"
+
+    def test_surfaces_skipped_when_even_simple_is_not_supported(self) -> None:
+        # GIVEN a validator that skips every level
+        class AlwaysSkippingValidator(BaseValidator):
+            def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
+                return self._skipped_result(level)
+
+        runner = self._runner_with("test-interface", AlwaysSkippingValidator)
+        charm = _make_charm(requires={"db": "test-interface"}, relations={"db": 2})
+
+        # WHEN
+        results = runner.run(charm, level="simple")  # type: ignore[arg-type]
+
+        # THEN both integrations produce independent SKIPPED results
+        assert results.results[0].status == "SKIPPED"
+        assert results.results[1].status == "SKIPPED"
         assert results.results[0].relation_id != results.results[1].relation_id

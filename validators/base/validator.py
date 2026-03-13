@@ -29,7 +29,7 @@ class ValidationCheck(BaseModel):
 
 
 class ValidationResult(BaseModel):
-    status: Literal["PASS", "FAIL", "ERROR"]
+    status: Literal["PASS", "FAIL", "ERROR", "SKIPPED"]
     endpoint: str
     interface: str
     level: ValidationLevel
@@ -53,6 +53,21 @@ class BaseValidator(ABC):
     @property
     def relation_id(self) -> int:
         return self.relation.id
+
+    @property
+    def interface(self) -> str:
+        return self.charm.meta.relations[self.relation.name].interface_name or ""
+
+    def _skipped_result(self, level: ValidationLevel) -> ValidationResult:
+        """Return a SKIPPED result indicating this validator does not support *level*."""
+        return ValidationResult(
+            status="SKIPPED",
+            endpoint=self.endpoint,
+            interface=self.interface,
+            level=level,
+            relation_id=self.relation_id,
+            error=f"Level '{level}' is not supported by {self.__class__.__name__}.",
+        )
 
     @abstractmethod
     def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
