@@ -30,12 +30,13 @@ class JujuStub(NullJujuBackend):
     exec_responses: deque[JujuExecOutput] = field(default_factory=deque)
     exec_calls: list[tuple[str, str, str]] = field(default_factory=list)
     scp_calls: list[tuple[str, str, str]] = field(default_factory=list)
+    ssh_calls: list[tuple[str, str, str]] = field(default_factory=list)
     units_by_app: dict[str, list[str]] = field(default_factory=dict)
 
     def application_units(self, model: str, application: str) -> list[str]:
         return self.units_by_app.get(application, [])
 
-    def exec_unit(self, model: str, unit: str, task: str) -> JujuExecOutput:
+    def exec_unit(self, model: str, unit: str, task: str, operator: bool = False) -> JujuExecOutput:
         self.exec_calls.append((model, unit, task))
         if self.exec_responses:
             return self.exec_responses.popleft()
@@ -45,7 +46,7 @@ class JujuStub(NullJujuBackend):
         self.scp_calls.append((model, source, destination))
 
     def ssh(self, model: str, unit: str, cmd: str) -> None:
-        pass
+        self.ssh_calls.append((model, unit, cmd))
 
 
 class LoggerStub(logging.Logger):
@@ -322,6 +323,23 @@ class TestValidatorInjectorExtension:
             _, source, dest = juju.scp_calls[0]
             assert source == str(validators_path.resolve())
             assert dest == f"myapp/0:{remote_validators_path}/packages"
+
+        def test_calls_ssh_mkdir_before_scp(
+            self,
+            extension: ValidatorInjectorExtension,
+            juju: JujuStub,
+        ) -> None:
+            # GIVEN all install commands succeed
+            juju.exec_responses.extend([_ok(), _ok(), _ok()])
+
+            # WHEN
+            extension._inject_validators("mymodel", "myapp/0")
+
+            # THEN ssh was called to create the remote directory before copying files
+            assert len(juju.ssh_calls) == 1
+            _, unit, cmd = juju.ssh_calls[0]
+            assert unit == "myapp/0"
+            assert cmd == f"mkdir -p {remote_validators_path}"
 
         def test_runs_three_install_commands(self, extension: ValidatorInjectorExtension, juju: JujuStub) -> None:
             # GIVEN all install commands succeed
