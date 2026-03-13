@@ -17,6 +17,8 @@ unlisted_charms:
   - tensorboard-controller
   - tensorboards-web-app
   - training-operator
+  # Data Integrator charm not listed in Charmhub search
+  # Remove after: https://github.com/canonical/data-integrator/issues/243
   - data-integrator
   # Needs relisting
   - tempo-worker-k8s
