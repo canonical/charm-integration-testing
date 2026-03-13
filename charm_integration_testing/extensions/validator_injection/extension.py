@@ -56,8 +56,11 @@ class ValidatorInjectorExtension(JujuExtension):
         validator_results = ValidatorRunnerResults.model_validate_json(run_result.stdout)
         failures = []
         for r in validator_results.results:
+            label = f"[{unit}] endpoint {r.endpoint} (level={r.level})"
             if r.status == "PASS":
-                self.logger.debug(f"[{unit}] endpoint {r.endpoint}: PASS")
+                self.logger.debug(f"{label}: PASS")
+            elif r.status == "SKIPPED":
+                self.logger.warning(f"{label}: SKIPPED - {r.error}")
             else:
                 if r.error:
                     msg = r.error
@@ -66,7 +69,7 @@ class ValidatorInjectorExtension(JujuExtension):
                     msg = f"{len(failed_checks)}/{len(r.checks)} checks failed: {[c.name for c in failed_checks]}"
                 else:
                     msg = r.status
-                self.logger.error(f"[{unit}] endpoint {r.endpoint}: {msg}")
+                self.logger.error(f"{label}: {msg}")
                 failures.append(r.endpoint)
 
         # Raise if there are any failures

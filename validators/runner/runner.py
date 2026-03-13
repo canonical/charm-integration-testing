@@ -29,6 +29,13 @@ from pydantic import BaseModel
 
 from validators.base import BaseValidator, ValidationLevel, ValidationResult
 
+# Ordered from highest to lowest; each level falls back to the next entry.
+_LEVEL_FALLBACK: dict[ValidationLevel, ValidationLevel | None] = {
+    "uat": "deep",
+    "deep": "simple",
+    "simple": None,
+}
+
 
 class ValidatorRunnerResults(BaseModel):
     results: list[ValidationResult]
@@ -71,6 +78,14 @@ class ValidatorRunner:
             validator = validator_cls(charm, integration)
             try:
                 result = validator.validate(level=level)
+                # If the validator doesn't support this level, fall back to the
+                # next lower level until we either get a real result or exhaust
+                # all options and surface the final SKIPPED.
+                while result.status == "SKIPPED":
+                    fallback = _LEVEL_FALLBACK[result.level]
+                    if fallback is None:
+                        break
+                    result = validator.validate(level=fallback)
                 results.append(result)
             except Exception as exc:
                 results.append(

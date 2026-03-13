@@ -23,4 +23,4 @@ def test_deploy(
     juju_client.idle_for_period(model=model, timeout=timedelta(minutes=15))
 
     # Validate all applications and relations
-    juju_client.validate_model(model=model, level="simple")
+    juju_client.validate_model(model=model, level="deep")

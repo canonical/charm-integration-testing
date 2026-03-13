@@ -13,7 +13,7 @@ charm-integration-testing = { path = "./charm_integration_testing", develop = tr
 bundle-builder = { path = "./bundle_builder", develop = true }
 validators-base = { path = "./validators/base", develop = true }
 validators-runner = { path = "./validators/runner", develop = true }
-validators-postgresql-client = { path = "./validators/postgresql_client", develop = true, extras = ["dev"] }
+validators-postgresql-client = { path = "./validators/postgresql_client", develop = true, extras = ["dev", "deep", "uat"] }
 
 
 [build-system]
