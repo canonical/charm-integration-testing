@@ -39,14 +39,25 @@ class RelationStub:
         self.data: dict[AppStub | None, dict[str, str]] = {app: databag}
 
 
+class RelationMetaStub:
+    def __init__(self, interface_name: str) -> None:
+        self.interface_name = interface_name
+
+
+class CharmMetaStub:
+    def __init__(self, endpoint: str, interface_name: str) -> None:
+        self.relations = {endpoint: RelationMetaStub(interface_name)}
+
+
 class CharmStub:
-    pass
+    def __init__(self, endpoint: str = "tracing", interface_name: str = "tracing") -> None:
+        self.meta = CharmMetaStub(endpoint, interface_name)
 
 
 def _make_validator(databag: dict[str, str], endpoint: str = "tracing") -> TracingValidator:
     app = AppStub()
     relation = RelationStub(app=app, databag=databag, name=endpoint)
-    charm = cast(ops.CharmBase, CharmStub())
+    charm = cast(ops.CharmBase, CharmStub(endpoint=endpoint))
     return TracingValidator(charm, cast(ops.Relation, relation))
 
 
@@ -330,7 +341,7 @@ class TestTracingValidatorDeep:
     def test_emit_test_span_uses_correct_http_path(self) -> None:
         # GIVEN the _emit_test_span helper is called with an http receiver
         # WHEN we inspect what endpoint the HTTP exporter is constructed with
-        from opentelemetry.sdk.trace.export import SpanExportResult  # type: ignore[import-untyped]
+        from opentelemetry.sdk.trace.export import SpanExportResult
 
         captured_endpoint: list[str] = []
 

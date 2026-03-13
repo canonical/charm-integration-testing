@@ -40,7 +40,7 @@ class TracingValidator(BaseValidator):
         if level == "deep":
             checks.extend(_trace_checks(receivers))
 
-        status = "PASS" if all(c.passed for c in checks) else "FAIL"
+        status: Literal["PASS", "FAIL"] = "PASS" if all(c.passed for c in checks) else "FAIL"
         return self._make_result(status, level, checks)
 
     # ------------------------------------------------------------------
@@ -76,7 +76,7 @@ class TracingValidator(BaseValidator):
 # ---------------------------------------------------------------------------
 
 
-def _parse_receivers(databag: dict[str, str]) -> tuple[ValidationCheck, list[dict]]:
+def _parse_receivers(databag: dict[str, str]) -> tuple[ValidationCheck, list[dict[str, Any]]]:
     """Parse and structurally validate the ``receivers`` databag field.
 
     Returns a *(check, receivers)* tuple. If the check did not pass,
@@ -124,10 +124,10 @@ def _parse_receivers(databag: dict[str, str]) -> tuple[ValidationCheck, list[dic
             ValidationCheck(name="schema", passed=False, message=f"Invalid receivers: {'; '.join(invalid)}"),
             [],
         )
-    return ValidationCheck(name="schema", passed=True, message="OK"), list(receivers)
+    return ValidationCheck(name="schema", passed=True, message="OK"), list[dict[str, Any]](receivers)
 
 
-def _connectivity_check(receivers: list[dict]) -> ValidationCheck:
+def _connectivity_check(receivers: list[dict[str, Any]]) -> ValidationCheck:
     """TCP-ping every receiver endpoint; return a single pass/fail check."""
     errors: list[str] = []
     for r in receivers:
@@ -149,7 +149,7 @@ def _connectivity_check(receivers: list[dict]) -> ValidationCheck:
 # ---------------------------------------------------------------------------
 
 
-def _trace_checks(receivers: list[dict]) -> list[ValidationCheck]:
+def _trace_checks(receivers: list[dict[str, Any]]) -> list[ValidationCheck]:
     """Emit a test span to each receiver; return one check per receiver."""
     checks: list[ValidationCheck] = []
     for r in receivers:
@@ -171,28 +171,29 @@ def _emit_test_span(url: str, protocol_type: str, timeout: int = 5) -> None:
     Imports are deferred so the ``opentelemetry-exporter-otlp-proto-*``
     packages are only required when the ``"deep"`` validation level is used.
     """
-    from opentelemetry.sdk.resources import Resource  # type: ignore[import-untyped]
-    from opentelemetry.sdk.trace import TracerProvider  # type: ignore[import-untyped]
-    from opentelemetry.sdk.trace.export import SimpleSpanProcessor, SpanExportResult  # type: ignore[import-untyped]
+    from opentelemetry.sdk.resources import Resource
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor, SpanExportResult
 
+    raw_exporter: Any
     if protocol_type == "grpc":
         from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
-            OTLPSpanExporter,  # type: ignore[import-untyped]
+            OTLPSpanExporter as OTLPGrpcSpanExporter,
         )
 
-        raw_exporter = OTLPSpanExporter(endpoint=url, timeout=timeout)
+        raw_exporter = OTLPGrpcSpanExporter(endpoint=url, timeout=timeout)
     else:
         from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
-            OTLPSpanExporter,  # type: ignore[import-untyped]
+            OTLPSpanExporter as OTLPHttpSpanExporter,
         )
 
         endpoint = url.rstrip("/") + "/v1/traces"
-        raw_exporter = OTLPSpanExporter(endpoint=endpoint, timeout=timeout)
+        raw_exporter = OTLPHttpSpanExporter(endpoint=endpoint, timeout=timeout)
 
     capture = _ExportResultCapture(raw_exporter)
     resource = Resource.create({"service.name": "validators.tracing"})
     provider = TracerProvider(resource=resource)
-    provider.add_span_processor(SimpleSpanProcessor(capture))
+    provider.add_span_processor(SimpleSpanProcessor(capture))  # type: ignore[arg-type]
     tracer = provider.get_tracer("validators.tracing")
 
     with tracer.start_as_current_span("validator-probe"):
