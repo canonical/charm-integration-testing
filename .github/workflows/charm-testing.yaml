@@ -460,9 +460,13 @@ jobs:
         id: logs_privacy_check
         if: ${{ always() && steps.collect_logs.outputs.directory_path != '' }}
         continue-on-error: true
-        uses: trufflesecurity/trufflehog@main
-        with:
-          path: ${{ steps.collect_logs.outputs.directory_path }}
+        shell: bash
+        run: |
+          # Run TruffleHog in filesystem mode and save output to a file
+          docker run --rm \
+            -v "${{ steps.collect_logs.outputs.directory_path }}:/scan-logs" \
+            ghcr.io/trufflesecurity/trufflehog:latest \
+            filesystem /scan-logs > trufflehog-output.txt 2>&1
       - name: Generate Privacy Check JUnit Report
         id: privacy_junit
         if: ${{ always() && steps.logs_privacy_check.conclusion != 'skipped' && env.test_observer_api != '' && inputs.execution_id != '' }}
@@ -471,11 +475,8 @@ jobs:
           STATUS="${{ steps.logs_privacy_check.outcome }}"
           JUNIT_OUTPUT="privacy-check-junit.xml"
           
-          # Capture TruffleHog output for the report
-          TRUFFLEHOG_OUTPUT=$(cat <<'TFOUT'
-          ${{ steps.logs_privacy_check.outputs.stdout }}
-          TFOUT
-          )
+          # Capture TruffleHog output from the text file for the report
+          TRUFFLEHOG_OUTPUT=$(cat trufflehog-output.txt)
           
           cat > "${JUNIT_OUTPUT}" <<EOF
           <?xml version="1.0" encoding="UTF-8"?>
