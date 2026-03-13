@@ -54,6 +54,10 @@ class BaseValidator(ABC):
     def relation_id(self) -> int:
         return self.relation.id
 
+    @property
+    def interface(self) -> str:
+        return self.charm.meta.relations[self.relation.name].interface_name or ""
+
     def _skipped_result(self, level: ValidationLevel) -> ValidationResult:
         """Return a SKIPPED result indicating this validator does not support *level*."""
         return ValidationResult(

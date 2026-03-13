@@ -39,14 +39,25 @@ class RelationStub:
         self.data: dict[AppStub | None, dict[str, str]] = {app: databag}
 
 
+class RelationMetaStub:
+    def __init__(self, interface_name: str) -> None:
+        self.interface_name = interface_name
+
+
+class CharmMetaStub:
+    def __init__(self, endpoint: str, interface_name: str) -> None:
+        self.relations = {endpoint: RelationMetaStub(interface_name)}
+
+
 class CharmStub:
-    pass
+    def __init__(self, endpoint: str = "db", interface_name: str = "postgresql_client") -> None:
+        self.meta = CharmMetaStub(endpoint, interface_name)
 
 
 def _make_validator(databag: dict[str, str], endpoint: str = "db") -> PostgreSQLClientValidator:
     app = AppStub()
     relation = RelationStub(app=app, databag=databag, name=endpoint)
-    charm = cast(ops.CharmBase, CharmStub())
+    charm = cast(ops.CharmBase, CharmStub(endpoint=endpoint))
     return PostgreSQLClientValidator(charm, cast(ops.Relation, relation))
 
 

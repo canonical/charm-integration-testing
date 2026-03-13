@@ -92,6 +92,11 @@ class ModelStub:
 class MetaStub:
     requires: dict[str, EndpointMetadataStub]
 
+    def __post_init__(self) -> None:
+        # charm.meta.relations is the merged view of all relations; in tests
+        # we only have requires, so alias it so the interface property works.
+        self.relations = self.requires
+
 
 @dataclass
 class CharmStub:
@@ -295,11 +300,12 @@ class TestValidatorRunnerRun:
                 return self._skipped_result(level)
 
         runner = self._runner_with("test-interface", AlwaysSkippingValidator)
-        charm = _make_charm(requires={"db": "test-interface"}, relations={"db": 1})
+        charm = _make_charm(requires={"db": "test-interface"}, relations={"db": 2})
 
         # WHEN
         results = runner.run(charm, level="simple")  # type: ignore[arg-type]
 
-        # THEN the final result is SKIPPED (no lower level to fall back to)
+        # THEN both integrations produce independent SKIPPED results
         assert results.results[0].status == "SKIPPED"
+        assert results.results[1].status == "SKIPPED"
         assert results.results[0].relation_id != results.results[1].relation_id
