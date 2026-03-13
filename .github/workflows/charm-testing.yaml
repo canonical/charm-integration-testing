@@ -463,10 +463,19 @@ jobs:
         shell: bash
         run: |
           # Run TruffleHog in filesystem mode and save output to a file
+          set +e
           docker run --rm \
             -v "${{ steps.collect_logs.outputs.directory_path }}:/scan-logs" \
             ghcr.io/trufflesecurity/trufflehog:latest \
             filesystem /scan-logs > trufflehog-output.txt 2>&1
+          EXIT_CODE=$?
+          set -e
+          
+          echo "TruffleHog Exit Code: ${EXIT_CODE}"
+          echo "TruffleHog Output:"
+          cat trufflehog-output.txt
+          
+          exit ${EXIT_CODE}
       - name: Generate Privacy Check JUnit Report
         id: privacy_junit
         if: ${{ always() && steps.logs_privacy_check.conclusion != 'skipped' && env.test_observer_api != '' && inputs.execution_id != '' }}
