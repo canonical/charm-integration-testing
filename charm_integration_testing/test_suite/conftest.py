@@ -58,6 +58,7 @@ def juju_client(
     logger: logging.Logger,
     minio_client_file: Path | None,
     ubuntu_pro_token: str | None,
+    uv_file: Path | None,
     validators_path: Path | None,
 ) -> JujuClient:
     return JujuClient(
@@ -71,7 +72,7 @@ def juju_client(
             TemporalExtension(juju_backend, logger),
             UnsealVaultJujuExtension(juju_backend, logger),
             UnsealVaultK8sJujuExtension(juju_backend, logger),
-            ValidatorInjectorExtension(validators_path, juju_backend, logger),
+            ValidatorInjectorExtension(validators_path, juju_backend, logger, uv_file),
         ],
     )
 
@@ -410,6 +411,14 @@ def bundle_mermaid_output(request: pytest.FixtureRequest) -> Path:
 @pytest.fixture
 def minio_client_file() -> Path | None:
     file_path = os.environ.get("MINIO_CLIENT_FILE")
+    if file_path:
+        file_path = file_path.strip()
+    return Path(file_path) if file_path else None
+
+
+@pytest.fixture
+def uv_file() -> Path | None:
+    file_path = os.environ.get("UV_FILE")
     if file_path:
         file_path = file_path.strip()
     return Path(file_path) if file_path else None

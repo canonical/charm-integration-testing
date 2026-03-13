@@ -31,6 +31,7 @@ best practices.
 The following environment variables can be set for specific test scenarios:
 
 - `MINIO_CLIENT_FILE`: Path to MinIO client (will be used when deploying minio with s3-integrator, otherwise will be downloaded)
+- `UV_FILE`: Path to a pre-downloaded `uv` binary (will be used when injecting validators, otherwise will be downloaded)
 - `UBUNTU_PRO_TOKEN`: Ubuntu Pro token (required for testing canonical-livepatch-server charms)
 
 ## Documentation
