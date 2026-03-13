@@ -126,7 +126,9 @@ class ValidatorInjectorExtension(JujuExtension):
             with tarfile.open(archive_path) as tar:
                 # The tarball contains uv-<arch>/uv — extract just the binary
                 member = next(m for m in tar.getmembers() if m.name.endswith("/uv") and not m.isdir())
-                member.name = "uv"
-                tar.extract(member, path=".", filter="data")
+                f = tar.extractfile(member)
+                if f is None:
+                    raise RuntimeError("Could not extract uv binary from archive")
+                Path("uv").write_bytes(f.read())
             self.uv_file = Path("uv")
         return self.uv_file
