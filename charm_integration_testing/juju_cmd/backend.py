@@ -21,7 +21,7 @@ from juju import (
 from juju.backend import JujuStatusPerformanceWarning, warn_performance
 
 from .cmd import CmdArg, CmdClient, CmdError
-from .structures import JujuExecTask, JujuModel, JujuSecretInfo, JujuStatus
+from .structures import JujuModel, JujuSecretInfo, JujuStatus
 
 
 class JujuCmdBackend(JujuBackend):
@@ -298,42 +298,8 @@ class JujuCmdBackend(JujuBackend):
     def application_units(self, model: str, application: str) -> list[str]:
         return list(self._status(model).applications[application].units.keys())
 
-    def _exec(self, model: str, task: str, unit: str | None = None) -> dict[str, JujuExecOutput]:
-        # Call juju exec
-        try:
-            exec_output = self._call_juju(
-                CmdArg(value="exec"),
-                CmdArg(name="model", value=model),
-                CmdArg(name="unit", value=unit) if unit else CmdArg(),
-                CmdArg(name="format", value="yaml"),
-                CmdArg(value="--"),
-                CmdArg(value=task),
-            )
-        except CmdError as e:
-            if "ERROR the following task failed" in e.stderr:
-                exec_output = e.stdout
-            else:
-                raise e
-
-        # Parse output
-        parsed_output = {unit: JujuExecTask(**result) for unit, result in yaml.safe_load(exec_output).items()}
-
-        # Return expected output
-        return {
-            unit: JujuExecOutput(
-                return_code=task.results.return_code,
-                stdout=task.results.stdout,
-                stderr=task.results.stderr,
-            )
-            for unit, task in parsed_output.items()
-        }
-
-    def exec_unit(self, model: str, unit: str, task: str) -> JujuExecOutput:
-        # Call exec
-        exec_output = self._exec(model, task, unit=unit)
-
-        # Return unit stdout
-        return next(iter(exec_output.values()))
+    def exec_unit(self, model: str, unit: str, task: str, operator: bool = False) -> JujuExecOutput:
+        raise NotImplementedError
 
     def add_secret(self, model: str, name: str, values: dict[str, str]) -> str:
         raise NotImplementedError

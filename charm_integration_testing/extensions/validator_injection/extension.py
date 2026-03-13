@@ -51,7 +51,7 @@ class ValidatorInjectorExtension(JujuExtension):
 
     def _run_validators_on_unit(self, model: str, unit: str, level: str) -> None:
         # Inject validators
-        if self.juju.exec_unit(model, unit, f"test -f {venv_runner}").return_code != 0:
+        if self.juju.exec_unit(model, unit, f"test -f {venv_runner}", operator=True).return_code != 0:
             if not self.validators_path:
                 self.logger.warning(f"Validators path not provided, skipping injection on {unit}")
                 return
@@ -59,7 +59,7 @@ class ValidatorInjectorExtension(JujuExtension):
 
         # Run validators
         self.logger.debug(f"Running validation on unit {unit}")
-        run_result = self.juju.exec_unit(model, unit, f"{venv_runner} --level {level}")
+        run_result = self.juju.exec_unit(model, unit, f"{venv_runner} --level {level}", operator=True)
         if run_result.return_code != 0:
             raise RuntimeError(f"Validators failed on {unit} (rc={run_result.return_code}): {run_result.stderr}")
 
@@ -114,7 +114,7 @@ class ValidatorInjectorExtension(JujuExtension):
             ),
         ]:
             self.logger.debug(f"[{unit}] {desc} with command: {cmd}")
-            result = self.juju.exec_unit(model, unit, cmd)
+            result = self.juju.exec_unit(model, unit, cmd, operator=True)
             if result.return_code != 0:
                 raise RuntimeError(f"Failed to {desc} on {unit} (rc={result.return_code}): {result.stderr}")
 

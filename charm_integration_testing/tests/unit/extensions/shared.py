@@ -86,7 +86,7 @@ class NullJujuBackend(JujuBackend):
     def application_units(self, model: str, application: str) -> list[str]:
         raise NotImplementedError
 
-    def exec_unit(self, model: str, unit: str, task: str) -> JujuExecOutput:
+    def exec_unit(self, model: str, unit: str, task: str, operator: bool = False) -> JujuExecOutput:
         raise NotImplementedError
 
     def run_action(self, model: str, unit: str, action: str, arguments: dict[str, Any]) -> JujuTask:

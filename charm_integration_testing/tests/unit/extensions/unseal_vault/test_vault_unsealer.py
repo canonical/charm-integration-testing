@@ -101,7 +101,7 @@ class JujuStub(NullJujuBackend):
                 )
             )
 
-    def exec_unit(self, model: str, unit: str, task: str) -> JujuExecOutput:
+    def exec_unit(self, model: str, unit: str, task: str, operator: bool = False) -> JujuExecOutput:
         self.exec_unit_calls.append((model, unit, task))
         return self.exec_units_output.pop(0)
 

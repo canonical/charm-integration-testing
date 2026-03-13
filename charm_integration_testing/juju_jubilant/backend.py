@@ -13,6 +13,7 @@ import jubilant
 import yaml
 from juju import (
     JujuApplicationInfo,
+    JujuExecOutput,
     JujuIntegration,
     JujuIntegrationApplication,
     JujuStatusPerformanceWarning,
@@ -24,6 +25,7 @@ from juju import (
 from juju_cmd import JujuCmdBackend
 
 from .client import JubilantClient
+from .structures import JujuExecTask
 from .wait import (
     all_statuses_are_in,
     applications_are_removed,
@@ -258,6 +260,48 @@ class JubilantBackend(JujuCmdBackend):
         # I'd rather just pass this through, but to follow the return type correctly,
         # we'll convert to a dict.
         return {k: v for k, v in self.client.model(model).config(application).items()}
+
+    def _exec(self, model: str, *args: str) -> dict[str, JujuExecTask]:
+        """Run juju exec with the given args and return output parsed and keyed by unit name."""
+        try:
+            exec_output = self.client.model(model).cli("exec", "--format", "yaml", *args)
+        except jubilant.CLIError as e:
+            if "ERROR the following task failed" not in e.stderr:
+                raise
+            exec_output = e.stdout
+        return {unit_name: JujuExecTask(**result) for unit_name, result in yaml.safe_load(exec_output).items()}
+
+    def exec_unit(self, model: str, unit: str, task: str, operator: bool = False) -> JujuExecOutput:
+        args = ["--unit", unit]
+        if operator:
+            args.append("--operator")
+        args += ["--", task]
+
+        parsed_output = self._exec(model, *args)
+
+        # Juju resolves "app/leader" to "app/{id}" in the output key; find the resolved name.
+        application, unit_id = unit.split("/")
+        if unit_id == "leader":
+            app_units = self.status(model).apps[application].units
+            leader_unit = next(
+                (name for name, info in app_units.items() if info.leader),
+                None,
+            )
+            if leader_unit is None:
+                raise KeyError(f"No leader found for application '{application}'")
+            resolved_unit = leader_unit
+        else:
+            resolved_unit = unit
+
+        if resolved_unit not in parsed_output:
+            raise KeyError(f"Unit '{resolved_unit}' not found in exec output; got: {list(parsed_output)}")
+
+        task_result = parsed_output[resolved_unit]
+        return JujuExecOutput(
+            return_code=task_result.results.return_code,
+            stdout=task_result.results.stdout,
+            stderr=task_result.results.stderr,
+        )
 
     def scp(self, model: str, source: str, destination: str) -> None:
         # Jubilant scp doesn't work for directories
