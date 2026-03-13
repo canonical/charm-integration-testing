@@ -854,6 +854,46 @@ class TestJubilantBackend:
                     raise jubilant.CLIError(1, ["juju"], self.response, "ERROR the following task failed")
                 return self.response
 
+        # Stub that provides both cli() (for exec) and status() (for leader resolution).
+        class ExecAndStatusStub:
+            class _UnitInfo:
+                def __init__(self, leader: bool) -> None:
+                    self.leader = leader
+
+            class _AppStatus:
+                def __init__(self, units: dict[str, Any]) -> None:
+                    self.units = units
+
+            class _Status:
+                def __init__(self, apps: dict[str, Any]) -> None:
+                    self.apps = apps
+
+            def __init__(self, cli_response: str, leader_units: dict[str, str]) -> None:
+                """
+                cli_response: YAML string to return from cli()
+                leader_units: mapping of app_name -> leader unit name (e.g. {"myapp": "myapp/1"})
+                """
+                self.cli_response = cli_response
+                self.leader_units = leader_units
+                self.cli_calls: list[tuple[str, ...]] = []
+
+            def cli(self, *args: str) -> str:
+                self.cli_calls.append(tuple(args))
+                return self.cli_response
+
+            def status(self) -> Any:
+                apps = {}
+                for app_name, leader_unit in self.leader_units.items():
+                    # Build a two-unit app where the specified unit is the leader.
+                    other_unit = f"{app_name}/0" if leader_unit != f"{app_name}/0" else f"{app_name}/1"
+                    apps[app_name] = self._AppStatus(
+                        {
+                            other_unit: self._UnitInfo(leader=False),
+                            leader_unit: self._UnitInfo(leader=True),
+                        }
+                    )
+                return self._Status(apps)
+
         def test_exec_success(self) -> None:
             # GIVEN a successful exec
             stub = self.ExecCliStub(response=self._exec_yaml("myapp/0", 0, stdout="hello\n"))
@@ -862,8 +902,8 @@ class TestJubilantBackend:
             # WHEN
             result = JubilantBackend(client).exec_unit("test-model", "myapp/0", "echo hello")
 
-            # THEN the CLI args include exec, unit, format, and the command
-            assert stub.calls == [("exec", "--unit", "myapp/0", "--format", "yaml", "--", "echo hello")]
+            # THEN _exec prepends "exec", "--format", "yaml" before the unit args
+            assert stub.calls == [("exec", "--format", "yaml", "--unit", "myapp/0", "--", "echo hello")]
             assert result.return_code == 0
             assert result.stdout == "hello\n"
             assert result.stderr == ""
@@ -876,8 +916,8 @@ class TestJubilantBackend:
             # WHEN operator=True is passed
             result = JubilantBackend(client).exec_unit("test-model", "myapp/0", "echo hello", operator=True)
 
-            # THEN --operator is inserted before --format
-            assert stub.calls == [("exec", "--unit", "myapp/0", "--operator", "--format", "yaml", "--", "echo hello")]
+            # THEN --operator appears after --unit but before "--"
+            assert stub.calls == [("exec", "--format", "yaml", "--unit", "myapp/0", "--operator", "--", "echo hello")]
             assert result.return_code == 0
 
         def test_exec_nonzero_return_code(self) -> None:
@@ -894,6 +934,56 @@ class TestJubilantBackend:
             # THEN the non-zero return code is returned, not raised
             assert result.return_code == 1
             assert result.stderr == "command not found"
+
+        def test_exec_with_leader_resolves_via_status(self) -> None:
+            # GIVEN: output is keyed by the resolved unit "myapp/1" (juju replaces "leader" in output)
+            stub = self.ExecAndStatusStub(
+                cli_response=self._exec_yaml("myapp/1", 0, stdout="leader output\n"),
+                leader_units={"myapp": "myapp/1"},
+            )
+            client = JubilantClientStub(client=stub)
+
+            # WHEN exec_unit is called with "app/leader"
+            result = JubilantBackend(client).exec_unit("test-model", "myapp/leader", "echo hello")
+
+            # THEN the resolved leader unit's output is returned
+            assert result.return_code == 0
+            assert result.stdout == "leader output\n"
+
+        def test_exec_leader_not_found_raises(self) -> None:
+            # GIVEN a status where no unit has leader=True
+            class NoLeaderStub:
+                class _UnitInfo:
+                    leader = False
+
+                class _AppStatus:
+                    def __init__(self) -> None:
+                        self.units: dict[str, Any] = {"myapp/0": NoLeaderStub._UnitInfo()}
+
+                class _Status:
+                    def __init__(self) -> None:
+                        self.apps: dict[str, Any] = {"myapp": NoLeaderStub._AppStatus()}
+
+                def cli(self, *args: str) -> str:
+                    # Return valid YAML so _exec succeeds; leader resolution happens after
+                    return yaml.dump(
+                        {
+                            "myapp/0": {
+                                "id": "1",
+                                "status": "completed",
+                                "results": {"return-code": 0, "stdout": "", "stderr": ""},
+                            }
+                        }
+                    )
+
+                def status(self) -> Any:
+                    return self._Status()
+
+            client = JubilantClientStub(client=NoLeaderStub())
+
+            # WHEN / THEN
+            with pytest.raises(KeyError, match="No leader found for application 'myapp'"):
+                JubilantBackend(client).exec_unit("test-model", "myapp/leader", "echo hello")
 
     class TestUnitIp:
         class Unit:
