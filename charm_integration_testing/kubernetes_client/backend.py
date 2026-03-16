@@ -51,7 +51,7 @@ class KubernetesBackend:
             List of pods that match the given charm name in the specified namespace
         """
         pods = self.client.list_namespaced_pods(model)  # juju creates a namespace for each model
-        matching_pods = [pod for pod in pods if charm in pod.metadata.name]
+        matching_pods = [pod for pod in pods if pod.metadata.name.startswith(charm)]
         return matching_pods
 
     def wait(
