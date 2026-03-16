@@ -22,6 +22,7 @@ from extensions import (
     ValidatorInjectorExtension,
 )
 from juju import JujuBackend, JujuClient, JujuWaitTimeoutError
+from juju_cmd.backend import JujuCmdBackend
 from juju_jubilant import JubilantBackend
 from kubernetes_client import KubernetesClient
 from pytest import StashKey
@@ -732,8 +733,8 @@ def record_pipeline_version_execution_metadata(
 
 
 @pytest.fixture
-def kubernetes_test(juju_client: JujuClient, model: str) -> None:
-    if not juju_client.backend.is_k8s_model(model):
+def kubernetes_test(juju_backend: JujuCmdBackend, model: str) -> None:
+    if not juju_backend.is_k8s_model(model):
         pytest.skip("Not kubernetes")
 
 

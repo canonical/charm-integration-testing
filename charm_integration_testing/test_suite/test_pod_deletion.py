@@ -11,7 +11,7 @@ from .scheduler.states import State
 
 @pytest.mark.state(requires=State.DEPLOYED, provides=State.DEPLOYED)
 def test_pod_deletion(
-    kubernetes_test,
+    kubernetes_test: None,
     juju_client: JujuClient,
     k8s_client: KubernetesClient,
     k8s_backend: KubernetesBackend,
@@ -24,9 +24,9 @@ def test_pod_deletion(
     k8s_client.delete_pod(model, pod_to_delete.metadata.name)
 
     # Wait for the pod to be deleted and a new one to be created
-    k8s_backend.wait_for_pod_status(
+    k8s_backend.wait(
         namespace=model,
-        target_status=PodStatus.READY,
+        ready=lambda x: x == PodStatus.RUNNING,
         timeout=timedelta(minutes=10),
         delay=timedelta(seconds=5),
     )
