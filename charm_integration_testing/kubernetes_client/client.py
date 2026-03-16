@@ -1,3 +1,7 @@
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+from logging import Logger
 from typing import List
 
 from kubernetes import client, config
@@ -5,12 +9,13 @@ from kubernetes.client import ApiException
 
 
 class KubernetesClient:
-    def __init__(self, kubeconfig_path: str = None):
+    def __init__(self, kubeconfig_path: str = None, logger: Logger | None = None):
         if kubeconfig_path:
             config.load_kube_config(config_file=kubeconfig_path)
         else:
             config.load_kube_config()
 
+        self.logger = logger or Logger(__name__)
         self.client = client.CoreV1Api()
 
     def list_namespaced_pods(self, namespace: str) -> List[client.V1Pod]:

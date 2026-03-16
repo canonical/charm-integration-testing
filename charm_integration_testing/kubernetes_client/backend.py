@@ -1,10 +1,13 @@
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+
 import logging
 from datetime import datetime, timedelta
 from enum import Enum
 from time import sleep
 from typing import Callable, List
 
-from kubernetes import client
+from kubernetes import client as k8s_client
 from kubernetes.client import ApiException
 
 from .client import KubernetesClient
@@ -19,28 +22,35 @@ class PodStatus(Enum):
 
 
 class KubernetesBackend:
-    k8s_client: KubernetesClient
-    default_timeout = timedelta(minutes=5)
-    default_delay = timedelta(seconds=1)
+    client: KubernetesClient
 
-    def __init__(self, k8s_client: KubernetesClient | None = None, logger: logging.Logger = None):
-        self.k8s_client = k8s_client or KubernetesClient()
+    def __init__(
+        self,
+        client: KubernetesClient | None = None,
+        logger: logging.Logger = None,
+        default_timeout: timedelta = timedelta(minutes=5),
+        default_delay: timedelta = timedelta(seconds=1),
+    ):
+        self.client = client or KubernetesClient()
         self.logger = logger or logging.getLogger(__name__)
+
+        self.default_timeout = default_timeout
+        self.default_delay = default_delay
 
     def get_charm_pods(
         self, charm: str, model: str
-    ) -> List[client.V1Pod]:  # multiple pods per a charm, depends on charm name and unit number
+    ) -> List[k8s_client.V1Pod]:  # multiple pods per a charm, depends on charm name and unit number
         """
         Gets all pods in the specified namespace that match the given charm name.
         Args:
             charm: Name of the charm to filter pods by
-            namespace: Namespace to search for pods
+            model: Model charm is deployed in
         Raises:
             ApiException: If there is an error communicating with the Kubernetes API
         Returns:
             List of pods that match the given charm name in the specified namespace
         """
-        pods = self.list_pods(model)  # juju creates a namespace for each model
+        pods = self.client.list_namespaced_pods(model)  # juju creates a namespace for each model
         matching_pods = [pod for pod in pods if charm in pod.metadata.name]
         return matching_pods
 
@@ -75,17 +85,13 @@ class KubernetesBackend:
                 raise TimeoutError(f"Timeout waiting for pod {pod_name} in namespace {namespace} to be ready.")
 
             try:
-                pod = self.get_pod(pod_name, namespace)
+                pod = self.client.get_namespaced_pod(pod_name, namespace)
 
                 if pod and ready(PodStatus(pod.status.phase)):
                     self.logger.info(f"Pod {pod.metadata.name} in namespace {namespace} is ready.")
                     return
-            except ApiException as e:
-                if e.status == 404:
-                    pass
-                else:
-                    self.logger.error(f"Exception when getting pod: {e}")
-                    raise
+            except ApiException:
+                raise
 
             sleep(delay.total_seconds())
 
@@ -97,7 +103,7 @@ class KubernetesBackend:
         target_status: PodStatus = PodStatus.RUNNING,
         timeout: timedelta | None = None,
         delay: timedelta | None = None,
-    ) -> client.V1Pod:
+    ) -> k8s_client.V1Pod:
         """
         Wait for a pod to be recreated with a new UID and reach the target status.
 
@@ -123,7 +129,7 @@ class KubernetesBackend:
 
         while datetime.now() < start_time + timeout:
             try:
-                new_pod = self.get_pod(pod_name, namespace)
+                new_pod = self.client.get_namespaced_pod(pod_name, namespace)
 
                 if new_pod is None:
                     # Pod doesn't exist yet, wait for recreation
@@ -138,20 +144,25 @@ class KubernetesBackend:
                 # Pod has been recreated with new UID
                 elif PodStatus(new_pod.status.phase) == target_status:
                     self.logger.info(
-                        f"Pod {pod_name} recreated successfully with UID {new_pod.metadata.uid} "
+                        f"Pod {pod_name} in namespace {namespace} recreated successfully with UID {new_pod.metadata.uid} "
                         f"and status {target_status.value}"
                     )
                     return new_pod
                 else:
                     self.logger.debug(
-                        f"Pod {pod_name} recreated with new UID but status is {new_pod.status.phase}, "
+                        f"Pod {pod_name} in namespace {namespace} recreated with new UID but status is {new_pod.status.phase}, "
                         f"waiting for {target_status.value}"
                     )
 
             except ApiException as e:
-                self.logger.error(f"Exception when checking pod recreation: {e}")
-                raise e
+                if e.status == 404:
+                    sleep(delay.total_seconds())
+                    continue
+                else:
+                    raise e
 
             sleep(delay.total_seconds())
 
-        raise TimeoutError(f"Pod {pod_name} was not recreated and reached {target_status.value} status within timeout")
+        raise TimeoutError(
+            f"Pod {pod_name} in namespace {namespace} was not recreated and reached {target_status.value} status within timeout"
+        )
