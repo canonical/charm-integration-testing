@@ -170,6 +170,10 @@ class JujuClient:
         self.logger.info("Getting list of integrations.")
         return self.backend.list_integrations(model)
 
+    def reboot_model_controller_leader(self, model: str = "default") -> None:
+        self.logger.info("Restarting model controller leader.")
+        return self.backend.reboot_model_controller_leader(model)
+
     def version(self, model: str = "default") -> str:
         self.logger.info("Collecting Juju version.")
         return self.backend.version(model)

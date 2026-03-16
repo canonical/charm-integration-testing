@@ -403,3 +403,30 @@ class JubilantBackend(JujuCmdBackend):
     def validate_application(self, model: str, application: str, level: str) -> dict[str, list[ValidationResult]]:
         # Phase 2 endpoint validation will be done here
         return {}
+
+    def reboot_model_controller_leader(self, model: str) -> None:
+        # TODO: remove this import before merge
+        from subprocess import run
+
+        controller_name = self.status(model).model.controller
+        controller_model = f"{controller_name}:controller"
+        controller_status = self.status(model=controller_model)
+        # If controller_status has machines, then it is a machine environment
+        if len(controller_status.machines) > 0:
+            # reboot the leader
+            self.ssh(model=controller_model, application="controller/leader", command="sleep 1 && sudo reboot")
+        else:
+            # If it doesn't have machines, then it is a k8s model
+            controller_k8s_namespace = f"controller-{controller_name}"
+            # TODO: switch this out for the proper K8s client when Amjad's PR is merged
+            run(
+                ["kubectl", "rollout", "restart", "statefulset/controller", "-n", controller_k8s_namespace],
+                text=True,
+                check=True,
+            )
+            # Wait until the rollout has finished.
+            run(
+                ["kubectl", "rollout", "status", "statefulset/controller", "-n", controller_k8s_namespace],
+                text=True,
+                check=True,
+            )
