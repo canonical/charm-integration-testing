@@ -1,19 +1,19 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-from logging import Logger
+import logging
 
 from kubernetes import client, config  # type: ignore[import-untyped]
 
 
 class KubernetesClient:
-    def __init__(self, kubeconfig_path: str | None = None, logger: Logger | None = None):
+    def __init__(self, kubeconfig_path: str | None = None, logger: logging.Logger | None = None):
         if kubeconfig_path:
             config.load_kube_config(config_file=kubeconfig_path)
         else:
             config.load_kube_config()
 
-        self.logger = logger or Logger(__name__)
+        self.logger = logger or logging.getLogger(__name__)
         self.client = client.CoreV1Api()
 
     def list_namespaced_pods(self, namespace: str) -> list[client.V1Pod]:
@@ -28,7 +28,7 @@ class KubernetesClient:
         return self.client.list_namespaced_pod(namespace)
 
     def list_namespaced_pod(self, namespace: str) -> client.V1PodList:
-        """      
+        """
         Get a pod by name in the specified namespace.
         Args:
             namespace: Namespace to list pods from
