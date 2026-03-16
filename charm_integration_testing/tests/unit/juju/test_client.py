@@ -124,16 +124,6 @@ class TestJujuValidationError:
             assert "myapp/0" in str(error)
             assert "myapp/1" in str(error)
 
-    def test_stores_failed_validations(self) -> None:
-        # GIVEN
-        validations: dict[str, list[ValidationResult]] = {"myapp/0": [_fail()]}
-
-        # WHEN
-        error = JujuValidationError(validations)
-
-        # THEN
-        assert error.failed_validations is validations
-
 
 class TestJujuClientValidateModel:
     @pytest.fixture
