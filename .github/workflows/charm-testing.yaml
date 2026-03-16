@@ -472,9 +472,7 @@ jobs:
             filesystem /scan-logs > trufflehog-output.txt 2>&1
           EXIT_CODE=$?
           set -e
-          
           echo "TruffleHog Exit Code: ${EXIT_CODE}"
-          
           exit ${EXIT_CODE}
       - name: Generate Privacy Check JUnit Report
         id: privacy_junit
@@ -484,10 +482,9 @@ jobs:
           STATUS: ${{ steps.logs_privacy_check.outcome }}
         run: |
           JUNIT_OUTPUT="privacy-check-junit.xml"
-          
+
           # Capture TruffleHog output from the text file for the report
           TRUFFLEHOG_OUTPUT=$(cat trufflehog-output.txt)
-          
           cat > "${JUNIT_OUTPUT}" <<EOF
           <?xml version="1.0" encoding="UTF-8"?>
           <testsuites>
@@ -499,7 +496,6 @@ jobs:
           fi
           cat >> "${JUNIT_OUTPUT}" <<EOF
                 <system-out>TruffleHog scan status: ${STATUS}
-          
           ${TRUFFLEHOG_OUTPUT}</system-out>
               </testcase>
             </testsuite>
