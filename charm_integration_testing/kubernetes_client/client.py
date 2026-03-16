@@ -2,7 +2,6 @@
 # See LICENSE file for licensing details.
 
 from logging import Logger
-from typing import List
 
 from kubernetes import client, config  # type: ignore[import-untyped]
 
@@ -22,8 +21,6 @@ class KubernetesClient:
         List all pods in the specified namespace.
         Args:
             namespace: Namespace to list pods from
-        Raises:
-            ApiException: If there is an error communicating with the Kubernetes API
         Returns:
             List of pods in the specified namespace
         """
@@ -31,6 +28,13 @@ class KubernetesClient:
         return self.client.list_namespaced_pod(namespace)
 
     def list_namespaced_pod(self, namespace: str) -> client.V1PodList:
+        """      
+        Get a pod by name in the specified namespace.
+        Args:
+            namespace: Namespace to list pods from
+        Returns:
+            specified pod in  the specified namespace
+        """
         return self.client.list_namespaced_pod(namespace)
 
     def delete_pod(self, namespace: str, pod_name: str) -> None:
@@ -58,7 +62,7 @@ class KubernetesClient:
         Raises:
             ApiException: If there is an error communicating with the Kubernetes API
         Returns:
-            The pod object if found, or None if the pod does not exist
+            The pod object if found
         """
 
         return self.client.read_namespaced_pod(name=pod_name, namespace=namespace)
