@@ -146,7 +146,7 @@ class TestJujuClientValidateModel:
         backend: BackendStub,
         extensions: list[JujuExtension] | None = None,
     ) -> JujuClient:
-        return JujuClient(backend, logger, extensions or [])  # type: ignore[arg-type]
+        return JujuClient(backend, logger, extensions or [])
 
     def test_does_not_raise_when_no_applications(self, logger: LoggerStub) -> None:
         # GIVEN a model with no applications
