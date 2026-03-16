@@ -1,11 +1,13 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
+from datetime import timedelta
+
 import pytest
 from juju import JujuClient
-from kubernetes_client import KubernetesClient, KubernetesBackend, PodStatus
+from kubernetes_client import KubernetesBackend, KubernetesClient, PodStatus
+
 from .scheduler.states import State
 
-from datetime import timedelta
 
 @pytest.mark.state(requires=State.DEPLOYED, provides=State.DEPLOYED)
 def test_pod_deletion(
@@ -28,7 +30,6 @@ def test_pod_deletion(
         timeout=timedelta(minutes=10),
         delay=timedelta(seconds=5),
     )
-
 
     # Wait for return to idle
     juju_client.idle_for_period(model=model, timeout=timedelta(minutes=5))
