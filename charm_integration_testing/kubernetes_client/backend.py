@@ -130,13 +130,7 @@ class KubernetesBackend:
         while datetime.now() < start_time + timeout:
             try:
                 new_pod = self.client.get_namespaced_pod(pod_name, namespace)
-
-                if new_pod is None:
-                    # Pod doesn't exist yet, wait for recreation
-                    sleep(delay.total_seconds())
-                    continue
-
-                elif new_pod.metadata.uid == old_uid:
+                if new_pod.metadata.uid == old_uid:
                     # Same pod, not recreated yet
                     sleep(delay.total_seconds())
                     continue
