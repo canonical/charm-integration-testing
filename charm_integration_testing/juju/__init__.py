@@ -14,7 +14,7 @@ from .backend import (
     JujuWaitTimeoutError,
     warn_performance,
 )
-from .client import JujuClient
+from .client import JujuClient, JujuValidationError
 from .extension import JujuExtension
 from .models import JujuApplicationInfo, JujuIntegration, JujuIntegrationApplication
 
@@ -29,9 +29,10 @@ __all__ = [
     "JujuIntegrationApplication",
     "JujuPerformanceWarning",
     "JujuStatusPerformanceWarning",
+    "JujuTask",
     "JujuUnitAgentState",
     "JujuUnitState",
-    "JujuTask",
+    "JujuValidationError",
     "JujuWaitState",
     "JujuWaitTimeoutError",
     "warn_performance",
