@@ -23,6 +23,7 @@ from extensions import (
 )
 from juju import JujuBackend, JujuClient, JujuWaitTimeoutError
 from juju_jubilant import JubilantBackend
+from kubernetes_client import KubernetesClient
 from pytest import StashKey
 from utils import normalize_string, normalize_string_multiline
 
@@ -728,3 +729,14 @@ def record_pipeline_version_execution_metadata(
             warnings.warn(f"Failed to get pipeline workflow hash: {pipeline_result.stderr.strip()}")
     else:
         warnings.warn(f"Pipeline file not found: {pipeline_path}")
+
+
+@pytest.fixture
+def kubernetes_test(juju_client: JujuClient, model: str) -> None:
+    if not juju_client.backend.is_k8s_model(model):
+        pytest.skip("Not kubernetes")
+
+
+@pytest.fixture
+def kubernetes_client(kubeconfig: str, logger: logging.Logger) -> KubernetesClient:
+    return KubernetesClient(kubeconfig, logger)
