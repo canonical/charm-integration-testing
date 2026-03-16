@@ -34,14 +34,14 @@ class KubernetesClient:
             return pods.items  # type: ignore[no-any-return]
         except ApiException as e:
             self.logger.error(f"Exception when listing pods: {e}")
-            raise e
+            raise
 
     def list_namespaced_pod(self, namespace: str) -> client.V1PodList:
         try:
             pods = self.client.list_namespaced_pod(namespace)
             return pods
         except ApiException as e:
-            raise e
+            raise
 
     def delete_pod(self, namespace: str, pod_name: str) -> None:
         """
@@ -60,7 +60,7 @@ class KubernetesClient:
             self.logger.info(f"Pod {pod_name} in namespace {namespace} deleted successfully.")
         except ApiException as e:
             self.logger.error(f"Exception when deleting pod: {e}")
-            raise e
+            raise
 
     def get_namespaced_pod(self, pod_name: str, namespace: str) -> client.V1Pod:
         """
@@ -80,4 +80,4 @@ class KubernetesClient:
             return pod
         except ApiException as e:
             self.logger.error(f"Exception when reading pod {pod_name}: {e}")
-            raise e
+            raise
