@@ -5,7 +5,6 @@ from logging import Logger
 from typing import List
 
 from kubernetes import client, config  # type: ignore[import-untyped]
-from kubernetes.client import ApiException  # type: ignore[import-untyped]
 
 
 class KubernetesClient:
@@ -29,19 +28,10 @@ class KubernetesClient:
             List of pods in the specified namespace
         """
 
-        try:
-            pods = self.client.list_namespaced_pod(namespace)
-            return pods.items  # type: ignore[no-any-return]
-        except ApiException as e:
-            self.logger.error(f"Exception when listing pods: {e}")
-            raise
+        return self.client.list_namespaced_pod(namespace)
 
     def list_namespaced_pod(self, namespace: str) -> client.V1PodList:
-        try:
-            pods = self.client.list_namespaced_pod(namespace)
-            return pods
-        except ApiException as e:
-            raise
+        return self.client.list_namespaced_pod(namespace)
 
     def delete_pod(self, namespace: str, pod_name: str) -> None:
         """
@@ -55,12 +45,7 @@ class KubernetesClient:
         Returns:
             None
         """
-        try:
-            self.client.delete_namespaced_pod(pod_name, namespace)
-            self.logger.info(f"Pod {pod_name} in namespace {namespace} deleted successfully.")
-        except ApiException as e:
-            self.logger.error(f"Exception when deleting pod: {e}")
-            raise
+        self.client.delete_namespaced_pod(pod_name, namespace)
 
     def get_namespaced_pod(self, pod_name: str, namespace: str) -> client.V1Pod:
         """
@@ -75,9 +60,5 @@ class KubernetesClient:
         Returns:
             The pod object if found, or None if the pod does not exist
         """
-        try:
-            pod = self.client.read_namespaced_pod(name=pod_name, namespace=namespace)
-            return pod
-        except ApiException as e:
-            self.logger.error(f"Exception when reading pod {pod_name}: {e}")
-            raise
+
+        return self.client.read_namespaced_pod(name=pod_name, namespace=namespace)
