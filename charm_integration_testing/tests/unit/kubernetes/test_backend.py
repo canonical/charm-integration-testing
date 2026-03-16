@@ -7,7 +7,7 @@ from datetime import timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
-from kubernetes.client import ApiException, V1ObjectMeta, V1Pod, V1PodStatus
+from kubernetes.client import ApiException, V1ObjectMeta, V1Pod, V1PodStatus  # type: ignore[import-untyped]
 from kubernetes_client import KubernetesBackend, PodStatus
 
 
@@ -70,10 +70,10 @@ class TestKubernetesBackendInit:
         client = KubernetesClientStub()
 
         # WHEN initializing backend with client
-        backend = KubernetesBackend(client=client)  # type: ignore
+        backend = KubernetesBackend(client=client)  # type: ignore[arg-type]
 
         # THEN the custom client is used
-        assert backend.client == client
+        assert backend.client is client  # type: ignore[comparison-overlap]
 
     @patch("kubernetes_client.backend.KubernetesClient")
     def test_init_without_client(self, mock_client_class: MagicMock) -> None:

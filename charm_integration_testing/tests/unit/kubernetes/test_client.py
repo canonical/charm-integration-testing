@@ -7,7 +7,7 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
-from kubernetes.client import ApiException, V1ObjectMeta, V1Pod, V1PodList, V1PodStatus
+from kubernetes.client import ApiException, V1ObjectMeta, V1Pod, V1PodList, V1PodStatus  # type: ignore[import-untyped]
 from kubernetes_client import KubernetesClient
 
 
@@ -111,7 +111,7 @@ class TestListNamespacedPods:
         stub = CoreV1ApiStub(list_namespaced_pod_result=pod_list)
 
         client = KubernetesClient()
-        client.client = stub  # type: ignore
+        client.client = stub
 
         # WHEN listing pods
         result = client.list_namespaced_pods("test-namespace")
@@ -128,7 +128,7 @@ class TestListNamespacedPods:
         stub = CoreV1ApiStub(list_namespaced_pod_result=pod_list)
 
         client = KubernetesClient()
-        client.client = stub  # type: ignore
+        client.client = stub
 
         # WHEN listing pods
         result = client.list_namespaced_pods("empty-namespace")
@@ -144,7 +144,7 @@ class TestListNamespacedPods:
         stub = CoreV1ApiStub(list_namespaced_pod_raises=api_error)
 
         client = KubernetesClient()
-        client.client = stub  # type: ignore
+        client.client = stub
 
         # WHEN listing pods
         # THEN raises ApiException
@@ -166,7 +166,7 @@ class TestListNamespacedPod:
         stub = CoreV1ApiStub(list_namespaced_pod_result=pod_list)
 
         client = KubernetesClient()
-        client.client = stub  # type: ignore
+        client.client = stub
 
         # WHEN getting pod list
         result = client.list_namespaced_pod("test-namespace")
@@ -183,7 +183,7 @@ class TestListNamespacedPod:
         stub = CoreV1ApiStub(list_namespaced_pod_raises=api_error)
 
         client = KubernetesClient()
-        client.client = stub  # type: ignore
+        client.client = stub
 
         # WHEN getting pod list
         # THEN raises ApiException
@@ -203,13 +203,12 @@ class TestDeletePod:
         stub = CoreV1ApiStub(delete_namespaced_pod_result=None)
 
         client = KubernetesClient()
-        client.client = stub  # type: ignore
+        client.client = stub
 
         # WHEN deleting pod
-        result = client.delete_pod("test-namespace", "test-pod")
+        client.delete_pod("test-namespace", "test-pod")
 
         # THEN completes without error
-        assert result is None
 
     @patch("kubernetes_client.client.config")
     @patch("kubernetes_client.client.client.CoreV1Api")
@@ -219,7 +218,7 @@ class TestDeletePod:
         stub = CoreV1ApiStub(delete_namespaced_pod_raises=api_error)
 
         client = KubernetesClient()
-        client.client = stub  # type: ignore
+        client.client = stub
 
         # WHEN deleting non-existent pod
         # THEN raises ApiException
@@ -236,7 +235,7 @@ class TestDeletePod:
         stub = CoreV1ApiStub(delete_namespaced_pod_raises=api_error)
 
         client = KubernetesClient()
-        client.client = stub  # type: ignore
+        client.client = stub
 
         # WHEN deleting pod
         # THEN raises ApiException
@@ -257,7 +256,7 @@ class TestGetNamespacedPod:
         stub = CoreV1ApiStub(read_namespaced_pod_result=pod)
 
         client = KubernetesClient()
-        client.client = stub  # type: ignore
+        client.client = stub
 
         # WHEN getting pod
         result = client.get_namespaced_pod("test-pod", "test-namespace")
@@ -275,7 +274,7 @@ class TestGetNamespacedPod:
         stub = CoreV1ApiStub(read_namespaced_pod_raises=api_error)
 
         client = KubernetesClient()
-        client.client = stub  # type: ignore
+        client.client = stub
 
         # WHEN getting non-existent pod
         # THEN raises ApiException
@@ -292,7 +291,7 @@ class TestGetNamespacedPod:
         stub = CoreV1ApiStub(read_namespaced_pod_raises=api_error)
 
         client = KubernetesClient()
-        client.client = stub  # type: ignore
+        client.client = stub
 
         # WHEN getting pod
         # THEN raises ApiException

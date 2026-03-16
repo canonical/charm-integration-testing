@@ -7,8 +7,8 @@ from enum import Enum
 from time import sleep
 from typing import Callable, List
 
-from kubernetes import client as k8s_client
-from kubernetes.client import ApiException
+from kubernetes import client as k8s_client  # type: ignore[import-untyped]
+from kubernetes.client import ApiException  # type: ignore[import-untyped]
 
 from .client import KubernetesClient
 
@@ -27,7 +27,7 @@ class KubernetesBackend:
     def __init__(
         self,
         client: KubernetesClient | None = None,
-        logger: logging.Logger = None,
+        logger: logging.Logger | None = None,
         default_timeout: timedelta = timedelta(minutes=5),
         default_delay: timedelta = timedelta(seconds=1),
     ):

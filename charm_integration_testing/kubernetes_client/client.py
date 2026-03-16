@@ -4,12 +4,12 @@
 from logging import Logger
 from typing import List
 
-from kubernetes import client, config
-from kubernetes.client import ApiException
+from kubernetes import client, config  # type: ignore[import-untyped]
+from kubernetes.client import ApiException  # type: ignore[import-untyped]
 
 
 class KubernetesClient:
-    def __init__(self, kubeconfig_path: str = None, logger: Logger | None = None):
+    def __init__(self, kubeconfig_path: str | None = None, logger: Logger | None = None):
         if kubeconfig_path:
             config.load_kube_config(config_file=kubeconfig_path)
         else:
@@ -31,7 +31,7 @@ class KubernetesClient:
 
         try:
             pods = self.client.list_namespaced_pod(namespace)
-            return pods.items
+            return pods.items  # type: ignore[no-any-return]
         except ApiException as e:
             self.logger.error(f"Exception when listing pods: {e}")
             raise e
