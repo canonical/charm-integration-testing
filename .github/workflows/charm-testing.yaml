@@ -337,7 +337,6 @@ jobs:
           test_execution_id: ${{ inputs.execution_id }}
           junit_xml: ${{ steps.run_tests.outputs.junit_xml }}
       - name: Post results to Test Observer
-        id: post_results
         if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-results
         with:
@@ -345,22 +344,6 @@ jobs:
           test_observer_token: ${{ env.test_observer_token }}
           test_execution_id: ${{ inputs.execution_id }}
           junit_xml: ${{ steps.run_tests.outputs.junit_xml }}
-      - name: Print Test Result IDs
-        if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
-        shell: bash
-        env:
-          ENVIRONMENT: ${{ inputs.environment }}
-          EXECUTION_ID: ${{ inputs.execution_id }}
-        run: |
-          # Determine base URL based on environment
-          if [ "$ENVIRONMENT" = "production" ]; then
-            BASE_URL="https://test-observer.canonical.com"
-          else
-            BASE_URL="https://test-observer-staging.canonical.com"
-          fi
-          
-          echo "Test Observer Links:"
-          cat ${{ steps.post_results.outputs.response_file }} | jq -r '.[] | "'"${BASE_URL}"'/#/charms/\(.artefact_id)?testExecutionId=\(.test_execution_id)&testResultId=\(.id)"'
       - name: Call Juju K8s Crashdump
         id: juju_k8s_crashdump
         if: ${{ !cancelled() && inputs.substrate == 'kubernetes'}}
@@ -489,8 +472,6 @@ jobs:
           set -e
           
           echo "TruffleHog Exit Code: ${EXIT_CODE}"
-          echo "TruffleHog Output:"
-          cat trufflehog-output.txt
           
           exit ${EXIT_CODE}
       - name: Generate Privacy Check JUnit Report
@@ -531,19 +512,3 @@ jobs:
           test_observer_token: ${{ env.test_observer_token }}
           test_execution_id: ${{ inputs.execution_id }}
           junit_xml: ${{ steps.privacy_junit.outputs.junit_xml }}
-      - name: Print Privacy Check Test Result IDs
-        if: ${{ always() && steps.post_privacy_results.outputs.response_file != '' }}
-        shell: bash
-        env:
-          ENVIRONMENT: ${{ inputs.environment }}
-          EXECUTION_ID: ${{ inputs.execution_id }}
-        run: |
-          # Determine base URL based on environment
-          if [ "$ENVIRONMENT" = "production" ]; then
-            BASE_URL="https://test-observer.canonical.com"
-          else
-            BASE_URL="https://test-observer-staging.canonical.com"
-          fi
-          
-          echo "Privacy Check Test Observer Links:"
-          cat ${{ steps.post_privacy_results.outputs.response_file }} | jq -r '.[] | "'"${BASE_URL}"'/#/charms/\(.artefact_id)?testExecutionId=\(.test_execution_id)&testResultId=\(.id)"'
