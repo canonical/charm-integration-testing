@@ -18,7 +18,7 @@ class KubernetesClient:
         self.logger = logger or Logger(__name__)
         self.client = client.CoreV1Api()
 
-    def list_namespaced_pods(self, namespace: str) -> List[client.V1Pod]:
+    def list_namespaced_pods(self, namespace: str) -> list[client.V1Pod]:
         """
         List all pods in the specified namespace.
         Args:
