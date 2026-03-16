@@ -461,11 +461,13 @@ jobs:
         if: ${{ always() && steps.collect_logs.outputs.directory_path != '' }}
         continue-on-error: true
         shell: bash
+        env:
+          LOGS_DIR: ${{ steps.collect_logs.outputs.directory_path }}
         run: |
           # Run TruffleHog in filesystem mode and save output to a file
           set +e
           docker run --rm \
-            -v "${{ steps.collect_logs.outputs.directory_path }}:/scan-logs" \
+            -v "${LOGS_DIR}:/scan-logs" \
             ghcr.io/trufflesecurity/trufflehog:latest \
             filesystem /scan-logs > trufflehog-output.txt 2>&1
           EXIT_CODE=$?
@@ -478,8 +480,9 @@ jobs:
         id: privacy_junit
         if: ${{ always() && steps.logs_privacy_check.conclusion != 'skipped' && env.test_observer_api != '' && inputs.execution_id != '' }}
         shell: bash
+        env:
+          STATUS: ${{ steps.logs_privacy_check.outcome }}
         run: |
-          STATUS="${{ steps.logs_privacy_check.outcome }}"
           JUNIT_OUTPUT="privacy-check-junit.xml"
           
           # Capture TruffleHog output from the text file for the report
