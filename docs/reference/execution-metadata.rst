@@ -184,6 +184,14 @@ Collected when the exception type is in ``KNOWN_FAILURE_EXCEPTIONS`` (``JujuWait
      - Error string from a validation result with status ``ERROR``. Only recorded when ``ValidationResult.error`` is set.
      - Yes
      - ``Unexpected exception during validation``
+   * - ``failure:build_bundle:unfulfilled_endpoint``
+     - An application endpoint that could not be fulfilled during bundle building. Collected when ``UnfulfilledEndpointsError`` is raised. Format: ``<charm>:<endpoint_name>``. Multiple values may be recorded.
+     - No
+     - ``postgresql:db``
+   * - ``failure:build_bundle:unfulfilled_interface``
+     - Interface name for an unfulfilled application endpoint. Collected when ``UnfulfilledEndpointsError`` is raised. Multiple values may be recorded.
+     - No
+     - ``postgresql_client``
 
 Error Metadata (Unexpected Errors)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
