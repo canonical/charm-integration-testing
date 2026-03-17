@@ -5,7 +5,7 @@ import logging
 from datetime import datetime, timedelta
 from enum import Enum
 from time import sleep
-from typing import Callable, List
+from typing import Callable
 
 from kubernetes import client as K8sClient  # type: ignore[import-untyped]
 from kubernetes.client import ApiException  # type: ignore[import-untyped]
@@ -24,7 +24,7 @@ class KubernetesBackend:
 
     def __init__(
         self,
-        client: K8sClient,
+        client: K8sClient.CoreV1Api,
         logger: logging.Logger | None = None,
         default_timeout: timedelta = timedelta(minutes=5),
         default_delay: timedelta = timedelta(seconds=1),
@@ -37,7 +37,7 @@ class KubernetesBackend:
 
     def get_charm_pods(
         self, charm: str, model: str
-    ) -> List[K8sClient.V1Pod]:  # multiple pods per a charm, depends on charm name and unit number
+    ) -> list[K8sClient.V1Pod]:  # multiple pods per a charm, depends on charm name and unit number
         """
         Gets all pods in the specified namespace that match the given charm name.
         Args:
@@ -75,8 +75,10 @@ class KubernetesBackend:
         Raises:
             TimeoutError: If pod does not reach the desired status within timeout
         """
-        timeout = timeout or self.default_timeout
-        delay = delay or self.default_delay
+        if timeout is None:
+            timeout = self.default_timeout
+        if delay is None:
+            delay = self.default_delay
         start_time = datetime.now()
         is_ready = ready or (lambda status: status == target_status)
 
@@ -156,7 +158,7 @@ class KubernetesBackend:
                     sleep(delay.total_seconds())
                     continue
                 else:
-                    raise e
+                    raise
 
             sleep(delay.total_seconds())
 
