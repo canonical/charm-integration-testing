@@ -178,4 +178,4 @@ expensive setup transitions.
 
 The ``--juju-model-config`` file is optional. If omitted, tests create the model
 without extra configuration; if provided, pass a JSON object of string keys and values
-matching Juju model configiguration options.
+matching Juju model configuration options.
