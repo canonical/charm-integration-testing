@@ -421,7 +421,7 @@ class TestTracingValidatorDeep:
         # WHEN we inspect how the gRPC exporter is constructed
         from opentelemetry.sdk.trace.export import SpanExportResult
 
-        captured_kwargs: list[dict] = []
+        captured_kwargs: list[dict[str, Any]] = []
 
         class FakeGrpcExporter:
             def __init__(self, endpoint: str, timeout: int, insecure: bool) -> None:
