@@ -21,7 +21,7 @@ from extensions import (
     UnsealVaultK8sJujuExtension,
     ValidatorInjectorExtension,
 )
-from juju import JujuBackend, JujuClient, JujuWaitTimeoutError
+from juju import JujuBackend, JujuClient, JujuValidationError, JujuWaitTimeoutError
 from juju_cmd.backend import JujuCmdBackend
 from juju_jubilant import JubilantBackend
 from kubernetes_client import KubernetesBackend, KubernetesClient
