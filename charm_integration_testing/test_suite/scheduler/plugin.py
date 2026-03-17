@@ -449,7 +449,6 @@ def _build_execution_plan(
 
     def _backtrack_search(
         current_state: State,
-        remaining_destinations: set[State],
         current_plan: list[pytest.Item],
         scheduled: set[pytest.Item],
     ) -> list[pytest.Item] | None:
@@ -460,6 +459,7 @@ def _build_execution_plan(
 
         Returns the completed plan if successful, None if this branch is a dead end.
         """
+        remaining_destinations = _unscheduled_destinations(scheduled)
         if not remaining_destinations:
             # All destinations have been scheduled; return the plan.
             return current_plan
@@ -481,9 +481,8 @@ def _build_execution_plan(
             # Run the user-selected items at this destination.
             new_state = _run_selected_at(target_state, branch_plan, branch_scheduled)
 
-            # Recurse with one fewer remaining destination.
-            new_remaining = remaining_destinations - {target_state}
-            result = _backtrack_search(new_state, new_remaining, branch_plan, branch_scheduled)
+            # Recurse; remaining destinations are recomputed from unscheduled items.
+            result = _backtrack_search(new_state, branch_plan, branch_scheduled)
 
             if result is not None:
                 # Found a valid complete path on this branch.
@@ -510,14 +509,14 @@ def _build_execution_plan(
     # Use exhaustive backtracking to find a valid ordering of destinations.
     # ------------------------------------------------------------------
     if remaining:
-        plan = _backtrack_search(state, remaining, plan, scheduled)
+        plan = _backtrack_search(state, plan, scheduled)
         if plan is None:
             raise _UnreachableStateError(
-                f"No valid ordering of destinations exists from state '{state}'. "
-                f"Remaining destinations: {sorted(remaining)}. "
-                "Regardless of the order tested, some destinations become unreachable. "
-                "Consider breaking the test selection into smaller groups or adding "
-                "transition tests to create bridging paths."
+                f"No path from state '{state}' to any of the remaining required states "
+                f"{sorted(remaining)}.  "
+                "No valid ordering of destinations could bridge this gap.  "
+                "Add a transition test for the missing edge or set --current-state "
+                "to a state closer to the required one."
             )
 
     return plan
