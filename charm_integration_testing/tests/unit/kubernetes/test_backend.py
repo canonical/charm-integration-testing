@@ -34,13 +34,13 @@ class KubernetesClientStub:
     get_namespaced_pod_raises: Exception | None = None
     get_namespaced_pod_call_count: int = 0
 
-    def list_namespaced_pods(self, namespace: str) -> list[V1Pod]:
+    def list_namespaced_pod(self, namespace: str) -> list[V1Pod]:
         if self.list_namespaced_pods_raises:
             raise self.list_namespaced_pods_raises
         assert self.list_namespaced_pods_result is not None
         return self.list_namespaced_pods_result
 
-    def get_namespaced_pod(self, pod_name: str, namespace: str) -> V1Pod:
+    def read_namespaced_pod(self, pod_name: str, namespace: str) -> V1Pod:
         self.get_namespaced_pod_call_count += 1
         if self.get_namespaced_pod_raises:
             raise self.get_namespaced_pod_raises
@@ -74,45 +74,34 @@ class TestKubernetesBackendInit:
         # THEN the custom client is used
         assert backend.client is client
 
-    @patch("kubernetes_client.backend.KubernetesClient")
-    def test_init_with_logger(self, mock_client_class: MagicMock) -> None:
-        # GIVEN a custom logger
-        logger = logging.getLogger("custom-logger")
 
-        # WHEN initializing backend with logger
-        backend = KubernetesBackend(logger=logger)
-
-        # THEN the custom logger is used
-        assert backend.logger == logger
-
-    @patch("kubernetes_client.backend.KubernetesClient")
-    def test_init_without_logger(self, mock_client_class: MagicMock) -> None:
+    def test_init_without_logger(self) -> None:
         # GIVEN no custom logger
         # WHEN initializing backend without logger
-        backend = KubernetesBackend()
+        client = KubernetesClientStub()
+        backend = KubernetesBackend(client=client)
 
         # THEN a default logger is created
         assert backend.logger is not None
         assert isinstance(backend.logger, logging.Logger)
 
-    @patch("kubernetes_client.backend.KubernetesClient")
-    def test_init_with_custom_timeouts(self, mock_client_class: MagicMock) -> None:
+    def test_init_with_custom_timeouts(self) -> None:
         # GIVEN custom timeout and delay values
         custom_timeout = timedelta(minutes=10)
         custom_delay = timedelta(seconds=2)
-
+        client = KubernetesClientStub()
         # WHEN initializing backend with custom values
-        backend = KubernetesBackend(default_timeout=custom_timeout, default_delay=custom_delay)
+        backend = KubernetesBackend(client=client, default_timeout=custom_timeout, default_delay=custom_delay)
 
         # THEN the custom values are set
         assert backend.default_timeout == custom_timeout
         assert backend.default_delay == custom_delay
 
-    @patch("kubernetes_client.backend.KubernetesClient")
-    def test_init_with_default_timeouts(self, mock_client_class: MagicMock) -> None:
+    def test_init_with_default_timeouts(self) -> None:
         # GIVEN no custom timeout and delay values
         # WHEN initializing backend with defaults
-        backend = KubernetesBackend()
+        client = KubernetesClientStub()
+        backend = KubernetesBackend(client=client)
 
         # THEN default values are set
         assert backend.default_timeout == timedelta(minutes=5)
@@ -232,7 +221,7 @@ class TestKubernetesBackendInit:
                 return running_pod
 
             client = MagicMock()
-            client.get_namespaced_pod.side_effect = get_pod_side_effect
+            client.read_namespaced_pod.side_effect = get_pod_side_effect
 
             backend = KubernetesBackend(
                 client=client,
@@ -374,7 +363,7 @@ class TestKubernetesBackendInit:
                     return new_running_pod  # New pod running
 
             client = MagicMock()
-            client.get_namespaced_pod.side_effect = get_pod_side_effect
+            client.read_namespaced_pod.side_effect = get_pod_side_effect
 
             backend = KubernetesBackend(
                 client=client,
@@ -466,7 +455,7 @@ class TestKubernetesBackendInit:
                 return new_pod
 
             client = MagicMock()
-            client.get_namespaced_pod.side_effect = get_pod_side_effect
+            client.read_namespaced_pod.side_effect = get_pod_side_effect
 
             backend = KubernetesBackend(
                 client=client,
