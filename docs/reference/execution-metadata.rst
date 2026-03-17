@@ -137,7 +137,7 @@ The framework distinguishes between expected failures and unexpected errors, usi
 Failure Metadata (Expected Failures)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Collected when the exception type is in ``KNOWN_FAILURE_EXCEPTIONS`` (``JujuWaitTimeoutError``, ``AssertionError``, ``CalledProcessError``):
+Collected when the exception type is in ``KNOWN_FAILURE_EXCEPTIONS`` (``JujuWaitTimeoutError``, ``JujuValidationError``, ``AssertionError``, ``CalledProcessError``):
 
 .. list-table::
    :header-rows: 1
@@ -171,6 +171,18 @@ Collected when the exception type is in ``KNOWN_FAILURE_EXCEPTIONS`` (``JujuWait
      - Standard error from a failed command. Only recorded for ``CalledProcessError`` with stderr.
      - Yes, multi-line normalized
      - ``ERROR connection refused``
+   * - ``failure:validator:interface:<interface>``
+     - Validation result status for a specific interface when a test fails due to ``JujuValidationError``. Dynamic category based on interface name (e.g., ``failure:validator:interface:postgresql_client``). Value is ``FAIL`` or ``ERROR``.
+     - No
+     - ``FAIL``
+   * - ``failure:validator:interface:<interface>:check``
+     - Details of a specific failed validation check for an interface. Format: ``<check_name>: <message>``. Multiple values may be recorded per interface.
+     - Yes
+     - ``connect: could not connect to server``
+   * - ``failure:validator:interface:<interface>:error``
+     - Error string from a validation result with status ``ERROR``. Only recorded when ``ValidationResult.error`` is set.
+     - Yes
+     - ``Unexpected exception during validation``
 
 Error Metadata (Unexpected Errors)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
