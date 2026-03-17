@@ -739,6 +739,6 @@ def kubernetes_test(juju_backend: JujuCmdBackend, model: str) -> None:
 
 
 @pytest.fixture
-def kubernetes_backend(kubernetes_test) -> KubernetesClient:
+def kubernetes_client(kubernetes_test: pytest.FixtureRequest) -> KubernetesClient:
     kubeconfig = os.environ.get("KUBECONFIG")
-    return KubernetesClient(KubernetesBackend.k8s_client())
+    return KubernetesClient(KubernetesBackend.k8s_client(kubeconfig=kubeconfig))
