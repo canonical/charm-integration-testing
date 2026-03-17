@@ -60,7 +60,7 @@ from .states import State
 logger = logging.getLogger(__name__)
 
 #: State assumed when no ``--current-state`` flag is given.
-_DEFAULT_CURRENT_STATE = State.NO_BUNDLE
+_DEFAULT_CURRENT_STATE = State.NO_CONTROLLER
 
 # All items collected by pytest before any -k/-m filtering.
 # Populated by pytest_itemcollected; used by modifyitems to build the full graph.

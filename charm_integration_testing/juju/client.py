@@ -179,3 +179,14 @@ class JujuClient:
             # Call extensions (Phase 1 validation happens here)
             for extension in self.extensions:
                 extension.post_validate(model, application, level)
+
+    def bootstrap_controller(self, cloud: str, controller: str) -> None:
+        self.logger.info(f"Bootstrapping Juju controller in cloud '{cloud}' with name '{controller}'.")
+        self.backend.bootstrap_controller(cloud=cloud, controller=controller)
+
+    def add_model(self, controller: str, model: str, model_config: dict[str, str]) -> None:
+        self.logger.info(
+            f"Creating model '{model}' with configuration '{model_config}' on controller '{controller}' and switching to it."
+        )
+        self.backend.add_model(controller=controller, model=model, model_config=model_config)
+        self.backend.switch(controller=controller, model=model)

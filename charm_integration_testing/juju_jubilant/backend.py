@@ -23,6 +23,7 @@ from juju import (
     warn_performance,
 )
 from juju_cmd import JujuCmdBackend
+from tenacity import retry, stop_after_attempt, wait_fixed
 
 from .client import JubilantClient
 from .structures import JujuExecTask
@@ -379,6 +380,19 @@ class JubilantBackend(JujuCmdBackend):
 
     def version(self, model: str) -> str:
         return str(self.client.model(model).version())
+
+    @retry(stop=stop_after_attempt(3), wait=wait_fixed(5), reraise=True)
+    def bootstrap_controller(self, cloud: str, controller: str) -> None:
+        return self.client.model(None).bootstrap(
+            cloud=cloud, controller=controller, bootstrap_constraints={"root-disk": "5G"}
+        )
+
+    @retry(stop=stop_after_attempt(3), wait=wait_fixed(5), reraise=True)
+    def add_model(self, controller: str, model: str, model_config: dict[str, str]) -> None:
+        self.client.model(None).add_model(model=model, controller=controller, config=model_config)
+
+    def switch(self, controller: str, model: str) -> None:
+        self.client.model(model).cli("switch", f"{controller}:{model}", include_model=False)
 
     def validate_application(self, model: str, application: str, level: str) -> None:
         # Phase 2 endpoint validation will be done here

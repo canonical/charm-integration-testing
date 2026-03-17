@@ -125,7 +125,7 @@ class JubilantClientStub(JubilantClient):
     def __init__(self, client: Any) -> None:
         self.client = client
 
-    def model(self, model: str) -> Any:
+    def model(self, model: str | None) -> Any:
         return self.client
 
 
@@ -1366,6 +1366,72 @@ class TestJubilantBackend:
             # THEN
             assert stub.app == "my-app"
             assert config == {"setting1": "value1", "setting2": "value2"}
+
+    class TestControllerSetupRetries:
+        @dataclass
+        class SetupStub:
+            bootstrap_failures_remaining: int = 0
+            add_model_failures_remaining: int = 0
+            bootstrap_calls: int = 0
+            add_model_calls: int = 0
+            switch_calls: int = 0
+
+            def bootstrap(self, cloud: str, controller: str, bootstrap_constraints: dict[str, str]) -> None:
+                self.bootstrap_calls += 1
+                if self.bootstrap_failures_remaining > 0:
+                    self.bootstrap_failures_remaining -= 1
+                    raise RuntimeError("transient bootstrap failure")
+
+            def add_model(self, model: str, controller: str, config: dict[str, str]) -> None:
+                self.add_model_calls += 1
+                if self.add_model_failures_remaining > 0:
+                    self.add_model_failures_remaining -= 1
+                    raise RuntimeError("transient add-model failure")
+
+            def cli(self, *args: str, include_model: bool = True) -> str:
+                if args and args[0] == "switch":
+                    self.switch_calls += 1
+                return ""
+
+        def test_bootstrap_controller_retries_then_succeeds(self) -> None:
+            stub = self.SetupStub(bootstrap_failures_remaining=2)
+            backend = JubilantBackend(JubilantClientStub(client=stub))
+
+            with patch("tenacity.nap.sleep", return_value=None):
+                backend.bootstrap_controller(cloud="k8s-stg", controller="test-controller")
+
+            assert stub.bootstrap_calls == 3
+
+        def test_bootstrap_controller_retries_then_raises(self) -> None:
+            stub = self.SetupStub(bootstrap_failures_remaining=3)
+            backend = JubilantBackend(JubilantClientStub(client=stub))
+
+            with patch("tenacity.nap.sleep", return_value=None):
+                with pytest.raises(RuntimeError, match="transient bootstrap failure"):
+                    backend.bootstrap_controller(cloud="k8s-stg", controller="test-controller")
+
+            assert stub.bootstrap_calls == 3
+
+        def test_add_model_retries_then_succeeds(self) -> None:
+            stub = self.SetupStub(add_model_failures_remaining=2)
+            backend = JubilantBackend(JubilantClientStub(client=stub))
+
+            with patch("tenacity.nap.sleep", return_value=None):
+                backend.add_model(controller="test-controller", model="test-model", model_config={})
+
+            assert stub.add_model_calls == 3
+            assert stub.switch_calls == 1
+
+        def test_add_model_retries_then_raises(self) -> None:
+            stub = self.SetupStub(add_model_failures_remaining=3)
+            backend = JubilantBackend(JubilantClientStub(client=stub))
+
+            with patch("tenacity.nap.sleep", return_value=None):
+                with pytest.raises(RuntimeError, match="transient add-model failure"):
+                    backend.add_model(controller="test-controller", model="test-model", model_config={})
+
+            assert stub.add_model_calls == 3
+            assert stub.switch_calls == 0
 
 
 class TestParseBundleFile:

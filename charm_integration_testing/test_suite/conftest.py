@@ -23,8 +23,12 @@ from extensions import (
 )
 from juju import JujuBackend, JujuClient, JujuWaitTimeoutError
 from juju_jubilant import JubilantBackend
+from pydantic import TypeAdapter, ValidationError
 from pytest import StashKey
 from utils import normalize_string, normalize_string_multiline
+
+from test_suite.scheduler.markers import read_state_marker
+from test_suite.scheduler.states import State
 
 pytest_plugins = [
     "test_suite.scheduler.plugin",
@@ -187,6 +191,24 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default="./static/charm-default-versions.yaml",
         help="Path to the charm-default-versions yaml.",
     )
+    parser.addoption(
+        "--juju-cloud",
+        type=str,
+        default=None,
+        help="Name of the Juju Cloud to create the controller on.",
+    )
+    parser.addoption(
+        "--juju-controller",
+        type=str,
+        default="charmqa",
+        help="Name of the controller to create the model on.",
+    )
+    parser.addoption(
+        "--juju-model-config",
+        type=str,
+        default=None,
+        help="Path to a json file containing the model configs to be passed down to Juju on model creation.",
+    )
 
 
 @pytest.fixture
@@ -194,6 +216,27 @@ def model(request: pytest.FixtureRequest) -> str:
     option = request.config.getoption("--model")
     assert isinstance(option, str)
     return option
+
+
+@pytest.fixture
+def juju_model_config(request: pytest.FixtureRequest) -> dict[str, str]:
+    """Juju model config file path passed via ``--juju-model-config``."""
+    value = request.config.getoption("--juju-model-config")
+
+    if not value:
+        return dict()
+
+    assert isinstance(value, str)
+    value = Path(value).resolve()
+
+    # Define the expected shape
+    ConfigSchema = TypeAdapter(dict[str, str])
+
+    try:
+        content = json.loads(value.read_text())
+        return ConfigSchema.validate_python(content)
+    except ValidationError as e:
+        pytest.fail(f"Invalid Juju model config passed via the --juju-model-config parameter: {e}")
 
 
 @pytest.fixture
@@ -319,6 +362,24 @@ def platform(request: pytest.FixtureRequest) -> str:
     value = request.config.getoption("--platform")
     if not value:
         pytest.fail("--platform is required by this test but was not provided.")
+    assert isinstance(value, str)
+    return value
+
+
+@pytest.fixture
+def juju_cloud(request: pytest.FixtureRequest) -> str:
+    value = request.config.getoption("--juju-cloud")
+    if not value:
+        pytest.fail("--juju-cloud is required by this test but was not provided.")
+    assert isinstance(value, str)
+    return value
+
+
+@pytest.fixture
+def juju_controller(request: pytest.FixtureRequest) -> str:
+    value = request.config.getoption("--juju-controller")
+    if not value:
+        pytest.fail("--juju-controller is required by this test but was not provided.")
     assert isinstance(value, str)
     return value
 
@@ -491,6 +552,11 @@ def print_setup_and_teardown_info(
     model: str,
     record_execution_metadata: None,
 ) -> Iterator[None]:
+    state_marker = read_state_marker(request.node)
+    if state_marker and any(state in (State.NO_MODEL, State.NO_CONTROLLER) for state in state_marker.requires):
+        yield
+        return
+
     # Enforce fixture execution order
     _ = record_execution_metadata
 
@@ -605,8 +671,16 @@ def record_charms_and_revisions_execution_metadata_instantaneous(
 
 @pytest.fixture
 def record_charms_and_revisions_execution_metadata(
-    juju_client: JujuClient, model: str, execution_metadata: Callable[[str, str | int], None]
+    request: pytest.FixtureRequest,
+    juju_client: JujuClient,
+    model: str,
+    execution_metadata: Callable[[str, str | int], None],
 ) -> Iterator[None]:
+    state_marker = read_state_marker(request.node)
+    if state_marker and any(state in (State.NO_MODEL, State.NO_CONTROLLER) for state in state_marker.requires):
+        yield
+        return
+
     # Save all charms and revisions at start of test
     record_charms_and_revisions_execution_metadata_instantaneous(juju_client, model, execution_metadata)
 
@@ -678,8 +752,16 @@ def record_failure_execution_metadata(
 
 @pytest.fixture
 def record_juju_execution_metadata(
-    juju_client: JujuClient, model: str, execution_metadata: Callable[[str, str | int], None]
+    request: pytest.FixtureRequest,
+    juju_client: JujuClient,
+    model: str,
+    execution_metadata: Callable[[str, str | int], None],
 ) -> Iterator[None]:
+    state_marker = read_state_marker(request.node)
+    if state_marker and any(state in (State.NO_MODEL, State.NO_CONTROLLER) for state in state_marker.requires):
+        yield
+        return
+
     # Let the test run
     yield
 
