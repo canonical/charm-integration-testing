@@ -202,6 +202,16 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def refresh_application(
+        self,
+        model: str,
+        application: str,
+        revision: int | None = None,
+        channel: str | None = None,
+    ) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
     def remove_applications(self, model: str, *applications: str) -> None:
         raise NotImplementedError
 
