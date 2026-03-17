@@ -56,7 +56,8 @@ class KubernetesBackend:
         self,
         namespace: str,
         pod_name: str,
-        ready: Callable[[PodStatus], bool],
+        ready: Callable[[PodStatus], bool] | None = None,
+        target_status: PodStatus = PodStatus.RUNNING,
         timeout: timedelta | None = None,
         delay: timedelta | None = None,
     ) -> None:
@@ -66,7 +67,8 @@ class KubernetesBackend:
         Args:
             namespace: Namespace where the pod is located
             pod_name: Name of the pod to wait for
-            ready: Callable that takes a PodStatus and returns True if the pod is ready
+            ready: Optional predicate to evaluate pod readiness
+            target_status: Desired pod status when no custom predicate is provided
             timeout: Maximum time to wait
             delay: Delay between checks
 
@@ -76,6 +78,7 @@ class KubernetesBackend:
         timeout = timeout or self.default_timeout
         delay = delay or self.default_delay
         start_time = datetime.now()
+        is_ready = ready or (lambda status: status == target_status)
 
         while True:
             if datetime.now() > start_time + timeout:
@@ -85,8 +88,10 @@ class KubernetesBackend:
             try:
                 pod = self.client.read_namespaced_pod(pod_name, namespace)
 
-                if pod and ready(PodStatus(pod.status.phase)):
-                    self.logger.info(f"Pod {pod.metadata.name} in namespace {namespace} is ready.")
+                if pod and is_ready(PodStatus(pod.status.phase)):
+                    self.logger.info(
+                        f"Pod {pod.metadata.name} in namespace {namespace} reached target status {target_status.value}."
+                    )
                     return
             except ApiException:
                 raise

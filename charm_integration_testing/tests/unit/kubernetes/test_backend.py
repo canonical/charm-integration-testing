@@ -199,7 +199,7 @@ class TestKubernetesBackendInit:
             backend.wait(
                 namespace="test-namespace",
                 pod_name="test-pod",
-                ready=lambda status: status == PodStatus.RUNNING,
+                target_status=PodStatus.RUNNING,
             )
 
             # THEN completes without error
@@ -233,7 +233,7 @@ class TestKubernetesBackendInit:
             backend.wait(
                 namespace="test-namespace",
                 pod_name="test-pod",
-                ready=lambda status: status == PodStatus.RUNNING,
+                target_status=PodStatus.RUNNING,
             )
 
             # THEN sleep is called between checks
@@ -265,7 +265,7 @@ class TestKubernetesBackendInit:
                 backend.wait(
                     namespace="test-namespace",
                     pod_name="test-pod",
-                    ready=lambda status: status == PodStatus.RUNNING,
+                    target_status=PodStatus.RUNNING,
                 )
 
             assert "Timeout waiting for pod test-pod in namespace test-namespace to be ready" in str(exc_info.value)
@@ -285,7 +285,7 @@ class TestKubernetesBackendInit:
             backend.wait(
                 namespace="test-namespace",
                 pod_name="test-pod",
-                ready=lambda status: status == PodStatus.RUNNING,
+                target_status=PodStatus.RUNNING,
                 timeout=custom_timeout,
                 delay=custom_delay,
             )
@@ -310,7 +310,7 @@ class TestKubernetesBackendInit:
                 backend.wait(
                     namespace="test-namespace",
                     pod_name="test-pod",
-                    ready=lambda status: status == PodStatus.RUNNING,
+                    target_status=PodStatus.RUNNING,
                 )
 
             assert exc_info.value.status == 500
