@@ -25,6 +25,7 @@ The ``normalize_string()`` function applies these transformations:
 - **Container names**: ``container=katib-controller`` → ``container=<CONTAINER>``
 - **Hook failure app/endpoint**: ``hook failed: "install" for app:endpoint`` → ``hook failed: "install" for <APP>:<ENDPOINT>``
 - **Relation version errors**: ``versions not found for apps: app-name`` → ``versions not found for apps: <APP>``
+- **Kubernetes cluster DNS names**: ``service.namespace.svc.cluster.local`` → ``<SERVICE>.<NAMESPACE>.svc.cluster.local``
 - **Numeric sequences**: ``12345`` → ``XXX`` (excludes technical terms like ``k8s``, ``s3``)
 - **Truncation**: Values longer than 150 characters are truncated with ``...``
 
