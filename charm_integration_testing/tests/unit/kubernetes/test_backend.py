@@ -118,7 +118,6 @@ class TestKubernetesBackendInit:
         assert backend.default_timeout == timedelta(minutes=5)
         assert backend.default_delay == timedelta(seconds=1)
 
-
     class TestGetCharmPods:
         """Test suite for get_charm_pods method."""
 
@@ -192,7 +191,6 @@ class TestKubernetesBackendInit:
                 backend.get_charm_pods("postgresql", "test-model")
 
             assert exc_info.value.status == 500
-
 
     class TestWait:
         """Test suite for wait method."""
@@ -327,7 +325,6 @@ class TestKubernetesBackendInit:
                 )
 
             assert exc_info.value.status == 500
-
 
     class TestWaitForPodRecreation:
         """Test suite for wait_for_pod_recreation method."""
