@@ -11,6 +11,8 @@ from typing import Any, ParamSpec, TypeVar
 
 from pydantic.dataclasses import dataclass
 
+from validators.base.validator import ValidationResult
+
 from .models import JujuApplicationInfo, JujuIntegration, JujuIntegrationApplication
 
 _P = ParamSpec("_P")
@@ -301,5 +303,5 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def validate_application(self, model: str, application: str, level: str) -> None:
+    def validate_application(self, model: str, application: str, level: str) -> dict[str, list[ValidationResult]]:
         raise NotImplementedError

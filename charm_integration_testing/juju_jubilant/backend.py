@@ -25,6 +25,8 @@ from juju import (
 from juju_cmd import JujuCmdBackend
 from tenacity import retry, stop_after_attempt, wait_fixed
 
+from validators.base.validator import ValidationResult
+
 from .client import JubilantClient
 from .structures import JujuExecTask
 from .wait import (
@@ -394,6 +396,6 @@ class JubilantBackend(JujuCmdBackend):
     def switch(self, controller: str, model: str) -> None:
         self.client.model(model).cli("switch", f"{controller}:{model}", include_model=False)
 
-    def validate_application(self, model: str, application: str, level: str) -> None:
+    def validate_application(self, model: str, application: str, level: str) -> dict[str, list[ValidationResult]]:
         # Phase 2 endpoint validation will be done here
-        pass
+        return {}

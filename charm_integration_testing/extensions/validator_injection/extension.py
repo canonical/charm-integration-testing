@@ -8,6 +8,7 @@ from pathlib import Path
 
 from juju import JujuBackend, JujuExtension
 
+from validators.base.validator import ValidationResult
 from validators.runner import ValidatorRunnerResults
 
 proxy_env = " ".join(
@@ -44,17 +45,18 @@ class ValidatorInjectorExtension(JujuExtension):
         self.juju = juju
         self.logger = logger.getChild("ValidatorInjectorExtension")
 
-    def post_validate(self, model: str, application: str, level: str) -> None:
-        units = self.juju.application_units(model, application)
-        for unit in units:
-            self._run_validators_on_unit(model, unit, level)
+    def post_validate(self, model: str, application: str, level: str) -> dict[str, list[ValidationResult]]:
+        results: dict[str, list[ValidationResult]] = {}
+        for unit in self.juju.application_units(model, application):
+            results[unit] = self._run_validators_on_unit(model, unit, level)
+        return results
 
-    def _run_validators_on_unit(self, model: str, unit: str, level: str) -> None:
+    def _run_validators_on_unit(self, model: str, unit: str, level: str) -> list[ValidationResult]:
         # Inject validators
         if self.juju.exec_unit(model, unit, f"test -f {venv_runner}", operator=True).return_code != 0:
             if not self.validators_path:
                 self.logger.warning(f"Validators path not provided, skipping injection on {unit}")
-                return
+                return []
             self._inject_validators(model, unit)
 
         # Run validators
@@ -64,28 +66,7 @@ class ValidatorInjectorExtension(JujuExtension):
             raise RuntimeError(f"Validators failed on {unit} (rc={run_result.return_code}): {run_result.stderr}")
 
         # Collect results
-        validator_results = ValidatorRunnerResults.model_validate_json(run_result.stdout)
-        failures = []
-        for r in validator_results.results:
-            label = f"[{unit}] endpoint {r.endpoint} (level={r.level})"
-            if r.status == "PASS":
-                self.logger.debug(f"{label}: PASS")
-            elif r.status == "SKIPPED":
-                self.logger.warning(f"{label}: SKIPPED - {r.error}")
-            else:
-                if r.error:
-                    msg = r.error
-                elif r.checks:
-                    failed_checks = [c for c in r.checks if not c.passed]
-                    msg = f"{len(failed_checks)}/{len(r.checks)} checks failed: {[c.name for c in failed_checks]}"
-                else:
-                    msg = r.status
-                self.logger.error(f"{label}: {msg}")
-                failures.append(r.endpoint)
-
-        # Raise if there are any failures
-        if failures:
-            raise RuntimeError(f"Validation failures on {unit}: {', '.join(failures)}")
+        return ValidatorRunnerResults.model_validate_json(run_result.stdout).results
 
     def _inject_validators(self, model: str, unit: str) -> None:
         # Ensure validators path is provided

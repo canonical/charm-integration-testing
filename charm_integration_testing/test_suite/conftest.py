@@ -21,7 +21,7 @@ from extensions import (
     UnsealVaultK8sJujuExtension,
     ValidatorInjectorExtension,
 )
-from juju import JujuBackend, JujuClient, JujuWaitTimeoutError
+from juju import JujuBackend, JujuClient, JujuValidationError, JujuWaitTimeoutError
 from juju_jubilant import JubilantBackend
 from pydantic import TypeAdapter, ValidationError
 from pytest import StashKey
@@ -36,6 +36,7 @@ pytest_plugins = [
 
 KNOWN_FAILURE_EXCEPTIONS = (
     JujuWaitTimeoutError,
+    JujuValidationError,
     AssertionError,
 )
 
@@ -742,6 +743,21 @@ def record_failure_execution_metadata(
             if exc.stderr:
                 for line in normalize_string_multiline(exc.stderr):
                     execution_metadata("failure:cli:stderr", line)
+        elif isinstance(exc, JujuValidationError):
+            for results in exc.failed_validations.values():
+                for result in results:
+                    execution_metadata(f"failure:validator:interface:{result.interface}", result.status)
+                    for check in result.checks:
+                        if not check.passed:
+                            execution_metadata(
+                                f"failure:validator:interface:{result.interface}:check",
+                                normalize_string(f"{check.name}: {check.message}"),
+                            )
+                    if result.error:
+                        execution_metadata(
+                            f"failure:validator:interface:{result.interface}:error",
+                            normalize_string(result.error),
+                        )
 
         if error_message in request.node.stash:
             # toggle expected failure flag
