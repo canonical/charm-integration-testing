@@ -165,3 +165,21 @@ class KubernetesBackend:
         raise TimeoutError(
             f"Pod {pod_name} in namespace {namespace} was not recreated and reached {target_status.value} status within timeout"
         )
+
+    def delete_pod(self, namespace: str, pod_name: str) -> None:
+        """
+        Deletes the specified pod.
+
+        Args:
+            namespace: Namespace where the pod is located
+            pod_name: Name of the pod to delete
+
+        Raises:
+            ApiException: If there is an error communicating with the Kubernetes API
+        """
+        try:
+            self.client.delete_namespaced_pod(name=pod_name, namespace=namespace)
+            self.logger.info(f"Pod {pod_name} in namespace {namespace} has been deleted.")
+        except ApiException as e:
+            self.logger.error(f"Failed to delete pod {pod_name} in namespace {namespace}: {e}")
+            raise
