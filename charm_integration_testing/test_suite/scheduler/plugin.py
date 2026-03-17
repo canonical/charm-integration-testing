@@ -415,7 +415,9 @@ def _build_execution_plan(
                         return st.to_state  # one transition at a time; re-navigate for the next
         return s
 
-    def _inject_bridge(path: list[tuple[StateTransition, pytest.Item]], plan: list[pytest.Item], scheduled: set[pytest.Item]) -> None:
+    def _inject_bridge(
+        path: list[tuple[StateTransition, pytest.Item]], plan: list[pytest.Item], scheduled: set[pytest.Item]
+    ) -> None:
         """Inject one bridging transition item per edge along *path*.
 
         For each edge, if the user selected tests for it, prefer the first
