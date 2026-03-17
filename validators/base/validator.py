@@ -55,6 +55,11 @@ class BaseValidator(ABC):
         return self.relation.id
 
     @property
+    def databag(self) -> dict[str, str]:
+        if self.relation.app is None:
+            return {}
+        return dict(self.relation.data[self.relation.app])
+
     def interface(self) -> str:
         return self.charm.meta.relations[self.relation.name].interface_name or ""
 
