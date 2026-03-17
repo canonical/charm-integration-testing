@@ -468,7 +468,7 @@ jobs:
           set +e
           docker run --rm \
             -v "${LOGS_DIR}:/scan-logs" \
-            ghcr.io/trufflesecurity/trufflehog:latest \
+            ghcr.io/trufflesecurity/trufflehog@sha256:b356cc273ab8c786fe2a54f20d2bec1f67438df4ca070e5c7d5a1283e18917cb \
             filesystem /scan-logs > trufflehog-output.txt 2>&1
           EXIT_CODE=$?
           set -e
@@ -495,8 +495,8 @@ jobs:
             echo '        <failure message="Secrets detected in logs"/>' >> "${JUNIT_OUTPUT}"
           fi
           cat >> "${JUNIT_OUTPUT}" <<EOF
-                <system-out>TruffleHog scan status: ${STATUS}
-          ${TRUFFLEHOG_OUTPUT}</system-out>
+                <system-out><![CDATA[TruffleHog scan status: ${STATUS}
+          ${TRUFFLEHOG_OUTPUT}]]></system-out>
               </testcase>
             </testsuite>
           </testsuites>
