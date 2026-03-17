@@ -19,6 +19,7 @@ from typing import Any, cast
 from unittest.mock import patch
 
 import ops
+import pytest
 
 from validators.tracing.validator import TracingValidator
 
@@ -185,6 +186,33 @@ class TestTracingValidatorSimple:
         assert not schema_check.passed
         assert "name" in schema_check.message
 
+    def test_fails_schema_check_when_receiver_is_not_an_object(self) -> None:
+        # GIVEN a receivers list where one entry is not a dict
+        validator = _make_validator({"receivers": json.dumps(["not-an-object"])})
+
+        # WHEN
+        result = validator.validate(level="simple")
+
+        # THEN
+        assert result.status == "FAIL"
+        schema_check = next(c for c in result.checks if c.name == "schema")
+        assert not schema_check.passed
+        assert "not an object" in schema_check.message
+
+    def test_fails_schema_check_when_protocol_is_not_an_object(self) -> None:
+        # GIVEN a receiver whose protocol field is a string rather than a dict
+        bad = {"protocol": "grpc", "url": "tempo.example.com:4317"}
+        validator = _make_validator({"receivers": json.dumps([bad])})
+
+        # WHEN
+        result = validator.validate(level="simple")
+
+        # THEN
+        assert result.status == "FAIL"
+        schema_check = next(c for c in result.checks if c.name == "schema")
+        assert not schema_check.passed
+        assert "protocol" in schema_check.message
+
     def test_passes_and_reaches_single_receiver(self) -> None:
         # GIVEN a valid databag and a reachable receiver
         validator = _make_validator(VALID_DATABAG)
@@ -270,6 +298,26 @@ class TestTracingValidatorSimple:
         # THEN schema and connect both pass, and _tcp_ping was called with the right port
         assert result.status == "PASS"
         mock_ping.assert_called_once_with("tempo.example.com", 4317)
+
+    def test_http_receiver_with_https_scheme_uses_port_443_as_default(self) -> None:
+        # GIVEN an https URL with no explicit port
+        https_receiver = {"protocol": {"name": "otlp_http", "type": "http"}, "url": "https://tempo.example.com"}
+        validator = _make_validator({"receivers": json.dumps([https_receiver])})
+
+        with patch("validators.tracing.validator._tcp_ping") as mock_ping:
+            validator.validate(level="simple")
+
+        mock_ping.assert_called_once_with("tempo.example.com", 443)
+
+    def test_http_receiver_without_port_defaults_to_80(self) -> None:
+        # GIVEN an http URL with no explicit port
+        http_receiver = {"protocol": {"name": "otlp_http", "type": "http"}, "url": "http://tempo.example.com"}
+        validator = _make_validator({"receivers": json.dumps([http_receiver])})
+
+        with patch("validators.tracing.validator._tcp_ping") as mock_ping:
+            validator.validate(level="simple")
+
+        mock_ping.assert_called_once_with("tempo.example.com", 80)
 
 
 class TestTracingValidatorDeep:
@@ -367,3 +415,115 @@ class TestTracingValidatorDeep:
             vmod._emit_test_span("http://tempo.example.com:4318", "http")
 
         assert captured_endpoint == ["http://tempo.example.com:4318/v1/traces"]
+
+    def test_emit_test_span_uses_insecure_for_grpc(self) -> None:
+        # GIVEN the _emit_test_span helper is called with a gRPC receiver
+        # WHEN we inspect how the gRPC exporter is constructed
+        from opentelemetry.sdk.trace.export import SpanExportResult
+
+        captured_kwargs: list[dict] = []
+
+        class FakeGrpcExporter:
+            def __init__(self, endpoint: str, timeout: int, insecure: bool) -> None:
+                captured_kwargs.append({"endpoint": endpoint, "timeout": timeout, "insecure": insecure})
+
+            def export(self, spans: Any) -> Any:
+                return SpanExportResult.SUCCESS
+
+            def shutdown(self) -> None:
+                pass
+
+            def force_flush(self, timeout_millis: int = 30_000) -> bool:
+                return True
+
+        import validators.tracing.validator as vmod
+
+        with patch("opentelemetry.exporter.otlp.proto.grpc.trace_exporter.OTLPSpanExporter", FakeGrpcExporter):
+            vmod._emit_test_span("tempo.example.com:4317", "grpc")
+
+        assert len(captured_kwargs) == 1
+        assert captured_kwargs[0]["insecure"] is True
+        assert captured_kwargs[0]["endpoint"] == "tempo.example.com:4317"
+
+    def test_emit_test_span_raises_with_exception_when_export_raises(self) -> None:
+        # GIVEN the inner exporter raises an exception during export
+
+        class RaisingExporter:
+            def __init__(self, endpoint: str, timeout: int) -> None:
+                pass
+
+            def export(self, spans: Any) -> Any:
+                raise ConnectionRefusedError("connection refused")
+
+            def shutdown(self) -> None:
+                pass
+
+            def force_flush(self, timeout_millis: int = 30_000) -> bool:
+                return True
+
+        import validators.tracing.validator as vmod
+
+        with (
+            patch("opentelemetry.exporter.otlp.proto.http.trace_exporter.OTLPSpanExporter", RaisingExporter),
+            pytest.raises(RuntimeError) as exc_info,
+        ):
+            vmod._emit_test_span("http://tempo.example.com:4318", "http")
+
+        assert "connection refused" in str(exc_info.value)
+
+    def test_emit_test_span_raises_with_log_message_when_exporter_returns_failure(self) -> None:
+        # GIVEN the inner exporter returns FAILURE and logs a message
+        import logging
+
+        from opentelemetry.sdk.trace.export import SpanExportResult
+
+        class LoggingFailureExporter:
+            def __init__(self, endpoint: str, timeout: int) -> None:
+                pass
+
+            def export(self, spans: Any) -> Any:
+                logging.getLogger("opentelemetry.exporter.otlp").error("StatusCode.UNAVAILABLE: unreachable")
+                return SpanExportResult.FAILURE
+
+            def shutdown(self) -> None:
+                pass
+
+            def force_flush(self, timeout_millis: int = 30_000) -> bool:
+                return True
+
+        import validators.tracing.validator as vmod
+
+        with (
+            patch("opentelemetry.exporter.otlp.proto.http.trace_exporter.OTLPSpanExporter", LoggingFailureExporter),
+            pytest.raises(RuntimeError) as exc_info,
+        ):
+            vmod._emit_test_span("http://tempo.example.com:4318", "http")
+
+        assert "StatusCode.UNAVAILABLE: unreachable" in str(exc_info.value)
+
+    def test_emit_test_span_raises_with_result_name_when_no_log_and_no_exception(self) -> None:
+        # GIVEN the inner exporter returns FAILURE without logging or raising
+        from opentelemetry.sdk.trace.export import SpanExportResult
+
+        class SilentFailureExporter:
+            def __init__(self, endpoint: str, timeout: int) -> None:
+                pass
+
+            def export(self, spans: Any) -> Any:
+                return SpanExportResult.FAILURE
+
+            def shutdown(self) -> None:
+                pass
+
+            def force_flush(self, timeout_millis: int = 30_000) -> bool:
+                return True
+
+        import validators.tracing.validator as vmod
+
+        with (
+            patch("opentelemetry.exporter.otlp.proto.http.trace_exporter.OTLPSpanExporter", SilentFailureExporter),
+            pytest.raises(RuntimeError) as exc_info,
+        ):
+            vmod._emit_test_span("http://tempo.example.com:4318", "http")
+
+        assert "FAILURE" in str(exc_info.value)

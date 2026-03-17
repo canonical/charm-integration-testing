@@ -181,7 +181,10 @@ def _emit_test_span(url: str, protocol_type: str, timeout: int = 5) -> None:
             OTLPSpanExporter as OTLPGrpcSpanExporter,
         )
 
-        raw_exporter = OTLPGrpcSpanExporter(endpoint=url, timeout=timeout)
+        # Per tracing/v2 interface spec, gRPC receiver URLs never contain a
+        # scheme (e.g. "host:port"), meaning the connection is always plain/insecure.
+        # See: https://github.com/canonical/charmlibs/tree/main/interfaces/tracing/interface/v2
+        raw_exporter = OTLPGrpcSpanExporter(endpoint=url, timeout=timeout, insecure=True)
     else:
         from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
             OTLPSpanExporter as OTLPHttpSpanExporter,
@@ -202,8 +205,10 @@ def _emit_test_span(url: str, protocol_type: str, timeout: int = 5) -> None:
     provider.shutdown()
 
     if capture.result is None or capture.result != SpanExportResult.SUCCESS:
-        result_label = capture.result.name if capture.result is not None else "no export attempted"
-        raise RuntimeError(f"Span export to {url!r} failed: {result_label}.")
+        if capture._exc is not None:
+            raise RuntimeError(f"Span export to {url!r} failed: {capture._exc}")
+        detail = capture._log or capture.result.name if capture.result is not None else "no export attempted"
+        raise RuntimeError(f"Span export to {url!r} failed: {detail}.")
 
 
 class _ExportResultCapture:
@@ -212,9 +217,36 @@ class _ExportResultCapture:
     def __init__(self, inner: Any) -> None:
         self._inner = inner
         self.result: Any = None
+        self._exc: BaseException | None = None
+        self._log: str | None = None
 
     def export(self, spans: Any) -> Any:
-        self.result = self._inner.export(spans)
+        import logging as _logging
+
+        from opentelemetry.sdk.trace.export import SpanExportResult
+
+        # The gRPC/HTTP exporters swallow exceptions and return FAILURE, but
+        # they do log the underlying error. Capture that log message so we can
+        # surface it to the caller.
+        captured_log: list[str] = []
+
+        class _LogCapture(_logging.Handler):
+            def emit(self, record: _logging.LogRecord) -> None:
+                captured_log.append(record.getMessage())
+
+        handler = _LogCapture()
+        otlp_logger = _logging.getLogger("opentelemetry.exporter.otlp")
+        otlp_logger.addHandler(handler)
+        try:
+            self.result = self._inner.export(spans)
+        except Exception as exc:
+            self.result = SpanExportResult.FAILURE
+            self._exc = exc
+        finally:
+            otlp_logger.removeHandler(handler)
+
+        if captured_log:
+            self._log = captured_log[-1]
         return self.result
 
     def shutdown(self) -> None:
