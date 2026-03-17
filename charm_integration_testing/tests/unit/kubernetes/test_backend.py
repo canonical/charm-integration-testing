@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from kubernetes.client import ApiException, V1ObjectMeta, V1Pod, V1PodStatus  # type: ignore[import-untyped]
-from kubernetes_client import KubernetesBackend, PodStatus
+from kubernetes_client import KubernetesClient, PodStatus
 
 
 def create_sample_pod(
@@ -33,7 +33,7 @@ class V1PodListStub:
 
 
 @dataclass
-class KubernetesClientStub:
+class KubernetesBackendStub:
     """Stub for KubernetesClient."""
 
     list_namespaced_pods_result: V1PodListStub | None = None
@@ -70,49 +70,49 @@ class TestPodStatus:
         assert PodStatus.UNKNOWN.value == "Unknown"
 
 
-class TestKubernetesBackendInit:
-    """Test suite for KubernetesBackend initialization."""
+class TestKubernetesClientInit:
+    """Test suite for KubernetesClient initialization."""
 
     def test_init_with_client(self) -> None:
         # GIVEN a custom client
-        client = KubernetesClientStub()
+        backend = KubernetesBackendStub()
 
-        # WHEN initializing backend with client
-        backend = KubernetesBackend(client=client)
-        # THEN the custom client is used
-        assert backend.client is client
+        # WHEN initializing client with backend
+        client = KubernetesClient(backend=backend)
+        # THEN the custom backend is used
+        assert client.backend is backend
 
     def test_init_without_logger(self) -> None:
         # GIVEN no custom logger
         # WHEN initializing backend without logger
-        client = KubernetesClientStub()
-        backend = KubernetesBackend(client=client)
+        backend = KubernetesBackendStub()
+        client = KubernetesClient(backend=backend)
 
         # THEN a default logger is created
-        assert backend.logger is not None
-        assert isinstance(backend.logger, logging.Logger)
+        assert client.logger is not None
+        assert isinstance(client.logger, logging.Logger)
 
     def test_init_with_custom_timeouts(self) -> None:
         # GIVEN custom timeout and delay values
         custom_timeout = timedelta(minutes=10)
         custom_delay = timedelta(seconds=2)
-        client = KubernetesClientStub()
+        backend = KubernetesBackendStub()
         # WHEN initializing backend with custom values
-        backend = KubernetesBackend(client=client, default_timeout=custom_timeout, default_delay=custom_delay)
+        client = KubernetesClient(backend=backend, default_timeout=custom_timeout, default_delay=custom_delay)
 
         # THEN the custom values are set
-        assert backend.default_timeout == custom_timeout
-        assert backend.default_delay == custom_delay
+        assert client.default_timeout == custom_timeout
+        assert client.default_delay == custom_delay
 
     def test_init_with_default_timeouts(self) -> None:
         # GIVEN no custom timeout and delay values
         # WHEN initializing backend with defaults
-        client = KubernetesClientStub()
-        backend = KubernetesBackend(client=client)
+        backend = KubernetesBackendStub()
+        client = KubernetesClient(backend=backend)
 
         # THEN default values are set
-        assert backend.default_timeout == timedelta(minutes=5)
-        assert backend.default_delay == timedelta(seconds=1)
+        assert client.default_timeout == timedelta(minutes=5)
+        assert client.default_delay == timedelta(seconds=1)
 
     class TestGetCharmPods:
         """Test suite for get_charm_pods method."""
@@ -121,9 +121,9 @@ class TestKubernetesBackendInit:
             # GIVEN a backend with a pod matching charm name
             pod = create_sample_pod("postgresql-0", "test-model")
             pod_list = V1PodListStub(items=[pod])
-            client_stub = KubernetesClientStub(list_namespaced_pods_result=pod_list)
+            backend_stub = KubernetesBackendStub(list_namespaced_pods_result=pod_list)
 
-            backend = KubernetesBackend(client=client_stub)
+            backend = KubernetesClient(backend=backend_stub)
 
             # WHEN getting charm pods
             result = backend.get_charm_pods("postgresql", "test-model")
@@ -138,9 +138,9 @@ class TestKubernetesBackendInit:
             pod2 = create_sample_pod("postgresql-1", "test-model")
             pod3 = create_sample_pod("redis-0", "test-model")
             pod_list = V1PodListStub(items=[pod1, pod2, pod3])
-            client_stub = KubernetesClientStub(list_namespaced_pods_result=pod_list)
+            backend_stub = KubernetesBackendStub(list_namespaced_pods_result=pod_list)
 
-            backend = KubernetesBackend(client=client_stub)
+            backend = KubernetesClient(backend=backend_stub)
 
             # WHEN getting charm pods
             result = backend.get_charm_pods("postgresql", "test-model")
@@ -155,9 +155,9 @@ class TestKubernetesBackendInit:
             # GIVEN a backend with no matching pods
             pod = create_sample_pod("redis-0", "test-model")
             pod_list = V1PodListStub(items=[pod])
-            client_stub = KubernetesClientStub(list_namespaced_pods_result=pod_list)
+            backend_stub = KubernetesBackendStub(list_namespaced_pods_result=pod_list)
 
-            backend = KubernetesBackend(client=client_stub)
+            backend = KubernetesClient(backend=backend_stub)
 
             # WHEN getting charm pods
             result = backend.get_charm_pods("postgresql", "test-model")
@@ -168,9 +168,9 @@ class TestKubernetesBackendInit:
         def test_empty_namespace(self) -> None:
             # GIVEN a backend with no pods
             pod_list = V1PodListStub(items=[])
-            client_stub = KubernetesClientStub(list_namespaced_pods_result=pod_list)
+            backend_stub = KubernetesBackendStub(list_namespaced_pods_result=pod_list)
 
-            backend = KubernetesBackend(client=client_stub)
+            backend = KubernetesClient(backend=backend_stub)
 
             # WHEN getting charm pods
             result = backend.get_charm_pods("postgresql", "test-model")
@@ -181,9 +181,9 @@ class TestKubernetesBackendInit:
         def test_api_exception(self) -> None:
             # GIVEN a backend that raises ApiException
             api_error = ApiException(status=500, reason="Internal Server Error")
-            client_stub = KubernetesClientStub(list_namespaced_pods_raises=api_error)
+            backend_stub = KubernetesBackendStub(list_namespaced_pods_raises=api_error)
 
-            backend = KubernetesBackend(client=client_stub)
+            backend = KubernetesClient(backend=backend_stub)
 
             # WHEN getting charm pods
             # THEN raises ApiException
@@ -195,65 +195,55 @@ class TestKubernetesBackendInit:
     class TestWait:
         """Test suite for wait method."""
 
-        def test_pod_already_ready(self) -> None:
-            # GIVEN a pod that is already running
-            pod = create_sample_pod("test-pod", "test-namespace", "Running")
-            client_stub = KubernetesClientStub(get_namespaced_pod_result=pod)
-
-            backend = KubernetesBackend(
-                client=client_stub,
+        def test_check_returns_immediately(self) -> None:
+            # GIVEN a check function that succeeds on first call
+            client = KubernetesClient(
+                backend=KubernetesBackendStub(),
                 default_timeout=timedelta(seconds=5),
                 default_delay=timedelta(milliseconds=100),
             )
 
-            # WHEN waiting for pod to be running
-            backend.wait(
-                namespace="test-namespace",
-                pod_name="test-pod",
-                target_status=PodStatus.RUNNING,
+            # WHEN waiting with a check that returns immediately
+            result = client.wait(
+                check=lambda: True,
+                timeout_message="should not timeout",
             )
 
-            # THEN completes without error
-            assert client_stub.get_namespaced_pod_call_count == 1
+            # THEN returns the check result
+            assert result is True
 
-        @patch("kubernetes_client.backend.sleep")
-        def test_pod_becomes_ready(self, mock_sleep: MagicMock) -> None:
-            # GIVEN a pod that becomes ready after a few checks
-            pending_pod = create_sample_pod("test-pod", "test-namespace", "Pending")
-            running_pod = create_sample_pod("test-pod", "test-namespace", "Running")
-
+        @patch("kubernetes_client.client.sleep")
+        def test_check_succeeds_after_retries(self, mock_sleep: MagicMock) -> None:
+            # GIVEN a check function that fails twice then succeeds
             call_count = 0
 
-            def get_pod_side_effect(pod_name: str, namespace: str) -> V1Pod:
+            def check() -> str | None:
                 nonlocal call_count
                 call_count += 1
                 if call_count <= 2:
-                    return pending_pod
-                return running_pod
+                    return None
+                return "done"
 
-            client = MagicMock()
-            client.read_namespaced_pod.side_effect = get_pod_side_effect
-
-            backend = KubernetesBackend(
-                client=client,
+            client = KubernetesClient(
+                backend=KubernetesBackendStub(),
                 default_timeout=timedelta(seconds=10),
                 default_delay=timedelta(seconds=1),
             )
 
-            # WHEN waiting for pod to be running
-            backend.wait(
-                namespace="test-namespace",
-                pod_name="test-pod",
-                target_status=PodStatus.RUNNING,
+            # WHEN waiting
+            result = client.wait(
+                check=check,
+                timeout_message="should not timeout",
             )
 
-            # THEN sleep is called between checks
+            # THEN sleep is called between checks and result is returned
+            assert result == "done"
             assert mock_sleep.call_count >= 2
 
-        @patch("kubernetes_client.backend.sleep")
-        @patch("kubernetes_client.backend.datetime")
+        @patch("kubernetes_client.client.sleep")
+        @patch("kubernetes_client.client.datetime")
         def test_timeout(self, mock_datetime: MagicMock, mock_sleep: MagicMock) -> None:
-            # GIVEN a pod that never becomes ready and time passes
+            # GIVEN a check function that never succeeds and time passes
             from datetime import datetime
 
             start_time = datetime(2026, 3, 16, 10, 0, 0)
@@ -261,67 +251,60 @@ class TestKubernetesBackendInit:
 
             mock_datetime.now.side_effect = [start_time, timeout_time]
 
-            pod = create_sample_pod("test-pod", "test-namespace", "Pending")
-            client_stub = KubernetesClientStub(get_namespaced_pod_result=pod)
-
-            backend = KubernetesBackend(
-                client=client_stub,
+            backend = KubernetesClient(
+                backend=KubernetesBackendStub(),
                 default_timeout=timedelta(minutes=5),
                 default_delay=timedelta(seconds=1),
             )
 
-            # WHEN waiting for pod that never becomes ready
-            # THEN raises TimeoutError
+            # WHEN waiting with a check that never succeeds
+            # THEN raises TimeoutError with the provided message
             with pytest.raises(TimeoutError) as exc_info:
                 backend.wait(
-                    namespace="test-namespace",
-                    pod_name="test-pod",
-                    target_status=PodStatus.RUNNING,
+                    check=lambda: None,
+                    timeout_message="timed out waiting",
                 )
 
-            assert "Timeout waiting for pod test-pod in namespace test-namespace to be ready" in str(exc_info.value)
+            assert "timed out waiting" in str(exc_info.value)
 
-        @patch("kubernetes_client.backend.sleep")
+        @patch("kubernetes_client.client.sleep")
         def test_custom_timeout_and_delay(self, mock_sleep: MagicMock) -> None:
             # GIVEN custom timeout and delay
-            pod = create_sample_pod("test-pod", "test-namespace", "Running")
-            client_stub = KubernetesClientStub(get_namespaced_pod_result=pod)
-
-            backend = KubernetesBackend(client=client_stub)
+            backend = KubernetesClient(
+                backend=KubernetesBackendStub(),
+            )
 
             custom_timeout = timedelta(minutes=10)
             custom_delay = timedelta(seconds=2)
 
-            # WHEN waiting with custom values
-            backend.wait(
-                namespace="test-namespace",
-                pod_name="test-pod",
-                target_status=PodStatus.RUNNING,
+            # WHEN waiting with custom values and an immediately succeeding check
+            result = backend.wait(
+                check=lambda: True,
+                timeout_message="should not timeout",
                 timeout=custom_timeout,
                 delay=custom_delay,
             )
 
             # THEN completes successfully
-            assert client_stub.get_namespaced_pod_call_count == 1
+            assert result is True
 
-        def test_api_exception_non_404(self) -> None:
-            # GIVEN a client that raises non-404 ApiException
-            api_error = ApiException(status=500, reason="Internal Server Error")
-            client_stub = KubernetesClientStub(get_namespaced_pod_raises=api_error)
-
-            backend = KubernetesBackend(
-                client=client_stub,
+        def test_check_exception_propagates(self) -> None:
+            # GIVEN a check function that raises an exception
+            client = KubernetesClient(
+                backend=KubernetesBackendStub(),
                 default_timeout=timedelta(seconds=5),
                 default_delay=timedelta(milliseconds=100),
             )
 
-            # WHEN waiting for pod
-            # THEN raises ApiException
+            def check() -> bool | None:
+                raise ApiException(status=500, reason="Internal Server Error")
+
+            # WHEN waiting
+            # THEN the exception propagates
             with pytest.raises(ApiException) as exc_info:
-                backend.wait(
-                    namespace="test-namespace",
-                    pod_name="test-pod",
-                    target_status=PodStatus.RUNNING,
+                client.wait(
+                    check=check,
+                    timeout_message="should not timeout",
                 )
 
             assert exc_info.value.status == 500
@@ -332,16 +315,16 @@ class TestKubernetesBackendInit:
         def test_pod_already_recreated_and_running(self) -> None:
             # GIVEN a recreated pod that is already running
             new_pod = create_sample_pod("test-pod", "test-namespace", "Running", "new-uid")
-            client_stub = KubernetesClientStub(get_namespaced_pod_result=new_pod)
+            backend_stub = KubernetesBackendStub(get_namespaced_pod_result=new_pod)
 
-            backend = KubernetesBackend(
-                client=client_stub,
+            client = KubernetesClient(
+                backend=backend_stub,
                 default_timeout=timedelta(seconds=5),
                 default_delay=timedelta(milliseconds=100),
             )
 
             # WHEN waiting for pod recreation
-            result = backend.wait_for_pod_recreation(
+            result = client.wait_for_pod_recreation(
                 pod_name="test-pod",
                 namespace="test-namespace",
                 old_uid="old-uid",
@@ -352,7 +335,7 @@ class TestKubernetesBackendInit:
             assert result == new_pod
             assert result.metadata.uid == "new-uid"
 
-        @patch("kubernetes_client.backend.sleep")
+        @patch("kubernetes_client.client.sleep")
         def test_pod_recreated_after_deletion(self, mock_sleep: MagicMock) -> None:
             # GIVEN a pod that is deleted then recreated
             old_pod = create_sample_pod("test-pod", "test-namespace", "Running", "old-uid")
@@ -373,17 +356,17 @@ class TestKubernetesBackendInit:
                 else:
                     return new_running_pod  # New pod running
 
-            client = MagicMock()
-            client.read_namespaced_pod.side_effect = get_pod_side_effect
+            mock_backend = MagicMock()
+            mock_backend.read_namespaced_pod.side_effect = get_pod_side_effect
 
-            backend = KubernetesBackend(
-                client=client,
+            client = KubernetesClient(
+                backend=mock_backend,
                 default_timeout=timedelta(seconds=10),
                 default_delay=timedelta(seconds=1),
             )
 
             # WHEN waiting for pod recreation
-            result = backend.wait_for_pod_recreation(
+            result = client.wait_for_pod_recreation(
                 pod_name="test-pod",
                 namespace="test-namespace",
                 old_uid="old-uid",
@@ -395,8 +378,8 @@ class TestKubernetesBackendInit:
             assert result.status.phase == "Running"
             assert mock_sleep.call_count >= 3
 
-        @patch("kubernetes_client.backend.sleep")
-        @patch("kubernetes_client.backend.datetime")
+        @patch("kubernetes_client.client.sleep")
+        @patch("kubernetes_client.client.datetime")
         def test_timeout_waiting_for_recreation(self, mock_datetime: MagicMock, mock_sleep: MagicMock) -> None:
             # GIVEN a pod that never gets recreated and time passes
             from datetime import datetime
@@ -407,10 +390,10 @@ class TestKubernetesBackendInit:
             mock_datetime.now.side_effect = [start_time, timeout_time]
 
             old_pod = create_sample_pod("test-pod", "test-namespace", "Running", "old-uid")
-            client_stub = KubernetesClientStub(get_namespaced_pod_result=old_pod)
+            backend_stub = KubernetesBackendStub(get_namespaced_pod_result=old_pod)
 
-            backend = KubernetesBackend(
-                client=client_stub,
+            client = KubernetesClient(
+                backend=backend_stub,
                 default_timeout=timedelta(minutes=5),
                 default_delay=timedelta(seconds=1),
             )
@@ -418,7 +401,7 @@ class TestKubernetesBackendInit:
             # WHEN waiting for pod that never recreates
             # THEN raises TimeoutError
             with pytest.raises(TimeoutError) as exc_info:
-                backend.wait_for_pod_recreation(
+                client.wait_for_pod_recreation(
                     pod_name="test-pod",
                     namespace="test-namespace",
                     old_uid="old-uid",
@@ -427,20 +410,20 @@ class TestKubernetesBackendInit:
 
             assert "was not recreated and reached Running status within timeout" in str(exc_info.value)
 
-        @patch("kubernetes_client.backend.sleep")
+        @patch("kubernetes_client.client.sleep")
         def test_custom_target_status(self, mock_sleep: MagicMock) -> None:
             # GIVEN a pod recreated with custom target status
             new_pod = create_sample_pod("test-pod", "test-namespace", "Succeeded", "new-uid")
-            client_stub = KubernetesClientStub(get_namespaced_pod_result=new_pod)
+            backend_stub = KubernetesBackendStub(get_namespaced_pod_result=new_pod)
 
-            backend = KubernetesBackend(
-                client=client_stub,
+            client = KubernetesClient(
+                backend=backend_stub,
                 default_timeout=timedelta(seconds=5),
                 default_delay=timedelta(milliseconds=100),
             )
 
             # WHEN waiting for pod recreation with custom status
-            result = backend.wait_for_pod_recreation(
+            result = client.wait_for_pod_recreation(
                 pod_name="test-pod",
                 namespace="test-namespace",
                 old_uid="old-uid",
@@ -451,7 +434,7 @@ class TestKubernetesBackendInit:
             assert result == new_pod
             assert result.status.phase == "Succeeded"
 
-        @patch("kubernetes_client.backend.sleep")
+        @patch("kubernetes_client.client.sleep")
         def test_404_handled_gracefully(self, mock_sleep: MagicMock) -> None:
             # GIVEN a pod that returns 404 then appears
             new_pod = create_sample_pod("test-pod", "test-namespace", "Running", "new-uid")
@@ -465,17 +448,17 @@ class TestKubernetesBackendInit:
                     raise ApiException(status=404, reason="Not Found")
                 return new_pod
 
-            client = MagicMock()
-            client.read_namespaced_pod.side_effect = get_pod_side_effect
+            mock_backend = MagicMock()
+            mock_backend.read_namespaced_pod.side_effect = get_pod_side_effect
 
-            backend = KubernetesBackend(
-                client=client,
+            client = KubernetesClient(
+                backend=mock_backend,
                 default_timeout=timedelta(seconds=10),
                 default_delay=timedelta(seconds=1),
             )
 
             # WHEN waiting for pod recreation
-            result = backend.wait_for_pod_recreation(
+            result = client.wait_for_pod_recreation(
                 pod_name="test-pod",
                 namespace="test-namespace",
                 old_uid="old-uid",
@@ -489,10 +472,10 @@ class TestKubernetesBackendInit:
         def test_non_404_api_exception(self) -> None:
             # GIVEN a client that raises non-404 ApiException
             api_error = ApiException(status=500, reason="Internal Server Error")
-            client_stub = KubernetesClientStub(get_namespaced_pod_raises=api_error)
+            backend_stub = KubernetesBackendStub(get_namespaced_pod_raises=api_error)
 
-            backend = KubernetesBackend(
-                client=client_stub,
+            client = KubernetesClient(
+                backend=backend_stub,
                 default_timeout=timedelta(seconds=5),
                 default_delay=timedelta(milliseconds=100),
             )
@@ -500,7 +483,7 @@ class TestKubernetesBackendInit:
             # WHEN waiting for pod recreation
             # THEN raises ApiException
             with pytest.raises(ApiException) as exc_info:
-                backend.wait_for_pod_recreation(
+                client.wait_for_pod_recreation(
                     pod_name="test-pod",
                     namespace="test-namespace",
                     old_uid="old-uid",
