@@ -25,16 +25,24 @@ def create_sample_pod(
 
 
 @dataclass
+class V1PodListStub:
+    items: list[V1Pod]
+    metadata: None = None
+    api_version: str = "v1"
+    kind: str = "V1PodList"
+
+
+@dataclass
 class KubernetesClientStub:
     """Stub for KubernetesClient."""
 
-    list_namespaced_pods_result: list[V1Pod] | None = None
+    list_namespaced_pods_result: V1PodListStub | None = None
     list_namespaced_pods_raises: Exception | None = None
     get_namespaced_pod_result: V1Pod | None = None
     get_namespaced_pod_raises: Exception | None = None
     get_namespaced_pod_call_count: int = 0
 
-    def list_namespaced_pod(self, namespace: str) -> list[V1Pod]:
+    def list_namespaced_pod(self, namespace: str) -> V1PodListStub:
         if self.list_namespaced_pods_raises:
             raise self.list_namespaced_pods_raises
         assert self.list_namespaced_pods_result is not None
@@ -112,7 +120,8 @@ class TestKubernetesBackendInit:
         def test_single_charm_pod(self) -> None:
             # GIVEN a backend with a pod matching charm name
             pod = create_sample_pod("postgresql-0", "test-model")
-            client_stub = KubernetesClientStub(list_namespaced_pods_result=[pod])
+            pod_list = V1PodListStub(items=[pod])
+            client_stub = KubernetesClientStub(list_namespaced_pods_result=pod_list)
 
             backend = KubernetesBackend(client=client_stub)
 
@@ -128,7 +137,8 @@ class TestKubernetesBackendInit:
             pod1 = create_sample_pod("postgresql-0", "test-model")
             pod2 = create_sample_pod("postgresql-1", "test-model")
             pod3 = create_sample_pod("redis-0", "test-model")
-            client_stub = KubernetesClientStub(list_namespaced_pods_result=[pod1, pod2, pod3])
+            pod_list = V1PodListStub(items=[pod1, pod2, pod3])
+            client_stub = KubernetesClientStub(list_namespaced_pods_result=pod_list)
 
             backend = KubernetesBackend(client=client_stub)
 
@@ -144,7 +154,8 @@ class TestKubernetesBackendInit:
         def test_no_matching_pods(self) -> None:
             # GIVEN a backend with no matching pods
             pod = create_sample_pod("redis-0", "test-model")
-            client_stub = KubernetesClientStub(list_namespaced_pods_result=[pod])
+            pod_list = V1PodListStub(items=[pod])
+            client_stub = KubernetesClientStub(list_namespaced_pods_result=pod_list)
 
             backend = KubernetesBackend(client=client_stub)
 
@@ -156,7 +167,8 @@ class TestKubernetesBackendInit:
 
         def test_empty_namespace(self) -> None:
             # GIVEN a backend with no pods
-            client_stub = KubernetesClientStub(list_namespaced_pods_result=[])
+            pod_list = V1PodListStub(items=[])
+            client_stub = KubernetesClientStub(list_namespaced_pods_result=pod_list)
 
             backend = KubernetesBackend(client=client_stub)
 
