@@ -24,7 +24,7 @@ from extensions import (
 from juju import JujuBackend, JujuClient, JujuWaitTimeoutError
 from juju_cmd.backend import JujuCmdBackend
 from juju_jubilant import JubilantBackend
-from kubernetes import client as K8sClient  # type: ignore[import-untyped]
+from kubernetes_client import KubernetesBackend
 from kubernetes_client import KubernetesClient
 from pytest import StashKey
 from utils import normalize_string, normalize_string_multiline
@@ -740,5 +740,5 @@ def kubernetes_test(juju_backend: JujuCmdBackend, model: str) -> None:
 
 
 @pytest.fixture
-def kubernetes_client(kubeconfig: str) -> K8sClient.CoreV1Api:
-    return KubernetesClient.k8s_client(kubeconfig)
+def kubernetes_backend(kubeconfig: str | None = None) -> KubernetesBackend:
+    return KubernetesBackend(KubernetesClient.k8s_client(kubeconfig))
