@@ -181,6 +181,20 @@ class TestValidatorInjectorExtension:
             # THEN no exec calls were made
             assert juju.exec_calls == []
 
+        def test_returns_results_keyed_by_unit(self, extension: ValidatorInjectorExtension, juju: JujuStub) -> None:
+            # GIVEN two units, each returning one PASS result
+            juju.units_by_app["myapp"] = ["myapp/0", "myapp/1"]
+            run_stdout = _runner_json(_pass_result("db"))
+            for _ in ["myapp/0", "myapp/1"]:
+                juju.exec_responses.extend(_preinstalled_responses(run_stdout))
+
+            # WHEN
+            results = extension.post_validate("mymodel", "myapp", "simple")
+
+            # THEN the return value maps each unit to its list of results
+            assert set(results.keys()) == {"myapp/0", "myapp/1"}
+            assert all(len(v) == 1 for v in results.values())
+
     class TestRunValidatorsOnUnit:
         class TestVenvAlreadyInstalled:
             def test_skips_injection_and_runs_validators(
@@ -245,29 +259,35 @@ class TestValidatorInjectorExtension:
                 # WHEN / THEN (no exception raised)
                 extension._run_validators_on_unit("mymodel", "myapp/0", "simple")
 
-            def test_raises_naming_the_failing_endpoint(
+            def test_returns_fail_result_naming_the_failing_endpoint(
                 self, extension: ValidatorInjectorExtension, juju: JujuStub
             ) -> None:
                 # GIVEN one endpoint fails
                 run_stdout = _runner_json(_fail_result("db"))
                 juju.exec_responses.extend(_preinstalled_responses(run_stdout))
 
-                # WHEN / THEN
-                with pytest.raises(RuntimeError, match="db"):
-                    extension._run_validators_on_unit("mymodel", "myapp/0", "simple")
+                # WHEN
+                results = extension._run_validators_on_unit("mymodel", "myapp/0", "simple")
 
-            def test_raises_listing_all_failing_endpoints(
+                # THEN the failing result is returned
+                assert len(results) == 1
+                assert results[0].endpoint == "db"
+                assert results[0].status == "FAIL"
+
+            def test_returns_fail_results_listing_all_failing_endpoints(
                 self, extension: ValidatorInjectorExtension, juju: JujuStub
             ) -> None:
                 # GIVEN two different endpoints fail
                 run_stdout = _runner_json(_fail_result("db"), _fail_result("metrics"))
                 juju.exec_responses.extend(_preinstalled_responses(run_stdout))
 
-                # WHEN / THEN
-                with pytest.raises(RuntimeError) as exc_info:
-                    extension._run_validators_on_unit("mymodel", "myapp/0", "simple")
-                assert "db" in str(exc_info.value)
-                assert "metrics" in str(exc_info.value)
+                # WHEN
+                results = extension._run_validators_on_unit("mymodel", "myapp/0", "simple")
+
+                # THEN both failing results are returned
+                endpoints = {r.endpoint for r in results}
+                assert "db" in endpoints
+                assert "metrics" in endpoints
 
             def test_passes_level_to_runner_command(
                 self, extension: ValidatorInjectorExtension, juju: JujuStub
@@ -282,22 +302,22 @@ class TestValidatorInjectorExtension:
                 run_cmd = juju.exec_calls[-1][2]
                 assert "--level deep" in run_cmd
 
-            def test_logs_error_message_for_failing_endpoint(
+            def test_returns_error_result_with_error_message(
                 self,
                 extension: ValidatorInjectorExtension,
                 juju: JujuStub,
-                logger: LoggerStub,
             ) -> None:
                 # GIVEN an endpoint that returns an ERROR with a message
                 run_stdout = _runner_json(_error_result("db", error="connection refused"))
                 juju.exec_responses.extend(_preinstalled_responses(run_stdout))
 
                 # WHEN
-                with pytest.raises(RuntimeError):
-                    extension._run_validators_on_unit("mymodel", "myapp/0", "simple")
+                results = extension._run_validators_on_unit("mymodel", "myapp/0", "simple")
 
-                # THEN the error message is logged
-                assert any("connection refused" in e for e in logger.errors)
+                # THEN the error result is returned with its error message
+                assert len(results) == 1
+                assert results[0].status == "ERROR"
+                assert results[0].error == "connection refused"
 
     class TestInjectValidators:
         def test_raises_when_validators_path_is_none(self, extension_no_path: ValidatorInjectorExtension) -> None:

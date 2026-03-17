@@ -4,9 +4,24 @@
 import logging
 from datetime import timedelta
 
+from validators.base import ValidationResult
+
 from .backend import JujuBackend
 from .extension import JujuExtension
 from .models import JujuApplicationInfo, JujuIntegration, JujuIntegrationApplication
+
+
+class JujuValidationError(Exception):
+    """Raised when validation of a Juju model fails."""
+
+    failed_validations: dict[str, list[ValidationResult]]
+
+    def __init__(self, failed_validations: dict[str, list[ValidationResult]]):
+        self.failed_validations = failed_validations
+
+        units = ", ".join(failed_validations.keys())
+        num_failed_validations = sum(len(validations) for validations in failed_validations.values())
+        super().__init__(f"Model validation failed with {num_failed_validations} failed validations (units: {units}).")
 
 
 class JujuClient:
@@ -168,14 +183,47 @@ class JujuClient:
         Args:
             model: Juju model name
             level: Validation level ("simple" or "deep", default: "simple")
+
+        Raises:
+            JujuValidationError: If any validation checks fail.
         """
-        for application in self.list_applications(model):
-            self.logger.info(f"Validating application '{application}' (level={level})")
+        # Collect applications for validators
+        applications = self.backend.list_applications(model)
+        self.logger.info(f"Running validators on {len(applications)} applications (level={level})")
+
+        # Run validators on each application
+        failed_validations: dict[str, list[ValidationResult]] = {}
+        for application in applications:
+            results: dict[str, list[ValidationResult]] = {}
 
             # Phase 2: This will trigger Ops framework validation
             # Phase 1: This is a no-op, just a placeholder
-            self.backend.validate_application(model, application, level)
+            for unit, unit_results in self.backend.validate_application(model, application, level).items():
+                results.setdefault(unit, []).extend(unit_results)
 
             # Call extensions (Phase 1 validation happens here)
             for extension in self.extensions:
-                extension.post_validate(model, application, level)
+                for unit, unit_results in extension.post_validate(model, application, level).items():
+                    results.setdefault(unit, []).extend(unit_results)
+
+            # Log results for this application
+            for unit, unit_results in results.items():
+                failed = [r for r in unit_results if r.status in ("FAIL", "ERROR")]
+                if not failed:
+                    self.logger.info(f"Validation passed for unit '{unit}'.")
+                else:
+                    for result in failed:
+                        self.logger.error(
+                            f"Validation failed for unit '{unit}' on endpoint '{result.endpoint}' "
+                            f"(interface='{result.interface}', relation_id={result.relation_id}, status={result.status})."
+                        )
+                        for check in result.checks:
+                            if not check.passed:
+                                self.logger.error(f"  Check '{check.name}' failed: {check.message}")
+                        if result.error:
+                            self.logger.error(f"  Error: {result.error}")
+                    failed_validations.setdefault(unit, []).extend(failed)
+
+        # Raise exception for any failed validation results
+        if sum(len(results) for results in failed_validations.values()) > 0:
+            raise JujuValidationError(failed_validations)

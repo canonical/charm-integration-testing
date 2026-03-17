@@ -24,6 +24,8 @@ from juju import (
 )
 from juju_cmd import JujuCmdBackend
 
+from validators.base.validator import ValidationResult
+
 from .client import JubilantClient
 from .structures import JujuExecTask
 from .wait import (
@@ -380,6 +382,6 @@ class JubilantBackend(JujuCmdBackend):
     def version(self, model: str) -> str:
         return str(self.client.model(model).version())
 
-    def validate_application(self, model: str, application: str, level: str) -> None:
+    def validate_application(self, model: str, application: str, level: str) -> dict[str, list[ValidationResult]]:
         # Phase 2 endpoint validation will be done here
-        pass
+        return {}
