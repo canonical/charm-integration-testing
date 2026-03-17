@@ -13,4 +13,4 @@ def test_bootstrap_controller(
     juju_cloud: str,
     juju_controller: str,
 ) -> None:
-    return juju_client.bootstrap_controller(cloud=juju_cloud, controller=juju_controller)
+    juju_client.bootstrap_controller(cloud=juju_cloud, controller=juju_controller)

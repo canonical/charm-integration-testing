@@ -11,4 +11,4 @@ from .scheduler.states import State
 def test_create_model(
     juju_client: JujuClient, juju_controller: str, model: str, juju_model_config: dict[str, str]
 ) -> None:
-    return juju_client.add_model(controller=juju_controller, model=model, model_config=juju_model_config)
+    juju_client.add_model(controller=juju_controller, model=model, model_config=juju_model_config)
