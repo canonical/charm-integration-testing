@@ -24,7 +24,7 @@ from extensions import (
 from juju import JujuBackend, JujuClient, JujuWaitTimeoutError
 from juju_cmd.backend import JujuCmdBackend
 from juju_jubilant import JubilantBackend
-from kubernetes_client import KubernetesClient, KubernetesBackend
+from kubernetes_client import KubernetesBackend, KubernetesClient
 from pytest import StashKey
 from utils import normalize_string, normalize_string_multiline
 
