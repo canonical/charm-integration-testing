@@ -146,7 +146,7 @@ class KubernetesClient:
 
         return self.wait(
             check=check,
-            timeout_message=f"Pod {pod_name} in namespace {namespace} was not recreated and reached {target_status.value} status within timeout",
+            timeout_message=f"Pod {pod_name} in namespace {namespace} was not recreated or did not reach {target_status.value} status within timeout",
             timeout=timeout,
             delay=delay,
         )
