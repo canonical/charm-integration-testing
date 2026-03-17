@@ -464,14 +464,30 @@ jobs:
         env:
           LOGS_DIR: ${{ steps.collect_logs.outputs.directory_path }}
         run: |
+          # Extract compressed archives for scanning
+          SCAN_DIR=$(mktemp -d)
+          cp -r "${LOGS_DIR}"/* "${SCAN_DIR}/"
+          
+          # Extract any tar.gz archives found
+          find "${SCAN_DIR}" -name "*.tar.gz" -type f | while read -r archive; do
+            echo "Extracting ${archive}..."
+            EXTRACT_DIR="${archive%.tar.gz}-extracted"
+            mkdir -p "${EXTRACT_DIR}"
+            tar -xzf "${archive}" -C "${EXTRACT_DIR}" 2>/dev/null || true
+          done
+          
           # Run TruffleHog in filesystem mode and save output to a file
           set +e
           docker run --rm \
-            -v "${LOGS_DIR}:/scan-logs" \
+            -v "${SCAN_DIR}:/scan-logs" \
             ghcr.io/trufflesecurity/trufflehog@sha256:b356cc273ab8c786fe2a54f20d2bec1f67438df4ca070e5c7d5a1283e18917cb \
             filesystem /scan-logs > trufflehog-output.txt 2>&1
           EXIT_CODE=$?
           set -e
+          
+          # Clean up temporary scan directory
+          rm -rf "${SCAN_DIR}"
+          
           echo "TruffleHog Exit Code: ${EXIT_CODE}"
           exit ${EXIT_CODE}
       - name: Generate Privacy Check JUnit Report
