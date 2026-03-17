@@ -13,23 +13,23 @@ from .scheduler.states import State
 def test_pod_deletion(
     kubernetes_test: None,
     juju_client: JujuClient,
-    k8s_backend: KubernetesBackend,
+    kubernetes_backend: KubernetesBackend,
     model: str,
     target_application: str,
 ) -> None:
-    pods = k8s_backend.get_charm_pods(charm=target_application, model=model)
+    pods = kubernetes_backend.get_charm_pods(charm=target_application, model=model)
     assert len(pods) > 0, f"No pods found in namespace {model} to delete."
 
     pod_to_delete = pods[0]
-    k8s_backend.delete_pod(namespace=model, pod_name=pod_to_delete.metadata.name)
+    kubernetes_backend.delete_pod(namespace=model, pod_name=pod_to_delete.metadata.name)
 
     # Wait for the pod to be deleted and a new one to be created
-    k8s_backend.wait(
+    kubernetes_backend.wait(
         namespace=model,
         pod_name=pod_to_delete.metadata.name,
         target_status=PodStatus.RUNNING,
-        timeout=timedelta(minutes=10),
-        delay=timedelta(seconds=5),
+        timeout=timedelta(minutes=1),
+        delay=timedelta(seconds=1),
     )
 
     # Wait for return to idle
