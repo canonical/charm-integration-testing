@@ -509,8 +509,8 @@ def _build_execution_plan(
     # Use exhaustive backtracking to find a valid ordering of destinations.
     # ------------------------------------------------------------------
     if remaining:
-        plan = _backtrack_search(state, plan, scheduled)
-        if plan is None:
+        backtrack_result = _backtrack_search(state, plan, scheduled)
+        if backtrack_result is None:
             raise _UnreachableStateError(
                 f"No path from state '{state}' to any of the remaining required states "
                 f"{sorted(remaining)}.  "
@@ -518,5 +518,6 @@ def _build_execution_plan(
                 "Add a transition test for the missing edge or set --current-state "
                 "to a state closer to the required one."
             )
+        plan = backtrack_result
 
     return plan
