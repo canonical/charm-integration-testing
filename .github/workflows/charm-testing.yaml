@@ -254,7 +254,7 @@ jobs:
           [global]
           proxy= http://squid.internal:3128
           EOF
-          pipx install poetry==2.0
+          pipx install poetry==2.3
           HTTPS_PROXY="http://squid.internal:3128" poetry install
       - name: Post 'test_start' event
         if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}

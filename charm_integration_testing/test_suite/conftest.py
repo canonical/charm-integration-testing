@@ -229,6 +229,10 @@ def juju_model_config(request: pytest.FixtureRequest) -> dict[str, str]:
 
     assert isinstance(value, str)
     value = Path(value).resolve()
+    if not value.exists() or not value.is_file():
+        pytest.fail(
+            "Juju model config file passed via the --juju-model-config parameter does not exist or is not a file."
+        )
 
     # Define the expected shape
     ConfigSchema = TypeAdapter(dict[str, str])
@@ -238,6 +242,10 @@ def juju_model_config(request: pytest.FixtureRequest) -> dict[str, str]:
         return ConfigSchema.validate_python(content)
     except ValidationError as e:
         pytest.fail(f"Invalid Juju model config passed via the --juju-model-config parameter: {e}")
+    except json.JSONDecodeError as e:
+        pytest.fail(
+            f"Juju model config file passed via the --juju-model-config parameter does not contain valid JSON: {e}"
+        )
 
 
 @pytest.fixture

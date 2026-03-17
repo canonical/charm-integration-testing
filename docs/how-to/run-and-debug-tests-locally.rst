@@ -33,7 +33,7 @@ This guide will reference variables that need to contain values specific to your
 ``OUTPUT_FILE``:
   A filename to use for for the charm bundle output produced by the ``build-bundle.sh`` script. For example, ``generated-bundle.yaml``.
 ``JUJU_MODEL_CONFIG_FILE``:
-  Path to a JSON file containing Juju model config values passed at model creation time. For example, ``./static/juju-model-config.json``.
+  Path to a JSON file containing Juju model configuration values passed at model creation time. For example, ``./static/juju-model-config.json``.
 
 Optional environment variables
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -177,5 +177,5 @@ iterating locally against an already-deployed model to avoid re-running
 expensive setup transitions.
 
 The ``--juju-model-config`` file is optional. If omitted, tests create the model
-without extra config; if provided, pass a JSON object of string keys and values
-matching Juju model config options.
+without extra configuration; if provided, pass a JSON object of string keys and values
+matching Juju model configiguration options.
