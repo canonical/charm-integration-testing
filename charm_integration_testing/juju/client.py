@@ -112,6 +112,22 @@ class JujuClient:
         for extension in self.extensions:
             extension.post_deploy(model)
 
+    def refresh_application(
+        self,
+        application: str,
+        revision: int | None = None,
+        channel: str | None = None,
+        model: str = "default",
+    ) -> None:
+        options: list[str] = []
+        if revision is not None:
+            options.append(f"revision={revision}")
+        if channel:
+            options.append(f"channel={channel}")
+        options_suffix = f" ({', '.join(options)})" if options else ""
+        self.logger.info(f"Refreshing application {application}{options_suffix}.")
+        self.backend.refresh_application(model, application, revision=revision, channel=channel)
+
     def remove_applications(self, *applications: str, model: str = "default") -> None:
         # Call extensions
         for extension in self.extensions:
