@@ -7,10 +7,8 @@ from enum import Enum
 from time import sleep
 from typing import Callable, List
 
-from kubernetes import client as k8s_client  # type: ignore[import-untyped]
+from kubernetes import client as K8sClient  # type: ignore[import-untyped]
 from kubernetes.client import ApiException  # type: ignore[import-untyped]
-
-from .client import KubernetesClient
 
 
 class PodStatus(Enum):
@@ -22,16 +20,16 @@ class PodStatus(Enum):
 
 
 class KubernetesBackend:
-    client: KubernetesClient
+    client: K8sClient.CoreV1Api
 
     def __init__(
         self,
-        client: KubernetesClient | None = None,
+        client: K8sClient,
         logger: logging.Logger | None = None,
         default_timeout: timedelta = timedelta(minutes=5),
         default_delay: timedelta = timedelta(seconds=1),
     ):
-        self.client = client or KubernetesClient()
+        self.client = client
         self.logger = logger or logging.getLogger(__name__)
 
         self.default_timeout = default_timeout
@@ -39,7 +37,7 @@ class KubernetesBackend:
 
     def get_charm_pods(
         self, charm: str, model: str
-    ) -> List[k8s_client.V1Pod]:  # multiple pods per a charm, depends on charm name and unit number
+    ) -> List[K8sClient.V1Pod]:  # multiple pods per a charm, depends on charm name and unit number
         """
         Gets all pods in the specified namespace that match the given charm name.
         Args:
@@ -50,7 +48,7 @@ class KubernetesBackend:
         Returns:
             List of pods that match the given charm name in the specified namespace
         """
-        pods = self.client.list_namespaced_pods(model)  # juju creates a namespace for each model
+        pods = self.client.list_namespaced_pod(model)  # juju creates a namespace for each model
         matching_pods = [pod for pod in pods if pod.metadata.name.startswith(charm)]
         return matching_pods
 
@@ -85,7 +83,7 @@ class KubernetesBackend:
                 raise TimeoutError(f"Timeout waiting for pod {pod_name} in namespace {namespace} to be ready.")
 
             try:
-                pod = self.client.get_namespaced_pod(pod_name, namespace)
+                pod = self.client.read_namespaced_pod(pod_name, namespace)
 
                 if pod and ready(PodStatus(pod.status.phase)):
                     self.logger.info(f"Pod {pod.metadata.name} in namespace {namespace} is ready.")
@@ -103,7 +101,7 @@ class KubernetesBackend:
         target_status: PodStatus = PodStatus.RUNNING,
         timeout: timedelta | None = None,
         delay: timedelta | None = None,
-    ) -> k8s_client.V1Pod:
+    ) -> K8sClient.V1Pod:
         """
         Wait for a pod to be recreated with a new UID and reach the target status.
 
@@ -129,7 +127,7 @@ class KubernetesBackend:
 
         while datetime.now() < start_time + timeout:
             try:
-                new_pod = self.client.get_namespaced_pod(pod_name, namespace)
+                new_pod = self.client.read_namespaced_pod(pod_name, namespace)
                 if new_pod.metadata.uid == old_uid:
                     # Same pod, not recreated yet
                     sleep(delay.total_seconds())

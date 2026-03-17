@@ -70,10 +70,9 @@ class TestKubernetesBackendInit:
         client = KubernetesClientStub()
 
         # WHEN initializing backend with client
-        backend = KubernetesBackend(client=client)  # type: ignore[arg-type]
-
+        backend = KubernetesBackend(client=client)
         # THEN the custom client is used
-        assert backend.client is client  # type: ignore[comparison-overlap]
+        assert backend.client is client
 
     @patch("kubernetes_client.backend.KubernetesClient")
     def test_init_without_client(self, mock_client_class: MagicMock) -> None:
@@ -138,7 +137,7 @@ class TestGetCharmPods:
         pod = create_sample_pod("postgresql-0", "test-model")
         client_stub = KubernetesClientStub(list_namespaced_pods_result=[pod])
 
-        backend = KubernetesBackend(client=client_stub)  # type: ignore
+        backend = KubernetesBackend(client=client_stub)
 
         # WHEN getting charm pods
         result = backend.get_charm_pods("postgresql", "test-model")
@@ -154,7 +153,7 @@ class TestGetCharmPods:
         pod3 = create_sample_pod("redis-0", "test-model")
         client_stub = KubernetesClientStub(list_namespaced_pods_result=[pod1, pod2, pod3])
 
-        backend = KubernetesBackend(client=client_stub)  # type: ignore
+        backend = KubernetesBackend(client=client_stub)
 
         # WHEN getting charm pods
         result = backend.get_charm_pods("postgresql", "test-model")
@@ -170,7 +169,7 @@ class TestGetCharmPods:
         pod = create_sample_pod("redis-0", "test-model")
         client_stub = KubernetesClientStub(list_namespaced_pods_result=[pod])
 
-        backend = KubernetesBackend(client=client_stub)  # type: ignore
+        backend = KubernetesBackend(client=client_stub)
 
         # WHEN getting charm pods
         result = backend.get_charm_pods("postgresql", "test-model")
@@ -182,7 +181,7 @@ class TestGetCharmPods:
         # GIVEN a backend with no pods
         client_stub = KubernetesClientStub(list_namespaced_pods_result=[])
 
-        backend = KubernetesBackend(client=client_stub)  # type: ignore
+        backend = KubernetesBackend(client=client_stub)
 
         # WHEN getting charm pods
         result = backend.get_charm_pods("postgresql", "test-model")
@@ -195,7 +194,7 @@ class TestGetCharmPods:
         api_error = ApiException(status=500, reason="Internal Server Error")
         client_stub = KubernetesClientStub(list_namespaced_pods_raises=api_error)
 
-        backend = KubernetesBackend(client=client_stub)  # type: ignore
+        backend = KubernetesBackend(client=client_stub)
 
         # WHEN getting charm pods
         # THEN raises ApiException
@@ -214,7 +213,7 @@ class TestWait:
         client_stub = KubernetesClientStub(get_namespaced_pod_result=pod)
 
         backend = KubernetesBackend(
-            client=client_stub,  # type: ignore
+            client=client_stub,
             default_timeout=timedelta(seconds=5),
             default_delay=timedelta(milliseconds=100),
         )
@@ -278,7 +277,7 @@ class TestWait:
         client_stub = KubernetesClientStub(get_namespaced_pod_result=pod)
 
         backend = KubernetesBackend(
-            client=client_stub,  # type: ignore
+            client=client_stub,
             default_timeout=timedelta(minutes=5),
             default_delay=timedelta(seconds=1),
         )
@@ -300,7 +299,7 @@ class TestWait:
         pod = create_sample_pod("test-pod", "test-namespace", "Running")
         client_stub = KubernetesClientStub(get_namespaced_pod_result=pod)
 
-        backend = KubernetesBackend(client=client_stub)  # type: ignore
+        backend = KubernetesBackend(client=client_stub)
 
         custom_timeout = timedelta(minutes=10)
         custom_delay = timedelta(seconds=2)
@@ -323,7 +322,7 @@ class TestWait:
         client_stub = KubernetesClientStub(get_namespaced_pod_raises=api_error)
 
         backend = KubernetesBackend(
-            client=client_stub,  # type: ignore
+            client=client_stub,
             default_timeout=timedelta(seconds=5),
             default_delay=timedelta(milliseconds=100),
         )
@@ -349,7 +348,7 @@ class TestWaitForPodRecreation:
         client_stub = KubernetesClientStub(get_namespaced_pod_result=new_pod)
 
         backend = KubernetesBackend(
-            client=client_stub,  # type: ignore
+            client=client_stub,
             default_timeout=timedelta(seconds=5),
             default_delay=timedelta(milliseconds=100),
         )
@@ -424,7 +423,7 @@ class TestWaitForPodRecreation:
         client_stub = KubernetesClientStub(get_namespaced_pod_result=old_pod)
 
         backend = KubernetesBackend(
-            client=client_stub,  # type: ignore
+            client=client_stub,
             default_timeout=timedelta(minutes=5),
             default_delay=timedelta(seconds=1),
         )
@@ -448,7 +447,7 @@ class TestWaitForPodRecreation:
         client_stub = KubernetesClientStub(get_namespaced_pod_result=new_pod)
 
         backend = KubernetesBackend(
-            client=client_stub,  # type: ignore
+            client=client_stub,
             default_timeout=timedelta(seconds=5),
             default_delay=timedelta(milliseconds=100),
         )
@@ -506,7 +505,7 @@ class TestWaitForPodRecreation:
         client_stub = KubernetesClientStub(get_namespaced_pod_raises=api_error)
 
         backend = KubernetesBackend(
-            client=client_stub,  # type: ignore
+            client=client_stub,
             default_timeout=timedelta(seconds=5),
             default_delay=timedelta(milliseconds=100),
         )
