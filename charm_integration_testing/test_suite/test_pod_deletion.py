@@ -18,8 +18,6 @@ def test_pod_deletion(
     target_application: str,
 ) -> None:
     pods = kubernetes_backend.get_charm_pods(charm=target_application, model=model)
-    print(f"Found {len(pods)} pods for application {target_application} in model {model}.")
-    print(pods)
     assert len(pods) > 0, f"No pods found in namespace {model} to delete."
 
     pod_to_delete = pods[0]
