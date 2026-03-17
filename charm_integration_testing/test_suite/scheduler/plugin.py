@@ -335,11 +335,15 @@ def _build_execution_plan(
     all_transitions: dict[StateTransition, list[pytest.Item]],
     full_graph: StateGraph,
 ) -> list[pytest.Item]:
-    """Build a minimum-cost ordered item list.
+    """Build a minimum-cost ordered item list using exhaustive backtracking.
 
-    Starting from *current_state*, the algorithm greedily picks the nearest
-    reachable destination state, injects the shortest-path bridging transitions
-    needed to get there, then runs all user-selected items at that state.
+    This algorithm uses backtracking to explore different orderings of destinations
+    until it finds a complete valid execution path.
+
+    Starting from *current_state*, it tries each reachable remaining destination.
+    For the first successful path sequence, it injects the shortest-path bridging
+    transitions needed and runs user-selected items. If a choice leads to an
+    unreachable remaining destination, it backtracks and tries a different order.
 
     Destination states are states where at least one user-selected item departs
     (for transitions) or must run (for pure tests).
@@ -368,12 +372,9 @@ def _build_execution_plan(
         Ordered list of pytest items forming the optimal execution plan.
 
     Raises:
-        _UnreachableStateError: If any destination state is unreachable from
-            *current_state* even using the full suite of transitions.
+        _UnreachableStateError: If no ordering of destinations can be found
+            that bridges all gaps from *current_state* using available transitions.
     """
-    plan: list[pytest.Item] = []
-    scheduled: set[pytest.Item] = set()
-    state = current_state
 
     def _all_selected_at(s: State) -> list[pytest.Item]:
         """All user-selected items that depart from state *s*."""
@@ -381,13 +382,14 @@ def _build_execution_plan(
         transition_tests = [it for st, items in selected_transitions.items() if st.from_state == s for it in items]
         return pure_tests + transition_tests
 
-    def _unscheduled_destinations() -> set[State]:
+    def _unscheduled_destinations(scheduled: set[pytest.Item]) -> set[State]:
+        """Compute destination states that still have unscheduled items."""
         all_destinations: set[State] = set(pure_clusters.keys())
         for st in selected_transitions:
             all_destinations.add(st.from_state)
         return {s for s in all_destinations if any(it not in scheduled for it in _all_selected_at(s))}
 
-    def _run_selected_at(s: State) -> State:
+    def _run_selected_at(s: State, plan: list[pytest.Item], scheduled: set[pytest.Item]) -> State:
         """Schedule all unscheduled pure tests at state *s*, then one transition.
 
         Pure tests are appended first: they don't change state so all of them
@@ -413,7 +415,7 @@ def _build_execution_plan(
                         return st.to_state  # one transition at a time; re-navigate for the next
         return s
 
-    def _inject_bridge(path: list[tuple[StateTransition, pytest.Item]]) -> None:
+    def _inject_bridge(path: list[tuple[StateTransition, pytest.Item]], plan: list[pytest.Item], scheduled: set[pytest.Item]) -> None:
         """Inject one bridging transition item per edge along *path*.
 
         For each edge, if the user selected tests for it, prefer the first
@@ -443,38 +445,77 @@ def _build_execution_plan(
                     _mark_as_injected(bridge_item)
                     plan.append(bridge_item)
 
-    # Handle destinations reachable at the starting state for free.
-    if state in _unscheduled_destinations():
-        state = _run_selected_at(state)
+    def _backtrack_search(
+        current_state: State,
+        remaining_destinations: set[State],
+        current_plan: list[pytest.Item],
+        scheduled: set[pytest.Item],
+    ) -> list[pytest.Item] | None:
+        """Recursively search for a valid ordering of destinations using backtracking.
 
-    remaining = _unscheduled_destinations()
-    while remaining:
-        best_path: list[tuple[StateTransition, pytest.Item]] | None = None
-        best_target: State | None = None
-        best_cost: float = float("inf")
+        Tries each reachable remaining destination. If a path leads to an
+        unreachable state, backtracks and tries a different destination.
 
-        for target_state in remaining:
-            raw_path = full_graph.shortest_path(state, target_state)
+        Returns the completed plan if successful, None if this branch is a dead end.
+        """
+        if not remaining_destinations:
+            # All destinations have been scheduled; return the plan.
+            return current_plan
+
+        # Try each remaining destination.
+        for target_state in remaining_destinations:
+            raw_path = full_graph.shortest_path(current_state, target_state)
             if raw_path is None:
+                # Can't reach this destination from the current state; try another.
                 continue
-            cost = sum(t.cost for t, _ in raw_path)
-            if cost < best_cost:
-                best_cost = cost
-                best_path = raw_path
-                best_target = target_state
 
-        if best_path is None or best_target is None:
+            # Create a copy of the plan and scheduled set for this branch.
+            branch_plan = current_plan[:]
+            branch_scheduled = scheduled.copy()
+
+            # Inject bridging transitions to reach the target.
+            _inject_bridge(raw_path, branch_plan, branch_scheduled)
+
+            # Run the user-selected items at this destination.
+            new_state = _run_selected_at(target_state, branch_plan, branch_scheduled)
+
+            # Recurse with one fewer remaining destination.
+            new_remaining = remaining_destinations - {target_state}
+            result = _backtrack_search(new_state, new_remaining, branch_plan, branch_scheduled)
+
+            if result is not None:
+                # Found a valid complete path on this branch.
+                return result
+
+            # This branch led to a dead end; backtrack and try the next destination.
+
+        # No valid ordering found from this state.
+        return None
+
+    # ------------------------------------------------------------------
+    # Initialize: handle destinations reachable at the starting state for free.
+    # ------------------------------------------------------------------
+    plan: list[pytest.Item] = []
+    scheduled: set[pytest.Item] = set()
+    state = current_state
+
+    remaining = _unscheduled_destinations(scheduled)
+    if state in remaining:
+        state = _run_selected_at(state, plan, scheduled)
+        remaining = _unscheduled_destinations(scheduled)
+
+    # ------------------------------------------------------------------
+    # Use exhaustive backtracking to find a valid ordering of destinations.
+    # ------------------------------------------------------------------
+    if remaining:
+        plan = _backtrack_search(state, remaining, plan, scheduled)
+        if plan is None:
             raise _UnreachableStateError(
-                f"No path from state '{state}' to any of the remaining required states "
-                f"{sorted(remaining)}.  "
-                "No transition tests exist in the suite to bridge this gap.  "
-                "Add a transition test for the missing edge or set --current-state "
-                "to a state closer to the required one."
+                f"No valid ordering of destinations exists from state '{state}'. "
+                f"Remaining destinations: {sorted(remaining)}. "
+                "Regardless of the order tested, some destinations become unreachable. "
+                "Consider breaking the test selection into smaller groups or adding "
+                "transition tests to create bridging paths."
             )
-
-        _inject_bridge(best_path)
-        state = best_target
-        state = _run_selected_at(state)
-        remaining = _unscheduled_destinations()
 
     return plan
