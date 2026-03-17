@@ -434,31 +434,9 @@ jobs:
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
           event_name: job_end
           detail: Charm integration test job completed.
-      - name: Mark Test Execution completed on Test Observer with the correct status
-        if: ${{ always() && env.test_observer_api != '' && inputs.execution_id != '' }}
-        uses: ./.github/actions/test-observer/patch-test-execution
-        with:
-          test_observer_api: ${{ env.test_observer_api }}
-          test_observer_token: ${{ env.test_observer_token }}
-          test_execution_id: ${{ inputs.execution_id }}
-          status: COMPLETED
-      - name: Trigger rerun on Test Observer if failure
-        if: ${{ failure() && env.test_observer_api != '' && inputs.execution_id != '' }}
-        uses: ./.github/actions/test-observer/trigger-rerun
-        with:
-          test_observer_api: ${{ env.test_observer_api }}
-          test_observer_token: ${{ env.test_observer_token }}
-          test_execution_id: ${{ inputs.execution_id }}
-      - name: Teardown Controller
-        if: ${{ always() }}
-        shell: bash
-        env:
-          controller: ${{ steps.juju_resources.outputs.controller }}
-        run: timeout 15m juju kill-controller "${controller}" --no-prompt --timeout
-          2m
       - name: Logs Privacy Check
         id: logs_privacy_check
-        if: ${{ always() && steps.collect_logs.outputs.directory_path != '' }}
+        if: ${{ success() && steps.collect_logs.outputs.directory_path != '' }}
         continue-on-error: true
         shell: bash
         env:
@@ -527,3 +505,25 @@ jobs:
           test_observer_token: ${{ env.test_observer_token }}
           test_execution_id: ${{ inputs.execution_id }}
           junit_xml: ${{ steps.privacy_junit.outputs.junit_xml }}
+      - name: Mark Test Execution completed on Test Observer with the correct status
+        if: ${{ always() && env.test_observer_api != '' && inputs.execution_id != '' }}
+        uses: ./.github/actions/test-observer/patch-test-execution
+        with:
+          test_observer_api: ${{ env.test_observer_api }}
+          test_observer_token: ${{ env.test_observer_token }}
+          test_execution_id: ${{ inputs.execution_id }}
+          status: COMPLETED
+      - name: Trigger rerun on Test Observer if failure
+        if: ${{ failure() && env.test_observer_api != '' && inputs.execution_id != '' }}
+        uses: ./.github/actions/test-observer/trigger-rerun
+        with:
+          test_observer_api: ${{ env.test_observer_api }}
+          test_observer_token: ${{ env.test_observer_token }}
+          test_execution_id: ${{ inputs.execution_id }}
+      - name: Teardown Controller
+        if: ${{ always() }}
+        shell: bash
+        env:
+          controller: ${{ steps.juju_resources.outputs.controller }}
+        run: timeout 15m juju kill-controller "${controller}" --no-prompt --timeout
+          2m
