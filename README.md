@@ -42,5 +42,10 @@ Run the documentation locally from the `docs` directory:
 make run
 ```
 
+For the current local test execution flow (including scheduler states and
+Juju options like `--juju-cloud`, `--juju-controller`, and
+`--juju-model-config`), see
+[`docs/how-to/run-and-debug-tests-locally.rst`](docs/how-to/run-and-debug-tests-locally.rst).
+
 See [CONTRIBUTING.md](CONTRIBUTING.md) for more information about the
 documentation setup.
