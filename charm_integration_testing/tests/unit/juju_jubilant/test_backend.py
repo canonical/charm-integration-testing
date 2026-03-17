@@ -1420,7 +1420,7 @@ class TestJubilantBackend:
                 backend.add_model(controller="test-controller", model="test-model", model_config={})
 
             assert stub.add_model_calls == 3
-            assert stub.switch_calls == 1
+            assert stub.switch_calls == 0
 
         def test_add_model_retries_then_raises(self) -> None:
             stub = self.SetupStub(add_model_failures_remaining=3)

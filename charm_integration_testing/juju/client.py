@@ -203,8 +203,6 @@ class JujuClient:
 
             # Call extensions (Phase 1 validation happens here)
             for extension in self.extensions:
-                extension.post_validate(model, application, level)
-
                 for unit, unit_results in extension.post_validate(model, application, level).items():
                     results.setdefault(unit, []).extend(unit_results)
 
