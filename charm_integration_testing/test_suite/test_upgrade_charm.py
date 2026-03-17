@@ -63,7 +63,7 @@ def _wait_for_application_revision(
     )
 
 
-@pytest.mark.state(requires=State.OLD_REVISION, provides=State.OLD_REVISION)
+@pytest.mark.state(requires=State.OLD_REVISION)
 def test_upgrade_charm(
     juju_client: JujuClient,
     model: str,
