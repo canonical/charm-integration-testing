@@ -26,7 +26,8 @@ def test_pod_deletion(
     # Wait for the pod to be deleted and a new one to be created
     k8s_backend.wait(
         namespace=model,
-        ready=lambda x: x == PodStatus.RUNNING,
+        pod_name=pod_to_delete.metadata.name,
+        target_status=PodStatus.RUNNING,
         timeout=timedelta(minutes=10),
         delay=timedelta(seconds=5),
     )
