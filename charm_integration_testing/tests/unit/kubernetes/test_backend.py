@@ -74,7 +74,6 @@ class TestKubernetesBackendInit:
         # THEN the custom client is used
         assert backend.client is client
 
-
     def test_init_without_logger(self) -> None:
         # GIVEN no custom logger
         # WHEN initializing backend without logger
