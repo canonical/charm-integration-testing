@@ -1565,7 +1565,7 @@ name = "validators-base"
 version = "0.1.0"
 description = "Base validator class for Interface Validators Framework (SQ096)"
 optional = false
-python-versions = ">=3.8"
+python-versions = ">=3.10"
 groups = ["main"]
 files = []
 develop = true
@@ -1712,4 +1712,4 @@ type = ["pytest-mypy"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<4.0"
-content-hash = "3a16e24698929df96122962dcc1cc8306741839ae6a77bd443b2909b63a82616"
+content-hash = "fa97b885f61d261c0ac67304f2ee267c3936ef0365c78bb528e0986e49b287da"
