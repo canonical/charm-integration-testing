@@ -7,6 +7,7 @@ from utils.normalization import (
     _normalize_container_names,
     _normalize_hook_failure_apps,
     _normalize_ip_addresses,
+    _normalize_k8s_cluster_urls,
     _normalize_minio_probe_urls,
     _normalize_numeric_sequences,
     _normalize_oci_image_digests,
@@ -615,6 +616,57 @@ class TestNormalizeHookFailureApps:
         assert result == params.expected
 
 
+class TestNormalizeK8sClusterUrls:
+    @dataclass
+    class Params:
+        label: str
+        input: str
+        expected: str
+
+    test_cases = [
+        Params(
+            label="simple_cluster_url",
+            input="tempo-coordinator-k8s.ryan-stg.svc.cluster.local",
+            expected="<SERVICE>.<NAMESPACE>.svc.cluster.local",
+        ),
+        Params(
+            label="cluster_url_with_port",
+            input="tempo-coordinator-k8s.ryan-stg.svc.cluster.local:4317",
+            expected="<SERVICE>.<NAMESPACE>.svc.cluster.local:4317",
+        ),
+        Params(
+            label="cluster_url_in_text",
+            input="connecting to tempo-coordinator-k8s.ryan-stg.svc.cluster.local:4317 for tracing",
+            expected="connecting to <SERVICE>.<NAMESPACE>.svc.cluster.local:4317 for tracing",
+        ),
+        Params(
+            label="cluster_url_numeric_namespace",
+            input="my-service.ns123.svc.cluster.local",
+            expected="<SERVICE>.<NAMESPACE>.svc.cluster.local",
+        ),
+        Params(
+            label="multiple_cluster_urls",
+            input="from svc-a.ns-1.svc.cluster.local to svc-b.ns-2.svc.cluster.local",
+            expected="from <SERVICE>.<NAMESPACE>.svc.cluster.local to <SERVICE>.<NAMESPACE>.svc.cluster.local",
+        ),
+        Params(
+            label="no_cluster_url",
+            input="hello world",
+            expected="hello world",
+        ),
+        Params(
+            label="partial_suffix_not_matched",
+            input="service.namespace.cluster.local",
+            expected="service.namespace.cluster.local",
+        ),
+    ]
+
+    @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
+    def test(self, params: Params) -> None:
+        result = _normalize_k8s_cluster_urls(params.input)
+        assert result == params.expected
+
+
 class TestNormalizeRelationVersionApps:
     @dataclass
     class Params:
@@ -787,6 +839,16 @@ class TestNormalizeString:
             label="combined_container_and_hook_failure",
             input='container=litestream failed with hook failed: "update-status" for app:endpoint',
             expected='container=<CONTAINER> failed with hook failed: "update-status" for <APP>:<ENDPOINT>',
+        ),
+        Params(
+            label="k8s_cluster_url_with_port",
+            input="tempo-coordinator-k8s.ryan-stg.svc.cluster.local:4317",
+            expected="<SERVICE>.<NAMESPACE>.svc.cluster.local:XXX",
+        ),
+        Params(
+            label="k8s_cluster_url_in_error_message",
+            input="failed to connect to tempo-coordinator-k8s.ryan-stg.svc.cluster.local:4317 after 30s",
+            expected="failed to connect to <SERVICE>.<NAMESPACE>.svc.cluster.local:XXX after XXXs",
         ),
     ]
 
