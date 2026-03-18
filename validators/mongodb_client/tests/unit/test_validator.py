@@ -15,10 +15,11 @@
 
 from dataclasses import dataclass, field
 from typing import cast
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import ops
 import pymongo
+from pymongo.errors import WriteError
 
 from validators.mongodb_client.validator import MongoDBClientValidator
 
@@ -39,14 +40,25 @@ class RelationStub:
         self.data: dict[AppStub | None, dict[str, str]] = {app: databag}
 
 
+class RelationMetaStub:
+    def __init__(self, interface_name: str) -> None:
+        self.interface_name = interface_name
+
+
+class CharmMetaStub:
+    def __init__(self, endpoint: str, interface_name: str) -> None:
+        self.relations = {endpoint: RelationMetaStub(interface_name)}
+
+
 class CharmStub:
-    pass
+    def __init__(self, endpoint: str = "db", interface_name: str = "mongodb_client") -> None:
+        self.meta = CharmMetaStub(endpoint, interface_name)
 
 
 def _make_validator(databag: dict[str, str], endpoint: str = "db") -> MongoDBClientValidator:
     app = AppStub()
     relation = RelationStub(app=app, databag=databag, name=endpoint)
-    charm = cast(ops.CharmBase, CharmStub())
+    charm = cast(ops.CharmBase, CharmStub(endpoint=endpoint))
     return MongoDBClientValidator(charm, cast(ops.Relation, relation))
 
 
@@ -62,20 +74,53 @@ class AdminStub:
 
 
 @dataclass
+class InsertResultStub:
+    """Minimal stand-in for insert result."""
+
+    inserted_id: str = "test_id_1"
+
+
+@dataclass
+class CollectionStub:
+    """Minimal stand-in for a MongoDB collection."""
+
+    insert_error: Exception | None = None
+    find_error: Exception | None = None
+    drop_error: Exception | None = None
+
+    def insert_one(self, document: dict) -> InsertResultStub:
+        if self.insert_error:
+            raise self.insert_error
+        return InsertResultStub()
+
+    def find_one(self, query: dict) -> dict | None:
+        if self.find_error:
+            raise self.find_error
+        return {"_id": query.get("_id"), "_test": True}
+
+
+@dataclass
 class DatabaseStub:
     """Minimal stand-in for a MongoDB database."""
 
     list_collections_error: Exception | None = None
+    collection_stub: CollectionStub = field(default_factory=CollectionStub)
 
     def list_collections(self) -> list[str]:
         if self.list_collections_error:
             raise self.list_collections_error
         return []
 
+    def __getitem__(self, name: str) -> CollectionStub:
+        return self.collection_stub
+
+    def drop_collection(self, name: str) -> None:
+        pass
+
 
 @dataclass
 class MongoClientStub:
-    """Minimal connection stub; cursor_stub is returned by cursor()."""
+    """Minimal connection stub; database_stub is returned by __getitem__()."""
 
     admin_stub: AdminStub = field(default_factory=AdminStub)
     database_stub: DatabaseStub = field(default_factory=DatabaseStub)
@@ -108,22 +153,22 @@ VALID_DATABAG: dict[str, str] = {
 
 
 class TestMongoDBClientValidatorSimple:
-    def test_returns_error_for_unsupported_level(self) -> None:
+    def test_returns_skipped_for_unsupported_level(self) -> None:
         # GIVEN
         validator = _make_validator(VALID_DATABAG)
 
         # WHEN
-        result = validator.validate(level="deep")
+        result = validator.validate(level="uat")
 
         # THEN
-        assert result.status == "ERROR"
+        assert result.status == "SKIPPED"
         assert result.error is not None
-        assert "not yet implemented" in result.error
+        assert "not supported" in result.error
 
     def test_returns_error_when_relation_app_is_none(self) -> None:
         # GIVEN a relation whose remote app is not yet known
         relation = RelationStub(app=None, databag={})
-        validator = MongoDBClientValidator(cast(ops.CharmBase, CharmStub()), cast(ops.Relation, relation))
+        validator = MongoDBClientValidator(cast(ops.CharmBase, CharmStub(endpoint=relation.name)), cast(ops.Relation, relation))
 
         # WHEN
         result = validator.validate(level="simple")
@@ -203,3 +248,70 @@ class TestMongoDBClientValidatorSimple:
         # THEN
         assert result.endpoint == "my-endpoint"
         assert result.interface == "mongodb_client"
+
+
+class TestMongoDBClientValidatorDeep:
+    def test_returns_skipped_for_uat_level(self) -> None:
+        # GIVEN
+        validator = _make_validator(VALID_DATABAG)
+
+        # WHEN
+        result = validator.validate(level="uat")
+
+        # THEN
+        assert result.status == "SKIPPED"
+        assert result.error is not None
+
+    def test_deep_passes_on_successful_write_read_verify(self) -> None:
+        # GIVEN a complete databag and a successful connection with write/read
+        validator = _make_validator(VALID_DATABAG)
+        conn = MongoClientStub(database_stub=DatabaseStub(collection_stub=CollectionStub()))
+        with patch("validators.mongodb_client.validator.MongoClient", return_value=conn):
+            # WHEN
+            result = validator.validate(level="deep")
+
+        # THEN
+        assert result.status == "PASS"
+        assert result.level == "deep"
+        write_check = next(c for c in result.checks if c.name == "write_read_verify")
+        assert write_check.passed
+        cleanup_check = next(c for c in result.checks if c.name == "cleanup")
+        assert cleanup_check.passed
+        latency_check = next(c for c in result.checks if c.name == "latency")
+        assert latency_check.passed
+
+    def test_deep_fails_when_write_fails(self) -> None:
+        # GIVEN a connection that fails on insert_one
+        validator = _make_validator(VALID_DATABAG)
+        conn = MongoClientStub(
+            database_stub=DatabaseStub(
+                collection_stub=CollectionStub(insert_error=WriteError("Write failed"))
+            )
+        )
+        with patch("validators.mongodb_client.validator.MongoClient", return_value=conn):
+            # WHEN
+            result = validator.validate(level="deep")
+
+        # THEN
+        assert result.status == "FAIL"
+        write_check = next(c for c in result.checks if c.name == "write_read_verify")
+        assert not write_check.passed
+
+    def test_deep_fails_when_read_verification_fails(self) -> None:
+        # GIVEN a connection where find_one returns a doc without the _test field
+        @dataclass
+        class FailingCollectionStub(CollectionStub):
+            def find_one(self, query: dict) -> dict | None:
+                return {"_id": query.get("_id")}  # Missing _test field
+
+        validator = _make_validator(VALID_DATABAG)
+        conn = MongoClientStub(database_stub=DatabaseStub(collection_stub=FailingCollectionStub()))
+        with patch("validators.mongodb_client.validator.MongoClient", return_value=conn):
+            # WHEN
+            result = validator.validate(level="deep")
+
+        # THEN
+        assert result.status == "FAIL"
+        write_check = next(c for c in result.checks if c.name == "write_read_verify")
+        assert not write_check.passed
+        assert "Failed to verify" in write_check.message

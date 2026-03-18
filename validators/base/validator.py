@@ -60,6 +60,7 @@ class BaseValidator(ABC):
             return {}
         return dict(self.relation.data[self.relation.app])
 
+    @property
     def interface(self) -> str:
         return self.charm.meta.relations[self.relation.name].interface_name or ""
 
@@ -73,11 +74,7 @@ class BaseValidator(ABC):
             relation_id=self.relation_id,
             error=f"Level '{level}' is not supported by {self.__class__.__name__}.",
         )
-    def databag(self) -> dict[str, str]:
-        if self.relation.app is None:
-            return {}
-        return dict(self.relation.data[self.relation.app])
-
+    
     @abstractmethod
     def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
         pass
