@@ -157,6 +157,9 @@ correct order:
      --neighbor-application "neighbor" \
      --neighbor-endpoint "${NEIGHBOR_ENDPOINT}"
 
+To increase test verbosity while debugging, pass ``--log-cli-level`` to stream
+logs live to your terminal.
+
 The ``--current-state`` option tells the scheduler the current state of
 the environment so it knows which setup steps (if any) still need to run:
 

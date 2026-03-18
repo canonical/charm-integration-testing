@@ -76,6 +76,12 @@ on:
           mode.
         required: false
         default: ''
+      log_level:
+        description: Log level to use for the tests.
+        required: false
+        type: choice
+        options: [DEBUG, INFO, WARNING, ERROR]
+        default: INFO
 env:
   DEBUG_SLEEP_SECONDS: 7200  # 2 hours
 jobs:
@@ -282,6 +288,7 @@ jobs:
           series: ${{ inputs.series }}
           neighbor: ${{ inputs.neighbor }}
           platform: ${{ inputs.substrate == 'openstack' && 'machine' || inputs.substrate }}
+          log_level: ${{ inputs.log_level }}
         run: |
           echo "junit_xml=$(realpath junit.xml)" >> $GITHUB_OUTPUT
           ./scripts/run-tests.sh \
@@ -305,6 +312,8 @@ jobs:
             --charm-test-configs "./static/charm-test-configs/" \
             --charm-priorities-config "./static/charm-priorities.yaml" \
             --charm-default-versions "./static/charm-default-versions.yaml" \
+            --log-cli-level "${log_level}" \
+            --log-level "${log_level}" \
             --junit-xml=junit.xml
       - name: Post 'test_end' event
         if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
