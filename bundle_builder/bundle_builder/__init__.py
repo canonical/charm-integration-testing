@@ -14,7 +14,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from .bundle import Application, ApplicationEndpoint, Bundle, Integration
-from .bundle_builder import BundleBuilder, Node, UncompletableBundleError
+from .bundle_builder import BundleBuilder, Node, UncompletableBundleError, UnfulfilledEndpointsError
 from .charm import ENDPOINT_PEERS, ENDPOINT_PROVIDES, ENDPOINT_REQUIRES, Charm, CharmEndpoint
 from .charmhub import CharmhubClient
 from .overrides import OverridesClient
@@ -34,4 +34,5 @@ __all__ = [
     "Node",
     "OverridesClient",
     "UncompletableBundleError",
+    "UnfulfilledEndpointsError",
 ]

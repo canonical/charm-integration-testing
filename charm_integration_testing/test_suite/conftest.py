@@ -26,6 +26,8 @@ from juju_jubilant import JubilantBackend
 from pytest import StashKey
 from utils import normalize_string, normalize_string_multiline
 
+from bundle_builder import UnfulfilledEndpointsError
+
 pytest_plugins = [
     "test_suite.scheduler.plugin",
 ]
@@ -684,6 +686,12 @@ def record_failure_execution_metadata(
                             f"failure:validator:interface:{result.interface}:error",
                             normalize_string(result.error),
                         )
+        elif isinstance(exc, UnfulfilledEndpointsError):
+            for endpoint in exc.unfulfilled_endpoints:
+                charm = exc.best_bundle.application_lookup[endpoint.application].charm.name
+                interface = exc.best_bundle.application_endpoints[endpoint].interface
+                execution_metadata("failure:build_bundle:unfulfilled_endpoint", f"{charm}:{endpoint.endpoint}")
+                execution_metadata("failure:build_bundle:unfulfilled_interface", interface)
 
         if error_message in request.node.stash:
             # toggle expected failure flag
