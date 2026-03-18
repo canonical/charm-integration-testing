@@ -1,9 +1,9 @@
 # Copyright 2025-2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import time
 from datetime import timedelta
 from pathlib import Path
-import time
 from typing import Any
 
 import pytest
@@ -50,9 +50,7 @@ def _wait_for_application_revision(
     deadline = time.monotonic() + timeout.total_seconds()
 
     while time.monotonic() < deadline:
-        actual_revision = _application_revision(
-            juju_client=juju_client, model=model, application=application
-        )
+        actual_revision = _application_revision(juju_client=juju_client, model=model, application=application)
         if actual_revision == expected_revision:
             return
         time.sleep(1)
@@ -74,19 +72,10 @@ def test_upgrade_charm(
 
     original_revision = target_data.get("revision")
     if not isinstance(original_revision, int):
-        pytest.fail(
-            f"Application '{target_application}' is missing an integer "
-            f"revision in bundle {bundle}"
-        )
-    target_channel = (
-        target_data.get("channel")
-        if isinstance(target_data.get("channel"), str)
-        else None
-    )
+        pytest.fail(f"Application '{target_application}' is missing an integer " f"revision in bundle {bundle}")
+    target_channel = target_data.get("channel") if isinstance(target_data.get("channel"), str) else None
 
-    pre_upgrade_revision = _application_revision(
-        juju_client=juju_client, model=model, application=target_application
-    )
+    pre_upgrade_revision = _application_revision(juju_client=juju_client, model=model, application=target_application)
     if pre_upgrade_revision == original_revision:
         pytest.skip(
             f"Target application '{target_application}' is already on revision "
@@ -111,10 +100,8 @@ def test_upgrade_charm(
         timeout=timedelta(minutes=5),
     )
     juju_client.idle_for_period(model=model, timeout=timedelta(minutes=15))
-    
-    upgraded_revision = _application_revision(
-        juju_client=juju_client, model=model, application=target_application
-    )
+
+    upgraded_revision = _application_revision(juju_client=juju_client, model=model, application=target_application)
     if upgraded_revision != original_revision:
         pytest.fail(
             f"Expected '{target_application}' to be on upgraded revision "
@@ -122,10 +109,7 @@ def test_upgrade_charm(
         )
     juju_client.validate_model(model=model, level="simple")
 
-    juju_client.logger.info(
-        f"Refreshing {target_application} back to pre-upgrade revision "
-        f"{pre_upgrade_revision}."
-    )
+    juju_client.logger.info(f"Refreshing {target_application} back to pre-upgrade revision " f"{pre_upgrade_revision}.")
     juju_client.refresh_application(
         application=target_application,
         revision=pre_upgrade_revision,
@@ -140,9 +124,7 @@ def test_upgrade_charm(
         timeout=timedelta(minutes=5),
     )
     juju_client.idle_for_period(model=model, timeout=timedelta(minutes=15))
-    downgraded_revision = _application_revision(
-        juju_client=juju_client, model=model, application=target_application
-    )
+    downgraded_revision = _application_revision(juju_client=juju_client, model=model, application=target_application)
     if downgraded_revision != pre_upgrade_revision:
         pytest.fail(
             f"Expected '{target_application}' to be on downgraded revision "
