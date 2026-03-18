@@ -21,7 +21,7 @@ def _build_headers(token: str | None) -> dict[str, str]:
     return headers
 
 
-def _extract_first_list(payload: dict[str, Any], *keys: str) -> list[dict[str, Any]]:
+def _extract_first_list(payload: dict[str, Any] | list[dict[str, Any]], *keys: str) -> list[dict[str, Any]]:
     if isinstance(payload, list):
         return [item for item in payload if isinstance(item, dict)]
     for key in keys:
@@ -31,7 +31,13 @@ def _extract_first_list(payload: dict[str, Any], *keys: str) -> list[dict[str, A
     return []
 
 
-def _extract_id(item: dict[str, Any], *keys: str) -> int | None:
+def _extract_id(item: dict[str, Any] | list[dict[str, Any]], *keys: str) -> int | None:
+    if isinstance(item, list):
+        for sub_item in item:
+            result = _extract_id(sub_item, *keys)
+            if result is not None:
+                return result
+        return None
     for key in keys:
         value = item.get(key)
         if isinstance(value, int):
@@ -48,15 +54,17 @@ def _extract_stage(channel: str | None) -> str:
     return channel.split("/")[-1]
 
 
-def _json_object(response: requests.Response, endpoint: str) -> dict[str, Any]:
+def _json_object(response: requests.Response, endpoint: str) -> dict[str, Any] | list[dict[str, Any]]:
     """Return response JSON payload as an object and fail fast on unexpected shapes."""
     payload = response.json()
-    if not isinstance(payload, dict):
-        raise RuntimeError(f"Unexpected JSON payload from {endpoint}: expected object")
+    if not (isinstance(payload, dict) or isinstance(payload, list)):
+        raise RuntimeError(f"Unexpected JSON payload from {endpoint}: expected object or list")
     return payload
 
 
-def query_artefacts_history(api_url: str, token: str | None, stage: str, name: str) -> dict[str, Any]:
+def query_artefacts_history(
+    api_url: str, token: str | None, stage: str, name: str
+) -> dict[str, Any] | list[dict[str, Any]]:
     """Query Test Observer artefacts history endpoint for the current model/bundle context."""
     params: dict[str, str | int] = {
         "family": "charm",
@@ -77,7 +85,7 @@ def query_artefacts_history(api_url: str, token: str | None, stage: str, name: s
     return _json_object(response, "/v1/artefacts/history")
 
 
-def query_artefact_builds(api_url: str, token: str | None, artefact_id: int) -> dict[str, Any]:
+def query_artefact_builds(api_url: str, token: str | None, artefact_id: int) -> dict[str, Any] | list[dict[str, Any]]:
     headers = _build_headers(token)
     params: dict[str, int] = {"limit": 100, "offset": 0}
     response = requests.get(
@@ -90,7 +98,9 @@ def query_artefact_builds(api_url: str, token: str | None, artefact_id: int) -> 
     return _json_object(response, "/v1/artefacts/{artefact_id}/builds")
 
 
-def query_test_results_for_execution(api_url: str, token: str | None, execution_id: int) -> dict[str, Any]:
+def query_test_results_for_execution(
+    api_url: str, token: str | None, execution_id: int
+) -> dict[str, Any] | list[dict[str, Any]]:
     headers = _build_headers(token)
 
     # Preferred endpoint in newer Test Observer API versions.
@@ -125,7 +135,7 @@ def query_test_results_for_execution(api_url: str, token: str | None, execution_
     )
 
 
-def has_test_deploy_passed(test_results_payload: dict[str, Any]) -> bool:
+def has_test_deploy_passed(test_results_payload: dict[str, Any] | list[dict[str, Any]]) -> bool:
     test_results = _extract_first_list(test_results_payload, "test_results", "results", "items")
     for result in test_results:
         name = result.get("name")
