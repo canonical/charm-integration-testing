@@ -1398,7 +1398,7 @@ class TestJubilantBackend:
             backend = JubilantBackend(JubilantClientStub(client=stub))
 
             with patch("tenacity.nap.sleep", return_value=None):
-                backend.bootstrap_controller(cloud="k8s-stg", controller="test-controller")
+                backend.bootstrap_controller(cloud="k8s-stg", controller="test-controller", controller_constraints={})
 
             assert stub.bootstrap_calls == 3
 
@@ -1408,7 +1408,9 @@ class TestJubilantBackend:
 
             with patch("tenacity.nap.sleep", return_value=None):
                 with pytest.raises(RuntimeError, match="transient bootstrap failure"):
-                    backend.bootstrap_controller(cloud="k8s-stg", controller="test-controller")
+                    backend.bootstrap_controller(
+                        cloud="k8s-stg", controller="test-controller", controller_constraints={}
+                    )
 
             assert stub.bootstrap_calls == 3
 
