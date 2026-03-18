@@ -28,14 +28,7 @@ class MongoDBClientValidator(BaseValidator):
 
     def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
         if level != "simple":
-            return ValidationResult(
-                status="ERROR",
-                endpoint=self.endpoint,
-                interface=self.interface,
-                level=level,
-                relation_id=self.relation_id,
-                error=f"Level '{level}' is not yet implemented.",
-            )
+            return self._skipped_result(level)
 
         checks: list[ValidationCheck] = []
 

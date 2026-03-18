@@ -14,7 +14,6 @@ bundle-builder = { path = "./bundle_builder", develop = true }
 validators-base = { path = "./validators/base", develop = true }
 validators-runner = { path = "./validators/runner", develop = true }
 validators-postgresql-client = { path = "./validators/postgresql_client", develop = true, extras = ["dev", "deep", "uat"] }
-validators-postgresql-client = { path = "./validators/postgresql_client", develop = true, extras = ["dev"] }
 validators-mongodb-client = { path = "./validators/mongodb_client", develop = true, extras = ["dev"] }
 
 
