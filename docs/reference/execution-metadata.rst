@@ -25,6 +25,7 @@ The ``normalize_string()`` function applies these transformations:
 - **Container names**: ``container=katib-controller`` → ``container=<CONTAINER>``
 - **Hook failure app/endpoint**: ``hook failed: "install" for app:endpoint`` → ``hook failed: "install" for <APP>:<ENDPOINT>``
 - **Relation version errors**: ``versions not found for apps: app-name`` → ``versions not found for apps: <APP>``
+- **Kubernetes cluster DNS names**: ``service.namespace.svc.cluster.local`` → ``<SERVICE>.<NAMESPACE>.svc.cluster.local``
 - **Numeric sequences**: ``12345`` → ``XXX`` (excludes technical terms like ``k8s``, ``s3``)
 - **Truncation**: Values longer than 150 characters are truncated with ``...``
 
@@ -183,6 +184,14 @@ Collected when the exception type is in ``KNOWN_FAILURE_EXCEPTIONS`` (``JujuWait
      - Error string from a validation result with status ``ERROR``. Only recorded when ``ValidationResult.error`` is set.
      - Yes
      - ``Unexpected exception during validation``
+   * - ``failure:build_bundle:unfulfilled_endpoint``
+     - An application endpoint that could not be fulfilled during bundle building. Collected when ``UnfulfilledEndpointsError`` is raised. Format: ``<charm>:<endpoint_name>``. Multiple values may be recorded.
+     - No
+     - ``postgresql:db``
+   * - ``failure:build_bundle:unfulfilled_interface``
+     - Interface name for an unfulfilled application endpoint. Collected when ``UnfulfilledEndpointsError`` is raised. Multiple values may be recorded.
+     - No
+     - ``postgresql_client``
 
 Error Metadata (Unexpected Errors)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

@@ -6,10 +6,15 @@ from pathlib import Path
 
 import pytest
 
-from bundle_builder.bundle import Application, ApplicationEndpoint, Bundle, Integration  # type: ignore[import-untyped]
-from bundle_builder.bundle_builder import BundleBuilder
-from bundle_builder.charmhub import CharmhubClient  # type: ignore[import-untyped]
-from bundle_builder.overrides import OverridesClient  # type: ignore[import-untyped]
+from bundle_builder import (
+    Application,
+    ApplicationEndpoint,
+    Bundle,
+    BundleBuilder,
+    CharmhubClient,
+    Integration,
+    OverridesClient,
+)
 
 from .scheduler.states import State
 

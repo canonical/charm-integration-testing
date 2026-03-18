@@ -268,6 +268,32 @@ def _normalize_hook_failure_apps(text: str) -> str:
     return re.sub(r'(hook failed: "[^"]+") for [a-z0-9-]+:[a-z0-9-]+', r"\1 for <APP>:<ENDPOINT>", text)
 
 
+def _normalize_k8s_cluster_urls(text: str) -> str:
+    """Normalize Kubernetes cluster DNS names by replacing service and namespace.
+
+    Matches service DNS names of the form:
+      <service>.<namespace>.svc.cluster.local
+    and replaces the service and namespace with placeholders while keeping
+    the 'svc.cluster.local' suffix intact.
+
+    For example:
+      tempo-coordinator-k8s.ryan-stg.svc.cluster.local:4317
+    becomes:
+      <SERVICE>.<NAMESPACE>.svc.cluster.local:4317
+
+    Args:
+        text: The text containing Kubernetes cluster DNS names
+
+    Returns:
+        Text with cluster DNS service and namespace names replaced
+    """
+    return re.sub(
+        r"[a-z0-9][a-z0-9-]*\.[a-z0-9][a-z0-9-]*\.svc\.cluster\.local",
+        "<SERVICE>.<NAMESPACE>.svc.cluster.local",
+        text,
+    )
+
+
 def _normalize_relation_version_apps(text: str) -> str:
     """Normalize application names in relation version error messages.
 
@@ -316,6 +342,7 @@ def normalize_string(message: Any, max_length: int = 150) -> str:
     - Normalizes container names
     - Normalizes hook failure app/endpoint names
     - Normalizes relation version app names
+    - Normalizes Kubernetes cluster DNS names (svc.cluster.local)
     - Replaces all numeric sequences (except technical terms like k8s, s3)
     - Truncates to maximum length
 
@@ -337,6 +364,7 @@ def normalize_string(message: Any, max_length: int = 150) -> str:
     text = _normalize_container_names(text)
     text = _normalize_hook_failure_apps(text)
     text = _normalize_relation_version_apps(text)
+    text = _normalize_k8s_cluster_urls(text)
     text = _normalize_numeric_sequences(text)
     text = _truncate_string(text, max_length)
     return text

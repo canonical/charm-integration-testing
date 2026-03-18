@@ -76,6 +76,12 @@ on:
           mode.
         required: false
         default: ''
+      log_level:
+        description: Log level to use for the tests.
+        required: false
+        type: choice
+        options: [DEBUG, INFO, WARNING, ERROR]
+        default: INFO
 env:
   DEBUG_SLEEP_SECONDS: 7200  # 2 hours
 jobs:
@@ -170,8 +176,8 @@ jobs:
           test_observer_token: ${{ env.test_observer_token }}
           test_execution_id: ${{ inputs.execution_id }}
           status: IN_PROGRESS
-          ci_link: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{
-            github.run_id }}
+          ci_link: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{github.run_id
+            }}
       - name: Post 'job_start' event
         if: ${{ !cancelled() && env.test_observer_api != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-events
@@ -282,6 +288,7 @@ jobs:
           series: ${{ inputs.series }}
           neighbor: ${{ inputs.neighbor }}
           platform: ${{ inputs.substrate == 'openstack' && 'machine' || inputs.substrate }}
+          log_level: ${{ inputs.log_level }}
         run: |
           echo "junit_xml=$(realpath junit.xml)" >> $GITHUB_OUTPUT
           ./scripts/run-tests.sh \
@@ -309,6 +316,8 @@ jobs:
             --charm-default-versions "./static/charm-default-versions.yaml" \
             --juju-model-config "./static/juju-model-config.json" \
             --juju-controller-bootstrap-constraints "./static/juju-bootstrap-constraints.json" \
+            --log-cli-level "${log_level}" \
+            --log-level "${log_level}" \
             --junit-xml=junit.xml
       - name: Post 'test_end' event
         if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}
