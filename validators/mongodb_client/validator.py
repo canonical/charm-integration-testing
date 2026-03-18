@@ -24,8 +24,6 @@ from validators.base import BaseValidator, ValidationCheck, ValidationLevel, Val
 
 
 class MongoDBClientValidator(BaseValidator):
-    interface = "mongodb_client"
-
     def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
         if level != "simple":
             return self._skipped_result(level)
