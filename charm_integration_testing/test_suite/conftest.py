@@ -208,7 +208,13 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         "--juju-model-config",
         type=str,
         default=None,
-        help="Path to a json file containing the model configs to be passed down to Juju on model creation.",
+        help="Path to a json file containing the model configurations to be passed down to Juju on model creation.",
+    )
+    parser.addoption(
+        "--juju-controller-bootstrap-constraints",
+        type=str,
+        default=None,
+        help="Path to a json file containing the controller constraints configurations to be passed down to Juju on controller bootstrap.",
     )
 
 
@@ -245,6 +251,37 @@ def juju_model_config(request: pytest.FixtureRequest) -> dict[str, str]:
     except json.JSONDecodeError as e:
         pytest.fail(
             f"Juju model config file passed via the --juju-model-config parameter does not contain valid JSON: {e}"
+        )
+
+
+@pytest.fixture
+def juju_controller_bootstrap_constraints(request: pytest.FixtureRequest) -> dict[str, str]:
+    """Juju controller bootstrap constraints config file path passed via ``--juju-controller-bootstrap-constraints``."""
+    value = request.config.getoption("--juju-controller-bootstrap-constraints")
+
+    if not value:
+        return dict()
+
+    assert isinstance(value, str)
+    value = Path(value).resolve()
+    if not value.exists() or not value.is_file():
+        pytest.fail(
+            "Juju controller bootstrap constraints config file passed via the --juju-controller-bootstrap-constraints parameter does not exist or is not a file."
+        )
+
+    # Define the expected shape
+    ConfigSchema = TypeAdapter(dict[str, str])
+
+    try:
+        content = json.loads(value.read_text())
+        return ConfigSchema.validate_python(content)
+    except ValidationError as e:
+        pytest.fail(
+            f"Invalid Juju controller bootstrap constraints config passed via the --juju-controller-bootstrap-constraints parameter: {e}"
+        )
+    except json.JSONDecodeError as e:
+        pytest.fail(
+            f"Juju controller bootstrap constraints config file passed via the --juju-controller-bootstrap-constraints parameter does not contain valid JSON: {e}"
         )
 
 
@@ -562,15 +599,15 @@ def print_setup_and_teardown_info(
     record_execution_metadata: None,
 ) -> Iterator[None]:
     state_marker = read_state_marker(request.node)
-    if state_marker and any(state in (State.NO_MODEL, State.NO_CONTROLLER) for state in state_marker.requires):
-        yield
-        return
+    if not (
+        state_marker
+        and any(state in (State.NO_MODEL, State.NO_CONTROLLER, State.NO_BUNDLE) for state in state_marker.requires)
+    ):
+        # Enforce fixture execution order
+        _ = record_execution_metadata
 
-    # Enforce fixture execution order
-    _ = record_execution_metadata
-
-    # Print starting state
-    juju_client.print_status(model=model)
+        # Print starting state
+        juju_client.print_status(model=model)
 
     # Log starting
     logger.info(f"Starting {request.node.name}")
@@ -587,8 +624,9 @@ def print_setup_and_teardown_info(
     else:
         logger.info(f"Successfully ran {request.node.name}")
 
-    # Log ending state
-    juju_client.print_status(model=model)
+    if not (state_marker and state_marker.provides in (State.NO_MODEL, State.NO_CONTROLLER, State.NO_BUNDLE)):
+        # Log ending state
+        juju_client.print_status(model=model)
 
 
 @pytest.fixture
@@ -686,18 +724,18 @@ def record_charms_and_revisions_execution_metadata(
     execution_metadata: Callable[[str, str | int], None],
 ) -> Iterator[None]:
     state_marker = read_state_marker(request.node)
-    if state_marker and any(state in (State.NO_MODEL, State.NO_CONTROLLER) for state in state_marker.requires):
-        yield
-        return
-
-    # Save all charms and revisions at start of test
-    record_charms_and_revisions_execution_metadata_instantaneous(juju_client, model, execution_metadata)
+    if not (
+        state_marker
+        and any(state in (State.NO_MODEL, State.NO_CONTROLLER, State.NO_BUNDLE) for state in state_marker.requires)
+    ):
+        # Save all charms and revisions at start of test
+        record_charms_and_revisions_execution_metadata_instantaneous(juju_client, model, execution_metadata)
 
     # Let the test run
     yield
-
-    # Save all charms and revisions at end of test
-    record_charms_and_revisions_execution_metadata_instantaneous(juju_client, model, execution_metadata)
+    if not (state_marker and state_marker.provides in (State.NO_MODEL, State.NO_CONTROLLER, State.NO_BUNDLE)):
+        # Save all charms and revisions at end of test
+        record_charms_and_revisions_execution_metadata_instantaneous(juju_client, model, execution_metadata)
 
 
 @pytest.fixture

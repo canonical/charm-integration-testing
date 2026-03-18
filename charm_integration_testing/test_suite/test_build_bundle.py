@@ -14,7 +14,7 @@ from bundle_builder.overrides import OverridesClient  # type: ignore[import-unty
 from .scheduler.states import State
 
 
-@pytest.mark.state(requires=State.NO_BUNDLE, provides=State.EMPTY_MODEL)
+@pytest.mark.state(requires=State.NO_BUNDLE, provides=State.NO_CONTROLLER)
 def test_build_bundle(
     target_charm: str,
     neighbor_charm: str,

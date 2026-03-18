@@ -384,9 +384,13 @@ class JubilantBackend(JujuCmdBackend):
         return str(self.client.model(model).version())
 
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(5), reraise=True)
-    def bootstrap_controller(self, cloud: str, controller: str) -> None:
+    def bootstrap_controller(self, cloud: str, controller: str, controller_constraints: dict[str, str]) -> None:
+        # XXX (@mbenzan): we have to be able to pass in `extra_arguments` for Openstack integrations.
+        # This is currently not supported by Jubilant. I'll open a PR there to add this functionality
+        # and then update the code here to use it. In the meantime, O11 will fail to provision.
+        # PR: https://github.com/canonical/jubilant/pull/272
         return self.client.model(None).bootstrap(
-            cloud=cloud, controller=controller, bootstrap_constraints={"root-disk": "5G"}
+            cloud=cloud, controller=controller, bootstrap_constraints=controller_constraints
         )
 
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(5), reraise=True)

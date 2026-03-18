@@ -308,6 +308,7 @@ jobs:
             --charm-priorities-config "./static/charm-priorities.yaml" \
             --charm-default-versions "./static/charm-default-versions.yaml" \
             --juju-model-config "./static/juju-model-config.json" \
+            --juju-controller-bootstrap-constraints "./static/juju-bootstrap-constraints.json" \
             --junit-xml=junit.xml
       - name: Post 'test_end' event
         if: ${{ env.test_observer_api != '' && inputs.execution_id != '' }}

@@ -12,5 +12,8 @@ def test_bootstrap_controller(
     juju_client: JujuClient,
     juju_cloud: str,
     juju_controller: str,
+    juju_controller_bootstrap_constraints: dict[str, str],
 ) -> None:
-    juju_client.bootstrap_controller(cloud=juju_cloud, controller=juju_controller)
+    juju_client.bootstrap_controller(
+        cloud=juju_cloud, controller=juju_controller, controller_constraints=juju_controller_bootstrap_constraints
+    )

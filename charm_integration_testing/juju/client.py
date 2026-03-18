@@ -228,9 +228,13 @@ class JujuClient:
         if sum(len(results) for results in failed_validations.values()) > 0:
             raise JujuValidationError(failed_validations)
 
-    def bootstrap_controller(self, cloud: str, controller: str) -> None:
-        self.logger.info(f"Bootstrapping Juju controller in cloud '{cloud}' with name '{controller}'.")
-        self.backend.bootstrap_controller(cloud=cloud, controller=controller)
+    def bootstrap_controller(self, cloud: str, controller: str, controller_constraints: dict[str, str]) -> None:
+        self.logger.info(
+            f"Bootstrapping Juju controller in cloud '{cloud}' with name '{controller}', using constraints '{controller_constraints}'."
+        )
+        self.backend.bootstrap_controller(
+            cloud=cloud, controller=controller, controller_constraints=controller_constraints
+        )
 
     def add_model(self, controller: str, model: str, model_config: dict[str, str]) -> None:
         self.logger.info(

@@ -275,7 +275,7 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def bootstrap_controller(self, cloud: str, controller: str) -> None:
+    def bootstrap_controller(self, cloud: str, controller: str, controller_constraints: dict[str, str]) -> None:
         raise NotImplementedError
 
     @abstractmethod
