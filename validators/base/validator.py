@@ -74,7 +74,7 @@ class BaseValidator(ABC):
             relation_id=self.relation_id,
             error=f"Level '{level}' is not supported by {self.__class__.__name__}.",
         )
-    
+
     @abstractmethod
     def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
         pass

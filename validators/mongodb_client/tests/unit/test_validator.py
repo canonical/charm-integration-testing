@@ -14,8 +14,8 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from dataclasses import dataclass, field
-from typing import cast
-from unittest.mock import MagicMock, patch
+from typing import Any, cast
+from unittest.mock import patch
 
 import ops
 import pymongo
@@ -88,12 +88,12 @@ class CollectionStub:
     find_error: Exception | None = None
     drop_error: Exception | None = None
 
-    def insert_one(self, document: dict) -> InsertResultStub:
+    def insert_one(self, document: dict[str, Any]) -> InsertResultStub:
         if self.insert_error:
             raise self.insert_error
         return InsertResultStub()
 
-    def find_one(self, query: dict) -> dict | None:
+    def find_one(self, query: dict[str, Any]) -> dict[str, Any] | None:
         if self.find_error:
             raise self.find_error
         return {"_id": query.get("_id"), "_test": True}
@@ -168,7 +168,9 @@ class TestMongoDBClientValidatorSimple:
     def test_returns_error_when_relation_app_is_none(self) -> None:
         # GIVEN a relation whose remote app is not yet known
         relation = RelationStub(app=None, databag={})
-        validator = MongoDBClientValidator(cast(ops.CharmBase, CharmStub(endpoint=relation.name)), cast(ops.Relation, relation))
+        validator = MongoDBClientValidator(
+            cast(ops.CharmBase, CharmStub(endpoint=relation.name)), cast(ops.Relation, relation)
+        )
 
         # WHEN
         result = validator.validate(level="simple")
@@ -284,9 +286,7 @@ class TestMongoDBClientValidatorDeep:
         # GIVEN a connection that fails on insert_one
         validator = _make_validator(VALID_DATABAG)
         conn = MongoClientStub(
-            database_stub=DatabaseStub(
-                collection_stub=CollectionStub(insert_error=WriteError("Write failed"))
-            )
+            database_stub=DatabaseStub(collection_stub=CollectionStub(insert_error=WriteError("Write failed")))
         )
         with patch("validators.mongodb_client.validator.MongoClient", return_value=conn):
             # WHEN
@@ -301,7 +301,7 @@ class TestMongoDBClientValidatorDeep:
         # GIVEN a connection where find_one returns a doc without the _test field
         @dataclass
         class FailingCollectionStub(CollectionStub):
-            def find_one(self, query: dict) -> dict | None:
+            def find_one(self, query: dict[str, Any]) -> dict[str, Any] | None:
                 return {"_id": query.get("_id")}  # Missing _test field
 
         validator = _make_validator(VALID_DATABAG)
