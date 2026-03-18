@@ -571,8 +571,7 @@ class TestBuildExecutionPlan:
             )
 
     def test_cycle_with_many_pure_clusters(self, make_item: Callable[..., pytest.Item]) -> None:
-        """There should be a valid plan that reaches all pure clusters without infinite loops, even with many states and cycles.
-        """
+        """There should be a valid plan that reaches all pure clusters without infinite loops, even with many states and cycles."""
         deploy = make_item("test_deploy")
         forward = make_item("test_forward")
         backward = make_item("test_backward")
@@ -606,6 +605,7 @@ class TestBuildExecutionPlan:
         assert deploy in plan
         assert advance in plan
         assert plan.index(pure_3) > plan.index(pure_2)
+
 
 # ---------------------------------------------------------------------------
 # Helpers for hook tests
