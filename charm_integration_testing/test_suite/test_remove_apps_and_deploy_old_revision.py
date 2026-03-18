@@ -1,8 +1,8 @@
 # Copyright 2025-2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-from datetime import timedelta
 import os
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -198,6 +198,7 @@ def create_bundle_with_revision_override(
     with destination_bundle.open("w", encoding="utf-8") as file:
         yaml.safe_dump(bundle_data, file, sort_keys=False)
 
+
 @pytest.mark.state(requires=State.DEPLOYED, provides=State.OLD_REVISION)
 def test_deploy(
     juju_client: JujuClient,
@@ -231,9 +232,7 @@ def test_deploy(
 
     current_revision = target_application_data.get("revision")
     if not isinstance(current_revision, int):
-        pytest.fail(
-            f"Application '{target_application}' is missing an integer revision in bundle {bundle}"
-        )
+        pytest.fail(f"Application '{target_application}' is missing an integer revision in bundle {bundle}")
 
     stage = _extract_stage(target_application_data.get("channel"))
 
@@ -279,4 +278,3 @@ def test_deploy(
 
     # Validate all applications and relations
     juju_client.validate_model(model=model, level="simple")
-
