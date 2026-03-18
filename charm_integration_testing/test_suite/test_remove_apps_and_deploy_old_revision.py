@@ -48,9 +48,17 @@ def _extract_stage(channel: str | None) -> str:
     return channel.split("/")[-1]
 
 
+def _json_object(response: requests.Response, endpoint: str) -> dict[str, Any]:
+    """Return response JSON payload as an object and fail fast on unexpected shapes."""
+    payload = response.json()
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"Unexpected JSON payload from {endpoint}: expected object")
+    return payload
+
+
 def query_artefacts_history(api_url: str, token: str | None, stage: str, name: str) -> dict[str, Any]:
     """Query Test Observer artefacts history endpoint for the current model/bundle context."""
-    params = {
+    params: dict[str, str | int] = {
         "family": "charm",
         "limit": 10,
         "offset": 0,
@@ -66,19 +74,20 @@ def query_artefacts_history(api_url: str, token: str | None, stage: str, name: s
         timeout=30,
     )
     response.raise_for_status()
-    return response.json()
+    return _json_object(response, "/v1/artefacts/history")
 
 
 def query_artefact_builds(api_url: str, token: str | None, artefact_id: int) -> dict[str, Any]:
     headers = _build_headers(token)
+    params: dict[str, int] = {"limit": 100, "offset": 0}
     response = requests.get(
         f"{api_url.rstrip('/')}/v1/artefacts/{artefact_id}/builds",
-        params={"limit": 100, "offset": 0},
+        params=params,
         headers=headers,
         timeout=30,
     )
     response.raise_for_status()
-    return response.json()
+    return _json_object(response, "/v1/artefacts/{artefact_id}/builds")
 
 
 def query_test_results_for_execution(api_url: str, token: str | None, execution_id: int) -> dict[str, Any]:
@@ -104,7 +113,7 @@ def query_test_results_for_execution(api_url: str, token: str | None, execution_
         )
         try:
             response.raise_for_status()
-            return response.json()
+            return _json_object(response, "/v1/test-results")
         except requests.HTTPError as exc:
             errors.append(exc)
             if response.status_code not in (400, 422):
