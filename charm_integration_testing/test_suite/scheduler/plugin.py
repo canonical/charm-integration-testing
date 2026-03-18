@@ -335,28 +335,55 @@ def _build_execution_plan(
     all_transitions: dict[StateTransition, list[pytest.Item]],
     full_graph: StateGraph,
 ) -> list[pytest.Item]:
-    """Build a minimum-cost ordered item list using exhaustive backtracking.
+    r"""Build an ordered item list using backtracking with memoization and cycle detection.
 
-    This algorithm uses backtracking to explore different orderings of destinations
-    until it finds a complete valid execution path.
+    **Algorithm Overview**
 
-    Starting from *current_state*, it tries each reachable remaining destination.
-    For the first successful path sequence, it injects the shortest-path bridging
-    transitions needed and runs user-selected items. If a choice leads to an
-    unreachable remaining destination, it backtracks and tries a different order.
+    The scheduler uses exhaustive backtracking to reorder user-selected tests
+    and automatically inject bridging transitions needed to satisfy state constraints.
 
-    Destination states are states where at least one user-selected item departs
-    (for transitions) or must run (for pure tests).
+    **Phase 1: Early Exits (O(states))**
+    - Check for unconnected nodes: LogWarning if any states are unreachable from current state.
+    - Run any pure tests already reachable at the current state (free destinations).
+    - Mark those tests as scheduled so they won't be reordered.
 
-    Bridging transitions are drawn from *all_transitions* (the complete suite),
-    so the scheduler can inject a transition that was filtered out by ``-k``
-    when it is the only way to reach a selected test's required state.
-    User-selected transition tests are always included in the plan directly;
-    they are never silently skipped in favour of a purely-bridging injection.
+    **Phase 2: Backtracking Search (O(destinations^destinations) worst-case)**
+    - Recursively explore different orderings of remaining destinations.
+    - For each remaining destination state:
+      * Use Dijkstra to find the shortest path from current state (O(edges log nodes)).
+      * If reachable: create a branch, inject bridging tests, execute tests at that destination.
+      * Recurse with new state and updated scheduled set.
+      * If recursion succeeds: return the complete plan.
+      * If recursion fails (returns None): backtrack and try the next destination.
+    - If all orderings fail: raise _UnreachableStateError.
 
-    Multiple tests may share the same :class:`StateTransition` edge.  When
-    bridging, only one representative item is injected (the first in the list).
-    When the user has explicitly selected tests on an edge, all of them run.
+        **Optimization: Dead-End Memoization & Cycle Detection**
+        - Memo key: (current_state, frozenset(remaining_destinations)).
+        - Dead-end memoization caches only unsatisfiable branches, so repeated visits
+            can be pruned immediately.
+        - Cycle detection uses an in-flight ``visiting`` set for the same key shape.
+            If we re-enter a key that is currently being explored, we return ``None``
+            to break recursion loops.
+        - Combined effect: guarantees termination even when the graph contains cycles
+            and at least one destination is unreachable.
+
+        **Cycle & Connectivity Detection**
+    - ``full_graph.unreachable_states(current_state)``: Returns states with no path from current_state.
+    - Logged as a warning; if a destination is in that set, _UnreachableStateError is raised.
+        - Cycle detection via ``visiting``: if (state, remaining) is re-entered while
+            still in progress, that branch returns ``None``.
+
+    **Destination Ordering**
+    - Tries destinations in sorted order for determinism.
+    - Backtracking ensures the first valid ordering is returned.
+    - Multiple user-selected tests on the same edge (multiple item variants) all run,
+      with bridging re-navigation between them.
+
+    **Edge Cases**
+    - Empty selection: returns empty plan.
+    - Already at required state: runs tests immediately without bridges.
+    - Isolated graph components: _UnreachableStateError raised before backtracking starts.
+    - Cyclic paths: dead-end memoization + cycle detection ensures recursive search terminates.
 
     Args:
         current_state: Environment state before any tests run.
@@ -369,11 +396,13 @@ def _build_execution_plan(
         full_graph: State graph built from all collected transition tests.
 
     Returns:
-        Ordered list of pytest items forming the optimal execution plan.
+        Ordered list of pytest items forming a valid execution plan that
+        satisfies all state constraints encountered along the chosen path.
 
     Raises:
         _UnreachableStateError: If no ordering of destinations can be found
-            that bridges all gaps from *current_state* using available transitions.
+            that bridges all gaps from *current_state* using available transitions,
+            or if a required state is unreachable from *current_state*.
     """
 
     def _all_selected_at(s: State) -> list[pytest.Item]:
@@ -447,6 +476,11 @@ def _build_execution_plan(
                     _mark_as_injected(bridge_item)
                     plan.append(bridge_item)
 
+    # Keys are (current_state, remaining_destinations). We only memoize dead ends.
+    dead_end_memo: set[tuple[State, frozenset[State]]] = set()
+    # Keys currently on the recursion stack; used to break in-flight cycles.
+    visiting: set[tuple[State, frozenset[State]]] = set()
+
     def _backtrack_search(
         current_state: State,
         current_plan: list[pytest.Item],
@@ -457,6 +491,9 @@ def _build_execution_plan(
         Tries each reachable remaining destination. If a path leads to an
         unreachable state, backtracks and tries a different destination.
 
+        Uses dead-end memoization to prune known-unsatisfiable branches and an
+        in-flight cycle guard (``visiting``) to prevent infinite recursion.
+
         Returns the completed plan if successful, None if this branch is a dead end.
         """
         remaining_destinations = _unscheduled_destinations(scheduled)
@@ -464,34 +501,54 @@ def _build_execution_plan(
             # All destinations have been scheduled; return the plan.
             return current_plan
 
-        # Try each remaining destination.
-        for target_state in remaining_destinations:
-            raw_path = full_graph.shortest_path(current_state, target_state)
-            if raw_path is None:
-                # Can't reach this destination from the current state; try another.
-                continue
+        memo_key = (current_state, frozenset(remaining_destinations))
 
-            # Create a copy of the plan and scheduled set for this branch.
-            branch_plan = current_plan[:]
-            branch_scheduled = scheduled.copy()
+        # Already determined this branch is a dead end.
+        if memo_key in dead_end_memo:
+            return None
 
-            # Inject bridging transitions to reach the target.
-            _inject_bridge(raw_path, branch_plan, branch_scheduled)
+        # Detect cycles: if we're currently visiting this key, we're in a loop.
+        if memo_key in visiting:
+            logger.debug(
+                f"Cycle detected at state '{current_state}' with remaining "
+                f"destinations {sorted(remaining_destinations)}. Returning None."
+            )
+            return None
 
-            # Run the user-selected items at this destination.
-            new_state = _run_selected_at(target_state, branch_plan, branch_scheduled)
+        visiting.add(memo_key)
 
-            # Recurse; remaining destinations are recomputed from unscheduled items.
-            result = _backtrack_search(new_state, branch_plan, branch_scheduled)
+        try:
+            # Try each remaining destination.
+            for target_state in sorted(remaining_destinations):
+                raw_path = full_graph.shortest_path(current_state, target_state)
+                if raw_path is None:
+                    # Can't reach this destination from the current state; try another.
+                    continue
 
-            if result is not None:
-                # Found a valid complete path on this branch.
-                return result
+                # Create a copy of the plan and scheduled set for this branch.
+                branch_plan = current_plan[:]
+                branch_scheduled = scheduled.copy()
 
-            # This branch led to a dead end; backtrack and try the next destination.
+                # Inject bridging transitions to reach the target.
+                _inject_bridge(raw_path, branch_plan, branch_scheduled)
 
-        # No valid ordering found from this state.
-        return None
+                # Run the user-selected items at this destination.
+                new_state = _run_selected_at(target_state, branch_plan, branch_scheduled)
+
+                # Recurse; remaining destinations are recomputed from unscheduled items.
+                result = _backtrack_search(new_state, branch_plan, branch_scheduled)
+
+                if result is not None:
+                    # Found a valid complete path on this branch.
+                    return result
+
+                # This branch led to a dead end; backtrack and try the next destination.
+
+            # No valid ordering found from this state.
+            dead_end_memo.add(memo_key)
+            return None
+        finally:
+            visiting.discard(memo_key)
 
     # ------------------------------------------------------------------
     # Initialize: handle destinations reachable at the starting state for free.
