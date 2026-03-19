@@ -172,7 +172,9 @@ class TestBaseValidator:
             app=app,
             data={app: {"secret-uri": "secret:db-creds", "username": "plain-user"}},
         )
-        charm = CharmStub(relation_name="my-db", secrets={"secret:db-creds": {"username": "secret-user", "password": "pw"}})
+        charm = CharmStub(
+            relation_name="my-db", secrets={"secret:db-creds": {"username": "secret-user", "password": "pw"}}
+        )
         validator = ConcreteValidator(charm, relation)  # type: ignore[arg-type]
 
         # WHEN
