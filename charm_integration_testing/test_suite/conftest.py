@@ -22,9 +22,13 @@ from extensions import (
     ValidatorInjectorExtension,
 )
 from juju import JujuBackend, JujuClient, JujuValidationError, JujuWaitTimeoutError
+from juju_cmd.backend import JujuCmdBackend
 from juju_jubilant import JubilantBackend
+from kubernetes_client import KubernetesBackend, KubernetesClient
 from pytest import StashKey
 from utils import normalize_string, normalize_string_multiline
+
+from bundle_builder import UnfulfilledEndpointsError
 
 pytest_plugins = [
     "test_suite.scheduler.plugin",
@@ -684,6 +688,12 @@ def record_failure_execution_metadata(
                             f"failure:validator:interface:{result.interface}:error",
                             normalize_string(result.error),
                         )
+        elif isinstance(exc, UnfulfilledEndpointsError):
+            for endpoint in exc.unfulfilled_endpoints:
+                charm = exc.best_bundle.application_lookup[endpoint.application].charm.name
+                interface = exc.best_bundle.application_endpoints[endpoint].interface
+                execution_metadata("failure:build_bundle:unfulfilled_endpoint", f"{charm}:{endpoint.endpoint}")
+                execution_metadata("failure:build_bundle:unfulfilled_interface", interface)
 
         if error_message in request.node.stash:
             # toggle expected failure flag
@@ -744,3 +754,15 @@ def record_pipeline_version_execution_metadata(
             warnings.warn(f"Failed to get pipeline workflow hash: {pipeline_result.stderr.strip()}")
     else:
         warnings.warn(f"Pipeline file not found: {pipeline_path}")
+
+
+@pytest.fixture
+def _kubernetes_test(juju_backend: JujuCmdBackend, model: str) -> None:
+    if not juju_backend.is_k8s_model(model):
+        pytest.skip("Not kubernetes")
+
+
+@pytest.fixture
+def kubernetes_client(_kubernetes_test: None) -> KubernetesClient:
+    kubeconfig = os.environ.get("KUBECONFIG")
+    return KubernetesClient(KubernetesBackend.k8s_client(kubeconfig=kubeconfig))

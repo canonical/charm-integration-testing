@@ -18,6 +18,7 @@ dependencies = [
     "jubilant (>=1.6.0,<2.0.0)",
     "validators-base",
     "validators-runner",
+    "kubernetes (>=32.0.0, < 33.0.0)",
 ]
 
 [tool.poetry]
@@ -26,6 +27,7 @@ packages = [
     { include = "juju" },
     { include = "juju_cmd" },
     { include = "juju_jubilant" },
+    { include = "kubernetes_client" },
     { include = "serializeable_dataclass" },
     { include = "test_suite" },
     { include = "utils" },
