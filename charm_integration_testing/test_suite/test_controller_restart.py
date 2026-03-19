@@ -19,8 +19,3 @@ def test_controller_restart(juju_client: JujuClient, model: str) -> None:
 
     # Validate all applications and relations
     juju_client.validate_model(model=model, level="simple")
-
-
-@pytest.mark.state(requires=State.EMPTY_MODEL, provides=State.NO_BUNDLE)
-def test_dummy():
-    pass

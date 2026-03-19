@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from kubernetes.client import ApiException, V1ObjectMeta, V1Pod, V1PodStatus  # type: ignore[import-untyped]
-from kubernetes_client import KubernetesClient, PodStatus
+from kubernetes_client import KubernetesBackend, KubernetesClient, PodStatus
 
 
 def create_sample_pod(
@@ -33,7 +33,7 @@ class V1PodListStub:
 
 
 @dataclass
-class KubernetesBackendStub:
+class KubernetesBackendStub(KubernetesBackend):
     """Stub for KubernetesClient."""
 
     list_namespaced_pods_result: V1PodListStub | None = None
@@ -41,6 +41,10 @@ class KubernetesBackendStub:
     get_namespaced_pod_result: V1Pod | None = None
     get_namespaced_pod_raises: Exception | None = None
     get_namespaced_pod_call_count: int = 0
+
+    def __post_init__(self) -> None:
+        self.CoreV1Api = self
+        self.AppsV1Api = self
 
     def list_namespaced_pod(self, namespace: str) -> V1PodListStub:
         if self.list_namespaced_pods_raises:
@@ -357,7 +361,7 @@ class TestKubernetesClientInit:
                     return new_running_pod  # New pod running
 
             mock_backend = MagicMock()
-            mock_backend.read_namespaced_pod.side_effect = get_pod_side_effect
+            mock_backend.CoreV1Api.read_namespaced_pod.side_effect = get_pod_side_effect
 
             client = KubernetesClient(
                 backend=mock_backend,
@@ -449,7 +453,7 @@ class TestKubernetesClientInit:
                 return new_pod
 
             mock_backend = MagicMock()
-            mock_backend.read_namespaced_pod.side_effect = get_pod_side_effect
+            mock_backend.CoreV1Api.read_namespaced_pod.side_effect = get_pod_side_effect
 
             client = KubernetesClient(
                 backend=mock_backend,

@@ -10,6 +10,7 @@ from .scheduler.states import State
 
 
 @pytest.mark.state(requires=State.DEPLOYED, provides=State.DEPLOYED)
+@pytest.mark.usefixtures("_is_running_on_kubernetes")  # Gates the test to only run on k8s environments
 def test_pod_deletion(
     juju_client: JujuClient,
     kubernetes_client: KubernetesClient,

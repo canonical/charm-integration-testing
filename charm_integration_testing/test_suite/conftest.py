@@ -884,12 +884,12 @@ def record_pipeline_version_execution_metadata(
 
 
 @pytest.fixture
-def _kubernetes_test(juju_backend: JujuCmdBackend, model: str) -> None:
+def _is_running_on_kubernetes(juju_backend: JujuCmdBackend, model: str) -> None:
     if not juju_backend.is_k8s_model(model):
         pytest.skip("Not kubernetes")
 
 
 @pytest.fixture
-def kubernetes_client(_kubernetes_test: None) -> KubernetesClient:
+def kubernetes_client() -> KubernetesClient:
     kubeconfig = os.environ.get("KUBECONFIG")
     return KubernetesClient(KubernetesBackend.k8s_client(kubeconfig=kubeconfig))

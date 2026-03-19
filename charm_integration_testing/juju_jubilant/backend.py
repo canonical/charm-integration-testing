@@ -3,6 +3,7 @@
 
 
 import dataclasses
+import os
 import pathlib
 import re
 import time
@@ -23,6 +24,7 @@ from juju import (
     warn_performance,
 )
 from juju_cmd import JujuCmdBackend
+from kubernetes_client import KubernetesBackend, KubernetesClient
 from tenacity import retry, stop_after_attempt, wait_fixed
 
 from validators.base.validator import ValidationResult
@@ -404,29 +406,21 @@ class JubilantBackend(JujuCmdBackend):
         # Phase 2 endpoint validation will be done here
         return {}
 
-    def reboot_model_controller_leader(self, model: str) -> None:
-        # TODO: remove this import before merge
-        from subprocess import run
+    def is_k8s_model(self, model: str) -> bool:
+        return self.client.model(model).show_model().model_type == "kubernetes"
 
+    def reboot_model_controller_leader(self, model: str) -> None:
         controller_name = self.status(model).model.controller
         controller_model = f"{controller_name}:controller"
-        controller_status = self.status(model=controller_model)
-        # If controller_status has machines, then it is a machine environment
-        if len(controller_status.machines) > 0:
+        if not self.is_k8s_model(model=controller_model):
             # reboot the leader
-            self.ssh(model=controller_model, application="controller/leader", command="sleep 1 && sudo reboot")
+            self.ssh(model=controller_model, application="controller/leader", command="sudo reboot || true")
         else:
-            # If it doesn't have machines, then it is a k8s model
             controller_k8s_namespace = f"controller-{controller_name}"
-            # TODO: switch this out for the proper K8s client when Amjad's PR is merged
-            run(
-                ["kubectl", "rollout", "restart", "statefulset/controller", "-n", controller_k8s_namespace],
-                text=True,
-                check=True,
+            k8s_client = KubernetesClient(KubernetesBackend.k8s_client(kubeconfig=os.environ.get("KUBECONFIG")))
+            k8s_client.restart_statefulset(
+                namespace=controller_k8s_namespace, statefulset_name="statefulset/controller"
             )
-            # Wait until the rollout has finished.
-            run(
-                ["kubectl", "rollout", "status", "statefulset/controller", "-n", controller_k8s_namespace],
-                text=True,
-                check=True,
+            k8s_client.wait_for_statefulset_restart(
+                namespace=controller_k8s_namespace, statefulset_name="statefulset/controller", timeout_seconds=300
             )
