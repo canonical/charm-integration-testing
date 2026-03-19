@@ -13,7 +13,7 @@ jobs:
         params:
           - target_charm: postgresql-k8s
             target_endpoint: certificates
-            target_revision: 495
+            target_revision: 798
             target_base: '22.04'
             neighbor_charm: self-signed-certificates
             neighbor_endpoint: certificates
