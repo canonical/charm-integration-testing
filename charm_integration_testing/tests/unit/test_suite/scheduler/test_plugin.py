@@ -575,7 +575,7 @@ class TestBuildExecutionPlan:
         deploy = make_item("test_deploy")
         forward = make_item("test_forward")
         backward = make_item("test_backward")
-        advance = make_item("test_advance")
+        kill_controller = make_item("test_kill_controller")
         pure_1 = make_item("test_pure_1")
         pure_2 = make_item("test_pure_2")
         pure_3 = make_item("test_pure_3")
@@ -584,17 +584,21 @@ class TestBuildExecutionPlan:
             (State.EMPTY_MODEL, State.DEPLOYED, deploy),
             (State.DEPLOYED, State.NEIGHBOR_ONLY, forward),
             (State.NEIGHBOR_ONLY, State.DEPLOYED, backward),
-            (State.NEIGHBOR_ONLY, State.NO_CONTROLLER, advance),
         )
 
         plan = _build_execution_plan(
             current_state=State.EMPTY_MODEL,
             pure_clusters={
-                State.DEPLOYED: [pure_1],
+                State.DEPLOYED: [pure_3],
                 State.NEIGHBOR_ONLY: [pure_2],
-                State.NO_CONTROLLER: [pure_3],
+                State.NO_CONTROLLER: [pure_1],
             },
-            selected_transitions=defaultdict(list),
+            selected_transitions=defaultdict(
+                list,
+                {
+                    StateTransition(State.DEPLOYED, State.NO_CONTROLLER): [kill_controller],
+                },
+            ),
             all_transitions=all_transitions,
             full_graph=graph,
         )
@@ -603,8 +607,9 @@ class TestBuildExecutionPlan:
         assert pure_2 in plan
         assert pure_3 in plan
         assert deploy in plan
-        assert advance in plan
-        assert plan.index(pure_3) > plan.index(pure_2)
+        assert kill_controller in plan
+        assert plan.index(pure_1) > plan.index(pure_3)
+        assert plan.index(pure_1) > plan.index(pure_2)
 
 
 # ---------------------------------------------------------------------------
