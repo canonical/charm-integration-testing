@@ -72,16 +72,16 @@ class TestMarkAsInjected:
         # THEN the name is prefixed
         assert item.name == f"[injected] {original_name}"
 
-    def test_prefixes_nodeid_with_injected(self, make_item: Callable[..., pytest.Item]) -> None:
-        # GIVEN an item with a known node ID
+    def test_sets_nodeid_to_injected_name(self, make_item: Callable[..., pytest.Item]) -> None:
+        # GIVEN an item with a known name
         item = make_item("test_foo")
-        original_nodeid = item.nodeid
 
         # WHEN marked as injected
         _mark_as_injected(item)
 
-        # THEN the node ID is prefixed
-        assert item.nodeid == f"[injected] {original_nodeid}"
+        # THEN the node ID is the bare function name prefixed with [injected],
+        # not the full file path, so JUnit XML renders it as a short name
+        assert item.nodeid == "[injected] test_foo"
 
     def test_idempotent_second_call_is_noop(self, make_item: Callable[..., pytest.Item]) -> None:
         # GIVEN an item that has already been marked as injected
