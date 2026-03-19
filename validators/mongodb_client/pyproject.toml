@@ -21,7 +21,7 @@ authors = [
     {name = "SQA Team", email = "solutionsqa@canonical.com"}
 ]
 
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 dependencies = [
     "pymongo>=4.0.0",
     "validators-base",

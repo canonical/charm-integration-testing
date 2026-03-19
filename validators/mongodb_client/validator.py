@@ -74,7 +74,12 @@ class MongoDBClientValidator(BaseValidator):
         # --- 4. Connect & ping ---
         endpoint = self.databag["endpoints"].split(",")[0].strip()
         mongodb_client: MongoClient[Any] | None = None
-        client_kwargs: dict[str, Any] = {}
+        client_kwargs: dict[str, Any] = {
+            "serverSelectionTimeoutMS": 5000,
+            "connectTimeoutMS": 5000,
+            "socketTimeoutMS": 10000,
+            "appname": "mongodb-client-validator",
+        }
         ca_file_path: str | None = None
         try:
             uri = f"mongodb://{quote_plus(creds['username'])}:{quote_plus(creds['password'])}@{endpoint}"
@@ -175,6 +180,12 @@ class MongoDBClientValidator(BaseValidator):
                 ca_file_path = ca_file.name
                 client_kwargs["tlsCAFile"] = ca_file_path
 
+            # Ensure bounded MongoDB connection attempts by setting explicit timeouts (in milliseconds).
+            timeout_ms = 5000
+            client_kwargs.setdefault("serverSelectionTimeoutMS", timeout_ms)
+            client_kwargs.setdefault("connectTimeoutMS", timeout_ms)
+            client_kwargs.setdefault("socketTimeoutMS", timeout_ms)
+
             mongodb_client = MongoClient(uri, **client_kwargs)
             mongodb_client.admin.command("ping")
             checks.append(ValidationCheck(name="connect", passed=True, message=f"Connected to {endpoint}."))
@@ -219,20 +230,29 @@ class MongoDBClientValidator(BaseValidator):
                     )
                 )
 
-            # Cleanup: drop canary collection
-            db.drop_collection(canary_collection)
-            checks.append(ValidationCheck(name="cleanup", passed=True, message="Dropped canary collection."))
-
         except Exception as exc:
             checks.append(ValidationCheck(name="write_read_verify", passed=False, message=str(exc)))
-            # Attempt cleanup on error
+        finally:
+            # Cleanup: drop canary collection and record result separately
+            cleanup_passed = False
+            cleanup_message = ""
             try:
                 if mongodb_client:
                     db = mongodb_client[self.databag["database"]]
                     db.drop_collection(canary_collection)
-            except Exception:  # nosec B110
-                pass
-        finally:
+                    cleanup_passed = True
+                    cleanup_message = "Dropped canary collection."
+            except Exception as exc:  # nosec B110 - best-effort cleanup
+                cleanup_message = f"Failed to drop canary collection: {exc}"
+            finally:
+                checks.append(
+                    ValidationCheck(
+                        name="cleanup",
+                        passed=cleanup_passed,
+                        message=cleanup_message,
+                    )
+                )
+
             if mongodb_client:
                 mongodb_client.close()
             if ca_file_path:
