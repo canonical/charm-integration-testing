@@ -461,14 +461,14 @@ def _build_execution_plan(
         edge and each needs a fresh environment).
         """
         for transition, _graph_item in path:
-                         # Always fall back to a pure bridge so the environment actually
-             # transitions - silently skipping would leave it in the wrong state.
-             candidates = all_transitions.get(transition)
-             if not candidates:
-                 continue
-             bridge_item = candidates[0]
-             _mark_as_injected(bridge_item)
-             plan.append(bridge_item)
+            # Always fall back to a pure bridge so the environment actually
+            # transitions - silently skipping would leave it in the wrong state.
+            candidates = all_transitions.get(transition)
+            if not candidates:
+                continue
+            bridge_item = candidates[0]
+            _mark_as_injected(bridge_item)
+            plan.append(bridge_item)
 
     # Keys are (current_state, remaining_destinations). We only memoize dead ends.
     dead_end_memo: set[tuple[State, frozenset[State]]] = set()
