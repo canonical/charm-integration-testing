@@ -321,11 +321,12 @@ def _mark_as_injected(item: pytest.Item) -> None:
         return
     _injected_item_ids.add(id(item))
     item.add_marker(pytest.mark.injected)
-    item.name = f"[injected] {item.name}"
+    original_name = item.name
+    item.name = f"[injected] {original_name}"
     # pytest exposes no public API to override the node ID; _nodeid is the
     # backing attribute for the read-only ``nodeid`` property.  This is a
     # known limitation: revisit if pytest removes or renames _nodeid.
-    item._nodeid = f"[injected] {item._nodeid}"
+    item._nodeid = f"[injected] {original_name}"
 
 
 def _build_execution_plan(
@@ -449,32 +450,26 @@ def _build_execution_plan(
     ) -> None:
         """Inject one bridging transition item per edge along *path*.
 
-        For each edge, if the user selected tests for it, prefer the first
-        unscheduled one (so it counts as both bridge and selected destination).
-        Otherwise use the first item from the full suite as a pure bridge;
-        these are NOT added to ``scheduled``, so the same bridging test can be
-        injected again if the scheduler needs to cross the same edge a second
-        time (e.g. when two selected tests share an edge and each needs a
-        fresh environment).
+        For each edge, always use a bridge-only transition from the full
+        suite rather than consuming any user-selected transition tests.
+        This ensures that selected transition tests are only scheduled via
+        ``_run_selected_at`` when their destination state is being targeted,
+        so that all pure tests at intermediate states can run before any
+        selected transition out of those states.
+        Bridge-only transitions are NOT added to ``scheduled``, so the same
+        bridging test can be injected again if the scheduler needs to cross
+        the same edge multiple times (e.g. when two selected tests share an
+        edge and each needs a fresh environment).
         """
         for transition, _graph_item in path:
-            selected = selected_transitions.get(transition)
-            unscheduled = next((it for it in selected if it not in scheduled), None) if selected else None
-            if unscheduled is not None:
-                # Prefer an unscheduled selected item; it will be added to
-                # scheduled inside _run_selected_at when it executes.
-                plan.append(unscheduled)
-                scheduled.add(unscheduled)
-            else:
-                # No unscheduled selected item (either none exist, or all were
-                # already pre-injected on a prior traversal of this edge).
-                # Fall back to a pure bridge so the environment actually
-                # transitions - silently skipping would leave it in the wrong state.
-                candidates = all_transitions.get(transition)
-                if candidates:
-                    bridge_item = candidates[0]
-                    _mark_as_injected(bridge_item)
-                    plan.append(bridge_item)
+            # Always fall back to a pure bridge so the environment actually
+            # transitions - silently skipping would leave it in the wrong state.
+            candidates = all_transitions.get(transition)
+            if not candidates:
+                continue
+            bridge_item = candidates[0]
+            _mark_as_injected(bridge_item)
+            plan.append(bridge_item)
 
     # Keys are (current_state, remaining_destinations). We only memoize dead ends.
     dead_end_memo: set[tuple[State, frozenset[State]]] = set()
