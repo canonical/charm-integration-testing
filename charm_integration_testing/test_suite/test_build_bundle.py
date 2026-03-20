@@ -18,7 +18,7 @@ from .scheduler.states import State
 def test_build_bundle(
     target_charm: str,
     neighbor_charm: str,
-    # target_channel: str | None,
+    target_channel: str | None,
     target_revision: int | None,
     target_series: str | None,
     target_endpoint: str,
@@ -48,7 +48,7 @@ def test_build_bundle(
 
     fetched_target_charm = charmhub_client.charm_from_store(
         charm_name=target_charm,
-        # charm_channel=target_channel,
+        charm_channel=target_channel,
         charm_revision=target_revision,
         ubuntu_version=target_series,
         ubuntu_arch="amd64",
