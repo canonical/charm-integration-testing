@@ -51,7 +51,7 @@ jobs:
           arch: charm-testing-integration-test-assert-pass-arch
           environment: charm-testing-integration-test-assert-pass-environment
           test_plan: charm-testing-integration-test-assert-pass-test_plan
-          track: "14"
+          track: '14'
           risk: stable
           status: NOT_STARTED
       - name: Trigger Charm Tests
