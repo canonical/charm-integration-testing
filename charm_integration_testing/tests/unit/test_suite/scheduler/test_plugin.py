@@ -72,16 +72,16 @@ class TestMarkAsInjected:
         # THEN the name is prefixed
         assert item.name == f"[injected] {original_name}"
 
-    def test_prefixes_nodeid_with_injected(self, make_item: Callable[..., pytest.Item]) -> None:
-        # GIVEN an item with a known node ID
+    def test_sets_nodeid_to_injected_name(self, make_item: Callable[..., pytest.Item]) -> None:
+        # GIVEN an item with a known name
         item = make_item("test_foo")
-        original_nodeid = item.nodeid
 
         # WHEN marked as injected
         _mark_as_injected(item)
 
-        # THEN the node ID is prefixed
-        assert item.nodeid == f"[injected] {original_nodeid}"
+        # THEN the node ID is the bare function name prefixed with [injected],
+        # not the full file path, so JUnit XML renders it as a short name
+        assert item.nodeid == "[injected] test_foo"
 
     def test_idempotent_second_call_is_noop(self, make_item: Callable[..., pytest.Item]) -> None:
         # GIVEN an item that has already been marked as injected
@@ -414,6 +414,202 @@ class TestBuildExecutionPlan:
         assert plan.count(teardown_1) == 1
         assert plan.count(teardown_2) == 1
         assert redeploy in plan
+
+    def test_unconnected_nodes_raises_unreachable_state_error(self, make_item: Callable[..., pytest.Item]) -> None:
+        """Unconnected nodes: a state exists in the graph but is unreachable from current state.
+
+        The graph has two disconnected components: EMPTY_MODEL → DEPLOYED and
+        NO_CONTROLLER → NEIGHBOR_ONLY. Starting from EMPTY_MODEL, the algorithm
+        detects that NO_CONTROLLER and NEIGHBOR_ONLY are unreachable and warns.
+        If a test requires an unreachable state, it raises _UnreachableStateError.
+        """
+        # GIVEN a graph with two disconnected components
+        deploy = make_item("test_deploy")  # EMPTY_MODEL → DEPLOYED
+        isolate_switch = make_item("test_isolate_switch")  # NO_CONTROLLER → NEIGHBOR_ONLY
+        unreachable_pure = make_item("test_unreachable")
+
+        graph, all_transitions = _graph_and_all(
+            (State.EMPTY_MODEL, State.DEPLOYED, deploy),
+            # Isolated component: unreachable from EMPTY_MODEL
+            (State.NO_CONTROLLER, State.NEIGHBOR_ONLY, isolate_switch),
+        )
+
+        # WHEN the plan is built and a test requiring the unreachable NEIGHBOR_ONLY is selected
+        # THEN _UnreachableStateError is raised
+        with pytest.raises(_UnreachableStateError, match="No path from state"):
+            _build_execution_plan(
+                current_state=State.EMPTY_MODEL,
+                pure_clusters={State.NEIGHBOR_ONLY: [unreachable_pure]},
+                selected_transitions=defaultdict(list),
+                all_transitions=all_transitions,
+                full_graph=graph,
+            )
+
+    def test_two_non_cyclical_destinations(self, make_item: Callable[..., pytest.Item]) -> None:
+        """Two separate non-cyclical destinations with independent paths and backtracking.
+
+        The scheduler must:
+        1. Navigate from EMPTY_MODEL → DEPLOYED (run first dest, say teardown_1)
+        2. Backtrack via redeploy bridge: NEIGHBOR_ONLY → DEPLOYED
+        3. Navigate to second destination: DEPLOYED → NO_CONTROLLER (run teardown_2)
+
+        This tests the memoization and cycle-detection logic ensures no infinite loops
+        when backtracking between diverging branches.
+        """
+        # GIVEN a graph with two separate teardown transitions requiring backtracking
+        deploy = make_item("test_deploy")
+        teardown_1 = make_item("test_teardown_1")  # DEPLOYED → NEIGHBOR_ONLY
+        teardown_2 = make_item("test_teardown_2")  # DEPLOYED → NO_CONTROLLER
+        redeploy = make_item("test_redeploy")  # NEIGHBOR_ONLY → DEPLOYED
+
+        graph, all_transitions = _graph_and_all(
+            (State.EMPTY_MODEL, State.DEPLOYED, deploy),
+            (State.DEPLOYED, State.NEIGHBOR_ONLY, teardown_1),
+            (State.DEPLOYED, State.NO_CONTROLLER, teardown_2),
+            (State.NEIGHBOR_ONLY, State.DEPLOYED, redeploy),
+            # NO_CONTROLLER has no return path; ensures asymmetry
+        )
+
+        # WHEN both teardowns are selected (non-cyclical destinations)
+        plan = _build_execution_plan(
+            current_state=State.EMPTY_MODEL,
+            pure_clusters=defaultdict(list),
+            selected_transitions=defaultdict(
+                list,
+                {
+                    StateTransition(State.DEPLOYED, State.NEIGHBOR_ONLY): [teardown_1],
+                    StateTransition(State.DEPLOYED, State.NO_CONTROLLER): [teardown_2],
+                },
+            ),
+            all_transitions=all_transitions,
+            full_graph=graph,
+        )
+
+        # THEN both teardowns are in the plan
+        assert teardown_1 in plan
+        assert teardown_2 in plan
+
+        # AND the redeploy bridge is injected between them to re-navigate
+        assert redeploy in plan
+        assert plan.index(teardown_1) < plan.index(redeploy)
+        assert plan.index(redeploy) < plan.index(teardown_2)
+
+        # AND deploy is injected at the start to reach DEPLOYED from EMPTY_MODEL
+        assert deploy in plan
+        assert plan.index(deploy) < plan.index(teardown_1)
+
+    def test_zero_non_cyclical_nodes_cyclic_graph(self, make_item: Callable[..., pytest.Item]) -> None:
+        """All paths involve cycles: memoization and cycle detection prevent infinite loops.
+
+        A cyclic graph: DEPLOYED ↔ NEIGHBOR_ONLY. The scheduler must navigate to
+        both destinations but must not infinitely loop. Memoization (state, remaining_destinations)
+        and visiting set ensure termination.
+        """
+        # GIVEN a cyclic graph where two states form a loop
+        deploy = make_item("test_deploy")
+        forward = make_item("test_forward")  # DEPLOYED → NEIGHBOR_ONLY
+        backward = make_item("test_backward")  # NEIGHBOR_ONLY → DEPLOYED
+        pure_1 = make_item("test_pure_1")
+        pure_2 = make_item("test_pure_2")
+
+        graph, all_transitions = _graph_and_all(
+            (State.EMPTY_MODEL, State.DEPLOYED, deploy),
+            (State.DEPLOYED, State.NEIGHBOR_ONLY, forward),
+            (State.NEIGHBOR_ONLY, State.DEPLOYED, backward),
+        )
+
+        # WHEN two pure tests require the two cyclic states
+        plan = _build_execution_plan(
+            current_state=State.EMPTY_MODEL,
+            pure_clusters={
+                State.DEPLOYED: [pure_1],
+                State.NEIGHBOR_ONLY: [pure_2],
+            },
+            selected_transitions=defaultdict(list),
+            all_transitions=all_transitions,
+            full_graph=graph,
+        )
+
+        # THEN both pure tests are in the plan (no infinite loop, memoization works)
+        assert pure_1 in plan
+        assert pure_2 in plan
+
+        # AND bridges are injected to navigate: at least deploy is needed to reach DEPLOYED
+        assert deploy in plan  # EMPTY_MODEL → DEPLOYED
+
+        # AND at least one of the cycle transitions is used (forward or backward or both)
+        # The scheduler will use the minimal path needed to reach both states
+        assert (forward in plan) ^ (backward in plan), "At least one cycle transition should be in plan"
+
+        # AND the order respects state machine: deploy at start, then states reached in sequence
+        assert plan.index(deploy) < plan.index(pure_1)
+
+    def test_cycle_with_unreachable_destination_raises(self, make_item: Callable[..., pytest.Item]) -> None:
+        """A reachable loop must not hide an unreachable destination.
+
+        Graph has a cycle (DEPLOYED <-> NEIGHBOR_ONLY), but NO_CONTROLLER is
+        disconnected. The planner must terminate and raise _UnreachableStateError.
+        """
+        deploy = make_item("test_deploy")
+        forward = make_item("test_forward")
+        backward = make_item("test_backward")
+        unreachable_pure = make_item("test_unreachable")
+
+        graph, all_transitions = _graph_and_all(
+            (State.EMPTY_MODEL, State.DEPLOYED, deploy),
+            (State.DEPLOYED, State.NEIGHBOR_ONLY, forward),
+            (State.NEIGHBOR_ONLY, State.DEPLOYED, backward),
+        )
+
+        with pytest.raises(_UnreachableStateError, match="No path from state"):
+            _build_execution_plan(
+                current_state=State.EMPTY_MODEL,
+                pure_clusters={State.NO_CONTROLLER: [unreachable_pure]},
+                selected_transitions=defaultdict(list),
+                all_transitions=all_transitions,
+                full_graph=graph,
+            )
+
+    def test_cycle_with_many_pure_clusters(self, make_item: Callable[..., pytest.Item]) -> None:
+        """There should be a valid plan that reaches all pure clusters without infinite loops, even with many states and cycles."""
+        deploy = make_item("test_deploy")
+        forward = make_item("test_forward")
+        backward = make_item("test_backward")
+        kill_controller = make_item("test_kill_controller")
+        pure_1 = make_item("test_pure_1")
+        pure_2 = make_item("test_pure_2")
+        pure_3 = make_item("test_pure_3")
+
+        graph, all_transitions = _graph_and_all(
+            (State.EMPTY_MODEL, State.DEPLOYED, deploy),
+            (State.DEPLOYED, State.NEIGHBOR_ONLY, forward),
+            (State.NEIGHBOR_ONLY, State.DEPLOYED, backward),
+        )
+
+        plan = _build_execution_plan(
+            current_state=State.EMPTY_MODEL,
+            pure_clusters={
+                State.DEPLOYED: [pure_3],
+                State.NEIGHBOR_ONLY: [pure_2],
+                State.NO_CONTROLLER: [pure_1],
+            },
+            selected_transitions=defaultdict(
+                list,
+                {
+                    StateTransition(State.DEPLOYED, State.NO_CONTROLLER): [kill_controller],
+                },
+            ),
+            all_transitions=all_transitions,
+            full_graph=graph,
+        )
+
+        assert pure_1 in plan
+        assert pure_2 in plan
+        assert pure_3 in plan
+        assert deploy in plan
+        assert kill_controller in plan
+        assert plan.index(pure_1) > plan.index(pure_3)
+        assert plan.index(pure_1) > plan.index(pure_2)
 
 
 # ---------------------------------------------------------------------------
