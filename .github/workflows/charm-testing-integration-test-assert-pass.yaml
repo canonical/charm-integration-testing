@@ -51,7 +51,7 @@ jobs:
           arch: charm-testing-integration-test-assert-pass-arch
           environment: charm-testing-integration-test-assert-pass-environment
           test_plan: charm-testing-integration-test-assert-pass-test_plan
-          track: 14
+          track: charm-testing-integration-test-assert-pass-track
           risk: stable
           status: NOT_STARTED
       - name: Trigger Charm Tests
@@ -75,8 +75,7 @@ jobs:
               "neighbor_endpoint": "${{ inputs.neighbor_endpoint }}",
               "revision": "${{ inputs.target_revision }}",
               "series": "${{ inputs.target_base }}",
-              "substrate": "${{ inputs.substrate }}",
-              "channel": "14/stable"
+              "substrate": "${{ inputs.substrate }}"
             }
       - name: Ensure Charm Tests Workflow Success
         shell: bash
