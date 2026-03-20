@@ -226,6 +226,9 @@ def test_deploy(
     model: str,
     bundle: Path,
     target_application: str,
+    target_charm: str,
+    target_channel: str | None,
+    target_revision: int | None,
     tmp_path: Path,
 ) -> None:
     test_observer_api = os.getenv("TEST_OBSERVER_API") or os.getenv("test_observer_api")
@@ -234,17 +237,11 @@ def test_deploy(
     if not test_observer_api:
         pytest.skip("TEST_OBSERVER_API is required to query artefacts history")
 
-    target_charm = os.getenv("target-charm")
-    if not isinstance(target_charm, str) or not target_charm:
-        pytest.fail(f"Application '{target_application}' is missing a valid charm in bundle {bundle}")
+    if target_revision is None:
+        pytest.fail("--target-revision must be provided as an integer for this test.")
 
-    current_revision = os.getenv("target-revision")
-    if not isinstance(current_revision, int):
-        pytest.fail(f"Application '{target_application}' is missing an integer revision in bundle {bundle}")
-
-    # Extract stage and track from the 'channel' environment variable (passed from charm-testing.yaml)
-    channel_env = os.getenv("target-channel", "")
-    track, stage = _extract_track_and_stage(channel_env)
+    # Extract stage and track from --target-channel passed by charm-testing.yaml.
+    track, stage = _extract_track_and_stage(target_channel)
 
     # Get all applications from the model
     apps = list(juju_client.list_applications(model=model).keys())
@@ -260,7 +257,7 @@ def test_deploy(
         token=test_observer_token,
         charm_name=target_charm,
         stage=stage,
-        current_revision=current_revision,
+        current_revision=target_revision,
         track=track,
     )
     if selected_revision is None:
