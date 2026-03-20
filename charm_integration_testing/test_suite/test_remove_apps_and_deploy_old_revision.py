@@ -131,7 +131,7 @@ def query_test_results_for_execution(
                 raise
 
     raise RuntimeError(
-        "Unable to query /v1/test-results for test execution "
+        "Unable to query /v1/test-results for test execution"
         f"{execution_id}; all supported query parameters failed: {errors}"
     )
 
