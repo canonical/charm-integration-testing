@@ -407,20 +407,19 @@ class JubilantBackend(JujuCmdBackend):
         return {}
 
     def is_k8s_model(self, model: str) -> bool:
-        return self.client.model(model).show_model().model_type == "kubernetes"
+        return self.client.model(model).show_model().type == "kubernetes"
 
     def reboot_model_controller_leader(self, model: str) -> None:
         controller_name = self.status(model).model.controller
         controller_model = f"{controller_name}:controller"
+
         if not self.is_k8s_model(model=controller_model):
             # reboot the leader
             self.ssh(model=controller_model, application="controller/leader", command="sudo reboot || true")
         else:
             controller_k8s_namespace = f"controller-{controller_name}"
             k8s_client = KubernetesClient(KubernetesBackend.k8s_client(kubeconfig=os.environ.get("KUBECONFIG")))
-            k8s_client.restart_statefulset(
-                namespace=controller_k8s_namespace, statefulset_name="statefulset/controller"
-            )
+            k8s_client.restart_statefulset(namespace=controller_k8s_namespace, statefulset_name="controller")
             k8s_client.wait_for_statefulset_restart(
-                namespace=controller_k8s_namespace, statefulset_name="statefulset/controller", timeout_seconds=300
+                namespace=controller_k8s_namespace, statefulset_name="controller", timeout_seconds=300
             )
