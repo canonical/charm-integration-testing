@@ -11,6 +11,7 @@ from subprocess import CalledProcessError, run  # nosec
 from typing import Any, Callable, Iterator
 
 import pytest
+import requests
 from extensions import (
     ConfigureLivepatchServerExtension,
     PostgresqlDatabaseReplicationExtension,
@@ -42,6 +43,164 @@ KNOWN_FAILURE_EXCEPTIONS = (
     JujuValidationError,
     AssertionError,
 )
+
+
+def _build_test_observer_headers(token: str | None) -> dict[str, str]:
+    """Helper to build headers for Test Observer API requests."""
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
+
+
+def _extract_first_list(payload: dict[str, Any] | list[dict[str, Any]], *keys: str) -> list[dict[str, Any]]:
+    """Helper to extract first matching list from nested payload."""
+    if isinstance(payload, list):
+        return [item for item in payload if isinstance(item, dict)]
+    for key in keys:
+        value = payload.get(key)
+        if isinstance(value, list):
+            return [item for item in value if isinstance(item, dict)]
+    return []
+
+
+def _extract_id(item: dict[str, Any] | list[dict[str, Any]], *keys: str) -> int | None:
+    """Helper to extract ID from item, trying multiple key names."""
+    if isinstance(item, list):
+        for sub_item in item:
+            result = _extract_id(sub_item, *keys)
+            if result is not None:
+                return result
+        return None
+    for key in keys:
+        value = item.get(key)
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str) and value.isdigit():
+            return int(value)
+    return None
+
+
+def _has_test_deploy_passed(test_results_payload: dict[str, Any] | list[dict[str, Any]]) -> bool:
+    """Helper to check if test_deploy passed in results."""
+    test_results = _extract_first_list(test_results_payload, "test_results", "results", "items")
+    for result in test_results:
+        if result.get("name") == "test_deploy" and str(result.get("status", "")).lower() == "passed":
+            return True
+    return False
+
+
+@pytest.fixture
+def choose_historical_revision_with_passing_deploy() -> Callable[[str, str, int, str], int | None]:
+    """Fixture for querying Test Observer API and selecting a historical revision with passing deploy."""
+    api_url = os.environ.get("TEST_OBSERVER_API") or os.environ.get("test_observer_api")
+    token = os.environ.get("TEST_OBSERVER_TOKEN") or os.environ.get("test_observer_token")
+
+    if not api_url:
+        raise RuntimeError("TEST_OBSERVER_API is not configured")
+
+    api_url = api_url.rstrip("/")
+    headers = _build_test_observer_headers(token)
+
+    def _json_object(response: requests.Response, endpoint: str) -> dict[str, Any] | list[dict[str, Any]]:
+        payload = response.json()
+        if not (isinstance(payload, dict) or isinstance(payload, list)):
+            raise RuntimeError(f"Unexpected JSON payload from {endpoint}: expected object or list")
+        return payload
+
+    def _query_artefacts_history(stage: str, name: str, track: str) -> dict[str, Any] | list[dict[str, Any]]:
+        params: dict[str, str | int] = {
+            "family": "charm",
+            "limit": 10,
+            "offset": 0,
+            "stage": stage,
+            "name": name,
+            "track": track,
+        }
+        response = requests.get(
+            f"{api_url}/v1/artefacts/history",
+            params=params,
+            headers=headers,
+            timeout=30,
+        )
+        response.raise_for_status()
+        return _json_object(response, "/v1/artefacts/history")
+
+    def _query_artefact_builds(artefact_id: int) -> dict[str, Any] | list[dict[str, Any]]:
+        response = requests.get(
+            f"{api_url}/v1/artefacts/{artefact_id}/builds",
+            params={"limit": 100, "offset": 0},
+            headers=headers,
+            timeout=30,
+        )
+        response.raise_for_status()
+        return _json_object(response, "/v1/artefacts/{artefact_id}/builds")
+
+    def _query_test_results_for_execution(execution_id: int) -> dict[str, Any] | list[dict[str, Any]]:
+        direct_response = requests.get(
+            f"{api_url}/v1/test-executions/{execution_id}/test-results",
+            headers=headers,
+            timeout=30,
+        )
+        if direct_response.status_code == 200:
+            return {"test_results": direct_response.json()}
+
+        errors: list[requests.HTTPError] = []
+        for query_key in ("test_execution", "test_execution_id", "test_execution_ids"):
+            response = requests.get(
+                f"{api_url}/v1/test-results",
+                params={query_key: execution_id, "limit": 200, "offset": 0},
+                headers=headers,
+                timeout=30,
+            )
+            try:
+                response.raise_for_status()
+                return _json_object(response, "/v1/test-results")
+            except requests.HTTPError as exc:
+                errors.append(exc)
+                if response.status_code not in (400, 422):
+                    raise
+
+        raise RuntimeError(
+            "Unable to query /v1/test-results for test execution "
+            f"{execution_id}; all supported query parameters failed: {errors}"
+        )
+
+    def _choose_revision(charm_name: str, stage: str, current_revision: int, track: str) -> int | None:
+        history_payload = _query_artefacts_history(stage=stage, name=charm_name, track=track)
+        artefacts = _extract_first_list(history_payload, "artefacts", "items", "results", "data")
+
+        for artefact in artefacts:
+            artefact_id = _extract_id(artefact, "id", "artefact_id", "artifact_id")
+            if artefact_id is None:
+                continue
+
+            builds_payload = _query_artefact_builds(artefact_id=artefact_id)
+            builds = _extract_first_list(builds_payload, "builds", "items", "results", "data")
+
+            for build in builds:
+                revision = _extract_id(build, "revision")
+                if revision is None or revision == current_revision:
+                    continue
+
+                executions = build.get("test_executions")
+                if not isinstance(executions, list):
+                    continue
+
+                for execution in executions:
+                    if not isinstance(execution, dict):
+                        continue
+                    execution_id = _extract_id(execution, "id", "test_execution_id")
+                    if execution_id is None:
+                        continue
+
+                    test_results_payload = _query_test_results_for_execution(execution_id=execution_id)
+                    if _has_test_deploy_passed(test_results_payload):
+                        return revision
+
+        return None
+
+    return _choose_revision
 
 
 @pytest.fixture
