@@ -75,7 +75,8 @@ jobs:
               "neighbor_endpoint": "${{ inputs.neighbor_endpoint }}",
               "revision": "${{ inputs.target_revision }}",
               "series": "${{ inputs.target_base }}",
-              "substrate": "${{ inputs.substrate }}"
+              "substrate": "${{ inputs.substrate }}",
+              "channel": "charm-testing-integration-test-assert-pass-track/stable"
             }
       - name: Ensure Charm Tests Workflow Success
         shell: bash
