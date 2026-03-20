@@ -3,7 +3,6 @@
 
 
 import dataclasses
-import os
 import pathlib
 import re
 import time
@@ -44,14 +43,16 @@ from .wait import (
 
 class JubilantBackend(JujuCmdBackend):
     client: JubilantClient
+    kubernetes_client: KubernetesClient
 
     default_timeout = timedelta(minutes=5)
     default_successes = 3
     default_delay = timedelta(seconds=1)
 
-    def __init__(self, client: JubilantClient | None = None):
+    def __init__(self, client: JubilantClient | None = None, kubernetes_client: KubernetesClient | None = None):
         super().__init__()
         self.client = client or JubilantClient()
+        self.kubernetes_client = kubernetes_client or KubernetesClient(KubernetesBackend.k8s_client())
 
     @warn_performance(category=JujuStatusPerformanceWarning, threshold=timedelta(seconds=5))
     def status(self, model: str) -> jubilant.Status:
@@ -419,8 +420,9 @@ class JubilantBackend(JujuCmdBackend):
             self.ssh(model=controller_model, application="controller/leader", command="sudo reboot || true")
         else:
             controller_k8s_namespace = f"controller-{controller_name}"
-            k8s_client = KubernetesClient(KubernetesBackend.k8s_client(kubeconfig=os.environ.get("KUBECONFIG")))
-            k8s_client.restart_statefulset(namespace=controller_k8s_namespace, statefulset_name="controller")
-            k8s_client.wait_for_statefulset_restart(
+            self.kubernetes_client.restart_statefulset(
+                namespace=controller_k8s_namespace, statefulset_name="controller"
+            )
+            self.kubernetes_client.wait_for_statefulset_restart(
                 namespace=controller_k8s_namespace, statefulset_name="controller", timeout_seconds=300
             )

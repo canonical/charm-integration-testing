@@ -174,7 +174,7 @@ class KubernetesClient:
 
     def restart_statefulset(self, namespace: str, statefulset_name: str) -> None:
         # Define the update timestamp
-        now = datetime.now(timezone.utc).isoformat() + "Z"
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
         # This updates the pod template's metadata annotations
         body = {"spec": {"template": {"metadata": {"annotations": {"kubectl.kubernetes.io/restartedAt": now}}}}}
@@ -185,7 +185,7 @@ class KubernetesClient:
             self.logger.error(
                 f"Failed to start rollout restart for Statefulset: '{statefulset_name}' in namespace '{namespace}': {e}"
             )
-            raise e
+            raise
 
     def wait_for_statefulset_restart(self, namespace: str, statefulset_name: str, timeout_seconds: int = 300) -> None:
         watcher = watch.Watch()
@@ -194,45 +194,48 @@ class KubernetesClient:
             sts = self.backend.AppsV1Api.read_namespaced_stateful_set(name=statefulset_name, namespace=namespace)
             target_generation = sts.metadata.generation
         except ApiException as e:
-            self.logger.error(f"Error fetching statefulset '{statefulset_name}' in namespace '{namespace}'.")
-            raise e
+            self.logger.error(f"Error fetching statefulset '{statefulset_name}' in namespace '{namespace}': {e}.")
+            raise
 
         self.logger.info(f"Waiting for StatefulSet '{statefulset_name}' to reach generation '{target_generation}'.")
-        for event in watcher.stream(
-            self.backend.AppsV1Api.list_namespaced_stateful_set,
-            namespace=namespace,
-            field_selector=f"metadata.name={statefulset_name}",
-            timeout_seconds=timeout_seconds,
-        ):
-            sts = event["object"]
-            status = sts.status
+        try:
+            for event in watcher.stream(
+                self.backend.AppsV1Api.list_namespaced_stateful_set,
+                namespace=namespace,
+                field_selector=f"metadata.name={statefulset_name}",
+                timeout_seconds=timeout_seconds,
+            ):
+                sts = event["object"]
+                status = sts.status
 
-            if status.observed_generation < target_generation:
-                self.logger.info("Waiting: K8s Controller hasn't processed the update yet.")
-                continue
+                if status.observed_generation < target_generation:
+                    self.logger.info("Waiting: K8s Controller hasn't processed the update yet.")
+                    continue
 
-            # If we use RollingUpdate, check if all replicas are updated
-            # updated_replicas refers to pods running the latest pod template
-            updated = status.updated_replicas or 0
-            ready = status.ready_replicas or 0
-            total = sts.spec.replicas
+                # If we use RollingUpdate, check if all replicas are updated
+                # updated_replicas refers to pods running the latest pod template
+                updated = status.updated_replicas or 0
+                ready = status.ready_replicas or 0
+                replicas = sts.spec.replicas
+                total = int(replicas) if replicas is not None else 1
 
-            if updated < total:
-                self.logger.debug(f"Updating: {updated}/{total} pods are on the new version.")
-                continue
+                if updated < total:
+                    self.logger.debug(f"Updating: {updated}/{total} pods are on the new version.")
+                    continue
 
-            # Check if they are actually Ready (passing probes)
-            if ready < total:
-                self.logger.debug(f"Waiting: {ready}/{total} pods are Ready.")
-                continue
+                # Check if they are actually Ready (passing probes)
+                if ready < total:
+                    self.logger.debug(f"Waiting: {ready}/{total} pods are Ready.")
+                    continue
 
-            self.logger.info(f"Successfully rolled out generation '{target_generation}'.")
+                self.logger.info(f"Successfully rolled out generation '{target_generation}'.")
+                return
+
+            self.logger.error(
+                f"Waiting for rollout restart on StatefulSet '{statefulset_name}' in namespace '{namespace}' timed out."
+            )
+            raise TimeoutError(
+                f"Waiting for rollout restart on StatefulSet '{statefulset_name}' in namespace '{namespace}' timed out."
+            )
+        finally:
             watcher.stop()
-            return
-
-        self.logger.error(
-            f"Waiting for rollout restart on StatefulSet '{statefulset_name}' in namespace '{namespace}' timed out."
-        )
-        raise TimeoutError(
-            f"Waiting for rollout restart on StatefulSet '{statefulset_name}' in namespace '{namespace}' timed out."
-        )

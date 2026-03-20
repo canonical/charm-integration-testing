@@ -326,7 +326,7 @@ def _mark_as_injected(item: pytest.Item) -> None:
     # pytest exposes no public API to override the node ID; _nodeid is the
     # backing attribute for the read-only ``nodeid`` property.  This is a
     # known limitation: revisit if pytest removes or renames _nodeid.
-    item._nodeid = f"[injected] {original_name}"
+    item._nodeid = f"[injected] {item._nodeid}"
 
 
 def _build_execution_plan(
