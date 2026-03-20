@@ -22,7 +22,6 @@ from extensions import (
     ValidatorInjectorExtension,
 )
 from juju import JujuBackend, JujuClient, JujuValidationError, JujuWaitTimeoutError
-from juju_cmd.backend import JujuCmdBackend
 from juju_jubilant import JubilantBackend
 from kubernetes_client import KubernetesBackend, KubernetesClient
 from pydantic import TypeAdapter, ValidationError
@@ -884,7 +883,7 @@ def record_pipeline_version_execution_metadata(
 
 
 @pytest.fixture
-def _is_running_on_kubernetes(juju_backend: JujuCmdBackend, model: str) -> None:
+def _is_running_on_kubernetes(juju_backend: JujuBackend, model: str) -> None:
     if not juju_backend.is_k8s_model(model):
         pytest.skip("Not kubernetes")
 

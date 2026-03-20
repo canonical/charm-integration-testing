@@ -12,7 +12,7 @@ from .scheduler.states import State
 @pytest.mark.state(requires=State.DEPLOYED, provides=State.EMPTY_MODEL)
 def test_controller_restart(juju_client: JujuClient, model: str) -> None:
     # Reboot our controllers with a rolling reboot
-    juju_client.reboot_model_controller_leader(model=model)
+    juju_client.reboot_model_controller(model=model)
 
     # Wait until idle
     juju_client.idle_for_period(model=model, timeout=timedelta(minutes=15))

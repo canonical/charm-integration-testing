@@ -218,12 +218,12 @@ class KubernetesClient:
             total = sts.spec.replicas
 
             if updated < total:
-                self.logger.info(f"Updating: {updated}/{total} pods are on the new version.")
+                self.logger.debug(f"Updating: {updated}/{total} pods are on the new version.")
                 continue
 
-            # RULE C: Check if they are actually Ready (passing probes)
+            # Check if they are actually Ready (passing probes)
             if ready < total:
-                self.logger.info(f"Waiting: {ready}/{total} pods are Ready.")
+                self.logger.debug(f"Waiting: {ready}/{total} pods are Ready.")
                 continue
 
             self.logger.info(f"Successfully rolled out generation '{target_generation}'.")

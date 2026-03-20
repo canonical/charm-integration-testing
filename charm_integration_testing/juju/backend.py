@@ -155,7 +155,11 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def reboot_model_controller_leader(self, model: str) -> None:
+    def reboot_model_controller(self, model: str) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def is_k8s_model(self, model: str) -> bool:
         raise NotImplementedError
 
     @abstractmethod
