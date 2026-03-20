@@ -446,7 +446,10 @@ def _build_execution_plan(
         return s
 
     def _inject_bridge(
-        path: list[tuple[StateTransition, pytest.Item]], plan: list[pytest.Item], scheduled: set[pytest.Item]
+        path: list[tuple[StateTransition, pytest.Item]],
+        plan: list[pytest.Item],
+        scheduled: set[pytest.Item],
+        injected_ids: set[int],
     ) -> None:
         """Inject one bridging transition item per edge along *path*.
 
@@ -460,6 +463,12 @@ def _build_execution_plan(
         bridging test can be injected again if the scheduler needs to cross
         the same edge multiple times (e.g. when two selected tests share an
         edge and each needs a fresh environment).
+
+        Injected item IDs are recorded in *injected_ids* rather than applied
+        immediately. ``_mark_as_injected`` must only be called after the
+        backtracking search has committed to a final plan; calling it inside
+        a speculative branch permanently mutates the pytest item even if that
+        branch is later abandoned.
         """
         for transition, _graph_item in path:
             # Always fall back to a pure bridge so the environment actually
@@ -468,7 +477,7 @@ def _build_execution_plan(
             if not candidates:
                 continue
             bridge_item = candidates[0]
-            _mark_as_injected(bridge_item)
+            injected_ids.add(id(bridge_item))
             plan.append(bridge_item)
 
     # Keys are (current_state, remaining_destinations). We only memoize dead ends.
@@ -480,7 +489,8 @@ def _build_execution_plan(
         current_state: State,
         current_plan: list[pytest.Item],
         scheduled: set[pytest.Item],
-    ) -> list[pytest.Item] | None:
+        injected_ids: set[int],
+    ) -> tuple[list[pytest.Item], set[int]] | None:
         """Recursively search for a valid ordering of destinations using backtracking.
 
         Tries each reachable remaining destination. If a path leads to an
@@ -489,12 +499,14 @@ def _build_execution_plan(
         Uses dead-end memoization to prune known-unsatisfiable branches and an
         in-flight cycle guard (``visiting``) to prevent infinite recursion.
 
-        Returns the completed plan if successful, None if this branch is a dead end.
+        Returns ``(plan, injected_ids)`` when a valid plan is found, or ``None``
+        if this branch is a dead end.  ``injected_ids`` is a per-branch copy so
+        that abandoned branches cannot permanently mark pytest items as injected.
         """
         remaining_destinations = _unscheduled_destinations(scheduled)
         if not remaining_destinations:
             # All destinations have been scheduled; return the plan.
-            return current_plan
+            return current_plan, injected_ids
 
         memo_key = (current_state, frozenset(remaining_destinations))
 
@@ -520,18 +532,21 @@ def _build_execution_plan(
                     # Can't reach this destination from the current state; try another.
                     continue
 
-                # Create a copy of the plan and scheduled set for this branch.
+                # Create a copy of the plan, scheduled set, and injected-IDs set for
+                # this branch. injected_ids must be copied so that a failed branch
+                # cannot permanently label items via _mark_as_injected.
                 branch_plan = current_plan[:]
                 branch_scheduled = scheduled.copy()
+                branch_injected = injected_ids.copy()
 
                 # Inject bridging transitions to reach the target.
-                _inject_bridge(raw_path, branch_plan, branch_scheduled)
+                _inject_bridge(raw_path, branch_plan, branch_scheduled, branch_injected)
 
                 # Run the user-selected items at this destination.
                 new_state = _run_selected_at(target_state, branch_plan, branch_scheduled)
 
                 # Recurse; remaining destinations are recomputed from unscheduled items.
-                result = _backtrack_search(new_state, branch_plan, branch_scheduled)
+                result = _backtrack_search(new_state, branch_plan, branch_scheduled, branch_injected)
 
                 if result is not None:
                     # Found a valid complete path on this branch.
@@ -561,7 +576,7 @@ def _build_execution_plan(
     # Use exhaustive backtracking to find a valid ordering of destinations.
     # ------------------------------------------------------------------
     if remaining:
-        backtrack_result = _backtrack_search(state, plan, scheduled)
+        backtrack_result = _backtrack_search(state, plan, scheduled, set())
         if backtrack_result is None:
             raise _UnreachableStateError(
                 f"No path from state '{state}' to any of the remaining required states "
@@ -570,6 +585,12 @@ def _build_execution_plan(
                 "Add a transition test for the missing edge or set --current-state "
                 "to a state closer to the required one."
             )
-        plan = backtrack_result
+        plan, final_injected_ids = backtrack_result
+        # Apply injected labels only now, after the final plan is committed.
+        # Doing this inside speculative backtracking branches would permanently
+        # mutate pytest items even when those branches are later abandoned.
+        for item in plan:
+            if id(item) in final_injected_ids:
+                _mark_as_injected(item)
 
     return plan
