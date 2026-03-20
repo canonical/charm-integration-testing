@@ -3,7 +3,6 @@
 
 import time
 from datetime import timedelta
-from pathlib import Path
 
 import pytest
 from juju import JujuClient
