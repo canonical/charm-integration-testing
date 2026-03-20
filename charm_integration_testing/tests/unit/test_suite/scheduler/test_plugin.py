@@ -188,6 +188,60 @@ class TestBuildExecutionPlan:
         # THEN deploy is never labelled as injected
         assert deploy.get_closest_marker("injected") is None
 
+    def test_selected_transition_not_labelled_when_abandoned_branch_tried_it_as_bridge(
+        self, make_item: Callable[..., pytest.Item]
+    ) -> None:
+        """Regression: user-selected transition must not be marked injected due to a dead-end branch.
+
+        Scenario mirrors the real suite run with --current-state no_bundle:
+        * Graph: NO_CONTROLLER → EMPTY_MODEL (bridge) → DEPLOYED (deploy) → NEIGHBOR_ONLY (teardown) → DEPLOYED (redeploy)
+        * Starting state: NO_CONTROLLER
+        * User selection: deploy (EMPTY_MODEL→DEPLOYED), teardown (DEPLOYED→NEIGHBOR_ONLY), redeploy (NEIGHBOR_ONLY→DEPLOYED)
+        * Sorted destination order: deployed < empty_model < neighbor_only
+        * The scheduler first tries DEPLOYED, which requires bridging via EMPTY_MODEL→DEPLOYED,
+          causing _inject_bridge to speculatively label 'deploy'.  That branch turns out to be a
+          dead-end (no path back to EMPTY_MODEL), so it's abandoned.
+        * The correct branch via EMPTY_MODEL runs 'deploy' as a user-selected destination —
+          it must NOT carry the [injected] label from the discarded branch.
+        """
+        bridge_to_empty = make_item("test_bridge_to_empty")  # NO_CONTROLLER → EMPTY_MODEL
+        deploy = make_item("test_deploy")  # EMPTY_MODEL → DEPLOYED  (user-selected)
+        teardown = make_item("test_teardown")  # DEPLOYED → NEIGHBOR_ONLY (user-selected)
+        redeploy = make_item("test_redeploy")  # NEIGHBOR_ONLY → DEPLOYED (user-selected)
+
+        graph, all_transitions = _graph_and_all(
+            (State.NO_CONTROLLER, State.EMPTY_MODEL, bridge_to_empty),
+            (State.EMPTY_MODEL, State.DEPLOYED, deploy),
+            (State.DEPLOYED, State.NEIGHBOR_ONLY, teardown),
+            (State.NEIGHBOR_ONLY, State.DEPLOYED, redeploy),
+        )
+
+        # WHEN deploy, teardown, and redeploy are all user-selected
+        plan = _build_execution_plan(
+            current_state=State.NO_CONTROLLER,
+            pure_clusters=defaultdict(list),
+            selected_transitions=defaultdict(
+                list,
+                {
+                    StateTransition(State.EMPTY_MODEL, State.DEPLOYED): [deploy],
+                    StateTransition(State.DEPLOYED, State.NEIGHBOR_ONLY): [teardown],
+                    StateTransition(State.NEIGHBOR_ONLY, State.DEPLOYED): [redeploy],
+                },
+            ),
+            all_transitions=all_transitions,
+            full_graph=graph,
+        )
+
+        # THEN deploy is in the plan
+        assert deploy in plan
+
+        # AND deploy is NOT marked injected (it was user-selected, not a bridge)
+        assert deploy.get_closest_marker("injected") is None
+        assert not deploy.name.startswith("[injected]")
+
+        # AND only the true bridge is marked injected
+        assert bridge_to_empty.get_closest_marker("injected") is not None
+
     def test_pure_tests_run_before_transition_at_same_state(self, make_item: Callable[..., pytest.Item]) -> None:
         # GIVEN a pure test and a transition both departing from DEPLOYED
         pure = make_item("test_pure")
