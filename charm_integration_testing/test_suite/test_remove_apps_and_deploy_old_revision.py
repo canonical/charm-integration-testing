@@ -3,12 +3,12 @@
 
 from datetime import timedelta
 from pathlib import Path
+from typing import Callable
 
 import pytest
 import yaml
 from juju import JujuClient
 
-from .conftest import TestObserverClient
 from .scheduler.states import State
 
 
@@ -48,18 +48,15 @@ def create_bundle_with_revision_override(
 @pytest.mark.state(requires=State.DEPLOYED, provides=State.OLD_REVISION)
 def test_deploy(
     juju_client: JujuClient,
-    test_observer_client: TestObserverClient,
+    choose_historical_revision_with_passing_deploy: Callable[[str, str, int, str], int | None],
     model: str,
     bundle: Path,
     target_application: str,
     target_charm: str,
     target_channel: str | None,
     target_revision: int | None,
-    temp_path: Path,
+    tmp_path: Path,
 ) -> None:
-    if not test_observer_client.enabled:
-        pytest.skip("TEST_OBSERVER_API is required to query artefacts history")
-
     if target_revision is None:
         pytest.fail("--target-revision must be provided as an integer for this test.")
 
@@ -75,7 +72,7 @@ def test_deploy(
         juju_client.wait_for_removal(*apps, model=model, timeout=timedelta(minutes=15))
 
     # Query Test Observer for historical revisions and pick the first one with a passing test_deploy run.
-    selected_revision = test_observer_client.choose_historical_revision_with_passing_deploy(
+    selected_revision = choose_historical_revision_with_passing_deploy(
         charm_name=target_charm,
         stage=stage,
         current_revision=target_revision,
@@ -91,7 +88,7 @@ def test_deploy(
         f"Selected historical revision {selected_revision} for {target_application} ({target_charm})"
     )
 
-    overridden_bundle = temp_path / f"bundle-{target_application}-rev-{selected_revision}.yaml"
+    overridden_bundle = tmp_path / f"bundle-{target_application}-rev-{selected_revision}.yaml"
     create_bundle_with_revision_override(
         source_bundle=bundle,
         destination_bundle=overridden_bundle,

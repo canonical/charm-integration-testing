@@ -45,60 +45,70 @@ KNOWN_FAILURE_EXCEPTIONS = (
 )
 
 
-class TestObserverClient:
-    """Thin client for querying historical charm test data from Test Observer."""
+def _build_test_observer_headers(token: str | None) -> dict[str, str]:
+    """Helper to build headers for Test Observer API requests."""
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
 
-    def __init__(self, api_url: str | None, token: str | None) -> None:
-        self.api_url = api_url.rstrip("/") if api_url else None
-        self.token = token
 
-    @property
-    def enabled(self) -> bool:
-        return self.api_url is not None
+def _extract_first_list(payload: dict[str, Any] | list[dict[str, Any]], *keys: str) -> list[dict[str, Any]]:
+    """Helper to extract first matching list from nested payload."""
+    if isinstance(payload, list):
+        return [item for item in payload if isinstance(item, dict)]
+    for key in keys:
+        value = payload.get(key)
+        if isinstance(value, list):
+            return [item for item in value if isinstance(item, dict)]
+    return []
 
-    def _build_headers(self) -> dict[str, str]:
-        headers = {"Content-Type": "application/json"}
-        if self.token:
-            headers["Authorization"] = f"Bearer {self.token}"
-        return headers
 
-    def _ensure_api_url(self) -> str:
-        if not self.api_url:
-            raise RuntimeError("TEST_OBSERVER_API is not configured")
-        return self.api_url
+def _extract_id(item: dict[str, Any] | list[dict[str, Any]], *keys: str) -> int | None:
+    """Helper to extract ID from item, trying multiple key names."""
+    if isinstance(item, list):
+        for sub_item in item:
+            result = _extract_id(sub_item, *keys)
+            if result is not None:
+                return result
+        return None
+    for key in keys:
+        value = item.get(key)
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str) and value.isdigit():
+            return int(value)
+    return None
 
-    def _json_object(self, response: requests.Response, endpoint: str) -> dict[str, Any] | list[dict[str, Any]]:
+
+def _has_test_deploy_passed(test_results_payload: dict[str, Any] | list[dict[str, Any]]) -> bool:
+    """Helper to check if test_deploy passed in results."""
+    test_results = _extract_first_list(test_results_payload, "test_results", "results", "items")
+    for result in test_results:
+        if result.get("name") == "test_deploy" and str(result.get("status", "")).lower() == "passed":
+            return True
+    return False
+
+
+@pytest.fixture
+def choose_historical_revision_with_passing_deploy() -> Callable[[str, str, int, str], int | None]:
+    """Fixture for querying Test Observer API and selecting a historical revision with passing deploy."""
+    api_url = os.environ.get("TEST_OBSERVER_API") or os.environ.get("test_observer_api")
+    token = os.environ.get("TEST_OBSERVER_TOKEN") or os.environ.get("test_observer_token")
+
+    if not api_url:
+        raise RuntimeError("TEST_OBSERVER_API is not configured")
+
+    api_url = api_url.rstrip("/")
+    headers = _build_test_observer_headers(token)
+
+    def _json_object(response: requests.Response, endpoint: str) -> dict[str, Any] | list[dict[str, Any]]:
         payload = response.json()
         if not (isinstance(payload, dict) or isinstance(payload, list)):
             raise RuntimeError(f"Unexpected JSON payload from {endpoint}: expected object or list")
         return payload
 
-    def _extract_first_list(self, payload: dict[str, Any] | list[dict[str, Any]], *keys: str) -> list[dict[str, Any]]:
-        if isinstance(payload, list):
-            return [item for item in payload if isinstance(item, dict)]
-        for key in keys:
-            value = payload.get(key)
-            if isinstance(value, list):
-                return [item for item in value if isinstance(item, dict)]
-        return []
-
-    def _extract_id(self, item: dict[str, Any] | list[dict[str, Any]], *keys: str) -> int | None:
-        if isinstance(item, list):
-            for sub_item in item:
-                result = self._extract_id(sub_item, *keys)
-                if result is not None:
-                    return result
-            return None
-        for key in keys:
-            value = item.get(key)
-            if isinstance(value, int):
-                return value
-            if isinstance(value, str) and value.isdigit():
-                return int(value)
-        return None
-
-    def _query_artefacts_history(self, stage: str, name: str, track: str) -> dict[str, Any] | list[dict[str, Any]]:
-        api_url = self._ensure_api_url()
+    def _query_artefacts_history(stage: str, name: str, track: str) -> dict[str, Any] | list[dict[str, Any]]:
         params: dict[str, str | int] = {
             "family": "charm",
             "limit": 10,
@@ -110,29 +120,26 @@ class TestObserverClient:
         response = requests.get(
             f"{api_url}/v1/artefacts/history",
             params=params,
-            headers=self._build_headers(),
+            headers=headers,
             timeout=30,
         )
         response.raise_for_status()
-        return self._json_object(response, "/v1/artefacts/history")
+        return _json_object(response, "/v1/artefacts/history")
 
-    def _query_artefact_builds(self, artefact_id: int) -> dict[str, Any] | list[dict[str, Any]]:
-        api_url = self._ensure_api_url()
+    def _query_artefact_builds(artefact_id: int) -> dict[str, Any] | list[dict[str, Any]]:
         response = requests.get(
             f"{api_url}/v1/artefacts/{artefact_id}/builds",
             params={"limit": 100, "offset": 0},
-            headers=self._build_headers(),
+            headers=headers,
             timeout=30,
         )
         response.raise_for_status()
-        return self._json_object(response, "/v1/artefacts/{artefact_id}/builds")
+        return _json_object(response, "/v1/artefacts/{artefact_id}/builds")
 
-    def _query_test_results_for_execution(self, execution_id: int) -> dict[str, Any] | list[dict[str, Any]]:
-        api_url = self._ensure_api_url()
-
+    def _query_test_results_for_execution(execution_id: int) -> dict[str, Any] | list[dict[str, Any]]:
         direct_response = requests.get(
             f"{api_url}/v1/test-executions/{execution_id}/test-results",
-            headers=self._build_headers(),
+            headers=headers,
             timeout=30,
         )
         if direct_response.status_code == 200:
@@ -143,12 +150,12 @@ class TestObserverClient:
             response = requests.get(
                 f"{api_url}/v1/test-results",
                 params={query_key: execution_id, "limit": 200, "offset": 0},
-                headers=self._build_headers(),
+                headers=headers,
                 timeout=30,
             )
             try:
                 response.raise_for_status()
-                return self._json_object(response, "/v1/test-results")
+                return _json_object(response, "/v1/test-results")
             except requests.HTTPError as exc:
                 errors.append(exc)
                 if response.status_code not in (400, 422):
@@ -159,33 +166,20 @@ class TestObserverClient:
             f"{execution_id}; all supported query parameters failed: {errors}"
         )
 
-    def _has_test_deploy_passed(self, test_results_payload: dict[str, Any] | list[dict[str, Any]]) -> bool:
-        test_results = self._extract_first_list(test_results_payload, "test_results", "results", "items")
-        for result in test_results:
-            if result.get("name") == "test_deploy" and str(result.get("status", "")).lower() == "passed":
-                return True
-        return False
-
-    def choose_historical_revision_with_passing_deploy(
-        self,
-        charm_name: str,
-        stage: str,
-        current_revision: int,
-        track: str,
-    ) -> int | None:
-        history_payload = self._query_artefacts_history(stage=stage, name=charm_name, track=track)
-        artefacts = self._extract_first_list(history_payload, "artefacts", "items", "results", "data")
+    def _choose_revision(charm_name: str, stage: str, current_revision: int, track: str) -> int | None:
+        history_payload = _query_artefacts_history(stage=stage, name=charm_name, track=track)
+        artefacts = _extract_first_list(history_payload, "artefacts", "items", "results", "data")
 
         for artefact in artefacts:
-            artefact_id = self._extract_id(artefact, "id", "artefact_id", "artifact_id")
+            artefact_id = _extract_id(artefact, "id", "artefact_id", "artifact_id")
             if artefact_id is None:
                 continue
 
-            builds_payload = self._query_artefact_builds(artefact_id=artefact_id)
-            builds = self._extract_first_list(builds_payload, "builds", "items", "results", "data")
+            builds_payload = _query_artefact_builds(artefact_id=artefact_id)
+            builds = _extract_first_list(builds_payload, "builds", "items", "results", "data")
 
             for build in builds:
-                revision = self._extract_id(build, "revision")
+                revision = _extract_id(build, "revision")
                 if revision is None or revision == current_revision:
                     continue
 
@@ -196,22 +190,17 @@ class TestObserverClient:
                 for execution in executions:
                     if not isinstance(execution, dict):
                         continue
-                    execution_id = self._extract_id(execution, "id", "test_execution_id")
+                    execution_id = _extract_id(execution, "id", "test_execution_id")
                     if execution_id is None:
                         continue
 
-                    test_results_payload = self._query_test_results_for_execution(execution_id=execution_id)
-                    if self._has_test_deploy_passed(test_results_payload):
+                    test_results_payload = _query_test_results_for_execution(execution_id=execution_id)
+                    if _has_test_deploy_passed(test_results_payload):
                         return revision
 
         return None
 
-
-@pytest.fixture
-def test_observer_client() -> TestObserverClient:
-    api_url = os.environ.get("TEST_OBSERVER_API") or os.environ.get("test_observer_api")
-    token = os.environ.get("TEST_OBSERVER_TOKEN") or os.environ.get("test_observer_token")
-    return TestObserverClient(api_url=api_url, token=token)
+    return _choose_revision
 
 
 @pytest.fixture
