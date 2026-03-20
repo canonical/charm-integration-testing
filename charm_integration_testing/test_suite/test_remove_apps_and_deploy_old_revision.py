@@ -47,11 +47,11 @@ def _extract_id(item: dict[str, Any] | list[dict[str, Any]], *keys: str) -> int 
     return None
 
 
-def _extract_stage(channel: str | None) -> str:
+def _extract_track_and_stage(channel: str | None) -> tuple[str, str]:
     if not channel:
-        return "stable"
+        return "14", "stable"
     # Channels are usually track/risk, e.g. "latest/edge".
-    return channel.split("/")[-1]
+    return channel.split("/")[0], channel.split("/")[1]
 
 
 def _json_object(response: requests.Response, endpoint: str) -> dict[str, Any] | list[dict[str, Any]]:
@@ -63,7 +63,7 @@ def _json_object(response: requests.Response, endpoint: str) -> dict[str, Any] |
 
 
 def query_artefacts_history(
-    api_url: str, token: str | None, stage: str, name: str
+    api_url: str, token: str | None, stage: str, name: str, track: str
 ) -> dict[str, Any] | list[dict[str, Any]]:
     """Query Test Observer artefacts history endpoint for the current model/bundle context."""
     params: dict[str, str | int] = {
@@ -72,6 +72,7 @@ def query_artefacts_history(
         "offset": 0,
         "stage": stage,
         "name": name,
+        "track": track,
     }
     headers = _build_headers(token)
 
@@ -151,8 +152,9 @@ def choose_historical_revision_with_passing_deploy(
     charm_name: str,
     stage: str,
     current_revision: int,
+    track: str,
 ) -> int | None:
-    history_payload = query_artefacts_history(api_url=api_url, token=token, stage=stage, name=charm_name)
+    history_payload = query_artefacts_history(api_url=api_url, token=token, stage=stage, name=charm_name, track=track)
     artefacts = _extract_first_list(history_payload, "artefacts", "items", "results", "data")
 
     for artefact in artefacts:
@@ -232,28 +234,17 @@ def test_deploy(
     if not test_observer_api:
         pytest.skip("TEST_OBSERVER_API is required to query artefacts history")
 
-    with bundle.open("r", encoding="utf-8") as file:
-        bundle_data = yaml.safe_load(file)
-    if not isinstance(bundle_data, dict):
-        pytest.fail(f"Invalid bundle format in {bundle}")
-
-    applications = bundle_data.get("applications")
-    if not isinstance(applications, dict) or target_application not in applications:
-        pytest.fail(f"Application '{target_application}' not found in bundle {bundle}")
-
-    target_application_data = applications[target_application]
-    if not isinstance(target_application_data, dict):
-        pytest.fail(f"Invalid application entry for '{target_application}' in bundle {bundle}")
-
-    target_charm = target_application_data.get("charm")
+    target_charm = os.getenv("target-charm")
     if not isinstance(target_charm, str) or not target_charm:
         pytest.fail(f"Application '{target_application}' is missing a valid charm in bundle {bundle}")
 
-    current_revision = target_application_data.get("revision")
+    current_revision = os.getenv("target-revision")
     if not isinstance(current_revision, int):
         pytest.fail(f"Application '{target_application}' is missing an integer revision in bundle {bundle}")
 
-    stage = _extract_stage(target_application_data.get("channel"))
+    # Extract stage and track from the 'channel' environment variable (passed from charm-testing.yaml)
+    channel_env = os.getenv("target-channel", "")
+    track, stage = _extract_track_and_stage(channel_env)
 
     # Get all applications from the model
     apps = list(juju_client.list_applications(model=model).keys())
@@ -270,6 +261,7 @@ def test_deploy(
         charm_name=target_charm,
         stage=stage,
         current_revision=current_revision,
+        track=track,
     )
     if selected_revision is None:
         pytest.fail(

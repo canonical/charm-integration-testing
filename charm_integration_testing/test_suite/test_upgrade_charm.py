@@ -1,30 +1,15 @@
 # Copyright 2025-2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import os
 import time
 from datetime import timedelta
 from pathlib import Path
-from typing import Any
 
 import pytest
-import yaml
 from juju import JujuClient
 
 from .scheduler.states import State
-
-
-def _load_target_from_bundle(bundle: Path, target_application: str) -> dict[str, Any]:
-    with bundle.open("r", encoding="utf-8") as file:
-        bundle_data = yaml.safe_load(file)
-    if not isinstance(bundle_data, dict):
-        pytest.fail(f"Invalid bundle format in {bundle}")
-    applications = bundle_data.get("applications")
-    if not isinstance(applications, dict) or target_application not in applications:
-        pytest.fail(f"Application '{target_application}' not found in bundle {bundle}")
-    target_data = applications[target_application]
-    if not isinstance(target_data, dict):
-        pytest.fail(f"Invalid application entry for '{target_application}' in bundle {bundle}")
-    return target_data
 
 
 def _application_revision(juju_client: JujuClient, model: str, application: str) -> int:
@@ -68,12 +53,10 @@ def test_upgrade_charm(
     bundle: Path,
     target_application: str,
 ) -> None:
-    target_data = _load_target_from_bundle(bundle=bundle, target_application=target_application)
-
-    original_revision = target_data.get("revision")
+    original_revision = os.getenv("target-revision")
     if not isinstance(original_revision, int):
         pytest.fail(f"Application '{target_application}' is missing an integer " f"revision in bundle {bundle}")
-    target_channel = target_data.get("channel") if isinstance(target_data.get("channel"), str) else None
+    target_channel = os.getenv("target-channel")
 
     pre_upgrade_revision = _application_revision(juju_client=juju_client, model=model, application=target_application)
     if pre_upgrade_revision == original_revision:
