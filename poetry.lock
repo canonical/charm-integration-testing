@@ -1680,7 +1680,7 @@ name = "validators-base"
 version = "0.1.0"
 description = "Base validator class for Interface Validators Framework (SQ096)"
 optional = false
-python-versions = ">=3.8"
+python-versions = ">=3.10"
 groups = ["main"]
 files = []
 develop = true
