@@ -55,7 +55,7 @@ def test_deploy(
     target_charm: str,
     target_channel: str | None,
     target_revision: int | None,
-    tmp_path: Path,
+    temp_path: Path,
 ) -> None:
     if not test_observer_client.enabled:
         pytest.skip("TEST_OBSERVER_API is required to query artefacts history")
@@ -91,7 +91,7 @@ def test_deploy(
         f"Selected historical revision {selected_revision} for {target_application} ({target_charm})"
     )
 
-    overridden_bundle = tmp_path / f"bundle-{target_application}-rev-{selected_revision}.yaml"
+    overridden_bundle = temp_path / f"bundle-{target_application}-rev-{selected_revision}.yaml"
     create_bundle_with_revision_override(
         source_bundle=bundle,
         destination_bundle=overridden_bundle,
@@ -99,7 +99,7 @@ def test_deploy(
         target_revision=selected_revision,
     )
 
-    # Deploy the original bundle with only the target app revision overridden.
+    # Deploy the original bundle with only the target app revision overridden
     juju_client.deploy_bundle_file(str(overridden_bundle), model=model)
 
     # Wait until idle
