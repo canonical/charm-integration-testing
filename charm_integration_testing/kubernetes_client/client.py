@@ -173,6 +173,20 @@ class KubernetesClient:
             raise
 
     def restart_statefulset(self, namespace: str, statefulset_name: str) -> None:
+        """
+        Triggers a rollout restart of a StatefulSet by patching its pod template annotation.
+
+        Equivalent to `kubectl rollout restart statefulset/<name>`. The restart is
+        performed by setting the `kubectl.kubernetes.io/restartedAt` annotation on the
+        pod template, which causes the controller to re-create all pods in the set.
+
+        Args:
+            namespace: Namespace where the StatefulSet is located.
+            statefulset_name: Name of the StatefulSet to restart.
+
+        Raises:
+            ApiException: If the Kubernetes API call to patch the StatefulSet fails.
+        """
         # Define the update timestamp
         now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -188,6 +202,24 @@ class KubernetesClient:
             raise
 
     def wait_for_statefulset_restart(self, namespace: str, statefulset_name: str, timeout_seconds: int = 300) -> None:
+        """
+        Blocks until a StatefulSet's rollout restart completes or the timeout is reached.
+
+        Watches the StatefulSet for events and considers the restart complete when all
+        replicas have been updated to the latest pod template and are in the Ready state.
+        The expected generation is read once at call time; events whose
+        `observed_generation` is below that threshold are skipped.
+
+        Args:
+            namespace: Namespace where the StatefulSet is located.
+            statefulset_name: Name of the StatefulSet to watch.
+            timeout_seconds: Maximum number of seconds to wait for the rollout to finish.
+                Defaults to 300.
+
+        Raises:
+            ApiException: If the initial StatefulSet read or the watch stream fails.
+            TimeoutError: If the rollout does not complete within `timeout_seconds`.
+        """
         watcher = watch.Watch()
 
         try:

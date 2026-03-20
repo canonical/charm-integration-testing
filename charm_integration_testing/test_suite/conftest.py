@@ -891,6 +891,8 @@ def _is_running_on_kubernetes(juju_backend: JujuBackend, model: str) -> None:
 @pytest.fixture
 def kubernetes_client(
     logger: logging.Logger,
-) -> KubernetesClient:
+) -> KubernetesClient | None:
     kubeconfig = os.environ.get("KUBECONFIG")
-    return KubernetesClient(KubernetesBackend.k8s_client(kubeconfig=kubeconfig), logger=logger)
+    if kubeconfig:
+        return KubernetesClient(KubernetesBackend.k8s_client(kubeconfig=kubeconfig), logger=logger)
+    return None
