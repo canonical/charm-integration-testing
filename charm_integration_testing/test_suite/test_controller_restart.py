@@ -9,7 +9,7 @@ from juju import JujuClient
 from .scheduler.states import State
 
 
-@pytest.mark.state(requires=State.DEPLOYED, provides=State.EMPTY_MODEL)
+@pytest.mark.state(requires=State.DEPLOYED)
 def test_controller_restart(juju_client: JujuClient, model: str) -> None:
     # Reboot our controllers with a rolling reboot
     juju_client.reboot_model_controller(model=model)

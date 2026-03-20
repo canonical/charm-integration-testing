@@ -140,6 +140,12 @@ class NullJujuBackend(JujuBackend):
     def unit_ip(self, model: str, unit: str) -> str:
         raise NotImplementedError
 
+    def reboot_model_controller(self, model: str) -> None:
+        raise NotImplementedError
+
+    def is_k8s_model(self, model: str) -> bool:
+        raise NotImplementedError
+
     def reboot_model_controller_leader(self, model: str) -> None:
         raise NotImplementedError
 
