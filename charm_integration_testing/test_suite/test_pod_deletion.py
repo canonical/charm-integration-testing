@@ -4,7 +4,7 @@ from datetime import timedelta
 
 import pytest
 from juju import JujuClient
-from kubernetes_client import KubernetesClient, PodStatus
+from kubernetes_client import PodStatus
 
 from .scheduler.states import State
 
@@ -13,18 +13,17 @@ from .scheduler.states import State
 @pytest.mark.usefixtures("_is_running_on_kubernetes")  # Gates the test to only run on k8s environments
 def test_pod_deletion(
     juju_client: JujuClient,
-    kubernetes_client: KubernetesClient,
     model: str,
     target_application: str,
 ) -> None:
-    pods = kubernetes_client.get_charm_pods(application_name=target_application, model=model)
+    pods = juju_client.backend.kubernetes_client.get_charm_pods(application_name=target_application, model=model)
     assert len(pods) > 0, f"No pods found in namespace {model} to delete."
 
     pod_to_delete = pods[0]
-    kubernetes_client.delete_pod(namespace=model, pod_name=pod_to_delete.metadata.name)
+    juju_client.backend.kubernetes_client.delete_pod(namespace=model, pod_name=pod_to_delete.metadata.name)
 
     # Wait for the pod to be deleted and a new one to be created
-    kubernetes_client.wait_for_pod_recreation(
+    juju_client.backend.kubernetes_client.wait_for_pod_recreation(
         namespace=model,
         pod_name=pod_to_delete.metadata.name,
         old_uid=pod_to_delete.metadata.uid,
