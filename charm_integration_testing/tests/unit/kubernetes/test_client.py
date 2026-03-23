@@ -50,8 +50,8 @@ class KubernetesBackendStub(KubernetesBackend):
     read_stateful_set_raises: Exception | None = None
 
     def __post_init__(self) -> None:
-        self.corev1_api = self
-        self.appsv1_api = self
+        self.core_v1_api = self
+        self.apps_v1_api = self
 
     def list_namespaced_pod(self, namespace: str) -> V1PodListStub:
         if self.list_namespaced_pods_raises:
@@ -433,7 +433,7 @@ class TestKubernetesClientInit:
                     return new_running_pod  # New pod running
 
             mock_backend = MagicMock()
-            mock_backend.corev1_api.read_namespaced_pod.side_effect = get_pod_side_effect
+            mock_backend.core_v1_api.read_namespaced_pod.side_effect = get_pod_side_effect
 
             client = KubernetesClient(
                 backend=mock_backend,
@@ -525,7 +525,7 @@ class TestKubernetesClientInit:
                 return new_pod
 
             mock_backend = MagicMock()
-            mock_backend.corev1_api.read_namespaced_pod.side_effect = get_pod_side_effect
+            mock_backend.core_v1_api.read_namespaced_pod.side_effect = get_pod_side_effect
 
             client = KubernetesClient(
                 backend=mock_backend,
