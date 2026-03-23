@@ -23,7 +23,7 @@ from juju import (
     warn_performance,
 )
 from juju_cmd import JujuCmdBackend
-from kubernetes_client import KubernetesBackend, KubernetesClient
+from kubernetes_client import KubernetesClient
 from tenacity import retry, stop_after_attempt, wait_fixed
 
 from validators.base.validator import ValidationResult
@@ -57,7 +57,7 @@ class JubilantBackend(JujuCmdBackend):
     @property
     def kubernetes_client(self) -> KubernetesClient:
         if self._kubernetes_client is None:
-            self._kubernetes_client = KubernetesClient(KubernetesBackend.k8s_client())
+            raise RuntimeError("No valid KubernetesClient was received. Is this a Kubernetes environment?")
         return self._kubernetes_client
 
     @warn_performance(category=JujuStatusPerformanceWarning, threshold=timedelta(seconds=5))

@@ -885,7 +885,7 @@ def record_pipeline_version_execution_metadata(
 @pytest.fixture
 def _is_running_on_kubernetes(juju_backend: JujuBackend, model: str) -> None:
     if not juju_backend.is_k8s_model(model):
-        pytest.skip("Not kubernetes")
+        pytest.skip("Not running on kubernetes.")
 
 
 @pytest.fixture
