@@ -85,8 +85,10 @@ def test_build_bundle(
     bundle_builder = BundleBuilder(charmhub_client=charmhub_client, logger=logger)
     built_bundle = bundle_builder.build(base_bundle)
 
-    bundle.write_text(built_bundle.export(), encoding="utf-8")
-    logger.info(f"Bundle written to {bundle}")
+    bundle_contents = built_bundle.export()
+    bundle.write_text(bundle_contents, encoding="utf-8")
+    logger.info(f"Bundle written to {bundle}.")
+    logger.info(f"Bundle content:\n{bundle_contents}")
 
     bundle_mermaid_output.write_text(built_bundle.export_mermaid(), encoding="utf-8")
     logger.info(f"Bundle Mermaid diagram written to {bundle_mermaid_output}")
