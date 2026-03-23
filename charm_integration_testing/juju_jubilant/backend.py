@@ -403,3 +403,13 @@ class JubilantBackend(JujuCmdBackend):
     def validate_application(self, model: str, application: str, level: str) -> dict[str, list[ValidationResult]]:
         # Phase 2 endpoint validation will be done here
         return {}
+
+    def kill_controller(self, controller: str) -> None:
+        self.client.model(None).cli(
+            "kill-controller", controller, "--no-prompt", "--timeout", "5m", include_model=False
+        )
+
+    def migrate_model(self, model_name: str, source_controller: str, target_controller: str) -> None:
+        self.client.model(model_name).cli(
+            "migrate", f"{source_controller}:{model_name}", target_controller, include_model=False
+        )
