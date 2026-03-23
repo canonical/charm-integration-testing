@@ -55,7 +55,7 @@ class KubernetesClient:
             List of pods that match the given application name in the specified namespace
         """
         pattern = re.compile(rf"^{re.escape(application_name)}(-\d+)$")
-        pods = self.backend.CoreV1Api.list_namespaced_pod(model)  # juju creates a namespace for each model
+        pods = self.backend.corev1_api.list_namespaced_pod(model)  # juju creates a namespace for each model
         matching_pods = [pod for pod in pods.items if pattern.match(pod.metadata.name)]
         return matching_pods
 
@@ -126,7 +126,7 @@ class KubernetesClient:
 
         def check() -> K8sClient.V1Pod | None:
             try:
-                new_pod = self.backend.CoreV1Api.read_namespaced_pod(pod_name, namespace)
+                new_pod = self.backend.corev1_api.read_namespaced_pod(pod_name, namespace)
                 if new_pod.metadata.uid == old_uid:
                     return None
 
@@ -166,7 +166,7 @@ class KubernetesClient:
             ApiException: If there is an error communicating with the Kubernetes API
         """
         try:
-            self.backend.CoreV1Api.delete_namespaced_pod(name=pod_name, namespace=namespace)
+            self.backend.corev1_api.delete_namespaced_pod(name=pod_name, namespace=namespace)
             self.logger.info(f"Pod {pod_name} in namespace {namespace} has been deleted.")
         except ApiException as e:
             self.logger.error(f"Failed to delete pod {pod_name} in namespace {namespace}: {e}")
@@ -194,7 +194,7 @@ class KubernetesClient:
         body = {"spec": {"template": {"metadata": {"annotations": {"kubectl.kubernetes.io/restartedAt": now}}}}}
         self.logger.info(f"Rollout restart initiated for Statefulset: '{statefulset_name}' in namespace '{namespace}'")
         try:
-            self.backend.AppsV1Api.patch_namespaced_stateful_set(name=statefulset_name, namespace=namespace, body=body)
+            self.backend.appsv1_api.patch_namespaced_stateful_set(name=statefulset_name, namespace=namespace, body=body)
         except ApiException as e:
             self.logger.error(
                 f"Failed to start rollout restart for Statefulset: '{statefulset_name}' in namespace '{namespace}': {e}"
@@ -223,7 +223,7 @@ class KubernetesClient:
         watcher = watch.Watch()
 
         try:
-            sts = self.backend.AppsV1Api.read_namespaced_stateful_set(name=statefulset_name, namespace=namespace)
+            sts = self.backend.appsv1_api.read_namespaced_stateful_set(name=statefulset_name, namespace=namespace)
             target_generation = sts.metadata.generation
         except ApiException as e:
             self.logger.error(f"Error fetching statefulset '{statefulset_name}' in namespace '{namespace}': {e}.")
@@ -232,7 +232,7 @@ class KubernetesClient:
         self.logger.info(f"Waiting for StatefulSet '{statefulset_name}' to reach generation '{target_generation}'.")
         try:
             for event in watcher.stream(
-                self.backend.AppsV1Api.list_namespaced_stateful_set,
+                self.backend.appsv1_api.list_namespaced_stateful_set,
                 namespace=namespace,
                 field_selector=f"metadata.name={statefulset_name}",
                 timeout_seconds=timeout_seconds,

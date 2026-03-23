@@ -417,7 +417,7 @@ class JubilantBackend(JujuCmdBackend):
         if not self.is_k8s_model(model=controller_model):
             # XXX(mbenzan): In the future, we might want to implement a rolling restart here too.
             # reboot the leader
-            self.ssh(model=controller_model, application="controller/leader", command="sudo reboot || true")
+            self.ssh(model=controller_model, application="controller/leader", command="sudo reboot")
         else:
             controller_k8s_namespace = f"controller-{controller_name}"
             self.kubernetes_client.restart_statefulset(
