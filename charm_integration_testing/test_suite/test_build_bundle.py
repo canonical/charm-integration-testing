@@ -86,9 +86,10 @@ def test_build_bundle(
     built_bundle = bundle_builder.build(base_bundle)
 
     bundle_contents = built_bundle.export()
+    separator = "-" * 80
     bundle.write_text(bundle_contents, encoding="utf-8")
     logger.info(f"Bundle written to {bundle}.")
-    logger.info(f"Bundle content:\n{bundle_contents}")
+    logger.info(f"Bundle content:\n{separator}\n{bundle_contents}\n{separator}")
 
     bundle_mermaid_output.write_text(built_bundle.export_mermaid(), encoding="utf-8")
     logger.info(f"Bundle Mermaid diagram written to {bundle_mermaid_output}")
