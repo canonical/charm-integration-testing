@@ -43,7 +43,7 @@ from .wait import (
 
 class JubilantBackend(JujuCmdBackend):
     client: JubilantClient
-    kubernetes_client: KubernetesClient
+    _kubernetes_client: KubernetesClient | None
 
     default_timeout = timedelta(minutes=5)
     default_successes = 3
@@ -52,7 +52,13 @@ class JubilantBackend(JujuCmdBackend):
     def __init__(self, client: JubilantClient | None = None, kubernetes_client: KubernetesClient | None = None):
         super().__init__()
         self.client = client or JubilantClient()
-        self.kubernetes_client = kubernetes_client or KubernetesClient(KubernetesBackend.k8s_client())
+        self._kubernetes_client = kubernetes_client
+
+    @property
+    def kubernetes_client(self) -> KubernetesClient:
+        if self._kubernetes_client is None:
+            self._kubernetes_client = KubernetesClient(KubernetesBackend.k8s_client())
+        return self._kubernetes_client
 
     @warn_performance(category=JujuStatusPerformanceWarning, threshold=timedelta(seconds=5))
     def status(self, model: str) -> jubilant.Status:
