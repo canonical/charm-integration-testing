@@ -37,10 +37,9 @@ def test_logs_privacy_check(
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
         pytest.skip(f"Docker is not available: {e}")
 
-    # Run TruffleHog in filesystem mode
+    # Run TruffleHog
     logger.info("Running TruffleHog secret scanner")
 
-    # Run TruffleHog container
     docker_cmd = [
         "docker",
         "run",
@@ -62,12 +61,10 @@ def test_logs_privacy_check(
     # Get TruffleHog output
     trufflehog_output = result.stdout + result.stderr
 
-    # Log the scan results
     logger.info(f"TruffleHog exit code: {result.returncode}")
     if trufflehog_output:
         logger.info(f"TruffleHog output:\n{trufflehog_output}")
 
-    # TruffleHog exits with non-zero code if secrets are found
     if result.returncode != 0:
         pytest.fail(
             f"Secrets detected in logs! TruffleHog found potential secrets.\n"
