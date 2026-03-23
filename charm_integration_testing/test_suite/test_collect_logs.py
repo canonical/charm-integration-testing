@@ -30,14 +30,14 @@ def test_collect_logs(
     logger: logging.Logger,
 ) -> None:
     """Collect Juju debug logs from the model.
-    
+
     This is a bridge test that collects logs for potential use by downstream tests.
     """
     logger.info(f"Collecting debug logs from model {model} to {logs_directory}")
-    
+
     result = juju_client.backend.run_cmd(["juju", "debug-log", "--model", model, "--replay", "--no-tail"])
-    
+
     debug_log_file = logs_directory / "debug.log"
     debug_log_file.write_text(result.stdout)
-    
+
     logger.info(f"Collected {len(result.stdout)} bytes of debug logs to {debug_log_file}")
