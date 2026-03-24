@@ -1,15 +1,12 @@
-# Copyright 2024-2025 Canonical Ltd.
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 """Test Observer API client for querying charm test results and metadata."""
 
 import logging
-import os
 from typing import Any
 
 import requests
-
-logger = logging.getLogger(__name__)
 
 
 class TestObserverClientError(Exception):
@@ -35,31 +32,30 @@ class TestObserverClient:
 
     This client provides methods for querying charm artefacts, builds, and test results.
     """
+    logger: logging.Logger
 
-    def __init__(self, api_url: str | None = None, token: str | None = None) -> None:
+    def __init__(self, logger: logging.Logger, api_url: str, token: str) -> None:
         """Initialize the Test Observer client.
 
         Args:
-            api_url: Test Observer API base URL. If not provided, reads from TEST_OBSERVER_API
-                    or test_observer_api environment variable.
-            token: API token for authentication. If not provided, reads from TEST_OBSERVER_TOKEN
-                   or test_observer_token environment variable.
+            logger: Logger instance for logging client operations.
+            api_url: Test Observer API base URL.
+            token: API token for authentication.
 
         Raises:
-            TestObserverAPINotConfiguredError: If API URL is not configured.
+            TestObserverAPINotConfiguredError: If API URL or token is not configured.
         """
-        self.api_url = (
-            api_url or os.environ.get("TEST_OBSERVER_API") or os.environ.get("test_observer_api") or ""
-        ).rstrip("/")
-        self.token = token or os.environ.get("TEST_OBSERVER_TOKEN") or os.environ.get("test_observer_token")
+        self.api_url = api_url.rstrip("/")
+        self.token = token
 
-        if not self.api_url:
+        if not self.api_url or not self.token:
             raise TestObserverAPINotConfiguredError(
-                "TEST_OBSERVER_API is not configured. Set via environment variable or constructor argument."
+                "api_url and token must both be provided when constructing TestObserverClient."
             )
 
         self._session = requests.Session()
         self._session.headers.update(self._build_headers())
+        self.logger = logger
 
     def _build_headers(self) -> dict[str, str]:
         """Build request headers for API calls."""
@@ -227,29 +223,8 @@ class TestObserverClient:
         except requests.RequestException:
             pass
 
-        # Try alternative endpoints with different query parameters
-        errors: list[requests.HTTPError] = []
-        for query_key in ("test_execution", "test_execution_id", "test_execution_ids"):
-            try:
-                params: dict[str, str | int] = {query_key: execution_id, "limit": 200, "offset": 0}
-                response = self._session.get(
-                    f"{self.api_url}/v1/test-results",
-                    params=params,
-                    timeout=30,
-                )
-                response.raise_for_status()
-                payload = response.json()
-                if not isinstance(payload, (dict, list)):
-                    continue
-                return payload
-            except requests.HTTPError as exc:
-                errors.append(exc)
-                if exc.response.status_code not in (400, 422):
-                    raise TestObserverQueryError(f"Failed to query test results: {exc}") from exc
-
         raise TestObserverQueryError(
             f"Unable to query test results for execution {execution_id}; "
-            f"tried {len(errors)} alternative endpoints, all failed"
         )
 
     def choose_historical_revision_with_passing_test(
@@ -273,7 +248,7 @@ class TestObserverClient:
         Raises:
             TestObserverQueryError: If API queries fail.
         """
-        logger.debug(
+        self.logger.debug(
             f"Searching for historical {charm_name} revision in {track}/{stage} "
             f"with passing {test_name} (excluding revision {current_revision})"
         )
@@ -281,35 +256,35 @@ class TestObserverClient:
         history_payload = self.query_artefacts_history(stage=stage, name=charm_name, track=track)
         artefacts = self._extract_first_list(history_payload, "artefacts", "items", "results", "data")
 
-        logger.debug(f"Found {len(artefacts)} artefacts in history")
+        self.logger.debug(f"Found {len(artefacts)} artefacts in history")
 
         for artefact in artefacts:
             artefact_id = self._extract_id(artefact, "id", "artefact_id", "artifact_id")
             if artefact_id is None:
-                logger.debug("Skipping artefact without ID")
+                self.logger.debug("Skipping artefact without ID")
                 continue
 
-            logger.debug(f"Querying builds for artefact {artefact_id}")
+            self.logger.debug(f"Querying builds for artefact {artefact_id}")
             builds_payload = self.query_artefact_builds(artefact_id=artefact_id)
             builds = self._extract_first_list(builds_payload, "builds", "items", "results", "data")
 
-            logger.debug(f"Found {len(builds)} builds for artefact {artefact_id}")
+            self.logger.debug(f"Found {len(builds)} builds for artefact {artefact_id}")
 
             for build in builds:
                 revision = self._extract_id(build, "revision")
                 if revision is None or revision == current_revision:
                     if revision == current_revision:
-                        logger.debug(f"Skipping current revision {revision}")
+                        self.logger.debug(f"Skipping current revision {revision}")
                     else:
-                        logger.debug("Skipping build without revision")
+                        self.logger.debug("Skipping build without revision")
                     continue
 
                 executions = build.get("test_executions")
                 if not isinstance(executions, list):
-                    logger.debug(f"No test executions for revision {revision}")
+                    self.logger.debug(f"No test executions for revision {revision}")
                     continue
 
-                logger.debug(f"Found {len(executions)} test executions for revision {revision}")
+                self.logger.debug(f"Found {len(executions)} test executions for revision {revision}")
 
                 for execution in executions:
                     if not isinstance(execution, dict):
@@ -319,20 +294,20 @@ class TestObserverClient:
                     if execution_id is None:
                         continue
 
-                    logger.debug(f"Querying test results for execution {execution_id}")
+                    self.logger.debug(f"Querying test results for execution {execution_id}")
                     try:
                         test_results_payload = self.query_test_results_for_execution(execution_id=execution_id)
                         if self._has_test_passed(test_results_payload, test_name):
-                            logger.info(
+                            self.logger.info(
                                 f"Found historical revision {revision} with passing {test_name} "
                                 f"(execution {execution_id})"
                             )
                             return revision
                     except TestObserverQueryError as exc:
-                        logger.warning(f"Failed to query test results for execution {execution_id}: {exc}")
+                        self.logger.warning(f"Failed to query test results for execution {execution_id}: {exc}")
                         continue
 
-        logger.info(f"No historical revision found with passing {test_name}")
+        self.logger.info(f"No historical revision found with passing {test_name}")
         return None
 
     def choose_historical_revision_with_passing_deploy(
