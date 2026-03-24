@@ -15,9 +15,9 @@ When asked to review a PR or diff:
 
 1. Start with findings, ordered by severity.
 2. For each finding, include:
-- Why this is a style or maintainability issue.
-- The repository convention being violated.
-- A specific fix (or patch-style suggestion when practical).
+	- Why this is a style or maintainability issue.
+	- The repository convention being violated.
+	- A specific fix (or patch-style suggestion when practical).
 3. Keep summaries brief. Findings are primary.
 4. If no style findings exist, explicitly state that.
 
@@ -25,7 +25,7 @@ When asked to review a PR or diff:
 
 Use this format for review responses:
 
-- `High` | `Medium` | `Low` - short title
+- Severity (High, Medium, or Low) - short title
 - Location: file + line
 - Issue: what is inconsistent and why it matters
 - Suggested change: exact recommendation
