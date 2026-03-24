@@ -2,7 +2,9 @@
 # See LICENSE file for licensing details.
 import logging
 import shutil
+import subprocess  # nosec B404
 import tempfile
+from collections.abc import Generator
 from pathlib import Path
 
 import pytest
@@ -12,7 +14,7 @@ from .scheduler.states import State
 
 
 @pytest.fixture(scope="session")
-def logs_directory() -> Path:
+def logs_directory() -> Generator[Path, None, None]:
     """Provide a session-scoped directory for storing collected logs."""
     logs_dir = Path(tempfile.mkdtemp(prefix="juju-logs-"))
     yield logs_dir
@@ -35,7 +37,13 @@ def test_collect_logs(
     """
     logger.info(f"Collecting debug logs from model {model} to {logs_directory}")
 
-    result = juju_client.backend.run_cmd(["juju", "debug-log", "--model", model, "--replay", "--no-tail"])
+    result = subprocess.run(  # nosec B603, B607
+        ["juju", "debug-log", "--model", model, "--replay", "--no-tail"],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=300,
+    )
 
     debug_log_file = logs_directory / "debug.log"
     debug_log_file.write_text(result.stdout)
