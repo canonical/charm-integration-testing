@@ -32,6 +32,7 @@ class TestObserverClient:
 
     This client provides methods for querying charm artefacts, builds, and test results.
     """
+
     logger: logging.Logger
 
     def __init__(self, logger: logging.Logger, api_url: str, token: str) -> None:
@@ -223,9 +224,7 @@ class TestObserverClient:
         except requests.RequestException:
             pass
 
-        raise TestObserverQueryError(
-            f"Unable to query test results for execution {execution_id}; "
-        )
+        raise TestObserverQueryError(f"Unable to query test results for execution {execution_id}; ")
 
     def choose_historical_revision_with_passing_test(
         self, charm_name: str, stage: str, current_revision: int, track: str, test_name: str = "test_deploy"
