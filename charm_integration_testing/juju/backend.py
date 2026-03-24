@@ -9,7 +9,6 @@ from datetime import datetime, timedelta
 from functools import wraps
 from typing import Any, ParamSpec, TypeVar
 
-from kubernetes_client.client import KubernetesClient
 from pydantic.dataclasses import dataclass
 
 from validators.base.validator import ValidationResult
@@ -139,11 +138,6 @@ class JujuTask:
 
 
 class JujuBackend(ABC):
-    @property
-    @abstractmethod
-    def kubernetes_client(self) -> KubernetesClient:
-        raise NotImplementedError
-
     @abstractmethod
     def scale_application(self, model: str, application: str, num: int) -> None:
         raise NotImplementedError
