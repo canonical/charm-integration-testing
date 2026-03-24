@@ -100,12 +100,13 @@ Flag cross-layer violations: e.g. a data model importing a client, or a backend 
 
 ## Copyright Headers
 
-Two copyright styles exist in the repo reflecting different packages:
+Use one canonical copyright format across the entire repository, even in areas that still contain legacy headers.
 
-- `# Copyright <year> Canonical Ltd. / # See LICENSE file for licensing details.` — used in `charm_integration_testing` and `bundle_builder`.
-- `# Copyright (C) <year> Canonical Ltd` with the full GPL block comment — used in `validators/`.
-
-New files must match the style already used in their package. Flag any file that uses the wrong style for its package, or that is missing a copyright header entirely.
+- Preferred format:
+  - `# Copyright <year> Canonical Ltd.`
+  - `# See LICENSE file for licensing details.`
+- Flag any file that uses a different copyright style.
+- Flag any file missing a copyright header.
 
 ## PR Template
 
