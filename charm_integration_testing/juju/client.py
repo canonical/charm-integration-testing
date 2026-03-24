@@ -150,6 +150,10 @@ class JujuClient:
         )
         self.backend.wait_for_removal_of_units(model, list(applications), timeout)
 
+    def wait_for_model_to_exist(self, model: str = "default", timeout: timedelta | None = None) -> None:
+        self.logger.info(f"Waiting {self._waiting_timeout_log(timeout)} for model {model} to exist before continuing.")
+        self.backend.wait_for_model_to_exist(model=model, timeout=timeout)
+
     def application_exists(self, application: str, model: str = "default") -> bool:
         self.logger.info(f"Checking that application exists: {application}.")
         return application in self.backend.list_applications(model)

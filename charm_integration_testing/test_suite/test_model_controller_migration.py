@@ -1,9 +1,7 @@
 # Copyright 2025-2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-import logging
 from datetime import timedelta
-from time import sleep
 
 import pytest
 from juju import JujuClient
@@ -17,7 +15,6 @@ def test_model_controller_migration(
     juju_controller: str,
     temp_juju_controller: str,
     model: str,
-    logger: logging.Logger,
 ) -> None:
     # Ensure model is idle before starting
     juju_client.idle_for_period(model=model, timeout=timedelta(minutes=15))
@@ -29,9 +26,8 @@ def test_model_controller_migration(
         model_name=model, source_controller=juju_controller, target_controller=temp_juju_controller
     )
 
-    # Wait 120 seconds for the migration to start
-    logger.info("Waiting 120 seconds for migration to start.")
-    sleep(120)
+    # Wait migration to start
+    juju_client.wait_for_model_to_exist(model=f"{temp_juju_controller}:{model}", timeout=timedelta(minutes=15))
 
     # Wait until model is idle in new controller
     juju_client.idle_for_period(model=f"{temp_juju_controller}:{model}", timeout=timedelta(minutes=15))
@@ -44,9 +40,8 @@ def test_model_controller_migration(
         model_name=model, source_controller=temp_juju_controller, target_controller=juju_controller
     )
 
-    # Wait 120 seconds for the migration to start
-    logger.info("Waiting 120 seconds for migration to start.")
-    sleep(120)
+    # Wait migration to start
+    juju_client.wait_for_model_to_exist(model=f"{juju_controller}:{model}", timeout=timedelta(minutes=15))
 
     # Wait until model is idle in old controller
     juju_client.idle_for_period(model=f"{juju_controller}:{model}", timeout=timedelta(minutes=15))

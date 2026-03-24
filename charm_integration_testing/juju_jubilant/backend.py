@@ -177,6 +177,30 @@ class JubilantBackend(JujuCmdBackend):
     def wait_for_removal_of_units(self, model: str, applications: list[str], timeout: timedelta | None) -> None:
         self.wait(model, lambda status: applications_have_no_units(status, *applications), timeout=timeout)
 
+    def wait_for_model_to_exist(self, model: str, timeout: timedelta | None) -> None:
+        if timeout is None:
+            timeout = self.default_timeout
+        delay = self.default_delay
+        start = datetime.now()
+
+        while True:
+            iteration_start = datetime.now()
+            if iteration_start - start > timeout:
+                raise JujuWaitTimeoutError(
+                    wait_state=JujuWaitState(
+                        message=f"Model {model} does not exist",
+                        insufficient_status_checks=True,
+                    )
+                )
+            try:
+                self.status(model)
+                return
+            except jubilant.CLIError:
+                pass
+
+            elapsed = datetime.now() - iteration_start
+            time.sleep(max(0, (delay - elapsed).total_seconds()))
+
     def run_action(self, model: str, unit: str, action: str, params: dict[str, Any]) -> JujuTask:
         try:
             task = self.client.model(model).run(

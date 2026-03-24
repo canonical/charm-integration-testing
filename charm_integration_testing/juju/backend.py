@@ -224,6 +224,10 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def wait_for_model_to_exist(self, model: str, timeout: timedelta | None) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
     def application_charm(self, model: str, application: str) -> str | None:
         raise NotImplementedError
 
