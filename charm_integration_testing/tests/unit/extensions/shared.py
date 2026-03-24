@@ -122,6 +122,15 @@ class NullJujuBackend(JujuBackend):
     def get_application_config(self, model: str, application: str) -> dict[str, Any]:
         raise NotImplementedError
 
+    def bootstrap_controller(self, cloud: str, controller: str, controller_constraints: dict[str, str]) -> None:
+        raise NotImplementedError
+
+    def add_model(self, controller: str, model: str, model_config: dict[str, str]) -> None:
+        raise NotImplementedError
+
+    def switch(self, controller: str, model: str) -> None:
+        raise NotImplementedError
+
     def scp(self, model: str, source: str, destination: str) -> None:
         raise NotImplementedError
 

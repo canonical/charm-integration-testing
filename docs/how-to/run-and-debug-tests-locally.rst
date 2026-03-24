@@ -32,6 +32,8 @@ This guide will reference variables that need to contain values specific to your
   The name to use for the Juju model that is created and used in the testing. For example, ``charm-testing``.
 ``OUTPUT_FILE``:
   A filename to use for for the charm bundle output produced by the ``build-bundle.sh`` script. For example, ``generated-bundle.yaml``.
+``JUJU_MODEL_CONFIG_FILE``:
+  Path to a JSON file containing Juju model configuration values passed at model creation time. For example, ``./static/juju-model-config.json``.
 
 Optional environment variables
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -79,10 +81,10 @@ It is also needed to setup the k8s cloud in juju. Do this with the following com
 .. code:: bash
 
    juju add-k8s ${K8S_CLOUD_NAME} --client
-   juju bootstrap k8s ${K8S-CONTROLLER} --bootstrap-constraints root-disk=5G
+   juju bootstrap ${K8S_CLOUD_NAME} ${K8S_CONTROLLER_NAME} --bootstrap-constraints root-disk=5G
    juju add-model ${MODEL_NAME} \
-    --config "logging-config=DEBUG" \
-    --config="update-status-hook-interval=2m"
+     --config "logging-config=DEBUG" \
+     --config="update-status-hook-interval=2m"
 
 Install the repository dependencies
 -----------------------------------
@@ -149,9 +151,12 @@ correct order:
 .. code:: bash
 
    ./scripts/run-tests.sh \
+     --juju-cloud "${K8S_CLOUD_NAME}" \
+     --juju-controller "${K8S_CONTROLLER_NAME}" \
      --model "${MODEL_NAME}" \
-     --current-state "empty_model" \
-     --bundles "${OUTPUT_FILE}" \
+     --current-state "no_controller" \
+     --bundle "${OUTPUT_FILE}" \
+     --juju-model-config "${JUJU_MODEL_CONFIG_FILE}" \
      --target-application "target" \
      --target-endpoint "${TARGET_ENDPOINT}" \
      --neighbor-application "neighbor" \
@@ -164,6 +169,7 @@ The ``--current-state`` option tells the scheduler the current state of
 the environment so it knows which setup steps (if any) still need to run:
 
 - ``no_controller`` — no Juju controller exists yet (default)
+- ``no_model`` — a controller exists, but the model does not
 - ``empty_model`` — controller and model are ready but nothing is deployed
 - ``deployed`` — the charm bundle is already deployed; skip straight to
   integration tests and teardown
@@ -172,3 +178,7 @@ the environment so it knows which setup steps (if any) still need to run:
 Use a non-default ``--current-state`` when resuming a partial run or
 iterating locally against an already-deployed model to avoid re-running
 expensive setup transitions.
+
+The ``--juju-model-config`` file is optional. If omitted, tests create the model
+without extra configuration; if provided, pass a JSON object of string keys and values
+matching Juju model configuration options.
