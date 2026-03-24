@@ -2,7 +2,7 @@
 # See LICENSE file for licensing details.
 
 import logging
-import subprocess
+import subprocess  # nosec B404
 from pathlib import Path
 
 import pytest
@@ -28,7 +28,7 @@ def test_logs_privacy_check(
 
     # Check if docker is available
     try:
-        subprocess.run(
+        subprocess.run(  # nosec B603, B607
             ["docker", "--version"],
             check=True,
             capture_output=True,
@@ -51,7 +51,7 @@ def test_logs_privacy_check(
         "/scan-logs",
     ]
 
-    result = subprocess.run(
+    result = subprocess.run(  # nosec B603
         docker_cmd,
         capture_output=True,
         text=True,
