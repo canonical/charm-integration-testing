@@ -85,7 +85,7 @@ def test_build_bundle(
     bundle_builder = BundleBuilder(charmhub_client=charmhub_client, logger=logger)
     built_bundle = bundle_builder.build(base_bundle)
 
-    bundle_contents = built_bundle.export()
+    bundle_contents = built_bundle.export().strip()
     separator = "-" * 80
     bundle.write_text(bundle_contents, encoding="utf-8")
     logger.info(f"Bundle written to {bundle}.")
