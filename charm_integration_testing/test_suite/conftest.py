@@ -897,7 +897,7 @@ def kubernetes_client(_kubernetes_test: None) -> KubernetesClient:
     return KubernetesClient(KubernetesBackend.k8s_client(kubeconfig=kubeconfig))
 
 
-def generate_short_id(length=8):
+def generate_short_id(length: int = 8) -> str:
     alphabet = string.ascii_letters + string.digits
     return str("".join(secrets.choice(alphabet) for _ in range(length))).lower()
 

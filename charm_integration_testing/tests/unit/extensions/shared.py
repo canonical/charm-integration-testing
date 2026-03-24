@@ -146,6 +146,12 @@ class NullJujuBackend(JujuBackend):
     def validate_application(self, model: str, application: str, level: str) -> dict[str, list[ValidationResult]]:
         raise NotImplementedError
 
+    def kill_controller(self, controller: str) -> None:
+        raise NotImplementedError
+
+    def migrate_model(self, model_name: str, source_controller: str, target_controller: str) -> None:
+        raise NotImplementedError
+
 
 @dataclass
 class JujuStub(NullJujuBackend):
