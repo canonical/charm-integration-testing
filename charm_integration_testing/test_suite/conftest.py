@@ -55,7 +55,7 @@ def logger() -> logging.Logger:
 
 
 @pytest.fixture
-def juju_backend(kubernetes_client: KubernetesClient) -> JujuBackend:
+def juju_backend(kubernetes_client: KubernetesClient | None) -> JujuBackend:
     return JubilantBackend(kubernetes_client=kubernetes_client)
 
 

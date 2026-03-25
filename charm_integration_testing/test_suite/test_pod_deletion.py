@@ -12,11 +12,14 @@ from .scheduler.states import State
 @pytest.mark.state(requires=State.DEPLOYED, provides=State.DEPLOYED)
 def test_pod_deletion(
     juju_client: JujuClient,
-    _is_running_on_kubernetes: bool,
-    kubernetes_client: KubernetesClient,
+    _is_running_on_kubernetes: None,
+    kubernetes_client: KubernetesClient | None,
     model: str,
     target_application: str,
 ) -> None:
+    if kubernetes_client is None:
+        pytest.fail("KubernetesClient was not instantiated correctly. Is KUBECONFIG set?")
+
     pods = kubernetes_client.get_charm_pods(application_name=target_application, model=model)
     assert len(pods) > 0, f"No pods found in namespace {model} to delete."
 

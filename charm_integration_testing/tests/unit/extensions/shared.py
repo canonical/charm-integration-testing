@@ -4,7 +4,7 @@ from typing import Any, Iterable
 
 from juju.backend import JujuBackend, JujuExecOutput, JujuTask
 from juju.models import JujuApplicationInfo, JujuIntegration, JujuIntegrationApplication
-from kubernetes_client.client import KubernetesClient
+from kubernetes_client import KubernetesClient
 
 from validators.base.validator import ValidationResult
 
