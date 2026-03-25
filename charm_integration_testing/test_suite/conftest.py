@@ -27,7 +27,8 @@ from juju_jubilant import JubilantBackend
 from kubernetes_client import KubernetesBackend, KubernetesClient
 from pydantic import TypeAdapter, ValidationError
 from pytest import StashKey
-from test_observer_client import TestObserverClient, TestObserverClientError
+from test_observer_client import TestObserverClient as TestObserverAPIClient
+from test_observer_client import TestObserverClientError
 from utils import normalize_string, normalize_string_multiline
 
 from bundle_builder import UnfulfilledEndpointsError
@@ -46,30 +47,64 @@ KNOWN_FAILURE_EXCEPTIONS = (
 
 
 @pytest.fixture
-def choose_historical_revision_with_passing_deploy() -> Callable[[str, str, int, str], int | None]:
-    """Fixture for querying Test Observer API and selecting a historical revision with passing deploy.
+def test_observer_api() -> str:
+    """Test Observer API base URL from environment."""
+    value = os.environ.get("TEST_OBSERVER_API") or os.environ.get("test_observer_api")
+    if not value:
+        pytest.skip("Test Observer API URL is not configured (TEST_OBSERVER_API/test_observer_api).")
+    return value.strip()
 
-    Returns a callable that takes (charm_name, stage, current_revision, track) and returns
-    the first historical revision with a passing test_deploy, or None if not found.
-    """
+
+@pytest.fixture
+def test_observer_token() -> str:
+    """Test Observer API token from environment."""
+    value = os.environ.get("TEST_OBSERVER_TOKEN") or os.environ.get("test_observer_token")
+    if not value:
+        pytest.skip("Test Observer API token is not configured (TEST_OBSERVER_TOKEN/test_observer_token).")
+    return value.strip()
+
+
+@pytest.fixture
+def test_observer_client(
+    logger: logging.Logger,
+    test_observer_api: str,
+    test_observer_token: str,
+) -> TestObserverAPIClient:
+    """Test Observer API client."""
     try:
-        client = TestObserverClient()
+        return TestObserverAPIClient(
+            logger=logger,
+            api_url=test_observer_api,
+            token=test_observer_token,
+        )
     except TestObserverClientError as exc:
-        raise RuntimeError(f"Failed to initialize Test Observer client: {exc}") from exc
+        pytest.skip(f"Test Observer API client is not configured properly: {exc}")
 
-    def _choose_revision(charm_name: str, stage: str, current_revision: int, track: str) -> int | None:
-        """Query Test Observer and select a historical revision with passing deploy test."""
-        try:
-            return client.choose_historical_revision_with_passing_deploy(
-                charm_name=charm_name,
-                stage=stage,
-                current_revision=current_revision,
-                track=track,
-            )
-        except TestObserverClientError as exc:
-            raise RuntimeError(f"Test Observer query failed: {exc}") from exc
 
-    return _choose_revision
+@pytest.fixture
+def historical_revision_with_passing_deploy(
+    test_observer_client: TestObserverAPIClient,
+    target_charm: str,
+    target_channel: str | None,
+    target_revision: int | None,
+) -> int | None:
+    """Historical revision with a passing test_deploy for the target charm."""
+    if target_revision is None or target_channel is None:
+        return None
+
+    parts = target_channel.split("/", maxsplit=1)
+    track = parts[0]
+    stage = parts[1] if len(parts) > 1 else "stable"
+
+    try:
+        return test_observer_client.choose_historical_revision_with_passing_deploy(
+            charm_name=target_charm,
+            stage=stage,
+            current_revision=target_revision,
+            track=track,
+        )
+    except TestObserverClientError as exc:
+        raise RuntimeError(f"Test Observer query failed: {exc}") from exc
 
 
 @pytest.fixture
