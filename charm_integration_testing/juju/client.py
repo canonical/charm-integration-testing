@@ -205,14 +205,13 @@ class JujuClient:
             for extension in self.extensions:
                 for unit, unit_results in extension.post_validate(model, application, level).items():
                     results.setdefault(unit, []).extend(unit_results)
-            
+
             if not results:
                 self.logger.info(f"No validation results for application '{application}'.")
                 continue
 
             # Log results for this application
             for unit, unit_results in results.items():
-
                 if not unit_results:
                     self.logger.info(f"No validation results for unit '{unit}'.")
                     continue
