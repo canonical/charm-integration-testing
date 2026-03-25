@@ -207,14 +207,14 @@ class JujuClient:
                     results.setdefault(unit, []).extend(unit_results)
             
             if not results:
-                self.logger.warning(f"No validation results for application '{application}'.")
+                self.logger.info(f"No validation results for application '{application}'.")
                 continue
 
             # Log results for this application
             for unit, unit_results in results.items():
 
                 if not unit_results:
-                    self.logger.warning(f"No validation results for unit '{unit}'.")
+                    self.logger.info(f"No validation results for unit '{unit}'.")
                     continue
 
                 elif all(r.status == "SKIPPED" for r in unit_results):
