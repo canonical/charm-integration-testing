@@ -52,12 +52,21 @@ class PostgreSQLClientValidator(BaseValidator):
         # --- 3. Schema check ---
         data = databag | creds
         required_fields = ["endpoints", "database", "username", "password"]
-        checks.append(
-            self._schema_validation_check(
-                data=data,
-                required_fields=required_fields,
-            )
+        schema_check = self._schema_validation_check(
+            data=data,
+            required_fields=required_fields,
         )
+        checks.append(schema_check)
+
+        if not schema_check.passed:
+            return ValidationResult(
+                status="FAIL",
+                endpoint=self.endpoint,
+                interface=self.interface,
+                level="simple",
+                relation_id=self.relation_id,
+                checks=checks,
+            )
 
         # --- 4. Connect ---
         endpoint = databag["endpoints"].split(",")[0].strip()

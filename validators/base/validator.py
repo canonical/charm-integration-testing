@@ -64,7 +64,7 @@ class BaseValidator(ABC):
         return dict(self.relation.data[self.relation.app])
 
     def _schema_validation_check(self, required_fields: list[str], data: dict[str, str]) -> ValidationCheck:
-        """Utility method to check if required fields are present in data, returning a list of missing fields"""
+        """Utility method to check if required fields are present in data, returning a ValidationCheck with the result."""
         missing = [f for f in required_fields if not data.get(f)]
 
         return ValidationCheck(
