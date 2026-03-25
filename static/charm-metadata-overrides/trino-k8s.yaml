@@ -1,0 +1,17 @@
+---
+provides:
+  metrics-endpoint:
+    optional: true
+  grafana-dashboard:
+    optional: true
+  trino-coordinator:
+    limit_if:
+      - criteria:
+          endpoint_integrated: trino-worker
+        limit: 0
+requires:
+  trino-worker:
+    limit_if:
+      - criteria:
+          endpoint_integrated: trino-coordinator
+        limit: 0

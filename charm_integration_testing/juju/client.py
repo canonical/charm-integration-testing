@@ -210,11 +210,28 @@ class JujuClient:
                 for unit, unit_results in extension.post_validate(model, application, level).items():
                     results.setdefault(unit, []).extend(unit_results)
 
+            if not results:
+                self.logger.info(f"No validation results for application '{application}'.")
+                continue
+
             # Log results for this application
             for unit, unit_results in results.items():
+                if not unit_results:
+                    self.logger.info(f"No validation results for unit '{unit}'.")
+                    continue
+
+                elif all(r.status == "SKIPPED" for r in unit_results):
+                    self.logger.info(f"Validation skipped for unit '{unit}'.")
+                    continue
+
                 failed = [r for r in unit_results if r.status in ("FAIL", "ERROR")]
                 if not failed:
-                    self.logger.info(f"Validation passed for unit '{unit}'.")
+                    self.logger.info(f"Validation passed for unit '{unit}' ({len(unit_results)} results)")
+                    for result in unit_results:
+                        self.logger.debug(
+                            f"  endpoint '{result.endpoint}' (interface='{result.interface}', "
+                            f"relation_id={result.relation_id}): {result.status}"
+                        )
                 else:
                     for result in failed:
                         self.logger.error(

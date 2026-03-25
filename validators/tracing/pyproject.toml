@@ -14,31 +14,33 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 [project]
-name = "validators-runner"
+name = "validators-tracing"
 version = "0.1.0"
-description = "Runs endpoint validators"
+description = "Validator for tracing interface (v2)"
 authors = [
     {name = "SQA Team", email = "solutionsqa@canonical.com"}
 ]
 
 requires-python = ">=3.10"
 dependencies = [
-    "ops>=3.3.0,<4.0.0",
-    "pydantic>=2.0.0",
     "validators-base",
-    "validators-postgresql-client",
-    "validators-tracing[deep]",
 ]
+
+[project.optional-dependencies]
+deep = [
+    "opentelemetry-exporter-otlp-proto-http>=1.0.0",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.0.0",
+]
+
+[project.entry-points."endpoint_validators"]
+tracing = "validators.tracing:TracingValidator"
 
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["validators.runner"]
+packages = ["validators.tracing"]
 
 [tool.setuptools.package-dir]
-"validators.runner" = "."
-
-[project.scripts]
-run_validators = "validators.runner.runner:main"
+"validators.tracing" = "."

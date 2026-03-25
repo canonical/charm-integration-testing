@@ -116,6 +116,10 @@ def _error(endpoint: str = "db", error: str = "exception occurred") -> Validatio
     )
 
 
+def _skipped(endpoint: str = "db", interface: str = "postgresql_client") -> ValidationResult:
+    return ValidationResult(status="SKIPPED", endpoint=endpoint, interface=interface, level="simple", relation_id=0)
+
+
 def _app_info(charm: str = "postgresql") -> JujuApplicationInfo:
     return JujuApplicationInfo(charm=charm, revision=1)
 
@@ -281,6 +285,63 @@ class TestJujuClientValidateModel:
 
         # THEN the error string is logged
         assert any("unexpected exception" in e for e in logger.errors)
+
+    def test_skips_application_with_no_results(self, logger: LoggerStub) -> None:
+        # GIVEN two applications: one with no results and one with a PASS
+        backend = BackendStub(
+            app_list={"app1": _app_info(), "app2": _app_info()},
+            validate_results={"app1": {}, "app2": {"app2/0": [_pass()]}},
+        )
+        client = self._client(logger, backend)
+
+        # WHEN / THEN (no exception)
+        client.validate_model("mymodel")
+
+        # THEN the application with no results is skipped with a log
+        assert any("No validation results for application 'app1'" in info for info in logger.infos)
+
+    def test_skips_unit_with_no_results(self, logger: LoggerStub) -> None:
+        # GIVEN an application with an empty unit results list
+        backend = BackendStub(
+            app_list={"myapp": _app_info()},
+            validate_results={"myapp": {"myapp/0": []}},
+        )
+        client = self._client(logger, backend)
+
+        # WHEN / THEN (no exception)
+        client.validate_model("mymodel")
+
+        # THEN the unit with no results is skipped with a log
+        assert any("No validation results for unit 'myapp/0'" in info for info in logger.infos)
+
+    def test_skips_unit_with_all_skipped_results(self, logger: LoggerStub) -> None:
+        # GIVEN an application with a unit that has only SKIPPED results
+        backend = BackendStub(
+            app_list={"myapp": _app_info()},
+            validate_results={"myapp": {"myapp/0": [_skipped(), _skipped("metrics")]}},
+        )
+        client = self._client(logger, backend)
+
+        # WHEN / THEN (no exception)
+        client.validate_model("mymodel")
+
+        # THEN the unit with all skipped results is skipped with a log
+        assert any("Validation skipped for unit 'myapp/0'" in info for info in logger.infos)
+
+    def test_does_not_skip_unit_with_mix_of_skipped_and_pass(self, logger: LoggerStub) -> None:
+        # GIVEN a unit with both SKIPPED and PASS results
+        backend = BackendStub(
+            app_list={"myapp": _app_info()},
+            validate_results={"myapp": {"myapp/0": [_skipped(), _pass()]}},
+        )
+        client = self._client(logger, backend)
+
+        # WHEN / THEN (no exception)
+        client.validate_model("mymodel")
+
+        # THEN the unit is not skipped and validation passed is logged
+        assert any("Validation passed for unit 'myapp/0'" in info for info in logger.infos)
+        assert not any("Validation skipped for unit 'myapp/0'" in info for info in logger.infos)
 
 
 class TestJujuClientKillController:
