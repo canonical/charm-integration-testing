@@ -1,0 +1,9 @@
+---
+requires:
+  ldap:
+    optional: true
+provides:
+  metrics-endpoint:
+    optional: true
+  grafana-dashboard:
+    optional: true
