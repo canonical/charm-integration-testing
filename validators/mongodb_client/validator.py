@@ -172,65 +172,86 @@ class MongoDBClientValidator(BaseValidator):
         client_kwargs: dict[str, Any] = {}
         ca_file_path: str | None = None
         try:
-            uri = f"mongodb://{quote_plus(creds['username'])}:{quote_plus(creds['password'])}@{endpoint}"
-            if creds.get("tls") and creds.get("tls-ca"):
-                client_kwargs["tls"] = True
-                with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".pem") as ca_file:
-                    ca_file.write(creds["tls-ca"])
-                ca_file_path = ca_file.name
-                client_kwargs["tlsCAFile"] = ca_file_path
+            try:
+                uri = f"mongodb://{quote_plus(creds['username'])}:{quote_plus(creds['password'])}@{endpoint}"
+                if creds.get("tls") and creds.get("tls-ca"):
+                    client_kwargs["tls"] = True
+                    with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".pem") as ca_file:
+                        ca_file.write(creds["tls-ca"])
+                    ca_file_path = ca_file.name
+                    client_kwargs["tlsCAFile"] = ca_file_path
 
-            # Ensure bounded MongoDB connection attempts by setting explicit timeouts (in milliseconds).
-            timeout_ms = 5000
-            client_kwargs.setdefault("serverSelectionTimeoutMS", timeout_ms)
-            client_kwargs.setdefault("connectTimeoutMS", timeout_ms)
-            client_kwargs.setdefault("socketTimeoutMS", timeout_ms)
+                # Ensure bounded MongoDB connection attempts by setting explicit timeouts (in milliseconds).
+                timeout_ms = 5000
+                client_kwargs.setdefault("serverSelectionTimeoutMS", timeout_ms)
+                client_kwargs.setdefault("connectTimeoutMS", timeout_ms)
+                client_kwargs.setdefault("socketTimeoutMS", timeout_ms)
 
-            mongodb_client = MongoClient(uri, **client_kwargs)
-            mongodb_client.admin.command("ping")
-            checks.append(ValidationCheck(name="connect", passed=True, message=f"Connected to {endpoint}."))
-        except Exception as exc:
-            checks.append(ValidationCheck(name="connect", passed=False, message=str(exc)))
-            return ValidationResult(
-                status="FAIL",
-                endpoint=self.endpoint,
-                interface=self.interface,
-                level="deep",
-                relation_id=self.relation_id,
-                checks=checks,
-            )
+                mongodb_client = MongoClient(uri, **client_kwargs)
+                mongodb_client.admin.command("ping")
+                checks.append(ValidationCheck(name="connect", passed=True, message=f"Connected to {endpoint}."))
+            except Exception as exc:
+                checks.append(ValidationCheck(name="connect", passed=False, message=str(exc)))
+                return ValidationResult(
+                    status="FAIL",
+                    endpoint=self.endpoint,
+                    interface=self.interface,
+                    level="deep",
+                    relation_id=self.relation_id,
+                    checks=checks,
+                )
 
-        # --- 5. Create canary collection, write, read-verify, cleanup ---
-        canary_collection = f"__canary_{uuid.uuid4().hex[:8]}"
-        try:
-            db = mongodb_client[self.databag["database"]]
-            col = db[canary_collection]
+            # --- 5. Create canary collection, write, read-verify, cleanup ---
+            canary_collection = f"__canary_{uuid.uuid4().hex[:8]}"
+            try:
+                db = mongodb_client[self.databag["database"]]
+                col = db[canary_collection]
 
-            # Write a test document
-            test_doc = {"_test": True, "timestamp": time.time()}
-            result = col.insert_one(test_doc)
-            inserted_id = result.inserted_id
+                # Write a test document
+                test_doc = {"_test": True, "timestamp": time.time()}
+                result = col.insert_one(test_doc)
+                inserted_id = result.inserted_id
 
-            # Read back and verify
-            read_doc = col.find_one({"_id": inserted_id})
-            if read_doc is None or not read_doc.get("_test"):
+                # Read back and verify
+                read_doc = col.find_one({"_id": inserted_id})
+                if read_doc is None or not read_doc.get("_test"):
+                    checks.append(
+                        ValidationCheck(
+                            name="write_read_verify",
+                            passed=False,
+                            message="Failed to verify written document.",
+                        )
+                    )
+                else:
+                    checks.append(
+                        ValidationCheck(
+                            name="write_read_verify",
+                            passed=True,
+                            message="Successfully wrote, read, and verified test document.",
+                        )
+                    )
+
+            except Exception as exc:
                 checks.append(
                     ValidationCheck(
                         name="write_read_verify",
                         passed=False,
-                        message="Failed to verify written document.",
+                        message=str(exc),
                     )
                 )
-            else:
-                checks.append(
-                    ValidationCheck(
-                        name="write_read_verify",
-                        passed=True,
-                        message="Successfully wrote, read, and verified test document.",
-                    )
-                )
-
-        except Exception as exc:
+        finally:
+            if mongodb_client is not None:
+                try:
+                    mongodb_client.close()
+                except Exception:
+                    # Best-effort cleanup; ignore close errors to avoid masking original exception.
+                    pass
+            if ca_file_path is not None and os.path.exists(ca_file_path):
+                try:
+                    os.remove(ca_file_path)
+                except OSError:
+                    # Best-effort cleanup; ignore file removal errors.
+                    pass
             checks.append(ValidationCheck(name="write_read_verify", passed=False, message=str(exc)))
         finally:
             # Cleanup: drop canary collection and record result separately
