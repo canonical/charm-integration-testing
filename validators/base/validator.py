@@ -61,6 +61,8 @@ class BaseValidator(ABC):
     @property
     def databag(self) -> dict[str, str]:
         """Returns the databag of the remote application."""
+        if self.relation.app is None:
+            return {}
         return dict(self.relation.data[self.relation.app])
 
     def _schema_validation_check(self, required_fields: list[str], data: dict[str, str]) -> ValidationCheck:
