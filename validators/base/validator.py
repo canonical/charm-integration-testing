@@ -67,7 +67,6 @@ class BaseValidator(ABC):
         """Utility method to check if required fields are present in data, returning a list of missing fields"""
         missing = [f for f in required_fields if not data.get(f)]
 
-
         return ValidationCheck(
             name="schema",
             passed=not missing,

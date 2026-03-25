@@ -20,10 +20,16 @@ import pytest
 from validators.base import BaseValidator, ValidationCheck, ValidationLevel, ValidationResult
 
 
+class AppStub:
+    """Minimal stand-in for ops.Application used as a relation-data key."""
+
+
 @dataclass
 class RelationStub:
     name: str
     id: int
+    app: AppStub | None = None
+    data: dict[AppStub | None, dict[str, str]] | None = None
 
 
 class ConcreteValidator(BaseValidator):
@@ -37,6 +43,13 @@ class ConcreteValidator(BaseValidator):
             level=level,
             relation_id=self.relation_id,
         )
+
+
+def _make_validator(databag: dict[str, str] | None = None) -> ConcreteValidator:
+    app = AppStub()
+    relation_databag = databag or {}
+    relation = RelationStub(name="db", id=1, app=app, data={app: relation_databag})
+    return ConcreteValidator(object(), relation)  # type: ignore[arg-type]
 
 
 class TestValidationCheck:
@@ -84,3 +97,51 @@ class TestBaseValidator:
         # GIVEN / WHEN / THEN
         with pytest.raises(TypeError):
             BaseValidator(object(), RelationStub(name="x", id=0))  # type: ignore[abstract, arg-type]
+
+    def test_databag_returns_copy_of_remote_app_databag(self) -> None:
+        # GIVEN
+        validator = _make_validator(databag={"database": "mydb"})
+
+        # WHEN
+        databag = validator.databag
+        databag["database"] = "other"
+
+        # THEN
+        assert validator.databag["database"] == "mydb"
+
+    def test_schema_validation_check_passes_when_required_fields_exist(self) -> None:
+        # GIVEN
+        validator = _make_validator()
+
+        # WHEN
+        check = validator._schema_validation_check(
+            required_fields=["endpoints", "database", "username", "password"],
+            data={
+                "endpoints": "10.0.0.1:5432",
+                "database": "mydb",
+                "username": "user",
+                "password": "pass",
+            },
+        )
+
+        # THEN
+        assert check.passed
+        assert check.message == "OK"
+
+    def test_schema_validation_check_fails_for_missing_or_empty_fields(self) -> None:
+        # GIVEN
+        validator = _make_validator()
+
+        # WHEN
+        check = validator._schema_validation_check(
+            required_fields=["endpoints", "database", "username", "password"],
+            data={
+                "endpoints": "10.0.0.1:5432",
+                "database": "",
+                "username": "user",
+            },
+        )
+
+        # THEN
+        assert not check.passed
+        assert check.message == "Missing: database, password"
