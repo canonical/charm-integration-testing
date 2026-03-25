@@ -642,6 +642,11 @@ class TestNormalizeForbiddenSecretErrors:
             expected='secrets "<SECRET>" is forbidden',
         ),
         Params(
+            label="secret_name_with_dots",
+            input='secrets "my.secret.name" is forbidden',
+            expected='secrets "<SECRET>" is forbidden',
+        ),
+        Params(
             label="namespace_clause",
             input='in the namespace "model-19725395113-251127043917"',
             expected='in the namespace "<NAMESPACE>"',
@@ -686,6 +691,11 @@ class TestNormalizeK8sServiceAccounts:
             label="multiple_service_accounts",
             input="system:serviceaccount:ns-a:sa-a and system:serviceaccount:ns-b:sa-b",
             expected="system:serviceaccount:<NAMESPACE>:<SA> and system:serviceaccount:<NAMESPACE>:<SA>",
+        ),
+        Params(
+            label="service_account_with_dots",
+            input="system:serviceaccount:my.namespace:my.sa.name",
+            expected="system:serviceaccount:<NAMESPACE>:<SA>",
         ),
         Params(
             label="no_match",
@@ -937,7 +947,8 @@ class TestNormalizeString:
         Params(
             label="kubernetes_forbidden_secret_error",
             input='Validator \'PostgreSQLClientValidator\' raised an exception: ERROR secrets "t0jekcfse9ecf9rtmgeg-1" is forbidden: User "system:serviceaccount:model-23246006951-260318130333:juju-secret-consumer-ac64e0e2-0c32-4e6c-a61f-ee8af9462d84" cannot get resource "secrets" in API group "" in the namespace "model-23246006951-260318130333"',
-            expected='Validator \'PostgreSQLClientValidator\' raised an exception: ERROR secrets "<SECRET>" is forbidden: User "system:serviceaccount:<NAMESPACE>:<SA>" can...',
+            expected='Validator \'PostgreSQLClientValidator\' raised an exception: ERROR secrets "<SECRET>" is forbidden: User "system:serviceaccount:<NAMESPACE>:<SA>" cannot get resource "secrets" in API group "" in the namespace "<NAMESPACE>"',
+            max_length=1000,
         ),
     ]
 
