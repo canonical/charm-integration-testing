@@ -58,6 +58,22 @@ class BaseValidator(ABC):
     def interface(self) -> str:
         return self.charm.meta.relations[self.relation.name].interface_name or ""
 
+    @property
+    def databag(self) -> dict[str, str]:
+        """Returns the databag of the remote application."""
+        return dict(self.relation.data[self.relation.app])
+
+    def _schema_validation_check(self, required_fields: list[str], data: dict[str, str]) -> ValidationCheck:
+        """Utility method to check if required fields are present in data, returning a list of missing fields"""
+        missing = [f for f in required_fields if not data.get(f)]
+
+
+        return ValidationCheck(
+            name="schema",
+            passed=not missing,
+            message="OK" if not missing else f"Missing: {', '.join(missing)}",
+        )
+
     def _skipped_result(self, level: ValidationLevel) -> ValidationResult:
         """Return a SKIPPED result indicating this validator does not support *level*."""
         return ValidationResult(

@@ -50,23 +50,14 @@ class PostgreSQLClientValidator(BaseValidator):
         }
 
         # --- 3. Schema check ---
-        missing = [f for f in ("endpoints", "database", "username", "password") if not (databag | creds).get(f)]
+        data = databag | creds
+        required_fields = ["endpoints", "database", "username", "password"]
         checks.append(
-            ValidationCheck(
-                name="schema",
-                passed=not missing,
-                message="OK" if not missing else f"Missing: {', '.join(missing)}",
+            self._schema_validation_check(
+                data=data,
+                required_fields=required_fields,
             )
         )
-        if missing:
-            return ValidationResult(
-                status="FAIL",
-                endpoint=self.endpoint,
-                interface=self.interface,
-                level="simple",
-                relation_id=self.relation_id,
-                checks=checks,
-            )
 
         # --- 4. Connect ---
         endpoint = databag["endpoints"].split(",")[0].strip()
