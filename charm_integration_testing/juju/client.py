@@ -208,6 +208,9 @@ class JujuClient:
 
             # Log results for this application
             for unit, unit_results in results.items():
+                if not unit_results or all(r.status == "SKIPPED" for r in unit_results):
+                    self.logger.info(f"Validation skipped for unit '{unit}'.")
+                    continue
                 failed = [r for r in unit_results if r.status in ("FAIL", "ERROR")]
                 if not failed:
                     self.logger.info(f"Validation passed for unit '{unit}'.")
