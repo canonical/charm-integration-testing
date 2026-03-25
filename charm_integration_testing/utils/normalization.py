@@ -169,6 +169,29 @@ def _normalize_pod_names(text: str) -> str:
     )
 
 
+def _normalize_k8s_service_accounts(text: str) -> str:
+    """Normalize Kubernetes service account identifiers.
+
+    Matches ``system:serviceaccount:<namespace>:<name>`` patterns that appear
+    in Kubernetes audit logs, RBAC error messages, and other API server output.
+
+    Example input::
+
+        system:serviceaccount:model-123:juju-secret-consumer-ac64e0e2-...
+
+    Args:
+        text: The text containing service account identifiers
+
+    Returns:
+        Text with service account namespace and name replaced with placeholders
+    """
+    return re.sub(
+        r"system:serviceaccount:[a-z0-9-]+:[a-z0-9-]+",
+        "system:serviceaccount:<NAMESPACE>:<SA>",
+        text,
+    )
+
+
 def _normalize_uuids(text: str) -> str:
     """Replace UUIDs with '<UUID>'.
 
@@ -268,6 +291,34 @@ def _normalize_hook_failure_apps(text: str) -> str:
     return re.sub(r'(hook failed: "[^"]+") for [a-z0-9-]+:[a-z0-9-]+', r"\1 for <APP>:<ENDPOINT>", text)
 
 
+def _normalize_forbidden_secret_errors(text: str) -> str:
+    """Normalize Kubernetes RBAC 'secrets is forbidden' error messages.
+
+    These errors are emitted by the Kubernetes API server when a service account
+    lacks permission to access a secret. Two dynamic parts are normalized:
+    - The secret name (inside quotes after ``secrets``)
+    - The namespace in the trailing ``in the namespace`` clause
+
+    Service account identifiers are handled separately by
+    ``_normalize_k8s_service_accounts``.
+
+    Example input::
+
+        ERROR secrets "t0jekcfse9ecf9rtmgeg-1" is forbidden: User
+        "system:serviceaccount:<NAMESPACE>:<SA>" cannot get resource "secrets"
+        in API group "" in the namespace "model-123"
+
+    Args:
+        text: The text containing RBAC forbidden-secret error messages
+
+    Returns:
+        Text with secret names and namespace names normalized
+    """
+    text = re.sub(r'secrets "[a-z0-9][a-z0-9-]*" is forbidden', 'secrets "<SECRET>" is forbidden', text)
+    text = re.sub(r'in the namespace "[a-z0-9-]+"', 'in the namespace "<NAMESPACE>"', text)
+    return text
+
+
 def _normalize_k8s_cluster_urls(text: str) -> str:
     """Normalize Kubernetes cluster DNS names by replacing service and namespace.
 
@@ -333,6 +384,7 @@ def normalize_string(message: Any, max_length: int = 150) -> str:
     Applies multiple normalizations to create consistent metadata across test runs:
     - Converts bytes/objects to strings
     - Normalizes Kubernetes pod names
+    - Normalizes Kubernetes service account identifiers (system:serviceaccount:...)
     - Normalizes UUIDs
     - Normalizes temporary file paths
     - Normalizes MinIO probe URLs
@@ -343,6 +395,7 @@ def normalize_string(message: Any, max_length: int = 150) -> str:
     - Normalizes hook failure app/endpoint names
     - Normalizes relation version app names
     - Normalizes Kubernetes cluster DNS names (svc.cluster.local)
+    - Normalizes Kubernetes RBAC forbidden-secret errors (secret name, namespace)
     - Replaces all numeric sequences (except technical terms like k8s, s3)
     - Truncates to maximum length
 
@@ -355,6 +408,8 @@ def normalize_string(message: Any, max_length: int = 150) -> str:
     """
     text = _convert_to_string(message)
     text = _normalize_pod_names(text)
+    text = _normalize_k8s_service_accounts(text)
+    text = _normalize_forbidden_secret_errors(text)
     text = _normalize_uuids(text)
     text = _normalize_temp_files(text)
     text = _normalize_minio_probe_urls(text)
