@@ -213,7 +213,12 @@ class JujuClient:
                     continue
                 failed = [r for r in unit_results if r.status in ("FAIL", "ERROR")]
                 if not failed:
-                    self.logger.info(f"Validation passed for unit '{unit}'.")
+                    self.logger.info(f"Validation passed for unit '{unit}' ({len(unit_results)} results)")
+                    for result in unit_results:
+                        self.logger.debug(
+                            f"  endpoint '{result.endpoint}' (interface='{result.interface}', "
+                            f"relation_id={result.relation_id}): {result.status}"
+                        )
                 else:
                     for result in failed:
                         self.logger.error(
