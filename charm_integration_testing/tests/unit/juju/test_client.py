@@ -54,6 +54,26 @@ class BackendStub(NullJujuBackend):
         return self.validate_results.get(application, {})
 
 
+@dataclass
+class KillControllerBackendStub(NullJujuBackend):
+    """Backend stub that records kill_controller calls."""
+
+    killed_controllers: list[str] = field(default_factory=list)
+
+    def kill_controller(self, controller: str) -> None:
+        self.killed_controllers.append(controller)
+
+
+@dataclass
+class MigrateModelBackendStub(NullJujuBackend):
+    """Backend stub that records migrate_model calls."""
+
+    migrated_models: list[tuple[str, str, str]] = field(default_factory=list)
+
+    def migrate_model(self, model_name: str, source_controller: str, target_controller: str) -> None:
+        self.migrated_models.append((model_name, source_controller, target_controller))
+
+
 class ExtensionStub(JujuExtension):
     """Extension that returns configurable validate results."""
 
@@ -261,3 +281,65 @@ class TestJujuClientValidateModel:
 
         # THEN the error string is logged
         assert any("unexpected exception" in e for e in logger.errors)
+
+
+class TestJujuClientKillController:
+    @pytest.fixture
+    def logger(self) -> LoggerStub:
+        return LoggerStub()
+
+    def _client(self, logger: Any, backend: NullJujuBackend) -> JujuClient:
+        return JujuClient(backend, logger, [])
+
+    def test_delegates_to_backend(self, logger: LoggerStub) -> None:
+        # GIVEN a backend that records kill_controller calls
+        backend = KillControllerBackendStub()
+        client = self._client(logger, backend)
+
+        # WHEN
+        client.kill_controller("mycontroller")
+
+        # THEN the backend received the call with the correct controller name
+        assert "mycontroller" in backend.killed_controllers
+
+    def test_logs_controller_name(self, logger: LoggerStub) -> None:
+        # GIVEN a backend stub
+        backend = KillControllerBackendStub()
+        client = self._client(logger, backend)
+
+        # WHEN
+        client.kill_controller("mycontroller")
+
+        # THEN an info message mentioning the controller was logged
+        assert any("mycontroller" in msg for msg in logger.infos)
+
+
+class TestJujuClientMigrateModel:
+    @pytest.fixture
+    def logger(self) -> LoggerStub:
+        return LoggerStub()
+
+    def _client(self, logger: Any, backend: NullJujuBackend) -> JujuClient:
+        return JujuClient(backend, logger, [])
+
+    def test_delegates_to_backend(self, logger: LoggerStub) -> None:
+        # GIVEN a backend that records migrate_model calls
+        backend = MigrateModelBackendStub()
+        client = self._client(logger, backend)
+
+        # WHEN
+        client.migrate_model("mymodel", "source-ctrl", "target-ctrl")
+
+        # THEN the backend received the call with all three arguments
+        assert ("mymodel", "source-ctrl", "target-ctrl") in backend.migrated_models
+
+    def test_logs_model_and_controllers(self, logger: LoggerStub) -> None:
+        # GIVEN a backend stub
+        backend = MigrateModelBackendStub()
+        client = self._client(logger, backend)
+
+        # WHEN
+        client.migrate_model("mymodel", "source-ctrl", "target-ctrl")
+
+        # THEN an info message mentioning the model and both controllers was logged
+        assert any("mymodel" in msg and "source-ctrl" in msg and "target-ctrl" in msg for msg in logger.infos)

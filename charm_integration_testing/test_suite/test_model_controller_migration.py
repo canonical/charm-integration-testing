@@ -16,9 +16,6 @@ def test_model_controller_migration(
     temp_juju_controller: str,
     model: str,
 ) -> None:
-    # Ensure model is idle before starting
-    juju_client.idle_for_period(model=model, timeout=timedelta(minutes=15))
-
     # Validate all applications and relations before migration
     juju_client.validate_model(model=model, level="deep")
 

@@ -195,8 +195,18 @@ class JubilantBackend(JujuCmdBackend):
             try:
                 self.status(model)
                 return
-            except jubilant.CLIError:
-                pass
+            except jubilant.CLIError as e:
+                # Validate that the error is specifically about the model being missing
+                # e.stderr: 'ERROR model pytest-tmp-controller-n84qeh17:admin/debug-test-1 not found\n'
+                err_msg = e.stderr.lower()
+                is_missing = "not found" in err_msg and all(p in err_msg for p in model.split(":"))
+                is_migrating = "has been migrated to controller" in err_msg or "migration in progress" in err_msg
+
+                if is_missing or is_migrating:
+                    pass
+                else:
+                    # Re-raise if it's a different type of CLI error (e.g., connection lost)
+                    raise
 
             elapsed = datetime.now() - iteration_start
             time.sleep(max(0, (delay - elapsed).total_seconds()))
