@@ -550,7 +550,7 @@ def ubuntu_pro_token() -> str | None:
 @pytest.fixture
 def logs_directory(request: pytest.FixtureRequest, collect_logs_after_tests: Path | None) -> Path:
     """Provide the directory where logs were collected.
-    
+
     This fixture depends on collect_logs_after_tests to ensure logs are collected first.
     """
     logs_dir = request.session.stash.get(logs_collected_flag, None)
@@ -913,22 +913,24 @@ def kubernetes_client(_kubernetes_test: None) -> KubernetesClient:
 
 
 @pytest.fixture(scope="session")
-def collect_logs_after_tests(request: pytest.FixtureRequest, model: str, logger: logging.Logger) -> Iterator[Path | None]:
+def collect_logs_after_tests(
+    request: pytest.FixtureRequest, model: str, logger: logging.Logger
+) -> Iterator[Path | None]:
     """Collect logs after all tests complete successfully.
-    
+
     This fixture yields None during test execution, then collects logs during teardown.
     The logs_directory fixture can depend on this to get the actual directory path.
     """
     logs_dir: Path | None = None
     yield logs_dir
-    
+
     # Teardown: collect logs after tests
     logger.info("Collecting debug logs after test completion...")
-    
+
     try:
         logs_dir = Path(tempfile.mkdtemp(prefix="juju-logs-"))
         logger.info(f"Collecting debug logs from model {model} to {logs_dir}")
-        
+
         result = subprocess.run(  # nosec B603, B607
             ["juju", "debug-log", "--model", model, "--replay", "--no-tail"],
             capture_output=True,
@@ -936,15 +938,13 @@ def collect_logs_after_tests(request: pytest.FixtureRequest, model: str, logger:
             check=True,
             timeout=300,
         )
-        
+
         debug_log_file = logs_dir / "debug.log"
         debug_log_file.write_text(result.stdout)
         logger.info(f"Collected {len(result.stdout)} bytes of debug logs to {debug_log_file}")
-        
+
         # Store in session stash for privacy check test to find
         request.session.stash[logs_collected_flag] = logs_dir
-        
+
     except Exception as e:
         logger.error(f"Failed to collect logs: {e}")
-
-

@@ -10,7 +10,7 @@ The actual collection happens in the fixture's teardown phase, after all other t
 
 def test_trigger_log_collection(collect_logs_after_tests: None) -> None:
     """Trigger log collection by depending on the collect_logs_after_tests fixture.
-    
+
     This test doesn't do anything itself - it just ensures the fixture runs,
     which will collect logs in its teardown phase after all tests complete.
     """
