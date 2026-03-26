@@ -88,7 +88,7 @@ jobs:
         run: |
           kubectl get serviceaccounts --all-namespaces --output json | jq --raw-output --argjson age "$AGE_THRESHOLD" '
             .items[] |
-            select(.metadata.name | test("^juju-credentials-[a-zA-Z0-9]{8}$")) |
+            select(.metadata.name | test("^juju-credentials?-[a-zA-Z0-9]{8}$")) |
             select((now - (.metadata.creationTimestamp | fromdateiso8601)) > ($age * 60)) |
             .metadata.namespace + ":" + .kind + "/" + .metadata.name
           ' >> resources_to_remove.txt
@@ -98,7 +98,7 @@ jobs:
           kubectl get secrets --all-namespaces --output json | jq --raw-output --argjson age "$AGE_THRESHOLD" '
             .items[] |
             select(.type == "kubernetes.io/service-account-token") |
-            select(.metadata.name | test("^juju-credentials-[a-zA-Z0-9]{8}$")) |
+            select(.metadata.name | test("^juju-credentials?-[a-zA-Z0-9]{8}$")) |
             select((now - (.metadata.creationTimestamp | fromdateiso8601)) > ($age * 60)) |
             .metadata.namespace + ":" + .kind + "/" + .metadata.name
           ' >> resources_to_remove.txt

@@ -23,10 +23,17 @@ from extensions import (
     UnsealVaultK8sJujuExtension,
     ValidatorInjectorExtension,
 )
-from juju import JujuBackend, JujuClient, JujuWaitTimeoutError
+from juju import JujuBackend, JujuClient, JujuValidationError, JujuWaitTimeoutError
+from juju_cmd.backend import JujuCmdBackend
 from juju_jubilant import JubilantBackend
+from kubernetes_client import KubernetesBackend, KubernetesClient
+from pydantic import TypeAdapter, ValidationError
 from pytest import StashKey
 from utils import normalize_string, normalize_string_multiline
+
+from bundle_builder import UnfulfilledEndpointsError
+from test_suite.scheduler.markers import read_state_marker
+from test_suite.scheduler.states import State
 
 pytest_plugins = [
     "test_suite.scheduler.plugin",
@@ -34,6 +41,7 @@ pytest_plugins = [
 
 KNOWN_FAILURE_EXCEPTIONS = (
     JujuWaitTimeoutError,
+    JujuValidationError,
     AssertionError,
 )
 
@@ -63,6 +71,7 @@ def juju_client(
     logger: logging.Logger,
     minio_client_file: Path | None,
     ubuntu_pro_token: str | None,
+    uv_file: Path | None,
     validators_path: Path | None,
 ) -> JujuClient:
     return JujuClient(
@@ -76,7 +85,7 @@ def juju_client(
             TemporalExtension(juju_backend, logger),
             UnsealVaultJujuExtension(juju_backend, logger),
             UnsealVaultK8sJujuExtension(juju_backend, logger),
-            ValidatorInjectorExtension(validators_path, juju_backend, logger),
+            ValidatorInjectorExtension(validators_path, juju_backend, logger, uv_file),
         ],
     )
 
@@ -191,6 +200,30 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default="./static/charm-default-versions.yaml",
         help="Path to the charm-default-versions yaml.",
     )
+    parser.addoption(
+        "--juju-cloud",
+        type=str,
+        default=None,
+        help="Name of the Juju Cloud to create the controller on.",
+    )
+    parser.addoption(
+        "--juju-controller",
+        type=str,
+        default="charmqa",
+        help="Name of the controller to create the model on.",
+    )
+    parser.addoption(
+        "--juju-model-config",
+        type=str,
+        default=None,
+        help="Path to a json file containing the model configurations to be passed down to Juju on model creation.",
+    )
+    parser.addoption(
+        "--juju-controller-bootstrap-constraints",
+        type=str,
+        default=None,
+        help="Path to a json file containing the controller constraints configurations to be passed down to Juju on controller bootstrap.",
+    )
 
 
 @pytest.fixture
@@ -198,6 +231,66 @@ def model(request: pytest.FixtureRequest) -> str:
     option = request.config.getoption("--model")
     assert isinstance(option, str)
     return option
+
+
+@pytest.fixture
+def juju_model_config(request: pytest.FixtureRequest) -> dict[str, str]:
+    """Juju model config file path passed via ``--juju-model-config``."""
+    value = request.config.getoption("--juju-model-config")
+
+    if not value:
+        return dict()
+
+    assert isinstance(value, str)
+    value = Path(value).resolve()
+    if not value.exists() or not value.is_file():
+        pytest.fail(
+            "Juju model config file passed via the --juju-model-config parameter does not exist or is not a file."
+        )
+
+    # Define the expected shape
+    ConfigSchema = TypeAdapter(dict[str, str])
+
+    try:
+        content = json.loads(value.read_text())
+        return ConfigSchema.validate_python(content)
+    except ValidationError as e:
+        pytest.fail(f"Invalid Juju model config passed via the --juju-model-config parameter: {e}")
+    except json.JSONDecodeError as e:
+        pytest.fail(
+            f"Juju model config file passed via the --juju-model-config parameter does not contain valid JSON: {e}"
+        )
+
+
+@pytest.fixture
+def juju_controller_bootstrap_constraints(request: pytest.FixtureRequest) -> dict[str, str]:
+    """Juju controller bootstrap constraints config file path passed via ``--juju-controller-bootstrap-constraints``."""
+    value = request.config.getoption("--juju-controller-bootstrap-constraints")
+
+    if not value:
+        return dict()
+
+    assert isinstance(value, str)
+    value = Path(value).resolve()
+    if not value.exists() or not value.is_file():
+        pytest.fail(
+            "Juju controller bootstrap constraints config file passed via the --juju-controller-bootstrap-constraints parameter does not exist or is not a file."
+        )
+
+    # Define the expected shape
+    ConfigSchema = TypeAdapter(dict[str, str])
+
+    try:
+        content = json.loads(value.read_text())
+        return ConfigSchema.validate_python(content)
+    except ValidationError as e:
+        pytest.fail(
+            f"Invalid Juju controller bootstrap constraints config passed via the --juju-controller-bootstrap-constraints parameter: {e}"
+        )
+    except json.JSONDecodeError as e:
+        pytest.fail(
+            f"Juju controller bootstrap constraints config file passed via the --juju-controller-bootstrap-constraints parameter does not contain valid JSON: {e}"
+        )
 
 
 @pytest.fixture
@@ -328,6 +421,24 @@ def platform(request: pytest.FixtureRequest) -> str:
 
 
 @pytest.fixture
+def juju_cloud(request: pytest.FixtureRequest) -> str:
+    value = request.config.getoption("--juju-cloud")
+    if not value:
+        pytest.fail("--juju-cloud is required by this test but was not provided.")
+    assert isinstance(value, str)
+    return value
+
+
+@pytest.fixture
+def juju_controller(request: pytest.FixtureRequest) -> str:
+    value = request.config.getoption("--juju-controller")
+    if not value:
+        pytest.fail("--juju-controller is required by this test but was not provided.")
+    assert isinstance(value, str)
+    return value
+
+
+@pytest.fixture
 def charm_metadata_overrides(request: pytest.FixtureRequest) -> Path:
     value = request.config.getoption("--charm-metadata-overrides")
     if not value:
@@ -421,6 +532,14 @@ def minio_client_file() -> Path | None:
 
 
 @pytest.fixture
+def uv_file() -> Path | None:
+    file_path = os.environ.get("UV_FILE")
+    if file_path:
+        file_path = file_path.strip()
+    return Path(file_path) if file_path else None
+
+
+@pytest.fixture
 def ubuntu_pro_token() -> str | None:
     token = os.environ.get("UBUNTU_PRO_TOKEN")
     if token:
@@ -499,11 +618,16 @@ def print_setup_and_teardown_info(
     model: str,
     record_execution_metadata: None,
 ) -> Iterator[None]:
-    # Enforce fixture execution order
-    _ = record_execution_metadata
+    state_marker = read_state_marker(request.node)
+    if not (
+        state_marker
+        and any(state in (State.NO_MODEL, State.NO_CONTROLLER, State.NO_BUNDLE) for state in state_marker.requires)
+    ):
+        # Enforce fixture execution order
+        _ = record_execution_metadata
 
-    # Print starting state
-    juju_client.print_status(model=model)
+        # Print starting state
+        juju_client.print_status(model=model)
 
     # Log starting
     logger.info(f"Starting {request.node.name}")
@@ -520,8 +644,9 @@ def print_setup_and_teardown_info(
     else:
         logger.info(f"Successfully ran {request.node.name}")
 
-    # Log ending state
-    juju_client.print_status(model=model)
+    if not (state_marker and state_marker.provides in (State.NO_MODEL, State.NO_CONTROLLER, State.NO_BUNDLE)):
+        # Log ending state
+        juju_client.print_status(model=model)
 
 
 @pytest.fixture
@@ -613,16 +738,24 @@ def record_charms_and_revisions_execution_metadata_instantaneous(
 
 @pytest.fixture
 def record_charms_and_revisions_execution_metadata(
-    juju_client: JujuClient, model: str, execution_metadata: Callable[[str, str | int], None]
+    request: pytest.FixtureRequest,
+    juju_client: JujuClient,
+    model: str,
+    execution_metadata: Callable[[str, str | int], None],
 ) -> Iterator[None]:
-    # Save all charms and revisions at start of test
-    record_charms_and_revisions_execution_metadata_instantaneous(juju_client, model, execution_metadata)
+    state_marker = read_state_marker(request.node)
+    if not (
+        state_marker
+        and any(state in (State.NO_MODEL, State.NO_CONTROLLER, State.NO_BUNDLE) for state in state_marker.requires)
+    ):
+        # Save all charms and revisions at start of test
+        record_charms_and_revisions_execution_metadata_instantaneous(juju_client, model, execution_metadata)
 
     # Let the test run
     yield
-
-    # Save all charms and revisions at end of test
-    record_charms_and_revisions_execution_metadata_instantaneous(juju_client, model, execution_metadata)
+    if not (state_marker and state_marker.provides in (State.NO_MODEL, State.NO_CONTROLLER, State.NO_BUNDLE)):
+        # Save all charms and revisions at end of test
+        record_charms_and_revisions_execution_metadata_instantaneous(juju_client, model, execution_metadata)
 
 
 @pytest.fixture
@@ -676,6 +809,27 @@ def record_failure_execution_metadata(
             if exc.stderr:
                 for line in normalize_string_multiline(exc.stderr):
                     execution_metadata("failure:cli:stderr", line)
+        elif isinstance(exc, JujuValidationError):
+            for results in exc.failed_validations.values():
+                for result in results:
+                    execution_metadata(f"failure:validator:interface:{result.interface}", result.status)
+                    for check in result.checks:
+                        if not check.passed:
+                            execution_metadata(
+                                f"failure:validator:interface:{result.interface}:check",
+                                normalize_string(f"{check.name}: {check.message}"),
+                            )
+                    if result.error:
+                        execution_metadata(
+                            f"failure:validator:interface:{result.interface}:error",
+                            normalize_string(result.error),
+                        )
+        elif isinstance(exc, UnfulfilledEndpointsError):
+            for endpoint in exc.unfulfilled_endpoints:
+                charm = exc.best_bundle.application_lookup[endpoint.application].charm.name
+                interface = exc.best_bundle.application_endpoints[endpoint].interface
+                execution_metadata("failure:build_bundle:unfulfilled_endpoint", f"{charm}:{endpoint.endpoint}")
+                execution_metadata("failure:build_bundle:unfulfilled_interface", interface)
 
         if error_message in request.node.stash:
             # toggle expected failure flag
@@ -686,8 +840,16 @@ def record_failure_execution_metadata(
 
 @pytest.fixture
 def record_juju_execution_metadata(
-    juju_client: JujuClient, model: str, execution_metadata: Callable[[str, str | int], None]
+    request: pytest.FixtureRequest,
+    juju_client: JujuClient,
+    model: str,
+    execution_metadata: Callable[[str, str | int], None],
 ) -> Iterator[None]:
+    state_marker = read_state_marker(request.node)
+    if state_marker and any(state in (State.NO_MODEL, State.NO_CONTROLLER) for state in state_marker.requires):
+        yield
+        return
+
     # Let the test run
     yield
 
@@ -738,6 +900,18 @@ def record_pipeline_version_execution_metadata(
         warnings.warn(f"Pipeline file not found: {pipeline_path}")
 
 
+@pytest.fixture
+def _kubernetes_test(juju_backend: JujuCmdBackend, model: str) -> None:
+    if not juju_backend.is_k8s_model(model):
+        pytest.skip("Not kubernetes")
+
+
+@pytest.fixture
+def kubernetes_client(_kubernetes_test: None) -> KubernetesClient:
+    kubeconfig = os.environ.get("KUBECONFIG")
+    return KubernetesClient(KubernetesBackend.k8s_client(kubeconfig=kubeconfig))
+
+
 @pytest.fixture(scope="session")
 def collect_logs_after_tests(request: pytest.FixtureRequest, model: str, logger: logging.Logger) -> Iterator[Path | None]:
     """Collect logs after all tests complete successfully.
@@ -772,3 +946,5 @@ def collect_logs_after_tests(request: pytest.FixtureRequest, model: str, logger:
         
     except Exception as e:
         logger.error(f"Failed to collect logs: {e}")
+
+

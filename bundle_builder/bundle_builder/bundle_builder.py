@@ -350,6 +350,8 @@ class BundleBuilder:
 class UncompletableBundleError(ValueError):
     """Exception raised when bundle builder cannot generate a complete bundle from the base bundle"""
 
+    best_bundle: Bundle
+
     def __init__(self, best_bundle: Bundle, reason: str = "no reason set"):
         self.best_bundle = best_bundle
         message = f"Could not build a complete valid bundle: {reason}"
@@ -357,11 +359,9 @@ class UncompletableBundleError(ValueError):
 
 
 class UnfulfilledEndpointsError(UncompletableBundleError):
-    """UncompletableBundleError when we cannot fulfill required application endpoints.
+    """UncompletableBundleError when we cannot fulfill required application endpoints."""
 
-    Attributes:
-        unfulfilled_endpoints: The set of application endpoints that could not be fulfilled.
-    """
+    unfulfilled_endpoints: frozenset[ApplicationEndpoint]
 
     def __init__(self, best_bundle: Bundle) -> None:
         self.unfulfilled_endpoints = best_bundle.unfulfilled_endpoints

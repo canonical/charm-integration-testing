@@ -13,6 +13,7 @@ import jubilant
 import yaml
 from juju import (
     JujuApplicationInfo,
+    JujuExecOutput,
     JujuIntegration,
     JujuIntegrationApplication,
     JujuStatusPerformanceWarning,
@@ -22,8 +23,12 @@ from juju import (
     warn_performance,
 )
 from juju_cmd import JujuCmdBackend
+from tenacity import retry, stop_after_attempt, wait_fixed
+
+from validators.base.validator import ValidationResult
 
 from .client import JubilantClient
+from .structures import JujuExecTask
 from .wait import (
     all_statuses_are_in,
     applications_are_removed,
@@ -259,6 +264,48 @@ class JubilantBackend(JujuCmdBackend):
         # we'll convert to a dict.
         return {k: v for k, v in self.client.model(model).config(application).items()}
 
+    def _exec(self, model: str, *args: str) -> dict[str, JujuExecTask]:
+        """Run juju exec with the given args and return output parsed and keyed by unit name."""
+        try:
+            exec_output = self.client.model(model).cli("exec", "--format", "yaml", *args)
+        except jubilant.CLIError as e:
+            if "ERROR the following task failed" not in e.stderr:
+                raise
+            exec_output = e.stdout
+        return {unit_name: JujuExecTask(**result) for unit_name, result in yaml.safe_load(exec_output).items()}
+
+    def exec_unit(self, model: str, unit: str, task: str, operator: bool = False) -> JujuExecOutput:
+        args = ["--unit", unit]
+        if operator:
+            args.append("--operator")
+        args += ["--", task]
+
+        parsed_output = self._exec(model, *args)
+
+        # Juju resolves "app/leader" to "app/{id}" in the output key; find the resolved name.
+        application, unit_id = unit.split("/")
+        if unit_id == "leader":
+            app_units = self.status(model).apps[application].units
+            leader_unit = next(
+                (name for name, info in app_units.items() if info.leader),
+                None,
+            )
+            if leader_unit is None:
+                raise KeyError(f"No leader found for application '{application}'")
+            resolved_unit = leader_unit
+        else:
+            resolved_unit = unit
+
+        if resolved_unit not in parsed_output:
+            raise KeyError(f"Unit '{resolved_unit}' not found in exec output; got: {list(parsed_output)}")
+
+        task_result = parsed_output[resolved_unit]
+        return JujuExecOutput(
+            return_code=task_result.results.return_code,
+            stdout=task_result.results.stdout,
+            stderr=task_result.results.stderr,
+        )
+
     def scp(self, model: str, source: str, destination: str) -> None:
         # Jubilant scp doesn't work for directories
         # https://github.com/canonical/jubilant/issues/266
@@ -336,6 +383,23 @@ class JubilantBackend(JujuCmdBackend):
     def version(self, model: str) -> str:
         return str(self.client.model(model).version())
 
-    def validate_application(self, model: str, application: str, level: str) -> None:
+    @retry(stop=stop_after_attempt(3), wait=wait_fixed(5), reraise=True)
+    def bootstrap_controller(self, cloud: str, controller: str, controller_constraints: dict[str, str]) -> None:
+        # XXX (@mbenzan): we have to be able to pass in `extra_arguments` for Openstack integrations.
+        # This is currently not supported by Jubilant. I'll open a PR there to add this functionality
+        # and then update the code here to use it. In the meantime, O11 will fail to provision.
+        # PR: https://github.com/canonical/jubilant/pull/272
+        return self.client.model(None).bootstrap(
+            cloud=cloud, controller=controller, bootstrap_constraints=controller_constraints
+        )
+
+    @retry(stop=stop_after_attempt(3), wait=wait_fixed(5), reraise=True)
+    def add_model(self, controller: str, model: str, model_config: dict[str, str]) -> None:
+        self.client.model(None).add_model(model=model, controller=controller, config=model_config)
+
+    def switch(self, controller: str, model: str) -> None:
+        self.client.model(model).cli("switch", f"{controller}:{model}", include_model=False)
+
+    def validate_application(self, model: str, application: str, level: str) -> dict[str, list[ValidationResult]]:
         # Phase 2 endpoint validation will be done here
-        pass
+        return {}

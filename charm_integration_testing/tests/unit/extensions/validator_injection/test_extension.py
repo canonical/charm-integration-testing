@@ -30,12 +30,13 @@ class JujuStub(NullJujuBackend):
     exec_responses: deque[JujuExecOutput] = field(default_factory=deque)
     exec_calls: list[tuple[str, str, str]] = field(default_factory=list)
     scp_calls: list[tuple[str, str, str]] = field(default_factory=list)
+    ssh_calls: list[tuple[str, str, str]] = field(default_factory=list)
     units_by_app: dict[str, list[str]] = field(default_factory=dict)
 
     def application_units(self, model: str, application: str) -> list[str]:
         return self.units_by_app.get(application, [])
 
-    def exec_unit(self, model: str, unit: str, task: str) -> JujuExecOutput:
+    def exec_unit(self, model: str, unit: str, task: str, operator: bool = False) -> JujuExecOutput:
         self.exec_calls.append((model, unit, task))
         if self.exec_responses:
             return self.exec_responses.popleft()
@@ -43,6 +44,9 @@ class JujuStub(NullJujuBackend):
 
     def scp(self, model: str, source: str, destination: str) -> None:
         self.scp_calls.append((model, source, destination))
+
+    def ssh(self, model: str, unit: str, cmd: str) -> None:
+        self.ssh_calls.append((model, unit, cmd))
 
 
 class LoggerStub(logging.Logger):
@@ -59,6 +63,9 @@ class LoggerStub(logging.Logger):
 
     def error(self, msg: str, *args: object, **kwargs: object) -> None:  # type: ignore[override]
         self.errors.append(str(msg))
+
+    def getChild(self, suffix: str) -> "LoggerStub":
+        return self
 
 
 # ---------------------------------------------------------------------------
@@ -134,12 +141,20 @@ class TestValidatorInjectorExtension:
         return tmp_path / "validators"
 
     @pytest.fixture
-    def extension(self, juju: JujuStub, logger: LoggerStub, validators_path: Path) -> ValidatorInjectorExtension:
-        return ValidatorInjectorExtension(validators_path=validators_path, juju=juju, logger=logger)
+    def uv_file(self, tmp_path: Path) -> Path:
+        path = tmp_path / "uv"
+        path.write_bytes(b"")
+        return path
 
     @pytest.fixture
-    def extension_no_path(self, juju: JujuStub, logger: LoggerStub) -> ValidatorInjectorExtension:
-        return ValidatorInjectorExtension(validators_path=None, juju=juju, logger=logger)
+    def extension(
+        self, juju: JujuStub, logger: LoggerStub, validators_path: Path, uv_file: Path
+    ) -> ValidatorInjectorExtension:
+        return ValidatorInjectorExtension(validators_path=validators_path, juju=juju, logger=logger, uv_file=uv_file)
+
+    @pytest.fixture
+    def extension_no_path(self, juju: JujuStub, logger: LoggerStub, uv_file: Path) -> ValidatorInjectorExtension:
+        return ValidatorInjectorExtension(validators_path=None, juju=juju, logger=logger, uv_file=uv_file)
 
     class TestPostValidate:
         def test_runs_validators_on_each_unit(self, extension: ValidatorInjectorExtension, juju: JujuStub) -> None:
@@ -165,6 +180,20 @@ class TestValidatorInjectorExtension:
 
             # THEN no exec calls were made
             assert juju.exec_calls == []
+
+        def test_returns_results_keyed_by_unit(self, extension: ValidatorInjectorExtension, juju: JujuStub) -> None:
+            # GIVEN two units, each returning one PASS result
+            juju.units_by_app["myapp"] = ["myapp/0", "myapp/1"]
+            run_stdout = _runner_json(_pass_result("db"))
+            for _ in ["myapp/0", "myapp/1"]:
+                juju.exec_responses.extend(_preinstalled_responses(run_stdout))
+
+            # WHEN
+            results = extension.post_validate("mymodel", "myapp", "simple")
+
+            # THEN the return value maps each unit to its list of results
+            assert set(results.keys()) == {"myapp/0", "myapp/1"}
+            assert all(len(v) == 1 for v in results.values())
 
     class TestRunValidatorsOnUnit:
         class TestVenvAlreadyInstalled:
@@ -218,7 +247,7 @@ class TestValidatorInjectorExtension:
                 extension._run_validators_on_unit("mymodel", "myapp/0", "simple")
 
                 # THEN scp + 3 install commands + run_validators all happened
-                assert len(juju.scp_calls) == 1
+                assert len(juju.scp_calls) == 2  # validators + uv
                 assert len(juju.exec_calls) == 5  # test-f + 3 installs + run
 
         class TestResultHandling:
@@ -230,29 +259,35 @@ class TestValidatorInjectorExtension:
                 # WHEN / THEN (no exception raised)
                 extension._run_validators_on_unit("mymodel", "myapp/0", "simple")
 
-            def test_raises_naming_the_failing_endpoint(
+            def test_returns_fail_result_naming_the_failing_endpoint(
                 self, extension: ValidatorInjectorExtension, juju: JujuStub
             ) -> None:
                 # GIVEN one endpoint fails
                 run_stdout = _runner_json(_fail_result("db"))
                 juju.exec_responses.extend(_preinstalled_responses(run_stdout))
 
-                # WHEN / THEN
-                with pytest.raises(RuntimeError, match="db"):
-                    extension._run_validators_on_unit("mymodel", "myapp/0", "simple")
+                # WHEN
+                results = extension._run_validators_on_unit("mymodel", "myapp/0", "simple")
 
-            def test_raises_listing_all_failing_endpoints(
+                # THEN the failing result is returned
+                assert len(results) == 1
+                assert results[0].endpoint == "db"
+                assert results[0].status == "FAIL"
+
+            def test_returns_fail_results_listing_all_failing_endpoints(
                 self, extension: ValidatorInjectorExtension, juju: JujuStub
             ) -> None:
                 # GIVEN two different endpoints fail
                 run_stdout = _runner_json(_fail_result("db"), _fail_result("metrics"))
                 juju.exec_responses.extend(_preinstalled_responses(run_stdout))
 
-                # WHEN / THEN
-                with pytest.raises(RuntimeError) as exc_info:
-                    extension._run_validators_on_unit("mymodel", "myapp/0", "simple")
-                assert "db" in str(exc_info.value)
-                assert "metrics" in str(exc_info.value)
+                # WHEN
+                results = extension._run_validators_on_unit("mymodel", "myapp/0", "simple")
+
+                # THEN both failing results are returned
+                endpoints = {r.endpoint for r in results}
+                assert "db" in endpoints
+                assert "metrics" in endpoints
 
             def test_passes_level_to_runner_command(
                 self, extension: ValidatorInjectorExtension, juju: JujuStub
@@ -267,22 +302,22 @@ class TestValidatorInjectorExtension:
                 run_cmd = juju.exec_calls[-1][2]
                 assert "--level deep" in run_cmd
 
-            def test_logs_error_message_for_failing_endpoint(
+            def test_returns_error_result_with_error_message(
                 self,
                 extension: ValidatorInjectorExtension,
                 juju: JujuStub,
-                logger: LoggerStub,
             ) -> None:
                 # GIVEN an endpoint that returns an ERROR with a message
                 run_stdout = _runner_json(_error_result("db", error="connection refused"))
                 juju.exec_responses.extend(_preinstalled_responses(run_stdout))
 
                 # WHEN
-                with pytest.raises(RuntimeError):
-                    extension._run_validators_on_unit("mymodel", "myapp/0", "simple")
+                results = extension._run_validators_on_unit("mymodel", "myapp/0", "simple")
 
-                # THEN the error message is logged
-                assert any("connection refused" in e for e in logger.errors)
+                # THEN the error result is returned with its error message
+                assert len(results) == 1
+                assert results[0].status == "ERROR"
+                assert results[0].error == "connection refused"
 
     class TestInjectValidators:
         def test_raises_when_validators_path_is_none(self, extension_no_path: ValidatorInjectorExtension) -> None:
@@ -304,10 +339,27 @@ class TestValidatorInjectorExtension:
             extension._inject_validators("mymodel", "myapp/0")
 
             # THEN scp is called with the resolved source path and correct destination
-            assert len(juju.scp_calls) == 1
+            assert len(juju.scp_calls) == 2  # validators + uv
             _, source, dest = juju.scp_calls[0]
             assert source == str(validators_path.resolve())
-            assert dest == f"myapp/0:{remote_validators_path}"
+            assert dest == f"myapp/0:{remote_validators_path}/packages"
+
+        def test_calls_ssh_mkdir_before_scp(
+            self,
+            extension: ValidatorInjectorExtension,
+            juju: JujuStub,
+        ) -> None:
+            # GIVEN all install commands succeed
+            juju.exec_responses.extend([_ok(), _ok(), _ok()])
+
+            # WHEN
+            extension._inject_validators("mymodel", "myapp/0")
+
+            # THEN ssh was called to create the remote directory before copying files
+            assert len(juju.ssh_calls) == 1
+            _, unit, cmd = juju.ssh_calls[0]
+            assert unit == "myapp/0"
+            assert cmd == f"mkdir -p {remote_validators_path}"
 
         def test_runs_three_install_commands(self, extension: ValidatorInjectorExtension, juju: JujuStub) -> None:
             # GIVEN all install commands succeed
@@ -320,11 +372,11 @@ class TestValidatorInjectorExtension:
             assert len(juju.exec_calls) == 3
 
         def test_raises_when_apt_install_fails(self, extension: ValidatorInjectorExtension, juju: JujuStub) -> None:
-            # GIVEN apt-get install fails
-            juju.exec_responses.append(_fail(stderr="apt error"))
+            # GIVEN chmod +x uv fails
+            juju.exec_responses.append(_fail(stderr="chmod error"))
 
             # WHEN / THEN
-            with pytest.raises(RuntimeError, match="install venv"):
+            with pytest.raises(RuntimeError, match="make uv executable"):
                 extension._inject_validators("mymodel", "myapp/0")
 
         def test_raises_when_venv_creation_fails(self, extension: ValidatorInjectorExtension, juju: JujuStub) -> None:

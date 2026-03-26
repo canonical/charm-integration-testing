@@ -27,6 +27,7 @@ dependencies = [
     "pydantic>=2.0.0",
     "validators-base",
     "validators-postgresql-client",
+    "validators-tracing[deep]",
 ]
 
 [build-system]

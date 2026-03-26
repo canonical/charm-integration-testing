@@ -1,0 +1,46 @@
+# Copyright (C) 2026 Canonical Ltd
+
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+[project]
+name = "validators-tracing"
+version = "0.1.0"
+description = "Validator for tracing interface (v2)"
+authors = [
+    {name = "SQA Team", email = "solutionsqa@canonical.com"}
+]
+
+requires-python = ">=3.10"
+dependencies = [
+    "validators-base",
+]
+
+[project.optional-dependencies]
+deep = [
+    "opentelemetry-exporter-otlp-proto-http>=1.0.0",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.0.0",
+]
+
+[project.entry-points."endpoint_validators"]
+tracing = "validators.tracing:TracingValidator"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["validators.tracing"]
+
+[tool.setuptools.package-dir]
+"validators.tracing" = "."

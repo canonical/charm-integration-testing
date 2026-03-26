@@ -25,6 +25,9 @@ The ``normalize_string()`` function applies these transformations:
 - **Container names**: ``container=katib-controller`` → ``container=<CONTAINER>``
 - **Hook failure app/endpoint**: ``hook failed: "install" for app:endpoint`` → ``hook failed: "install" for <APP>:<ENDPOINT>``
 - **Relation version errors**: ``versions not found for apps: app-name`` → ``versions not found for apps: <APP>``
+- **Kubernetes service accounts**: ``system:serviceaccount:namespace:sa-name`` → ``system:serviceaccount:<NAMESPACE>:<SA>``
+- **Forbidden secret errors**: ``secrets "t0jekcfse9ecf9rtmgeg-1" is forbidden`` → ``secrets "<SECRET>" is forbidden``; ``in the namespace "ns"`` → ``in the namespace "<NAMESPACE>"``
+- **Kubernetes cluster DNS names**: ``service.namespace.svc.cluster.local`` → ``<SERVICE>.<NAMESPACE>.svc.cluster.local``
 - **Numeric sequences**: ``12345`` → ``XXX`` (excludes technical terms like ``k8s``, ``s3``)
 - **Truncation**: Values longer than 150 characters are truncated with ``...``
 
@@ -137,7 +140,7 @@ The framework distinguishes between expected failures and unexpected errors, usi
 Failure Metadata (Expected Failures)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Collected when the exception type is in ``KNOWN_FAILURE_EXCEPTIONS`` (``JujuWaitTimeoutError``, ``AssertionError``, ``CalledProcessError``):
+Collected when the exception type is in ``KNOWN_FAILURE_EXCEPTIONS`` (``JujuWaitTimeoutError``, ``JujuValidationError``, ``AssertionError``, ``CalledProcessError``):
 
 .. list-table::
    :header-rows: 1
@@ -171,6 +174,26 @@ Collected when the exception type is in ``KNOWN_FAILURE_EXCEPTIONS`` (``JujuWait
      - Standard error from a failed command. Only recorded for ``CalledProcessError`` with stderr.
      - Yes, multi-line normalized
      - ``ERROR connection refused``
+   * - ``failure:validator:interface:<interface>``
+     - Validation result status for a specific interface when a test fails due to ``JujuValidationError``. Dynamic category based on interface name (e.g., ``failure:validator:interface:postgresql_client``). Value is ``FAIL`` or ``ERROR``.
+     - No
+     - ``FAIL``
+   * - ``failure:validator:interface:<interface>:check``
+     - Details of a specific failed validation check for an interface. Format: ``<check_name>: <message>``. Multiple values may be recorded per interface.
+     - Yes
+     - ``connect: could not connect to server``
+   * - ``failure:validator:interface:<interface>:error``
+     - Error string from a validation result with status ``ERROR``. Only recorded when ``ValidationResult.error`` is set.
+     - Yes
+     - ``Unexpected exception during validation``
+   * - ``failure:build_bundle:unfulfilled_endpoint``
+     - An application endpoint that could not be fulfilled during bundle building. Collected when ``UnfulfilledEndpointsError`` is raised. Format: ``<charm>:<endpoint_name>``. Multiple values may be recorded.
+     - No
+     - ``postgresql:db``
+   * - ``failure:build_bundle:unfulfilled_interface``
+     - Interface name for an unfulfilled application endpoint. Collected when ``UnfulfilledEndpointsError`` is raised. Multiple values may be recorded.
+     - No
+     - ``postgresql_client``
 
 Error Metadata (Unexpected Errors)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

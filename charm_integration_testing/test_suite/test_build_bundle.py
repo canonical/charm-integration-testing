@@ -6,15 +6,20 @@ from pathlib import Path
 
 import pytest
 
-from bundle_builder.bundle import Application, ApplicationEndpoint, Bundle, Integration  # type: ignore[import-untyped]
-from bundle_builder.bundle_builder import BundleBuilder
-from bundle_builder.charmhub import CharmhubClient  # type: ignore[import-untyped]
-from bundle_builder.overrides import OverridesClient  # type: ignore[import-untyped]
+from bundle_builder import (
+    Application,
+    ApplicationEndpoint,
+    Bundle,
+    BundleBuilder,
+    CharmhubClient,
+    Integration,
+    OverridesClient,
+)
 
 from .scheduler.states import State
 
 
-@pytest.mark.state(requires=State.NO_BUNDLE, provides=State.EMPTY_MODEL)
+@pytest.mark.state(requires=State.NO_BUNDLE, provides=State.NO_CONTROLLER)
 def test_build_bundle(
     target_charm: str,
     neighbor_charm: str,
@@ -80,8 +85,11 @@ def test_build_bundle(
     bundle_builder = BundleBuilder(charmhub_client=charmhub_client, logger=logger)
     built_bundle = bundle_builder.build(base_bundle)
 
-    bundle.write_text(built_bundle.export(), encoding="utf-8")
-    logger.info(f"Bundle written to {bundle}")
+    bundle_contents = built_bundle.export()
+    separator = "-" * 80
+    bundle.write_text(bundle_contents, encoding="utf-8")
+    logger.info(f"Bundle written to {bundle}.")
+    logger.info(f"Bundle content:\n{separator}\n{bundle_contents.strip()}\n{separator}")
 
     bundle_mermaid_output.write_text(built_bundle.export_mermaid(), encoding="utf-8")
     logger.info(f"Bundle Mermaid diagram written to {bundle_mermaid_output}")

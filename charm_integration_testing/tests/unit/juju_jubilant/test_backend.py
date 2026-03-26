@@ -125,7 +125,7 @@ class JubilantClientStub(JubilantClient):
     def __init__(self, client: Any) -> None:
         self.client = client
 
-    def model(self, model: str) -> Any:
+    def model(self, model: str | None) -> Any:
         return self.client
 
 
@@ -825,6 +825,166 @@ class TestJubilantBackend:
             assert stub.target == "my-app"
             assert stub.command == "ls -l"
 
+    class TestExecUnit:
+        @staticmethod
+        def _exec_yaml(unit: str, return_code: int, stdout: str = "", stderr: str = "") -> str:
+            return yaml.dump(
+                {
+                    unit: {
+                        "id": "1",
+                        "status": "completed",
+                        "results": {
+                            "return-code": return_code,
+                            "stdout": stdout,
+                            "stderr": stderr,
+                        },
+                    }
+                }
+            )
+
+        @dataclass
+        class ExecCliStub:
+            calls: list[tuple[str, ...]] = field(default_factory=list)
+            response: str = ""
+            fail_with_task_error: bool = False
+
+            def cli(self, *args: str) -> str:
+                self.calls.append(tuple(args))
+                if self.fail_with_task_error:
+                    raise jubilant.CLIError(1, ["juju"], self.response, "ERROR the following task failed")
+                return self.response
+
+        # Stub that provides both cli() (for exec) and status() (for leader resolution).
+        class ExecAndStatusStub:
+            class _UnitInfo:
+                def __init__(self, leader: bool) -> None:
+                    self.leader = leader
+
+            class _AppStatus:
+                def __init__(self, units: dict[str, Any]) -> None:
+                    self.units = units
+
+            class _Status:
+                def __init__(self, apps: dict[str, Any]) -> None:
+                    self.apps = apps
+
+            def __init__(self, cli_response: str, leader_units: dict[str, str]) -> None:
+                """
+                cli_response: YAML string to return from cli()
+                leader_units: mapping of app_name -> leader unit name (e.g. {"myapp": "myapp/1"})
+                """
+                self.cli_response = cli_response
+                self.leader_units = leader_units
+                self.cli_calls: list[tuple[str, ...]] = []
+
+            def cli(self, *args: str) -> str:
+                self.cli_calls.append(tuple(args))
+                return self.cli_response
+
+            def status(self) -> Any:
+                apps = {}
+                for app_name, leader_unit in self.leader_units.items():
+                    # Build a two-unit app where the specified unit is the leader.
+                    other_unit = f"{app_name}/0" if leader_unit != f"{app_name}/0" else f"{app_name}/1"
+                    apps[app_name] = self._AppStatus(
+                        {
+                            other_unit: self._UnitInfo(leader=False),
+                            leader_unit: self._UnitInfo(leader=True),
+                        }
+                    )
+                return self._Status(apps)
+
+        def test_exec_success(self) -> None:
+            # GIVEN a successful exec
+            stub = self.ExecCliStub(response=self._exec_yaml("myapp/0", 0, stdout="hello\n"))
+            client = JubilantClientStub(client=stub)
+
+            # WHEN
+            result = JubilantBackend(client).exec_unit("test-model", "myapp/0", "echo hello")
+
+            # THEN _exec prepends "exec", "--format", "yaml" before the unit args
+            assert stub.calls == [("exec", "--format", "yaml", "--unit", "myapp/0", "--", "echo hello")]
+            assert result.return_code == 0
+            assert result.stdout == "hello\n"
+            assert result.stderr == ""
+
+        def test_exec_with_operator(self) -> None:
+            # GIVEN
+            stub = self.ExecCliStub(response=self._exec_yaml("myapp/0", 0, stdout="hello\n"))
+            client = JubilantClientStub(client=stub)
+
+            # WHEN operator=True is passed
+            result = JubilantBackend(client).exec_unit("test-model", "myapp/0", "echo hello", operator=True)
+
+            # THEN --operator appears after --unit but before "--"
+            assert stub.calls == [("exec", "--format", "yaml", "--unit", "myapp/0", "--operator", "--", "echo hello")]
+            assert result.return_code == 0
+
+        def test_exec_nonzero_return_code(self) -> None:
+            # GIVEN a command that exits non-zero (juju exec raises CLIError with "task failed")
+            stub = self.ExecCliStub(
+                response=self._exec_yaml("myapp/0", 1, stderr="command not found"),
+                fail_with_task_error=True,
+            )
+            client = JubilantClientStub(client=stub)
+
+            # WHEN
+            result = JubilantBackend(client).exec_unit("test-model", "myapp/0", "bad-cmd")
+
+            # THEN the non-zero return code is returned, not raised
+            assert result.return_code == 1
+            assert result.stderr == "command not found"
+
+        def test_exec_with_leader_resolves_via_status(self) -> None:
+            # GIVEN: output is keyed by the resolved unit "myapp/1" (juju replaces "leader" in output)
+            stub = self.ExecAndStatusStub(
+                cli_response=self._exec_yaml("myapp/1", 0, stdout="leader output\n"),
+                leader_units={"myapp": "myapp/1"},
+            )
+            client = JubilantClientStub(client=stub)
+
+            # WHEN exec_unit is called with "app/leader"
+            result = JubilantBackend(client).exec_unit("test-model", "myapp/leader", "echo hello")
+
+            # THEN the resolved leader unit's output is returned
+            assert result.return_code == 0
+            assert result.stdout == "leader output\n"
+
+        def test_exec_leader_not_found_raises(self) -> None:
+            # GIVEN a status where no unit has leader=True
+            class NoLeaderStub:
+                class _UnitInfo:
+                    leader = False
+
+                class _AppStatus:
+                    def __init__(self) -> None:
+                        self.units: dict[str, Any] = {"myapp/0": NoLeaderStub._UnitInfo()}
+
+                class _Status:
+                    def __init__(self) -> None:
+                        self.apps: dict[str, Any] = {"myapp": NoLeaderStub._AppStatus()}
+
+                def cli(self, *args: str) -> str:
+                    # Return valid YAML so _exec succeeds; leader resolution happens after
+                    return yaml.dump(
+                        {
+                            "myapp/0": {
+                                "id": "1",
+                                "status": "completed",
+                                "results": {"return-code": 0, "stdout": "", "stderr": ""},
+                            }
+                        }
+                    )
+
+                def status(self) -> Any:
+                    return self._Status()
+
+            client = JubilantClientStub(client=NoLeaderStub())
+
+            # WHEN / THEN
+            with pytest.raises(KeyError, match="No leader found for application 'myapp'"):
+                JubilantBackend(client).exec_unit("test-model", "myapp/leader", "echo hello")
+
     class TestUnitIp:
         class Unit:
             def __init__(self, address: str, leader: bool = False) -> None:
@@ -1206,6 +1366,74 @@ class TestJubilantBackend:
             # THEN
             assert stub.app == "my-app"
             assert config == {"setting1": "value1", "setting2": "value2"}
+
+    class TestControllerSetupRetries:
+        @dataclass
+        class SetupStub:
+            bootstrap_failures_remaining: int = 0
+            add_model_failures_remaining: int = 0
+            bootstrap_calls: int = 0
+            add_model_calls: int = 0
+            switch_calls: int = 0
+
+            def bootstrap(self, cloud: str, controller: str, bootstrap_constraints: dict[str, str]) -> None:
+                self.bootstrap_calls += 1
+                if self.bootstrap_failures_remaining > 0:
+                    self.bootstrap_failures_remaining -= 1
+                    raise RuntimeError("transient bootstrap failure")
+
+            def add_model(self, model: str, controller: str, config: dict[str, str]) -> None:
+                self.add_model_calls += 1
+                if self.add_model_failures_remaining > 0:
+                    self.add_model_failures_remaining -= 1
+                    raise RuntimeError("transient add-model failure")
+
+            def cli(self, *args: str, include_model: bool = True) -> str:
+                if args and args[0] == "switch":
+                    self.switch_calls += 1
+                return ""
+
+        def test_bootstrap_controller_retries_then_succeeds(self) -> None:
+            stub = self.SetupStub(bootstrap_failures_remaining=2)
+            backend = JubilantBackend(JubilantClientStub(client=stub))
+
+            with patch("tenacity.nap.sleep", return_value=None):
+                backend.bootstrap_controller(cloud="k8s-stg", controller="test-controller", controller_constraints={})
+
+            assert stub.bootstrap_calls == 3
+
+        def test_bootstrap_controller_retries_then_raises(self) -> None:
+            stub = self.SetupStub(bootstrap_failures_remaining=3)
+            backend = JubilantBackend(JubilantClientStub(client=stub))
+
+            with patch("tenacity.nap.sleep", return_value=None):
+                with pytest.raises(RuntimeError, match="transient bootstrap failure"):
+                    backend.bootstrap_controller(
+                        cloud="k8s-stg", controller="test-controller", controller_constraints={}
+                    )
+
+            assert stub.bootstrap_calls == 3
+
+        def test_add_model_retries_then_succeeds(self) -> None:
+            stub = self.SetupStub(add_model_failures_remaining=2)
+            backend = JubilantBackend(JubilantClientStub(client=stub))
+
+            with patch("tenacity.nap.sleep", return_value=None):
+                backend.add_model(controller="test-controller", model="test-model", model_config={})
+
+            assert stub.add_model_calls == 3
+            assert stub.switch_calls == 0
+
+        def test_add_model_retries_then_raises(self) -> None:
+            stub = self.SetupStub(add_model_failures_remaining=3)
+            backend = JubilantBackend(JubilantClientStub(client=stub))
+
+            with patch("tenacity.nap.sleep", return_value=None):
+                with pytest.raises(RuntimeError, match="transient add-model failure"):
+                    backend.add_model(controller="test-controller", model="test-model", model_config={})
+
+            assert stub.add_model_calls == 3
+            assert stub.switch_calls == 0
 
 
 class TestParseBundleFile:

@@ -39,14 +39,25 @@ class RelationStub:
         self.data: dict[AppStub | None, dict[str, str]] = {app: databag}
 
 
+class RelationMetaStub:
+    def __init__(self, interface_name: str) -> None:
+        self.interface_name = interface_name
+
+
+class CharmMetaStub:
+    def __init__(self, endpoint: str, interface_name: str) -> None:
+        self.relations = {endpoint: RelationMetaStub(interface_name)}
+
+
 class CharmStub:
-    pass
+    def __init__(self, endpoint: str = "db", interface_name: str = "postgresql_client") -> None:
+        self.meta = CharmMetaStub(endpoint, interface_name)
 
 
 def _make_validator(databag: dict[str, str], endpoint: str = "db") -> PostgreSQLClientValidator:
     app = AppStub()
     relation = RelationStub(app=app, databag=databag, name=endpoint)
-    charm = cast(ops.CharmBase, CharmStub())
+    charm = cast(ops.CharmBase, CharmStub(endpoint=endpoint))
     return PostgreSQLClientValidator(charm, cast(ops.Relation, relation))
 
 
@@ -97,7 +108,7 @@ VALID_DATABAG: dict[str, str] = {
 
 
 class TestPostgreSQLClientValidatorSimple:
-    def test_returns_error_for_unsupported_level(self) -> None:
+    def test_returns_skipped_for_unsupported_level(self) -> None:
         # GIVEN
         validator = _make_validator(VALID_DATABAG)
 
@@ -105,9 +116,8 @@ class TestPostgreSQLClientValidatorSimple:
         result = validator.validate(level="deep")
 
         # THEN
-        assert result.status == "ERROR"
+        assert result.status == "SKIPPED"
         assert result.error is not None
-        assert "not yet implemented" in result.error
 
     def test_returns_error_when_relation_app_is_none(self) -> None:
         # GIVEN a relation whose remote app is not yet known

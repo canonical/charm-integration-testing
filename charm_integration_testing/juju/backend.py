@@ -11,6 +11,8 @@ from typing import Any, ParamSpec, TypeVar
 
 from pydantic.dataclasses import dataclass
 
+from validators.base.validator import ValidationResult
+
 from .models import JujuApplicationInfo, JujuIntegration, JujuIntegrationApplication
 
 _P = ParamSpec("_P")
@@ -230,7 +232,7 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def exec_unit(self, model: str, unit: str, task: str) -> JujuExecOutput:
+    def exec_unit(self, model: str, unit: str, task: str, operator: bool = False) -> JujuExecOutput:
         raise NotImplementedError
 
     @abstractmethod
@@ -273,6 +275,18 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def bootstrap_controller(self, cloud: str, controller: str, controller_constraints: dict[str, str]) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def add_model(self, controller: str, model: str, model_config: dict[str, str]) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def switch(self, controller: str, model: str) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
     def scp(self, model: str, source: str, destination: str) -> None:
         raise NotImplementedError
 
@@ -289,5 +303,5 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def validate_application(self, model: str, application: str, level: str) -> None:
+    def validate_application(self, model: str, application: str, level: str) -> dict[str, list[ValidationResult]]:
         raise NotImplementedError
