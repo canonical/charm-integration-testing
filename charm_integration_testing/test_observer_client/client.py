@@ -64,11 +64,11 @@ class TestObserverClient:
         that any underlying network resources are released.
         """
         self._session.close()
-    
+
     def __enter__(self) -> "TestObserverClient":
         """Enter the runtime context for this client."""
         return self
-    
+
     def __exit__(
         self,
         exc_type: type[BaseException] | None,
