@@ -213,8 +213,6 @@ class MongoDBClientValidator(BaseValidator):
 
     def _validate_schema_or_return(self, level: str, creds: dict[str, str]) -> ValidationResult | None:
         """Validate schema. Returns error result if invalid, else None."""
-        # Deprecated: inline schema validation instead (added to checks directly in methods).
-        # Kept for backward compatibility.
         schema = ["endpoints", "database", "username", "password"]
         checks = [self.validate_schema(schema, creds)]
         if not all(c.passed for c in checks):
