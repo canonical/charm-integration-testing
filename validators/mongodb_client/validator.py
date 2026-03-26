@@ -254,7 +254,7 @@ class MongoDBClientValidator(BaseValidator):
         except Exception as exc:
             return ValidationCheck(name="connect", passed=False, message=str(exc))
 
-    def _build_result(self, level: str, checks: list[ValidationCheck]) -> ValidationResult:
+    def _build_result(self, level: ValidationLevel, checks: list[ValidationCheck]) -> ValidationResult:
         """Build a ValidationResult from checks list."""
         status = "PASS" if all(c.passed for c in checks) else "FAIL"
         return ValidationResult(
