@@ -26,6 +26,8 @@ from validators.base import BaseValidator, ValidationCheck, ValidationLevel, Val
 
 
 class MongoDBClientValidator(BaseValidator):
+    interface = "mongodb-client"
+    temp_ca_file: str | None = None
     def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
         if level == "uat":
             return self._skipped_result(level)
@@ -60,6 +62,7 @@ class MongoDBClientValidator(BaseValidator):
 
         # --- 3. Schema check ---
         schema = ["endpoints", "database", "username", "password"]
+
         checks.append(self.validate_schema(schema, creds))
         if not all(c.passed for c in checks):
             return ValidationResult(
@@ -114,11 +117,7 @@ class MongoDBClientValidator(BaseValidator):
         finally:
             if mongodb_client:
                 mongodb_client.close()
-            if ca_file_path:
-                try:
-                    os.remove(ca_file_path)
-                except Exception:  # nosec B110
-                    pass
+            self._cleanup_temp_file()
 
         status = "PASS" if all(c.passed for c in checks) else "FAIL"
         return ValidationResult(
@@ -176,9 +175,7 @@ class MongoDBClientValidator(BaseValidator):
                 uri = f"mongodb://{quote_plus(creds['username'])}:{quote_plus(creds['password'])}@{endpoint}"
                 if creds.get("tls") and creds.get("tls-ca"):
                     client_kwargs["tls"] = True
-                    with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".pem") as ca_file:
-                        ca_file.write(creds["tls-ca"])
-                    ca_file_path = ca_file.name
+                    ca_file_path = self._create_temp_ca_file(creds["tls-ca"])
                     client_kwargs["tlsCAFile"] = ca_file_path
 
                 # Ensure bounded MongoDB connection attempts by setting explicit timeouts (in milliseconds).
@@ -276,11 +273,8 @@ class MongoDBClientValidator(BaseValidator):
 
             if mongodb_client:
                 mongodb_client.close()
-            if ca_file_path:
-                try:
-                    os.remove(ca_file_path)
-                except Exception:  # nosec B110
-                    pass
+            
+            self._cleanup_temp_file()
 
         elapsed = time.time() - start_time
         if elapsed > timeout_secs:
@@ -309,3 +303,19 @@ class MongoDBClientValidator(BaseValidator):
             relation_id=self.relation_id,
             checks=checks,
         )
+
+    def _create_temp_ca_file(self, ca_content: str) -> str:
+        """Create a temporary file with the given CA content and return its path."""
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".pem") as ca_file:
+            ca_file.write(ca_content)
+            return ca_file.name
+    
+    def _cleanup_temp_file(self) -> None:
+        """Remove the temporary file at the given path."""
+        if not self.temp_ca_file:
+            return
+        try:
+            os.remove(self.temp_ca_file)
+        except OSError:
+            # Best-effort cleanup; ignore file removal errors.
+            pass
