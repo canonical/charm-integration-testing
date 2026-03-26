@@ -3,7 +3,7 @@
 
 """Test Observer API client module."""
 
-from test_observer_client.client import (
+from .client import (
     TestObserverAPINotConfiguredError,
     TestObserverClient,
     TestObserverClientError,

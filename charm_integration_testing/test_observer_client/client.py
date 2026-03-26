@@ -58,6 +58,26 @@ class TestObserverClient:
         self._session.headers.update(self._build_headers())
         self.logger = logger
 
+    def close(self) -> None:
+        """Close the underlying HTTP session.
+        This method should be called when the client is no longer needed to ensure
+        that any underlying network resources are released.
+        """
+        self._session.close()
+
+    def __enter__(self) -> "TestObserverClient":
+        """Enter the runtime context for this client."""
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: Any | None,
+    ) -> None:
+        """Exit the runtime context and close the underlying session."""
+        self.close()
+
     def _build_headers(self) -> dict[str, str]:
         """Build request headers for API calls."""
         headers: dict[str, str] = {"Content-Type": "application/json"}

@@ -5,9 +5,11 @@ import pytest
 from pydantic.dataclasses import dataclass
 from utils.normalization import (
     _normalize_container_names,
+    _normalize_forbidden_secret_errors,
     _normalize_hook_failure_apps,
     _normalize_ip_addresses,
     _normalize_k8s_cluster_urls,
+    _normalize_k8s_service_accounts,
     _normalize_minio_probe_urls,
     _normalize_numeric_sequences,
     _normalize_oci_image_digests,
@@ -616,6 +618,98 @@ class TestNormalizeHookFailureApps:
         assert result == params.expected
 
 
+class TestNormalizeForbiddenSecretErrors:
+    @dataclass
+    class Params:
+        label: str
+        input: str
+        expected: str
+
+    test_cases = [
+        Params(
+            label="full_error_message",
+            input='ERROR secrets "t0jekcfse9ecf9rtmgeg-1" is forbidden: User "system:serviceaccount:model-123:juju-secret-consumer-ac64e0e2-0c32-4e6c-a61f-ee8af9462d84" cannot get resource "secrets" in API group "" in the namespace "model-123"',
+            expected='ERROR secrets "<SECRET>" is forbidden: User "system:serviceaccount:model-123:juju-secret-consumer-ac64e0e2-0c32-4e6c-a61f-ee8af9462d84" cannot get resource "secrets" in API group "" in the namespace "<NAMESPACE>"',
+        ),
+        Params(
+            label="secret_name_with_numeric_suffix",
+            input='secrets "t0jekcfse9ecf9rtmgeg-1" is forbidden',
+            expected='secrets "<SECRET>" is forbidden',
+        ),
+        Params(
+            label="secret_name_simple",
+            input='secrets "mysecret" is forbidden',
+            expected='secrets "<SECRET>" is forbidden',
+        ),
+        Params(
+            label="secret_name_with_dots",
+            input='secrets "my.secret.name" is forbidden',
+            expected='secrets "<SECRET>" is forbidden',
+        ),
+        Params(
+            label="namespace_clause",
+            input='in the namespace "model-19725395113-251127043917"',
+            expected='in the namespace "<NAMESPACE>"',
+        ),
+        Params(
+            label="no_match",
+            input="hello world",
+            expected="hello world",
+        ),
+    ]
+
+    @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
+    def test(self, params: Params) -> None:
+        result = _normalize_forbidden_secret_errors(params.input)
+        assert result == params.expected
+
+
+class TestNormalizeK8sServiceAccounts:
+    @dataclass
+    class Params:
+        label: str
+        input: str
+        expected: str
+
+    test_cases = [
+        Params(
+            label="bare_service_account_path",
+            input="system:serviceaccount:my-namespace:my-service-account",
+            expected="system:serviceaccount:<NAMESPACE>:<SA>",
+        ),
+        Params(
+            label="service_account_in_user_field",
+            input='User "system:serviceaccount:my-namespace:my-service-account"',
+            expected='User "system:serviceaccount:<NAMESPACE>:<SA>"',
+        ),
+        Params(
+            label="service_account_with_uuid_suffix",
+            input='User "system:serviceaccount:model-123:juju-secret-consumer-ac64e0e2-0c32-4e6c-a61f-ee8af9462d84"',
+            expected='User "system:serviceaccount:<NAMESPACE>:<SA>"',
+        ),
+        Params(
+            label="multiple_service_accounts",
+            input="system:serviceaccount:ns-a:sa-a and system:serviceaccount:ns-b:sa-b",
+            expected="system:serviceaccount:<NAMESPACE>:<SA> and system:serviceaccount:<NAMESPACE>:<SA>",
+        ),
+        Params(
+            label="service_account_with_dots",
+            input="system:serviceaccount:my.namespace:my.sa.name",
+            expected="system:serviceaccount:<NAMESPACE>:<SA>",
+        ),
+        Params(
+            label="no_match",
+            input="hello world",
+            expected="hello world",
+        ),
+    ]
+
+    @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
+    def test(self, params: Params) -> None:
+        result = _normalize_k8s_service_accounts(params.input)
+        assert result == params.expected
+
+
 class TestNormalizeK8sClusterUrls:
     @dataclass
     class Params:
@@ -849,6 +943,12 @@ class TestNormalizeString:
             label="k8s_cluster_url_in_error_message",
             input="failed to connect to tempo-coordinator-k8s.ryan-stg.svc.cluster.local:4317 after 30s",
             expected="failed to connect to <SERVICE>.<NAMESPACE>.svc.cluster.local:XXX after XXXs",
+        ),
+        Params(
+            label="kubernetes_forbidden_secret_error",
+            input='Validator \'PostgreSQLClientValidator\' raised an exception: ERROR secrets "t0jekcfse9ecf9rtmgeg-1" is forbidden: User "system:serviceaccount:model-23246006951-260318130333:juju-secret-consumer-ac64e0e2-0c32-4e6c-a61f-ee8af9462d84" cannot get resource "secrets" in API group "" in the namespace "model-23246006951-260318130333"',
+            expected='Validator \'PostgreSQLClientValidator\' raised an exception: ERROR secrets "<SECRET>" is forbidden: User "system:serviceaccount:<NAMESPACE>:<SA>" cannot get resource "secrets" in API group "" in the namespace "<NAMESPACE>"',
+            max_length=1000,
         ),
     ]
 
