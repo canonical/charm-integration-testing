@@ -69,16 +69,20 @@ def test_observer_client(
     logger: logging.Logger,
     test_observer_api: str,
     test_observer_token: str,
-) -> TestObserverAPIClient:
+) -> Iterator[TestObserverAPIClient]:
     """Test Observer API client."""
     try:
-        return TestObserverAPIClient(
+        client = TestObserverAPIClient(
             logger=logger,
             api_url=test_observer_api,
             token=test_observer_token,
         )
     except TestObserverClientError as exc:
         pytest.skip(f"Test Observer API client is not configured properly: {exc}")
+    try:
+        yield client
+    finally:
+        client.close()
 
 
 @pytest.fixture
