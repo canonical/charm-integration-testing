@@ -1,5 +1,16 @@
 # Copyright 2026 Canonical Ltd.
-# See LICENSE file for licensing details.
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License version 3, as
+# published by the Free Software Foundation.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import os
 import tempfile
@@ -14,7 +25,9 @@ from validators.base import BaseValidator, ValidationCheck, ValidationLevel, Val
 
 
 class MongoDBClientValidator(BaseValidator):
-    ca_file_path = None
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.ca_file_path: str | None = None
 
     def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
         if level == "uat":
