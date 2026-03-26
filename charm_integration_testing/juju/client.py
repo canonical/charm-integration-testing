@@ -2,6 +2,7 @@
 # See LICENSE file for licensing details.
 
 import logging
+import time
 from datetime import timedelta
 
 from validators.base import ValidationResult
@@ -181,6 +182,34 @@ class JujuClient:
     def list_applications(self, model: str = "default") -> dict[str, JujuApplicationInfo]:
         self.logger.info("Getting list of applications.")
         return self.backend.list_applications(model)
+
+    def application_revision(self, application: str, model: str = "default") -> int:
+        self.logger.info(f"Getting charm revision for application '{application}'.")
+        applications = self.backend.list_applications(model)
+        if application not in applications:
+            raise KeyError(f"Application '{application}' not found in model '{model}'")
+        return applications[application].revision
+
+    def wait_for_application_revision(
+        self,
+        application: str,
+        expected_revision: int,
+        model: str = "default",
+        timeout: timedelta = timedelta(minutes=15),
+    ) -> None:
+        self.logger.info(
+            f"Waiting {timeout} for application '{application}' to reach charm revision {expected_revision}."
+        )
+        deadline = time.monotonic() + timeout.total_seconds()
+        actual_revision = self.application_revision(application=application, model=model)
+        while actual_revision != expected_revision:
+            if time.monotonic() >= deadline:
+                raise TimeoutError(
+                    f"Timed out waiting for application '{application}' charm revision to be "
+                    f"{expected_revision}, got {actual_revision}"
+                )
+            time.sleep(1)
+            actual_revision = self.application_revision(application=application, model=model)
 
     def list_integrations(self, model: str = "default") -> set[JujuIntegration]:
         self.logger.info("Getting list of integrations.")

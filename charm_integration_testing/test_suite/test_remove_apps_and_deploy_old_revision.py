@@ -3,7 +3,6 @@
 
 from datetime import timedelta
 from pathlib import Path
-from typing import Callable
 
 import pytest
 import yaml
@@ -12,14 +11,7 @@ from juju import JujuClient
 from .scheduler.states import State
 
 
-def _extract_track_and_stage(channel: str | None) -> tuple[str, str]:
-    if not channel:
-        return "14", "stable"
-    # Channels are usually track/risk, e.g. "latest/edge".
-    return channel.split("/")[0], channel.split("/")[1]
-
-
-def create_bundle_with_revision_override(
+def _create_bundle_with_revision_override(
     source_bundle: Path,
     destination_bundle: Path,
     target_application: str,
@@ -48,7 +40,7 @@ def create_bundle_with_revision_override(
 @pytest.mark.state(requires=State.DEPLOYED, provides=State.OLD_REVISION)
 def test_deploy(
     juju_client: JujuClient,
-    choose_historical_revision_with_passing_deploy: Callable[[str, str, int, str], int | None],
+    historical_revision_with_passing_deploy: int | None,
     model: str,
     bundle: Path,
     target_application: str,
@@ -60,9 +52,6 @@ def test_deploy(
     if target_revision is None:
         pytest.fail("--target-revision must be provided as an integer for this test.")
 
-    # Extract stage and track from --target-channel passed by charm-testing.yaml.
-    track, stage = _extract_track_and_stage(target_channel)
-
     # Get all applications from the model
     apps = list(juju_client.list_applications(model=model).keys())
 
@@ -71,17 +60,13 @@ def test_deploy(
         juju_client.remove_applications(*apps, model=model)
         juju_client.wait_for_removal(*apps, model=model, timeout=timedelta(minutes=15))
 
-    # Query Test Observer for historical revisions and pick the first one with a passing test_deploy run.
-    selected_revision = choose_historical_revision_with_passing_deploy(
-        charm_name=target_charm,
-        stage=stage,
-        current_revision=target_revision,
-        track=track,
-    )
+    # Use historical revision selected by the fixture.
+    selected_revision = historical_revision_with_passing_deploy
+
     if selected_revision is None:
         pytest.fail(
             "Unable to find a historical revision with a passing test_deploy result "
-            f"for charm '{target_charm}' in stage '{stage}'."
+            f"for charm '{target_charm}' in channel '{target_channel}'."
         )
 
     juju_client.logger.info(
@@ -89,7 +74,7 @@ def test_deploy(
     )
 
     overridden_bundle = tmp_path / f"bundle-{target_application}-rev-{selected_revision}.yaml"
-    create_bundle_with_revision_override(
+    _create_bundle_with_revision_override(
         source_bundle=bundle,
         destination_bundle=overridden_bundle,
         target_application=target_application,
