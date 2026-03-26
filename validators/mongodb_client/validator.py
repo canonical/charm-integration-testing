@@ -27,6 +27,7 @@ from validators.base import BaseValidator, ValidationCheck, ValidationLevel, Val
 
 class MongoDBClientValidator(BaseValidator):
     interface = "mongodb-client"
+    ca_file_path = None
 
     def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
         if level == "uat":
@@ -227,11 +228,10 @@ class MongoDBClientValidator(BaseValidator):
             )
         return None
 
-    def _build_mongodb_client(self, creds: dict[str, Any]) -> tuple[MongoClient[Any] | None, str | None]:
+    def _build_mongodb_client(self, creds: dict[str, Any]) -> MongoClient[Any] | None:
         """Build and return MongoDB client with TLS/timeout config. Return client and ca file path."""
         endpoint = self.databag["endpoints"].split(",")[0].strip()
         mongodb_client: MongoClient[Any] | None = None
-        ca_file_path: str | None = None
         client_kwargs: dict[str, Any] = {
             "serverSelectionTimeoutMS": 5000,
             "connectTimeoutMS": 5000,
@@ -243,14 +243,13 @@ class MongoDBClientValidator(BaseValidator):
             uri = f"mongodb://{quote_plus(creds['username'])}:{quote_plus(creds['password'])}@{endpoint}"
             if creds.get("tls") and creds.get("tls-ca"):
                 client_kwargs["tls"] = True
-                ca_file_path = self._create_temp_ca_file(creds["tls-ca"])
-                client_kwargs["tlsCAFile"] = ca_file_path
+                self._create_temp_ca_file(creds["tls-ca"])
+                client_kwargs["tlsCAFile"] = self.ca_file_path
 
             mongodb_client = MongoClient(uri, **client_kwargs)
         except Exception:
-            self._remove_temp_ca_file(ca_file_path)
-
-        return mongodb_client, ca_file_path
+            self._remove_temp_ca_file()
+        return mongodb_client
 
     def _attempt_connection(self, mongodb_client: MongoClient[Any] | None, endpoint: str) -> ValidationCheck:
         """Attempt to connect and ping the MongoDB server."""
@@ -274,20 +273,21 @@ class MongoDBClientValidator(BaseValidator):
             checks=checks,
         )
 
-    def _cleanup_client(self, mongodb_client: MongoClient[Any] | None, ca_file_path: str | None) -> None:
+    def _cleanup_client(self, mongodb_client: MongoClient[Any] | None) -> None:
         """Clean up MongoDB client and temporary CA file."""
         if mongodb_client is not None:
             mongodb_client.close()
 
-        self._remove_temp_ca_file(ca_file_path)
+        self._remove_temp_ca_file()
 
     def _create_temp_ca_file(self, ca_content: str) -> str:
         """Create a temporary file with the given CA content and return its path."""
         with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".pem") as ca_file:
             ca_file.write(ca_content)
-            return ca_file.name
+            self.ca_file_path = ca_file.name
 
-    def _remove_temp_ca_file(self, ca_file_path: str) -> None:
+    def _remove_temp_ca_file(self) -> None:
         """Remove the temporary CA file."""
-        if ca_file_path and os.path.exists(ca_file_path):
-            os.remove(ca_file_path)
+        if self.ca_file_path and os.path.exists(self.ca_file_path):
+            os.remove(self.ca_file_path)
+            self.ca_file_path = None
