@@ -39,14 +39,20 @@ class MongoDBClientValidator(BaseValidator):
         # --- 2. Resolve credentials (plain fields or Juju secrets) ---
         creds = self._resolve_credentials()
 
-        # --- 3. Schema check & early return ---
-        schema_error = self._validate_schema_or_return("simple", creds)
-        if schema_error:
-            return schema_error
+        # --- 3. Schema check ---
+        schema = ["endpoints", "database", "username", "password"]
+        schema_check = self.validate_schema(schema, creds)
+        checks.append(schema_check)
+        if not schema_check.passed:
+            return self._build_result("simple", checks)
 
         # --- 4. Connect & ping ---
         endpoint = self.databag["endpoints"].split(",")[0].strip()
-        mongodb_client = self._build_mongodb_client(creds)
+        try:
+            mongodb_client = self._build_mongodb_client(creds)
+        except Exception as exc:
+            checks.append(ValidationCheck(name="connect", passed=False, message=str(exc)))
+            return self._build_result("simple", checks)
 
         try:
             connect_check = self._attempt_connection(mongodb_client, endpoint)
@@ -83,14 +89,20 @@ class MongoDBClientValidator(BaseValidator):
         # --- 2. Resolve credentials (plain fields or Juju secrets) ---
         creds = self._resolve_credentials()
 
-        # --- 3. Schema check & early return ---
-        schema_error = self._validate_schema_or_return("deep", creds)
-        if schema_error:
-            return schema_error
+        # --- 3. Schema check ---
+        schema = ["endpoints", "database", "username", "password"]
+        schema_check = self.validate_schema(schema, creds)
+        checks.append(schema_check)
+        if not schema_check.passed:
+            return self._build_result("deep", checks)
 
         # --- 4. Connect ---
         endpoint = self.databag["endpoints"].split(",")[0].strip()
-        mongodb_client = self._build_mongodb_client(creds)
+        try:
+            mongodb_client = self._build_mongodb_client(creds)
+        except Exception as exc:
+            checks.append(ValidationCheck(name="connect", passed=False, message=str(exc)))
+            return self._build_result("deep", checks)
 
         try:
             connect_check = self._attempt_connection(mongodb_client, endpoint)
@@ -203,6 +215,8 @@ class MongoDBClientValidator(BaseValidator):
 
     def _validate_schema_or_return(self, level: str, creds: dict[str, str]) -> ValidationResult | None:
         """Validate schema. Returns error result if invalid, else None."""
+        # Deprecated: inline schema validation instead (added to checks directly in methods).
+        # Kept for backward compatibility.
         schema = ["endpoints", "database", "username", "password"]
         checks = [self.validate_schema(schema, creds)]
         if not all(c.passed for c in checks):
@@ -216,10 +230,9 @@ class MongoDBClientValidator(BaseValidator):
             )
         return None
 
-    def _build_mongodb_client(self, creds: dict[str, Any]) -> MongoClient[Any] | None:
+    def _build_mongodb_client(self, creds: dict[str, Any]) -> MongoClient[Any]:
         """Build and return MongoDB client with TLS/timeout config."""
         endpoint = self.databag["endpoints"].split(",")[0].strip()
-        mongodb_client: MongoClient[Any] | None = None
         client_kwargs: dict[str, Any] = {
             "serverSelectionTimeoutMS": 5000,
             "connectTimeoutMS": 5000,
@@ -227,17 +240,13 @@ class MongoDBClientValidator(BaseValidator):
             "appname": "mongodb-client-validator",
         }
 
-        try:
-            uri = f"mongodb://{quote_plus(creds['username'])}:{quote_plus(creds['password'])}@{endpoint}"
-            if creds.get("tls") and creds.get("tls-ca"):
-                client_kwargs["tls"] = True
-                self._create_temp_ca_file(creds["tls-ca"])
-                client_kwargs["tlsCAFile"] = self.ca_file_path
+        uri = f"mongodb://{quote_plus(creds['username'])}:{quote_plus(creds['password'])}@{endpoint}"
+        if creds.get("tls") and creds.get("tls-ca"):
+            client_kwargs["tls"] = True
+            self._create_temp_ca_file(creds["tls-ca"])
+            client_kwargs["tlsCAFile"] = self.ca_file_path
 
-            mongodb_client = MongoClient(uri, **client_kwargs)
-        except Exception:
-            self._remove_temp_ca_file()
-        return mongodb_client
+        return MongoClient(uri, **client_kwargs)
 
     def _attempt_connection(self, mongodb_client: MongoClient[Any] | None, endpoint: str) -> ValidationCheck:
         """Attempt to connect and ping the MongoDB server."""
