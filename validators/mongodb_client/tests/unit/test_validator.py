@@ -141,7 +141,7 @@ class MongoClientStub:
 # ---------------------------------------------------------------------------
 
 VALID_DATABAG: dict[str, str] = {
-    "endpoints": "10.1.2.3:5432",
+    "endpoints": "10.1.2.3:27017",
     "database": "mydb",
     "username": "myuser",
     "password": "mypassword",

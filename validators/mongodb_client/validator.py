@@ -1,17 +1,5 @@
-# Copyright (C) 2026 Canonical Ltd
-
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
 
 import os
 import tempfile
@@ -26,7 +14,6 @@ from validators.base import BaseValidator, ValidationCheck, ValidationLevel, Val
 
 
 class MongoDBClientValidator(BaseValidator):
-    interface = "mongodb-client"
     ca_file_path = None
 
     def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
@@ -212,11 +199,10 @@ class MongoDBClientValidator(BaseValidator):
             **self.resolve_secret("secret-tls", "tls", "tls-ca"),
         }
 
-    def _validate_schema_or_return(self, level: str, creds: dict[str, Any]) -> ValidationResult | None:
+    def _validate_schema_or_return(self, level: str, creds: dict[str, str]) -> ValidationResult | None:
         """Validate schema. Returns error result if invalid, else None."""
         schema = ["endpoints", "database", "username", "password"]
-        data = self.databag | creds
-        checks = [self.validate_schema(schema, data)]
+        checks = [self.validate_schema(schema, creds)]
         if not all(c.passed for c in checks):
             return ValidationResult(
                 status="FAIL",
