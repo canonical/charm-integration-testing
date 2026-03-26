@@ -38,4 +38,3 @@ class State(str, Enum):
     EMPTY_MODEL = "empty_model"
     DEPLOYED = "deployed"
     NEIGHBOR_ONLY = "neighbor_only"
-    LOGS_COLLECTED = "logs_collected"

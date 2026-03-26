@@ -7,22 +7,15 @@ from pathlib import Path
 
 import pytest
 
-from .scheduler.states import State
 
-
-@pytest.mark.state(requires=State.LOGS_COLLECTED)
 def test_logs_privacy_check(
     logs_directory: Path,
     logger: logging.Logger,
 ) -> None:
     """Scan collected logs for secrets using TruffleHog.
 
-    This test:
-    1. Uses logs collected by the test_collect_logs bridge test
-    2. Scans all logs with TruffleHog to detect secrets
-    3. Fails if any secrets are found
-
-    Requires: LOGS_COLLECTED state (provided by test_collect_logs)
+    This test runs after logs have been collected by the collect_logs_after_tests fixture.
+    It scans all logs with TruffleHog to detect secrets and fails if any are found.
     """
     logger.info(f"Scanning logs from {logs_directory} for secrets")
 
