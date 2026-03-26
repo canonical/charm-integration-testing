@@ -61,7 +61,6 @@ class MongoDBClientValidator(BaseValidator):
                 return self._build_result("simple", checks)
 
             # --- 5. Canary read-only query ---
-            assert mongodb_client is not None
             try:
                 db = mongodb_client[self.databag["database"]]
                 db.list_collections()
@@ -111,7 +110,6 @@ class MongoDBClientValidator(BaseValidator):
                 return self._build_result("deep", checks)
 
             # --- 5. Create canary collection, write, read-verify, cleanup ---
-            assert mongodb_client is not None
             canary_collection = f"__canary_{uuid.uuid4().hex[:8]}"
             try:
                 db = mongodb_client[self.databag["database"]]
