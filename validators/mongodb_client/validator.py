@@ -211,21 +211,6 @@ class MongoDBClientValidator(BaseValidator):
             **self.resolve_secret("secret-tls", "tls", "tls-ca"),
         }
 
-    def _validate_schema_or_return(self, level: str, creds: dict[str, str]) -> ValidationResult | None:
-        """Validate schema. Returns error result if invalid, else None."""
-        schema = ["endpoints", "database", "username", "password"]
-        checks = [self.validate_schema(schema, creds)]
-        if not all(c.passed for c in checks):
-            return ValidationResult(
-                status="FAIL",
-                endpoint=self.endpoint,
-                interface=self.interface,
-                level=level,
-                relation_id=self.relation_id,
-                checks=checks,
-            )
-        return None
-
     def _build_mongodb_client(self, creds: dict[str, Any]) -> MongoClient[Any]:
         """Build and return MongoDB client with TLS/timeout config."""
         endpoint = self.databag["endpoints"].split(",")[0].strip()
