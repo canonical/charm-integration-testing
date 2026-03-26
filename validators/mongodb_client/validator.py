@@ -27,7 +27,7 @@ from validators.base import BaseValidator, ValidationCheck, ValidationLevel, Val
 
 class MongoDBClientValidator(BaseValidator):
     interface = "mongodb-client"
-    temp_ca_file: str | None = None
+
     def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
         if level == "uat":
             return self._skipped_result(level)
@@ -44,90 +44,41 @@ class MongoDBClientValidator(BaseValidator):
         checks: list[ValidationCheck] = []
 
         # --- 1. Remote app presence ---
-        if not self.relation_exists():
-            return ValidationResult(
-                status="ERROR",
-                endpoint=self.endpoint,
-                interface=self.interface,
-                level="simple",
-                relation_id=self.relation_id,
-                error=f"No remote application on relation '{self.endpoint}'.",
-            )
+        error_result = self._check_relation_exists("simple")
+        if error_result:
+            return error_result
 
         # --- 2. Resolve credentials (plain fields or Juju secrets) ---
-        creds = {
-            **self.resolve_secret("secret-user", "username", "password"),
-            **self.resolve_secret("secret-tls", "tls", "tls-ca"),
-        }
+        creds = self._resolve_credentials()
 
-        # --- 3. Schema check ---
-        schema = ["endpoints", "database", "username", "password"]
-
-        checks.append(self.validate_schema(schema, creds))
-        if not all(c.passed for c in checks):
-            return ValidationResult(
-                status="FAIL",
-                endpoint=self.endpoint,
-                interface=self.interface,
-                level="simple",
-                relation_id=self.relation_id,
-                checks=checks,
-            )
+        # --- 3. Schema check & early return ---
+        schema_error = self._validate_schema_or_return("simple", creds)
+        if schema_error:
+            return schema_error
 
         # --- 4. Connect & ping ---
         endpoint = self.databag["endpoints"].split(",")[0].strip()
-        mongodb_client: MongoClient[Any] | None = None
-        client_kwargs: dict[str, Any] = {
-            "serverSelectionTimeoutMS": 5000,
-            "connectTimeoutMS": 5000,
-            "socketTimeoutMS": 10000,
-            "appname": "mongodb-client-validator",
-        }
-        ca_file_path: str | None = None
-        try:
-            uri = f"mongodb://{quote_plus(creds['username'])}:{quote_plus(creds['password'])}@{endpoint}"
-            if creds.get("tls") and creds.get("tls-ca"):
-                client_kwargs["tls"] = True
-                with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".pem") as ca_file:
-                    ca_file.write(creds["tls-ca"])
-                ca_file_path = ca_file.name
-                client_kwargs["tlsCAFile"] = ca_file_path
+        mongodb_client, ca_file_path = self._build_mongodb_client(creds)
 
-            mongodb_client = MongoClient(uri, **client_kwargs)
-            mongodb_client.admin.command("ping")
-            checks.append(ValidationCheck(name="connect", passed=True, message=f"Connected to {endpoint}."))
-        except Exception as exc:
-            checks.append(ValidationCheck(name="connect", passed=False, message=str(exc)))
-            return ValidationResult(
-                status="FAIL",
-                endpoint=self.endpoint,
-                interface=self.interface,
-                level="simple",
-                relation_id=self.relation_id,
-                checks=checks,
-            )
-
-        # --- 5. Canary read-only query ---
         try:
-            db = mongodb_client[self.databag["database"]]
-            db.list_collections()
-            checks.append(ValidationCheck(name="query", passed=True, message="Retrieved collection list successfully."))
-        except Exception as exc:
-            checks.append(ValidationCheck(name="query", passed=False, message=str(exc)))
+            connect_check = self._attempt_connection(mongodb_client, endpoint)
+            checks.append(connect_check)
+            if not connect_check.passed:
+                return self._build_result("simple", checks)
+
+            # --- 5. Canary read-only query ---
+            try:
+                db = mongodb_client[self.databag["database"]]
+                db.list_collections()
+                checks.append(
+                    ValidationCheck(name="query", passed=True, message="Retrieved collection list successfully.")
+                )
+            except Exception as exc:
+                checks.append(ValidationCheck(name="query", passed=False, message=str(exc)))
         finally:
-            if mongodb_client:
-                mongodb_client.close()
-            self._cleanup_temp_file()
+            self._cleanup_client(mongodb_client, ca_file_path)
 
-        status = "PASS" if all(c.passed for c in checks) else "FAIL"
-        return ValidationResult(
-            status=status,
-            endpoint=self.endpoint,
-            interface=self.interface,
-            level="simple",
-            relation_id=self.relation_id,
-            checks=checks,
-        )
+        return self._build_result("simple", checks)
 
     def _validate_deep(self) -> ValidationResult:
         """L2: Read/Write Capability with canary collection (create, write, read-verify, cleanup)."""
@@ -136,67 +87,27 @@ class MongoDBClientValidator(BaseValidator):
         checks: list[ValidationCheck] = []
 
         # --- 1. Remote app presence ---
-        if not self.relation_exists():
-            return ValidationResult(
-                status="ERROR",
-                endpoint=self.endpoint,
-                interface=self.interface,
-                level="deep",
-                relation_id=self.relation_id,
-                error=f"No remote application on relation '{self.endpoint}'.",
-            )
+        error_result = self._check_relation_exists("deep")
+        if error_result:
+            return error_result
 
         # --- 2. Resolve credentials (plain fields or Juju secrets) ---
-        creds = {
-            **self.resolve_secret("secret-user", "username", "password"),
-            **self.resolve_secret("secret-tls", "tls", "tls-ca"),
-        }
+        creds = self._resolve_credentials()
 
-        # --- 3. Schema check ---
-        schema = ["endpoints", "database", "username", "password"]
-        checks.append(self.validate_schema(schema, creds))
-        if not all(c.passed for c in checks):
-            return ValidationResult(
-                status="FAIL",
-                endpoint=self.endpoint,
-                interface=self.interface,
-                level="deep",
-                relation_id=self.relation_id,
-                checks=checks,
-            )
+        # --- 3. Schema check & early return ---
+        schema_error = self._validate_schema_or_return("deep", creds)
+        if schema_error:
+            return schema_error
 
         # --- 4. Connect ---
         endpoint = self.databag["endpoints"].split(",")[0].strip()
-        mongodb_client: MongoClient[Any] | None = None
-        client_kwargs: dict[str, Any] = {}
-        ca_file_path: str | None = None
+        mongodb_client, ca_file_path = self._build_mongodb_client(creds)
+
         try:
-            try:
-                uri = f"mongodb://{quote_plus(creds['username'])}:{quote_plus(creds['password'])}@{endpoint}"
-                if creds.get("tls") and creds.get("tls-ca"):
-                    client_kwargs["tls"] = True
-                    ca_file_path = self._create_temp_ca_file(creds["tls-ca"])
-                    client_kwargs["tlsCAFile"] = ca_file_path
-
-                # Ensure bounded MongoDB connection attempts by setting explicit timeouts (in milliseconds).
-                timeout_ms = 5000
-                client_kwargs.setdefault("serverSelectionTimeoutMS", timeout_ms)
-                client_kwargs.setdefault("connectTimeoutMS", timeout_ms)
-                client_kwargs.setdefault("socketTimeoutMS", timeout_ms)
-
-                mongodb_client = MongoClient(uri, **client_kwargs)
-                mongodb_client.admin.command("ping")
-                checks.append(ValidationCheck(name="connect", passed=True, message=f"Connected to {endpoint}."))
-            except Exception as exc:
-                checks.append(ValidationCheck(name="connect", passed=False, message=str(exc)))
-                return ValidationResult(
-                    status="FAIL",
-                    endpoint=self.endpoint,
-                    interface=self.interface,
-                    level="deep",
-                    relation_id=self.relation_id,
-                    checks=checks,
-                )
+            connect_check = self._attempt_connection(mongodb_client, endpoint)
+            checks.append(connect_check)
+            if not connect_check.passed:
+                return self._build_result("deep", checks)
 
             # --- 5. Create canary collection, write, read-verify, cleanup ---
             canary_collection = f"__canary_{uuid.uuid4().hex[:8]}"
@@ -236,46 +147,30 @@ class MongoDBClientValidator(BaseValidator):
                         message=str(exc),
                     )
                 )
-        finally:
-            if mongodb_client is not None:
-                try:
-                    mongodb_client.close()
-                except Exception:
-                    # Best-effort cleanup; ignore close errors to avoid masking original exception.
-                    pass
-            if ca_file_path is not None and os.path.exists(ca_file_path):
-                try:
-                    os.remove(ca_file_path)
-                except OSError:
-                    # Best-effort cleanup; ignore file removal errors.
-                    pass
-            checks.append(ValidationCheck(name="write_read_verify", passed=False, message=str(exc)))
-        finally:
-            # Cleanup: drop canary collection and record result separately
+
+            # --- 6. Cleanup: drop canary collection ---
             cleanup_passed = False
             cleanup_message = ""
             try:
-                if mongodb_client:
+                if mongodb_client is not None:
                     db = mongodb_client[self.databag["database"]]
                     db.drop_collection(canary_collection)
                     cleanup_passed = True
                     cleanup_message = "Dropped canary collection."
             except Exception as exc:  # nosec B110 - best-effort cleanup
                 cleanup_message = f"Failed to drop canary collection: {exc}"
-            finally:
-                checks.append(
-                    ValidationCheck(
-                        name="cleanup",
-                        passed=cleanup_passed,
-                        message=cleanup_message,
-                    )
+
+            checks.append(
+                ValidationCheck(
+                    name="cleanup",
+                    passed=cleanup_passed,
+                    message=cleanup_message,
                 )
+            )
+        finally:
+            self._cleanup_client(mongodb_client, ca_file_path)
 
-            if mongodb_client:
-                mongodb_client.close()
-            
-            self._cleanup_temp_file()
-
+        # --- 7. Latency check ---
         elapsed = time.time() - start_time
         if elapsed > timeout_secs:
             checks.append(
@@ -294,28 +189,105 @@ class MongoDBClientValidator(BaseValidator):
                 )
             )
 
+        return self._build_result("deep", checks)
+
+    def _check_relation_exists(self, level: str) -> ValidationResult | None:
+        """Check if remote app exists on relation. Returns error result if missing, else None."""
+        if not self.relation_exists():
+            return ValidationResult(
+                status="ERROR",
+                endpoint=self.endpoint,
+                interface=self.interface,
+                level=level,
+                relation_id=self.relation_id,
+                error=f"No remote application on relation '{self.endpoint}'.",
+            )
+        return None
+
+    def _resolve_credentials(self) -> dict[str, Any]:
+        """Resolve credentials from relation data/secrets."""
+        return {
+            **self.resolve_secret("secret-user", "username", "password"),
+            **self.resolve_secret("secret-tls", "tls", "tls-ca"),
+        }
+
+    def _validate_schema_or_return(self, level: str, creds: dict[str, Any]) -> ValidationResult | None:
+        """Validate schema. Returns error result if invalid, else None."""
+        schema = ["endpoints", "database", "username", "password"]
+        data = self.databag | creds
+        checks = [self.validate_schema(schema, data)]
+        if not all(c.passed for c in checks):
+            return ValidationResult(
+                status="FAIL",
+                endpoint=self.endpoint,
+                interface=self.interface,
+                level=level,
+                relation_id=self.relation_id,
+                checks=checks,
+            )
+        return None
+
+    def _build_mongodb_client(self, creds: dict[str, Any]) -> tuple[MongoClient[Any] | None, str | None]:
+        """Build and return MongoDB client with TLS/timeout config. Return client and ca file path."""
+        endpoint = self.databag["endpoints"].split(",")[0].strip()
+        mongodb_client: MongoClient[Any] | None = None
+        ca_file_path: str | None = None
+        client_kwargs: dict[str, Any] = {
+            "serverSelectionTimeoutMS": 5000,
+            "connectTimeoutMS": 5000,
+            "socketTimeoutMS": 10000,
+            "appname": "mongodb-client-validator",
+        }
+
+        try:
+            uri = f"mongodb://{quote_plus(creds['username'])}:{quote_plus(creds['password'])}@{endpoint}"
+            if creds.get("tls") and creds.get("tls-ca"):
+                client_kwargs["tls"] = True
+                ca_file_path = self._create_temp_ca_file(creds["tls-ca"])
+                client_kwargs["tlsCAFile"] = ca_file_path
+
+            mongodb_client = MongoClient(uri, **client_kwargs)
+        except Exception:
+            self._remove_temp_ca_file(ca_file_path)
+
+        return mongodb_client, ca_file_path
+
+    def _attempt_connection(self, mongodb_client: MongoClient[Any] | None, endpoint: str) -> ValidationCheck:
+        """Attempt to connect and ping the MongoDB server."""
+        try:
+            if mongodb_client is None:
+                raise ValueError("MongoDB client is None")
+            mongodb_client.admin.command("ping")
+            return ValidationCheck(name="connect", passed=True, message=f"Connected to {endpoint}.")
+        except Exception as exc:
+            return ValidationCheck(name="connect", passed=False, message=str(exc))
+
+    def _build_result(self, level: str, checks: list[ValidationCheck]) -> ValidationResult:
+        """Build a ValidationResult from checks list."""
         status = "PASS" if all(c.passed for c in checks) else "FAIL"
         return ValidationResult(
             status=status,
             endpoint=self.endpoint,
             interface=self.interface,
-            level="deep",
+            level=level,
             relation_id=self.relation_id,
             checks=checks,
         )
+
+    def _cleanup_client(self, mongodb_client: MongoClient[Any] | None, ca_file_path: str | None) -> None:
+        """Clean up MongoDB client and temporary CA file."""
+        if mongodb_client is not None:
+            mongodb_client.close()
+
+        self._remove_temp_ca_file(ca_file_path)
 
     def _create_temp_ca_file(self, ca_content: str) -> str:
         """Create a temporary file with the given CA content and return its path."""
         with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".pem") as ca_file:
             ca_file.write(ca_content)
             return ca_file.name
-    
-    def _cleanup_temp_file(self) -> None:
-        """Remove the temporary file at the given path."""
-        if not self.temp_ca_file:
-            return
-        try:
-            os.remove(self.temp_ca_file)
-        except OSError:
-            # Best-effort cleanup; ignore file removal errors.
-            pass
+
+    def _remove_temp_ca_file(self, ca_file_path: str) -> None:
+        """Remove the temporary CA file."""
+        if ca_file_path and os.path.exists(ca_file_path):
+            os.remove(ca_file_path)
