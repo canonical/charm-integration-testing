@@ -49,18 +49,18 @@ KNOWN_FAILURE_EXCEPTIONS = (
 @pytest.fixture
 def test_observer_api() -> str:
     """Test Observer API base URL from environment."""
-    value = os.environ.get("TEST_OBSERVER_API") or os.environ.get("test_observer_api")
+    value = os.environ.get("TEST_OBSERVER_API")
     if not value:
-        pytest.skip("Test Observer API URL is not configured (TEST_OBSERVER_API/test_observer_api).")
+        pytest.skip("Test Observer API URL is not configured (TEST_OBSERVER_API).")
     return value.strip()
 
 
 @pytest.fixture
 def test_observer_token() -> str:
     """Test Observer API token from environment."""
-    value = os.environ.get("TEST_OBSERVER_TOKEN") or os.environ.get("test_observer_token")
+    value = os.environ.get("TEST_OBSERVER_TOKEN")
     if not value:
-        pytest.skip("Test Observer API token is not configured (TEST_OBSERVER_TOKEN/test_observer_token).")
+        pytest.skip("Test Observer API token is not configured (TEST_OBSERVER_TOKEN).")
     return value.strip()
 
 
