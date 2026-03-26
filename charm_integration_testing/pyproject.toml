@@ -15,6 +15,7 @@ dependencies = [
     "pydantic (>=2.11.3,<3.0.0)",
     "pyyaml==6.0.2",
     "pytest-timeout==2.3.1",
+    "requests (>=2.32.3,<2.35.0)",
     "tenacity (>=9.0.0,<10.0.0)",
     "jubilant (>=1.6.0,<2.0.0)",
     "validators-base",
@@ -32,6 +33,7 @@ packages = [
     { include = "serializeable_dataclass" },
     { include = "test_suite" },
     { include = "utils" },
+    { include = "test_observer_client" }
 ]
 
 [build-system]
