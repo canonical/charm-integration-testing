@@ -46,7 +46,7 @@ class MongoDBClientValidator(BaseValidator):
 
         # --- 4. Connect & ping ---
         endpoint = self.databag["endpoints"].split(",")[0].strip()
-        mongodb_client, ca_file_path = self._build_mongodb_client(creds)
+        mongodb_client = self._build_mongodb_client(creds)
 
         try:
             connect_check = self._attempt_connection(mongodb_client, endpoint)
@@ -55,6 +55,7 @@ class MongoDBClientValidator(BaseValidator):
                 return self._build_result("simple", checks)
 
             # --- 5. Canary read-only query ---
+            assert mongodb_client is not None
             try:
                 db = mongodb_client[self.databag["database"]]
                 db.list_collections()
@@ -64,7 +65,7 @@ class MongoDBClientValidator(BaseValidator):
             except Exception as exc:
                 checks.append(ValidationCheck(name="query", passed=False, message=str(exc)))
         finally:
-            self._cleanup_client(mongodb_client, ca_file_path)
+            self._cleanup_client(mongodb_client)
 
         return self._build_result("simple", checks)
 
@@ -89,7 +90,7 @@ class MongoDBClientValidator(BaseValidator):
 
         # --- 4. Connect ---
         endpoint = self.databag["endpoints"].split(",")[0].strip()
-        mongodb_client, ca_file_path = self._build_mongodb_client(creds)
+        mongodb_client = self._build_mongodb_client(creds)
 
         try:
             connect_check = self._attempt_connection(mongodb_client, endpoint)
@@ -98,6 +99,7 @@ class MongoDBClientValidator(BaseValidator):
                 return self._build_result("deep", checks)
 
             # --- 5. Create canary collection, write, read-verify, cleanup ---
+            assert mongodb_client is not None
             canary_collection = f"__canary_{uuid.uuid4().hex[:8]}"
             try:
                 db = mongodb_client[self.databag["database"]]
@@ -156,7 +158,7 @@ class MongoDBClientValidator(BaseValidator):
                 )
             )
         finally:
-            self._cleanup_client(mongodb_client, ca_file_path)
+            self._cleanup_client(mongodb_client)
 
         # --- 7. Latency check ---
         elapsed = time.time() - start_time
@@ -215,7 +217,7 @@ class MongoDBClientValidator(BaseValidator):
         return None
 
     def _build_mongodb_client(self, creds: dict[str, Any]) -> MongoClient[Any] | None:
-        """Build and return MongoDB client with TLS/timeout config. Return client and ca file path."""
+        """Build and return MongoDB client with TLS/timeout config."""
         endpoint = self.databag["endpoints"].split(",")[0].strip()
         mongodb_client: MongoClient[Any] | None = None
         client_kwargs: dict[str, Any] = {
@@ -266,8 +268,8 @@ class MongoDBClientValidator(BaseValidator):
 
         self._remove_temp_ca_file()
 
-    def _create_temp_ca_file(self, ca_content: str) -> str:
-        """Create a temporary file with the given CA content and return its path."""
+    def _create_temp_ca_file(self, ca_content: str) -> None:
+        """Create a temporary file with the given CA content and store path in self.ca_file_path."""
         with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".pem") as ca_file:
             ca_file.write(ca_content)
             self.ca_file_path = ca_file.name
