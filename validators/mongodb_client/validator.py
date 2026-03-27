@@ -1,16 +1,17 @@
-# Copyright 2026 Canonical Ltd.
-#
+# Copyright (C) 2026 Canonical Ltd
+
 # This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License version 3, as
-# published by the Free Software Foundation.
-#
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
 # This program is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU General Public License for more details.
-#
+
 # You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import os
 import tempfile
@@ -204,7 +205,7 @@ class MongoDBClientValidator(BaseValidator):
 
         return self._build_result("deep", checks)
 
-    def _check_relation_exists(self, level: str) -> ValidationResult | None:
+    def _check_relation_exists(self, level: ValidationLevel) -> ValidationResult | None:
         """Check if remote app exists on relation. Returns error result if missing, else None."""
         if not self.relation_exists():
             return ValidationResult(
@@ -217,14 +218,14 @@ class MongoDBClientValidator(BaseValidator):
             )
         return None
 
-    def _resolve_credentials(self) -> dict[str, Any]:
+    def _resolve_credentials(self) -> dict[str, str]:
         """Resolve credentials from relation data/secrets."""
         return {
             **self.resolve_secret("secret-user", "username", "password"),
             **self.resolve_secret("secret-tls", "tls", "tls-ca"),
         }
 
-    def _build_mongodb_client(self, creds: dict[str, Any]) -> MongoClient[Any]:
+    def _build_mongodb_client(self, creds: dict[str, str]) -> MongoClient[Any]:
         """Build and return MongoDB client with TLS/timeout config."""
         endpoint = self.databag["endpoints"].split(",")[0].strip()
         client_kwargs: dict[str, Any] = {
