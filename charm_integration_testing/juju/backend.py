@@ -155,6 +155,14 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def reboot_model_controller(self, model: str) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def is_k8s_model(self, model: str) -> bool:
+        raise NotImplementedError
+
+    @abstractmethod
     def integration_exists(
         self, application_1: str, endpoint_1: str, application_2: str, endpoint_2: str, model: str
     ) -> bool:
@@ -231,6 +239,10 @@ class JujuBackend(ABC):
 
     @abstractmethod
     def wait_for_removal_of_units(self, model: str, applications: list[str], timeout: timedelta | None) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def wait_for_model_to_exist(self, model: str, timeout: timedelta | None) -> None:
         raise NotImplementedError
 
     @abstractmethod
@@ -314,4 +326,12 @@ class JujuBackend(ABC):
 
     @abstractmethod
     def validate_application(self, model: str, application: str, level: str) -> dict[str, list[ValidationResult]]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def kill_controller(self, controller: str) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def migrate_model(self, model_name: str, source_controller: str, target_controller: str) -> None:
         raise NotImplementedError

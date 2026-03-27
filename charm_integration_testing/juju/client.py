@@ -167,6 +167,10 @@ class JujuClient:
         )
         self.backend.wait_for_removal_of_units(model, list(applications), timeout)
 
+    def wait_for_model_to_exist(self, model: str = "default", timeout: timedelta | None = None) -> None:
+        self.logger.info(f"Waiting {self._waiting_timeout_log(timeout)} for model {model} to exist before continuing.")
+        self.backend.wait_for_model_to_exist(model=model, timeout=timeout)
+
     def application_exists(self, application: str, model: str = "default") -> bool:
         self.logger.info(f"Checking that application exists: {application}.")
         return application in self.backend.list_applications(model)
@@ -214,6 +218,10 @@ class JujuClient:
     def list_integrations(self, model: str = "default") -> set[JujuIntegration]:
         self.logger.info("Getting list of integrations.")
         return self.backend.list_integrations(model)
+
+    def reboot_model_controller(self, model: str = "default") -> None:
+        self.logger.info("Restarting model controller.")
+        return self.backend.reboot_model_controller(model)
 
     def version(self, model: str = "default") -> str:
         self.logger.info("Collecting Juju version.")
@@ -304,3 +312,15 @@ class JujuClient:
         )
         self.backend.add_model(controller=controller, model=model, model_config=model_config)
         self.backend.switch(controller=controller, model=model)
+
+    def kill_controller(self, controller: str) -> None:
+        self.logger.info(f"Killing controller '{controller}'.")
+        self.backend.kill_controller(controller=controller)
+
+    def migrate_model(self, model_name: str, source_controller: str, target_controller: str) -> None:
+        self.logger.info(
+            f"Migrating model '{model_name}' from source controller '{source_controller}' to target controller '{target_controller}'"
+        )
+        self.backend.migrate_model(
+            model_name=model_name, source_controller=source_controller, target_controller=target_controller
+        )
