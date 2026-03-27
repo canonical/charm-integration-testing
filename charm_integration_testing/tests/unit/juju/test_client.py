@@ -54,6 +54,26 @@ class BackendStub(NullJujuBackend):
         return self.validate_results.get(application, {})
 
 
+@dataclass
+class KillControllerBackendStub(NullJujuBackend):
+    """Backend stub that records kill_controller calls."""
+
+    killed_controllers: list[str] = field(default_factory=list)
+
+    def kill_controller(self, controller: str) -> None:
+        self.killed_controllers.append(controller)
+
+
+@dataclass
+class MigrateModelBackendStub(NullJujuBackend):
+    """Backend stub that records migrate_model calls."""
+
+    migrated_models: list[tuple[str, str, str]] = field(default_factory=list)
+
+    def migrate_model(self, model_name: str, source_controller: str, target_controller: str) -> None:
+        self.migrated_models.append((model_name, source_controller, target_controller))
+
+
 class ExtensionStub(JujuExtension):
     """Extension that returns configurable validate results."""
 
@@ -94,6 +114,10 @@ def _error(endpoint: str = "db", error: str = "exception occurred") -> Validatio
     return ValidationResult(
         status="ERROR", endpoint=endpoint, interface="postgresql_client", level="simple", relation_id=0, error=error
     )
+
+
+def _skipped(endpoint: str = "db", interface: str = "postgresql_client") -> ValidationResult:
+    return ValidationResult(status="SKIPPED", endpoint=endpoint, interface=interface, level="simple", relation_id=0)
 
 
 def _app_info(charm: str = "postgresql") -> JujuApplicationInfo:
@@ -261,3 +285,122 @@ class TestJujuClientValidateModel:
 
         # THEN the error string is logged
         assert any("unexpected exception" in e for e in logger.errors)
+
+    def test_skips_application_with_no_results(self, logger: LoggerStub) -> None:
+        # GIVEN two applications: one with no results and one with a PASS
+        backend = BackendStub(
+            app_list={"app1": _app_info(), "app2": _app_info()},
+            validate_results={"app1": {}, "app2": {"app2/0": [_pass()]}},
+        )
+        client = self._client(logger, backend)
+
+        # WHEN / THEN (no exception)
+        client.validate_model("mymodel")
+
+        # THEN the application with no results is skipped with a log
+        assert any("No validation results for application 'app1'" in info for info in logger.infos)
+
+    def test_skips_unit_with_no_results(self, logger: LoggerStub) -> None:
+        # GIVEN an application with an empty unit results list
+        backend = BackendStub(
+            app_list={"myapp": _app_info()},
+            validate_results={"myapp": {"myapp/0": []}},
+        )
+        client = self._client(logger, backend)
+
+        # WHEN / THEN (no exception)
+        client.validate_model("mymodel")
+
+        # THEN the unit with no results is skipped with a log
+        assert any("No validation results for unit 'myapp/0'" in info for info in logger.infos)
+
+    def test_skips_unit_with_all_skipped_results(self, logger: LoggerStub) -> None:
+        # GIVEN an application with a unit that has only SKIPPED results
+        backend = BackendStub(
+            app_list={"myapp": _app_info()},
+            validate_results={"myapp": {"myapp/0": [_skipped(), _skipped("metrics")]}},
+        )
+        client = self._client(logger, backend)
+
+        # WHEN / THEN (no exception)
+        client.validate_model("mymodel")
+
+        # THEN the unit with all skipped results is skipped with a log
+        assert any("Validation skipped for unit 'myapp/0'" in info for info in logger.infos)
+
+    def test_does_not_skip_unit_with_mix_of_skipped_and_pass(self, logger: LoggerStub) -> None:
+        # GIVEN a unit with both SKIPPED and PASS results
+        backend = BackendStub(
+            app_list={"myapp": _app_info()},
+            validate_results={"myapp": {"myapp/0": [_skipped(), _pass()]}},
+        )
+        client = self._client(logger, backend)
+
+        # WHEN / THEN (no exception)
+        client.validate_model("mymodel")
+
+        # THEN the unit is not skipped and validation passed is logged
+        assert any("Validation passed for unit 'myapp/0'" in info for info in logger.infos)
+        assert not any("Validation skipped for unit 'myapp/0'" in info for info in logger.infos)
+
+
+class TestJujuClientKillController:
+    @pytest.fixture
+    def logger(self) -> LoggerStub:
+        return LoggerStub()
+
+    def _client(self, logger: Any, backend: NullJujuBackend) -> JujuClient:
+        return JujuClient(backend, logger, [])
+
+    def test_delegates_to_backend(self, logger: LoggerStub) -> None:
+        # GIVEN a backend that records kill_controller calls
+        backend = KillControllerBackendStub()
+        client = self._client(logger, backend)
+
+        # WHEN
+        client.kill_controller("mycontroller")
+
+        # THEN the backend received the call with the correct controller name
+        assert "mycontroller" in backend.killed_controllers
+
+    def test_logs_controller_name(self, logger: LoggerStub) -> None:
+        # GIVEN a backend stub
+        backend = KillControllerBackendStub()
+        client = self._client(logger, backend)
+
+        # WHEN
+        client.kill_controller("mycontroller")
+
+        # THEN an info message mentioning the controller was logged
+        assert any("mycontroller" in msg for msg in logger.infos)
+
+
+class TestJujuClientMigrateModel:
+    @pytest.fixture
+    def logger(self) -> LoggerStub:
+        return LoggerStub()
+
+    def _client(self, logger: Any, backend: NullJujuBackend) -> JujuClient:
+        return JujuClient(backend, logger, [])
+
+    def test_delegates_to_backend(self, logger: LoggerStub) -> None:
+        # GIVEN a backend that records migrate_model calls
+        backend = MigrateModelBackendStub()
+        client = self._client(logger, backend)
+
+        # WHEN
+        client.migrate_model("mymodel", "source-ctrl", "target-ctrl")
+
+        # THEN the backend received the call with all three arguments
+        assert ("mymodel", "source-ctrl", "target-ctrl") in backend.migrated_models
+
+    def test_logs_model_and_controllers(self, logger: LoggerStub) -> None:
+        # GIVEN a backend stub
+        backend = MigrateModelBackendStub()
+        client = self._client(logger, backend)
+
+        # WHEN
+        client.migrate_model("mymodel", "source-ctrl", "target-ctrl")
+
+        # THEN an info message mentioning the model and both controllers was logged
+        assert any("mymodel" in msg and "source-ctrl" in msg and "target-ctrl" in msg for msg in logger.infos)

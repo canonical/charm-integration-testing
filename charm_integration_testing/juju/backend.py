@@ -232,6 +232,10 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def wait_for_model_to_exist(self, model: str, timeout: timedelta | None) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
     def application_charm(self, model: str, application: str) -> str | None:
         raise NotImplementedError
 
@@ -312,4 +316,12 @@ class JujuBackend(ABC):
 
     @abstractmethod
     def validate_application(self, model: str, application: str, level: str) -> dict[str, list[ValidationResult]]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def kill_controller(self, controller: str) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def migrate_model(self, model_name: str, source_controller: str, target_controller: str) -> None:
         raise NotImplementedError

@@ -160,6 +160,15 @@ class NullJujuBackend(JujuBackend):
     def kubernetes_client(self) -> KubernetesClient:
         raise NotImplementedError
 
+    def kill_controller(self, controller: str) -> None:
+        raise NotImplementedError
+
+    def wait_for_model_to_exist(self, model: str, timeout: timedelta | None) -> None:
+        raise NotImplementedError
+
+    def migrate_model(self, model_name: str, source_controller: str, target_controller: str) -> None:
+        raise NotImplementedError
+
 
 @dataclass
 class JujuStub(NullJujuBackend):

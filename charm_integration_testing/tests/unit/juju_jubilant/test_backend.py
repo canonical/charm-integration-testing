@@ -2,7 +2,7 @@
 # See LICENSE file for licensing details.
 
 from dataclasses import field
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable
 from unittest.mock import patch
@@ -240,6 +240,37 @@ class WaitStub:
         self.call_count += 1
         if self.raise_timeout:
             raise JujuWaitTimeoutError()
+
+
+@dataclass
+class ModelExistsStub:
+    """Stub for status() used in wait_for_model_to_exist tests.
+
+    Tracks how many times status() is called. When error_stderr is set the stub raises
+    jubilant.CLIError with that stderr text; if max_errors is non-zero it stops raising after
+    that many calls and succeeds thereafter.
+    """
+
+    call_count: int = 0
+    error_stderr: str | None = None
+    max_errors: int = 0  # 0 means raise on every call while error_stderr is set
+
+    def status(self) -> jubilant.Status:
+        self.call_count += 1
+        should_error = self.error_stderr is not None and (self.max_errors == 0 or self.call_count <= self.max_errors)
+        if should_error:
+            raise jubilant.CLIError(1, ["juju", "status"], "", self.error_stderr)
+        return jubilant.Status(
+            model=jubilant.statustypes.ModelStatus(
+                name="test-model",
+                type="caas",
+                controller="test",
+                cloud="test",
+                version="3.0.0",
+            ),
+            machines={},
+            apps={},
+        )
 
 
 class TestJubilantBackend:
@@ -661,6 +692,121 @@ class TestJubilantBackend:
             # WHEN / THEN
             with pytest.raises(JujuWaitTimeoutError):
                 backend.wait_for_removal_of_units("test-model", ["my-app"], timeout=timedelta(milliseconds=100))
+
+    class TestWaitForModelToExist:
+        def test_returns_when_status_succeeds(self) -> None:
+            # GIVEN a backend whose status() immediately succeeds
+            stub = ModelExistsStub()
+            backend = JubilantBackend(JubilantClientStub(client=stub))
+
+            # WHEN wait_for_model_to_exist is called
+            backend.wait_for_model_to_exist("my-model", timeout=timedelta(seconds=10))
+
+            # THEN status was called exactly once and the method returned without error
+            assert stub.call_count == 1
+
+        def test_retries_on_model_not_found_then_succeeds(self) -> None:
+            # GIVEN a backend whose status() raises "not found" twice then succeeds
+            stub = ModelExistsStub(
+                error_stderr="ERROR model my-model not found\n",
+                max_errors=2,
+            )
+            backend = JubilantBackend(JubilantClientStub(client=stub))
+
+            # WHEN wait_for_model_to_exist is called (sleep patched to avoid real delays)
+            with patch("juju_jubilant.backend.time.sleep"):
+                backend.wait_for_model_to_exist("my-model", timeout=timedelta(seconds=10))
+
+            # THEN status was called three times (2 failures + 1 success)
+            assert stub.call_count == 3
+
+        def test_retries_on_model_migrating(self) -> None:
+            # GIVEN a backend whose status() raises a "has been migrated to controller" error once
+            stub = ModelExistsStub(
+                error_stderr="ERROR model my-model has been migrated to controller other-ctrl\n",
+                max_errors=1,
+            )
+            backend = JubilantBackend(JubilantClientStub(client=stub))
+
+            # WHEN wait_for_model_to_exist is called
+            with patch("juju_jubilant.backend.time.sleep"):
+                backend.wait_for_model_to_exist("my-model", timeout=timedelta(seconds=10))
+
+            # THEN the migration error was swallowed and status was retried until success
+            assert stub.call_count == 2
+
+        def test_retries_on_migration_in_progress(self) -> None:
+            # GIVEN a backend whose status() raises a "migration in progress" error once
+            stub = ModelExistsStub(
+                error_stderr="ERROR migration in progress for model my-model\n",
+                max_errors=1,
+            )
+            backend = JubilantBackend(JubilantClientStub(client=stub))
+
+            # WHEN wait_for_model_to_exist is called
+            with patch("juju_jubilant.backend.time.sleep"):
+                backend.wait_for_model_to_exist("my-model", timeout=timedelta(seconds=10))
+
+            # THEN the migration-in-progress error was swallowed and status was retried
+            assert stub.call_count == 2
+
+        def test_reraises_unrecognized_cli_error(self) -> None:
+            # GIVEN a backend whose status() raises a CLIError unrelated to model availability
+            stub = ModelExistsStub(
+                error_stderr="ERROR connection to controller lost\n",
+                max_errors=0,
+            )
+            backend = JubilantBackend(JubilantClientStub(client=stub))
+
+            # WHEN / THEN the unrecognized CLIError is re-raised immediately
+            with pytest.raises(jubilant.CLIError):
+                backend.wait_for_model_to_exist("my-model", timeout=timedelta(seconds=10))
+
+            # AND status was only called once (no retries)
+            assert stub.call_count == 1
+
+        def test_raises_juju_wait_timeout_error_on_timeout(self) -> None:
+            # GIVEN a backend whose status() always raises "not found"
+            stub = ModelExistsStub(error_stderr="ERROR model my-model not found\n", max_errors=0)
+            backend = JubilantBackend(JubilantClientStub(client=stub))
+
+            t0 = datetime(2025, 1, 1, 0, 0, 0)
+            # WHEN wait_for_model_to_exist is called with datetime mocked to jump past the timeout
+            with patch("juju_jubilant.backend.datetime") as mock_dt, patch("juju_jubilant.backend.time.sleep"):
+                mock_dt.now.side_effect = [
+                    t0,  # start
+                    t0,  # iteration_start, loop 1 — within timeout
+                    t0,  # elapsed, loop 1
+                    t0 + timedelta(seconds=31),  # iteration_start, loop 2 — past timeout
+                ]
+
+                # THEN JujuWaitTimeoutError is raised and its message names the model
+                with pytest.raises(JujuWaitTimeoutError) as exc_info:
+                    backend.wait_for_model_to_exist("my-model", timeout=timedelta(seconds=30))
+
+            assert "my-model" in exc_info.value.wait_state.message
+
+        def test_uses_default_timeout_when_none_given(self) -> None:
+            # GIVEN a backend whose status() always raises "not found"
+            stub = ModelExistsStub(error_stderr="ERROR model my-model not found\n", max_errors=0)
+            backend = JubilantBackend(JubilantClientStub(client=stub))
+
+            t0 = datetime(2025, 1, 1, 0, 0, 0)
+            # WHEN wait_for_model_to_exist is called with timeout=None and datetime mocked to jump
+            # past the default_timeout (5 minutes)
+            with patch("juju_jubilant.backend.datetime") as mock_dt, patch("juju_jubilant.backend.time.sleep"):
+                mock_dt.now.side_effect = [
+                    t0,  # start
+                    t0,  # iteration_start, loop 1 — within timeout
+                    t0,  # elapsed, loop 1
+                    t0 + timedelta(minutes=6),  # iteration_start, loop 2 — past default 5-min timeout
+                ]
+
+                # THEN JujuWaitTimeoutError is raised, confirming the default timeout was used
+                with pytest.raises(JujuWaitTimeoutError) as exc_info:
+                    backend.wait_for_model_to_exist("my-model", timeout=None)
+
+            assert "my-model" in exc_info.value.wait_state.message
 
     class TestAddSecret:
         @dataclass
