@@ -24,7 +24,6 @@ from extensions import (
     ValidatorInjectorExtension,
 )
 from juju import JujuBackend, JujuClient, JujuValidationError, JujuWaitTimeoutError
-from juju_cmd.backend import JujuCmdBackend
 from juju_jubilant import JubilantBackend
 from kubernetes_client import KubernetesBackend, KubernetesClient
 from pydantic import TypeAdapter, ValidationError
@@ -125,8 +124,8 @@ def logger() -> logging.Logger:
 
 
 @pytest.fixture
-def juju_backend() -> JujuBackend:
-    return JubilantBackend()
+def juju_backend(kubernetes_client: KubernetesClient | None) -> JujuBackend:
+    return JubilantBackend(kubernetes_client=kubernetes_client)
 
 
 @pytest.fixture
@@ -953,15 +952,19 @@ def record_pipeline_version_execution_metadata(
 
 
 @pytest.fixture
-def _kubernetes_test(juju_backend: JujuCmdBackend, model: str) -> None:
+def _is_running_on_kubernetes(juju_backend: JujuBackend, model: str) -> None:
     if not juju_backend.is_k8s_model(model):
-        pytest.skip("Not kubernetes")
+        pytest.skip("Not running on kubernetes.")
 
 
 @pytest.fixture
-def kubernetes_client(_kubernetes_test: None) -> KubernetesClient:
+def kubernetes_client(
+    logger: logging.Logger,
+) -> KubernetesClient | None:
     kubeconfig = os.environ.get("KUBECONFIG")
-    return KubernetesClient(KubernetesBackend.k8s_client(kubeconfig=kubeconfig))
+    if kubeconfig:
+        return KubernetesClient(KubernetesBackend.k8s_client(kubeconfig=kubeconfig), logger=logger)
+    return None
 
 
 def generate_short_id(length: int = 8) -> str:

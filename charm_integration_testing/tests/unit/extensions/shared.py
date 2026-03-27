@@ -4,6 +4,7 @@ from typing import Any, Iterable
 
 from juju.backend import JujuBackend, JujuExecOutput, JujuTask
 from juju.models import JujuApplicationInfo, JujuIntegration, JujuIntegrationApplication
+from kubernetes_client import KubernetesClient
 
 from validators.base.validator import ValidationResult
 
@@ -140,10 +141,23 @@ class NullJujuBackend(JujuBackend):
     def unit_ip(self, model: str, unit: str) -> str:
         raise NotImplementedError
 
+    def reboot_model_controller(self, model: str) -> None:
+        raise NotImplementedError
+
+    def is_k8s_model(self, model: str) -> bool:
+        raise NotImplementedError
+
+    def reboot_model_controller_leader(self, model: str) -> None:
+        raise NotImplementedError
+
     def version(self, model: str) -> str:
         raise NotImplementedError
 
     def validate_application(self, model: str, application: str, level: str) -> dict[str, list[ValidationResult]]:
+        raise NotImplementedError
+
+    @property
+    def kubernetes_client(self) -> KubernetesClient:
         raise NotImplementedError
 
     def kill_controller(self, controller: str) -> None:
