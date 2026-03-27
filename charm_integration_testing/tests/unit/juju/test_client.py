@@ -433,7 +433,7 @@ class TestJujuClientValidateModel:
                 "myapp", expected_revision=5, model="mymodel", timeout=timedelta(milliseconds=1)
             )
         except Exception:
-                pass  # Backend stub doesn't fully implement wait - that's expected
+            pass  # Backend stub doesn't fully implement wait - that's expected
 
 
 class TestJujuClientKillController:
