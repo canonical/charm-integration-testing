@@ -29,6 +29,8 @@ from juju_jubilant import JubilantBackend
 from kubernetes_client import KubernetesBackend, KubernetesClient
 from pydantic import TypeAdapter, ValidationError
 from pytest import StashKey
+from test_observer_client import TestObserverClient as TestObserverAPIClient
+from test_observer_client import TestObserverClientError
 from utils import normalize_string, normalize_string_multiline
 
 from bundle_builder import UnfulfilledEndpointsError
@@ -44,6 +46,71 @@ KNOWN_FAILURE_EXCEPTIONS = (
     JujuValidationError,
     AssertionError,
 )
+
+
+@pytest.fixture
+def test_observer_api() -> str:
+    """Test Observer API base URL from environment."""
+    value = os.environ.get("TEST_OBSERVER_API")
+    if not value:
+        pytest.skip("Test Observer API URL is not configured (TEST_OBSERVER_API).")
+    return value.strip()
+
+
+@pytest.fixture
+def test_observer_token() -> str:
+    """Test Observer API token from environment."""
+    value = os.environ.get("TEST_OBSERVER_TOKEN")
+    if not value:
+        pytest.skip("Test Observer API token is not configured (TEST_OBSERVER_TOKEN).")
+    return value.strip()
+
+
+@pytest.fixture
+def test_observer_client(
+    logger: logging.Logger,
+    test_observer_api: str,
+    test_observer_token: str,
+) -> Iterator[TestObserverAPIClient]:
+    """Test Observer API client."""
+    try:
+        client = TestObserverAPIClient(
+            logger=logger,
+            api_url=test_observer_api,
+            token=test_observer_token,
+        )
+    except TestObserverClientError as exc:
+        pytest.skip(f"Test Observer API client is not configured properly: {exc}")
+    try:
+        yield client
+    finally:
+        client.close()
+
+
+@pytest.fixture
+def historical_revision_with_passing_deploy(
+    test_observer_client: TestObserverAPIClient,
+    target_charm: str,
+    target_channel: str | None,
+    target_revision: int | None,
+) -> int | None:
+    """Historical revision with a passing test_deploy for the target charm."""
+    if target_revision is None or target_channel is None:
+        return None
+
+    parts = target_channel.split("/", maxsplit=1)
+    track = parts[0]
+    stage = parts[1] if len(parts) > 1 else "stable"
+
+    try:
+        return test_observer_client.choose_historical_revision_with_passing_deploy(
+            charm_name=target_charm,
+            stage=stage,
+            current_revision=target_revision,
+            track=track,
+        )
+    except TestObserverClientError as exc:
+        raise RuntimeError(f"Test Observer query failed: {exc}") from exc
 
 
 @pytest.fixture
