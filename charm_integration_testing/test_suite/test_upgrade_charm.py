@@ -57,7 +57,7 @@ def test_upgrade_charm(
     juju_client.validate_model(model=model, level="simple")
 
     # Downgrade the charm back to the original revision
-    juju_client.logger.info(f"Refreshing {target_application} back to pre-upgrade revision " f"{pre_upgrade_revision}.")
+    juju_client.logger.info(f"Refreshing {target_application} back to pre-upgrade revision {pre_upgrade_revision}.")
     juju_client.refresh_application(
         application=target_application,
         revision=pre_upgrade_revision,

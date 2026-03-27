@@ -400,6 +400,20 @@ class JubilantBackend(JujuCmdBackend):
     def switch(self, controller: str, model: str) -> None:
         self.client.model(model).cli("switch", f"{controller}:{model}", include_model=False)
 
+    def refresh_application(
+        self,
+        model: str,
+        application: str,
+        revision: int | None = None,
+        channel: str | None = None,
+    ) -> None:
+        args: list[str] = ["refresh", application]
+        if revision is not None:
+            args += ["--revision", str(revision)]
+        if channel:
+            args += ["--channel", channel]
+        self.client.model(model).cli(*args)
+
     def validate_application(self, model: str, application: str, level: str) -> dict[str, list[ValidationResult]]:
         # Phase 2 endpoint validation will be done here
         return {}

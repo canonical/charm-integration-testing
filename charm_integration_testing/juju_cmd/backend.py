@@ -239,21 +239,6 @@ class JujuCmdBackend(JujuBackend):
             CmdArg(value=bundle),
         )
 
-    def refresh_application(
-        self,
-        model: str,
-        application: str,
-        revision: int | None = None,
-        channel: str | None = None,
-    ) -> None:
-        self._call_juju(
-            CmdArg(value="refresh"),
-            CmdArg(name="model", value=model),
-            CmdArg(value=application),
-            CmdArg(name="revision", value=str(revision)) if revision is not None else CmdArg(),
-            CmdArg(name="channel", value=channel) if channel else CmdArg(),
-        )
-
     def remove_applications(self, model: str, *applications: str) -> None:
         self._call_juju(
             CmdArg(value="remove-application"),

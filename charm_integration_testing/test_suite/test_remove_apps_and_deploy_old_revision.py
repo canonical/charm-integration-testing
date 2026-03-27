@@ -87,5 +87,13 @@ def test_deploy(
     # Wait until idle
     juju_client.idle_for_period(model=model, timeout=timedelta(minutes=15))
 
+    # Verify the application is deployed at the target revision and the model is healthy
+    deployed_revision = juju_client.application_revision(application=target_application, model=model)
+    if deployed_revision != selected_revision:
+        pytest.fail(
+            f"Expected '{target_application}' to be deployed at revision {selected_revision}, "
+            f"got {deployed_revision}."
+        )
+
     # Validate all applications and relations
     juju_client.validate_model(model=model, level="simple")
