@@ -486,7 +486,7 @@ def _build_execution_plan(
                 candidates = all_transitions.get(transition)
                 if candidates:
                     bridge_item = candidates[0]
-                    _mark_as_injected(bridge_item)
+                    injected_ids.add(id(bridge_item))
                     plan.append(bridge_item)
 
     # Keys are (current_state, remaining_destinations). We only memoize dead ends.
