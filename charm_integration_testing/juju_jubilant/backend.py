@@ -23,6 +23,7 @@ from juju import (
     warn_performance,
 )
 from juju_cmd import JujuCmdBackend
+from kubernetes_client import KubernetesClient
 from tenacity import retry, stop_after_attempt, wait_fixed
 
 from validators.base.validator import ValidationResult
@@ -42,14 +43,22 @@ from .wait import (
 
 class JubilantBackend(JujuCmdBackend):
     client: JubilantClient
+    _kubernetes_client: KubernetesClient | None
 
     default_timeout = timedelta(minutes=5)
     default_successes = 3
     default_delay = timedelta(seconds=1)
 
-    def __init__(self, client: JubilantClient | None = None):
+    def __init__(self, client: JubilantClient | None = None, kubernetes_client: KubernetesClient | None = None):
         super().__init__()
         self.client = client or JubilantClient()
+        self._kubernetes_client = kubernetes_client
+
+    @property
+    def kubernetes_client(self) -> KubernetesClient:
+        if self._kubernetes_client is None:
+            raise RuntimeError("No valid KubernetesClient was received. Is this a Kubernetes environment?")
+        return self._kubernetes_client
 
     @warn_performance(category=JujuStatusPerformanceWarning, threshold=timedelta(seconds=5))
     def status(self, model: str) -> jubilant.Status:
@@ -437,6 +446,26 @@ class JubilantBackend(JujuCmdBackend):
     def validate_application(self, model: str, application: str, level: str) -> dict[str, list[ValidationResult]]:
         # Phase 2 endpoint validation will be done here
         return {}
+
+    def is_k8s_model(self, model: str) -> bool:
+        return self.client.model(model).show_model().type == "kubernetes"
+
+    def reboot_model_controller(self, model: str) -> None:
+        controller_name = self.status(model).model.controller
+        controller_model = f"{controller_name}:controller"
+
+        if not self.is_k8s_model(model=controller_model):
+            # XXX(mbenzan): In the future, we might want to implement a rolling restart here too.
+            # reboot the leader
+            self.ssh(model=controller_model, application="controller/leader", command="sudo reboot")
+        else:
+            controller_k8s_namespace = f"controller-{controller_name}"
+            self.kubernetes_client.restart_statefulset(
+                namespace=controller_k8s_namespace, statefulset_name="controller"
+            )
+            self.kubernetes_client.wait_for_statefulset_restart(
+                namespace=controller_k8s_namespace, statefulset_name="controller", timeout_seconds=300
+            )
 
     def kill_controller(self, controller: str) -> None:
         self.client.model(None).cli(
