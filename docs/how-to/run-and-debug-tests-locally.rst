@@ -174,7 +174,7 @@ the environment so it knows which setup steps (if any) still need to run:
 - ``deployed`` — the charm bundle is already deployed; skip straight to
   integration tests and teardown
 - ``neighbor_only`` — only the neighbor application remains after teardown
-- ``old_revision`` — the charm bundle is deployed with the target on an 
+- ``old_revision`` — the charm bundle is deployed with the target on an
   old revision
 
 Use a non-default ``--current-state`` when resuming a partial run or

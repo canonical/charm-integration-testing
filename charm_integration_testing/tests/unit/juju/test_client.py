@@ -2,6 +2,7 @@
 # See LICENSE file for licensing details.
 
 from dataclasses import dataclass, field
+from datetime import timedelta
 from typing import Any
 
 import pytest
@@ -62,6 +63,40 @@ class ExtensionStub(JujuExtension):
 
     def post_validate(self, model: str, application: str, level: str) -> dict[str, list[ValidationResult]]:
         return self.results.get(application, {})
+
+
+@dataclass
+class RefreshBackendStub(NullJujuBackend):
+    """Backend that records each refresh_application call as a (model, application, revision, channel) tuple."""
+
+    refresh_calls: list[tuple[str, str, int | None, str | None]] = field(default_factory=list)
+
+    def refresh_application(
+        self,
+        model: str,
+        application: str,
+        revision: int | None = None,
+        channel: str | None = None,
+    ) -> None:
+        self.refresh_calls.append((model, application, revision, channel))
+
+
+@dataclass
+class RevisionSequenceBackendStub(NullJujuBackend):
+    """Returns successive revisions from a fixed sequence on each list_applications call.
+
+    Once the sequence is exhausted the last value is repeated indefinitely.
+    Pass None as a revision to simulate a missing application.
+    """
+
+    application: str
+    revisions: list[int | None]
+
+    def list_applications(self, model: str) -> dict[str, JujuApplicationInfo]:
+        revision = self.revisions.pop(0) if len(self.revisions) > 1 else self.revisions[0]
+        if revision is None:
+            return {}
+        return {self.application: JujuApplicationInfo(charm="mycharm", revision=revision)}
 
 
 # ---------------------------------------------------------------------------
@@ -137,7 +172,7 @@ class TestJujuClientValidateModel:
     def _client(
         self,
         logger: Any,
-        backend: BackendStub,
+        backend: NullJujuBackend,
         extensions: list[JujuExtension] | None = None,
     ) -> JujuClient:
         return JujuClient(backend, logger, extensions or [])
@@ -322,3 +357,91 @@ class TestJujuClientValidateModel:
         # THEN the unit is not skipped and validation passed is logged
         assert any("Validation passed for unit 'myapp/0'" in info for info in logger.infos)
         assert not any("Validation skipped for unit 'myapp/0'" in info for info in logger.infos)
+
+    def test_delegates_to_backend_with_revision_only(self, logger: LoggerStub) -> None:
+        # GIVEN a backend that records refresh calls
+        backend = RefreshBackendStub()
+        client = self._client(logger, backend)
+
+        # WHEN
+        client.refresh_application("myapp", revision=42, model="mymodel")
+
+        # THEN the backend was called with revision and no channel
+        assert backend.refresh_calls == [("mymodel", "myapp", 42, None)]
+
+    def test_delegates_to_backend_with_revision_and_channel(self, logger: LoggerStub) -> None:
+        # GIVEN a backend that records refresh calls
+        backend = RefreshBackendStub()
+        client = self._client(logger, backend)
+
+        # WHEN
+        client.refresh_application("myapp", revision=42, channel="latest/stable", model="mymodel")
+
+        # THEN the backend was called with both revision and channel
+        assert backend.refresh_calls == [("mymodel", "myapp", 42, "latest/stable")]
+
+    def test_returns_revision_for_known_application(self, logger: LoggerStub) -> None:
+        # GIVEN an application with a known revision
+        backend = BackendStub(app_list={"myapp": JujuApplicationInfo(charm="mycharm", revision=7)})
+        client = self._client(logger, backend)
+
+        # WHEN
+        result = client.application_revision("myapp", model="mymodel")
+
+        # THEN
+        assert result == 7
+
+    def test_raises_key_error_for_missing_application(self, logger: LoggerStub) -> None:
+        # GIVEN no applications in the model
+        backend = BackendStub(app_list={})
+        client = self._client(logger, backend)
+
+        # WHEN / THEN
+        with pytest.raises(KeyError, match="myapp"):
+            client.application_revision("myapp", model="mymodel")
+
+    def test_waits_until_revision_eventually_matches(self, logger: LoggerStub, monkeypatch: pytest.MonkeyPatch) -> None:
+        # GIVEN the backend returns a stale revision then the expected one
+        monkeypatch.setattr("juju.client.time.sleep", lambda _: None)
+        backend = RevisionSequenceBackendStub(application="myapp", revisions=[3, 3, 5])
+        client = self._client(logger, backend)
+
+        # WHEN / THEN no exception raised
+        client.wait_for_application_revision(
+            "myapp", expected_revision=5, model="mymodel", timeout=timedelta(minutes=1)
+        )
+
+    def test_raises_timeout_when_revision_never_matches(
+        self, logger: LoggerStub, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # GIVEN the backend always returns the wrong revision and time expires immediately
+        monkeypatch.setattr("juju.client.time.sleep", lambda _: None)
+        _tick = [0]
+
+        def _monotonic() -> float:
+            _tick[0] += 1
+            return float(_tick[0])
+
+        monkeypatch.setattr("juju.client.time.monotonic", _monotonic)
+        backend = RevisionSequenceBackendStub(application="myapp", revisions=[3])
+        client = self._client(logger, backend)
+
+        # WHEN / THEN
+        with pytest.raises(TimeoutError):
+            client.wait_for_application_revision(
+                "myapp", expected_revision=5, model="mymodel", timeout=timedelta(seconds=5)
+            )
+
+    def test_raises_key_error_when_application_is_missing(
+        self, logger: LoggerStub, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # GIVEN the backend reports no applications
+        monkeypatch.setattr("juju.client.time.sleep", lambda _: None)
+        backend = RevisionSequenceBackendStub(application="myapp", revisions=[None])
+        client = self._client(logger, backend)
+
+        # WHEN / THEN
+        with pytest.raises(KeyError, match="myapp"):
+            client.wait_for_application_revision(
+                "myapp", expected_revision=5, model="mymodel", timeout=timedelta(minutes=1)
+            )
