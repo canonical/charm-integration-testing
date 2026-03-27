@@ -11,3 +11,4 @@ Contents
 
    execution-metadata
    charm-deployment-constraints
+   validators

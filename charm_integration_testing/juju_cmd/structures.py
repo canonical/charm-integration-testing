@@ -49,17 +49,6 @@ class JujuModel:
 
 
 @serializeable_dataclass
-class JujuExecTask:
-    @serializeable_dataclass
-    class Results:
-        return_code: int
-        stdout: str = ""
-        stderr: str = ""
-
-    results: Results
-
-
-@serializeable_dataclass
 class JujuSecretInfo:
     name: str | None = None
     content: dict[str, str] | None = None

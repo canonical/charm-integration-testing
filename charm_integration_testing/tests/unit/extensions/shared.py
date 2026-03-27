@@ -5,6 +5,8 @@ from typing import Any, Iterable
 from juju.backend import JujuBackend, JujuExecOutput, JujuTask
 from juju.models import JujuApplicationInfo, JujuIntegration, JujuIntegrationApplication
 
+from validators.base.validator import ValidationResult
+
 
 class NullJujuBackend(JujuBackend):
     """Concrete JujuBackend where every method raises NotImplementedError.
@@ -86,7 +88,7 @@ class NullJujuBackend(JujuBackend):
     def application_units(self, model: str, application: str) -> list[str]:
         raise NotImplementedError
 
-    def exec_unit(self, model: str, unit: str, task: str) -> JujuExecOutput:
+    def exec_unit(self, model: str, unit: str, task: str, operator: bool = False) -> JujuExecOutput:
         raise NotImplementedError
 
     def run_action(self, model: str, unit: str, action: str, arguments: dict[str, Any]) -> JujuTask:
@@ -120,6 +122,15 @@ class NullJujuBackend(JujuBackend):
     def get_application_config(self, model: str, application: str) -> dict[str, Any]:
         raise NotImplementedError
 
+    def bootstrap_controller(self, cloud: str, controller: str, controller_constraints: dict[str, str]) -> None:
+        raise NotImplementedError
+
+    def add_model(self, controller: str, model: str, model_config: dict[str, str]) -> None:
+        raise NotImplementedError
+
+    def switch(self, controller: str, model: str) -> None:
+        raise NotImplementedError
+
     def scp(self, model: str, source: str, destination: str) -> None:
         raise NotImplementedError
 
@@ -130,6 +141,9 @@ class NullJujuBackend(JujuBackend):
         raise NotImplementedError
 
     def version(self, model: str) -> str:
+        raise NotImplementedError
+
+    def validate_application(self, model: str, application: str, level: str) -> dict[str, list[ValidationResult]]:
         raise NotImplementedError
 
 

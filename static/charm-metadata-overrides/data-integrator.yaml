@@ -1,0 +1,125 @@
+---
+# At least one database/service endpoint must be integrated.
+# Each endpoint is optional when any other endpoint in the group is already integrated.
+requires:
+  mysql:
+    optional_if:
+      - any_of:
+          - endpoint_integrated: postgresql
+          - endpoint_integrated: mongodb
+          - endpoint_integrated: kafka
+          - endpoint_integrated: zookeeper
+          - endpoint_integrated: opensearch
+          - endpoint_integrated: kyuubi
+          - endpoint_integrated: etcd
+          - endpoint_integrated: cassandra
+          - endpoint_integrated: mongos
+  postgresql:
+    optional_if:
+      - any_of:
+          - endpoint_integrated: mysql
+          - endpoint_integrated: mongodb
+          - endpoint_integrated: kafka
+          - endpoint_integrated: zookeeper
+          - endpoint_integrated: opensearch
+          - endpoint_integrated: kyuubi
+          - endpoint_integrated: etcd
+          - endpoint_integrated: cassandra
+          - endpoint_integrated: mongos
+  mongodb:
+    optional_if:
+      - any_of:
+          - endpoint_integrated: mysql
+          - endpoint_integrated: postgresql
+          - endpoint_integrated: kafka
+          - endpoint_integrated: zookeeper
+          - endpoint_integrated: opensearch
+          - endpoint_integrated: kyuubi
+          - endpoint_integrated: etcd
+          - endpoint_integrated: cassandra
+          - endpoint_integrated: mongos
+  kafka:
+    optional_if:
+      - any_of:
+          - endpoint_integrated: mysql
+          - endpoint_integrated: postgresql
+          - endpoint_integrated: mongodb
+          - endpoint_integrated: zookeeper
+          - endpoint_integrated: opensearch
+          - endpoint_integrated: kyuubi
+          - endpoint_integrated: etcd
+          - endpoint_integrated: cassandra
+          - endpoint_integrated: mongos
+  zookeeper:
+    optional_if:
+      - any_of:
+          - endpoint_integrated: mysql
+          - endpoint_integrated: postgresql
+          - endpoint_integrated: mongodb
+          - endpoint_integrated: kafka
+          - endpoint_integrated: opensearch
+          - endpoint_integrated: kyuubi
+          - endpoint_integrated: etcd
+          - endpoint_integrated: cassandra
+          - endpoint_integrated: mongos
+  opensearch:
+    optional_if:
+      - any_of:
+          - endpoint_integrated: mysql
+          - endpoint_integrated: postgresql
+          - endpoint_integrated: mongodb
+          - endpoint_integrated: kafka
+          - endpoint_integrated: zookeeper
+          - endpoint_integrated: kyuubi
+          - endpoint_integrated: etcd
+          - endpoint_integrated: cassandra
+          - endpoint_integrated: mongos
+  kyuubi:
+    optional_if:
+      - any_of:
+          - endpoint_integrated: mysql
+          - endpoint_integrated: postgresql
+          - endpoint_integrated: mongodb
+          - endpoint_integrated: kafka
+          - endpoint_integrated: zookeeper
+          - endpoint_integrated: opensearch
+          - endpoint_integrated: etcd
+          - endpoint_integrated: cassandra
+          - endpoint_integrated: mongos
+  etcd:
+    optional_if:
+      - any_of:
+          - endpoint_integrated: mysql
+          - endpoint_integrated: postgresql
+          - endpoint_integrated: mongodb
+          - endpoint_integrated: kafka
+          - endpoint_integrated: zookeeper
+          - endpoint_integrated: opensearch
+          - endpoint_integrated: kyuubi
+          - endpoint_integrated: cassandra
+          - endpoint_integrated: mongos
+  cassandra:
+    optional_if:
+      - any_of:
+          - endpoint_integrated: mysql
+          - endpoint_integrated: postgresql
+          - endpoint_integrated: mongodb
+          - endpoint_integrated: kafka
+          - endpoint_integrated: zookeeper
+          - endpoint_integrated: opensearch
+          - endpoint_integrated: kyuubi
+          - endpoint_integrated: etcd
+          - endpoint_integrated: mongos
+provides:
+  mongos:
+    optional_if:
+      - any_of:
+          - endpoint_integrated: mysql
+          - endpoint_integrated: postgresql
+          - endpoint_integrated: mongodb
+          - endpoint_integrated: kafka
+          - endpoint_integrated: zookeeper
+          - endpoint_integrated: opensearch
+          - endpoint_integrated: kyuubi
+          - endpoint_integrated: etcd
+          - endpoint_integrated: cassandra

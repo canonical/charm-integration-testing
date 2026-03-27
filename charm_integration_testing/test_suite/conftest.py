@@ -19,11 +19,19 @@ from extensions import (
     TemporalExtension,
     UnsealVaultJujuExtension,
     UnsealVaultK8sJujuExtension,
+    ValidatorInjectorExtension,
 )
-from juju import JujuBackend, JujuClient, JujuWaitTimeoutError
+from juju import JujuBackend, JujuClient, JujuValidationError, JujuWaitTimeoutError
+from juju_cmd.backend import JujuCmdBackend
 from juju_jubilant import JubilantBackend
+from kubernetes_client import KubernetesBackend, KubernetesClient
+from pydantic import TypeAdapter, ValidationError
 from pytest import StashKey
 from utils import normalize_string, normalize_string_multiline
+
+from bundle_builder import UnfulfilledEndpointsError
+from test_suite.scheduler.markers import read_state_marker
+from test_suite.scheduler.states import State
 
 pytest_plugins = [
     "test_suite.scheduler.plugin",
@@ -31,6 +39,7 @@ pytest_plugins = [
 
 KNOWN_FAILURE_EXCEPTIONS = (
     JujuWaitTimeoutError,
+    JujuValidationError,
     AssertionError,
 )
 
@@ -57,6 +66,8 @@ def juju_client(
     logger: logging.Logger,
     minio_client_file: Path | None,
     ubuntu_pro_token: str | None,
+    uv_file: Path | None,
+    validators_path: Path | None,
 ) -> JujuClient:
     return JujuClient(
         juju_backend,
@@ -69,6 +80,7 @@ def juju_client(
             TemporalExtension(juju_backend, logger),
             UnsealVaultJujuExtension(juju_backend, logger),
             UnsealVaultK8sJujuExtension(juju_backend, logger),
+            ValidatorInjectorExtension(validators_path, juju_backend, logger, uv_file),
         ],
     )
 
@@ -76,11 +88,16 @@ def juju_client(
 def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption("--model", type=str, required=True, help="Juju model to test in.")
     parser.addoption(
-        "--bundles",
-        nargs="*",
+        "--bundle",
         type=str,
-        default=[],
-        help="Bundle file paths to deploy (used by deploy and idempotent-redeploy phases).",
+        default=None,
+        help="Bundle file path to deploy (used by deploy and idempotent-redeploy phases).",
+    )
+    parser.addoption(
+        "--mermaid-output",
+        type=str,
+        default=None,
+        help="File path to save the generated mermaid output.",
     )
     parser.addoption(
         "--target-application",
@@ -106,6 +123,102 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=None,
         help="Endpoint on the neighbor application used for the integration under test.",
     )
+    parser.addoption(
+        "--target-charm",
+        type=str,
+        default=None,
+        help="Charmhub name of the charm under test (used by bundle building).",
+    )
+    parser.addoption(
+        "--neighbor-charm",
+        type=str,
+        default=None,
+        help="Charmhub name of the neighbor charm (used by bundle building).",
+    )
+    parser.addoption(
+        "--target-channel",
+        type=str,
+        default="default",
+        help="Channel of the charm under test, e.g. '2/stable'. Use 'default' to defer to charm-default-versions.",
+    )
+    parser.addoption(
+        "--target-revision",
+        type=str,
+        default="default",
+        help="Revision of the charm under test (integer). Use 'default' to defer to charm-default-versions.",
+    )
+    parser.addoption(
+        "--target-series",
+        type=str,
+        default="default",
+        help="Ubuntu base series for the charm under test, e.g. '22.04'. Use 'default' to let the builder decide.",
+    )
+    parser.addoption(
+        "--platform",
+        type=str,
+        default="kubernetes",
+        help="Platform to deploy on (default: 'kubernetes').",
+    )
+    parser.addoption(
+        "--charm-metadata-overrides",
+        type=str,
+        default="./static/charm-metadata-overrides/",
+        help="Directory to the charm-metadata-overrides.",
+    )
+    parser.addoption(
+        "--charm-platform-overrides",
+        type=str,
+        default="./static/charm-platform-overrides/",
+        help="Directory to the charm-platform-overrides.",
+    )
+    parser.addoption(
+        "--charm-listing-overrides",
+        type=str,
+        default="./static/charm-listing-overrides.yaml",
+        help="Path to the charm-listing-overrides yaml.",
+    )
+    parser.addoption(
+        "--charm-test-configs",
+        type=str,
+        default="./static/charm-test-configs/",
+        help="Directory to the charm-test-configs.",
+    )
+    parser.addoption(
+        "--charm-priorities-config",
+        type=str,
+        default="./static/charm-priorities.yaml",
+        help="Path to the charm-priorities yaml.",
+    )
+    parser.addoption(
+        "--charm-default-versions",
+        type=str,
+        default="./static/charm-default-versions.yaml",
+        help="Path to the charm-default-versions yaml.",
+    )
+    parser.addoption(
+        "--juju-cloud",
+        type=str,
+        default=None,
+        help="Name of the Juju Cloud to create the controller on.",
+    )
+    parser.addoption(
+        "--juju-controller",
+        type=str,
+        default="charmqa",
+        help="Name of the controller to create the model on.",
+    )
+    parser.addoption(
+        "--juju-model-config",
+        type=str,
+        default=None,
+        help="Path to a json file containing the model configurations to be passed down to Juju on model creation.",
+    )
+    parser.addoption(
+        "--juju-controller-bootstrap-constraints",
+        type=str,
+        default=None,
+        help="Path to a json file containing the controller constraints configurations to be passed down to Juju on controller bootstrap.",
+    )
 
 
 @pytest.fixture
@@ -116,11 +229,78 @@ def model(request: pytest.FixtureRequest) -> str:
 
 
 @pytest.fixture
-def bundles(request: pytest.FixtureRequest) -> list[str]:
-    """Bundle file paths passed via ``--bundles``."""
-    option = request.config.getoption("--bundles")
-    assert isinstance(option, list)
-    return option
+def juju_model_config(request: pytest.FixtureRequest) -> dict[str, str]:
+    """Juju model config file path passed via ``--juju-model-config``."""
+    value = request.config.getoption("--juju-model-config")
+
+    if not value:
+        return dict()
+
+    assert isinstance(value, str)
+    value = Path(value).resolve()
+    if not value.exists() or not value.is_file():
+        pytest.fail(
+            "Juju model config file passed via the --juju-model-config parameter does not exist or is not a file."
+        )
+
+    # Define the expected shape
+    ConfigSchema = TypeAdapter(dict[str, str])
+
+    try:
+        content = json.loads(value.read_text())
+        return ConfigSchema.validate_python(content)
+    except ValidationError as e:
+        pytest.fail(f"Invalid Juju model config passed via the --juju-model-config parameter: {e}")
+    except json.JSONDecodeError as e:
+        pytest.fail(
+            f"Juju model config file passed via the --juju-model-config parameter does not contain valid JSON: {e}"
+        )
+
+
+@pytest.fixture
+def juju_controller_bootstrap_constraints(request: pytest.FixtureRequest) -> dict[str, str]:
+    """Juju controller bootstrap constraints config file path passed via ``--juju-controller-bootstrap-constraints``."""
+    value = request.config.getoption("--juju-controller-bootstrap-constraints")
+
+    if not value:
+        return dict()
+
+    assert isinstance(value, str)
+    value = Path(value).resolve()
+    if not value.exists() or not value.is_file():
+        pytest.fail(
+            "Juju controller bootstrap constraints config file passed via the --juju-controller-bootstrap-constraints parameter does not exist or is not a file."
+        )
+
+    # Define the expected shape
+    ConfigSchema = TypeAdapter(dict[str, str])
+
+    try:
+        content = json.loads(value.read_text())
+        return ConfigSchema.validate_python(content)
+    except ValidationError as e:
+        pytest.fail(
+            f"Invalid Juju controller bootstrap constraints config passed via the --juju-controller-bootstrap-constraints parameter: {e}"
+        )
+    except json.JSONDecodeError as e:
+        pytest.fail(
+            f"Juju controller bootstrap constraints config file passed via the --juju-controller-bootstrap-constraints parameter does not contain valid JSON: {e}"
+        )
+
+
+@pytest.fixture
+def bundle(request: pytest.FixtureRequest) -> Path:
+    """Bundle file path passed via ``--bundle``."""
+    value = request.config.getoption("--bundle")
+
+    if not value:
+        return Path(request.config.rootpath) / "generated-bundle.yaml"
+
+    assert isinstance(value, str)
+    value = Path(value).resolve()
+    # Ensures parents path exists for the output when calling .write_text
+    value.parent.mkdir(parents=True, exist_ok=True)
+    return value
 
 
 @pytest.fixture
@@ -164,8 +344,191 @@ def neighbor_endpoint(request: pytest.FixtureRequest) -> str:
 
 
 @pytest.fixture
+def validators_path() -> Path | None:
+    file_path_env = os.environ.get("VALIDATORS_PATH")
+    if not file_path_env:
+        return None
+    file_path = Path(file_path_env.strip())
+    assert file_path.is_dir(), f"Validators path is invalid: {file_path}"
+    return file_path
+
+
+@pytest.fixture
+def target_charm(request: pytest.FixtureRequest) -> str:
+    """Charmhub name of the charm under test, passed via ``--target-charm``."""
+    value = request.config.getoption("--target-charm")
+    if not value:
+        pytest.fail("--target-charm is required by this test but was not provided.")
+    assert isinstance(value, str)
+    return value
+
+
+@pytest.fixture
+def neighbor_charm(request: pytest.FixtureRequest) -> str:
+    """Charmhub name of the neighbor charm, passed via ``--neighbor-charm``."""
+    value = request.config.getoption("--neighbor-charm")
+    if not value:
+        pytest.fail("--neighbor-charm is required by this test but was not provided.")
+    assert isinstance(value, str)
+    return value
+
+
+@pytest.fixture
+def target_channel(request: pytest.FixtureRequest) -> str | None:
+    """Channel of the charm under test.
+
+    Returns ``None`` when the value is ``"default"``, which tells
+    ``CharmhubClient.charm_from_store`` to defer to ``charm-default-versions.yaml``.
+    """
+    value = request.config.getoption("--target-channel")
+    return None if value == "default" else value
+
+
+@pytest.fixture
+def target_revision(request: pytest.FixtureRequest) -> int | None:
+    """Revision of the charm under test.
+
+    Returns ``None`` when the value is ``"default"``, which tells
+    ``CharmhubClient.charm_from_store`` to defer to ``charm-default-versions.yaml``.
+    """
+    value = request.config.getoption("--target-revision")
+    return None if value == "default" else int(value)
+
+
+@pytest.fixture
+def target_series(request: pytest.FixtureRequest) -> str | None:
+    """Ubuntu base series for the charm under test.
+
+    Returns ``None`` when the value is ``"default"``, which tells
+    ``CharmhubClient.charm_from_store`` to pick a series based on the charm metadata.
+    """
+    value = request.config.getoption("--target-series")
+    return None if value == "default" else value
+
+
+@pytest.fixture
+def platform(request: pytest.FixtureRequest) -> str:
+    value = request.config.getoption("--platform")
+    if not value:
+        pytest.fail("--platform is required by this test but was not provided.")
+    assert isinstance(value, str)
+    return value
+
+
+@pytest.fixture
+def juju_cloud(request: pytest.FixtureRequest) -> str:
+    value = request.config.getoption("--juju-cloud")
+    if not value:
+        pytest.fail("--juju-cloud is required by this test but was not provided.")
+    assert isinstance(value, str)
+    return value
+
+
+@pytest.fixture
+def juju_controller(request: pytest.FixtureRequest) -> str:
+    value = request.config.getoption("--juju-controller")
+    if not value:
+        pytest.fail("--juju-controller is required by this test but was not provided.")
+    assert isinstance(value, str)
+    return value
+
+
+@pytest.fixture
+def charm_metadata_overrides(request: pytest.FixtureRequest) -> Path:
+    value = request.config.getoption("--charm-metadata-overrides")
+    if not value:
+        pytest.fail("--charm-metadata-overrides is required by this test but was not provided.")
+    assert isinstance(value, str)
+    ppath = Path(value).resolve()
+    if not ppath.exists():
+        pytest.fail("Provided path for --charm-metadata-overrides does not exist.")
+    return ppath
+
+
+@pytest.fixture
+def charm_platform_overrides(request: pytest.FixtureRequest) -> Path:
+    value = request.config.getoption("--charm-platform-overrides")
+    if not value:
+        pytest.fail("--charm-platform-overrides is required by this test but was not provided.")
+    assert isinstance(value, str)
+    ppath = Path(value).resolve()
+    if not ppath.exists():
+        pytest.fail("Provided path for --charm-platform-overrides does not exist.")
+    return ppath
+
+
+@pytest.fixture
+def charm_listing_overrides(request: pytest.FixtureRequest) -> Path:
+    value = request.config.getoption("--charm-listing-overrides")
+    if not value:
+        pytest.fail("--charm-listing-overrides is required by this test but was not provided.")
+    assert isinstance(value, str)
+    ppath = Path(value).resolve()
+    if not ppath.exists():
+        pytest.fail("Provided path for --charm-listing-overrides does not exist.")
+    return ppath
+
+
+@pytest.fixture
+def charm_test_configs(request: pytest.FixtureRequest) -> Path:
+    value = request.config.getoption("--charm-test-configs")
+    if not value:
+        pytest.fail("--charm-test-configs is required by this test but was not provided.")
+    assert isinstance(value, str)
+    ppath = Path(value).resolve()
+    if not ppath.exists():
+        pytest.fail("Provided path for --charm-test-configs does not exist.")
+    return ppath
+
+
+@pytest.fixture
+def charm_priorities_config(request: pytest.FixtureRequest) -> Path:
+    value = request.config.getoption("--charm-priorities-config")
+    if not value:
+        pytest.fail("--charm-priorities-config is required by this test but was not provided.")
+    assert isinstance(value, str)
+    ppath = Path(value).resolve()
+    if not ppath.exists():
+        pytest.fail("Provided path for --charm-priorities-config does not exist.")
+    return ppath
+
+
+@pytest.fixture
+def charm_default_versions(request: pytest.FixtureRequest) -> Path:
+    value = request.config.getoption("--charm-default-versions")
+    if not value:
+        pytest.fail("--charm-default-versions is required by this test but was not provided.")
+    assert isinstance(value, str)
+    ppath = Path(value).resolve()
+    if not ppath.exists():
+        pytest.fail("Provided path for --charm-default-versions does not exist.")
+    return ppath
+
+
+@pytest.fixture
+def bundle_mermaid_output(request: pytest.FixtureRequest) -> Path:
+    """Path where the generated bundle Mermaid diagram is written by ``test_build_bundle``."""
+    value = request.config.getoption("--mermaid-output")
+    if not value:
+        pytest.fail("--mermaid-output is required by this test but was not provided.")
+    assert isinstance(value, str)
+    ppath = Path(value).resolve()
+    # Ensures parents path exists for the output when calling .write_text
+    ppath.parent.mkdir(parents=True, exist_ok=True)
+    return ppath
+
+
+@pytest.fixture
 def minio_client_file() -> Path | None:
     file_path = os.environ.get("MINIO_CLIENT_FILE")
+    if file_path:
+        file_path = file_path.strip()
+    return Path(file_path) if file_path else None
+
+
+@pytest.fixture
+def uv_file() -> Path | None:
+    file_path = os.environ.get("UV_FILE")
     if file_path:
         file_path = file_path.strip()
     return Path(file_path) if file_path else None
@@ -238,11 +601,16 @@ def print_setup_and_teardown_info(
     model: str,
     record_execution_metadata: None,
 ) -> Iterator[None]:
-    # Enforce fixture execution order
-    _ = record_execution_metadata
+    state_marker = read_state_marker(request.node)
+    if not (
+        state_marker
+        and any(state in (State.NO_MODEL, State.NO_CONTROLLER, State.NO_BUNDLE) for state in state_marker.requires)
+    ):
+        # Enforce fixture execution order
+        _ = record_execution_metadata
 
-    # Print starting state
-    juju_client.print_status(model=model)
+        # Print starting state
+        juju_client.print_status(model=model)
 
     # Log starting
     logger.info(f"Starting {request.node.name}")
@@ -259,8 +627,9 @@ def print_setup_and_teardown_info(
     else:
         logger.info(f"Successfully ran {request.node.name}")
 
-    # Log ending state
-    juju_client.print_status(model=model)
+    if not (state_marker and state_marker.provides in (State.NO_MODEL, State.NO_CONTROLLER, State.NO_BUNDLE)):
+        # Log ending state
+        juju_client.print_status(model=model)
 
 
 @pytest.fixture
@@ -352,16 +721,24 @@ def record_charms_and_revisions_execution_metadata_instantaneous(
 
 @pytest.fixture
 def record_charms_and_revisions_execution_metadata(
-    juju_client: JujuClient, model: str, execution_metadata: Callable[[str, str | int], None]
+    request: pytest.FixtureRequest,
+    juju_client: JujuClient,
+    model: str,
+    execution_metadata: Callable[[str, str | int], None],
 ) -> Iterator[None]:
-    # Save all charms and revisions at start of test
-    record_charms_and_revisions_execution_metadata_instantaneous(juju_client, model, execution_metadata)
+    state_marker = read_state_marker(request.node)
+    if not (
+        state_marker
+        and any(state in (State.NO_MODEL, State.NO_CONTROLLER, State.NO_BUNDLE) for state in state_marker.requires)
+    ):
+        # Save all charms and revisions at start of test
+        record_charms_and_revisions_execution_metadata_instantaneous(juju_client, model, execution_metadata)
 
     # Let the test run
     yield
-
-    # Save all charms and revisions at end of test
-    record_charms_and_revisions_execution_metadata_instantaneous(juju_client, model, execution_metadata)
+    if not (state_marker and state_marker.provides in (State.NO_MODEL, State.NO_CONTROLLER, State.NO_BUNDLE)):
+        # Save all charms and revisions at end of test
+        record_charms_and_revisions_execution_metadata_instantaneous(juju_client, model, execution_metadata)
 
 
 @pytest.fixture
@@ -415,6 +792,27 @@ def record_failure_execution_metadata(
             if exc.stderr:
                 for line in normalize_string_multiline(exc.stderr):
                     execution_metadata("failure:cli:stderr", line)
+        elif isinstance(exc, JujuValidationError):
+            for results in exc.failed_validations.values():
+                for result in results:
+                    execution_metadata(f"failure:validator:interface:{result.interface}", result.status)
+                    for check in result.checks:
+                        if not check.passed:
+                            execution_metadata(
+                                f"failure:validator:interface:{result.interface}:check",
+                                normalize_string(f"{check.name}: {check.message}"),
+                            )
+                    if result.error:
+                        execution_metadata(
+                            f"failure:validator:interface:{result.interface}:error",
+                            normalize_string(result.error),
+                        )
+        elif isinstance(exc, UnfulfilledEndpointsError):
+            for endpoint in exc.unfulfilled_endpoints:
+                charm = exc.best_bundle.application_lookup[endpoint.application].charm.name
+                interface = exc.best_bundle.application_endpoints[endpoint].interface
+                execution_metadata("failure:build_bundle:unfulfilled_endpoint", f"{charm}:{endpoint.endpoint}")
+                execution_metadata("failure:build_bundle:unfulfilled_interface", interface)
 
         if error_message in request.node.stash:
             # toggle expected failure flag
@@ -425,8 +823,16 @@ def record_failure_execution_metadata(
 
 @pytest.fixture
 def record_juju_execution_metadata(
-    juju_client: JujuClient, model: str, execution_metadata: Callable[[str, str | int], None]
+    request: pytest.FixtureRequest,
+    juju_client: JujuClient,
+    model: str,
+    execution_metadata: Callable[[str, str | int], None],
 ) -> Iterator[None]:
+    state_marker = read_state_marker(request.node)
+    if state_marker and any(state in (State.NO_MODEL, State.NO_CONTROLLER) for state in state_marker.requires):
+        yield
+        return
+
     # Let the test run
     yield
 
@@ -475,3 +881,15 @@ def record_pipeline_version_execution_metadata(
             warnings.warn(f"Failed to get pipeline workflow hash: {pipeline_result.stderr.strip()}")
     else:
         warnings.warn(f"Pipeline file not found: {pipeline_path}")
+
+
+@pytest.fixture
+def _kubernetes_test(juju_backend: JujuCmdBackend, model: str) -> None:
+    if not juju_backend.is_k8s_model(model):
+        pytest.skip("Not kubernetes")
+
+
+@pytest.fixture
+def kubernetes_client(_kubernetes_test: None) -> KubernetesClient:
+    kubeconfig = os.environ.get("KUBECONFIG")
+    return KubernetesClient(KubernetesBackend.k8s_client(kubeconfig=kubeconfig))

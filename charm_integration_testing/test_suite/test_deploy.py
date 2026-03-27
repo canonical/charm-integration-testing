@@ -2,6 +2,7 @@
 # See LICENSE file for licensing details.
 
 from datetime import timedelta
+from pathlib import Path
 
 import pytest
 from juju import JujuClient
@@ -13,11 +14,13 @@ from .scheduler.states import State
 def test_deploy(
     juju_client: JujuClient,
     model: str,
-    bundles: list[str],
+    bundle: Path,
 ) -> None:
-    # Deploy each bundle
-    for bundle in bundles:
-        juju_client.deploy_bundle_file(bundle, model=model)
+    # Deploy the bundle
+    juju_client.deploy_bundle_file(str(bundle), model=model)
 
     # Wait until idle
     juju_client.idle_for_period(model=model, timeout=timedelta(minutes=15))
+
+    # Validate all applications and relations
+    juju_client.validate_model(model=model, level="deep")
