@@ -2,7 +2,6 @@
 # See LICENSE file for licensing details.
 
 import logging
-import time
 from datetime import timedelta
 
 from validators.base import ValidationResult
@@ -198,22 +197,13 @@ class JujuClient:
         self,
         application: str,
         expected_revision: int,
+        timeout: timedelta | None,
         model: str = "default",
-        timeout: timedelta = timedelta(minutes=15),
     ) -> None:
         self.logger.info(
             f"Waiting {timeout} for application '{application}' to reach charm revision {expected_revision}."
         )
-        deadline = time.monotonic() + timeout.total_seconds()
-        actual_revision = self.application_revision(application=application, model=model)
-        while actual_revision != expected_revision:
-            if time.monotonic() >= deadline:
-                raise TimeoutError(
-                    f"Timed out waiting for application '{application}' charm revision to be "
-                    f"{expected_revision}, got {actual_revision}"
-                )
-            time.sleep(1)
-            actual_revision = self.application_revision(application=application, model=model)
+        self.backend.wait_for_application_revision(application, expected_revision, timeout, model)
 
     def list_integrations(self, model: str = "default") -> set[JujuIntegration]:
         self.logger.info("Getting list of integrations.")

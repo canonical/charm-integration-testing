@@ -178,6 +178,15 @@ class NullJujuBackend(JujuBackend):
     def migrate_model(self, model_name: str, source_controller: str, target_controller: str) -> None:
         raise NotImplementedError
 
+    def wait_for_application_revision(
+        self,
+        application: str,
+        expected_revision: int,
+        timeout: timedelta | None,
+        model: str = "default",
+    ) -> None:
+        raise NotImplementedError
+
 
 @dataclass
 class JujuStub(NullJujuBackend):

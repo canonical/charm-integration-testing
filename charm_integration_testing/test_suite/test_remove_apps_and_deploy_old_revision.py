@@ -37,7 +37,7 @@ def _create_bundle_with_revision_override(
         yaml.safe_dump(bundle_data, file, sort_keys=False)
 
 
-@pytest.mark.state(requires=State.DEPLOYED, provides=State.OLD_REVISION)
+@pytest.mark.state(requires=State.NEIGHBOR_ONLY, provides=State.DEPLOYED_WITH_OLD_REVISION)
 def test_deploy(
     juju_client: JujuClient,
     historical_revision_with_passing_deploy: int | None,
@@ -52,14 +52,6 @@ def test_deploy(
     if target_revision is None:
         pytest.fail("--target-revision must be provided as an integer for this test.")
 
-    # Get all applications from the model
-    apps = list(juju_client.list_applications(model=model).keys())
-
-    # Remove all applications from the model
-    if apps:
-        juju_client.remove_applications(*apps, model=model)
-        juju_client.wait_for_removal(*apps, model=model, timeout=timedelta(minutes=15))
-
     # Use historical revision selected by the fixture.
     selected_revision = historical_revision_with_passing_deploy
 
@@ -73,6 +65,8 @@ def test_deploy(
         f"Selected historical revision {selected_revision} for {target_application} ({target_charm})"
     )
 
+    ### Create a temporary bundle file with target revision overridden
+    ### Should be replaced by bundle-builder with old revision in the future
     overridden_bundle = tmp_path / f"bundle-{target_application}-rev-{selected_revision}.yaml"
     _create_bundle_with_revision_override(
         source_bundle=bundle,

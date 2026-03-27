@@ -39,4 +39,4 @@ class State(str, Enum):
     EMPTY_MODEL = "empty_model"
     DEPLOYED = "deployed"
     NEIGHBOR_ONLY = "neighbor_only"
-    OLD_REVISION = "old_revision"
+    DEPLOYED_WITH_OLD_REVISION = "deployed_with_old_revision"

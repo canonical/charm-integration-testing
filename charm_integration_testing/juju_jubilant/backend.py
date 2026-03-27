@@ -32,6 +32,7 @@ from .client import JubilantClient
 from .structures import JujuExecTask
 from .wait import (
     all_statuses_are_in,
+    application_is_on_revision,
     applications_are_removed,
     applications_are_scaled,
     applications_have_no_units,
@@ -219,6 +220,19 @@ class JubilantBackend(JujuCmdBackend):
 
             elapsed = datetime.now() - iteration_start
             time.sleep(max(0, (delay - elapsed).total_seconds()))
+
+    def wait_for_application_revision(
+        self,
+        application: str,
+        expected_revision: int,
+        timeout: timedelta | None,
+        model: str = "default",
+    ) -> None:
+        self.wait(
+            model,
+            lambda status: application_is_on_revision(status, application, expected_revision),
+            timeout=timeout,
+        )
 
     def run_action(self, model: str, unit: str, action: str, params: dict[str, Any]) -> JujuTask:
         try:
@@ -450,12 +464,11 @@ class JubilantBackend(JujuCmdBackend):
         revision: int | None = None,
         channel: str | None = None,
     ) -> None:
-        args: list[str] = ["refresh", application]
-        if revision is not None:
-            args += ["--revision", str(revision)]
-        if channel:
-            args += ["--channel", channel]
-        self.client.model(model).cli(*args)
+        self.client.model(model).refresh(
+            app=application,
+            revision=revision,
+            channel=channel,
+        )
 
     def validate_application(self, model: str, application: str, level: str) -> dict[str, list[ValidationResult]]:
         # Phase 2 endpoint validation will be done here
