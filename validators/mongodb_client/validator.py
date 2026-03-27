@@ -240,7 +240,12 @@ class MongoDBClientValidator(BaseValidator):
             self._create_temp_ca_file(creds["tls-ca"])
             client_kwargs["tlsCAFile"] = self.ca_file_path
 
-        return MongoClient(uri, **client_kwargs)
+        try:
+            return MongoClient(uri, **client_kwargs)
+        except Exception:
+            # Ensure temporary CA file is removed if client construction fails.
+            self._remove_temp_ca_file()
+            raise
 
     def _attempt_connection(self, mongodb_client: MongoClient[Any] | None, endpoint: str) -> ValidationCheck:
         """Attempt to connect and ping the MongoDB server."""
