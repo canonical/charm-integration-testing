@@ -466,6 +466,7 @@ class TestJujuClientValidateModel:
                 "myapp", expected_revision=5, model="mymodel", timeout=timedelta(minutes=1)
             )
 
+
 class TestJujuClientKillController:
     @pytest.fixture
     def logger(self) -> LoggerStub:
