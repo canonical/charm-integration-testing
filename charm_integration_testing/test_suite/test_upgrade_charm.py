@@ -9,7 +9,7 @@ from juju import JujuClient
 from .scheduler.states import State
 
 
-@pytest.mark.state(requires=State.DEPLOYED_WITH_OLD_REVISION, provides=State.UPGRADED_FROM_OLD_REVISION)
+@pytest.mark.state(requires=State.DEPLOYED_WITH_OLD_REVISION, provides=State.DEPLOYED)
 def test_upgrade_charm(
     juju_client: JujuClient,
     model: str,

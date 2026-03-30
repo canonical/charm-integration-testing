@@ -38,7 +38,7 @@ def _create_bundle_with_revision_override(
 
 
 @pytest.mark.state(requires=State.NEIGHBOR_ONLY, provides=State.DEPLOYED_WITH_OLD_REVISION)
-def test_deploy(
+def test_deploy_target_old_revision(
     juju_client: JujuClient,
     historical_revision_with_passing_deploy: int | None,
     model: str,
