@@ -12,24 +12,15 @@ from .scheduler.states import State
 @pytest.mark.state(requires=State.DEPLOYED, provides=State.DEPLOYED_WITH_OLD_REVISION)
 def test_downgrade_charm(
     juju_client: JujuClient,
-    historical_revision_with_passing_deploy: int | None,
+    historical_revision_with_passing_deploy: int,
     model: str,
     target_charm: str,
     target_application: str,
     target_revision: int | None,
     target_channel: str | None,
 ) -> None:
-    if target_revision is None:
-        pytest.fail("--target-revision must be provided as an integer for this test.")
-
     # Use historical revision selected by the fixture.
     selected_revision = historical_revision_with_passing_deploy
-
-    if selected_revision is None:
-        pytest.fail(
-            "Unable to find a historical revision with a passing test_deploy result "
-            f"for charm '{target_charm}' in channel '{target_channel}'."
-        )
 
     juju_client.logger.info(
         f"Selected historical revision {selected_revision} for {target_application} ({target_charm})"
