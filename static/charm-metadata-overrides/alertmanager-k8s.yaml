@@ -1,0 +1,5 @@
+---
+# Remove after: https://github.com/canonical/charm-integration-testing/issues/436
+requires:
+  service-mesh:
+    optional: true
