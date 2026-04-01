@@ -210,6 +210,16 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def refresh_application(
+        self,
+        model: str,
+        application: str,
+        revision: int | None = None,
+        channel: str | None = None,
+    ) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
     def remove_applications(self, model: str, *applications: str) -> None:
         raise NotImplementedError
 
@@ -324,4 +334,14 @@ class JujuBackend(ABC):
 
     @abstractmethod
     def migrate_model(self, model_name: str, source_controller: str, target_controller: str) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def wait_for_application_revision(
+        self,
+        application: str,
+        expected_revision: int,
+        timeout: timedelta | None,
+        model: str = "default",
+    ) -> None:
         raise NotImplementedError

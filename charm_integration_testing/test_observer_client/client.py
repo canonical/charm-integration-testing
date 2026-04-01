@@ -221,8 +221,6 @@ class TestObserverClient:
     def query_test_results_for_execution(self, execution_id: int) -> dict[str, Any] | list[dict[str, Any]]:
         """Query test results for a specific test execution.
 
-        Tries multiple endpoints and query parameters for compatibility with different API versions.
-
         Args:
             execution_id: Test execution ID.
 

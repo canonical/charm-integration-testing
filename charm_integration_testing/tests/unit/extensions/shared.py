@@ -65,6 +65,15 @@ class NullJujuBackend(JujuBackend):
     def deploy_bundle_file(self, model: str, bundle: str) -> None:
         raise NotImplementedError
 
+    def refresh_application(
+        self,
+        model: str,
+        application: str,
+        revision: int | None = None,
+        channel: str | None = None,
+    ) -> None:
+        raise NotImplementedError
+
     def remove_applications(self, model: str, *applications: str) -> None:
         raise NotImplementedError
 
@@ -167,6 +176,15 @@ class NullJujuBackend(JujuBackend):
         raise NotImplementedError
 
     def migrate_model(self, model_name: str, source_controller: str, target_controller: str) -> None:
+        raise NotImplementedError
+
+    def wait_for_application_revision(
+        self,
+        application: str,
+        expected_revision: int,
+        timeout: timedelta | None,
+        model: str = "default",
+    ) -> None:
         raise NotImplementedError
 
 

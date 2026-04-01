@@ -808,6 +808,195 @@ class TestJubilantBackend:
 
             assert "my-model" in exc_info.value.wait_state.message
 
+    class TestWaitForApplicationRevision:
+        def test_calls_wait_with_correct_parameters(self) -> None:
+            # GIVEN a backend with mocked wait method
+            wait_stub = WaitStub()
+            backend = JubilantBackend()
+            backend.wait = wait_stub.wait
+
+            # WHEN wait_for_application_revision is called
+            backend.wait_for_application_revision(
+                "myapp",
+                expected_revision=42,
+                timeout=timedelta(seconds=30),
+                model="test-model",
+            )
+
+            # THEN wait was called exactly once
+            assert wait_stub.call_count == 1
+
+        def test_timeout_raises_error(self) -> None:
+            # GIVEN a backend whose wait raises a timeout
+            wait_stub = WaitStub(raise_timeout=True)
+            backend = JubilantBackend()
+            backend.wait = wait_stub.wait
+
+            # WHEN wait_for_application_revision is called
+            # THEN JujuWaitTimeoutError is raised
+            with pytest.raises(JujuWaitTimeoutError):
+                backend.wait_for_application_revision(
+                    "myapp",
+                    expected_revision=42,
+                    timeout=timedelta(seconds=5),
+                    model="test-model",
+                )
+
+        def test_ready_callback_with_matching_revision(self) -> None:
+            # GIVEN a backend with a status that has the target application at the target revision
+            stub = StatusStub(
+                application_statuses={"myapp": "active"},
+            )
+            client = JubilantClientStub(client=stub)
+            backend = JubilantBackend(client)
+
+            # Capture the ready callback
+            captured_ready: Callable[[jubilant.Status], tuple[bool, JujuWaitState]] | None = None
+
+            def capture_wait(
+                model: str,
+                ready: Callable[[jubilant.Status], tuple[bool, JujuWaitState]],
+                **kwargs: Any,
+            ) -> None:
+                nonlocal captured_ready
+                captured_ready = ready
+
+            with patch.object(backend, "wait", side_effect=capture_wait):
+                backend.wait_for_application_revision(
+                    "myapp",
+                    expected_revision=42,
+                    timeout=timedelta(seconds=5),
+                    model="test-model",
+                )
+
+            # WHEN the ready callback is evaluated with a status where the app has the correct revision
+            assert captured_ready is not None
+            ready_status = jubilant.Status(
+                model=jubilant.statustypes.ModelStatus(
+                    name="test-model",
+                    type="caas",
+                    controller="test",
+                    cloud="test",
+                    version="3.0.0",
+                ),
+                machines={},
+                apps={
+                    "myapp": jubilant.statustypes.AppStatus(
+                        charm="myapp-charm",
+                        charm_rev=42,
+                        exposed=False,
+                        app_status=jubilant.statustypes.StatusInfo(current="active", message=""),
+                        units={},
+                        relations={},
+                        endpoint_bindings={},
+                        charm_name="myapp-charm",
+                        charm_origin="charmhub",
+                    )
+                },
+            )
+            result, _ = captured_ready(ready_status)
+
+            # THEN the callback returns True
+            assert result is True
+
+        def test_ready_callback_with_mismatched_revision(self) -> None:
+            # GIVEN a backend with a status that has the target application at a different revision
+            stub = StatusStub()
+            client = JubilantClientStub(client=stub)
+            backend = JubilantBackend(client)
+
+            # Capture the ready callback
+            captured_ready: Callable[[jubilant.Status], tuple[bool, JujuWaitState]] | None = None
+
+            def capture_wait(
+                model: str,
+                ready: Callable[[jubilant.Status], tuple[bool, JujuWaitState]],
+                **kwargs: Any,
+            ) -> None:
+                nonlocal captured_ready
+                captured_ready = ready
+
+            with patch.object(backend, "wait", side_effect=capture_wait):
+                backend.wait_for_application_revision(
+                    "myapp",
+                    expected_revision=42,
+                    timeout=timedelta(seconds=5),
+                    model="test-model",
+                )
+
+            # WHEN the ready callback is evaluated with a status where the app has a different revision
+            assert captured_ready is not None
+            ready_status = jubilant.Status(
+                model=jubilant.statustypes.ModelStatus(
+                    name="test-model",
+                    type="caas",
+                    controller="test",
+                    cloud="test",
+                    version="3.0.0",
+                ),
+                machines={},
+                apps={
+                    "myapp": jubilant.statustypes.AppStatus(
+                        charm="myapp-charm",
+                        charm_rev=41,
+                        exposed=False,
+                        app_status=jubilant.statustypes.StatusInfo(current="active", message=""),
+                        units={},
+                        relations={},
+                        endpoint_bindings={},
+                        charm_name="myapp-charm",
+                        charm_origin="charmhub",
+                    )
+                },
+            )
+            result, _ = captured_ready(ready_status)
+
+            # THEN the callback returns False
+            assert result is False
+
+        def test_ready_callback_with_missing_application(self) -> None:
+            # GIVEN a backend with an empty model (no applications)
+            stub = StatusStub()
+            client = JubilantClientStub(client=stub)
+            backend = JubilantBackend(client)
+
+            # Capture the ready callback
+            captured_ready: Callable[[jubilant.Status], tuple[bool, JujuWaitState]] | None = None
+
+            def capture_wait(
+                model: str,
+                ready: Callable[[jubilant.Status], tuple[bool, JujuWaitState]],
+                **kwargs: Any,
+            ) -> None:
+                nonlocal captured_ready
+                captured_ready = ready
+
+            with patch.object(backend, "wait", side_effect=capture_wait):
+                backend.wait_for_application_revision(
+                    "myapp",
+                    expected_revision=42,
+                    timeout=timedelta(seconds=5),
+                    model="test-model",
+                )
+
+            # WHEN the ready callback is evaluated with a status where the app is missing
+            assert captured_ready is not None
+            ready_status = jubilant.Status(
+                model=jubilant.statustypes.ModelStatus(
+                    name="test-model",
+                    type="caas",
+                    controller="test",
+                    cloud="test",
+                    version="3.0.0",
+                ),
+                machines={},
+                apps={},  # No applications
+            )
+            result, _ = captured_ready(ready_status)
+
+            # THEN the callback returns False
+            assert result is False
+
     class TestAddSecret:
         @dataclass
         class AddSecretStub:

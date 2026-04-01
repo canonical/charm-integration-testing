@@ -112,6 +112,22 @@ class JujuClient:
         for extension in self.extensions:
             extension.post_deploy(model)
 
+    def refresh_application(
+        self,
+        application: str,
+        revision: int | None = None,
+        channel: str | None = None,
+        model: str = "default",
+    ) -> None:
+        options: list[str] = []
+        if revision is not None:
+            options.append(f"revision={revision}")
+        if channel:
+            options.append(f"channel={channel}")
+        options_suffix = f" ({', '.join(options)})" if options else ""
+        self.logger.info(f"Refreshing application {application}{options_suffix}.")
+        self.backend.refresh_application(model, application, revision=revision, channel=channel)
+
     def remove_applications(self, *applications: str, model: str = "default") -> None:
         # Call extensions
         for extension in self.extensions:
@@ -169,6 +185,25 @@ class JujuClient:
     def list_applications(self, model: str = "default") -> dict[str, JujuApplicationInfo]:
         self.logger.info("Getting list of applications.")
         return self.backend.list_applications(model)
+
+    def application_revision(self, application: str, model: str = "default") -> int:
+        self.logger.info(f"Getting charm revision for application '{application}'.")
+        applications = self.backend.list_applications(model)
+        if application not in applications:
+            raise KeyError(f"Application '{application}' not found in model '{model}'")
+        return applications[application].revision
+
+    def wait_for_application_revision(
+        self,
+        application: str,
+        expected_revision: int,
+        timeout: timedelta | None,
+        model: str = "default",
+    ) -> None:
+        self.logger.info(
+            f"Waiting {timeout} for application '{application}' to reach charm revision {expected_revision}."
+        )
+        self.backend.wait_for_application_revision(application, expected_revision, timeout, model)
 
     def list_integrations(self, model: str = "default") -> set[JujuIntegration]:
         self.logger.info("Getting list of integrations.")

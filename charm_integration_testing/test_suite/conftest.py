@@ -92,22 +92,30 @@ def historical_revision_with_passing_deploy(
     target_charm: str,
     target_channel: str | None,
     target_revision: int | None,
-) -> int | None:
+) -> int:
     """Historical revision with a passing test_deploy for the target charm."""
     if target_revision is None or target_channel is None:
-        return None
+        pytest.fail(
+            "--target-revision and --target-channel must be provided for this test to select a historical revision."
+        )
 
     parts = target_channel.split("/", maxsplit=1)
     track = parts[0]
     stage = parts[1] if len(parts) > 1 else "stable"
 
     try:
-        return test_observer_client.choose_historical_revision_with_passing_deploy(
+        previous_revision = test_observer_client.choose_historical_revision_with_passing_deploy(
             charm_name=target_charm,
             stage=stage,
             current_revision=target_revision,
             track=track,
         )
+        if previous_revision is None:
+            pytest.fail(
+                "Unable to find a historical revision with a passing test_deploy result "
+                f"for charm '{target_charm}' in channel '{target_channel}'."
+            )
+        return previous_revision
     except TestObserverClientError as exc:
         raise RuntimeError(f"Test Observer query failed: {exc}") from exc
 
