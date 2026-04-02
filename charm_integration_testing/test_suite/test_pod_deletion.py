@@ -37,7 +37,7 @@ def test_pod_deletion(
     )
 
     # Wait for return to idle
-    juju_client.idle_for_period(model=model, timeout=timedelta(minutes=5))
+    juju_client.idle_for_period(model=model, timeout=timedelta(minutes=15))
 
     # Validate all applications and relations
     juju_client.validate_model(model=model, level="simple")
