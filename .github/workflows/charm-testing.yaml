@@ -68,27 +68,18 @@ on:
         options: [kubernetes, openstack]
         default: kubernetes
       debug_sleep_after:
-        description: The stage of the workflow to sleep after. Enables SSH access.
+        description: The stage of the workflow to sleep after. Enables a tmate session.
         required: false
         type: choice
         options: [none, setup, log_collection]
         default: none
-      debug_extra_ssh_imports:
-        # The IDs take the form of lp:<value> for Launchpad and gh:<value> for GitHub.
-        # The GitHub Actor's key is always included.
-        description: A comma-separated list of IDs to use with ssh-import-id in debug
-          mode.
-        required: false
-        default: ''
       log_level:
         description: Log level to use for the tests.
         required: false
         type: choice
         options: [DEBUG, INFO, WARNING, ERROR]
         default: INFO
-env:
-  DEBUG_SLEEP_SECONDS: 7200  # 2 hours
-  DEBUG_SLEEP_AFTER: ${{ inputs.debug_sleep_after }}
+        
 jobs:
   execute-charm-test:
     name: Execute integration tests against the charms
@@ -229,7 +220,7 @@ jobs:
           event_name: setup_o7k_failed
           detail: Setup of OpenStack cloud failed.
       - name: Debug Setup
-        if: ${{ env.DEBUG_SLEEP_AFTER == 'setup' && !cancelled() }}
+        if: ${{ inputs.debug_sleep_after== 'setup' && !cancelled() }}
         uses: canonical/action-tmate@main  # zizmor: ignore[unpinned-uses] no releases in the repo
       - name: Install Repository
         shell: bash
@@ -393,7 +384,7 @@ jobs:
           event_name: log_collection_finished
           detail: Log collection has completed.
       - name: Debug Post Log Collection
-        if: ${{ env.DEBUG_SLEEP_AFTER == 'log_collection' && !cancelled() }}
+        if: ${{ inputs.debug_sleep_after == 'log_collection' && !cancelled() }}
         uses: canonical/action-tmate@main  # zizmor: ignore[unpinned-uses] no releases in the repo
       - name: Post links to Test Observer
         if: ${{ !cancelled() && steps.post_logs_to_swift.outcome == 'success' && env.TEST_OBSERVER_API != '' && inputs.execution_id != '' }}
