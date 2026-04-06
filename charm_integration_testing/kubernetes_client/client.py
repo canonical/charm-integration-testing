@@ -3,13 +3,16 @@
 
 import logging
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from time import sleep
 from typing import Callable, TypeVar
 
 from kubernetes import client as K8sClient  # type: ignore[import-untyped]
+from kubernetes import watch
 from kubernetes.client import ApiException  # type: ignore[import-untyped]
+
+from kubernetes_client.backend import KubernetesBackend
 
 T = TypeVar("T")
 
@@ -23,11 +26,11 @@ class PodStatus(Enum):
 
 
 class KubernetesClient:
-    backend: K8sClient.CoreV1Api
+    backend: KubernetesBackend
 
     def __init__(
         self,
-        backend: K8sClient.CoreV1Api,
+        backend: KubernetesBackend,
         logger: logging.Logger | None = None,
         default_timeout: timedelta = timedelta(minutes=5),
         default_delay: timedelta = timedelta(seconds=1),
@@ -52,7 +55,7 @@ class KubernetesClient:
             List of pods that match the given application name in the specified namespace
         """
         pattern = re.compile(rf"^{re.escape(application_name)}(-\d+)$")
-        pods = self.backend.list_namespaced_pod(model)  # juju creates a namespace for each model
+        pods = self.backend.core_v1_api.list_namespaced_pod(model)  # juju creates a namespace for each model
         matching_pods = [pod for pod in pods.items if pattern.match(pod.metadata.name)]
         return matching_pods
 
@@ -123,7 +126,7 @@ class KubernetesClient:
 
         def check() -> K8sClient.V1Pod | None:
             try:
-                new_pod = self.backend.read_namespaced_pod(pod_name, namespace)
+                new_pod = self.backend.core_v1_api.read_namespaced_pod(pod_name, namespace)
                 if new_pod.metadata.uid == old_uid:
                     return None
 
@@ -163,8 +166,110 @@ class KubernetesClient:
             ApiException: If there is an error communicating with the Kubernetes API
         """
         try:
-            self.backend.delete_namespaced_pod(name=pod_name, namespace=namespace)
+            self.backend.core_v1_api.delete_namespaced_pod(name=pod_name, namespace=namespace)
             self.logger.info(f"Pod {pod_name} in namespace {namespace} has been deleted.")
         except ApiException as e:
             self.logger.error(f"Failed to delete pod {pod_name} in namespace {namespace}: {e}")
             raise
+
+    def restart_statefulset(self, namespace: str, statefulset_name: str) -> None:
+        """
+        Triggers a rollout restart of a StatefulSet by patching its pod template annotation.
+
+        Equivalent to `kubectl rollout restart statefulset/<name>`. The restart is
+        performed by setting the `kubectl.kubernetes.io/restartedAt` annotation on the
+        pod template, which causes the controller to re-create all pods in the set.
+
+        Args:
+            namespace: Namespace where the StatefulSet is located.
+            statefulset_name: Name of the StatefulSet to restart.
+
+        Raises:
+            ApiException: If the Kubernetes API call to patch the StatefulSet fails.
+        """
+        # Define the update timestamp
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        # This updates the pod template's metadata annotations
+        body = {"spec": {"template": {"metadata": {"annotations": {"kubectl.kubernetes.io/restartedAt": now}}}}}
+        self.logger.info(f"Rollout restart initiated for Statefulset: '{statefulset_name}' in namespace '{namespace}'")
+        try:
+            self.backend.apps_v1_api.patch_namespaced_stateful_set(
+                name=statefulset_name, namespace=namespace, body=body
+            )
+        except ApiException as e:
+            self.logger.error(
+                f"Failed to start rollout restart for Statefulset: '{statefulset_name}' in namespace '{namespace}': {e}"
+            )
+            raise
+
+    def wait_for_statefulset_restart(self, namespace: str, statefulset_name: str, timeout_seconds: int = 300) -> None:
+        """
+        Blocks until a StatefulSet's rollout restart completes or the timeout is reached.
+
+        Watches the StatefulSet for events and considers the restart complete when all
+        replicas have been updated to the latest pod template and are in the Ready state.
+        The expected generation is read once at call time; events whose
+        `observed_generation` is below that threshold are skipped.
+
+        Args:
+            namespace: Namespace where the StatefulSet is located.
+            statefulset_name: Name of the StatefulSet to watch.
+            timeout_seconds: Maximum number of seconds to wait for the rollout to finish.
+                Defaults to 300.
+
+        Raises:
+            ApiException: If the initial StatefulSet read or the watch stream fails.
+            TimeoutError: If the rollout does not complete within `timeout_seconds`.
+        """
+        watcher = watch.Watch()
+
+        try:
+            sts = self.backend.apps_v1_api.read_namespaced_stateful_set(name=statefulset_name, namespace=namespace)
+            target_generation = sts.metadata.generation
+        except ApiException as e:
+            self.logger.error(f"Error fetching statefulset '{statefulset_name}' in namespace '{namespace}': {e}.")
+            raise
+
+        self.logger.info(f"Waiting for StatefulSet '{statefulset_name}' to reach generation '{target_generation}'.")
+        try:
+            for event in watcher.stream(
+                self.backend.apps_v1_api.list_namespaced_stateful_set,
+                namespace=namespace,
+                field_selector=f"metadata.name={statefulset_name}",
+                timeout_seconds=timeout_seconds,
+            ):
+                sts = event["object"]
+                status = sts.status
+
+                if status.observed_generation < target_generation:
+                    self.logger.info("Waiting: K8s Controller hasn't processed the update yet.")
+                    continue
+
+                # If we use RollingUpdate, check if all replicas are updated
+                # updated_replicas refers to pods running the latest pod template
+                updated = status.updated_replicas or 0
+                ready = status.ready_replicas or 0
+                replicas = sts.spec.replicas
+                total = int(replicas) if replicas is not None else 1
+
+                if updated < total:
+                    self.logger.debug(f"Updating: {updated}/{total} pods are on the new version.")
+                    continue
+
+                # Check if they are actually Ready (passing probes)
+                if ready < total:
+                    self.logger.debug(f"Waiting: {ready}/{total} pods are Ready.")
+                    continue
+
+                self.logger.info(f"Successfully rolled out generation '{target_generation}'.")
+                return
+
+            self.logger.error(
+                f"Waiting for rollout restart on StatefulSet '{statefulset_name}' in namespace '{namespace}' timed out."
+            )
+            raise TimeoutError(
+                f"Waiting for rollout restart on StatefulSet '{statefulset_name}' in namespace '{namespace}' timed out."
+            )
+        finally:
+            watcher.stop()

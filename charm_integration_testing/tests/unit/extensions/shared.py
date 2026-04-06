@@ -4,6 +4,7 @@ from typing import Any, Iterable
 
 from juju.backend import JujuBackend, JujuExecOutput, JujuTask
 from juju.models import JujuApplicationInfo, JujuIntegration, JujuIntegrationApplication
+from kubernetes_client import KubernetesClient
 
 from validators.base.validator import ValidationResult
 
@@ -62,6 +63,15 @@ class NullJujuBackend(JujuBackend):
         raise NotImplementedError
 
     def deploy_bundle_file(self, model: str, bundle: str) -> None:
+        raise NotImplementedError
+
+    def refresh_application(
+        self,
+        model: str,
+        application: str,
+        revision: int | None = None,
+        channel: str | None = None,
+    ) -> None:
         raise NotImplementedError
 
     def remove_applications(self, model: str, *applications: str) -> None:
@@ -140,10 +150,41 @@ class NullJujuBackend(JujuBackend):
     def unit_ip(self, model: str, unit: str) -> str:
         raise NotImplementedError
 
+    def reboot_model_controller(self, model: str) -> None:
+        raise NotImplementedError
+
+    def is_k8s_model(self, model: str) -> bool:
+        raise NotImplementedError
+
+    def reboot_model_controller_leader(self, model: str) -> None:
+        raise NotImplementedError
+
     def version(self, model: str) -> str:
         raise NotImplementedError
 
     def validate_application(self, model: str, application: str, level: str) -> dict[str, list[ValidationResult]]:
+        raise NotImplementedError
+
+    @property
+    def kubernetes_client(self) -> KubernetesClient:
+        raise NotImplementedError
+
+    def kill_controller(self, controller: str) -> None:
+        raise NotImplementedError
+
+    def wait_for_model_to_exist(self, model: str, timeout: timedelta | None) -> None:
+        raise NotImplementedError
+
+    def migrate_model(self, model_name: str, source_controller: str, target_controller: str) -> None:
+        raise NotImplementedError
+
+    def wait_for_application_revision(
+        self,
+        application: str,
+        expected_revision: int,
+        timeout: timedelta | None,
+        model: str = "default",
+    ) -> None:
         raise NotImplementedError
 
 

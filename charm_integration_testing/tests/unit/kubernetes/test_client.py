@@ -2,13 +2,15 @@
 # See LICENSE file for licensing details.
 
 import logging
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from datetime import timedelta
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 from kubernetes.client import ApiException, V1ObjectMeta, V1Pod, V1PodStatus  # type: ignore[import-untyped]
-from kubernetes_client import KubernetesClient, PodStatus
+from kubernetes_client import KubernetesBackend, KubernetesClient, PodStatus
 
 
 def create_sample_pod(
@@ -33,7 +35,7 @@ class V1PodListStub:
 
 
 @dataclass
-class KubernetesBackendStub:
+class KubernetesBackendStub(KubernetesBackend):
     """Stub for KubernetesClient."""
 
     list_namespaced_pods_result: V1PodListStub | None = None
@@ -41,6 +43,15 @@ class KubernetesBackendStub:
     get_namespaced_pod_result: V1Pod | None = None
     get_namespaced_pod_raises: Exception | None = None
     get_namespaced_pod_call_count: int = 0
+    patch_stateful_set_raises: Exception | None = None
+    patch_stateful_set_call_count: int = 0
+    patch_stateful_set_last_body: dict[str, Any] | None = None
+    read_stateful_set_result: "V1StatefulSetStub | None" = None
+    read_stateful_set_raises: Exception | None = None
+
+    def __post_init__(self) -> None:
+        self.core_v1_api = self
+        self.apps_v1_api = self
 
     def list_namespaced_pod(self, namespace: str) -> V1PodListStub:
         if self.list_namespaced_pods_raises:
@@ -54,6 +65,71 @@ class KubernetesBackendStub:
             raise self.get_namespaced_pod_raises
         assert self.get_namespaced_pod_result is not None
         return self.get_namespaced_pod_result
+
+    def patch_namespaced_stateful_set(self, name: str, namespace: str, body: dict[str, Any]) -> None:
+        self.patch_stateful_set_call_count += 1
+        self.patch_stateful_set_last_body = body
+        if self.patch_stateful_set_raises:
+            raise self.patch_stateful_set_raises
+
+    def read_namespaced_stateful_set(self, name: str, namespace: str) -> "V1StatefulSetStub":
+        if self.read_stateful_set_raises:
+            raise self.read_stateful_set_raises
+        assert self.read_stateful_set_result is not None
+        return self.read_stateful_set_result
+
+    def list_namespaced_stateful_set(self, namespace: str, **kwargs: Any) -> None:
+        pass
+
+
+@dataclass
+class V1StatefulSetStatusStub:
+    observed_generation: int
+    updated_replicas: int | None
+    ready_replicas: int | None
+
+
+@dataclass
+class V1StatefulSetSpecStub:
+    replicas: int | None
+
+
+@dataclass
+class V1StatefulSetStub:
+    metadata: V1ObjectMeta
+    status: V1StatefulSetStatusStub
+    spec: V1StatefulSetSpecStub
+
+
+@dataclass
+class WatchStub:
+    events: list[dict[str, Any]]
+    stop_call_count: int = 0
+
+    def stream(self, func: Callable[..., Any], **kwargs: Any) -> Iterator[dict[str, Any]]:
+        return iter(self.events)
+
+    def stop(self) -> None:
+        self.stop_call_count += 1
+
+
+def create_statefulset_stub(
+    generation: int,
+    observed_generation: int,
+    updated_replicas: int | None,
+    ready_replicas: int | None,
+    replicas: int | None,
+) -> V1StatefulSetStub:
+    """Helper to create a V1StatefulSetStub for testing."""
+    return V1StatefulSetStub(
+        metadata=V1ObjectMeta(generation=generation),
+        status=V1StatefulSetStatusStub(
+            observed_generation=observed_generation,
+            updated_replicas=updated_replicas,
+            ready_replicas=ready_replicas,
+        ),
+        spec=V1StatefulSetSpecStub(replicas=replicas),
+    )
 
 
 class TestPodStatus:
@@ -357,7 +433,7 @@ class TestKubernetesClientInit:
                     return new_running_pod  # New pod running
 
             mock_backend = MagicMock()
-            mock_backend.read_namespaced_pod.side_effect = get_pod_side_effect
+            mock_backend.core_v1_api.read_namespaced_pod.side_effect = get_pod_side_effect
 
             client = KubernetesClient(
                 backend=mock_backend,
@@ -449,7 +525,7 @@ class TestKubernetesClientInit:
                 return new_pod
 
             mock_backend = MagicMock()
-            mock_backend.read_namespaced_pod.side_effect = get_pod_side_effect
+            mock_backend.core_v1_api.read_namespaced_pod.side_effect = get_pod_side_effect
 
             client = KubernetesClient(
                 backend=mock_backend,
@@ -491,3 +567,208 @@ class TestKubernetesClientInit:
                 )
 
             assert exc_info.value.status == 500
+
+    class TestRestartStatefulset:
+        """Test suite for restart_statefulset method."""
+
+        def test_success(self) -> None:
+            # GIVEN a backend stub
+            backend_stub = KubernetesBackendStub()
+            client = KubernetesClient(backend=backend_stub)
+
+            # WHEN restarting a statefulset
+            client.restart_statefulset(namespace="test-ns", statefulset_name="my-sts")
+
+            # THEN patch_namespaced_stateful_set is called once with the correct name, namespace,
+            # and a body containing the restartedAt annotation
+            assert backend_stub.patch_stateful_set_call_count == 1
+            assert backend_stub.patch_stateful_set_last_body is not None
+            annotations = backend_stub.patch_stateful_set_last_body["spec"]["template"]["metadata"]["annotations"]
+            assert "kubectl.kubernetes.io/restartedAt" in annotations
+
+        def test_api_exception_propagates(self) -> None:
+            # GIVEN a backend stub configured to raise ApiException on patch
+            api_error = ApiException(status=500, reason="Internal Server Error")
+            backend_stub = KubernetesBackendStub(patch_stateful_set_raises=api_error)
+            client = KubernetesClient(backend=backend_stub)
+
+            # WHEN restarting a statefulset
+            # THEN the ApiException is re-raised
+            with pytest.raises(ApiException) as exc_info:
+                client.restart_statefulset(namespace="test-ns", statefulset_name="my-sts")
+
+            assert exc_info.value.status == 500
+
+    class TestWaitForStatefulsetRestart:
+        """Test suite for wait_for_statefulset_restart method."""
+
+        @patch("kubernetes_client.client.watch.Watch")
+        def test_success_returns_when_all_replicas_ready(self, MockWatch: MagicMock) -> None:
+            # GIVEN a watch stream delivering a single fully-rolled-out event
+            ready_sts = create_statefulset_stub(
+                generation=2, observed_generation=2, updated_replicas=3, ready_replicas=3, replicas=3
+            )
+            watch_stub = WatchStub(events=[{"object": ready_sts}])
+            MockWatch.return_value = watch_stub
+            backend_stub = KubernetesBackendStub(
+                read_stateful_set_result=create_statefulset_stub(
+                    generation=2, observed_generation=2, updated_replicas=0, ready_replicas=0, replicas=3
+                )
+            )
+            client = KubernetesClient(backend=backend_stub)
+
+            # WHEN waiting for the statefulset restart
+            client.wait_for_statefulset_restart(namespace="test-ns", statefulset_name="my-sts", timeout_seconds=60)
+
+            # THEN no exception is raised and the watcher is stopped via the finally block
+            assert watch_stub.stop_call_count == 1
+
+        @patch("kubernetes_client.client.watch.Watch")
+        def test_skips_events_below_target_generation(self, MockWatch: MagicMock) -> None:
+            # GIVEN a stream where the first event has a stale observed_generation
+            # and the second event is at the current generation with all replicas ready
+            stale_sts = create_statefulset_stub(
+                generation=2, observed_generation=1, updated_replicas=2, ready_replicas=2, replicas=2
+            )
+            ready_sts = create_statefulset_stub(
+                generation=2, observed_generation=2, updated_replicas=2, ready_replicas=2, replicas=2
+            )
+            watch_stub = WatchStub(events=[{"object": stale_sts}, {"object": ready_sts}])
+            MockWatch.return_value = watch_stub
+            backend_stub = KubernetesBackendStub(
+                read_stateful_set_result=create_statefulset_stub(
+                    generation=2, observed_generation=1, updated_replicas=0, ready_replicas=0, replicas=2
+                )
+            )
+            client = KubernetesClient(backend=backend_stub)
+
+            # WHEN waiting for the statefulset restart
+            client.wait_for_statefulset_restart(namespace="test-ns", statefulset_name="my-sts")
+
+            # THEN the method returns without raising (stale event was skipped)
+            assert watch_stub.stop_call_count == 1
+
+        @patch("kubernetes_client.client.watch.Watch")
+        def test_waits_while_pods_still_updating(self, MockWatch: MagicMock) -> None:
+            # GIVEN a stream where the first event shows fewer updated pods than desired
+            updating_sts = create_statefulset_stub(
+                generation=2, observed_generation=2, updated_replicas=1, ready_replicas=3, replicas=3
+            )
+            ready_sts = create_statefulset_stub(
+                generation=2, observed_generation=2, updated_replicas=3, ready_replicas=3, replicas=3
+            )
+            watch_stub = WatchStub(events=[{"object": updating_sts}, {"object": ready_sts}])
+            MockWatch.return_value = watch_stub
+            backend_stub = KubernetesBackendStub(
+                read_stateful_set_result=create_statefulset_stub(
+                    generation=2, observed_generation=2, updated_replicas=0, ready_replicas=0, replicas=3
+                )
+            )
+            client = KubernetesClient(backend=backend_stub)
+
+            # WHEN waiting for the statefulset restart
+            client.wait_for_statefulset_restart(namespace="test-ns", statefulset_name="my-sts")
+
+            # THEN the method returns without raising once all pods have been updated
+
+        @patch("kubernetes_client.client.watch.Watch")
+        def test_waits_while_pods_not_yet_ready(self, MockWatch: MagicMock) -> None:
+            # GIVEN a stream where pods are updated but not yet ready (failing readiness probes)
+            not_ready_sts = create_statefulset_stub(
+                generation=2, observed_generation=2, updated_replicas=3, ready_replicas=1, replicas=3
+            )
+            ready_sts = create_statefulset_stub(
+                generation=2, observed_generation=2, updated_replicas=3, ready_replicas=3, replicas=3
+            )
+            watch_stub = WatchStub(events=[{"object": not_ready_sts}, {"object": ready_sts}])
+            MockWatch.return_value = watch_stub
+            backend_stub = KubernetesBackendStub(
+                read_stateful_set_result=create_statefulset_stub(
+                    generation=2, observed_generation=2, updated_replicas=0, ready_replicas=0, replicas=3
+                )
+            )
+            client = KubernetesClient(backend=backend_stub)
+
+            # WHEN waiting for the statefulset restart
+            client.wait_for_statefulset_restart(namespace="test-ns", statefulset_name="my-sts")
+
+            # THEN the method returns without raising once all pods pass their readiness probes
+
+        @patch("kubernetes_client.client.watch.Watch")
+        def test_raises_timeout_when_stream_exhausted(self, MockWatch: MagicMock) -> None:
+            # GIVEN a watch stream that ends before the rollout completes (timeout_seconds exceeded)
+            watch_stub = WatchStub(events=[])
+            MockWatch.return_value = watch_stub
+            backend_stub = KubernetesBackendStub(
+                read_stateful_set_result=create_statefulset_stub(
+                    generation=2, observed_generation=2, updated_replicas=0, ready_replicas=0, replicas=2
+                )
+            )
+            client = KubernetesClient(backend=backend_stub)
+
+            # WHEN waiting for the statefulset restart
+            # THEN a TimeoutError is raised with the statefulset name in the message
+            with pytest.raises(TimeoutError) as exc_info:
+                client.wait_for_statefulset_restart(namespace="test-ns", statefulset_name="my-sts")
+
+            assert "my-sts" in str(exc_info.value)
+            # AND the watcher is still stopped via the finally block
+            assert watch_stub.stop_call_count == 1
+
+        def test_initial_read_api_exception_propagates(self) -> None:
+            # GIVEN a backend where the initial StatefulSet read raises ApiException
+            api_error = ApiException(status=404, reason="Not Found")
+            backend_stub = KubernetesBackendStub(read_stateful_set_raises=api_error)
+            client = KubernetesClient(backend=backend_stub)
+
+            # WHEN waiting for the statefulset restart
+            # THEN the ApiException is re-raised before the watch loop begins
+            with pytest.raises(ApiException) as exc_info:
+                client.wait_for_statefulset_restart(namespace="test-ns", statefulset_name="my-sts")
+
+            assert exc_info.value.status == 404
+
+        @patch("kubernetes_client.client.watch.Watch")
+        def test_none_spec_replicas_defaults_to_one(self, MockWatch: MagicMock) -> None:
+            # GIVEN a StatefulSet whose spec.replicas is None (treated as 1 by the client)
+            ready_sts = create_statefulset_stub(
+                generation=1, observed_generation=1, updated_replicas=1, ready_replicas=1, replicas=None
+            )
+            watch_stub = WatchStub(events=[{"object": ready_sts}])
+            MockWatch.return_value = watch_stub
+            backend_stub = KubernetesBackendStub(
+                read_stateful_set_result=create_statefulset_stub(
+                    generation=1, observed_generation=1, updated_replicas=0, ready_replicas=0, replicas=None
+                )
+            )
+            client = KubernetesClient(backend=backend_stub)
+
+            # WHEN waiting for the statefulset restart
+            client.wait_for_statefulset_restart(namespace="test-ns", statefulset_name="my-sts")
+
+            # THEN replicas=None is treated as 1 and the method returns without raising
+
+        @patch("kubernetes_client.client.watch.Watch")
+        def test_none_updated_and_ready_replicas_treated_as_zero(self, MockWatch: MagicMock) -> None:
+            # GIVEN an event where updated_replicas and ready_replicas are None (rollout just started),
+            # followed by an event where all pods are updated and ready
+            starting_sts = create_statefulset_stub(
+                generation=2, observed_generation=2, updated_replicas=None, ready_replicas=None, replicas=2
+            )
+            ready_sts = create_statefulset_stub(
+                generation=2, observed_generation=2, updated_replicas=2, ready_replicas=2, replicas=2
+            )
+            watch_stub = WatchStub(events=[{"object": starting_sts}, {"object": ready_sts}])
+            MockWatch.return_value = watch_stub
+            backend_stub = KubernetesBackendStub(
+                read_stateful_set_result=create_statefulset_stub(
+                    generation=2, observed_generation=2, updated_replicas=0, ready_replicas=0, replicas=2
+                )
+            )
+            client = KubernetesClient(backend=backend_stub)
+
+            # WHEN waiting for the statefulset restart
+            client.wait_for_statefulset_restart(namespace="test-ns", statefulset_name="my-sts")
+
+            # THEN None counts are treated as 0 so the first event is skipped, and the method
+            # returns without raising once actual counts reach the desired replica count

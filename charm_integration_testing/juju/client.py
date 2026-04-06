@@ -112,6 +112,22 @@ class JujuClient:
         for extension in self.extensions:
             extension.post_deploy(model)
 
+    def refresh_application(
+        self,
+        application: str,
+        revision: int | None = None,
+        channel: str | None = None,
+        model: str = "default",
+    ) -> None:
+        options: list[str] = []
+        if revision is not None:
+            options.append(f"revision={revision}")
+        if channel:
+            options.append(f"channel={channel}")
+        options_suffix = f" ({', '.join(options)})" if options else ""
+        self.logger.info(f"Refreshing application {application}{options_suffix}.")
+        self.backend.refresh_application(model, application, revision=revision, channel=channel)
+
     def remove_applications(self, *applications: str, model: str = "default") -> None:
         # Call extensions
         for extension in self.extensions:
@@ -150,6 +166,10 @@ class JujuClient:
         )
         self.backend.wait_for_removal_of_units(model, list(applications), timeout)
 
+    def wait_for_model_to_exist(self, model: str = "default", timeout: timedelta | None = None) -> None:
+        self.logger.info(f"Waiting {self._waiting_timeout_log(timeout)} for model {model} to exist before continuing.")
+        self.backend.wait_for_model_to_exist(model=model, timeout=timeout)
+
     def application_exists(self, application: str, model: str = "default") -> bool:
         self.logger.info(f"Checking that application exists: {application}.")
         return application in self.backend.list_applications(model)
@@ -166,9 +186,32 @@ class JujuClient:
         self.logger.info("Getting list of applications.")
         return self.backend.list_applications(model)
 
+    def application_revision(self, application: str, model: str = "default") -> int:
+        self.logger.info(f"Getting charm revision for application '{application}'.")
+        applications = self.backend.list_applications(model)
+        if application not in applications:
+            raise KeyError(f"Application '{application}' not found in model '{model}'")
+        return applications[application].revision
+
+    def wait_for_application_revision(
+        self,
+        application: str,
+        expected_revision: int,
+        timeout: timedelta | None,
+        model: str = "default",
+    ) -> None:
+        self.logger.info(
+            f"Waiting {timeout} for application '{application}' to reach charm revision {expected_revision}."
+        )
+        self.backend.wait_for_application_revision(application, expected_revision, timeout, model)
+
     def list_integrations(self, model: str = "default") -> set[JujuIntegration]:
         self.logger.info("Getting list of integrations.")
         return self.backend.list_integrations(model)
+
+    def reboot_model_controller(self, model: str = "default") -> None:
+        self.logger.info("Restarting model controller.")
+        return self.backend.reboot_model_controller(model)
 
     def version(self, model: str = "default") -> str:
         self.logger.info("Collecting Juju version.")
@@ -259,3 +302,15 @@ class JujuClient:
         )
         self.backend.add_model(controller=controller, model=model, model_config=model_config)
         self.backend.switch(controller=controller, model=model)
+
+    def kill_controller(self, controller: str) -> None:
+        self.logger.info(f"Killing controller '{controller}'.")
+        self.backend.kill_controller(controller=controller)
+
+    def migrate_model(self, model_name: str, source_controller: str, target_controller: str) -> None:
+        self.logger.info(
+            f"Migrating model '{model_name}' from source controller '{source_controller}' to target controller '{target_controller}'"
+        )
+        self.backend.migrate_model(
+            model_name=model_name, source_controller=source_controller, target_controller=target_controller
+        )

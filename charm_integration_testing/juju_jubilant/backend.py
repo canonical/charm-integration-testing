@@ -23,6 +23,7 @@ from juju import (
     warn_performance,
 )
 from juju_cmd import JujuCmdBackend
+from kubernetes_client import KubernetesClient
 from tenacity import retry, stop_after_attempt, wait_fixed
 
 from validators.base.validator import ValidationResult
@@ -31,6 +32,7 @@ from .client import JubilantClient
 from .structures import JujuExecTask
 from .wait import (
     all_statuses_are_in,
+    application_is_on_revision,
     applications_are_removed,
     applications_are_scaled,
     applications_have_no_units,
@@ -42,14 +44,22 @@ from .wait import (
 
 class JubilantBackend(JujuCmdBackend):
     client: JubilantClient
+    _kubernetes_client: KubernetesClient | None
 
     default_timeout = timedelta(minutes=5)
     default_successes = 3
     default_delay = timedelta(seconds=1)
 
-    def __init__(self, client: JubilantClient | None = None):
+    def __init__(self, client: JubilantClient | None = None, kubernetes_client: KubernetesClient | None = None):
         super().__init__()
         self.client = client or JubilantClient()
+        self._kubernetes_client = kubernetes_client
+
+    @property
+    def kubernetes_client(self) -> KubernetesClient:
+        if self._kubernetes_client is None:
+            raise RuntimeError("No valid KubernetesClient was received. Is this a Kubernetes environment?")
+        return self._kubernetes_client
 
     @warn_performance(category=JujuStatusPerformanceWarning, threshold=timedelta(seconds=5))
     def status(self, model: str) -> jubilant.Status:
@@ -176,6 +186,53 @@ class JubilantBackend(JujuCmdBackend):
 
     def wait_for_removal_of_units(self, model: str, applications: list[str], timeout: timedelta | None) -> None:
         self.wait(model, lambda status: applications_have_no_units(status, *applications), timeout=timeout)
+
+    def wait_for_model_to_exist(self, model: str, timeout: timedelta | None) -> None:
+        if timeout is None:
+            timeout = self.default_timeout
+        delay = self.default_delay
+        start = datetime.now()
+
+        while True:
+            iteration_start = datetime.now()
+            if iteration_start - start > timeout:
+                raise JujuWaitTimeoutError(
+                    wait_state=JujuWaitState(
+                        message=f"Model {model} does not exist",
+                        insufficient_status_checks=True,
+                    )
+                )
+            try:
+                self.status(model)
+                return
+            except jubilant.CLIError as e:
+                # Validate that the error is specifically about the model being missing
+                # e.stderr: 'ERROR model pytest-tmp-controller-n84qeh17:admin/debug-test-1 not found\n'
+                err_msg = e.stderr.lower()
+                is_missing = "not found" in err_msg and all(p in err_msg for p in model.lower().split(":"))
+                is_migrating = "has been migrated to controller" in err_msg or "migration in progress" in err_msg
+
+                if is_missing or is_migrating:
+                    pass
+                else:
+                    # Re-raise if it's a different type of CLI error (e.g., connection lost)
+                    raise
+
+            elapsed = datetime.now() - iteration_start
+            time.sleep(max(0, (delay - elapsed).total_seconds()))
+
+    def wait_for_application_revision(
+        self,
+        application: str,
+        expected_revision: int,
+        timeout: timedelta | None,
+        model: str = "default",
+    ) -> None:
+        self.wait(
+            model,
+            lambda status: application_is_on_revision(status, application, expected_revision),
+            timeout=timeout,
+        )
 
     def run_action(self, model: str, unit: str, action: str, params: dict[str, Any]) -> JujuTask:
         try:
@@ -400,6 +457,49 @@ class JubilantBackend(JujuCmdBackend):
     def switch(self, controller: str, model: str) -> None:
         self.client.model(model).cli("switch", f"{controller}:{model}", include_model=False)
 
+    def refresh_application(
+        self,
+        model: str,
+        application: str,
+        revision: int | None = None,
+        channel: str | None = None,
+    ) -> None:
+        self.client.model(model).refresh(
+            app=application,
+            revision=revision,
+            channel=channel,
+        )
+
     def validate_application(self, model: str, application: str, level: str) -> dict[str, list[ValidationResult]]:
         # Phase 2 endpoint validation will be done here
         return {}
+
+    def is_k8s_model(self, model: str) -> bool:
+        return self.client.model(model).show_model().type == "kubernetes"
+
+    def reboot_model_controller(self, model: str) -> None:
+        controller_name = self.status(model).model.controller
+        controller_model = f"{controller_name}:controller"
+
+        if not self.is_k8s_model(model=controller_model):
+            # XXX(mbenzan): In the future, we might want to implement a rolling restart here too.
+            # reboot the leader
+            self.ssh(model=controller_model, application="controller/leader", command="sudo reboot")
+        else:
+            controller_k8s_namespace = f"controller-{controller_name}"
+            self.kubernetes_client.restart_statefulset(
+                namespace=controller_k8s_namespace, statefulset_name="controller"
+            )
+            self.kubernetes_client.wait_for_statefulset_restart(
+                namespace=controller_k8s_namespace, statefulset_name="controller", timeout_seconds=300
+            )
+
+    def kill_controller(self, controller: str) -> None:
+        self.client.model(None).cli(
+            "kill-controller", controller, "--no-prompt", "--timeout", "5m", include_model=False
+        )
+
+    def migrate_model(self, model_name: str, source_controller: str, target_controller: str) -> None:
+        self.client.model(model_name).cli(
+            "migrate", f"{source_controller}:{model_name}", target_controller, include_model=False
+        )

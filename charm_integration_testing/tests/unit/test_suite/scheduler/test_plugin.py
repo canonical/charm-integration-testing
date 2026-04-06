@@ -665,6 +665,88 @@ class TestBuildExecutionPlan:
         assert plan.index(pure_1) > plan.index(pure_3)
         assert plan.index(pure_1) > plan.index(pure_2)
 
+    def test_deployed_with_old_revision_cycle_succeeds(self, make_item: Callable[..., pytest.Item]) -> None:
+        """Regression: the full suite graph with DEPLOYED_WITH_OLD_REVISION must produce a valid plan.
+
+        The real test suite has a cycle through a third state:
+            DEPLOYED → DEPLOYED_WITH_OLD_REVISION (downgrade)
+            DEPLOYED_WITH_OLD_REVISION → DEPLOYED (upgrade)
+            DEPLOYED → NEIGHBOR_ONLY (teardown)
+            NEIGHBOR_ONLY → DEPLOYED (idempotent redeploy)
+            NEIGHBOR_ONLY → DEPLOYED_WITH_OLD_REVISION (deploy old revision)
+
+        With pure tests at DEPLOYED, transitions on every edge, and the starting
+        state far from any destination (NO_CONTROLLER), the scheduler must bridge
+        the full path and visit every destination. A previous bug in _inject_bridge
+        called _mark_as_injected during speculative backtracking, which mutated
+        item._nodeid and corrupted set-based scheduled tracking (hash changed),
+        causing the planner to believe items were never scheduled and declare all
+        branches dead ends.
+        """
+        # GIVEN the full suite graph with upgrade/downgrade cycle
+        bootstrap = make_item("test_bootstrap")  # NO_CONTROLLER → EMPTY_MODEL
+        deploy = make_item("test_deploy")  # EMPTY_MODEL → DEPLOYED
+        downgrade = make_item("test_downgrade")  # DEPLOYED → DEPLOYED_WITH_OLD_REVISION
+        upgrade = make_item("test_upgrade")  # DEPLOYED_WITH_OLD_REVISION → DEPLOYED
+        teardown = make_item("test_teardown")  # DEPLOYED → NEIGHBOR_ONLY
+        redeploy = make_item("test_redeploy")  # NEIGHBOR_ONLY → DEPLOYED
+        deploy_old = make_item("test_deploy_old")  # NEIGHBOR_ONLY → DEPLOYED_WITH_OLD_REVISION
+        pure_restart = make_item("test_restart")  # pure at DEPLOYED
+        pure_pod = make_item("test_pod_deletion")  # pure at DEPLOYED
+
+        graph, all_transitions = _graph_and_all(
+            (State.NO_CONTROLLER, State.EMPTY_MODEL, bootstrap),
+            (State.EMPTY_MODEL, State.DEPLOYED, deploy),
+            (State.DEPLOYED, State.DEPLOYED_WITH_OLD_REVISION, downgrade),
+            (State.DEPLOYED_WITH_OLD_REVISION, State.DEPLOYED, upgrade),
+            (State.DEPLOYED, State.NEIGHBOR_ONLY, teardown),
+            (State.NEIGHBOR_ONLY, State.DEPLOYED, redeploy),
+            (State.NEIGHBOR_ONLY, State.DEPLOYED_WITH_OLD_REVISION, deploy_old),
+        )
+
+        # WHEN all non-bridge tests are user-selected
+        plan = _build_execution_plan(
+            current_state=State.NO_CONTROLLER,
+            pure_clusters={State.DEPLOYED: [pure_restart, pure_pod]},
+            selected_transitions=defaultdict(
+                list,
+                {
+                    StateTransition(State.EMPTY_MODEL, State.DEPLOYED): [deploy],
+                    StateTransition(State.DEPLOYED, State.DEPLOYED_WITH_OLD_REVISION): [downgrade],
+                    StateTransition(State.DEPLOYED_WITH_OLD_REVISION, State.DEPLOYED): [upgrade],
+                    StateTransition(State.DEPLOYED, State.NEIGHBOR_ONLY): [teardown],
+                    StateTransition(State.NEIGHBOR_ONLY, State.DEPLOYED): [redeploy],
+                    StateTransition(State.NEIGHBOR_ONLY, State.DEPLOYED_WITH_OLD_REVISION): [deploy_old],
+                },
+            ),
+            all_transitions=all_transitions,
+            full_graph=graph,
+        )
+
+        # THEN every user-selected item appears in the plan
+        assert deploy in plan
+        assert downgrade in plan
+        assert upgrade in plan
+        assert teardown in plan
+        assert redeploy in plan
+        assert deploy_old in plan
+        assert pure_restart in plan
+        assert pure_pod in plan
+
+        # AND pure tests at DEPLOYED run before any transition out of DEPLOYED
+        first_transition_from_deployed = min(plan.index(downgrade), plan.index(teardown))
+        assert plan.index(pure_restart) < first_transition_from_deployed
+        assert plan.index(pure_pod) < first_transition_from_deployed
+
+        # AND the bootstrap bridge is injected (user didn't select it)
+        assert bootstrap in plan
+        assert bootstrap.get_closest_marker("injected") is not None
+
+        # AND user-selected transitions that are never re-used as bridges are NOT marked injected
+        assert deploy.get_closest_marker("injected") is None
+        assert downgrade.get_closest_marker("injected") is None
+        assert upgrade.get_closest_marker("injected") is None
+
 
 # ---------------------------------------------------------------------------
 # Helpers for hook tests
