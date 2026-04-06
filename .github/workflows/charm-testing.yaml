@@ -79,7 +79,6 @@ on:
         type: choice
         options: [DEBUG, INFO, WARNING, ERROR]
         default: INFO
-        
 jobs:
   execute-charm-test:
     name: Execute integration tests against the charms
