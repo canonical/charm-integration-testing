@@ -38,7 +38,7 @@ line-length = 120
 extend-select = ["I"]
 
 [tool.pytest.ini_options]
-timeout = 1800
+timeout = 14400
 
 log_cli = true
 log_cli_level = "INFO"

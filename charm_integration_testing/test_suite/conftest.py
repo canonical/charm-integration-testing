@@ -5,6 +5,8 @@
 import json
 import logging
 import os
+import secrets
+import string
 import warnings
 from pathlib import Path
 from subprocess import CalledProcessError, run  # nosec
@@ -22,11 +24,12 @@ from extensions import (
     ValidatorInjectorExtension,
 )
 from juju import JujuBackend, JujuClient, JujuValidationError, JujuWaitTimeoutError
-from juju_cmd.backend import JujuCmdBackend
 from juju_jubilant import JubilantBackend
 from kubernetes_client import KubernetesBackend, KubernetesClient
 from pydantic import TypeAdapter, ValidationError
 from pytest import StashKey
+from test_observer_client import TestObserverClient as TestObserverAPIClient
+from test_observer_client import TestObserverClientError
 from utils import normalize_string, normalize_string_multiline
 
 from bundle_builder import UnfulfilledEndpointsError
@@ -45,6 +48,79 @@ KNOWN_FAILURE_EXCEPTIONS = (
 
 
 @pytest.fixture
+def test_observer_api() -> str:
+    """Test Observer API base URL from environment."""
+    value = os.environ.get("TEST_OBSERVER_API")
+    if not value:
+        pytest.skip("Test Observer API URL is not configured (TEST_OBSERVER_API).")
+    return value.strip()
+
+
+@pytest.fixture
+def test_observer_token() -> str:
+    """Test Observer API token from environment."""
+    value = os.environ.get("TEST_OBSERVER_TOKEN")
+    if not value:
+        pytest.skip("Test Observer API token is not configured (TEST_OBSERVER_TOKEN).")
+    return value.strip()
+
+
+@pytest.fixture
+def test_observer_client(
+    logger: logging.Logger,
+    test_observer_api: str,
+    test_observer_token: str,
+) -> Iterator[TestObserverAPIClient]:
+    """Test Observer API client."""
+    try:
+        client = TestObserverAPIClient(
+            logger=logger,
+            api_url=test_observer_api,
+            token=test_observer_token,
+        )
+    except TestObserverClientError as exc:
+        pytest.skip(f"Test Observer API client is not configured properly: {exc}")
+    try:
+        yield client
+    finally:
+        client.close()
+
+
+@pytest.fixture
+def historical_revision_with_passing_deploy(
+    test_observer_client: TestObserverAPIClient,
+    target_charm: str,
+    target_channel: str | None,
+    target_revision: int | None,
+) -> int:
+    """Historical revision with a passing test_deploy for the target charm."""
+    if target_revision is None or target_channel is None:
+        pytest.fail(
+            "--target-revision and --target-channel must be provided for this test to select a historical revision."
+        )
+
+    parts = target_channel.split("/", maxsplit=1)
+    track = parts[0]
+    stage = parts[1] if len(parts) > 1 else "stable"
+
+    try:
+        previous_revision = test_observer_client.choose_historical_revision_with_passing_deploy(
+            charm_name=target_charm,
+            stage=stage,
+            current_revision=target_revision,
+            track=track,
+        )
+        if previous_revision is None:
+            pytest.fail(
+                "Unable to find a historical revision with a passing test_deploy result "
+                f"for charm '{target_charm}' in channel '{target_channel}'."
+            )
+        return previous_revision
+    except TestObserverClientError as exc:
+        raise RuntimeError(f"Test Observer query failed: {exc}") from exc
+
+
+@pytest.fixture
 def logger() -> logging.Logger:
     jubilant_logger = logging.getLogger("jubilant")
     jubilant_logger.setLevel(logging.WARNING)
@@ -56,8 +132,8 @@ def logger() -> logging.Logger:
 
 
 @pytest.fixture
-def juju_backend() -> JujuBackend:
-    return JubilantBackend()
+def juju_backend(kubernetes_client: KubernetesClient | None) -> JujuBackend:
+    return JubilantBackend(kubernetes_client=kubernetes_client)
 
 
 @pytest.fixture
@@ -884,12 +960,39 @@ def record_pipeline_version_execution_metadata(
 
 
 @pytest.fixture
-def _kubernetes_test(juju_backend: JujuCmdBackend, model: str) -> None:
+def _is_running_on_kubernetes(juju_backend: JujuBackend, model: str) -> None:
     if not juju_backend.is_k8s_model(model):
-        pytest.skip("Not kubernetes")
+        pytest.skip("Not running on kubernetes.")
 
 
 @pytest.fixture
-def kubernetes_client(_kubernetes_test: None) -> KubernetesClient:
+def kubernetes_client(
+    logger: logging.Logger,
+) -> KubernetesClient | None:
     kubeconfig = os.environ.get("KUBECONFIG")
-    return KubernetesClient(KubernetesBackend.k8s_client(kubeconfig=kubeconfig))
+    if kubeconfig:
+        return KubernetesClient(KubernetesBackend.k8s_client(kubeconfig=kubeconfig), logger=logger)
+    return None
+
+
+def generate_short_id(length: int = 8) -> str:
+    alphabet = string.ascii_lowercase + string.digits
+    return "".join(secrets.choice(alphabet) for _ in range(length))
+
+
+@pytest.fixture(scope="function")
+def temp_juju_controller(
+    juju_client: JujuClient,
+    juju_cloud: str,
+    juju_controller_bootstrap_constraints: dict[str, str],
+    logger: logging.Logger,
+) -> Iterator[str]:
+    temp_controller_name = f"pytest-tmp-controller-{generate_short_id(length=8)}"
+    logger.info(f"Creating temporary fixture controller '{temp_controller_name}'.")
+    juju_client.bootstrap_controller(
+        cloud=juju_cloud, controller=temp_controller_name, controller_constraints=juju_controller_bootstrap_constraints
+    )
+
+    yield temp_controller_name
+    logger.info(f"Destroying temporary fixture controller '{temp_controller_name}'.")
+    juju_client.kill_controller(controller=temp_controller_name)
