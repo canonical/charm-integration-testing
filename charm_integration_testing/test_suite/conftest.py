@@ -5,10 +5,10 @@
 import json
 import logging
 import os
-import subprocess  # nosec B404
-import tempfile
 import secrets
 import string
+import subprocess  # nosec B404
+import tempfile
 import warnings
 from pathlib import Path
 from subprocess import CalledProcessError, run  # nosec
