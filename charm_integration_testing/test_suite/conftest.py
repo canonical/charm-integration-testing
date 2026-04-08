@@ -621,39 +621,41 @@ def ubuntu_pro_token() -> str | None:
 
 
 @pytest.fixture
-def debug_logs_directory(model: str, logger: logging.Logger) -> Path:
+def debug_logs_directory(model: str, logger: logging.Logger) -> Iterator[Path]:
     """Provide a directory with collected debug logs from Juju.
 
     Logs are collected during test setup (not teardown), ensuring they're available
     immediately for the test to use. This fixture is self-contained and doesn't
     depend on other fixtures running first.
+
+    The temporary directory is automatically cleaned up after the test.
     """
     logger.info("Collecting debug logs...")
 
-    logs_dir = Path(tempfile.mkdtemp(prefix="juju-logs-"))
-    logger.info(f"Collecting debug logs from model {model} to {logs_dir}")
+    with tempfile.TemporaryDirectory(prefix="juju-logs-") as temp_dir:
+        logs_dir = Path(temp_dir)
+        logger.info(f"Collecting debug logs from model {model} to {logs_dir}")
 
-    debug_log_file = logs_dir / "debug.log"
+        debug_log_file = logs_dir / "debug.log"
 
-    try:
-        with open(debug_log_file, "wb") as log_file:
-            subprocess.run(  # nosec B603, B607
-                ["juju", "debug-log", "--model", model, "--replay", "--no-tail"],
-                stdout=log_file,
-                check=True,
-                timeout=300,
-            )
+        try:
+            with open(debug_log_file, "wb") as log_file:
+                subprocess.run(  # nosec B603, B607
+                    ["juju", "debug-log", "--model", model, "--replay", "--no-tail"],
+                    stdout=log_file,
+                    check=True,
+                    timeout=300,
+                )
 
-        log_size = debug_log_file.stat().st_size
-        logger.info(f"Collected {log_size} bytes of debug logs to {debug_log_file}")
-        return logs_dir
+            log_size = debug_log_file.stat().st_size
+            logger.info(f"Collected {log_size} bytes of debug logs to {debug_log_file}")
 
-    except subprocess.TimeoutExpired as e:
-        logger.error(f"Timeout while collecting logs: {e.timeout}s")
-        pytest.skip(f"Log collection timed out after {e.timeout}s")
-    except subprocess.CalledProcessError as e:
-        logger.error(f"juju debug-log failed with exit code {e.returncode}")
-        pytest.skip("Failed to collect logs from Juju")
+            yield logs_dir
+
+        except subprocess.TimeoutExpired:
+            logger.exception("Timeout while collecting logs")
+        except subprocess.CalledProcessError:
+            logger.exception("juju debug-log failed")
 
 
 failure_message: StashKey[str] = StashKey()
