@@ -222,7 +222,7 @@ class MongoDBClientValidator(BaseValidator):
         """Resolve credentials from relation data/secrets."""
         return {
             **self.resolve_secret("secret-user", "username", "password"),
-            **self.resolve_secret("secret-tls", "tls", "tls-ca"),
+            **self.resolve_secret("secret-tls", "tls-ca"),
         }
 
     def _build_mongodb_client(self, creds: dict[str, str]) -> MongoClient[Any]:
@@ -236,7 +236,7 @@ class MongoDBClientValidator(BaseValidator):
         }
 
         uri = f"mongodb://{quote_plus(creds['username'])}:{quote_plus(creds['password'])}@{endpoint}"
-        if creds.get("tls") and creds.get("tls-ca"):
+        if creds.get("tls-ca"):
             client_kwargs["tls"] = True
             self._create_temp_ca_file(creds["tls-ca"])
             client_kwargs["tlsCAFile"] = self.ca_file_path
