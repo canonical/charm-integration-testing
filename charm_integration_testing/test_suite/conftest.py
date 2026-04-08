@@ -1007,27 +1007,33 @@ def collect_logs_after_tests(
     # Teardown: collect logs after tests
     logger.info("Collecting debug logs after test completion...")
 
+    logs_dir = Path(tempfile.mkdtemp(prefix="juju-logs-"))
+    logger.info(f"Collecting debug logs from model {model} to {logs_dir}")
+
+    debug_log_file = logs_dir / "debug.log"
+
     try:
-        logs_dir = Path(tempfile.mkdtemp(prefix="juju-logs-"))
-        logger.info(f"Collecting debug logs from model {model} to {logs_dir}")
+        with open(debug_log_file, "w") as log_file:
+            subprocess.run(  # nosec B603, B607
+                ["juju", "debug-log", "--model", model, "--replay", "--no-tail"],
+                stdout=log_file,
+                text=True,
+                check=True,
+                timeout=300,
+            )
 
-        result = subprocess.run(  # nosec B603, B607
-            ["juju", "debug-log", "--model", model, "--replay", "--no-tail"],
-            capture_output=True,
-            text=True,
-            check=True,
-            timeout=300,
-        )
-
-        debug_log_file = logs_dir / "debug.log"
-        debug_log_file.write_text(result.stdout)
-        logger.info(f"Collected {len(result.stdout)} bytes of debug logs to {debug_log_file}")
+        log_size = debug_log_file.stat().st_size
+        logger.info(f"Collected {log_size} bytes of debug logs to {debug_log_file}")
 
         # Store in session stash for privacy check test to find
         request.session.stash[logs_collected_flag] = logs_dir
 
-    except Exception as e:
-        logger.error(f"Failed to collect logs: {e}")
+    except subprocess.TimeoutExpired as e:
+        logger.error(f"Timeout while collecting logs after {e.timeout}s: {e}")
+        raise
+    except subprocess.CalledProcessError as e:
+        logger.error(f"juju debug-log failed with exit code {e.returncode}: {e}")
+        raise
 
 
 def generate_short_id(length: int = 8) -> str:
