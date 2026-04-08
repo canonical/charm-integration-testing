@@ -7,3 +7,11 @@ provides:
     optional: true
   grafana-dashboard:
     optional: true
+requires:
+  # When zookeeper is serving kafka (zookeeper endpoint is integrated), TLS must
+  # be enabled on both kafka and zookeeper for secure operation.
+  # See: https://github.com/canonical/charm-integration-testing/issues/408
+  certificates:
+    optional_if:
+      - none_of:
+          - endpoint_integrated: zookeeper

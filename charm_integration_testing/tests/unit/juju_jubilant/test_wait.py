@@ -7,6 +7,7 @@ import pytest
 from juju import JujuIntegrationApplication
 from juju_jubilant.wait import (
     all_statuses_are_in,
+    application_is_on_revision,
     applications_are_removed,
     applications_are_scaled,
     applications_have_no_units,
@@ -243,6 +244,32 @@ class TestWaitConditions:
     ) -> None:
         # GIVEN / WHEN
         result, wait = applications_are_scaled(sample_database_webapp_status, "missing")
+
+        # THEN
+        assert result is False
+        assert "missing" in wait.noncompliant_applications
+
+    def test_application_is_on_revision_match(self, sample_database_webapp_status: jubilant.Status) -> None:
+        # GIVEN / WHEN
+        result, wait = application_is_on_revision(sample_database_webapp_status, "database", 0)
+
+        # THEN
+        assert result is True
+        assert wait.noncompliant_applications == {}
+
+    def test_application_is_on_revision_mismatch(self, sample_database_webapp_status: jubilant.Status) -> None:
+        # GIVEN / WHEN
+        result, wait = application_is_on_revision(sample_database_webapp_status, "database", 1)
+
+        # THEN
+        assert result is False
+        assert "database" in wait.noncompliant_applications
+
+    def test_application_is_on_revision_application_not_in_status(
+        self, sample_database_webapp_status: jubilant.Status
+    ) -> None:
+        # GIVEN / WHEN
+        result, wait = application_is_on_revision(sample_database_webapp_status, "missing", 0)
 
         # THEN
         assert result is False

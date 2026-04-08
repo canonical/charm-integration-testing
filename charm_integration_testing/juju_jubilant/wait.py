@@ -193,6 +193,20 @@ def applications_are_scaled(status: jubilant.Status, *application_args: str) -> 
     )
 
 
+def application_is_on_revision(status: jubilant.Status, application: str, revision: int) -> tuple[bool, JujuWaitState]:
+    noncompliant_applications: dict[str, JujuApplicationState | None] = {}
+
+    if application not in status.apps:
+        noncompliant_applications[application] = None
+    elif status.apps[application].charm_rev != revision:
+        noncompliant_applications[application] = get_application_state(status, application)
+
+    return len(noncompliant_applications) == 0, JujuWaitState(
+        message=f"waiting for application revision {revision}",
+        noncompliant_applications=noncompliant_applications,
+    )
+
+
 def units_have_message(message: str, status: jubilant.Status, *unit_args: str) -> tuple[bool, JujuWaitState]:
     if unit_args:
         units = set(unit_args)
