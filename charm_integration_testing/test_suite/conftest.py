@@ -636,11 +636,10 @@ def debug_logs_directory(model: str, logger: logging.Logger) -> Path:
     debug_log_file = logs_dir / "debug.log"
 
     try:
-        with open(debug_log_file, "w") as log_file:
+        with open(debug_log_file, "wb") as log_file:
             subprocess.run(  # nosec B603, B607
                 ["juju", "debug-log", "--model", model, "--replay", "--no-tail"],
                 stdout=log_file,
-                text=True,
                 check=True,
                 timeout=300,
             )
