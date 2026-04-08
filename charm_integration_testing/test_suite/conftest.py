@@ -992,11 +992,11 @@ def kubernetes_client(
     return None
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="function")
 def collect_logs_after_tests(
     request: pytest.FixtureRequest, model: str, logger: logging.Logger
 ) -> Iterator[Path | None]:
-    """Collect logs after all tests complete successfully.
+    """Collect logs after each test completes successfully.
 
     This fixture yields None during test execution, then collects logs during teardown.
     The logs_directory fixture can depend on this to get the actual directory path.
