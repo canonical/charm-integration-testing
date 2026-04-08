@@ -19,7 +19,11 @@ def test_logs_privacy_check(
     """Scan collected logs for secrets using TruffleHog.
 
     This test scans collected logs with TruffleHog to detect secrets.
-    It fails if any secrets are found.
+
+    Outcomes:
+    - ERROR: Docker is unavailable or scan times out (test cannot run)
+    - FAILED: Secrets are found in logs
+    - PASSED: No secrets found
     """
     logger.info(f"Scanning logs from {debug_logs_directory} for secrets")
 
@@ -32,7 +36,7 @@ def test_logs_privacy_check(
             timeout=10,
         )
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
-        pytest.skip(f"Docker is not available: {e}")
+        raise RuntimeError(f"Docker is not available (required for privacy check): {e}") from e
 
     # Run TruffleHog
     logger.info("Running TruffleHog secret scanner")
@@ -56,7 +60,7 @@ def test_logs_privacy_check(
             timeout=600,  # 10 minutes timeout for scanning
         )
     except subprocess.TimeoutExpired as e:
-        pytest.skip(f"TruffleHog scan timed out after {e.timeout}s")
+        raise RuntimeError(f"TruffleHog scan timed out after {e.timeout}s (required for privacy check)") from e
 
     # Get TruffleHog output
     trufflehog_output = result.stdout + result.stderr
@@ -69,7 +73,7 @@ def test_logs_privacy_check(
     if result.returncode == TRUFFLEHOG_FINDINGS_DETECTED:
         pytest.fail(f"TruffleHog found potential secrets.\n" f"Scan output:\n{trufflehog_output}")
     elif result.returncode == TRUFFLEHOG_NO_FINDINGS:
-        pytest.skip("No secrets found in logs.")
+        logger.info("No secrets found in logs.")
     else:
         output_str = f"Scan output:\n{trufflehog_output}" if trufflehog_output else "No output from TruffleHog."
         pytest.fail(f"TruffleHog scan failed with unexpected exit code {result.returncode}.\n" f"{output_str}")
