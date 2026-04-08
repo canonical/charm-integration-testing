@@ -48,9 +48,6 @@ KNOWN_FAILURE_EXCEPTIONS = (
     AssertionError,
 )
 
-# Session-level stash key for tracking log collection directory
-logs_collected_flag: StashKey[Path] = StashKey()
-
 
 @pytest.fixture
 def test_observer_api() -> str:
@@ -624,15 +621,40 @@ def ubuntu_pro_token() -> str | None:
 
 
 @pytest.fixture
-def logs_directory(request: pytest.FixtureRequest, collect_logs_after_tests: Path | None) -> Path:
-    """Provide the directory where logs were collected.
+def debug_logs_directory(model: str, logger: logging.Logger) -> Path:
+    """Provide a directory with collected debug logs from Juju.
 
-    This fixture depends on collect_logs_after_tests to ensure logs are collected first.
+    Logs are collected during test setup (not teardown), ensuring they're available
+    immediately for the test to use. This fixture is self-contained and doesn't
+    depend on other fixtures running first.
     """
-    logs_dir = request.session.stash.get(logs_collected_flag, None)
-    if logs_dir is None:
-        pytest.skip("Logs were not collected")
-    return logs_dir
+    logger.info("Collecting debug logs...")
+
+    logs_dir = Path(tempfile.mkdtemp(prefix="juju-logs-"))
+    logger.info(f"Collecting debug logs from model {model} to {logs_dir}")
+
+    debug_log_file = logs_dir / "debug.log"
+
+    try:
+        with open(debug_log_file, "w") as log_file:
+            subprocess.run(  # nosec B603, B607
+                ["juju", "debug-log", "--model", model, "--replay", "--no-tail"],
+                stdout=log_file,
+                text=True,
+                check=True,
+                timeout=300,
+            )
+
+        log_size = debug_log_file.stat().st_size
+        logger.info(f"Collected {log_size} bytes of debug logs to {debug_log_file}")
+        return logs_dir
+
+    except subprocess.TimeoutExpired as e:
+        logger.error(f"Timeout while collecting logs: {e.timeout}s")
+        pytest.skip(f"Log collection timed out after {e.timeout}s")
+    except subprocess.CalledProcessError as e:
+        logger.error(f"juju debug-log failed with exit code {e.returncode}")
+        pytest.skip("Failed to collect logs from Juju")
 
 
 failure_message: StashKey[str] = StashKey()
@@ -992,48 +1014,6 @@ def kubernetes_client(
     return None
 
 
-@pytest.fixture(scope="function")
-def collect_logs_after_tests(
-    request: pytest.FixtureRequest, model: str, logger: logging.Logger
-) -> Iterator[Path | None]:
-    """Collect logs after each test completes successfully.
-
-    This fixture yields None during test execution, then collects logs during teardown.
-    The logs_directory fixture can depend on this to get the actual directory path.
-    """
-    logs_dir: Path | None = None
-    yield logs_dir
-
-    # Teardown: collect logs after tests
-    logger.info("Collecting debug logs after test completion...")
-
-    logs_dir = Path(tempfile.mkdtemp(prefix="juju-logs-"))
-    logger.info(f"Collecting debug logs from model {model} to {logs_dir}")
-
-    debug_log_file = logs_dir / "debug.log"
-
-    try:
-        with open(debug_log_file, "w") as log_file:
-            subprocess.run(  # nosec B603, B607
-                ["juju", "debug-log", "--model", model, "--replay", "--no-tail"],
-                stdout=log_file,
-                text=True,
-                check=True,
-                timeout=300,
-            )
-
-        log_size = debug_log_file.stat().st_size
-        logger.info(f"Collected {log_size} bytes of debug logs to {debug_log_file}")
-
-        # Store in session stash for privacy check test to find
-        request.session.stash[logs_collected_flag] = logs_dir
-
-    except subprocess.TimeoutExpired as e:
-        logger.error(f"Timeout while collecting logs after {e.timeout}s: {e}")
-        raise
-    except subprocess.CalledProcessError as e:
-        logger.error(f"juju debug-log failed with exit code {e.returncode}: {e}")
-        raise
 
 
 def generate_short_id(length: int = 8) -> str:

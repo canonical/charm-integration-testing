@@ -14,15 +14,15 @@ TRUFFLEHOG_FINDINGS_DETECTED = 1
 
 
 def test_logs_privacy_check(
-    logs_directory: Path,
+    debug_logs_directory: Path,
     logger: logging.Logger,
 ) -> None:
     """Scan collected logs for secrets using TruffleHog.
 
-    This test runs after logs have been collected by the collect_logs_after_tests fixture.
-    It scans all logs with TruffleHog to detect secrets and fails if any are found.
+    This test scans collected logs with TruffleHog to detect secrets.
+    It fails if any secrets are found.
     """
-    logger.info(f"Scanning logs from {logs_directory} for secrets")
+    logger.info(f"Scanning logs from {debug_logs_directory} for secrets")
 
     # Check if docker is available
     try:
@@ -43,7 +43,7 @@ def test_logs_privacy_check(
         "run",
         "--rm",
         "-v",
-        f"{logs_directory}:/scan-logs:ro",
+        f"{debug_logs_directory}:/scan-logs:ro",
         "ghcr.io/trufflesecurity/trufflehog@sha256:b356cc273ab8c786fe2a54f20d2bec1f67438df4ca070e5c7d5a1283e18917cb",
         "filesystem",
         "/scan-logs",
@@ -78,5 +78,5 @@ def test_logs_privacy_check(
         output_str = f"Scan output:\n{trufflehog_output}" if trufflehog_output else "No output from TruffleHog."
         pytest.fail(
             f"TruffleHog scan failed with unexpected exit code {result.returncode}.\n"
-            output_str
+            f"{output_str}"
         )
