@@ -43,7 +43,7 @@ def test_logs_privacy_check(
         "run",
         "--rm",
         "-v",
-        f"{logs_directory}:/scan-logs",
+        f"{logs_directory}:/scan-logs:ro",
         "ghcr.io/trufflesecurity/trufflehog@sha256:b356cc273ab8c786fe2a54f20d2bec1f67438df4ca070e5c7d5a1283e18917cb",
         "filesystem",
         "/scan-logs",
