@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pytest
 
-
 # TruffleHog exit codes
 TRUFFLEHOG_NO_FINDINGS = 0
 TRUFFLEHOG_FINDINGS_DETECTED = 1
@@ -68,15 +67,9 @@ def test_logs_privacy_check(
 
     # TruffleHog exit codes:
     if result.returncode == TRUFFLEHOG_FINDINGS_DETECTED:
-        pytest.fail(
-            f"TruffleHog found potential secrets.\n"
-            f"Scan output:\n{trufflehog_output}"
-        )
+        pytest.fail(f"TruffleHog found potential secrets.\n" f"Scan output:\n{trufflehog_output}")
     elif result.returncode == TRUFFLEHOG_NO_FINDINGS:
         pytest.skip("No secrets found in logs.")
     else:
         output_str = f"Scan output:\n{trufflehog_output}" if trufflehog_output else "No output from TruffleHog."
-        pytest.fail(
-            f"TruffleHog scan failed with unexpected exit code {result.returncode}.\n"
-            f"{output_str}"
-        )
+        pytest.fail(f"TruffleHog scan failed with unexpected exit code {result.returncode}.\n" f"{output_str}")
