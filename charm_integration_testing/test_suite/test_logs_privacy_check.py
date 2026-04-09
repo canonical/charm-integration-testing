@@ -14,7 +14,6 @@ TRUFFLEHOG_NO_FINDINGS = 0
 TRUFFLEHOG_FINDINGS_DETECTED = 1
 
 
-@pytest.mark.state(requires=State.DEPLOYED, provides=State.DEPLOYED)
 def test_logs_privacy_check(
     debug_logs_directory: Path,
     logger: logging.Logger,
