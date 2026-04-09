@@ -7,13 +7,12 @@ from pathlib import Path
 
 import pytest
 
-from test_suite.scheduler.states import State
-
 # TruffleHog exit codes
 TRUFFLEHOG_NO_FINDINGS = 0
 TRUFFLEHOG_FINDINGS_DETECTED = 1
 
 
+# no state marker so it runs last
 def test_logs_privacy_check(
     debug_logs_directory: Path,
     logger: logging.Logger,
