@@ -249,6 +249,10 @@ class BundleBuilder:
             # Get the default charm release
             charm = self.charmhub_client.charm_from_store(charm_name=charm_name, ubuntu_arch=node.bundle.arch)
 
+            # Skip charm if it doesn't support the required Juju version
+            if not charm.assumes.satisfied_by(node.bundle.juju_version, node.bundle.features):
+                continue
+
             # Create the application
             application = Application(
                 name=node.bundle.generate_unique_application_name(charm_name),

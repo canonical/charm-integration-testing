@@ -30,9 +30,11 @@ from bundle_builder.entrypoint import (
     applications_from_args,
     integrations_from_args,
     platform_from_args,
+    resolve_juju_version,
     setup_logging,
     write_to_file,
 )
+from bundle_builder.juju_version import JujuVersion
 
 from .test_charm import sample_charm_postgresql_k8s, sample_charm_self_signed_certificates
 
@@ -61,6 +63,7 @@ class TestAddArgsToParser:
         "--integrations": "target:certificates::neighbor:certificates",
         "--arch": "amd64",
         "--substrate": "kubernetes",
+        "--juju-version": "3.6",
         "--output-file": "bundle.yaml",
         "--charm-metadata-overrides": "some/folder/directory",
         "--charm-platform-overrides": "some/folder/directory",
@@ -377,3 +380,32 @@ class TestWriteToFile:
 
         # THEN content is written
         assert file_path.read_text() == "my bundle string"
+
+
+class TestResolveJujuVersion:
+    @dataclass
+    class Params:
+        label: str
+        value: str
+        expected: JujuVersion | None
+
+    test_cases = [
+        Params(label="major_minor", value="3.6", expected=JujuVersion(major=3, minor=6, patch=0)),
+        Params(label="invalid", value="not-a-version", expected=None),
+    ]
+
+    @pytest.mark.parametrize("params", test_cases, ids=[p.label for p in test_cases])
+    def test(self, params: Params) -> None:
+        # GIVEN a parser
+        parser = argparse.ArgumentParser()
+
+        if params.expected is None:
+            # WHEN / THEN an invalid value causes a SystemExit
+            with pytest.raises(SystemExit):
+                resolve_juju_version(parser, params.value)
+        else:
+            # WHEN
+            result = resolve_juju_version(parser, params.value)
+
+            # THEN
+            assert result == params.expected

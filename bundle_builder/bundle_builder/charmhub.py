@@ -15,14 +15,17 @@
 
 import dataclasses
 import logging
+import re
 from functools import cache
-from typing import TypeVar
+from typing import Any, TypeVar
 
 from .charm import (
+    ASSUMES_OPS,
     ENDPOINT_PEERS,
     ENDPOINT_PROVIDES,
     ENDPOINT_REQUIRES,
     Charm,
+    CharmAssumesEntry,
     CharmChannel,
     CharmEndpoint,
     CharmEndpointOptionality,
@@ -39,9 +42,34 @@ from .charmhub_http import (
     RefreshAction,
     RefreshResponse,
 )
+from .juju_version import JujuVersion
 from .overrides import CharmMetadataOverride, OverridesClient
 
 _T = TypeVar("_T")
+
+# Matches juju version constraint strings in charm assumes blocks e.g. "juju >= 3.0"
+_ASSUMES_JUJU_RE = re.compile(rf"^juju\s+({'|'.join(re.escape(op) for op in ASSUMES_OPS)})\s+(\S+)$")
+
+
+def parse_assumes_entry(raw: str | dict[str, Any]) -> CharmAssumesEntry:
+    """Translate a raw charmhub assumes entry (wire format) into a domain CharmAssumesEntry."""
+    if isinstance(raw, str):
+        match = _ASSUMES_JUJU_RE.match(raw)
+        if match:
+            op_str, version_str = match.group(1), match.group(2)
+            try:
+                return CharmAssumesEntry(op=op_str, required_version=JujuVersion.parse(version_str))
+            except ValueError:
+                pass
+        return CharmAssumesEntry(feature=raw)
+
+    if isinstance(raw, dict):
+        if "any-of" in raw:
+            return CharmAssumesEntry(any_of=frozenset(parse_assumes_entry(sub) for sub in raw["any-of"]))
+        if "all-of" in raw:
+            return CharmAssumesEntry(all_of=frozenset(parse_assumes_entry(sub) for sub in raw["all-of"]))
+
+    return CharmAssumesEntry(feature=str(raw))
 
 
 class CharmhubClient:
@@ -221,6 +249,9 @@ class CharmhubClient:
             endpoints=self._all_charm_endpoints(refresh_info),
             test_configs=self._charm_test_configs(charm_name),
             priority=self._get_charm_priority(charm_name),
+            assumes=CharmAssumesEntry(
+                all_of=frozenset(parse_assumes_entry(e) for e in refresh_info.charm.metadata.assumes)
+            ),
         )
 
     def _charm_from_store_by_revision(
@@ -276,6 +307,9 @@ class CharmhubClient:
             endpoints=self._all_charm_endpoints(refresh_info),
             test_configs=self._charm_test_configs(charm_name),
             priority=self._get_charm_priority(charm_name),
+            assumes=CharmAssumesEntry(
+                all_of=frozenset(parse_assumes_entry(e) for e in refresh_info.charm.metadata.assumes)
+            ),
         )
 
     def _charm_from_store_by_channel(
@@ -285,8 +319,8 @@ class CharmhubClient:
         charm_channel: str,
         ubuntu_version: str | None = None,
     ) -> Charm:
-        # Get default ubuntu version if not provided
-        if not ubuntu_version:
+        # Resolve ubuntu version if not specified
+        if ubuntu_version is None:
             ubuntu_version = self._default_ubuntu_version(charm_name, ubuntu_arch, charm_channel=charm_channel)
 
         # Call refresh with channel and base
@@ -325,6 +359,9 @@ class CharmhubClient:
             endpoints=self._all_charm_endpoints(refresh_info),
             test_configs=self._charm_test_configs(charm_name),
             priority=self._get_charm_priority(charm_name),
+            assumes=CharmAssumesEntry(
+                all_of=frozenset(parse_assumes_entry(e) for e in refresh_info.charm.metadata.assumes)
+            ),
         )
 
     def _charm_from_store_default(
@@ -365,6 +402,9 @@ class CharmhubClient:
             endpoints=self._all_charm_endpoints(refresh_info),
             test_configs=self._charm_test_configs(charm_name),
             priority=self._get_charm_priority(charm_name),
+            assumes=CharmAssumesEntry(
+                all_of=frozenset(parse_assumes_entry(e) for e in refresh_info.charm.metadata.assumes)
+            ),
         )
 
     def _get_ubuntu_version_from_bases(

@@ -19,7 +19,7 @@ from datetime import timedelta
 import pytest
 from pydantic.dataclasses import dataclass
 
-from bundle_builder import Application, Bundle, BundleBuilder, CharmhubClient, UncompletableBundleError
+from bundle_builder import Application, Bundle, BundleBuilder, CharmhubClient, JujuVersion, UncompletableBundleError
 
 
 @dataclass
@@ -50,6 +50,7 @@ class Params:
             },
             platform="kubernetes",
             arch="amd64",
+            juju_version=JujuVersion.parse("3.6"),
         ),
     ],
 )
@@ -63,6 +64,7 @@ def test_speed(charmhub_client: CharmhubClient, params: Params) -> None:
         integrations=frozenset(),
         platform=params.platform,
         arch=params.arch,
+        juju_version=JujuVersion.parse("3.6"),
     )
 
     # WHEN minimal bundle is built

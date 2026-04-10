@@ -18,8 +18,9 @@ import yaml
 from pydantic import Field
 from pydantic.dataclasses import dataclass
 
-from .charm import ENDPOINT_PROVIDES, ENDPOINT_REQUIRES, Charm, CharmConfig, CharmEndpoint
+from .charm import ENDPOINT_PROVIDES, ENDPOINT_REQUIRES, PLATFORM_FEATURES, Charm, CharmConfig, CharmEndpoint
 from .immutable_dataclass import computed_property, immutable_dataclass
+from .juju_version import JujuVersion
 
 
 @immutable_dataclass
@@ -56,11 +57,24 @@ class Bundle:
     integrations: frozenset[Integration]
     platform: str
     arch: str
+    juju_version: JujuVersion
+
+    @computed_property
+    def features(self) -> frozenset[str]:
+        return PLATFORM_FEATURES.get(self.platform, frozenset())
 
     def validate(self) -> None:
         # Ensure all applications have unique names
         if len(self.application_lookup) != len(self.applications):
             raise ValueError("Application names must be unique in the bundle.")
+
+        # Validate that all pre-specified charms support the required Juju version
+        for application in self.applications:
+            if not application.charm.assumes.satisfied_by(self.juju_version, self.features):
+                raise ValueError(
+                    f"Charm '{application.charm.name}' does not support Juju {self.juju_version} "
+                    f"according to its assumes block."
+                )
 
         # Validate integrations
         for integration in self.integrations:

@@ -5,6 +5,7 @@ import logging
 from pathlib import Path
 
 import pytest
+from juju.backend import JujuBackend
 
 from bundle_builder import (
     Application,
@@ -13,6 +14,7 @@ from bundle_builder import (
     BundleBuilder,
     CharmhubClient,
     Integration,
+    JujuVersion,
     OverridesClient,
 )
 
@@ -40,6 +42,8 @@ def test_build_bundle(
     bundle: Path,
     bundle_mermaid_output: Path,
     logger: logging.Logger,
+    juju_backend: JujuBackend,
+    model: str,
 ) -> None:
     overrides_client = OverridesClient(
         charm_metadata_overrides=charm_metadata_overrides,
@@ -80,6 +84,7 @@ def test_build_bundle(
         integrations=frozenset({integration}),
         platform=platform,
         arch="amd64",
+        juju_version=JujuVersion.parse(juju_backend.version(model)),
     )
 
     bundle_builder = BundleBuilder(charmhub_client=charmhub_client, logger=logger)

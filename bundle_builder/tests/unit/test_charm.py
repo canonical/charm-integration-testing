@@ -24,6 +24,7 @@ from bundle_builder.charm import (
     ENDPOINT_PROVIDES,
     ENDPOINT_REQUIRES,
     Charm,
+    CharmAssumesEntry,
     CharmChannel,
     CharmConfig,
     CharmConfigCriteria,
@@ -33,6 +34,7 @@ from bundle_builder.charm import (
     CharmLimitCriteria,
     CharmTestConfig,
 )
+from bundle_builder.juju_version import JujuVersion
 
 
 class CharmConfigCriteriaDict(TypedDict, total=False):
@@ -1180,3 +1182,153 @@ class TestCharm:
 
         # THEN repr is charm name
         assert repr == charm.name
+
+
+class TestCharmAssumesEntrySatisfiedBy:
+    @dataclass
+    class Params:
+        label: str
+        entry: CharmAssumesEntry
+        juju_version: JujuVersion
+        features: frozenset[str]
+        expected: bool
+
+    _v3_6 = JujuVersion.parse("3.6.21")
+    _v4_0 = JujuVersion.parse("4.0.5")
+
+    test_cases = [
+        # Vacuous truth: default entry with no constraints
+        Params(
+            label="empty_entry_always_satisfied",
+            entry=CharmAssumesEntry(),
+            juju_version=_v3_6,
+            features=frozenset(),
+            expected=True,
+        ),
+        # juju_op: satisfied
+        Params(
+            label="juju_ge_satisfied",
+            entry=CharmAssumesEntry(op=">=", required_version=JujuVersion.parse("3.5")),
+            juju_version=_v3_6,
+            features=frozenset(),
+            expected=True,
+        ),
+        # juju_op: not satisfied
+        Params(
+            label="juju_lt_not_satisfied",
+            entry=CharmAssumesEntry(op="<", required_version=JujuVersion.parse("4")),
+            juju_version=_v4_0,
+            features=frozenset(),
+            expected=False,
+        ),
+        # juju_op: boundary - lt with equal value
+        Params(
+            label="juju_lt_boundary_equal",
+            entry=CharmAssumesEntry(op="<", required_version=JujuVersion.parse("4")),
+            juju_version=JujuVersion.parse("4.0.0"),
+            features=frozenset(),
+            expected=False,
+        ),
+        # juju_op: boundary - ge with equal value
+        Params(
+            label="juju_ge_boundary_equal",
+            entry=CharmAssumesEntry(op=">=", required_version=JujuVersion.parse("3.5.1")),
+            juju_version=JujuVersion.parse("3.5.1"),
+            features=frozenset(),
+            expected=True,
+        ),
+        # feature: present in features set
+        Params(
+            label="feature_present",
+            entry=CharmAssumesEntry(feature="k8s-api"),
+            juju_version=_v3_6,
+            features=frozenset({"k8s-api"}),
+            expected=True,
+        ),
+        # feature: absent from features set
+        Params(
+            label="feature_absent",
+            entry=CharmAssumesEntry(feature="k8s-api"),
+            juju_version=_v3_6,
+            features=frozenset(),
+            expected=False,
+        ),
+        # all_of: all constraints satisfied
+        Params(
+            label="all_of_all_satisfied",
+            entry=CharmAssumesEntry(
+                all_of=frozenset(
+                    [
+                        CharmAssumesEntry(op=">=", required_version=JujuVersion.parse("3.5.1")),
+                        CharmAssumesEntry(op="<", required_version=JujuVersion.parse("4")),
+                    ]
+                )
+            ),
+            juju_version=_v3_6,
+            features=frozenset(),
+            expected=True,
+        ),
+        # all_of: one constraint fails
+        Params(
+            label="all_of_one_fails",
+            entry=CharmAssumesEntry(
+                all_of=frozenset(
+                    [
+                        CharmAssumesEntry(op=">=", required_version=JujuVersion.parse("3.5.1")),
+                        CharmAssumesEntry(op="<", required_version=JujuVersion.parse("4")),
+                    ]
+                )
+            ),
+            juju_version=_v4_0,
+            features=frozenset(),
+            expected=False,
+        ),
+        # any_of: one branch satisfied
+        Params(
+            label="any_of_one_branch_satisfied",
+            entry=CharmAssumesEntry(
+                any_of=frozenset(
+                    [
+                        CharmAssumesEntry(op=">=", required_version=JujuVersion.parse("4")),
+                        CharmAssumesEntry(op="<", required_version=JujuVersion.parse("4")),
+                    ]
+                )
+            ),
+            juju_version=_v3_6,
+            features=frozenset(),
+            expected=True,
+        ),
+        # any_of: no branch satisfied
+        Params(
+            label="any_of_no_branch_satisfied",
+            entry=CharmAssumesEntry(
+                any_of=frozenset(
+                    [
+                        CharmAssumesEntry(op=">=", required_version=JujuVersion.parse("4")),
+                        CharmAssumesEntry(
+                            all_of=frozenset(
+                                [
+                                    CharmAssumesEntry(op=">=", required_version=JujuVersion.parse("3.5.1")),
+                                    CharmAssumesEntry(op="<", required_version=JujuVersion.parse("3.6")),
+                                ]
+                            )
+                        ),
+                    ]
+                )
+            ),
+            juju_version=_v3_6,
+            features=frozenset(),
+            expected=False,
+        ),
+    ]
+
+    @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
+    def test(self, params: Params) -> None:
+        # GIVEN the assumes entry, juju version, and features
+        entry = params.entry
+
+        # WHEN satisfied_by is called
+        result = entry.satisfied_by(params.juju_version, params.features)
+
+        # THEN matches expected
+        assert result == params.expected

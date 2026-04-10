@@ -26,6 +26,7 @@ from bundle_builder.charm import (
     ENDPOINT_PROVIDES,
     ENDPOINT_REQUIRES,
     Charm,
+    CharmAssumesEntry,
     CharmChannel,
     CharmEndpoint,
     CharmEndpointOptionality,
@@ -33,6 +34,7 @@ from bundle_builder.charm import (
 )
 from bundle_builder.charmhub import CharmhubClient
 from bundle_builder.charmhub_http import CharmhubBase, CharmhubHttpClient
+from bundle_builder.juju_version import JujuVersion
 from bundle_builder.overrides import CharmEndpointOverride, CharmMetadataOverride, OverridesClient
 
 from .test_charm import (
@@ -146,6 +148,7 @@ class TestLimitApplication:
                                         self.provides = {"database": MockEndpoint("postgresql")}
                                         self.requires: dict[str, MockEndpoint] = {}
                                         self.peers: dict[str, MockEndpoint] = {}
+                                        self.assumes: list[Any] = []
 
                                 self.metadata = MockMetadata()
 
@@ -218,6 +221,27 @@ def sample_bundle_postgresql_k8s_kratos() -> Bundle:
         ),
         platform="kubernetes",
         arch="amd64",
+        juju_version=JujuVersion.parse("3.0"),
+    )
+
+
+def _assumes_bundle(
+    assumes: CharmAssumesEntry,
+    platform: str = "kubernetes",
+    juju_version: JujuVersion = JujuVersion.parse("3.6"),
+) -> Bundle:
+    return Bundle(
+        applications=frozenset(
+            {
+                Application(
+                    name="postgresql-k8s", charm=dataclasses.replace(sample_charm_postgresql_k8s(), assumes=assumes)
+                )
+            }
+        ),
+        integrations=frozenset(),
+        platform=platform,
+        arch="amd64",
+        juju_version=juju_version,
     )
 
 
@@ -386,6 +410,121 @@ class TestBundle:
                 ),
                 should_raise=True,
                 match="exceeding its limit",
+            ),
+            Params(
+                label="k8s_api_on_kubernetes_passes",
+                bundle=_assumes_bundle(
+                    CharmAssumesEntry(all_of=frozenset([CharmAssumesEntry(feature="k8s-api")])),
+                    platform="kubernetes",
+                ),
+                should_raise=False,
+            ),
+            Params(
+                label="k8s_api_on_machine_fails",
+                bundle=_assumes_bundle(
+                    CharmAssumesEntry(all_of=frozenset([CharmAssumesEntry(feature="k8s-api")])),
+                    platform="machine",
+                ),
+                should_raise=True,
+                match="does not support Juju",
+            ),
+            Params(
+                label="juju_lt4_on_juju3_passes",
+                bundle=_assumes_bundle(
+                    CharmAssumesEntry(
+                        all_of=frozenset([CharmAssumesEntry(op="<", required_version=JujuVersion.parse("4"))])
+                    ),
+                    juju_version=JujuVersion.parse("3.6.21"),
+                ),
+                should_raise=False,
+            ),
+            Params(
+                label="juju_lt4_on_juju4_fails",
+                bundle=_assumes_bundle(
+                    CharmAssumesEntry(
+                        all_of=frozenset([CharmAssumesEntry(op="<", required_version=JujuVersion.parse("4"))])
+                    ),
+                    juju_version=JujuVersion.parse("4.0.5"),
+                ),
+                should_raise=True,
+                match="does not support Juju",
+            ),
+            Params(
+                label="any_of_version_ranges_satisfied_passes",
+                bundle=_assumes_bundle(
+                    CharmAssumesEntry(
+                        all_of=frozenset(
+                            [
+                                CharmAssumesEntry(feature="k8s-api"),
+                                CharmAssumesEntry(
+                                    any_of=frozenset(
+                                        [
+                                            CharmAssumesEntry(
+                                                all_of=frozenset(
+                                                    [
+                                                        CharmAssumesEntry(
+                                                            op=">=", required_version=JujuVersion.parse("3.4.3")
+                                                        ),
+                                                        CharmAssumesEntry(
+                                                            op="<", required_version=JujuVersion.parse("3.5")
+                                                        ),
+                                                    ]
+                                                )
+                                            ),
+                                            CharmAssumesEntry(
+                                                all_of=frozenset(
+                                                    [
+                                                        CharmAssumesEntry(
+                                                            op=">=", required_version=JujuVersion.parse("3.5.1")
+                                                        ),
+                                                        CharmAssumesEntry(
+                                                            op="<", required_version=JujuVersion.parse("4")
+                                                        ),
+                                                    ]
+                                                )
+                                            ),
+                                        ]
+                                    )
+                                ),
+                            ]
+                        )
+                    ),
+                    juju_version=JujuVersion.parse("3.6.21"),
+                ),
+                should_raise=False,
+            ),
+            Params(
+                label="any_of_version_ranges_juju4_fails",
+                bundle=_assumes_bundle(
+                    CharmAssumesEntry(
+                        all_of=frozenset(
+                            [
+                                CharmAssumesEntry(feature="k8s-api"),
+                                CharmAssumesEntry(
+                                    any_of=frozenset(
+                                        [
+                                            CharmAssumesEntry(
+                                                all_of=frozenset(
+                                                    [
+                                                        CharmAssumesEntry(
+                                                            op=">=", required_version=JujuVersion.parse("3.5.1")
+                                                        ),
+                                                        CharmAssumesEntry(
+                                                            op="<", required_version=JujuVersion.parse("4")
+                                                        ),
+                                                    ]
+                                                )
+                                            ),
+                                        ]
+                                    )
+                                ),
+                            ]
+                        )
+                    ),
+                    juju_version=JujuVersion.parse("4.0.5"),
+                ),
+                should_raise=True,
+                match="does not support Juju",
             ),
         ]
 
@@ -574,6 +713,7 @@ class TestBundle:
                 ),
                 platform="machine",
                 arch="amd64",
+                juju_version=JujuVersion.parse("3.0"),
             )
 
             # WHEN getting unfulfilled endpoints
@@ -642,6 +782,7 @@ class TestBundle:
                 ),
                 platform="machine",
                 arch="amd64",
+                juju_version=JujuVersion.parse("3.0"),
             )
 
             # WHEN getting unfulfilled endpoints
@@ -675,6 +816,7 @@ class TestBundle:
                     integrations=frozenset(),
                     platform="kubernetes",
                     arch="amd64",
+                    juju_version=JujuVersion.parse("3.0"),
                 ),
                 expected_graph_keys={"a", "b"},
                 expected_requires={"a": set(), "b": set()},
@@ -729,6 +871,7 @@ class TestBundle:
                     ),
                     platform="kubernetes",
                     arch="amd64",
+                    juju_version=JujuVersion.parse("3.0"),
                 ),
                 expected_graph_keys={"a", "b", "c"},
                 expected_requires={"a": {"b"}, "b": {"c"}, "c": set()},
@@ -810,6 +953,7 @@ class TestBundle:
                     ),
                     platform="kubernetes",
                     arch="amd64",
+                    juju_version=JujuVersion.parse("3.0"),
                 ),
                 expected_graph_keys={"a", "b"},
                 expected_requires={"a": {"b"}, "b": {"a"}},
@@ -847,6 +991,7 @@ class TestBundle:
                     ),
                     platform="kubernetes",
                     arch="amd64",
+                    juju_version=JujuVersion.parse("3.0"),
                 ),
                 expected_graph_keys={"a", "b", "c"},
                 expected_requires={"a": {"b"}, "b": {"c"}, "c": set()},
@@ -1065,6 +1210,7 @@ class TestBundle:
                     integrations=frozenset(),
                     platform="kubernetes",
                     arch="amd64",
+                    juju_version=JujuVersion.parse("3.0"),
                 ),
                 expected_features={
                     "provider": frozenset(),
@@ -1092,6 +1238,7 @@ class TestBundle:
                     ),
                     platform="kubernetes",
                     arch="amd64",
+                    juju_version=JujuVersion.parse("3.0"),
                 ),
                 expected_features={
                     "provider": frozenset({"database:ssl", "database:compression"}),
@@ -1126,6 +1273,7 @@ class TestBundle:
                     ),
                     platform="kubernetes",
                     arch="amd64",
+                    juju_version=JujuVersion.parse("3.0"),
                 ),
                 expected_features={
                     "provider": frozenset({"database:ssl", "database:compression"}),
@@ -1190,6 +1338,7 @@ class TestBundle:
                     ),
                     platform="kubernetes",
                     arch="amd64",
+                    juju_version=JujuVersion.parse("3.0"),
                 ),
                 expected_features={
                     "multi": frozenset({"db1:ssl", "db2:compression"}),

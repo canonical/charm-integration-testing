@@ -1188,6 +1188,137 @@ class TestCharmhubClient:
                 assert charm.revision == params.charm_revision
                 assert charm.ubuntu_arch == params.ubuntu_arch
 
+    class TestCharmFromStoreByChannel:
+        @dataclass
+        class Params:
+            label: str
+            charm_name: str
+            ubuntu_arch: str
+            charm_channel: str
+            ubuntu_version: str | None
+            default_versions_refresh_response: RefreshResponse | None
+            channel_refresh_response: RefreshResponse
+            expected_ubuntu_version: str
+            raise_exception: bool = False
+
+        test_cases = [
+            Params(
+                label="resolves_ubuntu_version_when_none",
+                charm_name="test-charm",
+                ubuntu_arch="amd64",
+                charm_channel="16/edge",
+                ubuntu_version=None,
+                default_versions_refresh_response=RefreshResponse(
+                    name="test-charm",
+                    error=RefreshResponse.Error(
+                        code="invalid-charm-base",
+                        message="Invalid base",
+                        extra=RefreshResponse.Error.Extra(default_bases=[other_base]),
+                    ),
+                ),
+                channel_refresh_response=RefreshResponse(
+                    name="test-charm",
+                    effective_channel="16/edge",
+                    charm=RefreshResponse.Charm(
+                        revision=865,
+                        bases=[other_base],
+                        config="{}",
+                        metadata=CharmMetadata({}),
+                    ),
+                ),
+                expected_ubuntu_version=other_base.channel,
+            ),
+            Params(
+                label="uses_provided_ubuntu_version_directly",
+                charm_name="test-charm",
+                ubuntu_arch="amd64",
+                charm_channel="16/edge",
+                ubuntu_version="22.04",
+                default_versions_refresh_response=None,
+                channel_refresh_response=RefreshResponse(
+                    name="test-charm",
+                    effective_channel="16/edge",
+                    charm=RefreshResponse.Charm(
+                        revision=865,
+                        bases=[other_base],
+                        config="{}",
+                        metadata=CharmMetadata({}),
+                    ),
+                ),
+                expected_ubuntu_version="22.04",
+            ),
+            Params(
+                label="raises_on_refresh_error",
+                charm_name="test-charm",
+                ubuntu_arch="amd64",
+                charm_channel="16/edge",
+                ubuntu_version="22.04",
+                default_versions_refresh_response=None,
+                channel_refresh_response=RefreshResponse(
+                    name="test-charm",
+                    error=RefreshResponse.Error(
+                        code="revision-not-found",
+                        message="Not found",
+                    ),
+                ),
+                expected_ubuntu_version="22.04",
+                raise_exception=True,
+            ),
+        ]
+
+        @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
+        def test(self, params: Params) -> None:
+            # GIVEN refresh responses keyed by action
+            refresh_actions: dict[RefreshAction, RefreshResponse] = {}
+
+            # Channel refresh action uses the (resolved) ubuntu version
+            refresh_actions[
+                RefreshAction(
+                    charm_name=params.charm_name,
+                    charm_channel=params.charm_channel,
+                    base=CharmhubBase(
+                        channel=params.expected_ubuntu_version,
+                        architecture=params.ubuntu_arch,
+                    ),
+                )
+            ] = params.channel_refresh_response
+
+            # Default versions lookup (only needed when ubuntu_version is None)
+            if params.default_versions_refresh_response is not None:
+                refresh_actions[
+                    RefreshAction(
+                        charm_name=params.charm_name,
+                        charm_channel=params.charm_channel,
+                        base=CharmhubBase(name="NA", architecture=params.ubuntu_arch, channel="NA"),
+                    )
+                ] = params.default_versions_refresh_response
+
+            http_client = CharmhubHttpStub(refresh_response=refresh_actions)
+            client = CharmhubClient(http_client=http_client)
+
+            # WHEN _charm_from_store_by_channel is called
+            try:
+                charm = client._charm_from_store_by_channel(
+                    charm_name=params.charm_name,
+                    ubuntu_arch=params.ubuntu_arch,
+                    charm_channel=params.charm_channel,
+                    ubuntu_version=params.ubuntu_version,
+                )
+            except CharmReleaseNotFoundException:
+                raised = True
+            else:
+                raised = False
+
+            # THEN
+            if params.raise_exception:
+                assert raised
+            else:
+                assert not raised
+                assert charm.name == params.charm_name
+                assert str(charm.channel) == params.charm_channel
+                assert charm.ubuntu_version == params.expected_ubuntu_version
+                assert charm.ubuntu_arch == params.ubuntu_arch
+
     class TestCharmFromStore:
         @dataclass
         class Params:

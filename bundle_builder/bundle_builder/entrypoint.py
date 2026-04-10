@@ -21,6 +21,7 @@ from .bundle import Application, ApplicationEndpoint, Bundle, Integration
 from .bundle_builder import BundleBuilder, UncompletableBundleError
 from .charmhub import CharmhubClient
 from .charmhub_http import CharmReleaseNotFoundException
+from .juju_version import JujuVersion
 from .overrides import OverridesClient
 
 
@@ -90,6 +91,12 @@ def add_args_to_parser(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--charm-default-versions", type=Path, help="Path to file containing charm default versions", default=None
+    )
+    parser.add_argument(
+        "--juju-version",
+        type=str,
+        required=True,
+        help=("Juju version to require charm compatibility with. Accepts a version number (e.g. '3.6', '3.6.21')"),
     )
 
 
@@ -170,6 +177,17 @@ def platform_from_args(parser: argparse.ArgumentParser, substrate: str) -> str:
         parser.error(f"Unknown substrate: '{substrate}'")
 
 
+# Resolve Juju version from args, allowing for a direct version string
+def resolve_juju_version(
+    parser: argparse.ArgumentParser,
+    juju_version_str: str,
+) -> JujuVersion:
+    try:
+        return JujuVersion.parse(juju_version_str)
+    except ValueError as e:
+        parser.error(f"Invalid Juju version '{juju_version_str}': {e}")
+
+
 # Dump the bundle to file
 def write_to_file(filename: str, content: str, logger: logging.Logger) -> None:
     # Get proper file path
@@ -189,6 +207,9 @@ def main() -> None:
 
     # Get logger
     logger = setup_logging(args.log_level)
+
+    # Resolve Juju version from the provided version string
+    juju_version = resolve_juju_version(parser, args.juju_version)
 
     # Create override client
     if args.charm_metadata_overrides is not None and not args.charm_metadata_overrides.is_dir():
@@ -221,6 +242,7 @@ def main() -> None:
         integrations=integrations_from_args(parser, args.integrations),
         platform=platform_from_args(parser, args.substrate),
         arch=args.arch,
+        juju_version=juju_version,
     )
 
     # Validate the base bundle
