@@ -1891,3 +1891,71 @@ class TestDeployBundleFile:
 
         # THEN the predicate returns True
         assert result is True
+
+
+class TestJubilantBackendVersion:
+    @dataclass
+    class VersionStub:
+        version_str: str = "3.6.1-ubuntu-amd64"
+
+        def status(self) -> jubilant.Status:
+            return jubilant.Status(
+                model=jubilant.statustypes.ModelStatus(
+                    name="test-model",
+                    type="caas",
+                    controller="test",
+                    cloud="test",
+                    version=self.version_str,
+                ),
+                machines={},
+                apps={},
+            )
+
+    def test_returns_version_from_model(self) -> None:
+        # GIVEN a client stub whose status() exposes a known version
+        client = JubilantClientStub(client=self.VersionStub(version_str="3.6.1-ubuntu-amd64"))
+        backend = JubilantBackend(client)
+
+        # WHEN
+        result = backend.version("test-model")
+
+        # THEN the version string is returned
+        assert result == "3.6.1-ubuntu-amd64"
+
+
+class TestJubilantBackendCliVersion:
+    @dataclass
+    class VersionStub:
+        version_str: str = "3.6.1-ubuntu-amd64"
+
+        def version(self) -> str:
+            return self.version_str
+
+    def test_returns_cli_version_stripped(self) -> None:
+        # GIVEN a client stub that returns a version with surrounding whitespace
+        client = JubilantClientStub(client=self.VersionStub(version_str="  3.6.1-ubuntu-amd64  "))
+        backend = JubilantBackend(client)
+
+        # WHEN
+        result = backend.cli_version()
+
+        # THEN the version string is returned stripped
+        assert result == "3.6.1-ubuntu-amd64"
+
+    def test_passes_none_model_to_client(self) -> None:
+        # GIVEN a client stub that records which model was requested
+        requested_models: list[str | None] = []
+        version_stub = self.VersionStub()
+
+        class TrackingClient(JubilantClientStub):
+            def model(self, model: str | None) -> Any:
+                requested_models.append(model)
+                return version_stub
+
+        backend = JubilantBackend(TrackingClient(client=version_stub))
+
+        # WHEN
+        backend.cli_version()
+
+        # THEN model(None) was called (no specific model - CLI-level version)
+        assert None in requested_models

@@ -438,7 +438,10 @@ class JubilantBackend(JujuCmdBackend):
         } in [{integration.provider, integration.requirer} for integration in self.list_integrations(model)]
 
     def version(self, model: str) -> str:
-        return str(self.client.model(model).version())
+        return str(self.client.model(model).status().model.version).strip()
+
+    def cli_version(self) -> str:
+        return str(self.client.model(None).version()).strip()
 
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(5), reraise=True)
     def bootstrap_controller(self, cloud: str, controller: str, controller_constraints: dict[str, str]) -> None:
