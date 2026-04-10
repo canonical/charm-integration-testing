@@ -22,6 +22,8 @@ requires:
     optional: true
   s3-credentials:
     optional: true
+  gcs-credentials:
+    optional: true
   sharding:
     limit_if:
       - criteria:
