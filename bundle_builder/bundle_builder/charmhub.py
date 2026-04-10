@@ -48,7 +48,11 @@ from .overrides import CharmMetadataOverride, OverridesClient
 _T = TypeVar("_T")
 
 # Matches juju version constraint strings in charm assumes blocks e.g. "juju >= 3.0"
-_ASSUMES_JUJU_RE = re.compile(rf"^juju\s+({'|'.join(re.escape(op) for op in ASSUMES_OPS)})\s+(\S+)$")
+# Operators are sorted by descending length so longer ops (>=, <=, ==) are tried before
+# their single-char prefixes (>, <) to avoid prefix shadowing in alternation.
+_ASSUMES_JUJU_RE = re.compile(
+    rf"^juju\s+({'|'.join(re.escape(op) for op in sorted(ASSUMES_OPS, key=len, reverse=True))})\s+(\S+)$"
+)
 
 
 def parse_assumes_entry(raw: str | dict[str, Any]) -> CharmAssumesEntry:

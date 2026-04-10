@@ -14,6 +14,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import warnings
+from dataclasses import field
 from datetime import timedelta
 
 import pytest
@@ -27,6 +28,7 @@ class Params:
     charms: set[str]
     platform: str
     arch: str
+    juju_version: JujuVersion = field(default_factory=lambda: JujuVersion.parse("3.6"))
 
 
 @pytest.mark.parametrize(
@@ -64,7 +66,7 @@ def test_speed(charmhub_client: CharmhubClient, params: Params) -> None:
         integrations=frozenset(),
         platform=params.platform,
         arch=params.arch,
-        juju_version=JujuVersion.parse("3.6"),
+        juju_version=params.juju_version,
     )
 
     # WHEN minimal bundle is built

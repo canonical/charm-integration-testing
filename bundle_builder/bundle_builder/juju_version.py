@@ -8,7 +8,7 @@ from .immutable_dataclass import immutable_dataclass
 # Matches a Juju version string of the form major[.minor[.patch]][{-|+}suffix].
 # Examples: "4", "3.6", "3.6.21", "3.6-beta2", "4.0.6-d20c9e8", "4.1-beta1-c7c73d7",
 # "3.6.21-genericlinux-amd64". Rejects channel strings like "3/stable".
-_VERSION_RE = re.compile(r"(\d+)(?:\.(\d+)(?:\.(\d+))?)?(?:[-+][a-zA-Z0-9.+\-]*)?", re.ASCII)
+_VERSION_RE = re.compile(r"(\d+)(?:\.(\d+)(?:\.(\d+))?)?(?:[-+][a-zA-Z0-9.+\-]+)?", re.ASCII)
 
 
 @immutable_dataclass(order=True)

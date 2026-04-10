@@ -46,6 +46,13 @@ class CharmAssumesEntry:
     required_version: JujuVersion | None = None
     feature: str | None = None
 
+    @field_validator("op")
+    @classmethod
+    def _validate_op(cls, v: str | None) -> str | None:
+        if v is not None and v not in ASSUMES_OPS:
+            raise ValueError(f"Unknown juju version operator {v!r}. Expected one of: {list(ASSUMES_OPS)}")
+        return v
+
     def satisfied_by(self, juju_version: JujuVersion, features: frozenset[str] = frozenset()) -> bool:
         return all(
             [

@@ -17,7 +17,7 @@
 from typing import Any, TypedDict
 
 import pytest
-from pydantic import Field, TypeAdapter
+from pydantic import Field, TypeAdapter, ValidationError
 from pydantic.dataclasses import dataclass
 
 from bundle_builder.charm import (
@@ -1182,6 +1182,15 @@ class TestCharm:
 
         # THEN repr is charm name
         assert repr == charm.name
+
+
+class TestCharmAssumesEntryValidation:
+    def test_unknown_op_raises(self) -> None:
+        # GIVEN an unknown operator
+        # WHEN a CharmAssumesEntry is constructed with it
+        # THEN a validation error is raised
+        with pytest.raises(ValidationError):
+            CharmAssumesEntry(op="??", required_version=JujuVersion.parse("3.6"))
 
 
 class TestCharmAssumesEntrySatisfiedBy:

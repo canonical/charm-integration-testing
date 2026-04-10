@@ -62,6 +62,11 @@ class TestJujuVersionFromString:
             value="3/stable",
             raises=True,
         ),
+        Params(
+            label="empty_suffix_raises",
+            value="3-",
+            raises=True,
+        ),
     ]
 
     @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
