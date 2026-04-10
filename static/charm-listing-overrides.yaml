@@ -22,3 +22,6 @@ unlisted_charms:
   - data-integrator
   # Needs relisting
   - tempo-worker-k8s
+  # Resource Dispatcher charm not listed in Charmhub search
+  # Remove after: https://github.com/canonical/resource-dispatcher/issues/158
+  - resource-dispatcher
