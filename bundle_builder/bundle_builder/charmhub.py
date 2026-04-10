@@ -55,27 +55,6 @@ _ASSUMES_JUJU_RE = re.compile(
 )
 
 
-def parse_assumes_entry(raw: str | dict[str, Any]) -> CharmAssumesEntry:
-    """Translate a raw charmhub assumes entry (wire format) into a domain CharmAssumesEntry."""
-    if isinstance(raw, str):
-        match = _ASSUMES_JUJU_RE.match(raw)
-        if match:
-            op_str, version_str = match.group(1), match.group(2)
-            try:
-                return CharmAssumesEntry(op=op_str, required_version=JujuVersion.parse(version_str))
-            except ValueError:
-                pass
-        return CharmAssumesEntry(feature=raw)
-
-    if isinstance(raw, dict):
-        if "any-of" in raw:
-            return CharmAssumesEntry(any_of=frozenset(parse_assumes_entry(sub) for sub in raw["any-of"]))
-        if "all-of" in raw:
-            return CharmAssumesEntry(all_of=frozenset(parse_assumes_entry(sub) for sub in raw["all-of"]))
-
-    return CharmAssumesEntry(feature=str(raw))
-
-
 class CharmhubClient:
     http_client: CharmhubHttpClient
     logger: logging.Logger
@@ -254,7 +233,7 @@ class CharmhubClient:
             test_configs=self._charm_test_configs(charm_name),
             priority=self._get_charm_priority(charm_name),
             assumes=CharmAssumesEntry(
-                all_of=frozenset(parse_assumes_entry(e) for e in refresh_info.charm.metadata.assumes)
+                all_of=frozenset(self._parse_assumes_entry(e) for e in refresh_info.charm.metadata.assumes)
             ),
         )
 
@@ -312,7 +291,7 @@ class CharmhubClient:
             test_configs=self._charm_test_configs(charm_name),
             priority=self._get_charm_priority(charm_name),
             assumes=CharmAssumesEntry(
-                all_of=frozenset(parse_assumes_entry(e) for e in refresh_info.charm.metadata.assumes)
+                all_of=frozenset(self._parse_assumes_entry(e) for e in refresh_info.charm.metadata.assumes)
             ),
         )
 
@@ -364,7 +343,7 @@ class CharmhubClient:
             test_configs=self._charm_test_configs(charm_name),
             priority=self._get_charm_priority(charm_name),
             assumes=CharmAssumesEntry(
-                all_of=frozenset(parse_assumes_entry(e) for e in refresh_info.charm.metadata.assumes)
+                all_of=frozenset(self._parse_assumes_entry(e) for e in refresh_info.charm.metadata.assumes)
             ),
         )
 
@@ -407,7 +386,7 @@ class CharmhubClient:
             test_configs=self._charm_test_configs(charm_name),
             priority=self._get_charm_priority(charm_name),
             assumes=CharmAssumesEntry(
-                all_of=frozenset(parse_assumes_entry(e) for e in refresh_info.charm.metadata.assumes)
+                all_of=frozenset(self._parse_assumes_entry(e) for e in refresh_info.charm.metadata.assumes)
             ),
         )
 
@@ -656,3 +635,26 @@ class CharmhubClient:
 
     def _get_charm_priority(self, charm_name: str) -> float:
         return self.overrides_client.get_charm_priorities_mapping().get(charm_name, 1.0)
+
+    def _parse_assumes_entry(self, raw: str | dict[str, Any]) -> CharmAssumesEntry:
+        """Translate a raw charmhub assumes entry (wire format) into a domain CharmAssumesEntry."""
+        if isinstance(raw, str):
+            match = _ASSUMES_JUJU_RE.match(raw)
+            if match:
+                op_str, version_str = match.group(1), match.group(2)
+                try:
+                    return CharmAssumesEntry(op=op_str, required_version=JujuVersion.parse(version_str))
+                except ValueError:
+                    self.logger.warning(
+                        f"Could not parse Juju version constraint {raw!r}: version string {version_str!r} "
+                        "is not a valid Juju version. Treating as unsatisfied feature."
+                    )
+            return CharmAssumesEntry(feature=raw)
+
+        if isinstance(raw, dict):
+            if "any-of" in raw:
+                return CharmAssumesEntry(any_of=frozenset(self._parse_assumes_entry(sub) for sub in raw["any-of"]))
+            if "all-of" in raw:
+                return CharmAssumesEntry(all_of=frozenset(self._parse_assumes_entry(sub) for sub in raw["all-of"]))
+
+        return CharmAssumesEntry(feature=str(raw))

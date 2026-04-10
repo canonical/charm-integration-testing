@@ -21,7 +21,7 @@ import yaml
 from pydantic import Field, TypeAdapter
 from pydantic.dataclasses import dataclass
 
-from bundle_builder.charm import CharmConfigCriteria, CharmTestConfig
+from bundle_builder.charm import CharmAssumesEntry, CharmConfigCriteria, CharmTestConfig
 from bundle_builder.charmhub import CharmhubClient
 from bundle_builder.charmhub_http import (
     CharmhubBase,
@@ -33,6 +33,7 @@ from bundle_builder.charmhub_http import (
     RefreshAction,
     RefreshResponse,
 )
+from bundle_builder.juju_version import JujuVersion
 from bundle_builder.overrides import CharmMetadataOverride, CharmTestConfigs, OverridesClient
 
 
@@ -1619,3 +1620,76 @@ class TestCharmhubClient:
             assert str(charm.channel) == params.expected_channel_used
             assert charm.revision == params.expected_revision_used
             assert charm.ubuntu_arch == params.ubuntu_arch
+
+    class TestParseAssumesEntry:
+        def _client(self) -> CharmhubClient:
+            return CharmhubClient(http_client=CharmhubHttpStub(), overrides_client=OverridesStub())
+
+        def test_juju_version_constraint_parsed(self) -> None:
+            # GIVEN a valid juju version constraint string
+            # WHEN _parse_assumes_entry is called
+            result = self._client()._parse_assumes_entry("juju >= 3.5")
+
+            # THEN the entry has the correct op and required_version
+            assert result == CharmAssumesEntry(op=">=", required_version=JujuVersion.parse("3.5"))
+
+        def test_feature_string_parsed(self) -> None:
+            # GIVEN a plain feature string
+            # WHEN _parse_assumes_entry is called
+            result = self._client()._parse_assumes_entry("k8s-api")
+
+            # THEN the entry is a feature entry
+            assert result == CharmAssumesEntry(feature="k8s-api")
+
+        def test_malformed_juju_version_falls_back_to_feature(self) -> None:
+            # GIVEN a juju constraint with an invalid version string
+            # WHEN _parse_assumes_entry is called
+            result = self._client()._parse_assumes_entry("juju >= not-a-version")
+
+            # THEN the entry falls back to a feature entry (treated as unsatisfied feature)
+            assert result == CharmAssumesEntry(feature="juju >= not-a-version")
+
+        def test_malformed_juju_version_logs_warning(self, caplog: pytest.LogCaptureFixture) -> None:
+            # GIVEN a juju constraint with an invalid version string
+            import logging
+
+            with caplog.at_level(logging.WARNING):
+                # WHEN _parse_assumes_entry is called
+                self._client()._parse_assumes_entry("juju >= not-a-version")
+
+            # THEN a warning is emitted
+            assert any("not-a-version" in record.message for record in caplog.records)
+
+        def test_any_of_dict_parsed(self) -> None:
+            # GIVEN a dict with any-of
+            raw: dict = {"any-of": ["juju >= 3.5", "k8s-api"]}
+
+            # WHEN _parse_assumes_entry is called
+            result = self._client()._parse_assumes_entry(raw)
+
+            # THEN the entry is an any_of entry with parsed sub-entries
+            assert result == CharmAssumesEntry(
+                any_of=frozenset(
+                    [
+                        CharmAssumesEntry(op=">=", required_version=JujuVersion.parse("3.5")),
+                        CharmAssumesEntry(feature="k8s-api"),
+                    ]
+                )
+            )
+
+        def test_all_of_dict_parsed(self) -> None:
+            # GIVEN a dict with all-of
+            raw: dict = {"all-of": ["juju >= 3.5", "k8s-api"]}
+
+            # WHEN _parse_assumes_entry is called
+            result = self._client()._parse_assumes_entry(raw)
+
+            # THEN the entry is an all_of entry with parsed sub-entries
+            assert result == CharmAssumesEntry(
+                all_of=frozenset(
+                    [
+                        CharmAssumesEntry(op=">=", required_version=JujuVersion.parse("3.5")),
+                        CharmAssumesEntry(feature="k8s-api"),
+                    ]
+                )
+            )

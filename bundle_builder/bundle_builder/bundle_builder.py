@@ -251,6 +251,11 @@ class BundleBuilder:
 
             # Skip charm if it doesn't support the required Juju version
             if not charm.assumes.satisfied_by(node.bundle.juju_version, node.bundle.features):
+                self.logger.debug(
+                    f"Skipping charm '{charm_name}': assumes block not satisfied "
+                    f"(juju_version={node.bundle.juju_version}, features={node.bundle.features}, "
+                    f"assumes={charm.assumes})"
+                )
                 continue
 
             # Create the application
