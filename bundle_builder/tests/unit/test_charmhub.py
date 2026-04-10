@@ -1662,7 +1662,7 @@ class TestCharmhubClient:
 
         def test_any_of_dict_parsed(self) -> None:
             # GIVEN a dict with any-of
-            raw: dict = {"any-of": ["juju >= 3.5", "k8s-api"]}
+            raw: dict[str, list[str]] = {"any-of": ["juju >= 3.5", "k8s-api"]}
 
             # WHEN _parse_assumes_entry is called
             result = self._client()._parse_assumes_entry(raw)
@@ -1679,7 +1679,7 @@ class TestCharmhubClient:
 
         def test_all_of_dict_parsed(self) -> None:
             # GIVEN a dict with all-of
-            raw: dict = {"all-of": ["juju >= 3.5", "k8s-api"]}
+            raw: dict[str, list[str]] = {"all-of": ["juju >= 3.5", "k8s-api"]}
 
             # WHEN _parse_assumes_entry is called
             result = self._client()._parse_assumes_entry(raw)
