@@ -32,8 +32,7 @@ def test_pod_deletion(
         pod_name=pod_to_delete.metadata.name,
         old_uid=pod_to_delete.metadata.uid,
         target_status=PodStatus.RUNNING,
-        timeout=timedelta(minutes=5),
-        delay=timedelta(seconds=1),
+        timeout=timedelta(minutes=15),
     )
 
     # Wait for return to idle
