@@ -17,6 +17,9 @@ on:
       target_base:
         type: string
         required: true
+      target_channel:
+        type: string
+        required: true
       neighbor_charm:
         type: string
         required: true
@@ -75,8 +78,8 @@ jobs:
               "neighbor_endpoint": "${{ inputs.neighbor_endpoint }}",
               "revision": "${{ inputs.target_revision }}",
               "series": "${{ inputs.target_base }}",
-              "substrate": "${{ inputs.substrate }}",
-              "channel": "14/stable"
+              "channel": "${{ inputs.target_channel }}",
+              "substrate": "${{ inputs.substrate }}"
             }
       - name: Ensure Charm Tests Workflow Success
         shell: bash
