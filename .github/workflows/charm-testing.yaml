@@ -361,7 +361,7 @@ jobs:
       - name: Call Juju K8s Crashdump
         id: juju_k8s_crashdump
         if: ${{ !cancelled() && inputs.substrate == 'kubernetes'}}
-        uses: canonical/juju-k8s-crashdump/actions/juju-k8s-crashdump@0d02b49cd8c7e2dbb580dca20504561745b79e1c
+        uses: canonical/juju-k8s-crashdump/actions/juju-k8s-crashdump@22ef04caaeeb94ad6ed49f8392b6bada65184569  # zizmor disallows the use of latest or tags for actions, so we have to pin to a specific commit
         with:
           kubeconf: ${{ steps.setup_k8s.outputs.kubeconfig_path }}
           controller: ${{ steps.juju_resources.outputs.controller }}
