@@ -24,6 +24,7 @@ from bundle_builder.charm import (
     CharmEndpoint,
     CharmEndpointOptionality,
 )
+from bundle_builder.juju_version import JujuVersion
 
 from .conftest import CharmhubClientStub
 
@@ -123,6 +124,7 @@ class TestEndpointFeatures:
             ),
             platform="machine",
             arch="amd64",
+            juju_version=JujuVersion.parse("3.6"),
         )
 
         # AND a bundle builder
@@ -232,6 +234,7 @@ class TestEndpointFeatures:
             ),
             platform="machine",
             arch="amd64",
+            juju_version=JujuVersion.parse("3.6"),
         )
 
         # AND a bundle builder
@@ -343,6 +346,7 @@ class TestEndpointFeatures:
             ),
             platform="machine",
             arch="amd64",
+            juju_version=JujuVersion.parse("3.6"),
         )
 
         # AND a bundle builder
@@ -468,6 +472,7 @@ class TestEndpointFeatures:
             ),
             platform="machine",
             arch="amd64",
+            juju_version=JujuVersion.parse("3.6"),
         )
 
         # AND a bundle builder

@@ -26,6 +26,7 @@ from bundle_builder.charm import (
     CharmEndpointOptionality,
     CharmLimit,
 )
+from bundle_builder.juju_version import JujuVersion
 
 from .conftest import CharmhubClientStub
 
@@ -69,6 +70,7 @@ class TestDependencyCycle:
             integrations=frozenset(),
             platform="machine",
             arch="amd64",
+            juju_version=JujuVersion.parse("3.6"),
         )
         # AND a bundle builder with a charmhub client that knows about the charm
         builder = BundleBuilder(CharmhubClientStub(provides_and_requires_same_interface_charm))
@@ -135,6 +137,7 @@ class TestDependencyCycle:
             integrations=frozenset(),
             platform="machine",
             arch="amd64",
+            juju_version=JujuVersion.parse("3.6"),
         )
         # AND a bundle builder with a charmhub client that knows about the charm
         builder = BundleBuilder(CharmhubClientStub(provides_and_requires_same_interface_charm))
@@ -223,6 +226,7 @@ class TestDependencyCycle:
             integrations=frozenset(),
             platform="machine",
             arch="amd64",
+            juju_version=JujuVersion.parse("3.6"),
         )
         # AND a bundle builder with a charmhub client that knows about the charms
         builder = BundleBuilder(CharmhubClientStub(charm_a, charm_b))
@@ -306,6 +310,7 @@ class TestDependencyCycle:
             integrations=frozenset(),
             platform="machine",
             arch="amd64",
+            juju_version=JujuVersion.parse("3.6"),
         )
         # AND a bundle builder with a charmhub client that knows about the charms
         builder = BundleBuilder(CharmhubClientStub(charm_a, charm_b), avoid_application_dependency_cycles=True)

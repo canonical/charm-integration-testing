@@ -23,6 +23,7 @@ from bundle_builder.bundle import Application, ApplicationEndpoint, Bundle, Inte
 from bundle_builder.bundle_builder import BundleBuilder, Node
 from bundle_builder.charm import (
     Charm,
+    CharmAssumesEntry,
     CharmChannel,
     CharmConfigCriteria,
     CharmEndpointOptionality,
@@ -30,6 +31,7 @@ from bundle_builder.charm import (
     CharmTestConfig,
 )
 from bundle_builder.charmhub import CharmhubClient
+from bundle_builder.juju_version import JujuVersion
 
 from .test_bundle import sample_bundle_postgresql_k8s_kratos
 from .test_charm import (
@@ -192,6 +194,33 @@ class TestBundleBuilder:
         for child in children:
             assert any(app.name.startswith("postgresql-k8s") for app in child.bundle.applications)
 
+    def test_child_nodes_new_applications_skips_assumes_incompatible_charm(self) -> None:
+        # GIVEN a candidate charm that requires a juju version incompatible with the bundle
+        incompatible_charm = dataclasses.replace(
+            sample_charm_postgresql_k8s(),
+            assumes=CharmAssumesEntry(
+                all_of=frozenset([CharmAssumesEntry(op=">=", required_version=JujuVersion(major=99, minor=0))])
+            ),
+        )
+
+        class IncompatibleCharmStub(CharmhubClientStub):
+            def charm_from_store(self, charm_name: str, ubuntu_arch: str, **kwargs: object) -> Charm | None:  # type: ignore[override]
+                if charm_name == "postgresql-k8s":
+                    return incompatible_charm
+                return super().charm_from_store(charm_name, ubuntu_arch)
+
+        stub = IncompatibleCharmStub()
+        builder = BundleBuilder(charmhub_client=stub)
+        node = sample_node_kratos()
+
+        # WHEN child nodes are generated for an unfulfilled endpoint
+        children = builder.child_nodes_new_applications(node, ApplicationEndpoint("kratos", "pg-database"))
+
+        # THEN the incompatible charm is not added as a child
+        assert all(
+            not any(app.charm.name == "postgresql-k8s" for app in child.bundle.applications) for child in children
+        )
+
     def test_child_nodes_existing_applications_validates_endpoint_features(self) -> None:
         # GIVEN a provider charm with limited features (only compression, not SSL)
         provider_charm = dataclasses.replace(
@@ -249,6 +278,7 @@ class TestBundleBuilder:
             integrations=frozenset(),
             platform="machine",
             arch="amd64",
+            juju_version=JujuVersion.parse("3.0"),
         )
 
         stub = CharmhubClientStub()
@@ -320,6 +350,7 @@ class TestBundleBuilder:
             integrations=frozenset(),
             platform="machine",
             arch="amd64",
+            juju_version=JujuVersion.parse("3.0"),
         )
 
         stub = CharmhubClientStub()
@@ -383,6 +414,7 @@ class TestBundleBuilder:
             integrations=frozenset(),
             platform="machine",
             arch="amd64",
+            juju_version=JujuVersion.parse("3.0"),
         )
 
         stub = CharmhubClientStub()
@@ -472,6 +504,7 @@ class TestBundleBuilder:
                 ),
                 platform="machine",
                 arch="amd64",
+                juju_version=JujuVersion.parse("3.0"),
             )
 
             # WHEN checking if we can add another integration
@@ -531,6 +564,7 @@ class TestBundleBuilder:
                 ),
                 platform="machine",
                 arch="amd64",
+                juju_version=JujuVersion.parse("3.0"),
             )
 
             # WHEN checking if we can add another integration
@@ -589,6 +623,7 @@ class TestBundleBuilder:
                 ),
                 platform="machine",
                 arch="amd64",
+                juju_version=JujuVersion.parse("3.0"),
             )
 
             # WHEN checking if we can add another integration
@@ -617,6 +652,7 @@ class TestDuplicateCharms:
             integrations=frozenset(),
             platform="kubernetes",
             arch="amd64",
+            juju_version=JujuVersion.parse("3.0"),
         )
 
         # WHEN checking if we would exceed the limit
@@ -643,6 +679,7 @@ class TestDuplicateCharms:
             integrations=frozenset(),
             platform="kubernetes",
             arch="amd64",
+            juju_version=JujuVersion.parse("3.0"),
         )
 
         # WHEN checking if we would exceed the limit
@@ -667,6 +704,7 @@ class TestDuplicateCharms:
             integrations=frozenset(),
             platform="kubernetes",
             arch="amd64",
+            juju_version=JujuVersion.parse("3.0"),
         )
 
         bundle2 = Bundle(
@@ -678,6 +716,7 @@ class TestDuplicateCharms:
             integrations=frozenset(),
             platform="kubernetes",
             arch="amd64",
+            juju_version=JujuVersion.parse("3.0"),
         )
 
         # WHEN creating nodes from these bundles
@@ -746,6 +785,7 @@ class TestDuplicateCharms:
             ),
             platform="kubernetes",
             arch="amd64",
+            juju_version=JujuVersion.parse("3.0"),
         )
 
         # THEN each database should have exactly one connection (respecting the limit)
@@ -784,6 +824,7 @@ class TestAddTestConfigs:
                 integrations=frozenset(),
                 platform="kubernetes",
                 arch="amd64",
+                juju_version=JujuVersion.parse("3.0"),
             )
 
             # WHEN add_test_configs is called
@@ -852,6 +893,7 @@ class TestAddTestConfigs:
                 ),
                 platform="kubernetes",
                 arch="amd64",
+                juju_version=JujuVersion.parse("3.0"),
             )
 
             # WHEN add_test_configs is called
@@ -873,6 +915,7 @@ class TestAddTestConfigs:
                 integrations=frozenset(),
                 platform="kubernetes",
                 arch="amd64",
+                juju_version=JujuVersion.parse("3.0"),
             )
 
             # WHEN add_test_configs is called
@@ -899,6 +942,7 @@ class TestAddTestConfigs:
                 integrations=frozenset(),
                 platform="kubernetes",
                 arch="amd64",
+                juju_version=JujuVersion.parse("3.0"),
             )
 
             # WHEN add_test_configs is called (channel is latest/stable, not 1.0/stable)
@@ -942,6 +986,7 @@ class TestAddTestConfigs:
                 integrations=frozenset(),
                 platform="kubernetes",
                 arch="amd64",
+                juju_version=JujuVersion.parse("3.0"),
             )
 
             # WHEN add_test_configs is called
@@ -974,6 +1019,7 @@ class TestAddTestConfigs:
                 integrations=frozenset(),
                 platform="kubernetes",
                 arch="amd64",
+                juju_version=JujuVersion.parse("3.0"),
             )
 
             # WHEN add_test_configs is called
@@ -1048,6 +1094,7 @@ class TestAddTestConfigs:
                 ),
                 platform="kubernetes",
                 arch="amd64",
+                juju_version=JujuVersion.parse("3.0"),
             )
 
             # WHEN add_test_configs is called
