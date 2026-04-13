@@ -438,7 +438,7 @@ class JubilantBackend(JujuCmdBackend):
         } in [{integration.provider, integration.requirer} for integration in self.list_integrations(model)]
 
     def version(self, model: str) -> str:
-        return str(self.client.model(model).status().model.version).strip()
+        return str(self.status(model).model.version).strip()
 
     def cli_version(self) -> str:
         return str(self.client.model(None).version()).strip()
