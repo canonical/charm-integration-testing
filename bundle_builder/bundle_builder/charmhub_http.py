@@ -77,6 +77,7 @@ class CharmMetadata:
     peers: dict[str, Endpoint] = Field(default_factory=dict)
     requires: dict[str, Endpoint] = Field(default_factory=dict)
     provides: dict[str, Endpoint] = Field(default_factory=dict)
+    assumes: list[str | dict[str, Any]] = Field(default_factory=list)
 
     if TYPE_CHECKING:  # so mypy knows the class can be constructed from a dict
 
@@ -85,6 +86,7 @@ class CharmMetadata:
             peers: dict[str, Endpoint | dict[str, Any]] = ...,
             requires: dict[str, Endpoint | dict[str, Any]] = ...,
             provides: dict[str, Endpoint | dict[str, Any]] = ...,
+            assumes: list[str | dict[str, Any]] = ...,
         ): ...
 
     @model_validator(mode="before")
@@ -104,6 +106,7 @@ class CharmMetadata:
                             "peers": check_dict.get("peers", {}),
                             "requires": check_dict.get("requires", {}),
                             "provides": check_dict.get("provides", {}),
+                            "assumes": check_dict.get("assumes", []),
                         }
         return data
 

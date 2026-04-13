@@ -26,6 +26,7 @@ from bundle_builder.charm import (
     CharmEndpointOptionality,
     CharmLimit,
 )
+from bundle_builder.juju_version import JujuVersion
 
 from .conftest import CharmhubClientStub
 
@@ -62,6 +63,7 @@ class TestEndpointLimits:
                 integrations=frozenset(),
                 platform="machine",
                 arch="amd64",
+                juju_version=JujuVersion.parse("3.6"),
             )
 
             # AND a bundle builder with a charmhub client that knows about the charm
@@ -127,6 +129,7 @@ class TestEndpointLimits:
                 integrations=frozenset(),
                 platform="machine",
                 arch="amd64",
+                juju_version=JujuVersion.parse("3.6"),
             )
             # AND a bundle builder with a charmhub client that knows about the charms
             builder = BundleBuilder(CharmhubClientStub(zero_limit_charm, requiring_charm))
@@ -210,6 +213,7 @@ class TestEndpointLimits:
                 ),
                 platform="machine",
                 arch="amd64",
+                juju_version=JujuVersion.parse("3.6"),
             )
             # AND a bundle builder with a charmhub client that knows about the charms
             builder = BundleBuilder(CharmhubClientStub(charm1, charm2))
@@ -333,6 +337,7 @@ class TestEndpointLimits:
                 ),
                 platform="kubernetes",
                 arch="amd64",
+                juju_version=JujuVersion.parse("3.6"),
             )
             # AND a bundle builder with a charmhub client that knows about the charms
             builder = BundleBuilder(CharmhubClientStub(postgresql_charm, indico_charm, dependency_charm))
@@ -443,6 +448,7 @@ class TestEndpointLimits:
                 ),
                 platform="kubernetes",
                 arch="amd64",
+                juju_version=JujuVersion.parse("3.6"),
             )
             # AND a bundle builder with a charmhub client that knows about the charm
             builder = BundleBuilder(CharmhubClientStub(self_ref_charm, app_charm))
@@ -596,6 +602,7 @@ class TestEndpointLimits:
                 integrations=frozenset(),
                 platform="kubernetes",
                 arch="amd64",
+                juju_version=JujuVersion.parse("3.6"),
             )
 
             # WHEN building the bundle
@@ -697,6 +704,7 @@ class TestEndpointLimits:
                 integrations=frozenset(),
                 platform="kubernetes",
                 arch="amd64",
+                juju_version=JujuVersion.parse("3.6"),
             )
 
             # WHEN building the bundle
