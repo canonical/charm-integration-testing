@@ -1633,6 +1633,30 @@ class TestCharmhubClient:
             # THEN the entry has the correct op and required_version
             assert result == CharmAssumesEntry(op=">=", required_version=JujuVersion.parse("3.5"))
 
+        def test_juju_version_constraint_no_whitespace_parsed(self) -> None:
+            # GIVEN a juju version constraint string with no whitespace around the operator
+            # WHEN _parse_assumes_entry is called
+            result = self._client()._parse_assumes_entry("juju>=3.5")
+
+            # THEN the entry has the correct op and required_version
+            assert result == CharmAssumesEntry(op=">=", required_version=JujuVersion.parse("3.5"))
+
+        def test_juju_version_constraint_no_whitespace_single_char_op_parsed(self) -> None:
+            # GIVEN a juju version constraint string with a single-char operator and no whitespace
+            # WHEN _parse_assumes_entry is called
+            result = self._client()._parse_assumes_entry("juju>3.5")
+
+            # THEN the entry has the correct op and required_version
+            assert result == CharmAssumesEntry(op=">", required_version=JujuVersion.parse("3.5"))
+
+        def test_juju_version_constraint_mixed_whitespace_parsed(self) -> None:
+            # GIVEN a juju version constraint string with whitespace only before the operator
+            # WHEN _parse_assumes_entry is called
+            result = self._client()._parse_assumes_entry("juju >=3.5")
+
+            # THEN the entry has the correct op and required_version
+            assert result == CharmAssumesEntry(op=">=", required_version=JujuVersion.parse("3.5"))
+
         def test_feature_string_parsed(self) -> None:
             # GIVEN a plain feature string
             # WHEN _parse_assumes_entry is called

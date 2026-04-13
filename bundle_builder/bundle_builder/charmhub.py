@@ -47,11 +47,12 @@ from .overrides import CharmMetadataOverride, OverridesClient
 
 _T = TypeVar("_T")
 
-# Matches juju version constraint strings in charm assumes blocks e.g. "juju >= 3.0"
+# Matches juju version constraint strings in charm assumes blocks e.g. "juju >= 3.0" or "juju>=3.0"
 # Operators are sorted by descending length so longer ops (>=, <=, ==) are tried before
 # their single-char prefixes (>, <) to avoid prefix shadowing in alternation.
+# Whitespace around the operator is optional to support both "juju >= 3.0" and "juju>=3.0".
 _ASSUMES_JUJU_RE = re.compile(
-    rf"^juju\s+({'|'.join(re.escape(op) for op in sorted(ASSUMES_OPS, key=len, reverse=True))})\s+(\S+)$"
+    rf"^juju\s*({'|'.join(re.escape(op) for op in sorted(ASSUMES_OPS, key=len, reverse=True))})\s*(\S+)$"
 )
 
 
