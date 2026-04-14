@@ -49,7 +49,6 @@ on:
         default: default
       downgrade_revision:
         description: Revision number to downgrade to during testing, if applicable.
-          Found via Test Observer if not provided.
         required: false
         default: default
       channel:
