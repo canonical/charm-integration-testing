@@ -56,40 +56,37 @@ def test_logs_privacy_check(
     This test scans collected logs with TruffleHog to detect secrets.
 
     Outcomes:
-    - ERROR: Docker is unavailable or scan times out (test cannot run)
+    - ERROR: TruffleHog is unavailable or scan times out (test cannot run)
     - FAILED: Secrets are found in logs
     - PASSED: No secrets found
     """
     logger.info(f"Scanning logs from {debug_logs_directory} for secrets")
 
-    # Check if docker is available
+    # Check if trufflehog is available
     try:
         subprocess.run(  # nosec B603, B607
-            ["docker", "--version"],
+            ["trufflehog", "--version"],
             check=True,
             capture_output=True,
             timeout=10,
         )
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
-        raise RuntimeError(f"Docker is not available (required for privacy check): {e}") from e
+        raise RuntimeError(
+            f"Error checking for TruffleHog CLI: {e}\n"
+        ) from e
 
     # Run TruffleHog
     logger.info("Running TruffleHog secret scanner")
 
-    docker_cmd = [
-        "docker",
-        "run",
-        "--rm",
-        "-v",
-        f"{debug_logs_directory}:/scan-logs:ro",
-        "ghcr.io/trufflesecurity/trufflehog@sha256:b356cc273ab8c786fe2a54f20d2bec1f67438df4ca070e5c7d5a1283e18917cb",
+    trufflehog_cmd = [
+        "trufflehog",
         "filesystem",
-        "/scan-logs",
+        str(debug_logs_directory),
     ]
 
     try:
         result = subprocess.run(  # nosec B603
-            docker_cmd,
+            trufflehog_cmd,
             capture_output=True,
             text=True,
             timeout=600,  # 10 minutes timeout for scanning
