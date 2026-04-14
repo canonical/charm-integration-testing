@@ -71,9 +71,7 @@ def test_logs_privacy_check(
             timeout=10,
         )
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
-        raise RuntimeError(
-            f"Error checking for TruffleHog CLI: {e}\n"
-        ) from e
+        raise RuntimeError(f"Error checking for TruffleHog CLI: {e}\n") from e
 
     # Run TruffleHog
     logger.info("Running TruffleHog secret scanner")
