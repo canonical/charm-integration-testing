@@ -23,7 +23,7 @@ from extensions import (
     UnsealVaultK8sJujuExtension,
     ValidatorInjectorExtension,
 )
-from juju import JujuBackend, JujuClient, JujuValidationError, JujuWaitTimeoutError
+from juju import JujuBackend, JujuClient, JujuValidationError, JujuVersion, JujuWaitTimeoutError
 from juju_jubilant import JubilantBackend
 from kubernetes_client import KubernetesBackend, KubernetesClient
 from pydantic import TypeAdapter, ValidationError
@@ -525,7 +525,7 @@ def juju_controller(request: pytest.FixtureRequest) -> str:
 
 
 @pytest.fixture
-def juju_cli_version(juju_backend: JujuBackend) -> str:
+def juju_cli_version(juju_backend: JujuBackend) -> JujuVersion:
     """Juju version resolved from the installed Juju CLI."""
     return juju_backend.cli_version()
 
@@ -936,7 +936,7 @@ def record_juju_execution_metadata(
     yield
 
     # Save Juju version
-    juju_version = juju_client.version(model)
+    juju_version = str(juju_client.version(model))
     execution_metadata("juju:version", juju_version)
 
 

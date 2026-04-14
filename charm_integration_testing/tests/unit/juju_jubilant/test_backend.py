@@ -11,6 +11,7 @@ import jubilant
 import pytest
 import yaml
 from juju import JujuIntegrationApplication, JujuWaitState, JujuWaitTimeoutError
+from juju.version import JujuVersion
 from juju_jubilant.backend import JubilantBackend
 from juju_jubilant.client import JubilantClient
 from juju_jubilant.wait import _parse_bundle
@@ -1182,12 +1183,16 @@ class TestJubilantBackend:
             calls: list[tuple[str, ...]] = field(default_factory=list)
             response: str = ""
             fail_with_task_error: bool = False
+            juju_version: str = "3.6.1-ubuntu-amd64"
 
             def cli(self, *args: str) -> str:
                 self.calls.append(tuple(args))
                 if self.fail_with_task_error:
                     raise jubilant.CLIError(1, ["juju"], self.response, "ERROR the following task failed")
                 return self.response
+
+            def version(self) -> str:
+                return self.juju_version
 
         # Stub that provides both cli() (for exec) and status() (for leader resolution).
         class ExecAndStatusStub:
@@ -1244,8 +1249,11 @@ class TestJubilantBackend:
             assert result.stderr == ""
 
         def test_exec_with_operator(self) -> None:
-            # GIVEN
-            stub = self.ExecCliStub(response=self._exec_yaml("myapp/0", 0, stdout="hello\n"))
+            # GIVEN a Juju 3 backend
+            stub = self.ExecCliStub(
+                response=self._exec_yaml("myapp/0", 0, stdout="hello\n"),
+                juju_version="3.6.1-ubuntu-amd64",
+            )
             client = JubilantClientStub(client=stub)
 
             # WHEN operator=True is passed
@@ -1254,6 +1262,26 @@ class TestJubilantBackend:
             # THEN --operator appears after --unit but before "--"
             assert stub.calls == [("exec", "--format", "yaml", "--unit", "myapp/0", "--operator", "--", "echo hello")]
             assert result.return_code == 0
+
+        def test_exec_with_operator_on_juju4_warns(self) -> None:
+            # GIVEN a Juju 4 backend
+            stub = self.ExecCliStub(
+                response=self._exec_yaml("myapp/0", 0, stdout="hello\n"),
+                juju_version="4.0.0-ubuntu-amd64",
+            )
+            client = JubilantClientStub(client=stub)
+
+            # WHEN operator=True is passed
+            import warnings
+
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                JubilantBackend(client).exec_unit("test-model", "myapp/0", "echo hello", operator=True)
+
+            # THEN a warning is emitted and --operator is NOT passed
+            assert len(caught) == 1
+            assert "--operator" in str(caught[0].message)
+            assert stub.calls == [("exec", "--format", "yaml", "--unit", "myapp/0", "--", "echo hello")]
 
         def test_exec_nonzero_return_code(self) -> None:
             # GIVEN a command that exits non-zero (juju exec raises CLIError with "task failed")
@@ -1919,8 +1947,8 @@ class TestJubilantBackendVersion:
         # WHEN
         result = backend.version("test-model")
 
-        # THEN the version string is returned
-        assert result == "3.6.1-ubuntu-amd64"
+        # THEN the version is parsed and returned as a JujuVersion
+        assert result == JujuVersion(3, 6, 1)
 
 
 class TestJubilantBackendCliVersion:
@@ -1939,8 +1967,8 @@ class TestJubilantBackendCliVersion:
         # WHEN
         result = backend.cli_version()
 
-        # THEN the version string is returned stripped
-        assert result == "3.6.1-ubuntu-amd64"
+        # THEN the version is parsed and returned as a JujuVersion
+        assert result == JujuVersion(3, 6, 1)
 
     def test_passes_none_model_to_client(self) -> None:
         # GIVEN a client stub that records which model was requested
