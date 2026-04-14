@@ -10,6 +10,7 @@ from juju import JujuValidationError
 from juju.client import JujuClient
 from juju.extension import JujuExtension
 from juju.models import JujuApplicationInfo
+from juju.version import JujuVersion
 
 from validators.base.validator import ValidationCheck, ValidationResult
 
@@ -505,11 +506,11 @@ class VersionBackendStub(NullJujuBackend):
     _version: str = "3.6.1"
     _cli_version: str = "3.6.1-ubuntu-amd64"
 
-    def version(self, model: str) -> str:
-        return self._version
+    def version(self, model: str) -> JujuVersion:
+        return JujuVersion.parse(self._version)
 
-    def cli_version(self) -> str:
-        return self._cli_version
+    def cli_version(self) -> JujuVersion:
+        return JujuVersion.parse(self._cli_version)
 
 
 class TestJujuClientVersion:
@@ -524,10 +525,10 @@ class TestJujuClientVersion:
         backend = VersionBackendStub(_version="3.6.1")
         client = self._client(logger, backend)
 
-        assert client.version("mymodel") == "3.6.1"
+        assert client.version("mymodel") == JujuVersion(3, 6, 1)
 
     def test_delegates_cli_version_to_backend(self, logger: LoggerStub) -> None:
         backend = VersionBackendStub(_cli_version="3.6.1-ubuntu-amd64")
         client = self._client(logger, backend)
 
-        assert client.cli_version() == "3.6.1-ubuntu-amd64"
+        assert client.cli_version() == JujuVersion(3, 6, 1)
