@@ -7,7 +7,6 @@ import logging
 import os
 import secrets
 import string
-import subprocess  # nosec B404
 import tempfile
 import warnings
 from pathlib import Path
@@ -621,7 +620,7 @@ def ubuntu_pro_token() -> str | None:
 
 
 @pytest.fixture
-def debug_logs_directory(model: str, logger: logging.Logger) -> Iterator[Path]:
+def debug_logs_directory(juju_backend: JujuBackend, model: str, logger: logging.Logger) -> Iterator[Path]:
     """Provide a directory with collected debug logs from Juju.
 
     Logs are collected during test setup (not teardown), ensuring they're available
@@ -639,23 +638,16 @@ def debug_logs_directory(model: str, logger: logging.Logger) -> Iterator[Path]:
         debug_log_file = logs_dir / "debug.log"
 
         try:
-            with open(debug_log_file, "wb") as log_file:
-                subprocess.run(  # nosec B603, B607
-                    ["juju", "debug-log", "--model", model, "--replay", "--no-tail"],
-                    stdout=log_file,
-                    check=True,
-                    timeout=300,
-                )
+            debug_log = juju_backend.client.model(model).debug_log()  # type: ignore[attr-defined]
+            debug_log_file.write_text(debug_log)
 
             log_size = debug_log_file.stat().st_size
             logger.info(f"Collected {log_size} bytes of debug logs to {debug_log_file}")
 
             yield logs_dir
 
-        except subprocess.TimeoutExpired:
-            logger.exception("Timeout while collecting logs")
-        except subprocess.CalledProcessError:
-            logger.exception("juju debug-log failed")
+        except Exception:
+            logger.exception("Failed to collect debug logs")
 
 
 failure_message: StashKey[str] = StashKey()
