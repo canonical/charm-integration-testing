@@ -24,6 +24,17 @@ def test_pod_deletion(
     assert len(pods) > 0, f"No pods found in namespace {model} to delete."
 
     pod_to_delete = pods[0]
+
+    # Wait for the application-config Secret to reference a live controller address before
+    # deleting the pod. After a model migration the Secret may still point to the old
+    # controller; charm-init reads it cold on startup and will CrashLoopBackOff if the
+    # address is stale. See: https://github.com/juju/juju/issues/22114
+    kubernetes_client.wait_for_application_config_secret(
+        namespace=model,
+        application=target_application,
+        timeout=timedelta(minutes=2),
+    )
+
     kubernetes_client.delete_pod(namespace=model, pod_name=pod_to_delete.metadata.name)
 
     # Wait for the pod to be deleted and a new one to be created

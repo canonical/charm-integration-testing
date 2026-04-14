@@ -1,8 +1,10 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import base64
 import logging
 import re
+import socket
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from time import sleep
@@ -150,6 +152,65 @@ class KubernetesClient:
         return self.wait(
             check=check,
             timeout_message=f"Pod {pod_name} in namespace {namespace} was not recreated or did not reach {target_status.value} status within timeout",
+            timeout=timeout,
+            delay=delay,
+        )
+
+    def wait_for_application_config_secret(
+        self, namespace: str, application: str, timeout: timedelta | None = None, delay: timedelta | None = None
+    ) -> None:
+        """Wait until every controller hostname in the application-config Secret resolves in DNS.
+
+        Juju stores the controller API addresses in the {app}-application-config Secret read
+        by charm-init on pod startup. After a model migration the Secret may still reference
+        the old (now-destroyed) controller's in-cluster hostname until Juju's
+        caasapplicationprovisioner reconciles it on the destination controller. Deleting a pod
+        before this reconciliation completes causes charm-init to CrashLoopBackOff.
+
+        See: https://github.com/juju/juju/issues/22114
+
+        Args:
+            namespace: Kubernetes namespace (Juju model name) where the secret lives.
+            application: Juju application name; secret is named {application}-application-config.
+            timeout: Maximum time to wait. Defaults to the client default_timeout.
+            delay: Polling interval. Defaults to the client default_delay.
+
+        Raises:
+            TimeoutError: If the secret does not converge to valid addresses within timeout.
+        """
+        secret_name = f"{application}-application-config"
+        self.logger.info(f"Waiting for secret {secret_name} to reference resolvable controller addresses")
+
+        def check() -> bool | None:
+            try:
+                secret = self.backend.core_v1_api.read_namespaced_secret(name=secret_name, namespace=namespace)
+            except ApiException as e:
+                if e.status == 404:
+                    return None
+                raise
+
+            if not secret.data:
+                return None
+
+            for key, encoded in secret.data.items():
+                value = base64.b64decode(encoded).decode()
+                for entry in value.split(","):
+                    host = entry.strip().rsplit(":", 1)[0]
+                    if ".svc.cluster.local" not in host:
+                        continue
+                    try:
+                        socket.getaddrinfo(host, None)
+                    except socket.gaierror:
+                        self.logger.debug(
+                            f"Secret {secret_name}: key {key!r} references unresolvable host {host!r}, waiting"
+                        )
+                        return None
+
+            return True
+
+        self.wait(
+            check=check,
+            timeout_message=f"Secret {secret_name} in namespace {namespace} still references unresolvable controller addresses after timeout",
             timeout=timeout,
             delay=delay,
         )
