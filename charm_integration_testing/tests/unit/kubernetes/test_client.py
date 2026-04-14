@@ -1,7 +1,9 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import base64
 import logging
+import socket
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from datetime import timedelta
@@ -35,6 +37,11 @@ class V1PodListStub:
 
 
 @dataclass
+class V1SecretStub:
+    data: dict[str, bytes] | None
+
+
+@dataclass
 class KubernetesBackendStub(KubernetesBackend):
     """Stub for KubernetesClient."""
 
@@ -48,6 +55,8 @@ class KubernetesBackendStub(KubernetesBackend):
     patch_stateful_set_last_body: dict[str, Any] | None = None
     read_stateful_set_result: "V1StatefulSetStub | None" = None
     read_stateful_set_raises: Exception | None = None
+    read_namespaced_secret_result: V1SecretStub | None = None
+    read_namespaced_secret_raises: Exception | None = None
 
     def __post_init__(self) -> None:
         self.core_v1_api = self
@@ -80,6 +89,12 @@ class KubernetesBackendStub(KubernetesBackend):
 
     def list_namespaced_stateful_set(self, namespace: str, **kwargs: Any) -> None:
         pass
+
+    def read_namespaced_secret(self, name: str, namespace: str) -> V1SecretStub:
+        if self.read_namespaced_secret_raises:
+            raise self.read_namespaced_secret_raises
+        assert self.read_namespaced_secret_result is not None
+        return self.read_namespaced_secret_result
 
 
 @dataclass
@@ -772,3 +787,289 @@ class TestKubernetesClientInit:
 
             # THEN None counts are treated as 0 so the first event is skipped, and the method
             # returns without raising once actual counts reach the desired replica count
+
+    class TestWaitForApplicationConfigSecret:
+        """Test suite for wait_for_application_config_secret method."""
+
+        def _make_secret(self, **kwargs: str) -> V1SecretStub:
+            """Return a V1SecretStub whose data values are base64-encoded."""
+            return V1SecretStub(data={key: base64.b64encode(value.encode()) for key, value in kwargs.items()})
+
+        @patch("kubernetes_client.client.socket.getaddrinfo")
+        def test_cluster_local_host_resolves_immediately(self, mock_getaddrinfo: MagicMock) -> None:
+            # GIVEN a secret whose only cluster-local host resolves on the first check
+            secret = self._make_secret(controller="controller.test-ns.svc.cluster.local:17070")
+            backend_stub = KubernetesBackendStub(read_namespaced_secret_result=secret)
+            client = KubernetesClient(
+                backend=backend_stub,
+                default_timeout=timedelta(seconds=5),
+                default_delay=timedelta(milliseconds=100),
+            )
+
+            # WHEN waiting for the secret to converge
+            client.wait_for_application_config_secret(namespace="test-ns", application="myapp")
+
+            # THEN socket.getaddrinfo is called with the host (port stripped)
+            mock_getaddrinfo.assert_called_once_with("controller.test-ns.svc.cluster.local", None)
+
+        def test_non_cluster_local_hosts_skipped(self) -> None:
+            # GIVEN a secret with only external (non-.svc.cluster.local) addresses
+            secret = self._make_secret(addresses="10.0.0.1:17070,192.168.1.2:17070")
+            backend_stub = KubernetesBackendStub(read_namespaced_secret_result=secret)
+            client = KubernetesClient(
+                backend=backend_stub,
+                default_timeout=timedelta(seconds=5),
+                default_delay=timedelta(milliseconds=100),
+            )
+
+            # WHEN waiting for the secret to converge
+            # THEN no DNS lookups are performed and the method returns immediately
+            with patch("kubernetes_client.client.socket.getaddrinfo") as mock_getaddrinfo:
+                client.wait_for_application_config_secret(namespace="test-ns", application="myapp")
+                mock_getaddrinfo.assert_not_called()
+
+        def test_empty_data_dict_waits(self) -> None:
+            # GIVEN a secret whose data dict is empty (treated as falsy, same as no data)
+            secret = V1SecretStub(data={})
+            backend_stub = KubernetesBackendStub(read_namespaced_secret_result=secret)
+            client = KubernetesClient(
+                backend=backend_stub,
+                default_timeout=timedelta(milliseconds=200),
+                default_delay=timedelta(milliseconds=50),
+            )
+
+            # WHEN waiting for the secret to converge
+            # THEN the method times out because an empty dict is falsy and treated as no data
+            with pytest.raises(TimeoutError):
+                client.wait_for_application_config_secret(namespace="test-ns", application="myapp")
+
+        @patch("kubernetes_client.client.sleep")
+        def test_secret_not_found_then_found(self, mock_sleep: MagicMock) -> None:
+            # GIVEN the secret is absent (404) on the first check, then present on the second
+            secret = self._make_secret(controller="controller.test-ns.svc.cluster.local:17070")
+            call_count = 0
+
+            def read_secret(name: str, namespace: str) -> V1SecretStub:
+                nonlocal call_count
+                call_count += 1
+                if call_count == 1:
+                    raise ApiException(status=404, reason="Not Found")
+                return secret
+
+            mock_backend = MagicMock()
+            mock_backend.core_v1_api.read_namespaced_secret.side_effect = read_secret
+            client = KubernetesClient(
+                backend=mock_backend,
+                default_timeout=timedelta(seconds=10),
+                default_delay=timedelta(seconds=1),
+            )
+
+            # WHEN waiting for the secret to converge
+            with patch("kubernetes_client.client.socket.getaddrinfo"):
+                client.wait_for_application_config_secret(namespace="test-ns", application="myapp")
+
+            # THEN the method retried after the 404
+            assert mock_sleep.call_count >= 1
+
+        @patch("kubernetes_client.client.sleep")
+        def test_secret_has_no_data_then_populated(self, mock_sleep: MagicMock) -> None:
+            # GIVEN a secret that initially has no data, then is populated
+            secret_no_data = V1SecretStub(data=None)
+            secret_with_data = self._make_secret(controller="controller.test-ns.svc.cluster.local:17070")
+            results = iter([secret_no_data, secret_with_data])
+            mock_backend = MagicMock()
+            mock_backend.core_v1_api.read_namespaced_secret.side_effect = lambda name, namespace: next(results)
+            client = KubernetesClient(
+                backend=mock_backend,
+                default_timeout=timedelta(seconds=10),
+                default_delay=timedelta(seconds=1),
+            )
+
+            # WHEN waiting for the secret to converge
+            with patch("kubernetes_client.client.socket.getaddrinfo"):
+                client.wait_for_application_config_secret(namespace="test-ns", application="myapp")
+
+            # THEN the method retried after seeing no data
+            assert mock_sleep.call_count >= 1
+
+        @patch("kubernetes_client.client.sleep")
+        def test_unresolvable_host_then_resolves(self, mock_sleep: MagicMock) -> None:
+            # GIVEN a cluster-local host that fails DNS twice then succeeds
+            secret = self._make_secret(controller="controller.test-ns.svc.cluster.local:17070")
+            backend_stub = KubernetesBackendStub(read_namespaced_secret_result=secret)
+            client = KubernetesClient(
+                backend=backend_stub,
+                default_timeout=timedelta(seconds=10),
+                default_delay=timedelta(seconds=1),
+            )
+
+            gaierror_call_count = 0
+
+            def getaddrinfo_side_effect(host: str, port: object) -> list[object]:
+                nonlocal gaierror_call_count
+                gaierror_call_count += 1
+                if gaierror_call_count <= 2:
+                    raise socket.gaierror("Name or service not known")
+                return [("AF_INET", None, None, None, ("10.0.0.1", 0))]
+
+            # WHEN waiting for the secret to converge
+            with patch("kubernetes_client.client.socket.getaddrinfo", side_effect=getaddrinfo_side_effect):
+                client.wait_for_application_config_secret(namespace="test-ns", application="myapp")
+
+            # THEN the method retried until DNS resolved
+            assert mock_sleep.call_count >= 2
+
+        @patch("kubernetes_client.client.sleep")
+        @patch("kubernetes_client.client.datetime")
+        def test_timeout_when_host_never_resolves(self, mock_datetime: MagicMock, mock_sleep: MagicMock) -> None:
+            # GIVEN the cluster-local host never resolves
+            from datetime import datetime
+
+            start_time = datetime(2026, 4, 14, 10, 0, 0)
+            timeout_time = datetime(2026, 4, 14, 10, 5, 1)
+            mock_datetime.now.side_effect = [start_time, timeout_time]
+
+            secret = self._make_secret(controller="controller.test-ns.svc.cluster.local:17070")
+            backend_stub = KubernetesBackendStub(read_namespaced_secret_result=secret)
+            client = KubernetesClient(
+                backend=backend_stub,
+                default_timeout=timedelta(minutes=5),
+                default_delay=timedelta(seconds=1),
+            )
+
+            # WHEN waiting for the secret to converge
+            # THEN a TimeoutError is raised containing the secret name
+            with patch(
+                "kubernetes_client.client.socket.getaddrinfo", side_effect=socket.gaierror("Name or service not known")
+            ):
+                with pytest.raises(TimeoutError) as exc_info:
+                    client.wait_for_application_config_secret(namespace="test-ns", application="myapp")
+
+            assert "myapp-application-config" in str(exc_info.value)
+
+        def test_non_404_api_exception_propagates(self) -> None:
+            # GIVEN the Kubernetes API returns a 500 error
+            api_error = ApiException(status=500, reason="Internal Server Error")
+            backend_stub = KubernetesBackendStub(read_namespaced_secret_raises=api_error)
+            client = KubernetesClient(
+                backend=backend_stub,
+                default_timeout=timedelta(seconds=5),
+                default_delay=timedelta(milliseconds=100),
+            )
+
+            # WHEN waiting for the secret to converge
+            # THEN the ApiException is re-raised
+            with pytest.raises(ApiException) as exc_info:
+                client.wait_for_application_config_secret(namespace="test-ns", application="myapp")
+
+            assert exc_info.value.status == 500
+
+        @patch("kubernetes_client.client.socket.getaddrinfo")
+        def test_comma_separated_entries_all_checked(self, mock_getaddrinfo: MagicMock) -> None:
+            # GIVEN a single key whose value contains two cluster-local entries
+            secret = self._make_secret(addresses="ctrl-a.ns.svc.cluster.local:17070,ctrl-b.ns.svc.cluster.local:17070")
+            backend_stub = KubernetesBackendStub(read_namespaced_secret_result=secret)
+            client = KubernetesClient(
+                backend=backend_stub,
+                default_timeout=timedelta(seconds=5),
+                default_delay=timedelta(milliseconds=100),
+            )
+
+            # WHEN waiting for the secret to converge
+            client.wait_for_application_config_secret(namespace="ns", application="myapp")
+
+            # THEN both hosts are looked up
+            assert mock_getaddrinfo.call_count == 2
+            mock_getaddrinfo.assert_any_call("ctrl-a.ns.svc.cluster.local", None)
+            mock_getaddrinfo.assert_any_call("ctrl-b.ns.svc.cluster.local", None)
+
+        @patch("kubernetes_client.client.socket.getaddrinfo")
+        def test_port_stripped_before_getaddrinfo(self, mock_getaddrinfo: MagicMock) -> None:
+            # GIVEN a value with a host:port entry
+            secret = self._make_secret(controller="controller.model.svc.cluster.local:17070")
+            backend_stub = KubernetesBackendStub(read_namespaced_secret_result=secret)
+            client = KubernetesClient(
+                backend=backend_stub,
+                default_timeout=timedelta(seconds=5),
+                default_delay=timedelta(milliseconds=100),
+            )
+
+            # WHEN waiting for the secret to converge
+            client.wait_for_application_config_secret(namespace="model", application="myapp")
+
+            # THEN socket.getaddrinfo is called with the host only, port stripped
+            mock_getaddrinfo.assert_called_once_with("controller.model.svc.cluster.local", None)
+
+        @patch("kubernetes_client.client.socket.getaddrinfo")
+        def test_multiple_keys_all_must_resolve(self, mock_getaddrinfo: MagicMock) -> None:
+            # GIVEN a secret with two keys, each containing a cluster-local host
+            secret = self._make_secret(
+                key1="ctrl-a.ns.svc.cluster.local:17070",
+                key2="ctrl-b.ns.svc.cluster.local:17070",
+            )
+            backend_stub = KubernetesBackendStub(read_namespaced_secret_result=secret)
+            client = KubernetesClient(
+                backend=backend_stub,
+                default_timeout=timedelta(seconds=5),
+                default_delay=timedelta(milliseconds=100),
+            )
+
+            # WHEN both hosts resolve
+            client.wait_for_application_config_secret(namespace="ns", application="myapp")
+
+            # THEN both hosts are looked up and the method returns without error
+            assert mock_getaddrinfo.call_count == 2
+
+        @patch("kubernetes_client.client.sleep")
+        def test_one_of_multiple_keys_unresolvable_keeps_waiting(self, mock_sleep: MagicMock) -> None:
+            # GIVEN a secret with two keys; the second key's host initially fails DNS
+            secret = self._make_secret(
+                key1="ctrl-a.ns.svc.cluster.local:17070",
+                key2="ctrl-b.ns.svc.cluster.local:17070",
+            )
+            backend_stub = KubernetesBackendStub(read_namespaced_secret_result=secret)
+            client = KubernetesClient(
+                backend=backend_stub,
+                default_timeout=timedelta(seconds=10),
+                default_delay=timedelta(seconds=1),
+            )
+
+            fail_count = 0
+
+            def getaddrinfo_side_effect(host: str, port: object) -> list[object]:
+                nonlocal fail_count
+                if "ctrl-b" in host and fail_count < 2:
+                    fail_count += 1
+                    raise socket.gaierror("Name or service not known")
+                return [("AF_INET", None, None, None, ("10.0.0.1", 0))]
+
+            # WHEN waiting for the secret to converge
+            with patch("kubernetes_client.client.socket.getaddrinfo", side_effect=getaddrinfo_side_effect):
+                client.wait_for_application_config_secret(namespace="ns", application="myapp")
+
+            # THEN the method retried until both hosts resolved
+            assert mock_sleep.call_count >= 2
+
+        @patch("kubernetes_client.client.socket.getaddrinfo")
+        def test_secret_name_uses_application_name(self, mock_getaddrinfo: MagicMock) -> None:
+            # GIVEN a backend that records the secret name requested
+            requested_names: list[str] = []
+
+            def read_secret(name: str, namespace: str) -> V1SecretStub:
+                requested_names.append(name)
+                # Return a secret with only external addresses so the check passes immediately
+                return V1SecretStub(data={"addr": base64.b64encode(b"10.0.0.1:17070")})
+
+            mock_backend = MagicMock()
+            mock_backend.core_v1_api.read_namespaced_secret.side_effect = read_secret
+            client = KubernetesClient(
+                backend=mock_backend,
+                default_timeout=timedelta(seconds=5),
+                default_delay=timedelta(milliseconds=100),
+            )
+
+            # WHEN waiting for the secret
+            client.wait_for_application_config_secret(namespace="model", application="postgresql")
+
+            # THEN the secret name is {application}-application-config
+            assert requested_names == ["postgresql-application-config"]

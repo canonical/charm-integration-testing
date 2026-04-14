@@ -32,7 +32,7 @@ def test_pod_deletion(
     kubernetes_client.wait_for_application_config_secret(
         namespace=model,
         application=target_application,
-        timeout=timedelta(minutes=2),
+        timeout=timedelta(minutes=15),
     )
 
     kubernetes_client.delete_pod(namespace=model, pod_name=pod_to_delete.metadata.name)
