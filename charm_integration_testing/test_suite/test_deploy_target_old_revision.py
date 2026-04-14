@@ -40,7 +40,7 @@ def _create_bundle_with_revision_override(
 @pytest.mark.state(requires=State.NEIGHBOR_ONLY, provides=State.DEPLOYED_WITH_OLD_REVISION)
 def test_deploy_target_old_revision(
     juju_client: JujuClient,
-    historical_revision_with_passing_deploy: int,
+    target_downgrade_revision: int,
     model: str,
     bundle: Path,
     target_application: str,
@@ -48,7 +48,7 @@ def test_deploy_target_old_revision(
     tmp_path: Path,
 ) -> None:
     # Use historical revision selected by the fixture.
-    selected_revision = historical_revision_with_passing_deploy
+    selected_revision = target_downgrade_revision
 
     juju_client.logger.info(
         f"Selected historical revision {selected_revision} for {target_application} ({target_charm})"

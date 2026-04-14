@@ -47,6 +47,11 @@ on:
         description: Revision number of the charm under test.
         required: false
         default: default
+      downgrade_revision:
+        description: Revision number to downgrade to during testing, if applicable.
+          Found via Test Observer if not provided.
+        required: false
+        default: default
       channel:
         description: Channel of the charm under test.
         required: false
@@ -143,6 +148,7 @@ jobs:
           neighbor: ${{ inputs.neighbor }}
           neighbor_endpoint: ${{ inputs.neighbor_endpoint }}
           revision: ${{ inputs.revision }}
+          downgrade_revision: ${{ inputs.downgrade_revision }}
           channel: ${{ inputs.channel }}
           series: ${{ inputs.series }}
           substrate: ${{ inputs.substrate }}
@@ -160,6 +166,7 @@ jobs:
           echo "| \`neighbor\` | \`${neighbor}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| \`neighbor_endpoint\` | \`${neighbor_endpoint}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| \`revision\` | \`${revision}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| \`downgrade_revision\` | \`${downgrade_revision}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| \`channel\` | \`${channel}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| \`series\` | \`${series}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| \`substrate\` | \`${substrate}\` |" >> $GITHUB_STEP_SUMMARY
@@ -284,6 +291,7 @@ jobs:
           neighbor_endpoint: ${{ inputs.neighbor_endpoint }}
           charm_under_test: ${{ inputs.charm_under_test }}
           revision: ${{ inputs.revision }}
+          downgrade_revision: ${{ inputs.downgrade_revision }}
           channel: ${{ inputs.channel }}
           series: ${{ inputs.series }}
           neighbor: ${{ inputs.neighbor }}
@@ -295,6 +303,7 @@ jobs:
             --target-charm "${charm_under_test}" \
             --target-channel "${channel}" \
             --target-revision "${revision}" \
+            --target-downgrade-revision "${downgrade_revision}" \
             --target-series "${series}" \
             --neighbor-charm "${neighbor}" \
             --model "${model}" \

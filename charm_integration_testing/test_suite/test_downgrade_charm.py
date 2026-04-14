@@ -12,7 +12,7 @@ from .scheduler.states import State
 @pytest.mark.state(requires=State.DEPLOYED, provides=State.DEPLOYED_WITH_OLD_REVISION)
 def test_downgrade_charm(
     juju_client: JujuClient,
-    historical_revision_with_passing_deploy: int,
+    target_downgrade_revision: int,
     model: str,
     target_charm: str,
     target_application: str,
@@ -20,7 +20,7 @@ def test_downgrade_charm(
     target_channel: str | None,
 ) -> None:
     # Use historical revision selected by the fixture.
-    selected_revision = historical_revision_with_passing_deploy
+    selected_revision = target_downgrade_revision
 
     juju_client.logger.info(
         f"Selected historical revision {selected_revision} for {target_application} ({target_charm})"
