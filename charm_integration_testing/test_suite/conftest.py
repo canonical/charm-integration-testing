@@ -7,7 +7,6 @@ import logging
 import os
 import secrets
 import string
-import tempfile
 import warnings
 from pathlib import Path
 from subprocess import CalledProcessError, run  # nosec
@@ -617,37 +616,6 @@ def ubuntu_pro_token() -> str | None:
     if token:
         token = token.strip()
     return token if token else None
-
-
-@pytest.fixture
-def debug_logs_directory(juju_backend: JujuBackend, model: str, logger: logging.Logger) -> Iterator[Path]:
-    """Provide a directory with collected debug logs from Juju.
-
-    Logs are collected during test setup (not teardown), ensuring they're available
-    immediately for the test to use. This fixture is self-contained and doesn't
-    depend on other fixtures running first.
-
-    The temporary directory is automatically cleaned up after the test.
-    """
-    logger.info("Collecting debug logs...")
-
-    with tempfile.TemporaryDirectory(prefix="juju-logs-") as temp_dir:
-        logs_dir = Path(temp_dir)
-        logger.info(f"Collecting debug logs from model {model} to {logs_dir}")
-
-        debug_log_file = logs_dir / "debug.log"
-
-        try:
-            debug_log = juju_backend.client.model(model).debug_log()  # type: ignore[attr-defined]
-            debug_log_file.write_text(debug_log)
-
-            log_size = debug_log_file.stat().st_size
-            logger.info(f"Collected {log_size} bytes of debug logs to {debug_log_file}")
-
-            yield logs_dir
-
-        except Exception:
-            logger.exception("Failed to collect debug logs")
 
 
 failure_message: StashKey[str] = StashKey()
