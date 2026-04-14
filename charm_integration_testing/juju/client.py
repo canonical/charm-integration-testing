@@ -78,7 +78,8 @@ class JujuClient:
             Debug log content as a string
         """
         self.logger.info(f"Collecting debug log from model {model}")
-        return self.backend.client.model(model).debug_log()  # type: ignore[attr-defined]
+        debug_log = self.backend.client.model(model).debug_log()  # type: ignore[attr-defined]
+        return debug_log  # type: ignore[no-any-return]
 
     def integrate(
         self,
