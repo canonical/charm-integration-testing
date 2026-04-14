@@ -15,7 +15,8 @@ jobs:
             target_endpoint: certificates
             target_revision: 588
             target_base: '22.04'
-            target_channel: 1/stable
+            target_track: 1
+            target_risk: stable
             neighbor_charm: postgresql-k8s
             neighbor_endpoint: certificates
             substrate: kubernetes
@@ -28,7 +29,8 @@ jobs:
       target_endpoint: ${{ matrix.params.target_endpoint }}
       target_revision: ${{ matrix.params.target_revision }}
       target_base: ${{ matrix.params.target_base }}
-      target_channel: ${{ matrix.params.target_channel }}
+      target_track: ${{ matrix.params.target_track }}
+      target_risk: ${{ matrix.params.target_risk }}
       neighbor_charm: ${{ matrix.params.neighbor_charm }}
       neighbor_endpoint: ${{ matrix.params.neighbor_endpoint }}
       substrate: ${{ matrix.params.substrate }}
