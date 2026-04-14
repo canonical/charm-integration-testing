@@ -162,6 +162,9 @@ class NullJujuBackend(JujuBackend):
     def version(self, model: str) -> str:
         raise NotImplementedError
 
+    def cli_version(self) -> str:
+        raise NotImplementedError
+
     def validate_application(self, model: str, application: str, level: str) -> dict[str, list[ValidationResult]]:
         raise NotImplementedError
 

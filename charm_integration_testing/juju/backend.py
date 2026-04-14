@@ -325,6 +325,10 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def cli_version(self) -> str:
+        raise NotImplementedError
+
+    @abstractmethod
     def validate_application(self, model: str, application: str, level: str) -> dict[str, list[ValidationResult]]:
         raise NotImplementedError
 

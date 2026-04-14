@@ -214,8 +214,12 @@ class JujuClient:
         return self.backend.reboot_model_controller(model)
 
     def version(self, model: str = "default") -> str:
-        self.logger.info("Collecting Juju version.")
+        self.logger.info("Collecting Juju model version.")
         return self.backend.version(model)
+
+    def cli_version(self) -> str:
+        self.logger.info("Collecting Juju CLI version.")
+        return self.backend.cli_version()
 
     def validate_model(self, model: str = "default", level: str = "simple") -> None:
         """Validate all applications in the model.
