@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Iterator
 
 import pytest
-from juju import JujuBackend
+from juju import JujuClient
 
 # TruffleHog exit codes
 TRUFFLEHOG_NO_FINDINGS = 0
@@ -16,7 +16,7 @@ TRUFFLEHOG_FINDINGS_DETECTED = 1
 
 
 @pytest.fixture
-def debug_logs_directory(juju_backend: JujuBackend, model: str, logger: logging.Logger) -> Iterator[Path]:
+def debug_logs_directory(juju_client: JujuClient, model: str, logger: logging.Logger) -> Iterator[Path]:
     """Provide a directory with collected debug logs from Juju.
 
     Logs are collected during test setup (not teardown), ensuring they're available
@@ -34,7 +34,7 @@ def debug_logs_directory(juju_backend: JujuBackend, model: str, logger: logging.
         debug_log_file = logs_dir / "debug.log"
 
         try:
-            debug_log = juju_backend.client.model(model).debug_log()  # type: ignore[attr-defined]
+            debug_log = juju_client.debug_log(model)
             debug_log_file.write_text(debug_log)
 
             log_size = debug_log_file.stat().st_size
@@ -71,7 +71,9 @@ def test_logs_privacy_check(
             timeout=10,
         )
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
-        raise RuntimeError(f"Error checking for TruffleHog CLI: {e}\n") from e
+        raise RuntimeError(
+                f"TruffleHog CLI is not available (required for privacy check): {e}"
+        ) from e
 
     # Run TruffleHog
     logger.info("Running TruffleHog secret scanner")
