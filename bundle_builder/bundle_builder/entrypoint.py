@@ -267,7 +267,9 @@ def main() -> None:
 
     # Export the bundle to mermaid diagram
     if args.output_mermaid:
-        write_to_file(args.output_mermaid, built_bundle.export_mermaid(), logger)
+        write_to_file(
+            args.output_mermaid, built_bundle.export_mermaid(markdown=args.output_mermaid.endswith(".md")), logger
+        )
 
 
 if __name__ == "__main__":  # pragma: no cover
