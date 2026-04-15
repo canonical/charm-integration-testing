@@ -16,6 +16,11 @@ def test_model_controller_migration(
     temp_juju_controller: str,
     model: str,
 ) -> None:
+    # Model migration is broken in juju >= 4.0.0.
+    # See https://github.com/juju/juju/issues/22239
+    if juju_client.version(model).major >= 4:
+        pytest.skip("Model migration is not supported on juju >= 4.0.0 (https://github.com/juju/juju/issues/22239).")
+
     # Validate all applications and relations before migration
     juju_client.validate_model(model=model, level="deep")
 
