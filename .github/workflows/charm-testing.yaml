@@ -362,15 +362,14 @@ jobs:
       # See https://warthogs.atlassian.net/browse/SQT-871 for the complete solution.
       - name: Check controller exists
         id: check_controller
-        if: ${{ !cancelled() }}
+        if: ${{ always() }}
         shell: bash
         env:
           controller: ${{ steps.juju_resources.outputs.controller }}
         run: |
-          if juju show-controller "${controller}" 2>/dev/null; then
+          echo "exists=false" >> $GITHUB_OUTPUT
+          if juju show-controller "${controller}" >/dev/null 2>&1; then
             echo "exists=true" >> $GITHUB_OUTPUT
-          else
-            echo "exists=false" >> $GITHUB_OUTPUT
           fi
       - name: Call Juju K8s Crashdump
         id: juju_k8s_crashdump
