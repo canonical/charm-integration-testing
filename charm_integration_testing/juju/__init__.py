@@ -17,6 +17,7 @@ from .backend import (
 from .client import JujuClient, JujuValidationError
 from .extension import JujuExtension
 from .models import JujuApplicationInfo, JujuIntegration, JujuIntegrationApplication
+from .version import JujuVersion
 
 __all__ = [
     "JujuApplicationInfo",
@@ -33,6 +34,7 @@ __all__ = [
     "JujuUnitAgentState",
     "JujuUnitState",
     "JujuValidationError",
+    "JujuVersion",
     "JujuWaitState",
     "JujuWaitTimeoutError",
     "warn_performance",
