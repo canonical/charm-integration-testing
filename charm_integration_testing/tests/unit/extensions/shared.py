@@ -190,6 +190,9 @@ class NullJujuBackend(JujuBackend):
     ) -> None:
         raise NotImplementedError
 
+    def debug_log(self, model: str) -> str:
+        raise NotImplementedError
+
 
 @dataclass
 class JujuStub(NullJujuBackend):

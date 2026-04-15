@@ -506,3 +506,6 @@ class JubilantBackend(JujuCmdBackend):
         self.client.model(model_name).cli(
             "migrate", f"{source_controller}:{model_name}", target_controller, include_model=False
         )
+
+    def debug_log(self, model: str) -> str:
+        return self.client.model(model).debug_log()

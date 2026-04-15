@@ -349,3 +349,7 @@ class JujuBackend(ABC):
         model: str = "default",
     ) -> None:
         raise NotImplementedError
+
+    @abstractmethod
+    def debug_log(self, model: str) -> str:
+        raise NotImplementedError
