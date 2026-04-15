@@ -16,6 +16,11 @@ def test_model_controller_migration(
     temp_juju_controller: str,
     model: str,
 ) -> None:
+    # Model migration is broken in juju >= 4.0.0.
+    # See https://github.com/juju/juju/issues/22239
+    if juju_client.version(model).major >= 4:
+        pytest.skip("Model migration is not supported on juju >= 4.0.0 (https://github.com/juju/juju/issues/22239).")
+
     # Validate all applications and relations before migration
     juju_client.validate_model(model=model, level="deep")
 
@@ -42,6 +47,15 @@ def test_model_controller_migration(
 
     # Wait until model is idle in old controller
     juju_client.idle_for_period(model=f"{juju_controller}:{model}", timeout=timedelta(minutes=15))
+
+    # Workaround for https://github.com/juju/juju/issues/22114:
+    # After migrating back to the original controller, the per-app CAAS workers on the
+    # original controller fail to restart, so the {app}-application-config K8s secrets
+    # are never updated with the original controller's addresses. Restarting the
+    # controller forces the CAAS workers to restart, which triggers Ensure() and
+    # rewrites the secrets before the temp controller is destroyed.
+    juju_client.reboot_model_controller(model=model)
+    juju_client.idle_for_period(model=model, timeout=timedelta(minutes=15))
 
     # Validate all applications and relations AFTER second migration
     juju_client.validate_model(model=f"{juju_controller}:{model}", level="deep")
