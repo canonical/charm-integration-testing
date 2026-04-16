@@ -40,3 +40,4 @@ class State(str, Enum):
     DEPLOYED = "deployed"
     NEIGHBOR_ONLY = "neighbor_only"
     DEPLOYED_WITH_OLD_REVISION = "deployed_with_old_revision"
+    DEPLOYED_WITH_UPGRADED_CONTROLLER = "deployed_with_upgraded_controller"
