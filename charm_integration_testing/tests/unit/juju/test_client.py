@@ -617,11 +617,12 @@ class VersionBackendStub(NullJujuBackend):
         return JujuVersion.parse(self._cli_version)
 
 
-class TestJujuClientVersion:
-    @pytest.fixture
-    def logger(self) -> LoggerStub:
-        return LoggerStub()
+@pytest.fixture
+def logger() -> LoggerStub:
+    return LoggerStub()
 
+
+class TestJujuClientVersion:
     def _client(self, logger: Any, backend: NullJujuBackend) -> JujuClient:
         return JujuClient(backend, logger, [])
 
@@ -636,3 +637,27 @@ class TestJujuClientVersion:
         client = self._client(logger, backend)
 
         assert client.cli_version() == JujuVersion(3, 6, 1)
+
+
+class DebugLogStub(NullJujuBackend):
+    """Backend stub that offers debug_log."""
+
+    def debug_log(self, model: str) -> str:
+        return f"this is a debug log\nmessage\n{model}"
+
+
+class TestJujuClientDebugLog:
+    def _client(self, logger: Any, backend: NullJujuBackend) -> JujuClient:
+        return JujuClient(backend, logger, [])
+
+    def test_debug_log_calls_backend(self, logger: LoggerStub) -> None:
+        # GIVEN a backend that returns debug_log
+        backend = DebugLogStub()
+        client = self._client(logger, backend)
+
+        # WHEN
+        log = client.debug_log("mymodel")
+
+        # THEN the backend's debug_log method was called and returned the expected string
+        assert "Collecting debug log from model mymodel" in logger.infos
+        assert log == "this is a debug log\nmessage\nmymodel"

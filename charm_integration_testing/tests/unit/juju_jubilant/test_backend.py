@@ -1987,3 +1987,27 @@ class TestJubilantBackendCliVersion:
 
         # THEN model(None) was called (no specific model - CLI-level version)
         assert None in requested_models
+
+
+class TestJubilantBackendDebugLog:
+    def test_debug_log_calls_client_debug_log(self) -> None:
+        # GIVEN a client stub that returns a debug log message
+        class ModelStub:
+            def __init__(self, model: str) -> None:
+                self.model = model
+
+            def debug_log(self) -> str:
+                return f"this is a debug log for model {self.model}"
+
+        class DebugClient(JubilantClientStub):
+            def model(self, model: str | Any) -> Any:
+                return ModelStub(model=model)
+
+        client = DebugClient(client=None)
+        backend = JubilantBackend(client)
+
+        # WHEN we call debug_log on the backend
+        log = backend.debug_log("my-model")
+
+        # THEN the client's debug_log message from the client is returned
+        assert log == "this is a debug log for model my-model"

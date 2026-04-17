@@ -261,6 +261,10 @@ jobs:
           EOF
           pipx install poetry==2.3
           HTTPS_PROXY="http://squid.internal:3128" poetry install
+      - name: Install TruffleHog CLI
+        shell: bash
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/trufflesecurity/trufflehog/main/scripts/install.sh | sh -s -- -b /usr/local/bin v3.56.0
       - name: Post 'test_start' event
         if: ${{ env.TEST_OBSERVER_API != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-events
