@@ -222,6 +222,11 @@ class JujuClient:
         self.logger.info("Collecting Juju CLI version.")
         return self.backend.cli_version()
 
+    def upgrade_model(self, model: str, agent_version: str | None = None) -> None:
+        version_suffix = f" to agent version '{agent_version}'" if agent_version else ""
+        self.logger.info(f"Upgrading model '{model}'{version_suffix}.")
+        self.backend.upgrade_model(model=model, agent_version=agent_version)
+
     def validate_model(self, model: str = "default", level: str = "simple") -> None:
         """Validate all applications in the model.
 
@@ -293,12 +298,23 @@ class JujuClient:
         if sum(len(results) for results in failed_validations.values()) > 0:
             raise JujuValidationError(failed_validations)
 
-    def bootstrap_controller(self, cloud: str, controller: str, controller_constraints: dict[str, str]) -> None:
+    def bootstrap_controller(
+        self,
+        cloud: str,
+        controller: str,
+        controller_constraints: dict[str, str],
+        agent_version: str | None = None,
+    ) -> None:
+        version_suffix = f" at agent version '{agent_version}'" if agent_version else ""
         self.logger.info(
-            f"Bootstrapping Juju controller in cloud '{cloud}' with name '{controller}', using constraints '{controller_constraints}'."
+            f"Bootstrapping Juju controller in cloud '{cloud}' with name '{controller}'{version_suffix}, "
+            f"using constraints '{controller_constraints}'."
         )
         self.backend.bootstrap_controller(
-            cloud=cloud, controller=controller, controller_constraints=controller_constraints
+            cloud=cloud,
+            controller=controller,
+            controller_constraints=controller_constraints,
+            agent_version=agent_version,
         )
 
     def add_model(self, controller: str, model: str, model_config: dict[str, str]) -> None:
@@ -319,3 +335,8 @@ class JujuClient:
         self.backend.migrate_model(
             model_name=model_name, source_controller=source_controller, target_controller=target_controller
         )
+
+    def upgrade_controller(self, controller: str, agent_version: str | None = None) -> None:
+        version_suffix = f" to agent version '{agent_version}'" if agent_version else ""
+        self.logger.info(f"Upgrading controller '{controller}'{version_suffix}.")
+        self.backend.upgrade_controller(controller=controller, agent_version=agent_version)

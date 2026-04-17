@@ -298,7 +298,13 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def bootstrap_controller(self, cloud: str, controller: str, controller_constraints: dict[str, str]) -> None:
+    def bootstrap_controller(
+        self,
+        cloud: str,
+        controller: str,
+        controller_constraints: dict[str, str],
+        agent_version: str | None = None,
+    ) -> None:
         raise NotImplementedError
 
     @abstractmethod
@@ -339,6 +345,14 @@ class JujuBackend(ABC):
 
     @abstractmethod
     def migrate_model(self, model_name: str, source_controller: str, target_controller: str) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def upgrade_controller(self, controller: str, agent_version: str | None = None) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def upgrade_model(self, model: str, agent_version: str | None = None) -> None:
         raise NotImplementedError
 
     @abstractmethod
