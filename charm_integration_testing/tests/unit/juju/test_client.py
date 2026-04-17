@@ -547,7 +547,7 @@ class TestJujuClientDebugLog:
         return JujuClient(backend, logger, [])
 
     def test_debug_log_calls_backend(self, logger: LoggerStub) -> None:
-        # GIVEN a backend that records debug_log calls
+        # GIVEN a backend that returns debug_log
         backend = DebugLogStub()
         client = self._client(logger, backend)
 

@@ -355,3 +355,6 @@ class JujuCmdBackend(JujuBackend):
 
     def version(self, model: str) -> JujuVersion:
         raise NotImplementedError
+
+    def debug_log(self, model: str) -> str:
+        raise NotImplementedError
