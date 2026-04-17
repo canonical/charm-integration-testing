@@ -31,6 +31,10 @@ from pytest import StashKey
 from test_observer_client import TestObserverClient as TestObserverAPIClient
 from test_observer_client import TestObserverClientError
 from utils import normalize_string, normalize_string_multiline
+from utils.juju_releases import (
+    fetch_stable_juju_versions,
+    select_upgrade_target,
+)
 
 from bundle_builder import UnfulfilledEndpointsError
 from test_suite.scheduler.markers import read_state_marker
@@ -266,6 +270,14 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         type=str,
         default=None,
         help="Path to a json file containing the controller constraints configurations to be passed down to Juju on controller bootstrap.",
+    )
+    parser.addoption(
+        "--juju-upgrade-target-version",
+        type=str,
+        default=None,
+        help="Explicit Juju version to upgrade the controller to, e.g. '3.6.21'. "
+        "When omitted, an upgrade target is resolved from GitHub, preferring stable patch releases "
+        "in the current minor version before higher minor releases.",
     )
 
 
@@ -1019,3 +1031,88 @@ def temp_juju_controller(
     yield temp_controller_name
     logger.info(f"Destroying temporary fixture controller '{temp_controller_name}'.")
     juju_client.kill_controller(controller=temp_controller_name)
+
+
+@pytest.fixture(scope="function")
+def juju_controller_at_version(
+    juju_client: JujuClient,
+    juju_cloud: str,
+    juju_controller_bootstrap_constraints: dict[str, str],
+    juju_upgrade_target_version: JujuVersion,
+    logger: logging.Logger,
+) -> Iterator[str]:
+    """Bootstrap a controller pinned to the upgrade target version."""
+    temp_controller_name = f"pytest-upgrade-controller-{generate_short_id(length=8)}"
+    agent_version = str(juju_upgrade_target_version)
+    logger.info(f"Bootstrapping controller '{temp_controller_name}' at Juju {agent_version}.")
+    juju_client.bootstrap_controller(
+        cloud=juju_cloud,
+        controller=temp_controller_name,
+        controller_constraints=juju_controller_bootstrap_constraints,
+        agent_version=agent_version,
+    )
+
+    yield temp_controller_name
+
+
+@pytest.fixture
+def juju_upgrade_target_version(
+    juju_client: JujuClient,
+    juju_cli_version: JujuVersion,
+    juju_controller: str,
+    request: pytest.FixtureRequest,
+    logger: logging.Logger,
+) -> JujuVersion | None:
+    """Resolve the Juju version the controller should be upgraded to.
+
+    Uses ``--juju-upgrade-target-version`` if provided, otherwise queries
+    the GitHub releases API for the latest stable release above the current
+    controller version.
+
+    Returns ``None`` when no upgrade target is available (the controller is
+    already at or above the latest stable release). Tests that consume this
+    fixture should treat ``None`` as "nothing to do" and skip the
+    upgrade-specific test flow.
+
+    Cross-major upgrades are not supported.  Both the explicit and
+    auto-detection paths restrict the target to the same major version as
+    the current controller.
+    """
+    explicit = request.config.getoption("--juju-upgrade-target-version")
+    controller_model = f"{juju_controller}:controller"
+    current = juju_client.version(controller_model)
+    logger.info(f"Current Juju controller version: {current} (CLI: {juju_cli_version})")
+
+    if explicit:
+        target = JujuVersion.parse(str(explicit))
+        if target <= current:
+            logger.info(f"Explicit target {target} is not higher than current {current}; no upgrade needed.")
+            return None
+        if target.major != current.major:
+            logger.info(
+                f"Explicit target {target} has a different major version than current {current}; "
+                "cross-major upgrades are not supported."
+            )
+            return None
+        if target.major != juju_cli_version.major:
+            pytest.skip(
+                f"Cannot upgrade to {target}: the installed Juju client ({juju_cli_version}) "
+                f"can only bootstrap {juju_cli_version.major}.x controllers. "
+                "Install a Juju client at the target major version first."
+            )
+        logger.info(f"Selected explicit upgrade target: {target}")
+        return target
+
+    try:
+        available = fetch_stable_juju_versions()
+    except Exception as exc:
+        pytest.skip(f"Unable to fetch Juju releases from GitHub: {exc}")
+
+    logger.info(f"Fetched {len(available)} stable Juju releases from GitHub.")
+    target_version = select_upgrade_target(current, available, allow_higher_major=False)
+    if target_version is None:
+        logger.info(f"No upgrade target above current version {current}; controller is already up to date.")
+        return None
+
+    logger.info(f"Selected upgrade target: {target_version}")
+    return target_version
