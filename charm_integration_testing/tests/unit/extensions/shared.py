@@ -133,7 +133,13 @@ class NullJujuBackend(JujuBackend):
     def get_application_config(self, model: str, application: str) -> dict[str, Any]:
         raise NotImplementedError
 
-    def bootstrap_controller(self, cloud: str, controller: str, controller_constraints: dict[str, str]) -> None:
+    def bootstrap_controller(
+        self,
+        cloud: str,
+        controller: str,
+        controller_constraints: dict[str, str],
+        agent_version: str | None = None,
+    ) -> None:
         raise NotImplementedError
 
     def add_model(self, controller: str, model: str, model_config: dict[str, str]) -> None:
@@ -180,6 +186,12 @@ class NullJujuBackend(JujuBackend):
         raise NotImplementedError
 
     def migrate_model(self, model_name: str, source_controller: str, target_controller: str) -> None:
+        raise NotImplementedError
+
+    def upgrade_controller(self, controller: str, agent_version: str | None = None) -> None:
+        raise NotImplementedError
+
+    def upgrade_model(self, model: str, agent_version: str | None = None) -> None:
         raise NotImplementedError
 
     def wait_for_application_revision(
