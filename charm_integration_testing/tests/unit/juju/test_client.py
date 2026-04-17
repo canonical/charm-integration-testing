@@ -640,7 +640,7 @@ class TestJujuClientVersion:
 
 
 class DebugLogStub(NullJujuBackend):
-    """Backend stub that records debug_log calls."""
+    """Backend stub that offers debug_log."""
 
     def debug_log(self, model: str) -> str:
         return f"this is a debug log\nmessage\n{model}"
