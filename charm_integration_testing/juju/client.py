@@ -9,6 +9,7 @@ from validators.base import ValidationResult
 from .backend import JujuBackend
 from .extension import JujuExtension
 from .models import JujuApplicationInfo, JujuIntegration, JujuIntegrationApplication
+from .version import JujuVersion
 
 
 class JujuValidationError(Exception):
@@ -213,9 +214,13 @@ class JujuClient:
         self.logger.info("Restarting model controller.")
         return self.backend.reboot_model_controller(model)
 
-    def version(self, model: str = "default") -> str:
-        self.logger.info("Collecting Juju version.")
+    def version(self, model: str = "default") -> JujuVersion:
+        self.logger.info("Collecting Juju model version.")
         return self.backend.version(model)
+
+    def cli_version(self) -> JujuVersion:
+        self.logger.info("Collecting Juju CLI version.")
+        return self.backend.cli_version()
 
     def validate_model(self, model: str = "default", level: str = "simple") -> None:
         """Validate all applications in the model.

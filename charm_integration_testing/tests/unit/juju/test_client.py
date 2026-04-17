@@ -10,6 +10,7 @@ from juju import JujuValidationError
 from juju.client import JujuClient
 from juju.extension import JujuExtension
 from juju.models import JujuApplicationInfo
+from juju.version import JujuVersion
 
 from validators.base.validator import ValidationCheck, ValidationResult
 
@@ -496,3 +497,38 @@ class TestJujuClientMigrateModel:
 
         # THEN an info message mentioning the model and both controllers was logged
         assert any("mymodel" in msg and "source-ctrl" in msg and "target-ctrl" in msg for msg in logger.infos)
+
+
+@dataclass
+class VersionBackendStub(NullJujuBackend):
+    """Backend stub that returns a fixed version string."""
+
+    _version: str = "3.6.1"
+    _cli_version: str = "3.6.1-ubuntu-amd64"
+
+    def version(self, model: str) -> JujuVersion:
+        return JujuVersion.parse(self._version)
+
+    def cli_version(self) -> JujuVersion:
+        return JujuVersion.parse(self._cli_version)
+
+
+class TestJujuClientVersion:
+    @pytest.fixture
+    def logger(self) -> LoggerStub:
+        return LoggerStub()
+
+    def _client(self, logger: Any, backend: NullJujuBackend) -> JujuClient:
+        return JujuClient(backend, logger, [])
+
+    def test_delegates_version_to_backend(self, logger: LoggerStub) -> None:
+        backend = VersionBackendStub(_version="3.6.1")
+        client = self._client(logger, backend)
+
+        assert client.version("mymodel") == JujuVersion(3, 6, 1)
+
+    def test_delegates_cli_version_to_backend(self, logger: LoggerStub) -> None:
+        backend = VersionBackendStub(_cli_version="3.6.1-ubuntu-amd64")
+        client = self._client(logger, backend)
+
+        assert client.cli_version() == JujuVersion(3, 6, 1)

@@ -14,7 +14,15 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
-from bundle_builder import Application, ApplicationEndpoint, Bundle, BundleBuilder, CharmhubClient, Integration
+from bundle_builder import (
+    Application,
+    ApplicationEndpoint,
+    Bundle,
+    BundleBuilder,
+    CharmhubClient,
+    Integration,
+    JujuVersion,
+)
 
 
 def test_correctness_independent(
@@ -42,6 +50,7 @@ def test_correctness_independent(
         integrations=frozenset(),
         platform=sample_platform,
         arch=sample_arch,
+        juju_version=JujuVersion.parse("3.6"),
     )
 
     # WHEN minimal bundle is built
@@ -81,6 +90,7 @@ def test_correctness_dependent(
         integrations=frozenset(),
         platform=sample_platform,
         arch=sample_arch,
+        juju_version=JujuVersion.parse("3.6"),
     )
 
     # WHEN minimal bundle is built

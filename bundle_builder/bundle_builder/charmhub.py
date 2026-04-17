@@ -15,14 +15,17 @@
 
 import dataclasses
 import logging
+import re
 from functools import cache
-from typing import TypeVar
+from typing import Any, TypeVar
 
 from .charm import (
+    ASSUMES_OPS,
     ENDPOINT_PEERS,
     ENDPOINT_PROVIDES,
     ENDPOINT_REQUIRES,
     Charm,
+    CharmAssumesEntry,
     CharmChannel,
     CharmEndpoint,
     CharmEndpointOptionality,
@@ -39,9 +42,18 @@ from .charmhub_http import (
     RefreshAction,
     RefreshResponse,
 )
+from .juju_version import JujuVersion
 from .overrides import CharmMetadataOverride, OverridesClient
 
 _T = TypeVar("_T")
+
+# Matches juju version constraint strings in charm assumes blocks e.g. "juju >= 3.0" or "juju>=3.0"
+# Operators are sorted by descending length so longer ops (>=, <=, ==) are tried before
+# their single-char prefixes (>, <) to avoid prefix shadowing in alternation.
+# Whitespace around the operator is optional to support both "juju >= 3.0" and "juju>=3.0".
+_ASSUMES_JUJU_RE = re.compile(
+    rf"^juju\s*({'|'.join(re.escape(op) for op in sorted(ASSUMES_OPS, key=len, reverse=True))})\s*(\S+)$"
+)
 
 
 class CharmhubClient:
@@ -221,6 +233,9 @@ class CharmhubClient:
             endpoints=self._all_charm_endpoints(refresh_info),
             test_configs=self._charm_test_configs(charm_name),
             priority=self._get_charm_priority(charm_name),
+            assumes=CharmAssumesEntry(
+                all_of=frozenset(self._parse_assumes_entry(e) for e in refresh_info.charm.metadata.assumes)
+            ),
         )
 
     def _charm_from_store_by_revision(
@@ -276,6 +291,9 @@ class CharmhubClient:
             endpoints=self._all_charm_endpoints(refresh_info),
             test_configs=self._charm_test_configs(charm_name),
             priority=self._get_charm_priority(charm_name),
+            assumes=CharmAssumesEntry(
+                all_of=frozenset(self._parse_assumes_entry(e) for e in refresh_info.charm.metadata.assumes)
+            ),
         )
 
     def _charm_from_store_by_channel(
@@ -285,8 +303,8 @@ class CharmhubClient:
         charm_channel: str,
         ubuntu_version: str | None = None,
     ) -> Charm:
-        # Get default ubuntu version if not provided
-        if not ubuntu_version:
+        # Resolve ubuntu version if not specified
+        if ubuntu_version is None:
             ubuntu_version = self._default_ubuntu_version(charm_name, ubuntu_arch, charm_channel=charm_channel)
 
         # Call refresh with channel and base
@@ -325,6 +343,9 @@ class CharmhubClient:
             endpoints=self._all_charm_endpoints(refresh_info),
             test_configs=self._charm_test_configs(charm_name),
             priority=self._get_charm_priority(charm_name),
+            assumes=CharmAssumesEntry(
+                all_of=frozenset(self._parse_assumes_entry(e) for e in refresh_info.charm.metadata.assumes)
+            ),
         )
 
     def _charm_from_store_default(
@@ -365,6 +386,9 @@ class CharmhubClient:
             endpoints=self._all_charm_endpoints(refresh_info),
             test_configs=self._charm_test_configs(charm_name),
             priority=self._get_charm_priority(charm_name),
+            assumes=CharmAssumesEntry(
+                all_of=frozenset(self._parse_assumes_entry(e) for e in refresh_info.charm.metadata.assumes)
+            ),
         )
 
     def _get_ubuntu_version_from_bases(
@@ -612,3 +636,26 @@ class CharmhubClient:
 
     def _get_charm_priority(self, charm_name: str) -> float:
         return self.overrides_client.get_charm_priorities_mapping().get(charm_name, 1.0)
+
+    def _parse_assumes_entry(self, raw: str | dict[str, Any]) -> CharmAssumesEntry:
+        """Translate a raw charmhub assumes entry (wire format) into a domain CharmAssumesEntry."""
+        if isinstance(raw, str):
+            match = _ASSUMES_JUJU_RE.match(raw)
+            if match:
+                op_str, version_str = match.group(1), match.group(2)
+                try:
+                    return CharmAssumesEntry(op=op_str, required_version=JujuVersion.parse(version_str))
+                except ValueError:
+                    self.logger.warning(
+                        f"Could not parse Juju version constraint {raw!r}: version string {version_str!r} "
+                        "is not a valid Juju version. Treating as unsatisfied feature."
+                    )
+            return CharmAssumesEntry(feature=raw)
+
+        if isinstance(raw, dict):
+            if "any-of" in raw:
+                return CharmAssumesEntry(any_of=frozenset(self._parse_assumes_entry(sub) for sub in raw["any-of"]))
+            if "all-of" in raw:
+                return CharmAssumesEntry(all_of=frozenset(self._parse_assumes_entry(sub) for sub in raw["all-of"]))
+
+        return CharmAssumesEntry(feature=str(raw))

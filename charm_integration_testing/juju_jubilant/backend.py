@@ -6,6 +6,7 @@ import dataclasses
 import pathlib
 import re
 import time
+import warnings
 from datetime import datetime, timedelta
 from typing import Any, Callable
 
@@ -18,6 +19,7 @@ from juju import (
     JujuIntegrationApplication,
     JujuStatusPerformanceWarning,
     JujuTask,
+    JujuVersion,
     JujuWaitState,
     JujuWaitTimeoutError,
     warn_performance,
@@ -334,7 +336,13 @@ class JubilantBackend(JujuCmdBackend):
     def exec_unit(self, model: str, unit: str, task: str, operator: bool = False) -> JujuExecOutput:
         args = ["--unit", unit]
         if operator:
-            args.append("--operator")
+            if self.cli_version() >= JujuVersion(4, 0, 0):
+                warnings.warn(
+                    "operator=True has no effect on Juju 4+: the --operator flag was removed.",
+                    stacklevel=2,
+                )
+            else:
+                args.append("--operator")
         args += ["--", task]
 
         parsed_output = self._exec(model, *args)
@@ -437,8 +445,11 @@ class JubilantBackend(JujuCmdBackend):
             JujuIntegrationApplication(application=application_2, endpoint=endpoint_2),
         } in [{integration.provider, integration.requirer} for integration in self.list_integrations(model)]
 
-    def version(self, model: str) -> str:
-        return str(self.client.model(model).version())
+    def version(self, model: str) -> JujuVersion:
+        return JujuVersion.parse(str(self.status(model).model.version).strip())
+
+    def cli_version(self) -> JujuVersion:
+        return JujuVersion.parse(str(self.client.model(None).version()).strip())
 
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(5), reraise=True)
     def bootstrap_controller(self, cloud: str, controller: str, controller_constraints: dict[str, str]) -> None:

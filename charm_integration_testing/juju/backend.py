@@ -14,6 +14,7 @@ from pydantic.dataclasses import dataclass
 from validators.base.validator import ValidationResult
 
 from .models import JujuApplicationInfo, JujuIntegration, JujuIntegrationApplication
+from .version import JujuVersion
 
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
@@ -321,7 +322,11 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def version(self, model: str) -> str:
+    def version(self, model: str) -> JujuVersion:
+        raise NotImplementedError
+
+    @abstractmethod
+    def cli_version(self) -> JujuVersion:
         raise NotImplementedError
 
     @abstractmethod

@@ -23,7 +23,7 @@ from extensions import (
     UnsealVaultK8sJujuExtension,
     ValidatorInjectorExtension,
 )
-from juju import JujuBackend, JujuClient, JujuValidationError, JujuWaitTimeoutError
+from juju import JujuBackend, JujuClient, JujuValidationError, JujuVersion, JujuWaitTimeoutError
 from juju_jubilant import JubilantBackend
 from kubernetes_client import KubernetesBackend, KubernetesClient
 from pydantic import TypeAdapter, ValidationError
@@ -510,6 +510,12 @@ def juju_controller(request: pytest.FixtureRequest) -> str:
 
 
 @pytest.fixture
+def juju_cli_version(juju_backend: JujuBackend) -> JujuVersion:
+    """Juju version resolved from the installed Juju CLI."""
+    return juju_backend.cli_version()
+
+
+@pytest.fixture
 def charm_metadata_overrides(request: pytest.FixtureRequest) -> Path:
     value = request.config.getoption("--charm-metadata-overrides")
     if not value:
@@ -905,7 +911,9 @@ def record_juju_execution_metadata(
     execution_metadata: Callable[[str, str | int], None],
 ) -> Iterator[None]:
     state_marker = read_state_marker(request.node)
-    if state_marker and any(state in (State.NO_MODEL, State.NO_CONTROLLER) for state in state_marker.requires):
+    if state_marker and any(
+        state in (State.NO_BUNDLE, State.NO_MODEL, State.NO_CONTROLLER) for state in state_marker.requires
+    ):
         yield
         return
 
@@ -913,7 +921,7 @@ def record_juju_execution_metadata(
     yield
 
     # Save Juju version
-    juju_version = juju_client.version(model)
+    juju_version = str(juju_client.version(model))
     execution_metadata("juju:version", juju_version)
 
 

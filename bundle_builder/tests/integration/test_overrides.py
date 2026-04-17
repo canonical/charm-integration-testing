@@ -18,7 +18,15 @@ from pathlib import Path
 
 import yaml
 
-from bundle_builder import Application, ApplicationEndpoint, Bundle, BundleBuilder, CharmhubClient, OverridesClient
+from bundle_builder import (
+    Application,
+    ApplicationEndpoint,
+    Bundle,
+    BundleBuilder,
+    CharmhubClient,
+    JujuVersion,
+    OverridesClient,
+)
 
 
 def test_overrides_metadata_make_optional(
@@ -65,6 +73,7 @@ def test_overrides_metadata_make_optional(
             integrations=frozenset(),
             platform="kubernetes",
             arch="amd64",
+            juju_version=JujuVersion.parse("3.6"),
         )
     )
 
@@ -100,6 +109,7 @@ def test_charm_config(tmp_path: Path, sample_independent_charm: str) -> None:
             integrations=frozenset(),
             platform="kubernetes",
             arch="amd64",
+            juju_version=JujuVersion.parse("3.6"),
         )
     )
 

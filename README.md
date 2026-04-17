@@ -8,7 +8,7 @@ validating the deployment and interoperability of charms.
 Python dependencies are managed through poetry.
 
 ```bash
-pipx install poetry==1.6
+pipx install poetry==2.0
 poetry install
 ```
 

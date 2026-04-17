@@ -16,6 +16,7 @@ from juju import (
     JujuIntegration,
     JujuIntegrationApplication,
     JujuTask,
+    JujuVersion,
     JujuWaitTimeoutError,
 )
 from juju.backend import JujuStatusPerformanceWarning, warn_performance
@@ -352,5 +353,5 @@ class JujuCmdBackend(JujuBackend):
     def remove_secret(self, model: str, name_or_id: str) -> None:
         raise NotImplementedError
 
-    def version(self, model: str) -> str:
+    def version(self, model: str) -> JujuVersion:
         raise NotImplementedError

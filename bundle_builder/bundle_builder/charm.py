@@ -14,12 +14,65 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
-from typing import TYPE_CHECKING, Any, TypeAlias
+import operator
+from typing import TYPE_CHECKING, Any, Callable, TypeAlias
 
 from pydantic import Field, field_validator, model_serializer, model_validator
 from pydantic_core import ArgsKwargs
 
 from .immutable_dataclass import cached_method, immutable_dataclass
+from .juju_version import JujuVersion
+
+ASSUMES_OPS: dict[str, Callable[["JujuVersion", "JujuVersion"], bool]] = {
+    ">=": operator.ge,
+    ">": operator.gt,
+    "<=": operator.le,
+    "<": operator.lt,
+    "==": operator.eq,
+}
+
+# Maps bundle platform to the set of Juju 'assumes' features that are satisfied on that platform.
+PLATFORM_FEATURES: dict[str, frozenset[str]] = {
+    "kubernetes": frozenset(["k8s-api"]),
+    "machine": frozenset(),
+}
+
+
+@immutable_dataclass
+class CharmAssumesEntry:
+    all_of: frozenset["CharmAssumesEntry"] | None = None
+    any_of: frozenset["CharmAssumesEntry"] | None = None
+    op: str | None = None
+    required_version: JujuVersion | None = None
+    feature: str | None = None
+
+    @field_validator("op")
+    @classmethod
+    def _validate_op(cls, v: str | None) -> str | None:
+        if v is not None and v not in ASSUMES_OPS:
+            raise ValueError(f"Unknown juju version operator {v!r}. Expected one of: {list(ASSUMES_OPS)}")
+        return v
+
+    def satisfied_by(self, juju_version: JujuVersion, features: frozenset[str] = frozenset()) -> bool:
+        return all(
+            [
+                # all of
+                all(entry.satisfied_by(juju_version, features) for entry in self.all_of)
+                if self.all_of is not None
+                else True,
+                # any of
+                any(entry.satisfied_by(juju_version, features) for entry in self.any_of)
+                if self.any_of is not None
+                else True,
+                # juju version constraint
+                ASSUMES_OPS[self.op](juju_version, self.required_version)
+                if self.op is not None and self.required_version is not None
+                else True,
+                # feature requirement
+                self.feature in features if self.feature is not None else True,
+            ]
+        )
+
 
 ENDPOINT_PEERS = "peers"
 ENDPOINT_REQUIRES = "requires"
@@ -299,6 +352,7 @@ class Charm:
     endpoints: frozenset[CharmEndpoint]
     priority: float  # greater priority values mean a node with this charm is prioritized
     test_configs: tuple[CharmTestConfig, ...] = Field(default_factory=tuple)
+    assumes: CharmAssumesEntry = Field(default_factory=CharmAssumesEntry)
 
     def __repr__(self) -> str:
         return self.name

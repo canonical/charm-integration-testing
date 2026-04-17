@@ -4,6 +4,7 @@ from typing import Any, Iterable
 
 from juju.backend import JujuBackend, JujuExecOutput, JujuTask
 from juju.models import JujuApplicationInfo, JujuIntegration, JujuIntegrationApplication
+from juju.version import JujuVersion
 from kubernetes_client import KubernetesClient
 
 from validators.base.validator import ValidationResult
@@ -159,7 +160,10 @@ class NullJujuBackend(JujuBackend):
     def reboot_model_controller_leader(self, model: str) -> None:
         raise NotImplementedError
 
-    def version(self, model: str) -> str:
+    def version(self, model: str) -> JujuVersion:
+        raise NotImplementedError
+
+    def cli_version(self) -> JujuVersion:
         raise NotImplementedError
 
     def validate_application(self, model: str, application: str, level: str) -> dict[str, list[ValidationResult]]:
