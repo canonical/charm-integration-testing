@@ -304,7 +304,8 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         type=str,
         default=None,
         help="Explicit Juju version to upgrade the controller to, e.g. '3.6.21'. "
-        "When omitted the latest stable release is resolved from GitHub.",
+        "When omitted, an upgrade target is resolved from GitHub, preferring stable patch releases "
+        "in the current minor version before higher minor releases.",
     )
 
 
@@ -1054,8 +1055,9 @@ def juju_upgrade_target_version(
     controller version.
 
     Returns ``None`` when no upgrade target is available (the controller is
-    already at or above the latest stable release).  Tests that consume this
-    fixture should treat ``None`` as "nothing to do" and pass automatically.
+    already at or above the latest stable release). Tests that consume this
+    fixture should treat ``None`` as "nothing to do" and skip the
+    upgrade-specific test flow.
 
     Upgrading to a higher major version is not supported by this fixture. To
     upgrade to a higher major version, a higher version Juju CLI must be

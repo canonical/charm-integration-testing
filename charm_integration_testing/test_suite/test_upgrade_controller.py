@@ -23,7 +23,7 @@ def test_upgrade_controller(
     Patch upgrades (same major.minor) use ``juju upgrade-controller``.
     Minor/major upgrades use model migration to a new controller at the target version.
 
-    If no upgrade target is available the test passes automatically.
+    If no upgrade target is available the test is skipped automatically.
     """
     # GIVEN the resolved upgrade target
     if juju_upgrade_target_version is None:
@@ -92,7 +92,7 @@ def _upgrade_via_migration(
 
     Follows the Juju documentation for minor/major controller upgrades:
     1. A new controller at the target version has already been bootstrapped
-       (handled by the ``temp_juju_controller_at_version`` fixture).
+       (handled by the ``juju_controller_at_version`` fixture).
     2. Migrate the model from the old controller to the new one.
     3. Upgrade the model agents to match the new controller's version.
     """
