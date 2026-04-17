@@ -1059,9 +1059,9 @@ def juju_upgrade_target_version(
     fixture should treat ``None`` as "nothing to do" and skip the
     upgrade-specific test flow.
 
-    Upgrading to a higher major version is not supported by this fixture. To
-    upgrade to a higher major version, a higher version Juju CLI must be
-    installed, which is out of scope for now.
+    Cross-major upgrades are not supported.  Both the explicit and
+    auto-detection paths restrict the target to the same major version as
+    the current controller.
     """
     explicit = request.config.getoption("--juju-upgrade-target-version")
     controller_model = f"{juju_controller}:controller"
@@ -1072,6 +1072,12 @@ def juju_upgrade_target_version(
         target = JujuVersion.parse(str(explicit))
         if target <= current:
             logger.info(f"Explicit target {target} is not higher than current {current}; no upgrade needed.")
+            return None
+        if target.major != current.major:
+            logger.info(
+                f"Explicit target {target} has a different major version than current {current}; "
+                "cross-major upgrades are not supported."
+            )
             return None
         if target.major != juju_cli_version.major:
             pytest.skip(

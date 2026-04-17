@@ -500,6 +500,110 @@ class TestJujuClientMigrateModel:
 
 
 @dataclass
+class UpgradeControllerBackendStub(NullJujuBackend):
+    """Backend stub that records upgrade_controller calls."""
+
+    upgrade_controller_calls: list[tuple[str, str | None]] = field(default_factory=list)
+
+    def upgrade_controller(self, controller: str, agent_version: str | None = None) -> None:
+        self.upgrade_controller_calls.append((controller, agent_version))
+
+
+class TestJujuClientUpgradeController:
+    @pytest.fixture
+    def logger(self) -> LoggerStub:
+        return LoggerStub()
+
+    def _client(self, logger: Any, backend: NullJujuBackend) -> JujuClient:
+        return JujuClient(backend, logger, [])
+
+    def test_delegates_to_backend(self, logger: LoggerStub) -> None:
+        # GIVEN a backend that records upgrade_controller calls
+        backend = UpgradeControllerBackendStub()
+        client = self._client(logger, backend)
+
+        # WHEN
+        client.upgrade_controller("mycontroller", agent_version="3.6.21")
+
+        # THEN the backend received the call with the correct arguments
+        assert ("mycontroller", "3.6.21") in backend.upgrade_controller_calls
+
+    def test_delegates_without_agent_version(self, logger: LoggerStub) -> None:
+        # GIVEN a backend that records upgrade_controller calls
+        backend = UpgradeControllerBackendStub()
+        client = self._client(logger, backend)
+
+        # WHEN
+        client.upgrade_controller("mycontroller")
+
+        # THEN the backend received the call with None agent_version
+        assert ("mycontroller", None) in backend.upgrade_controller_calls
+
+    def test_logs_controller_and_version(self, logger: LoggerStub) -> None:
+        # GIVEN a backend stub
+        backend = UpgradeControllerBackendStub()
+        client = self._client(logger, backend)
+
+        # WHEN
+        client.upgrade_controller("mycontroller", agent_version="3.6.21")
+
+        # THEN an info message mentioning the controller and version was logged
+        assert any("mycontroller" in msg and "3.6.21" in msg for msg in logger.infos)
+
+
+@dataclass
+class UpgradeModelBackendStub(NullJujuBackend):
+    """Backend stub that records upgrade_model calls."""
+
+    upgrade_model_calls: list[tuple[str, str | None]] = field(default_factory=list)
+
+    def upgrade_model(self, model: str, agent_version: str | None = None) -> None:
+        self.upgrade_model_calls.append((model, agent_version))
+
+
+class TestJujuClientUpgradeModel:
+    @pytest.fixture
+    def logger(self) -> LoggerStub:
+        return LoggerStub()
+
+    def _client(self, logger: Any, backend: NullJujuBackend) -> JujuClient:
+        return JujuClient(backend, logger, [])
+
+    def test_delegates_to_backend(self, logger: LoggerStub) -> None:
+        # GIVEN a backend that records upgrade_model calls
+        backend = UpgradeModelBackendStub()
+        client = self._client(logger, backend)
+
+        # WHEN
+        client.upgrade_model("mymodel", agent_version="4.0.5")
+
+        # THEN the backend received the call with the correct arguments
+        assert ("mymodel", "4.0.5") in backend.upgrade_model_calls
+
+    def test_delegates_without_agent_version(self, logger: LoggerStub) -> None:
+        # GIVEN a backend that records upgrade_model calls
+        backend = UpgradeModelBackendStub()
+        client = self._client(logger, backend)
+
+        # WHEN
+        client.upgrade_model("mymodel")
+
+        # THEN the backend received the call with None agent_version
+        assert ("mymodel", None) in backend.upgrade_model_calls
+
+    def test_logs_model_and_version(self, logger: LoggerStub) -> None:
+        # GIVEN a backend stub
+        backend = UpgradeModelBackendStub()
+        client = self._client(logger, backend)
+
+        # WHEN
+        client.upgrade_model("mymodel", agent_version="4.0.5")
+
+        # THEN an info message mentioning the model and version was logged
+        assert any("mymodel" in msg and "4.0.5" in msg for msg in logger.infos)
+
+
+@dataclass
 class VersionBackendStub(NullJujuBackend):
     """Backend stub that returns a fixed version string."""
 
