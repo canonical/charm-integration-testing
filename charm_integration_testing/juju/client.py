@@ -69,6 +69,18 @@ class JujuClient:
         separator = "-" * 80
         self.logger.info(f"Juju Status:\n{separator}\n{self.backend.juju_status_text(model)}{separator}")
 
+    def debug_log(self, model: str = "default") -> str:
+        """Retrieve the Juju debug log for the model.
+
+        Args:
+            model: Juju model name
+
+        Returns:
+            Debug log content as a string
+        """
+        self.logger.info(f"Collecting debug log from model {model}")
+        return self.backend.debug_log(model)
+
     def integrate(
         self,
         application_1: str,

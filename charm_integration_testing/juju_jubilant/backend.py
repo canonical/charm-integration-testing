@@ -540,3 +540,6 @@ class JubilantBackend(JujuCmdBackend):
     def upgrade_model(self, model: str, agent_version: str | None = None) -> None:
         extra = ("--agent-version", agent_version) if agent_version else ()
         self.client.model(model).cli("upgrade-model", *extra)
+
+    def debug_log(self, model: str) -> str:
+        return self.client.model(model).debug_log()
