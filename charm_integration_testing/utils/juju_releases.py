@@ -74,6 +74,8 @@ def select_upgrade_target(
     same_major: JujuVersion | None = None
     higher_major: JujuVersion | None = None
 
+    available = sorted(available, reverse=True)
+
     for version in available:
         if version <= current:
             continue

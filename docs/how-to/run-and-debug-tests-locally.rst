@@ -176,7 +176,7 @@ the environment so it knows which setup steps (if any) still need to run:
 - ``neighbor_only`` — only the neighbor application remains after teardown
 - ``deployed_with_old_revision`` — the charm bundle is deployed with the target on an
   old revision
-- ``deployed_with_upgraded_controller`` — the charm bundle is deployed with an upgraded juju controller
+- ``deployed_with_upgraded_controller`` — the charm bundle is deployed with an upgraded Juju controller
 
 Use a non-default ``--current-state`` when resuming a partial run or
 iterating locally against an already-deployed model to avoid re-running

@@ -464,16 +464,16 @@ class JubilantBackend(JujuCmdBackend):
         # and then update the code here to use it. In the meantime, O11 will fail to provision.
         # PR: https://github.com/canonical/jubilant/pull/272
         if agent_version:
-            self.client.model(None).cli(
-                "bootstrap",
-                cloud,
-                controller,
-                "--bootstrap-constraints",
-                " ".join(f"{k}={v}" for k, v in controller_constraints.items()),
-                "--agent-version",
-                agent_version,
-                include_model=False,
-            )
+            bootstrap_args: list[str] = ["bootstrap", cloud, controller]
+            if controller_constraints:
+                bootstrap_args.extend(
+                    [
+                        "--bootstrap-constraints",
+                        " ".join(f"{k}={v}" for k, v in controller_constraints.items()),
+                    ]
+                )
+            bootstrap_args.extend(["--agent-version", agent_version])
+            self.client.model(None).cli(*bootstrap_args, include_model=False)
         else:
             self.client.model(None).bootstrap(
                 cloud=cloud, controller=controller, bootstrap_constraints=controller_constraints

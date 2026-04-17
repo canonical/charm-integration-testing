@@ -27,8 +27,9 @@ def test_upgrade_controller(
     """
     # GIVEN the resolved upgrade target
     if juju_upgrade_target_version is None:
-        # No upgrade needed or available, so skip the test but consider it a pass.
-        return
+        # No upgrade target is available, so skip instead of reporting the
+        # upgraded-controller state as provided.
+        pytest.skip("No Juju upgrade target version is available for this environment.")
 
     target_version_str = str(juju_upgrade_target_version)
     controller_model = f"{juju_controller}:controller"
@@ -46,7 +47,7 @@ def test_upgrade_controller(
         # Migration path: bootstrap a new controller at the target version
         # (handled by the fixture), migrate the model to it, and upgrade the
         # model agents to match the new controller.
-        temp_controller: str = request.getfixturevalue("temp_juju_controller_at_version")
+        temp_controller: str = request.getfixturevalue("juju_controller_at_version")
         _upgrade_via_migration(juju_client, juju_controller, temp_controller, target_version_str, model)
         active_controller = temp_controller
 

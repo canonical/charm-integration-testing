@@ -1018,17 +1018,17 @@ def temp_juju_controller(
 
 
 @pytest.fixture(scope="function")
-def temp_juju_controller_at_version(
+def juju_controller_at_version(
     juju_client: JujuClient,
     juju_cloud: str,
     juju_controller_bootstrap_constraints: dict[str, str],
     juju_upgrade_target_version: JujuVersion,
     logger: logging.Logger,
 ) -> Iterator[str]:
-    """Bootstrap a temporary controller pinned to the upgrade target version."""
+    """Bootstrap a controller pinned to the upgrade target version."""
     temp_controller_name = f"pytest-upgrade-controller-{generate_short_id(length=8)}"
     agent_version = str(juju_upgrade_target_version)
-    logger.info(f"Bootstrapping temporary controller '{temp_controller_name}' at Juju {agent_version}.")
+    logger.info(f"Bootstrapping controller '{temp_controller_name}' at Juju {agent_version}.")
     juju_client.bootstrap_controller(
         cloud=juju_cloud,
         controller=temp_controller_name,
