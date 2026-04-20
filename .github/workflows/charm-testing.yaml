@@ -372,7 +372,8 @@ jobs:
           controller: ${{ steps.juju_resources.outputs.controller }}
         run: |
           echo "exists=false" >> $GITHUB_OUTPUT
-          if juju show-controller "${controller}" >/dev/null 2>&1; then
+          # Check local Juju client metadata rather than making a live API connection.
+          if grep -qF "  ${controller}:" ~/.local/share/juju/controllers.yaml 2>/dev/null; then
             echo "exists=true" >> $GITHUB_OUTPUT
           fi
       - name: Call Juju K8s Crashdump
