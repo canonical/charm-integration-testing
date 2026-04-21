@@ -1,6 +1,7 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import dataclasses
 import logging
 import subprocess
 from dataclasses import dataclass, field
@@ -70,7 +71,7 @@ class TestJujuControllerHandle:
 
     def test_frozen(self) -> None:
         handle = JujuControllerHandle(controller="my-ctrl")
-        with pytest.raises(Exception):
+        with pytest.raises(dataclasses.FrozenInstanceError):
             handle.controller = "other"  # type: ignore[misc]
 
 

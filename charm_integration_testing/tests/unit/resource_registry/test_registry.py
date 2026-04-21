@@ -90,6 +90,26 @@ class TestResourceRegistryRegister:
         # THEN the child is listed under the parent
         assert child.resource_id in registry._children[parent.resource_id]
 
+    def test_register_duplicate_raises(self) -> None:
+        # GIVEN a handle that is already registered
+        registry = _registry()
+        handle = HandleStub("ctrl")
+        registry.register(handle)
+
+        # WHEN registering the same handle again
+        with pytest.raises(ValueError, match="already registered"):
+            registry.register(handle)
+
+    def test_register_with_unknown_parent_raises(self) -> None:
+        # GIVEN an empty registry
+        registry = _registry()
+        parent = HandleStub("parent")
+        child = HandleStub("child")
+
+        # WHEN a child is registered with a parent that was never registered
+        with pytest.raises(ValueError, match="not registered"):
+            registry.register(child, parent=parent)
+
 
 class TestResourceRegistryDeregister:
     def test_deregister_removes_entry(self) -> None:

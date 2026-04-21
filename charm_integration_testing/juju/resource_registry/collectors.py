@@ -9,6 +9,12 @@ from resource_registry.protocols import ResourceHandle
 
 from .handles import JujuControllerHandle
 
+_JUJU_CRASHDUMP_TIMEOUT_SECONDS = 300
+_JUJU_CRASHDUMP_MAX_FILE_SIZE_BYTES = 100_000_000
+# Subprocess timeout is double the internal tool timeout to allow for startup and
+# file compression overhead.
+_SUBPROCESS_TIMEOUT_SECONDS = _JUJU_CRASHDUMP_TIMEOUT_SECONDS * 2
+
 
 class JujuCrashdumpCollector:
     """Collect controller logs using juju-crashdump or juju-k8s-crashdump.
@@ -65,7 +71,7 @@ class JujuCrashdumpCollector:
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=600,
+                timeout=_SUBPROCESS_TIMEOUT_SECONDS,
             )
             if result.stdout:
                 self._logger.debug(f"juju-k8s-crashdump stdout:\n{result.stdout}")
@@ -87,10 +93,10 @@ class JujuCrashdumpCollector:
             "--model",
             f"{controller}:controller",
             "--timeout",
-            "300",
+            str(_JUJU_CRASHDUMP_TIMEOUT_SECONDS),
             "--small",
             "-f",
-            "100000000",
+            str(_JUJU_CRASHDUMP_MAX_FILE_SIZE_BYTES),
             "--compression",
             "gz",
             "--unit-dump-location",
@@ -103,7 +109,7 @@ class JujuCrashdumpCollector:
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=600,
+                timeout=_SUBPROCESS_TIMEOUT_SECONDS,
             )
             if result.stdout:
                 self._logger.debug(f"juju-crashdump stdout:\n{result.stdout}")

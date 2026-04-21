@@ -46,7 +46,13 @@ class ResourceRegistry:
         collectors: list[LogCollector] | None = None,
         parent: ResourceHandle | None = None,
     ) -> None:
+        if handle.resource_id in self._entries:
+            raise ValueError(
+                f"Handle '{handle.resource_id}' is already registered; " "call deregister() before re-registering"
+            )
         parent_id = parent.resource_id if parent is not None else None
+        if parent_id is not None and parent_id not in self._entries:
+            raise ValueError(f"Parent '{parent_id}' is not registered; " "register the parent before its children")
         entry = ResourceEntry(
             handle=handle,
             destroyer=destroyer,
@@ -61,13 +67,16 @@ class ResourceRegistry:
 
     def deregister(self, handle: ResourceHandle) -> None:
         entry = self._entries.pop(handle.resource_id, None)
-        if entry is not None and entry.parent_id is not None:
+        self._children.pop(handle.resource_id, None)
+        if entry is None:
+            self._logger.debug(f"ResourceRegistry: no entry for '{handle.resource_id}', skipping deregistration")
+            return
+        if entry.parent_id is not None:
             siblings = self._children.get(entry.parent_id)
             if siblings is not None:
                 self._children[entry.parent_id] = [child_id for child_id in siblings if child_id != handle.resource_id]
                 if not self._children[entry.parent_id]:
                     self._children.pop(entry.parent_id, None)
-        self._children.pop(handle.resource_id, None)
         self._logger.debug(f"ResourceRegistry: deregistered {handle.resource_type} '{handle.resource_id}'")
 
     def collect_logs(self, handle: ResourceHandle) -> None:
