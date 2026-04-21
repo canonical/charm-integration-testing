@@ -661,3 +661,169 @@ class TestJujuClientDebugLog:
         # THEN the backend's debug_log method was called and returned the expected string
         assert "Collecting debug log from model mymodel" in logger.infos
         assert log == "this is a debug log\nmessage\nmymodel"
+
+
+# ---------------------------------------------------------------------------
+# Stubs for controller lifecycle hook tests
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class BootstrapControllerBackendStub(NullJujuBackend):
+    """Backend stub that records bootstrap_controller calls."""
+
+    bootstrapped: list[str] = field(default_factory=list)
+
+    def bootstrap_controller(
+        self,
+        cloud: str,
+        controller: str,
+        controller_constraints: dict[str, str],
+        agent_version: str | None = None,
+    ) -> None:
+        self.bootstrapped.append(controller)
+
+
+@dataclass
+class HookRecordingExtension(JujuExtension):
+    """Extension that records all lifecycle hook calls."""
+
+    post_bootstrap_calls: list[str] = field(default_factory=list)
+    pre_kill_calls: list[str] = field(default_factory=list)
+    post_migrate_calls: list[tuple[str, str, str]] = field(default_factory=list)
+
+    def post_bootstrap_controller(self, controller: str) -> None:
+        self.post_bootstrap_calls.append(controller)
+
+    def pre_kill_controller(self, controller: str) -> None:
+        self.pre_kill_calls.append(controller)
+
+    def post_migrate_model(self, model: str, source: str, target: str) -> None:
+        self.post_migrate_calls.append((model, source, target))
+
+
+# ---------------------------------------------------------------------------
+# Tests: JujuClient controller lifecycle hooks
+# ---------------------------------------------------------------------------
+
+
+class TestJujuClientBootstrapControllerHooks:
+    @pytest.fixture
+    def logger(self) -> LoggerStub:
+        return LoggerStub()
+
+    def _client(
+        self, logger: Any, backend: NullJujuBackend, extensions: list[JujuExtension] | None = None
+    ) -> JujuClient:
+        return JujuClient(backend, logger, extensions or [])
+
+    def test_post_bootstrap_controller_hook_fires(self, logger: LoggerStub) -> None:
+        # GIVEN a client with a hook-recording extension
+        ext = HookRecordingExtension()
+        backend = BootstrapControllerBackendStub()
+        client = self._client(logger, backend, [ext])
+
+        # WHEN a controller is bootstrapped
+        client.bootstrap_controller(cloud="mycloud", controller="my-ctrl", controller_constraints={})
+
+        # THEN the extension hook received the controller name
+        assert ext.post_bootstrap_calls == ["my-ctrl"]
+
+    def test_post_bootstrap_controller_hook_fires_for_all_extensions(self, logger: LoggerStub) -> None:
+        # GIVEN a client with two extensions
+        ext1 = HookRecordingExtension()
+        ext2 = HookRecordingExtension()
+        backend = BootstrapControllerBackendStub()
+        client = self._client(logger, backend, [ext1, ext2])
+
+        # WHEN a controller is bootstrapped
+        client.bootstrap_controller(cloud="mycloud", controller="my-ctrl", controller_constraints={})
+
+        # THEN both extensions received the hook
+        assert ext1.post_bootstrap_calls == ["my-ctrl"]
+        assert ext2.post_bootstrap_calls == ["my-ctrl"]
+
+
+class TestJujuClientKillControllerHooks:
+    @pytest.fixture
+    def logger(self) -> LoggerStub:
+        return LoggerStub()
+
+    def _client(
+        self, logger: Any, backend: NullJujuBackend, extensions: list[JujuExtension] | None = None
+    ) -> JujuClient:
+        return JujuClient(backend, logger, extensions or [])
+
+    def test_pre_kill_controller_hook_fires_before_backend(self, logger: LoggerStub) -> None:
+        # GIVEN a client with a hook-recording extension
+        order: list[str] = []
+        ext = HookRecordingExtension()
+
+        @dataclass
+        class OrderedKillBackend(NullJujuBackend):
+            def kill_controller(self, controller: str) -> None:
+                order.append("backend")
+
+        # Patch the extension to record order
+        original_pre_kill = ext.pre_kill_controller
+
+        def recording_pre_kill(controller: str) -> None:
+            order.append("hook")
+            original_pre_kill(controller)
+
+        ext.pre_kill_controller = recording_pre_kill
+        client = self._client(logger, OrderedKillBackend(), [ext])
+
+        # WHEN the controller is killed
+        client.kill_controller("my-ctrl")
+
+        # THEN hook fires before backend
+        assert order == ["hook", "backend"]
+
+    def test_pre_kill_controller_hook_fires_for_all_extensions(self, logger: LoggerStub) -> None:
+        # GIVEN a client with two extensions
+        ext1 = HookRecordingExtension()
+        ext2 = HookRecordingExtension()
+        client = self._client(logger, KillControllerBackendStub(), [ext1, ext2])
+
+        # WHEN
+        client.kill_controller("my-ctrl")
+
+        # THEN both extensions received the hook
+        assert ext1.pre_kill_calls == ["my-ctrl"]
+        assert ext2.pre_kill_calls == ["my-ctrl"]
+
+
+class TestJujuClientMigrateModelHooks:
+    @pytest.fixture
+    def logger(self) -> LoggerStub:
+        return LoggerStub()
+
+    def _client(
+        self, logger: Any, backend: NullJujuBackend, extensions: list[JujuExtension] | None = None
+    ) -> JujuClient:
+        return JujuClient(backend, logger, extensions or [])
+
+    def test_post_migrate_model_hook_fires(self, logger: LoggerStub) -> None:
+        # GIVEN a client with a hook-recording extension
+        ext = HookRecordingExtension()
+        client = self._client(logger, MigrateModelBackendStub(), [ext])
+
+        # WHEN a model is migrated
+        client.migrate_model("mymodel", "source-ctrl", "target-ctrl")
+
+        # THEN the extension hook received all three arguments
+        assert ext.post_migrate_calls == [("mymodel", "source-ctrl", "target-ctrl")]
+
+    def test_post_migrate_model_hook_fires_for_all_extensions(self, logger: LoggerStub) -> None:
+        # GIVEN a client with two extensions
+        ext1 = HookRecordingExtension()
+        ext2 = HookRecordingExtension()
+        client = self._client(logger, MigrateModelBackendStub(), [ext1, ext2])
+
+        # WHEN
+        client.migrate_model("mymodel", "source-ctrl", "target-ctrl")
+
+        # THEN both extensions received the hook
+        assert ext1.post_migrate_calls == [("mymodel", "source-ctrl", "target-ctrl")]
+        assert ext2.post_migrate_calls == [("mymodel", "source-ctrl", "target-ctrl")]
