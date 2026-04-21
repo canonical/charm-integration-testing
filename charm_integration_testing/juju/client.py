@@ -329,6 +329,10 @@ class JujuClient:
             agent_version=agent_version,
         )
 
+        # Call extensions
+        for extension in self.extensions:
+            extension.post_bootstrap_controller(controller)
+
     def add_model(self, controller: str, model: str, model_config: dict[str, str]) -> None:
         self.logger.info(
             f"Creating model '{model}' with configuration '{model_config}' on controller '{controller}' and switching to it."
@@ -338,6 +342,11 @@ class JujuClient:
 
     def kill_controller(self, controller: str) -> None:
         self.logger.info(f"Killing controller '{controller}'.")
+
+        # Call extensions
+        for extension in self.extensions:
+            extension.pre_kill_controller(controller)
+
         self.backend.kill_controller(controller=controller)
 
     def migrate_model(self, model_name: str, source_controller: str, target_controller: str) -> None:
@@ -347,6 +356,10 @@ class JujuClient:
         self.backend.migrate_model(
             model_name=model_name, source_controller=source_controller, target_controller=target_controller
         )
+
+        # Call extensions
+        for extension in self.extensions:
+            extension.post_migrate_model(model_name, source_controller, target_controller)
 
     def upgrade_controller(self, controller: str, agent_version: str | None = None) -> None:
         version_suffix = f" to agent version '{agent_version}'" if agent_version else ""
