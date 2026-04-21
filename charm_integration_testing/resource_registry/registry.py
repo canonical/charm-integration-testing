@@ -52,7 +52,7 @@ class ResourceRegistry:
             destroyer=destroyer,
             parent_id=parent_id,
             created_at=datetime.utcnow(),
-            collectors=collectors or [],
+            collectors=list(collectors) if collectors is not None else [],
         )
         self._entries[handle.resource_id] = entry
         if parent_id is not None:
@@ -76,7 +76,9 @@ class ResourceRegistry:
             self._logger.debug(f"ResourceRegistry: no entry for '{handle.resource_id}', skipping log collection")
             return
         self._logger.debug(f"ResourceRegistry: collecting logs for {handle.resource_type} '{handle.resource_id}'")
-        all_collectors = list(entry.collectors) + [c for c in self._global_collectors if c.supports(handle)]
+        all_collectors = [c for c in entry.collectors if c.supports(handle)] + [
+            c for c in self._global_collectors if c.supports(handle)
+        ]
         for collector in all_collectors:
             try:
                 collector.collect(handle)

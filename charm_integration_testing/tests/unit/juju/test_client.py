@@ -755,23 +755,20 @@ class TestJujuClientKillControllerHooks:
         return JujuClient(backend, logger, extensions or [])
 
     def test_pre_kill_controller_hook_fires_before_backend(self, logger: LoggerStub) -> None:
-        # GIVEN a client with a hook-recording extension
+        # GIVEN a client with a hook-recording extension that appends to an order list
         order: list[str] = []
-        ext = HookRecordingExtension()
+
+        class OrderRecordingExtension(HookRecordingExtension):
+            def pre_kill_controller(self, controller: str) -> None:
+                order.append("hook")
+                super().pre_kill_controller(controller)
 
         @dataclass
         class OrderedKillBackend(NullJujuBackend):
             def kill_controller(self, controller: str) -> None:
                 order.append("backend")
 
-        # Patch the extension to record order
-        original_pre_kill = ext.pre_kill_controller
-
-        def recording_pre_kill(controller: str) -> None:
-            order.append("hook")
-            original_pre_kill(controller)
-
-        ext.pre_kill_controller = recording_pre_kill
+        ext = OrderRecordingExtension()
         client = self._client(logger, OrderedKillBackend(), [ext])
 
         # WHEN the controller is killed

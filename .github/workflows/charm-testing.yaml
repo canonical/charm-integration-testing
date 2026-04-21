@@ -377,7 +377,7 @@ jobs:
           generated_bundle: ./generated-bundle.yaml
         run: |
           mkdir -p "logs"
-          [ -d "./test-logs" ] && cp -r ./test-logs/* "logs/"
+          [ -d "./test-logs" ] && cp -r ./test-logs/. "logs/"
           [ -f "${junit_xml}" ] && cp "${junit_xml}" "logs/junit.xml"
           [ -f "${generated_bundle}" ] && cp "${generated_bundle}" "logs/generated-bundle.yaml"
           echo "directory_path=$(realpath "logs")" >> $GITHUB_OUTPUT
