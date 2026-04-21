@@ -22,7 +22,7 @@ class JujuResourceRegistryExtension(JujuExtension):
         handle = JujuControllerHandle(controller=controller)
         self._registry.register(
             handle=handle,
-            destroyer=lambda: self._backend.kill_controller(controller),
+            destroyer=lambda: self._backend.kill_controller(controller=controller),
         )
 
     def pre_kill_controller(self, controller: str) -> None:

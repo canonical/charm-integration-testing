@@ -5,7 +5,7 @@ import logging
 import warnings
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Callable
 
 from .protocols import LogCollector, ResourceHandle
@@ -57,7 +57,7 @@ class ResourceRegistry:
             handle=handle,
             destroyer=destroyer,
             parent_id=parent_id,
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(timezone.utc),
             collectors=list(collectors) if collectors is not None else [],
         )
         self._entries[handle.resource_id] = entry
@@ -67,10 +67,14 @@ class ResourceRegistry:
 
     def deregister(self, handle: ResourceHandle) -> None:
         entry = self._entries.pop(handle.resource_id, None)
-        self._children.pop(handle.resource_id, None)
         if entry is None:
             self._logger.debug(f"ResourceRegistry: no entry for '{handle.resource_id}', skipping deregistration")
             return
+        # Re-parent any children to root so they remain reachable by teardown_all().
+        for child_id in self._children.pop(handle.resource_id, []):
+            child_entry = self._entries.get(child_id)
+            if child_entry is not None:
+                child_entry.parent_id = None
         if entry.parent_id is not None:
             siblings = self._children.get(entry.parent_id)
             if siblings is not None:

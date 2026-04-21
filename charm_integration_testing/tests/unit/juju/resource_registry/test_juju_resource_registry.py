@@ -86,10 +86,24 @@ class TestJujuCrashdumpCollectorSupports:
         assert collector.supports(JujuControllerHandle(controller="ctrl")) is True
 
     def test_does_not_support_other_handle(self) -> None:
-        from ...resource_registry.test_registry import HandleStub
+        @dataclass(frozen=True)
+        class OtherHandle:
+            name: str
+
+            @property
+            def resource_id(self) -> str:
+                return f"other:{self.name}"
+
+            @property
+            def resource_type(self) -> str:
+                return "other"
+
+            @property
+            def path_segment(self) -> str:
+                return self.name
 
         collector = JujuCrashdumpCollector(LoggerStub(), output_dir=None)
-        assert collector.supports(HandleStub("other")) is False
+        assert collector.supports(OtherHandle("other")) is False
 
 
 class TestJujuCrashdumpCollectorMachine:
