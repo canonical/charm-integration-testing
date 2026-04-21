@@ -1,7 +1,6 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 
@@ -20,4 +19,4 @@ class ResourceHandle(Protocol):
 class LogCollector(Protocol):
     def supports(self, handle: ResourceHandle) -> bool: ...
 
-    def collect(self, handle: ResourceHandle, output_dir: Path) -> None: ...
+    def collect(self, handle: ResourceHandle) -> None: ...

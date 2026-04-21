@@ -81,13 +81,13 @@ class TestJujuControllerHandle:
 
 class TestJujuCrashdumpCollectorSupports:
     def test_supports_controller_handle(self) -> None:
-        collector = JujuCrashdumpCollector(LoggerStub())
+        collector = JujuCrashdumpCollector(LoggerStub(), output_dir=None)
         assert collector.supports(JujuControllerHandle(controller="ctrl")) is True
 
     def test_does_not_support_other_handle(self) -> None:
         from ...resource_registry.test_registry import HandleStub
 
-        collector = JujuCrashdumpCollector(LoggerStub())
+        collector = JujuCrashdumpCollector(LoggerStub(), output_dir=None)
         assert collector.supports(HandleStub("other")) is False
 
 
@@ -95,12 +95,12 @@ class TestJujuCrashdumpCollectorMachine:
     def test_runs_juju_crashdump(self, tmp_path: Path) -> None:
         # GIVEN a machine collector (no kubeconfig)
         logger = LoggerStub()
-        collector = JujuCrashdumpCollector(logger, kubeconfig_path=None)
+        collector = JujuCrashdumpCollector(logger, output_dir=tmp_path, kubeconfig_path=None)
         handle = JujuControllerHandle(controller="my-ctrl")
 
         completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
         with patch("subprocess.run", return_value=completed) as mock_run:
-            collector.collect(handle, tmp_path)
+            collector.collect(handle)
 
         cmd = mock_run.call_args[0][0]
         assert cmd[0] == "juju-crashdump"
@@ -109,48 +109,59 @@ class TestJujuCrashdumpCollectorMachine:
     def test_warns_on_nonzero_exit(self, tmp_path: Path) -> None:
         # GIVEN crashdump exits non-zero
         logger = LoggerStub()
-        collector = JujuCrashdumpCollector(logger, kubeconfig_path=None)
+        collector = JujuCrashdumpCollector(logger, output_dir=tmp_path, kubeconfig_path=None)
         handle = JujuControllerHandle(controller="my-ctrl")
 
         failed = subprocess.CompletedProcess(args=[], returncode=1, stdout="", stderr="err")
         with patch("subprocess.run", return_value=failed):
-            collector.collect(handle, tmp_path)
+            collector.collect(handle)
 
         assert any("exited with code 1" in w for w in logger.warnings)
 
     def test_warns_on_tool_not_found(self, tmp_path: Path) -> None:
         # GIVEN juju-crashdump is not installed
         logger = LoggerStub()
-        collector = JujuCrashdumpCollector(logger, kubeconfig_path=None)
+        collector = JujuCrashdumpCollector(logger, output_dir=tmp_path, kubeconfig_path=None)
         handle = JujuControllerHandle(controller="my-ctrl")
 
         with patch("subprocess.run", side_effect=FileNotFoundError):
-            collector.collect(handle, tmp_path)
+            collector.collect(handle)
 
         assert any("not found" in w for w in logger.warnings)
 
     def test_warns_on_timeout(self, tmp_path: Path) -> None:
         # GIVEN crashdump times out
         logger = LoggerStub()
-        collector = JujuCrashdumpCollector(logger, kubeconfig_path=None)
+        collector = JujuCrashdumpCollector(logger, output_dir=tmp_path, kubeconfig_path=None)
         handle = JujuControllerHandle(controller="my-ctrl")
 
         with patch("subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="juju-crashdump", timeout=600)):
-            collector.collect(handle, tmp_path)
+            collector.collect(handle)
 
         assert any("timed out" in w for w in logger.warnings)
+
+    def test_skips_when_output_dir_is_none(self) -> None:
+        # GIVEN a collector with no output_dir configured
+        logger = LoggerStub()
+        collector = JujuCrashdumpCollector(logger, output_dir=None, kubeconfig_path=None)
+        handle = JujuControllerHandle(controller="my-ctrl")
+
+        with patch("subprocess.run") as mock_run:
+            collector.collect(handle)
+
+        mock_run.assert_not_called()
 
 
 class TestJujuCrashdumpCollectorK8s:
     def test_runs_juju_k8s_crashdump(self, tmp_path: Path) -> None:
         # GIVEN a k8s collector
         logger = LoggerStub()
-        collector = JujuCrashdumpCollector(logger, kubeconfig_path="/tmp/kubeconfig")
+        collector = JujuCrashdumpCollector(logger, output_dir=tmp_path, kubeconfig_path="/tmp/kubeconfig")
         handle = JujuControllerHandle(controller="my-ctrl")
 
         completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
         with patch("subprocess.run", return_value=completed) as mock_run:
-            collector.collect(handle, tmp_path)
+            collector.collect(handle)
 
         cmd = mock_run.call_args[0][0]
         assert cmd[0] == "juju-k8s-crashdump"
@@ -159,11 +170,11 @@ class TestJujuCrashdumpCollectorK8s:
 
     def test_warns_on_tool_not_found(self, tmp_path: Path) -> None:
         logger = LoggerStub()
-        collector = JujuCrashdumpCollector(logger, kubeconfig_path="/tmp/kubeconfig")
+        collector = JujuCrashdumpCollector(logger, output_dir=tmp_path, kubeconfig_path="/tmp/kubeconfig")
         handle = JujuControllerHandle(controller="my-ctrl")
 
         with patch("subprocess.run", side_effect=FileNotFoundError):
-            collector.collect(handle, tmp_path)
+            collector.collect(handle)
 
         assert any("not found" in w for w in logger.warnings)
 
@@ -181,7 +192,7 @@ class TestJujuResourceRegistryExtensionPostBootstrap:
         # GIVEN a JujuClient with the extension installed
         backend = BootstrapKillBackendStub()
         registry = self._make_registry()
-        ext = JujuResourceRegistryExtension(backend, registry, log_dir=None)
+        ext = JujuResourceRegistryExtension(backend, registry)
         client = JujuClient(backend, LoggerStub(), [ext])
 
         # WHEN a controller is bootstrapped via the client
@@ -195,7 +206,7 @@ class TestJujuResourceRegistryExtensionPostBootstrap:
         # GIVEN a bootstrapped controller tracked in the registry
         backend = BootstrapKillBackendStub()
         registry = self._make_registry()
-        ext = JujuResourceRegistryExtension(backend, registry, log_dir=None)
+        ext = JujuResourceRegistryExtension(backend, registry)
         client = JujuClient(backend, LoggerStub(), [ext])
         client.bootstrap_controller(cloud="mycloud", controller="my-ctrl", controller_constraints={})
 
@@ -216,7 +227,7 @@ class TestJujuResourceRegistryExtensionPreKill:
         # GIVEN a controller bootstrapped and tracked via JujuClient
         backend = BootstrapKillBackendStub()
         registry = self._make_registry()
-        ext = JujuResourceRegistryExtension(backend, registry, log_dir=None)
+        ext = JujuResourceRegistryExtension(backend, registry)
         client = JujuClient(backend, LoggerStub(), [ext])
         client.bootstrap_controller(cloud="mycloud", controller="my-ctrl", controller_constraints={})
 
@@ -233,7 +244,7 @@ class TestJujuResourceRegistryExtensionPreKill:
         # GIVEN a client with an empty registry (no prior bootstrap)
         backend = BootstrapKillBackendStub()
         registry = self._make_registry()
-        ext = JujuResourceRegistryExtension(backend, registry, log_dir=None)
+        ext = JujuResourceRegistryExtension(backend, registry)
         client = JujuClient(backend, LoggerStub(), [ext])
 
         # WHEN killing a controller that was never registered

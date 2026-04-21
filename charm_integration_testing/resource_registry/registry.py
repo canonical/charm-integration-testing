@@ -6,7 +6,6 @@ import warnings
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
-from pathlib import Path
 from typing import Callable
 
 from .protocols import LogCollector, ResourceHandle
@@ -71,21 +70,16 @@ class ResourceRegistry:
         self._children.pop(handle.resource_id, None)
         self._logger.debug(f"ResourceRegistry: deregistered {handle.resource_type} '{handle.resource_id}'")
 
-    def collect_logs(self, handle: ResourceHandle, output_dir: Path | None) -> None:
+    def collect_logs(self, handle: ResourceHandle) -> None:
         entry = self._entries.get(handle.resource_id)
         if entry is None:
             self._logger.debug(f"ResourceRegistry: no entry for '{handle.resource_id}', skipping log collection")
-            return
-        if output_dir is None:
-            self._logger.debug(
-                f"ResourceRegistry: output_dir is None, skipping log collection for '{handle.resource_id}'"
-            )
             return
         self._logger.debug(f"ResourceRegistry: collecting logs for {handle.resource_type} '{handle.resource_id}'")
         all_collectors = list(entry.collectors) + [c for c in self._global_collectors if c.supports(handle)]
         for collector in all_collectors:
             try:
-                collector.collect(handle, output_dir)
+                collector.collect(handle)
             except Exception as exc:
                 self._logger.debug(
                     f"ResourceRegistry: collector {type(collector).__name__} failed for "
@@ -93,7 +87,7 @@ class ResourceRegistry:
                 )
         entry.logs_collected = True
 
-    def teardown(self, handle: ResourceHandle, output_dir: Path | None) -> None:
+    def teardown(self, handle: ResourceHandle) -> None:
         """Depth-first teardown: collect and destroy children, then collect and destroy self."""
         entry = self._entries.get(handle.resource_id)
         if entry is None:
@@ -103,12 +97,12 @@ class ResourceRegistry:
         for child_id in list(self._children.get(handle.resource_id, [])):
             child_entry = self._entries.get(child_id)
             if child_entry is not None:
-                self.teardown(child_entry.handle, output_dir)
+                self.teardown(child_entry.handle)
 
         # Collect logs for self
         if not entry.logs_collected:
             try:
-                self.collect_logs(handle, output_dir)
+                self.collect_logs(handle)
             except Exception as exc:
                 warnings.warn(
                     f"Log collection failed for '{handle.resource_id}': {exc}",
@@ -131,7 +125,7 @@ class ResourceRegistry:
 
         self.deregister(handle)
 
-    def teardown_all(self, output_dir: Path | None) -> None:
+    def teardown_all(self) -> None:
         """Tear down all root resources in reverse registration order."""
         root_ids = [resource_id for resource_id, entry in self._entries.items() if entry.parent_id is None]
         self._logger.debug(f"ResourceRegistry: teardown_all starting, {len(root_ids)} root resource(s)")
@@ -140,7 +134,7 @@ class ResourceRegistry:
             if entry is None:
                 continue
             try:
-                self.teardown(entry.handle, output_dir)
+                self.teardown(entry.handle)
             except Exception as exc:
                 warnings.warn(
                     f"teardown failed for '{resource_id}': {exc}",

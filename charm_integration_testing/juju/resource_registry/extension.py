@@ -1,8 +1,6 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-from pathlib import Path
-
 from resource_registry import ResourceRegistry
 
 from juju.backend import JujuBackend
@@ -16,11 +14,9 @@ class JujuResourceRegistryExtension(JujuExtension):
         self,
         backend: JujuBackend,
         registry: ResourceRegistry,
-        log_dir: Path | None,
     ) -> None:
         self._backend = backend
         self._registry = registry
-        self._log_dir = log_dir
 
     def post_bootstrap_controller(self, controller: str) -> None:
         handle = JujuControllerHandle(controller=controller)
@@ -31,7 +27,7 @@ class JujuResourceRegistryExtension(JujuExtension):
 
     def pre_kill_controller(self, controller: str) -> None:
         handle = JujuControllerHandle(controller=controller)
-        self._registry.collect_logs(handle, self._log_dir)
+        self._registry.collect_logs(handle)
 
     def post_kill_controller(self, controller: str) -> None:
         handle = JujuControllerHandle(controller=controller)

@@ -166,14 +166,14 @@ def session_resource_registry(
     """Session-scoped resource registry for the main workflow controller."""
     kubeconfig = os.environ.get("KUBECONFIG")
     registry = ResourceRegistry(
-        global_collectors=[JujuCrashdumpCollector(logger, kubeconfig_path=kubeconfig)],
+        global_collectors=[JujuCrashdumpCollector(logger, output_dir=log_dir, kubeconfig_path=kubeconfig)],
         logger=logger,
     )
     try:
         yield registry
     finally:
         try:
-            registry.teardown_all(log_dir)
+            registry.teardown_all()
         except Exception as exc:
             warnings.warn(f"session_resource_registry teardown_all raised: {exc}", ResourceTeardownWarning)
 
@@ -187,7 +187,6 @@ def juju_client(
     uv_file: Path | None,
     validators_path: Path | None,
     session_resource_registry: ResourceRegistry,
-    log_dir: Path | None,
 ) -> JujuClient:
     return JujuClient(
         juju_backend,
@@ -201,7 +200,7 @@ def juju_client(
             UnsealVaultJujuExtension(juju_backend, logger),
             UnsealVaultK8sJujuExtension(juju_backend, logger),
             ValidatorInjectorExtension(validators_path, juju_backend, logger, uv_file),
-            JujuResourceRegistryExtension(juju_backend, session_resource_registry, log_dir),
+            JujuResourceRegistryExtension(juju_backend, session_resource_registry),
         ],
     )
 

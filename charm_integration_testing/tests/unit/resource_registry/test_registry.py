@@ -36,20 +36,20 @@ class HandleStub:
 class CollectorStub:
     def __init__(self, supported: bool = True) -> None:
         self._supported = supported
-        self.collected: list[tuple[ResourceHandle, Path]] = []
+        self.collected: list[ResourceHandle] = []
 
     def supports(self, handle: ResourceHandle) -> bool:
         return self._supported
 
-    def collect(self, handle: ResourceHandle, output_dir: Path) -> None:
-        self.collected.append((handle, output_dir))
+    def collect(self, handle: ResourceHandle) -> None:
+        self.collected.append(handle)
 
 
 class FailingCollector:
     def supports(self, handle: ResourceHandle) -> bool:
         return True
 
-    def collect(self, handle: ResourceHandle, output_dir: Path) -> None:
+    def collect(self, handle: ResourceHandle) -> None:
         raise RuntimeError("collection failed")
 
 
@@ -121,24 +121,11 @@ class TestResourceRegistryCollectLogs:
         registry.register(handle)
 
         # WHEN logs are collected
-        registry.collect_logs(handle, tmp_path)
+        registry.collect_logs(handle)
 
         # THEN the collector was called once with the handle
         assert len(collector.collected) == 1
-        assert collector.collected[0][0] == handle
-
-    def test_collect_skipped_when_output_dir_is_none(self) -> None:
-        # GIVEN a registry with a global collector
-        collector = CollectorStub()
-        registry = _registry(global_collectors=[collector])
-        handle = HandleStub("ctrl")
-        registry.register(handle)
-
-        # WHEN collecting with no output dir
-        registry.collect_logs(handle, None)
-
-        # THEN collector is never called
-        assert collector.collected == []
+        assert collector.collected[0] == handle
 
     def test_collect_skipped_for_unknown_handle(self, tmp_path: Path) -> None:
         # GIVEN an empty registry
@@ -146,7 +133,7 @@ class TestResourceRegistryCollectLogs:
         registry = _registry(global_collectors=[collector])
 
         # WHEN collecting for a handle that was never registered
-        registry.collect_logs(HandleStub("ghost"), tmp_path)
+        registry.collect_logs(HandleStub("ghost"))
 
         # THEN collector is never called
         assert collector.collected == []
@@ -159,7 +146,7 @@ class TestResourceRegistryCollectLogs:
         registry.register(handle)
 
         # WHEN collecting
-        registry.collect_logs(handle, tmp_path)
+        registry.collect_logs(handle)
 
         # THEN the collector is not invoked
         assert collector.collected == []
@@ -171,7 +158,7 @@ class TestResourceRegistryCollectLogs:
         registry.register(handle)
 
         # WHEN collecting - should not raise
-        registry.collect_logs(handle, tmp_path)
+        registry.collect_logs(handle)
 
     def test_per_resource_collector_is_called(self, tmp_path: Path) -> None:
         # GIVEN a resource registered with its own collector
@@ -181,7 +168,7 @@ class TestResourceRegistryCollectLogs:
         registry.register(handle, collectors=[per_resource_collector])
 
         # WHEN collecting
-        registry.collect_logs(handle, tmp_path)
+        registry.collect_logs(handle)
 
         # THEN the per-resource collector is called
         assert len(per_resource_collector.collected) == 1
@@ -196,7 +183,7 @@ class TestResourceRegistryTeardown:
         registry.register(handle, destroyer=lambda: destroyed.append(handle.name))
 
         # WHEN torn down
-        registry.teardown(handle, tmp_path)
+        registry.teardown(handle)
 
         # THEN the destroyer was called
         assert destroyed == ["ctrl"]
@@ -208,7 +195,7 @@ class TestResourceRegistryTeardown:
         registry.register(handle, destroyer=None)
 
         # WHEN torn down
-        registry.teardown(handle, tmp_path)
+        registry.teardown(handle)
 
         # THEN the handle is no longer registered
         assert handle.resource_id not in registry._entries
@@ -223,7 +210,7 @@ class TestResourceRegistryTeardown:
         registry.register(child, destroyer=lambda: order.append("child"), parent=parent)
 
         # WHEN the parent is torn down
-        registry.teardown(parent, tmp_path)
+        registry.teardown(parent)
 
         # THEN child is destroyed before parent
         assert order == ["child", "parent"]
@@ -236,14 +223,14 @@ class TestResourceRegistryTeardown:
 
         # WHEN torn down
         with pytest.warns(ResourceTeardownWarning, match="Destruction failed"):
-            registry.teardown(handle, tmp_path)
+            registry.teardown(handle)
 
     def test_teardown_unknown_handle_is_noop(self, tmp_path: Path) -> None:
         # GIVEN an empty registry
         registry = _registry()
 
         # WHEN tearing down a handle that was never registered - should not raise
-        registry.teardown(HandleStub("ghost"), tmp_path)
+        registry.teardown(HandleStub("ghost"))
 
 
 class TestResourceRegistryTeardownAll:
@@ -260,22 +247,22 @@ class TestResourceRegistryTeardownAll:
             registry.register(handle, destroyer=make_destroyer(name))
 
         # WHEN teardown_all is called
-        registry.teardown_all(tmp_path)
+        registry.teardown_all()
 
         # THEN destruction happens in reverse order
         assert order == ["C", "B", "A"]
 
-    def test_teardown_all_skips_output_when_none(self) -> None:
+    def test_teardown_all_calls_collectors(self) -> None:
         # GIVEN a registry with a global collector and a registered resource
         collector = CollectorStub()
         registry = _registry(global_collectors=[collector])
         registry.register(HandleStub("ctrl"))
 
-        # WHEN torn down with no output dir
-        registry.teardown_all(None)
+        # WHEN torn down
+        registry.teardown_all()
 
-        # THEN no logs are collected
-        assert collector.collected == []
+        # THEN the collector was called
+        assert len(collector.collected) == 1
 
     def test_teardown_all_emits_warning_on_destroyer_failure(self, tmp_path: Path) -> None:
         # GIVEN a resource with a failing destroyer
@@ -285,7 +272,7 @@ class TestResourceRegistryTeardownAll:
 
         # WHEN teardown_all is called
         with pytest.warns(ResourceTeardownWarning):
-            registry.teardown_all(tmp_path)
+            registry.teardown_all()
 
     def test_teardown_all_continues_after_failure(self, tmp_path: Path) -> None:
         # GIVEN two resources, the first of which fails destruction
@@ -296,7 +283,7 @@ class TestResourceRegistryTeardownAll:
 
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", ResourceTeardownWarning)
-            registry.teardown_all(tmp_path)
+            registry.teardown_all()
 
         # THEN A is still destroyed despite B failing
         assert "A" in destroyed

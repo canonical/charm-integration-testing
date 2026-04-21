@@ -21,19 +21,26 @@ class JujuCrashdumpCollector:
     def __init__(
         self,
         logger: logging.Logger,
+        output_dir: Path | None = None,
         kubeconfig_path: str | None = None,
     ) -> None:
         self._logger = logger
+        self._output_dir = output_dir
         self._kubeconfig_path = kubeconfig_path
 
     def supports(self, handle: ResourceHandle) -> bool:
         return isinstance(handle, JujuControllerHandle)
 
-    def collect(self, handle: ResourceHandle, output_dir: Path) -> None:
+    def collect(self, handle: ResourceHandle) -> None:
         if not isinstance(handle, JujuControllerHandle):
             return
+        if self._output_dir is None:
+            self._logger.debug(
+                f"JujuCrashdumpCollector: output_dir is None, skipping log collection for '{handle.controller}'"
+            )
+            return
 
-        dest = output_dir / handle.path_segment
+        dest = self._output_dir / handle.path_segment
         dest.mkdir(parents=True, exist_ok=True)
 
         if self._kubeconfig_path is not None:
