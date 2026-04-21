@@ -193,6 +193,13 @@ def applications_are_scaled(status: jubilant.Status, *application_args: str) -> 
             else:
                 noncompliant_units[unit] = get_unit_state(status, unit)
 
+        # FIXME(@motjuste): detect if machine model, cus scale is not present there
+        #   juju status of machine models does not contain scale!?
+        #   jubilant's AppStatus sets scale to default value of 0
+        #   The following hack is incomplete: what if we wanted to scale to 0?
+        if application_info.scale == 0 and len(valid_units) > 0:
+            continue
+
         # Compare with the target scale of the application
         if application_info.scale != len(valid_units):
             noncompliant_applications[application] = get_application_state(status, application)
