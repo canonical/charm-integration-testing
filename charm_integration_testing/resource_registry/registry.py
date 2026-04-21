@@ -61,7 +61,14 @@ class ResourceRegistry:
         self._logger.debug(f"ResourceRegistry: registered {handle.resource_type} '{handle.resource_id}'")
 
     def deregister(self, handle: ResourceHandle) -> None:
-        self._entries.pop(handle.resource_id, None)
+        entry = self._entries.pop(handle.resource_id, None)
+        if entry is not None and entry.parent_id is not None:
+            siblings = self._children.get(entry.parent_id)
+            if siblings is not None:
+                self._children[entry.parent_id] = [child_id for child_id in siblings if child_id != handle.resource_id]
+                if not self._children[entry.parent_id]:
+                    self._children.pop(entry.parent_id, None)
+        self._children.pop(handle.resource_id, None)
         self._logger.debug(f"ResourceRegistry: deregistered {handle.resource_type} '{handle.resource_id}'")
 
     def collect_logs(self, handle: ResourceHandle, output_dir: Path | None) -> None:

@@ -1,13 +1,15 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import re
 from dataclasses import dataclass
+
+_UNSAFE_PATH_CHARS = re.compile(r"[^a-zA-Z0-9_\-]")
 
 
 @dataclass(frozen=True)
 class JujuControllerHandle:
     controller: str
-    model: str | None = None
 
     @property
     def resource_id(self) -> str:
@@ -19,4 +21,5 @@ class JujuControllerHandle:
 
     @property
     def path_segment(self) -> str:
-        return f"juju-controller-{self.controller}"
+        safe = _UNSAFE_PATH_CHARS.sub("-", self.controller)
+        return f"juju-controller-{safe}"

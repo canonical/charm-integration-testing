@@ -349,6 +349,10 @@ class JujuClient:
 
         self.backend.kill_controller(controller=controller)
 
+        # Call extensions
+        for extension in self.extensions:
+            extension.post_kill_controller(controller)
+
     def migrate_model(self, model_name: str, source_controller: str, target_controller: str) -> None:
         self.logger.info(
             f"Migrating model '{model_name}' from source controller '{source_controller}' to target controller '{target_controller}'"

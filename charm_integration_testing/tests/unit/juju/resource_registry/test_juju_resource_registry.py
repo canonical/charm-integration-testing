@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from juju.client import JujuClient
 from juju.resource_registry.collectors import JujuCrashdumpCollector
 from juju.resource_registry.extension import JujuResourceRegistryExtension
 from juju.resource_registry.handles import JujuControllerHandle
@@ -168,7 +169,7 @@ class TestJujuCrashdumpCollectorK8s:
 
 
 # ---------------------------------------------------------------------------
-# Tests: JujuResourceRegistryExtension
+# Tests: JujuResourceRegistryExtension (via JujuClient)
 # ---------------------------------------------------------------------------
 
 
@@ -177,26 +178,28 @@ class TestJujuResourceRegistryExtensionPostBootstrap:
         return ResourceRegistry(global_collectors=[], logger=logging.getLogger("test"))
 
     def test_registers_controller_on_bootstrap(self) -> None:
-        # GIVEN an extension wired to a registry
+        # GIVEN a JujuClient with the extension installed
         backend = BootstrapKillBackendStub()
         registry = self._make_registry()
         ext = JujuResourceRegistryExtension(backend, registry, log_dir=None)
+        client = JujuClient(backend, LoggerStub(), [ext])
 
-        # WHEN a controller is bootstrapped
-        ext.post_bootstrap_controller("my-ctrl")
+        # WHEN a controller is bootstrapped via the client
+        client.bootstrap_controller(cloud="mycloud", controller="my-ctrl", controller_constraints={})
 
-        # THEN the handle is registered
+        # THEN the handle is registered in the registry
         handle = JujuControllerHandle(controller="my-ctrl")
         assert handle.resource_id in registry._entries
 
     def test_destroyer_calls_backend_kill(self) -> None:
-        # GIVEN an extension wired to a registry
+        # GIVEN a bootstrapped controller tracked in the registry
         backend = BootstrapKillBackendStub()
         registry = self._make_registry()
         ext = JujuResourceRegistryExtension(backend, registry, log_dir=None)
-        ext.post_bootstrap_controller("my-ctrl")
+        client = JujuClient(backend, LoggerStub(), [ext])
+        client.bootstrap_controller(cloud="mycloud", controller="my-ctrl", controller_constraints={})
 
-        # WHEN the destroyer registered in the registry is invoked
+        # WHEN the registered destroyer is invoked directly (simulates teardown_all)
         entry = registry._entries[JujuControllerHandle(controller="my-ctrl").resource_id]
         assert entry.destroyer is not None
         entry.destroyer()
@@ -209,27 +212,29 @@ class TestJujuResourceRegistryExtensionPreKill:
     def _make_registry(self) -> ResourceRegistry:
         return ResourceRegistry(global_collectors=[], logger=logging.getLogger("test"))
 
-    def test_deregisters_controller_before_kill(self) -> None:
-        # GIVEN a registered controller
+    def test_deregisters_controller_after_kill(self) -> None:
+        # GIVEN a controller bootstrapped and tracked via JujuClient
         backend = BootstrapKillBackendStub()
         registry = self._make_registry()
         ext = JujuResourceRegistryExtension(backend, registry, log_dir=None)
-        ext.post_bootstrap_controller("my-ctrl")
+        client = JujuClient(backend, LoggerStub(), [ext])
+        client.bootstrap_controller(cloud="mycloud", controller="my-ctrl", controller_constraints={})
 
         handle = JujuControllerHandle(controller="my-ctrl")
         assert handle.resource_id in registry._entries
 
-        # WHEN pre_kill_controller fires
-        ext.pre_kill_controller("my-ctrl")
+        # WHEN the controller is killed via the client
+        client.kill_controller(controller="my-ctrl")
 
-        # THEN the handle is removed from the registry
+        # THEN the handle is removed from the registry (post_kill_controller fired)
         assert handle.resource_id not in registry._entries
 
-    def test_pre_kill_on_unregistered_controller_is_noop(self) -> None:
-        # GIVEN an extension with an empty registry
+    def test_kill_on_unregistered_controller_is_noop(self) -> None:
+        # GIVEN a client with an empty registry (no prior bootstrap)
         backend = BootstrapKillBackendStub()
         registry = self._make_registry()
         ext = JujuResourceRegistryExtension(backend, registry, log_dir=None)
+        client = JujuClient(backend, LoggerStub(), [ext])
 
-        # WHEN pre_kill_controller fires for a controller never registered
-        ext.pre_kill_controller("ghost-ctrl")  # should not raise
+        # WHEN killing a controller that was never registered
+        client.kill_controller(controller="ghost-ctrl")  # should not raise

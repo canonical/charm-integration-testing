@@ -32,4 +32,7 @@ class JujuResourceRegistryExtension(JujuExtension):
     def pre_kill_controller(self, controller: str) -> None:
         handle = JujuControllerHandle(controller=controller)
         self._registry.collect_logs(handle, self._log_dir)
+
+    def post_kill_controller(self, controller: str) -> None:
+        handle = JujuControllerHandle(controller=controller)
         self._registry.deregister(handle)
