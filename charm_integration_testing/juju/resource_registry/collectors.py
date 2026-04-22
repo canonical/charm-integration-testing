@@ -41,7 +41,7 @@ class JujuCrashdumpCollector:
         if not isinstance(handle, JujuControllerHandle):
             return
         if self._output_dir is None:
-            self._logger.debug(f"output_dir is None, skipping log collection for '{handle.controller}'")
+            self._logger.debug(f"Output_dir is None, skipping log collection for '{handle.controller}'")
             return
 
         dest = self._output_dir / handle.path_segment
@@ -63,7 +63,7 @@ class JujuCrashdumpCollector:
             "--output_path",
             str(dest / f"{dest.name}.tar.gz"),
         ]
-        self._logger.debug(f"running {' '.join(str(c) for c in cmd)}")
+        self._logger.debug(f"Running {' '.join(str(c) for c in cmd)}")
         result = subprocess.run(  # nosec B603
             cmd,
             capture_output=True,
@@ -98,7 +98,7 @@ class JujuCrashdumpCollector:
             str(dest / f"{dest.name}.tar.gz"),
             "--as-root",
         ]
-        self._logger.debug(f"running {' '.join(str(c) for c in cmd)}")
+        self._logger.debug(f"Running {' '.join(str(c) for c in cmd)}")
         result = subprocess.run(  # nosec B603
             cmd,
             capture_output=True,

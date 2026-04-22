@@ -63,12 +63,12 @@ class ResourceRegistry:
         self._entries[handle.resource_id] = entry
         if parent_id is not None:
             self._children[parent_id].append(handle.resource_id)
-        self._logger.debug(f"registered {handle.resource_type} '{handle.resource_id}'")
+        self._logger.debug(f"Registered {handle.resource_type} '{handle.resource_id}'")
 
     def deregister(self, handle: ResourceHandle) -> None:
         entry = self._entries.pop(handle.resource_id, None)
         if entry is None:
-            self._logger.debug(f"no entry for '{handle.resource_id}', skipping deregistration")
+            self._logger.debug(f"No entry for '{handle.resource_id}', skipping deregistration")
             return
         # Re-parent any children to root so they remain reachable by teardown_all().
         for child_id in self._children.pop(handle.resource_id, []):
@@ -81,14 +81,14 @@ class ResourceRegistry:
                 self._children[entry.parent_id] = [child_id for child_id in siblings if child_id != handle.resource_id]
                 if not self._children[entry.parent_id]:
                     self._children.pop(entry.parent_id, None)
-        self._logger.debug(f"deregistered {handle.resource_type} '{handle.resource_id}'")
+        self._logger.debug(f"Deregistered {handle.resource_type} '{handle.resource_id}'")
 
     def collect_logs(self, handle: ResourceHandle) -> None:
         entry = self._entries.get(handle.resource_id)
         if entry is None:
-            self._logger.debug(f"no entry for '{handle.resource_id}', skipping log collection")
+            self._logger.debug(f"No entry for '{handle.resource_id}', skipping log collection")
             return
-        self._logger.info(f"collecting logs for {handle.resource_type} '{handle.resource_id}'")
+        self._logger.info(f"Collecting logs for {handle.resource_type} '{handle.resource_id}'")
         all_collectors = [c for c in entry.collectors if c.supports(handle)] + [
             c for c in self._global_collectors if c.supports(handle)
         ]
@@ -120,7 +120,7 @@ class ResourceRegistry:
         destroy_exc: BaseException | None = None
         if not entry.destroyed and entry.destroyer is not None:
             try:
-                self._logger.debug(f"destroying {handle.resource_type} '{handle.resource_id}'")
+                self._logger.debug(f"Destroying {handle.resource_type} '{handle.resource_id}'")
                 entry.destroyer()
                 entry.destroyed = True
             except Exception as exc:
@@ -138,7 +138,7 @@ class ResourceRegistry:
     def teardown_all(self) -> None:
         """Tear down all root resources in reverse registration order."""
         root_ids = [resource_id for resource_id, entry in self._entries.items() if entry.parent_id is None]
-        self._logger.debug(f"teardown_all starting, {len(root_ids)} root resource(s)")
+        self._logger.debug(f"Teardown_all starting, {len(root_ids)} root resource(s)")
         for resource_id in reversed(root_ids):
             entry = self._entries.get(resource_id)
             if entry is None:
@@ -151,4 +151,4 @@ class ResourceRegistry:
                     ResourceTeardownWarning,
                     stacklevel=2,
                 )
-        self._logger.debug("teardown_all complete")
+        self._logger.debug("Teardown_all complete")
