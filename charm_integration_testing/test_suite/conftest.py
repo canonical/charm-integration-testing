@@ -189,8 +189,9 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption(
         "--bundle",
         type=str,
+        action="append",
         default=None,
-        help="Bundle file path to deploy (used by deploy and idempotent-redeploy phases).",
+        help="Bundle file path to deploy (used by deploy and idempotent-redeploy phases). Can be specified multiple times; the first value is used.",
     )
     parser.addoption(
         "--mermaid-output",
@@ -404,13 +405,12 @@ def juju_controller_bootstrap_constraints(request: pytest.FixtureRequest) -> dic
 @pytest.fixture
 def bundle(request: pytest.FixtureRequest) -> Path:
     """Bundle file path passed via ``--bundle``."""
-    value = request.config.getoption("--bundle")
+    values = request.config.getoption("--bundle")
 
-    if not value:
+    if not values:
         return Path(request.config.rootpath) / "generated-bundle.yaml"
 
-    assert isinstance(value, str)
-    value = Path(value).resolve()
+    value = Path(values[0]).resolve()
     # Ensures parents path exists for the output when calling .write_text
     value.parent.mkdir(parents=True, exist_ok=True)
     return value
