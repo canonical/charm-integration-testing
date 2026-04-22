@@ -44,15 +44,15 @@ class JujuCrashdumpCollector:
             self._logger.debug(f"Output_dir is None, skipping log collection for '{handle.controller}'")
             return
 
-        dest = self._output_dir / handle.path_segment
-        dest.mkdir(parents=True, exist_ok=True)
+        output_dir = self._output_dir
+        output_dir.mkdir(parents=True, exist_ok=True)
 
         if self._kubeconfig_path is not None:
-            self._collect_k8s(handle.controller, dest)
+            self._collect_k8s(handle.controller, output_dir / f"{handle.path_segment}.tar.gz")
         else:
-            self._collect_machine(handle.controller, dest)
+            self._collect_machine(handle.controller, output_dir / f"{handle.path_segment}.tar.gz")
 
-    def _collect_k8s(self, controller: str, dest: Path) -> None:
+    def _collect_k8s(self, controller: str, output_path: Path) -> None:
         kubeconfig_path = self._kubeconfig_path
         if kubeconfig_path is None:
             raise ValueError("kubeconfig_path must be set for Kubernetes crashdump collection")
@@ -61,7 +61,7 @@ class JujuCrashdumpCollector:
             kubeconfig_path,
             controller,
             "--output_path",
-            str(dest / f"{dest.name}.tar.gz"),
+            str(output_path),
         ]
         self._logger.debug(f"Running {' '.join(str(c) for c in cmd)}")
         result = subprocess.run(  # nosec B603
@@ -82,7 +82,7 @@ class JujuCrashdumpCollector:
                 self._logger.debug(f"juju-k8s-crashdump stderr:\n{result.stderr}")
         result.check_returncode()
 
-    def _collect_machine(self, controller: str, dest: Path) -> None:
+    def _collect_machine(self, controller: str, output_path: Path) -> None:
         cmd = [
             "juju-crashdump",
             "--model",
@@ -95,7 +95,7 @@ class JujuCrashdumpCollector:
             "--compression",
             "gz",
             "--unit-dump-location",
-            str(dest / f"{dest.name}.tar.gz"),
+            str(output_path),
             "--as-root",
         ]
         self._logger.debug(f"Running {' '.join(str(c) for c in cmd)}")
