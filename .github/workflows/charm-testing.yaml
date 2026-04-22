@@ -188,22 +188,12 @@ jobs:
           event_name: job_start
           detail: Charm integration test job started.
       - name: Install Juju
+        uses: ./.github/actions/install-with-retry
+        with:
+          command: sudo snap install juju --channel "${{ inputs.juju_channel }}"
+      - name: Ensure Juju home directory exists
         shell: bash
-        env:
-          juju_channel: ${{ inputs.juju_channel }}
-        run: |
-          for ((attempt = 1; ; attempt++)); do
-            if sudo snap install juju --channel "${juju_channel}"; then
-              break
-            elif [ "$attempt" -lt 3 ]; then
-              echo "Failed, retrying..."
-              sleep 5
-            else
-              exit 1
-            fi
-          done
-          # Ensure the juju home directory exists
-          mkdir -p $HOME/.local/share/juju
+        run: mkdir -p $HOME/.local/share/juju
       - name: Setup K8s Cloud
         if: ${{ inputs.substrate == 'kubernetes'}}
         id: setup_k8s
@@ -265,39 +255,18 @@ jobs:
         shell: bash
         run: |
           curl -sSfL https://raw.githubusercontent.com/trufflesecurity/trufflehog/main/scripts/install.sh | sh -s -- -b /usr/local/bin v3.56.0
-      - name: Install crashdump tools
-        shell: bash
-        run: |
-          for ((attempt = 1; ; attempt++)); do
-            if pipx install "git+https://github.com/canonical/juju-k8s-crashdump@22ef04caaeeb94ad6ed49f8392b6bada65184569"; then
-              break
-            elif [ "$attempt" -lt 3 ]; then
-              echo "Failed, retrying..."
-              sleep 5
-            else
-              exit 1
-            fi
-          done
-          for ((attempt = 1; ; attempt++)); do
-            if sudo snap install juju-crashdump --classic; then
-              break
-            elif [ "$attempt" -lt 3 ]; then
-              echo "Failed, retrying..."
-              sleep 5
-            else
-              exit 1
-            fi
-          done
-          for ((attempt = 1; ; attempt++)); do
-            if sudo snap install kubectl --classic; then
-              break
-            elif [ "$attempt" -lt 3 ]; then
-              echo "Failed, retrying..."
-              sleep 5
-            else
-              exit 1
-            fi
-          done
+      - name: Install juju-k8s-crashdump
+        uses: ./.github/actions/install-with-retry
+        with:
+          command: pipx install "git+https://github.com/canonical/juju-k8s-crashdump@22ef04caaeeb94ad6ed49f8392b6bada65184569"
+      - name: Install juju-crashdump
+        uses: ./.github/actions/install-with-retry
+        with:
+          command: sudo snap install juju-crashdump --classic
+      - name: Install kubectl
+        uses: ./.github/actions/install-with-retry
+        with:
+          command: sudo snap install kubectl --classic
       - name: Post 'test_start' event
         if: ${{ env.TEST_OBSERVER_API != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-events

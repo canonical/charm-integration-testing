@@ -1,0 +1,34 @@
+---
+name: Install with retry
+description: Run an install command, retrying up to max-attempts times on failure.
+inputs:
+  command:
+    description: The install command to run.
+    required: true
+  max-attempts:
+    description: Maximum number of attempts before failing.
+    required: false
+    default: '3'
+  sleep-seconds:
+    description: Seconds to sleep between attempts.
+    required: false
+    default: '5'
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        INSTALL_COMMAND: ${{ inputs.command }}
+        MAX_ATTEMPTS: ${{ inputs.max-attempts }}
+        SLEEP_SECONDS: ${{ inputs.sleep-seconds }}
+      run: |-
+        for ((attempt = 1; ; attempt++)); do
+          if eval "$INSTALL_COMMAND"; then
+            break
+          elif [ "$attempt" -lt "$MAX_ATTEMPTS" ]; then
+            echo "Failed, retrying..."
+            sleep "$SLEEP_SECONDS"
+          else
+            exit 1
+          fi
+        done
