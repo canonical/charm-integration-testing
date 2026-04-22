@@ -50,9 +50,20 @@ def get_unit_info(status: jubilant.Status, unit: str) -> jubilant.statustypes.Un
 
 def generate_endpoint_integrations(status: jubilant.Status) -> Iterator[tuple[str, str, AppStatusRelation]]:
     for application, application_info in status.apps.items():
-        for endpoint, integrations in application_info.relations.items():
-            for integration in integrations:
-                yield (application, endpoint, integration)
+        for endpoint, related_apps in application_info.relations.items():
+            for related_app in related_apps:
+                yield (application, endpoint, related_app)
+    for application, remote_app_info in status.app_endpoints.items():
+        for endpoint, related_apps in remote_app_info.relations.items():
+            for related_app in related_apps:
+                yield (
+                    application,
+                    endpoint,
+                    AppStatusRelation(
+                        interface=remote_app_info.endpoints[endpoint].interface,
+                        related_app=related_app,
+                    ),
+                )
 
 
 def get_integrations(status: jubilant.Status) -> set[tuple[JujuIntegrationApplication, JujuIntegrationApplication]]:
