@@ -171,14 +171,15 @@ class TestResourceRegistryCollectLogs:
         # THEN the collector is not invoked
         assert collector.collected == []
 
-    def test_failing_collector_is_swallowed(self, tmp_path: Path) -> None:
+    def test_failing_collector_emits_warning(self, tmp_path: Path) -> None:
         # GIVEN a collector that raises
         registry = _registry(global_collectors=[FailingCollector()])
         handle = HandleStub("ctrl")
         registry.register(handle)
 
-        # WHEN collecting - should not raise
-        registry.collect_logs(handle)
+        # WHEN collecting - should not raise but emit a ResourceTeardownWarning
+        with pytest.warns(ResourceTeardownWarning, match="Log collection failed"):
+            registry.collect_logs(handle)
 
     def test_per_resource_collector_is_called(self, tmp_path: Path) -> None:
         # GIVEN a resource registered with its own collector

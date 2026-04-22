@@ -96,9 +96,10 @@ class ResourceRegistry:
             try:
                 collector.collect(handle)
             except Exception as exc:
-                self._logger.debug(
-                    f"ResourceRegistry: collector {type(collector).__name__} failed for "
-                    f"'{handle.resource_id}': {exc}"
+                warnings.warn(
+                    f"Log collection failed for '{handle.resource_id}' " f"({type(collector).__name__}): {exc}",
+                    ResourceTeardownWarning,
+                    stacklevel=2,
                 )
         entry.logs_collected = True
 

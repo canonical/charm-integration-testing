@@ -63,29 +63,20 @@ class JujuCrashdumpCollector:
             kubeconfig_path,
             controller,
             "--output_path",
-            str(dest / "k8s-crashdump.tar.gz"),
+            str(dest / f"{dest.name}.tar.gz"),
         ]
         self._logger.debug(f"JujuCrashdumpCollector: running {' '.join(str(c) for c in cmd)}")
-        try:
-            result = subprocess.run(  # nosec B603
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=_SUBPROCESS_TIMEOUT_SECONDS,
-            )
-            if result.stdout:
-                self._logger.debug(f"juju-k8s-crashdump stdout:\n{result.stdout}")
-            if result.stderr:
-                self._logger.debug(f"juju-k8s-crashdump stderr:\n{result.stderr}")
-            if result.returncode != 0:
-                self._logger.warning(
-                    f"JujuCrashdumpCollector: juju-k8s-crashdump exited with code "
-                    f"{result.returncode} for controller '{controller}'"
-                )
-        except FileNotFoundError:
-            self._logger.warning("JujuCrashdumpCollector: juju-k8s-crashdump not found, skipping K8s crashdump")
-        except subprocess.TimeoutExpired:
-            self._logger.warning(f"JujuCrashdumpCollector: juju-k8s-crashdump timed out for controller '{controller}'")
+        result = subprocess.run(  # nosec B603
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=_SUBPROCESS_TIMEOUT_SECONDS,
+        )
+        if result.stdout:
+            self._logger.debug(f"juju-k8s-crashdump stdout:\n{result.stdout}")
+        if result.stderr:
+            self._logger.debug(f"juju-k8s-crashdump stderr:\n{result.stderr}")
+        result.check_returncode()
 
     def _collect_machine(self, controller: str, dest: Path) -> None:
         cmd = [
@@ -100,27 +91,18 @@ class JujuCrashdumpCollector:
             "--compression",
             "gz",
             "--unit-dump-location",
-            str(dest / "crashdump.tar.gz"),
+            str(dest / f"{dest.name}.tar.gz"),
             "--as-root",
         ]
         self._logger.debug(f"JujuCrashdumpCollector: running {' '.join(str(c) for c in cmd)}")
-        try:
-            result = subprocess.run(  # nosec B603
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=_SUBPROCESS_TIMEOUT_SECONDS,
-            )
-            if result.stdout:
-                self._logger.debug(f"juju-crashdump stdout:\n{result.stdout}")
-            if result.stderr:
-                self._logger.debug(f"juju-crashdump stderr:\n{result.stderr}")
-            if result.returncode != 0:
-                self._logger.warning(
-                    f"JujuCrashdumpCollector: juju-crashdump exited with code "
-                    f"{result.returncode} for controller '{controller}'"
-                )
-        except FileNotFoundError:
-            self._logger.warning("JujuCrashdumpCollector: juju-crashdump not found, skipping machine crashdump")
-        except subprocess.TimeoutExpired:
-            self._logger.warning(f"JujuCrashdumpCollector: juju-crashdump timed out for controller '{controller}'")
+        result = subprocess.run(  # nosec B603
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=_SUBPROCESS_TIMEOUT_SECONDS,
+        )
+        if result.stdout:
+            self._logger.debug(f"juju-crashdump stdout:\n{result.stdout}")
+        if result.stderr:
+            self._logger.debug(f"juju-crashdump stderr:\n{result.stderr}")
+        result.check_returncode()

@@ -121,39 +121,33 @@ class TestJujuCrashdumpCollectorMachine:
         assert cmd[0] == "juju-crashdump"
         assert "my-ctrl:controller" in cmd
 
-    def test_warns_on_nonzero_exit(self, tmp_path: Path) -> None:
+    def test_raises_on_nonzero_exit(self, tmp_path: Path) -> None:
         # GIVEN crashdump exits non-zero
-        logger = LoggerStub()
-        collector = JujuCrashdumpCollector(logger, output_dir=tmp_path, kubeconfig_path=None)
+        collector = JujuCrashdumpCollector(LoggerStub(), output_dir=tmp_path, kubeconfig_path=None)
         handle = JujuControllerHandle(controller="my-ctrl")
 
-        failed = subprocess.CompletedProcess(args=[], returncode=1, stdout="", stderr="err")
+        failed = subprocess.CompletedProcess(args=["juju-crashdump"], returncode=1, stdout="", stderr="err")
         with patch("subprocess.run", return_value=failed):
-            collector.collect(handle)
+            with pytest.raises(subprocess.CalledProcessError):
+                collector.collect(handle)
 
-        assert any("exited with code 1" in w for w in logger.warnings)
-
-    def test_warns_on_tool_not_found(self, tmp_path: Path) -> None:
+    def test_raises_on_tool_not_found(self, tmp_path: Path) -> None:
         # GIVEN juju-crashdump is not installed
-        logger = LoggerStub()
-        collector = JujuCrashdumpCollector(logger, output_dir=tmp_path, kubeconfig_path=None)
+        collector = JujuCrashdumpCollector(LoggerStub(), output_dir=tmp_path, kubeconfig_path=None)
         handle = JujuControllerHandle(controller="my-ctrl")
 
         with patch("subprocess.run", side_effect=FileNotFoundError):
-            collector.collect(handle)
+            with pytest.raises(FileNotFoundError):
+                collector.collect(handle)
 
-        assert any("not found" in w for w in logger.warnings)
-
-    def test_warns_on_timeout(self, tmp_path: Path) -> None:
+    def test_raises_on_timeout(self, tmp_path: Path) -> None:
         # GIVEN crashdump times out
-        logger = LoggerStub()
-        collector = JujuCrashdumpCollector(logger, output_dir=tmp_path, kubeconfig_path=None)
+        collector = JujuCrashdumpCollector(LoggerStub(), output_dir=tmp_path, kubeconfig_path=None)
         handle = JujuControllerHandle(controller="my-ctrl")
 
         with patch("subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="juju-crashdump", timeout=600)):
-            collector.collect(handle)
-
-        assert any("timed out" in w for w in logger.warnings)
+            with pytest.raises(subprocess.TimeoutExpired):
+                collector.collect(handle)
 
     def test_skips_when_output_dir_is_none(self) -> None:
         # GIVEN a collector with no output_dir configured
@@ -183,15 +177,13 @@ class TestJujuCrashdumpCollectorK8s:
         assert "/tmp/kubeconfig" in cmd
         assert "my-ctrl" in cmd
 
-    def test_warns_on_tool_not_found(self, tmp_path: Path) -> None:
-        logger = LoggerStub()
-        collector = JujuCrashdumpCollector(logger, output_dir=tmp_path, kubeconfig_path="/tmp/kubeconfig")
+    def test_raises_on_tool_not_found(self, tmp_path: Path) -> None:
+        collector = JujuCrashdumpCollector(LoggerStub(), output_dir=tmp_path, kubeconfig_path="/tmp/kubeconfig")
         handle = JujuControllerHandle(controller="my-ctrl")
 
         with patch("subprocess.run", side_effect=FileNotFoundError):
-            collector.collect(handle)
-
-        assert any("not found" in w for w in logger.warnings)
+            with pytest.raises(FileNotFoundError):
+                collector.collect(handle)
 
 
 # ---------------------------------------------------------------------------
