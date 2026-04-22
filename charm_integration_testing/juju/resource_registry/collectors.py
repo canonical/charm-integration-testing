@@ -30,7 +30,7 @@ class JujuCrashdumpCollector:
         output_dir: Path | None = None,
         kubeconfig_path: str | None = None,
     ) -> None:
-        self._logger = logger
+        self._logger = logger.getChild(type(self).__name__)
         self._output_dir = output_dir
         self._kubeconfig_path = kubeconfig_path
 
@@ -41,9 +41,7 @@ class JujuCrashdumpCollector:
         if not isinstance(handle, JujuControllerHandle):
             return
         if self._output_dir is None:
-            self._logger.debug(
-                f"JujuCrashdumpCollector: output_dir is None, skipping log collection for '{handle.controller}'"
-            )
+            self._logger.debug(f"output_dir is None, skipping log collection for '{handle.controller}'")
             return
 
         dest = self._output_dir / handle.path_segment
@@ -65,17 +63,23 @@ class JujuCrashdumpCollector:
             "--output_path",
             str(dest / f"{dest.name}.tar.gz"),
         ]
-        self._logger.debug(f"JujuCrashdumpCollector: running {' '.join(str(c) for c in cmd)}")
+        self._logger.debug(f"running {' '.join(str(c) for c in cmd)}")
         result = subprocess.run(  # nosec B603
             cmd,
             capture_output=True,
             text=True,
             timeout=_SUBPROCESS_TIMEOUT_SECONDS,
         )
-        if result.stdout:
-            self._logger.debug(f"juju-k8s-crashdump stdout:\n{result.stdout}")
-        if result.stderr:
-            self._logger.debug(f"juju-k8s-crashdump stderr:\n{result.stderr}")
+        if result.returncode != 0:
+            if result.stdout:
+                self._logger.warning(f"juju-k8s-crashdump stdout:\n{result.stdout}")
+            if result.stderr:
+                self._logger.warning(f"juju-k8s-crashdump stderr:\n{result.stderr}")
+        else:
+            if result.stdout:
+                self._logger.debug(f"juju-k8s-crashdump stdout:\n{result.stdout}")
+            if result.stderr:
+                self._logger.debug(f"juju-k8s-crashdump stderr:\n{result.stderr}")
         result.check_returncode()
 
     def _collect_machine(self, controller: str, dest: Path) -> None:
@@ -94,15 +98,21 @@ class JujuCrashdumpCollector:
             str(dest / f"{dest.name}.tar.gz"),
             "--as-root",
         ]
-        self._logger.debug(f"JujuCrashdumpCollector: running {' '.join(str(c) for c in cmd)}")
+        self._logger.debug(f"running {' '.join(str(c) for c in cmd)}")
         result = subprocess.run(  # nosec B603
             cmd,
             capture_output=True,
             text=True,
             timeout=_SUBPROCESS_TIMEOUT_SECONDS,
         )
-        if result.stdout:
-            self._logger.debug(f"juju-crashdump stdout:\n{result.stdout}")
-        if result.stderr:
-            self._logger.debug(f"juju-crashdump stderr:\n{result.stderr}")
+        if result.returncode != 0:
+            if result.stdout:
+                self._logger.warning(f"juju-crashdump stdout:\n{result.stdout}")
+            if result.stderr:
+                self._logger.warning(f"juju-crashdump stderr:\n{result.stderr}")
+        else:
+            if result.stdout:
+                self._logger.debug(f"juju-crashdump stdout:\n{result.stdout}")
+            if result.stderr:
+                self._logger.debug(f"juju-crashdump stderr:\n{result.stderr}")
         result.check_returncode()
