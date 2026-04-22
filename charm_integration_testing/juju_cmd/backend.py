@@ -95,7 +95,7 @@ class JujuCmdBackend(JujuBackend):
                 )
 
     def num_units(self, model: str, application: str) -> int:
-        return len(self._status(model).applications[application].units)
+        return 0 if not (app := self._status(model).applications.get(application)) else len(app.units)
 
     def list_applications(self, model: str) -> dict[str, JujuApplicationInfo]:
         status = self._status(model)
@@ -294,10 +294,10 @@ class JujuCmdBackend(JujuBackend):
         )
 
     def application_charm(self, model: str, application: str) -> str | None:
-        return self._status(model).applications[application].charm
+        return None if not (app := self._status(model).applications.get(application)) else app.charm
 
     def application_units(self, model: str, application: str) -> list[str]:
-        return list(self._status(model).applications[application].units.keys())
+        return [] if not (app := self._status(model).applications.get(application)) else list(app.units.keys())
 
     def exec_unit(self, model: str, unit: str, task: str, operator: bool = False) -> JujuExecOutput:
         raise NotImplementedError
