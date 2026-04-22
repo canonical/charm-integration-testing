@@ -1,0 +1,14 @@
+applications:
+  target:
+    charm: postgresql
+    channel: 14/stable
+    scale: 1
+    trust: true
+# bundle: machine
+--- # overlay.yaml
+applications:
+  target:
+    offers:
+      target-offer:
+        endpoints:
+        - database
