@@ -391,10 +391,15 @@ class JubilantBackend(JujuCmdBackend):
         raise KeyError(f"Unit '{unit}' not found")
 
     def list_applications(self, model: str) -> dict[str, JujuApplicationInfo]:
-        return {
+        result = {
             app_name: JujuApplicationInfo(charm=app_info.charm, revision=app_info.charm_rev)
             for app_name, app_info in self.status(model).apps.items()
         }
+        result |= {
+            app_name: JujuApplicationInfo(charm=app_name, revision=0)
+            for app_name, _ in self.status(model).app_endpoints.items()
+        }
+        return result
 
     def list_integrations(self, model: str) -> set[JujuIntegration]:
         # Juju status yaml format doesn't expose provider/requirer information or
