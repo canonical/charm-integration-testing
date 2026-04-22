@@ -159,14 +159,21 @@ def log_dir(request: pytest.FixtureRequest) -> Path | None:
 
 
 @pytest.fixture(scope="session")
+def kubeconfig_path() -> Path | None:
+    raw = os.environ.get("KUBECONFIG")
+    stripped = None if raw is None else raw.strip() or None
+    return Path(stripped) if stripped is not None else None
+
+
+@pytest.fixture(scope="session")
 def session_resource_registry(
     log_dir: Path | None,
     logger: logging.Logger,
+    kubeconfig_path: Path | None,
 ) -> Iterator[ResourceRegistry]:
     """Session-scoped resource registry for the main workflow controller."""
-    kubeconfig = os.environ.get("KUBECONFIG")
     registry = ResourceRegistry(
-        global_collectors=[JujuCrashdumpCollector(logger, output_dir=log_dir, kubeconfig_path=kubeconfig)],
+        global_collectors=[JujuCrashdumpCollector(logger, output_dir=log_dir, kubeconfig_path=kubeconfig_path)],
         logger=logger,
     )
     try:
@@ -1034,10 +1041,10 @@ def _is_running_on_kubernetes(juju_backend: JujuBackend, model: str) -> None:
 @pytest.fixture
 def kubernetes_client(
     logger: logging.Logger,
+    kubeconfig_path: Path | None,
 ) -> KubernetesClient | None:
-    kubeconfig = os.environ.get("KUBECONFIG")
-    if kubeconfig:
-        return KubernetesClient(KubernetesBackend.k8s_client(kubeconfig=kubeconfig), logger=logger)
+    if kubeconfig_path:
+        return KubernetesClient(KubernetesBackend.k8s_client(kubeconfig=kubeconfig_path), logger=logger)
     return None
 
 

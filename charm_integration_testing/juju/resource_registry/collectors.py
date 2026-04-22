@@ -28,7 +28,7 @@ class JujuCrashdumpCollector:
         self,
         logger: logging.Logger,
         output_dir: Path | None = None,
-        kubeconfig_path: str | None = None,
+        kubeconfig_path: Path | None = None,
     ) -> None:
         self._logger = logger.getChild(type(self).__name__)
         self._output_dir = output_dir
@@ -58,7 +58,7 @@ class JujuCrashdumpCollector:
             raise ValueError("kubeconfig_path must be set for Kubernetes crashdump collection")
         cmd = [
             "juju-k8s-crashdump",
-            kubeconfig_path,
+            str(kubeconfig_path.resolve()),
             controller,
             "--output_path",
             str(output_path),

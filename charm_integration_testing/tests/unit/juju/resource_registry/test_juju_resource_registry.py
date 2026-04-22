@@ -170,7 +170,7 @@ class TestJujuCrashdumpCollectorK8s:
     def test_runs_juju_k8s_crashdump(self, tmp_path: Path) -> None:
         # GIVEN a k8s collector
         logger = LoggerStub()
-        collector = JujuCrashdumpCollector(logger, output_dir=tmp_path, kubeconfig_path="/tmp/kubeconfig")
+        collector = JujuCrashdumpCollector(logger, output_dir=tmp_path, kubeconfig_path=Path("/tmp/kubeconfig"))
         handle = JujuControllerHandle(controller="my-ctrl")
 
         completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
@@ -184,7 +184,7 @@ class TestJujuCrashdumpCollectorK8s:
         assert any("juju-controller-my-ctrl" in str(arg) for arg in cmd)
 
     def test_raises_on_tool_not_found(self, tmp_path: Path) -> None:
-        collector = JujuCrashdumpCollector(LoggerStub(), output_dir=tmp_path, kubeconfig_path="/tmp/kubeconfig")
+        collector = JujuCrashdumpCollector(LoggerStub(), output_dir=tmp_path, kubeconfig_path=Path("/tmp/kubeconfig"))
         handle = JujuControllerHandle(controller="my-ctrl")
 
         with patch("subprocess.run", side_effect=FileNotFoundError):
