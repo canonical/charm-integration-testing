@@ -69,6 +69,10 @@ class TestJujuControllerHandle:
         handle = JujuControllerHandle(controller="my-ctrl")
         assert handle.path_segment == "juju-controller-my-ctrl"
 
+    def test_path_segment_sanitizes_unsafe_chars(self) -> None:
+        handle = JujuControllerHandle(controller="ctrl.with spaces/and:colons")
+        assert handle.path_segment == "juju-controller-ctrl-with-spaces-and-colons"
+
     def test_frozen(self) -> None:
         handle = JujuControllerHandle(controller="my-ctrl")
         with pytest.raises(dataclasses.FrozenInstanceError):
@@ -120,6 +124,7 @@ class TestJujuCrashdumpCollectorMachine:
         cmd = mock_run.call_args[0][0]
         assert cmd[0] == "juju-crashdump"
         assert "my-ctrl:controller" in cmd
+        assert any("juju-controller-my-ctrl" in str(arg) for arg in cmd)
 
     def test_raises_on_nonzero_exit(self, tmp_path: Path) -> None:
         # GIVEN crashdump exits non-zero
@@ -176,6 +181,7 @@ class TestJujuCrashdumpCollectorK8s:
         assert cmd[0] == "juju-k8s-crashdump"
         assert "/tmp/kubeconfig" in cmd
         assert "my-ctrl" in cmd
+        assert any("juju-controller-my-ctrl" in str(arg) for arg in cmd)
 
     def test_raises_on_tool_not_found(self, tmp_path: Path) -> None:
         collector = JujuCrashdumpCollector(LoggerStub(), output_dir=tmp_path, kubeconfig_path="/tmp/kubeconfig")
@@ -217,10 +223,9 @@ class TestJujuResourceRegistryExtensionPostBootstrap:
         client = JujuClient(backend, LoggerStub(), [ext])
         client.bootstrap_controller(cloud="mycloud", controller="my-ctrl", controller_constraints={})
 
-        # WHEN the registered destroyer is invoked directly (simulates teardown_all)
-        entry = registry._entries[JujuControllerHandle(controller="my-ctrl").resource_id]
-        assert entry.destroyer is not None
-        entry.destroyer()
+        # WHEN the registry tears down the handle
+        handle = JujuControllerHandle(controller="my-ctrl")
+        registry.teardown(handle)
 
         # THEN backend.kill_controller was called
         assert "my-ctrl" in backend.killed

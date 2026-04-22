@@ -93,14 +93,7 @@ class ResourceRegistry:
             c for c in self._global_collectors if c.supports(handle)
         ]
         for collector in all_collectors:
-            try:
-                collector.collect(handle)
-            except Exception as exc:
-                warnings.warn(
-                    f"Log collection failed for '{handle.resource_id}' " f"({type(collector).__name__}): {exc}",
-                    ResourceTeardownWarning,
-                    stacklevel=2,
-                )
+            collector.collect(handle)
         entry.logs_collected = True
 
     def teardown(self, handle: ResourceHandle) -> None:
@@ -115,31 +108,32 @@ class ResourceRegistry:
             if child_entry is not None:
                 self.teardown(child_entry.handle)
 
-        # Collect logs for self
+        # Collect logs for self; save any exception so destroy still runs
+        log_exc: BaseException | None = None
         if not entry.logs_collected:
             try:
                 self.collect_logs(handle)
             except Exception as exc:
-                warnings.warn(
-                    f"Log collection failed for '{handle.resource_id}': {exc}",
-                    ResourceTeardownWarning,
-                    stacklevel=2,
-                )
+                log_exc = exc
 
-        # Destroy self
+        # Destroy self (always runs, even if log collection failed)
+        destroy_exc: BaseException | None = None
         if not entry.destroyed and entry.destroyer is not None:
             try:
                 self._logger.debug(f"destroying {handle.resource_type} '{handle.resource_id}'")
                 entry.destroyer()
                 entry.destroyed = True
             except Exception as exc:
-                warnings.warn(
-                    f"Destruction failed for '{handle.resource_id}': {exc}",
-                    ResourceTeardownWarning,
-                    stacklevel=2,
-                )
+                destroy_exc = exc
 
         self.deregister(handle)
+
+        if destroy_exc is not None:
+            if log_exc is not None:
+                raise destroy_exc from log_exc
+            raise destroy_exc
+        if log_exc is not None:
+            raise log_exc
 
     def teardown_all(self) -> None:
         """Tear down all root resources in reverse registration order."""

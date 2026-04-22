@@ -268,8 +268,36 @@ jobs:
       - name: Install crashdump tools
         shell: bash
         run: |
-          pipx install "git+https://github.com/canonical/juju-k8s-crashdump@22ef04caaeeb94ad6ed49f8392b6bada65184569"
-          sudo snap install juju-crashdump --classic
+          for ((attempt = 1; ; attempt++)); do
+            if pipx install "git+https://github.com/canonical/juju-k8s-crashdump@22ef04caaeeb94ad6ed49f8392b6bada65184569"; then
+              break
+            elif [ "$attempt" -lt 3 ]; then
+              echo "Failed, retrying..."
+              sleep 5
+            else
+              exit 1
+            fi
+          done
+          for ((attempt = 1; ; attempt++)); do
+            if sudo snap install juju-crashdump --classic; then
+              break
+            elif [ "$attempt" -lt 3 ]; then
+              echo "Failed, retrying..."
+              sleep 5
+            else
+              exit 1
+            fi
+          done
+          for ((attempt = 1; ; attempt++)); do
+            if sudo snap install kubectl --classic; then
+              break
+            elif [ "$attempt" -lt 3 ]; then
+              echo "Failed, retrying..."
+              sleep 5
+            else
+              exit 1
+            fi
+          done
       - name: Post 'test_start' event
         if: ${{ env.TEST_OBSERVER_API != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-events

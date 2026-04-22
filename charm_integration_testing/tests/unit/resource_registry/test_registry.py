@@ -4,7 +4,6 @@
 import logging
 import warnings
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Callable
 
 import pytest
@@ -131,9 +130,24 @@ class TestResourceRegistryDeregister:
         # WHEN deregistering a handle that was never registered
         registry.deregister(HandleStub("ghost"))  # should not raise
 
+    def test_deregister_parent_reparents_children_to_root(self) -> None:
+        # GIVEN a parent with a child
+        registry = _registry()
+        parent = HandleStub("parent")
+        child = HandleStub("child")
+        registry.register(parent)
+        registry.register(child, parent=parent)
+
+        # WHEN the parent is deregistered without teardown
+        registry.deregister(parent)
+
+        # THEN the child is still in the registry with no parent
+        assert child.resource_id in registry._entries
+        assert registry._entries[child.resource_id].parent_id is None
+
 
 class TestResourceRegistryCollectLogs:
-    def test_collect_calls_global_collector(self, tmp_path: Path) -> None:
+    def test_collect_calls_global_collector(self) -> None:
         # GIVEN a registry with a global collector
         collector = CollectorStub()
         registry = _registry(global_collectors=[collector])
@@ -147,7 +161,7 @@ class TestResourceRegistryCollectLogs:
         assert len(collector.collected) == 1
         assert collector.collected[0] == handle
 
-    def test_collect_skipped_for_unknown_handle(self, tmp_path: Path) -> None:
+    def test_collect_skipped_for_unknown_handle(self) -> None:
         # GIVEN an empty registry
         collector = CollectorStub()
         registry = _registry(global_collectors=[collector])
@@ -158,7 +172,7 @@ class TestResourceRegistryCollectLogs:
         # THEN collector is never called
         assert collector.collected == []
 
-    def test_unsupported_collector_not_called(self, tmp_path: Path) -> None:
+    def test_unsupported_collector_not_called(self) -> None:
         # GIVEN a global collector that does not support the handle type
         collector = CollectorStub(supported=False)
         registry = _registry(global_collectors=[collector])
@@ -171,17 +185,17 @@ class TestResourceRegistryCollectLogs:
         # THEN the collector is not invoked
         assert collector.collected == []
 
-    def test_failing_collector_emits_warning(self, tmp_path: Path) -> None:
+    def test_failing_collector_raises(self) -> None:
         # GIVEN a collector that raises
         registry = _registry(global_collectors=[FailingCollector()])
         handle = HandleStub("ctrl")
         registry.register(handle)
 
-        # WHEN collecting - should not raise but emit a ResourceTeardownWarning
-        with pytest.warns(ResourceTeardownWarning, match="Log collection failed"):
+        # WHEN collecting - the exception propagates
+        with pytest.raises(RuntimeError, match="collection failed"):
             registry.collect_logs(handle)
 
-    def test_per_resource_collector_is_called(self, tmp_path: Path) -> None:
+    def test_per_resource_collector_is_called(self) -> None:
         # GIVEN a resource registered with its own collector
         per_resource_collector = CollectorStub()
         registry = _registry()
@@ -196,7 +210,7 @@ class TestResourceRegistryCollectLogs:
 
 
 class TestResourceRegistryTeardown:
-    def test_teardown_calls_destroyer(self, tmp_path: Path) -> None:
+    def test_teardown_calls_destroyer(self) -> None:
         # GIVEN a registered resource with a destroyer
         destroyed: list[str] = []
         registry = _registry()
@@ -209,7 +223,7 @@ class TestResourceRegistryTeardown:
         # THEN the destroyer was called
         assert destroyed == ["ctrl"]
 
-    def test_teardown_deregisters_handle(self, tmp_path: Path) -> None:
+    def test_teardown_deregisters_handle(self) -> None:
         # GIVEN a registered resource
         registry = _registry()
         handle = HandleStub("ctrl")
@@ -221,7 +235,7 @@ class TestResourceRegistryTeardown:
         # THEN the handle is no longer registered
         assert handle.resource_id not in registry._entries
 
-    def test_teardown_child_before_parent(self, tmp_path: Path) -> None:
+    def test_teardown_child_before_parent(self) -> None:
         # GIVEN a parent with a child
         order: list[str] = []
         registry = _registry()
@@ -236,26 +250,60 @@ class TestResourceRegistryTeardown:
         # THEN child is destroyed before parent
         assert order == ["child", "parent"]
 
-    def test_teardown_failing_destroyer_emits_warning(self, tmp_path: Path) -> None:
+    def test_teardown_failing_destroyer_raises(self) -> None:
         # GIVEN a resource with a failing destroyer
         registry = _registry()
         handle = HandleStub("ctrl")
         registry.register(handle, destroyer=lambda: (_ for _ in ()).throw(RuntimeError("boom")))
 
-        # WHEN torn down
-        with pytest.warns(ResourceTeardownWarning, match="Destruction failed"):
+        # WHEN torn down - the exception propagates
+        with pytest.raises(RuntimeError, match="boom"):
             registry.teardown(handle)
 
-    def test_teardown_unknown_handle_is_noop(self, tmp_path: Path) -> None:
+        # THEN the resource is still deregistered
+        assert handle.resource_id not in registry._entries
+
+    def test_teardown_unknown_handle_is_noop(self) -> None:
         # GIVEN an empty registry
         registry = _registry()
 
         # WHEN tearing down a handle that was never registered - should not raise
         registry.teardown(HandleStub("ghost"))
 
+    def test_teardown_destroys_even_when_collect_logs_fails(self) -> None:
+        # GIVEN a resource with a failing collector and a destroyer
+        destroyed: list[str] = []
+        registry = _registry(global_collectors=[FailingCollector()])
+        handle = HandleStub("ctrl")
+        registry.register(handle, destroyer=lambda: destroyed.append(handle.name))
+
+        # WHEN torn down - the log collection exception propagates
+        with pytest.raises(RuntimeError, match="collection failed"):
+            registry.teardown(handle)
+
+        # THEN the resource was still destroyed and deregistered
+        assert destroyed == ["ctrl"]
+        assert handle.resource_id not in registry._entries
+
+    def test_teardown_destroy_exception_chains_log_exception(self) -> None:
+        # GIVEN a resource where both log collection and destruction fail
+        registry = _registry(global_collectors=[FailingCollector()])
+        handle = HandleStub("ctrl")
+        registry.register(handle, destroyer=lambda: (_ for _ in ()).throw(RuntimeError("destroy boom")))
+
+        # WHEN torn down - destroy exception is raised, chained from log exception
+        with pytest.raises(RuntimeError, match="destroy boom") as exc_info:
+            registry.teardown(handle)
+
+        assert isinstance(exc_info.value.__cause__, RuntimeError)
+        assert "collection failed" in str(exc_info.value.__cause__)
+
+        # AND the resource is still deregistered
+        assert handle.resource_id not in registry._entries
+
 
 class TestResourceRegistryTeardownAll:
-    def test_teardown_all_reverse_registration_order(self, tmp_path: Path) -> None:
+    def test_teardown_all_reverse_registration_order(self) -> None:
         # GIVEN three resources registered in order A, B, C
         order: list[str] = []
         registry = _registry()
@@ -285,17 +333,17 @@ class TestResourceRegistryTeardownAll:
         # THEN the collector was called
         assert len(collector.collected) == 1
 
-    def test_teardown_all_emits_warning_on_destroyer_failure(self, tmp_path: Path) -> None:
+    def test_teardown_all_emits_warning_on_destroyer_failure(self) -> None:
         # GIVEN a resource with a failing destroyer
         registry = _registry()
         handle = HandleStub("ctrl")
         registry.register(handle, destroyer=lambda: (_ for _ in ()).throw(RuntimeError("boom")))
 
-        # WHEN teardown_all is called
+        # WHEN teardown_all is called - exception is surfaced as a warning
         with pytest.warns(ResourceTeardownWarning):
             registry.teardown_all()
 
-    def test_teardown_all_continues_after_failure(self, tmp_path: Path) -> None:
+    def test_teardown_all_continues_after_failure(self) -> None:
         # GIVEN two resources, the first of which fails destruction
         destroyed: list[str] = []
         registry = _registry()
