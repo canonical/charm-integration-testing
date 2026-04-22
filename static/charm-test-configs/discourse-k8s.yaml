@@ -3,4 +3,9 @@ configs:
   - criteria:
       endpoint_integrated: oauth
     config:
-      external_hostname: discourse-test.local
+      external_hostname: discourse.example.com
+  - criteria:
+      endpoint_integrated: saml
+    config:
+      force_https: true
+      external_hostname: discourse.example.com

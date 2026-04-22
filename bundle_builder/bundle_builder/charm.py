@@ -14,9 +14,65 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
-from pydantic import Field, model_serializer, model_validator
+import operator
+from typing import TYPE_CHECKING, Any, Callable, TypeAlias
+
+from pydantic import Field, field_validator, model_serializer, model_validator
+from pydantic_core import ArgsKwargs
 
 from .immutable_dataclass import cached_method, immutable_dataclass
+from .juju_version import JujuVersion
+
+ASSUMES_OPS: dict[str, Callable[["JujuVersion", "JujuVersion"], bool]] = {
+    ">=": operator.ge,
+    ">": operator.gt,
+    "<=": operator.le,
+    "<": operator.lt,
+    "==": operator.eq,
+}
+
+# Maps bundle platform to the set of Juju 'assumes' features that are satisfied on that platform.
+PLATFORM_FEATURES: dict[str, frozenset[str]] = {
+    "kubernetes": frozenset(["k8s-api"]),
+    "machine": frozenset(),
+}
+
+
+@immutable_dataclass
+class CharmAssumesEntry:
+    all_of: frozenset["CharmAssumesEntry"] | None = None
+    any_of: frozenset["CharmAssumesEntry"] | None = None
+    op: str | None = None
+    required_version: JujuVersion | None = None
+    feature: str | None = None
+
+    @field_validator("op")
+    @classmethod
+    def _validate_op(cls, v: str | None) -> str | None:
+        if v is not None and v not in ASSUMES_OPS:
+            raise ValueError(f"Unknown juju version operator {v!r}. Expected one of: {list(ASSUMES_OPS)}")
+        return v
+
+    def satisfied_by(self, juju_version: JujuVersion, features: frozenset[str] = frozenset()) -> bool:
+        return all(
+            [
+                # all of
+                all(entry.satisfied_by(juju_version, features) for entry in self.all_of)
+                if self.all_of is not None
+                else True,
+                # any of
+                any(entry.satisfied_by(juju_version, features) for entry in self.any_of)
+                if self.any_of is not None
+                else True,
+                # juju version constraint
+                ASSUMES_OPS[self.op](juju_version, self.required_version)
+                if self.op is not None and self.required_version is not None
+                else True,
+                # feature requirement
+                self.feature in features if self.feature is not None else True,
+            ]
+        )
+
 
 ENDPOINT_PEERS = "peers"
 ENDPOINT_REQUIRES = "requires"
@@ -29,22 +85,36 @@ class CharmChannel:
     risk: str
     branch: str
 
-    @model_validator(mode="before")
+    @model_validator(mode="wrap")
     @classmethod
-    # TODO(raul): remove type ignore in subsequent type checker PRs
-    def validate_from_string(cls, value):  # type: ignore
+    def validate_from_string(cls, value: Any, handler: Any) -> Any:
+        # Handle ArgsKwargs for positional arguments
+        if isinstance(value, ArgsKwargs):
+            if len(value.args) == 1 and isinstance(value.args[0], str):
+                # Single string argument: parse it
+                value = value.args[0]
+            elif len(value.args) == 3:
+                # Three positional arguments: convert to dict
+                return handler({"track": value.args[0], "risk": value.args[1], "branch": value.args[2]})
+            else:
+                # Let Pydantic handle it normally
+                return handler(value)
+
+        # Handle string input
         if isinstance(value, str):
             parts = value.split("/")
             match len(parts):
                 case 1:
-                    return {"track": "", "risk": parts[0], "branch": ""}
+                    return handler({"track": "", "risk": parts[0], "branch": ""})
                 case 2:
-                    return {"track": parts[0], "risk": parts[1], "branch": ""}
+                    return handler({"track": parts[0], "risk": parts[1], "branch": ""})
                 case 3:
-                    return {"track": parts[0], "risk": parts[1], "branch": parts[2]}
+                    return handler({"track": parts[0], "risk": parts[1], "branch": parts[2]})
                 case _:
                     raise ValueError(f"Invalid channel string: {value}")
-        return value
+
+        # Let Pydantic handle dict/other inputs normally
+        return handler(value)
 
     @model_serializer(mode="plain")
     def serialize_model(self) -> str:
@@ -200,7 +270,7 @@ class CharmEndpoint:
         return smallest_limit
 
 
-CharmConfig = tuple[tuple[str, str | int | bool], ...]
+CharmConfig: TypeAlias = tuple[tuple[str, str | int | bool], ...]
 
 
 @immutable_dataclass
@@ -210,14 +280,6 @@ class CharmConfigCriteria:
     none_of: frozenset["CharmConfigCriteria"] | None = None
     track: str | None = None
     endpoint_integrated: str | None = None
-
-    @model_validator(mode="before")
-    @classmethod
-    # TODO(raul): remove type ignore in subsequent type checker PRs
-    def validate_config_from_dict(cls, value):  # type: ignore
-        if isinstance(value, list):
-            return {"all_of": value}
-        return value
 
     @cached_method
     def valid(
@@ -268,16 +330,16 @@ class CharmTestConfig:
     criteria: CharmConfigCriteria = Field(default=CharmConfigCriteria.from_bool(True))
     config: CharmConfig = Field(default_factory=CharmConfig)
 
-    @model_validator(mode="before")
+    if TYPE_CHECKING:  # tell mypy what types are allowed
+
+        def __init__(self, criteria: CharmConfigCriteria = ..., config: CharmConfig | dict[str, Any] = ...): ...
+
+    @field_validator("config", mode="before")
     @classmethod
-    # TODO(raul): remove type ignore in subsequent type checker PRs
-    def validate_config_from_dict(cls, value):  # type: ignore
-        if isinstance(value, dict) and "config" in value:
-            if isinstance(value["config"], dict):
-                # Convert dict to tuple of tuples
-                value = value.copy()
-                value["config"] = tuple(sorted(value["config"].items()))
-        return value
+    def _convert_config_dict(cls, v: Any) -> Any:
+        if isinstance(v, dict):
+            return tuple(sorted(v.items()))
+        return v
 
 
 @immutable_dataclass
@@ -290,6 +352,7 @@ class Charm:
     endpoints: frozenset[CharmEndpoint]
     priority: float  # greater priority values mean a node with this charm is prioritized
     test_configs: tuple[CharmTestConfig, ...] = Field(default_factory=tuple)
+    assumes: CharmAssumesEntry = Field(default_factory=CharmAssumesEntry)
 
     def __repr__(self) -> str:
         return self.name

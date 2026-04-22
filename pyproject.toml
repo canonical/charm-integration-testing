@@ -11,6 +11,11 @@ package-mode = false
 [tool.poetry.dependencies]
 charm-integration-testing = { path = "./charm_integration_testing", develop = true }
 bundle-builder = { path = "./bundle_builder", develop = true }
+validators-base = { path = "./validators/base", develop = true }
+validators-runner = { path = "./validators/runner", develop = true }
+validators-postgresql-client = { path = "./validators/postgresql_client", develop = true, extras = ["dev", "deep", "uat"] }
+validators-mongodb-client = { path = "./validators/mongodb_client", develop = true }
+validators-tracing = { path = "./validators/tracing", develop = true, extras = ["dev", "deep", "uat"] }
 
 
 [build-system]
@@ -33,7 +38,7 @@ line-length = 120
 extend-select = ["I"]
 
 [tool.pytest.ini_options]
-timeout = 1800
+timeout = 14400
 
 log_cli = true
 log_cli_level = "INFO"

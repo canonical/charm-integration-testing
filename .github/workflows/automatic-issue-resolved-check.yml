@@ -1,0 +1,62 @@
+---
+name: Run Integration from fixed branch
+permissions:
+  contents: read
+on:
+  issue_comment:
+    types: [created]
+jobs:
+  check_issue_fixed:
+    name: issue_checker
+    runs-on: [self-hosted, charm_qa]
+    if: ${{ github.event.issue.pull_request }}
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+      actions: write  # needed to dispatch workflow
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Get PR details and extract issue number
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
+        id: pr-details
+        with:
+          script: |
+            const pr = await github.rest.pulls.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: context.issue.number
+            });
+            core.setOutput('ref', pr.data.head.ref);
+            if (!context.payload.comment || !context.payload.comment.body) {
+              core.setOutput('has_issue', 'false');
+              console.log('No comment body available in payload. Skipping dispatch.');
+              return;
+            }
+            const comment = context.payload.comment.body;
+            // e.g. "Dispatch test for #123" or "Dispatch test for https://github.com/canonical/charm-integration-testing/issues/123"
+            const issuePattern = RegExp("^\\s*Dispatch test for (?:#|https:\\/\\/github\\.com\\/[^\\/]+\\/[^\\/]+\\/issues\\/)(\\d+)\\s*$", "i");
+            const commentMatch = comment.match(issuePattern);
+            console.log(`Comment Body: ${comment}`);
+            if (commentMatch) {
+              const issueNumber = commentMatch[1];
+              core.setOutput('issue_number', issueNumber);
+              core.setOutput('has_issue', 'true');
+              console.log(`Found issue number ${issueNumber} in comment`);
+            } else {
+              core.setOutput('has_issue', 'false');
+              console.log('No "Dispatch test for #<number>" command found in comment. Skipping dispatch.');
+            }
+      - name: dispatch test to check if issue is fixed
+        if: steps.pr-details.outputs.has_issue == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ steps.pr-details.outputs.issue_number }}
+          PR_REF: ${{ steps.pr-details.outputs.ref }}
+          PROJECT: canonical/charm-integration-testing
+          ENVIRONMENT: staging
+        run: |-
+          python3 ./scripts/dispatch_issue_fixed_check.py ${ISSUE_NUMBER} ${PR_REF} --project ${PROJECT} --environment ${ENVIRONMENT}

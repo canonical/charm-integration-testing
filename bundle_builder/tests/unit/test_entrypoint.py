@@ -22,16 +22,19 @@ import pytest
 from pydantic.dataclasses import dataclass
 
 from bundle_builder.bundle import Application, ApplicationEndpoint, Integration
-from bundle_builder.charm import Charm
+from bundle_builder.charm import Charm, CharmChannel
+from bundle_builder.charmhub import CharmhubClient
 from bundle_builder.charmhub_http import CharmReleaseNotFoundException
 from bundle_builder.entrypoint import (
     add_args_to_parser,
     applications_from_args,
     integrations_from_args,
     platform_from_args,
+    resolve_juju_version,
     setup_logging,
     write_to_file,
 )
+from bundle_builder.juju_version import JujuVersion
 
 from .test_charm import sample_charm_postgresql_k8s, sample_charm_self_signed_certificates
 
@@ -60,6 +63,7 @@ class TestAddArgsToParser:
         "--integrations": "target:certificates::neighbor:certificates",
         "--arch": "amd64",
         "--substrate": "kubernetes",
+        "--juju-version": "3.6",
         "--output-file": "bundle.yaml",
         "--charm-metadata-overrides": "some/folder/directory",
         "--charm-platform-overrides": "some/folder/directory",
@@ -109,14 +113,14 @@ class TestAddArgsToParser:
             assert not params.fail
 
 
-class ArgumentParserStub:
-    def error(self, message: str) -> None:
+class ArgumentParserStub(argparse.ArgumentParser):
+    def error(self, message: str) -> None:  # type: ignore[override]
         raise RuntimeError
 
 
 class TestApplicationFromArgs:
-    class CharmhubClientStub:
-        def charm_from_store(
+    class CharmhubClientStub(CharmhubClient):
+        def charm_from_store(  # type: ignore[override]
             self,
             charm_name: str,
             ubuntu_arch: str,
@@ -134,8 +138,7 @@ class TestApplicationFromArgs:
             return dataclasses.replace(
                 charm,
                 ubuntu_arch=ubuntu_arch,
-                # TODO(raul): remove type: ignore in subsequent type checker-related PR
-                channel=charm_channel if charm_channel is not None else charm.channel,  # type: ignore[arg-type]
+                channel=CharmChannel(charm_channel) if charm_channel is not None else charm.channel,
                 revision=charm_revision or charm.revision,
                 ubuntu_version=ubuntu_version or charm.ubuntu_version,
             )
@@ -167,8 +170,7 @@ class TestApplicationFromArgs:
             applications={
                 Application(
                     name="target",
-                    # TODO(raul): remove type: ignore in subsequent type checker-related PR
-                    charm=dataclasses.replace(sample_charm_postgresql_k8s(), channel="edge"),  # type: ignore[arg-type]
+                    charm=dataclasses.replace(sample_charm_postgresql_k8s(), channel=CharmChannel("edge")),
                 )
             },
         ),
@@ -209,8 +211,9 @@ class TestApplicationFromArgs:
             applications={
                 Application(
                     name="target",
-                    # TODO(raul): remove type: ignore in subsequent type checker-related PR
-                    charm=dataclasses.replace(sample_charm_postgresql_k8s(), channel="edge", revision=111),  # type: ignore
+                    charm=dataclasses.replace(
+                        sample_charm_postgresql_k8s(), channel=CharmChannel("edge"), revision=111
+                    ),
                 )
             },
         ),
@@ -220,8 +223,9 @@ class TestApplicationFromArgs:
             applications={
                 Application(
                     name="target",
-                    # TODO(raul): remove type ignore in subsequent type checker PRs
-                    charm=dataclasses.replace(sample_charm_postgresql_k8s(), channel="stable", ubuntu_version="24.04"),  # type: ignore
+                    charm=dataclasses.replace(
+                        sample_charm_postgresql_k8s(), channel=CharmChannel("stable"), ubuntu_version="24.04"
+                    ),
                 )
             },
         ),
@@ -233,8 +237,7 @@ class TestApplicationFromArgs:
                     name="target",
                     charm=dataclasses.replace(
                         sample_charm_postgresql_k8s(),
-                        # TODO(raul): remove type: ignore in subsequent type checker-related PR
-                        channel="edge",  # type: ignore[arg-type]
+                        channel=CharmChannel("edge"),
                         revision=111,
                         ubuntu_version="24.04",
                     ),
@@ -252,7 +255,7 @@ class TestApplicationFromArgs:
 
         # WHEN called with the specs
         try:
-            applications = applications_from_args(parser, charmhub_client, params.specs, params.arch)  # type: ignore[arg-type]
+            applications = applications_from_args(parser, charmhub_client, params.specs, params.arch)
         except RuntimeError:
             threw = True
         else:
@@ -310,7 +313,7 @@ class TestIntegrationFromArgs:
 
         # WHEN called with the specs
         try:
-            integrations = integrations_from_args(parser, params.specs)  # type: ignore[arg-type]
+            integrations = integrations_from_args(parser, params.specs)
         except RuntimeError:
             threw = True
         else:
@@ -352,7 +355,7 @@ class TestPlatformFromArgs:
 
         # WHEN called with the specs
         try:
-            platform = platform_from_args(parser, params.substrate)  # type: ignore[arg-type]
+            platform = platform_from_args(parser, params.substrate)
         except RuntimeError:
             threw = True
         else:
@@ -377,3 +380,32 @@ class TestWriteToFile:
 
         # THEN content is written
         assert file_path.read_text() == "my bundle string"
+
+
+class TestResolveJujuVersion:
+    @dataclass
+    class Params:
+        label: str
+        value: str
+        expected: JujuVersion | None
+
+    test_cases = [
+        Params(label="major_minor", value="3.6", expected=JujuVersion(major=3, minor=6, patch=0)),
+        Params(label="invalid", value="not-a-version", expected=None),
+    ]
+
+    @pytest.mark.parametrize("params", test_cases, ids=[p.label for p in test_cases])
+    def test(self, params: Params) -> None:
+        # GIVEN a parser
+        parser = argparse.ArgumentParser()
+
+        if params.expected is None:
+            # WHEN / THEN an invalid value causes a SystemExit
+            with pytest.raises(SystemExit):
+                resolve_juju_version(parser, params.value)
+        else:
+            # WHEN
+            result = resolve_juju_version(parser, params.value)
+
+            # THEN
+            assert result == params.expected

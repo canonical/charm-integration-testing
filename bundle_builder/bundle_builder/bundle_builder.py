@@ -35,7 +35,6 @@ class Node:
         # Prioritize fewer applications, accounting for charm priorities
         weight_applications = sum(1.0 / app.charm.priority for app in self.bundle.applications)
         # Prioritize fewer unfulfilled endpoints
-        # TODO(raul): remove type: ignore in subsequent type checker-related PR
         weight_unfulfilled_endpoints = self.aggression * len(self.bundle.unfulfilled_endpoints)
         # Prioritize more integrations, scaled by aggression
         # As aggression increases (expected to be between 0 and 1) the weight of integrations increases
@@ -250,6 +249,15 @@ class BundleBuilder:
             # Get the default charm release
             charm = self.charmhub_client.charm_from_store(charm_name=charm_name, ubuntu_arch=node.bundle.arch)
 
+            # Skip charm if it doesn't support the required Juju version
+            if not charm.assumes.satisfied_by(node.bundle.juju_version, node.bundle.features):
+                self.logger.debug(
+                    f"Skipping charm '{charm_name}': assumes block not satisfied "
+                    f"(juju_version={node.bundle.juju_version}, features={node.bundle.features}, "
+                    f"assumes={charm.assumes})"
+                )
+                continue
+
             # Create the application
             application = Application(
                 name=node.bundle.generate_unique_application_name(charm_name),
@@ -351,6 +359,8 @@ class BundleBuilder:
 class UncompletableBundleError(ValueError):
     """Exception raised when bundle builder cannot generate a complete bundle from the base bundle"""
 
+    best_bundle: Bundle
+
     def __init__(self, best_bundle: Bundle, reason: str = "no reason set"):
         self.best_bundle = best_bundle
         message = f"Could not build a complete valid bundle: {reason}"
@@ -358,11 +368,9 @@ class UncompletableBundleError(ValueError):
 
 
 class UnfulfilledEndpointsError(UncompletableBundleError):
-    """UncompletableBundleError when we cannot fulfill required application endpoints.
+    """UncompletableBundleError when we cannot fulfill required application endpoints."""
 
-    Attributes:
-        unfulfilled_endpoints: The set of application endpoints that could not be fulfilled.
-    """
+    unfulfilled_endpoints: frozenset[ApplicationEndpoint]
 
     def __init__(self, best_bundle: Bundle) -> None:
         self.unfulfilled_endpoints = best_bundle.unfulfilled_endpoints

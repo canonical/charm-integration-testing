@@ -1,0 +1,19 @@
+# Copyright 2025-2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+import pytest
+from juju import JujuClient
+
+from .scheduler.states import State
+
+
+@pytest.mark.state(requires=State.NO_CONTROLLER, provides=State.NO_MODEL, bridge_only=True)
+def test_bootstrap_controller(
+    juju_client: JujuClient,
+    juju_cloud: str,
+    juju_controller: str,
+    juju_controller_bootstrap_constraints: dict[str, str],
+) -> None:
+    juju_client.bootstrap_controller(
+        cloud=juju_cloud, controller=juju_controller, controller_constraints=juju_controller_bootstrap_constraints
+    )

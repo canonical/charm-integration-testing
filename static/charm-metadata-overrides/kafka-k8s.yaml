@@ -14,11 +14,16 @@ requires:
   # integration - when `client-cas` is present, the charm 
   # [defers processing indefinitely](https://github.com/canonical/kafka-k8s-operator/blob/main/src/events/tls.py#L247-L270) 
   # until `certificates` is also integrated to provide signed certificates.
+  # Additionally, when `zookeeper` is integrated, TLS must be enabled on both
+  # kafka and zookeeper, so `certificates` is also required in that case.
+  # See: https://github.com/canonical/charm-integration-testing/issues/408
   certificates:
     interface: tls-certificates
     optional_if:
       - none_of:
           - endpoint_integrated: client-cas
+          - endpoint_integrated: oauth
+          - endpoint_integrated: zookeeper
   client-cas:
     interface: certificate_transfer
     optional: true

@@ -7,11 +7,17 @@ from collections.abc import Callable
 from dataclasses import field
 from datetime import datetime, timedelta
 from functools import wraps
-from typing import Any, TypeVar
+from typing import Any, ParamSpec, TypeVar
 
 from pydantic.dataclasses import dataclass
 
-_F = TypeVar("_F", bound=Callable[..., Any])
+from validators.base.validator import ValidationResult
+
+from .models import JujuApplicationInfo, JujuIntegration, JujuIntegrationApplication
+from .version import JujuVersion
+
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
 
 
 class JujuPerformanceWarning(UserWarning):
@@ -22,7 +28,9 @@ class JujuStatusPerformanceWarning(JujuPerformanceWarning):
     """Warning when juju status operations are slow."""
 
 
-def warn_performance(threshold: timedelta, category: type[Warning] = JujuPerformanceWarning) -> Callable[[_F], _F]:
+def warn_performance(
+    threshold: timedelta, category: type[Warning] = JujuPerformanceWarning
+) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
     """Decorator that emits a warning if a function takes longer than threshold.
 
     Args:
@@ -30,9 +38,9 @@ def warn_performance(threshold: timedelta, category: type[Warning] = JujuPerform
         category: Warning class to emit
     """
 
-    def decorator(func: _F) -> _F:
+    def decorator(func: Callable[_P, _R]) -> Callable[_P, _R]:
         @wraps(func)
-        def wrapper(*args: Any, **kwargs: Any) -> Any:
+        def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
             start_time = datetime.now()
             result = None
             try:
@@ -42,7 +50,7 @@ def warn_performance(threshold: timedelta, category: type[Warning] = JujuPerform
                     warnings.warn(f"Exceeded threshold of {threshold.total_seconds():.1f}s", category, stacklevel=2)
             return result
 
-        return wrapper  # type: ignore[return-value]
+        return wrapper
 
     return decorator
 
@@ -108,26 +116,26 @@ class JujuWaitTimeoutError(TimeoutError):
         return str(self)
 
 
-@dataclass(frozen=True)
-class JujuIntegrationApplication:
-    application: str
-    endpoint: str
-
-    def __str__(self) -> str:
-        return f"{self.application}:{self.endpoint}"
-
-
-@dataclass(frozen=True)
-class JujuIntegration:
-    interface: str
-    applications: frozenset[JujuIntegrationApplication]
-
-
 @dataclass
 class JujuExecOutput:
     return_code: int
     stdout: str
     stderr: str
+
+
+@dataclass
+class JujuTask:
+    """Represents a Juju task, as used by Juju Actions to represent action results."""
+
+    # For now, keeping this somewhat minimal and opinionated.
+    # Not doing a full wrapper of jubilant.Task.
+    id: str
+    return_code: int
+    status: str
+    message: str
+    output: str  # from results.output
+    # Omitting log, stdout and stderr for now.  During testing these were blank or empty.
+    # We can always add them later.
 
 
 class JujuBackend(ABC):
@@ -140,11 +148,19 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def list_applications(self, model: str) -> set[str]:
+    def list_applications(self, model: str) -> dict[str, JujuApplicationInfo]:
         raise NotImplementedError
 
     @abstractmethod
     def list_integrations(self, model: str) -> set[JujuIntegration]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def reboot_model_controller(self, model: str) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def is_k8s_model(self, model: str) -> bool:
         raise NotImplementedError
 
     @abstractmethod
@@ -154,7 +170,14 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def wait_idle(self, model: str, timeout: timedelta | None, count: int | None, strict_timeout: bool = False) -> None:
+    def wait_idle(
+        self,
+        model: str,
+        timeout: timedelta | None,
+        count: int | None,
+        strict_timeout: bool = False,
+        applications: list[str] | None = None,
+    ) -> None:
         raise NotImplementedError
 
     @abstractmethod
@@ -188,6 +211,16 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def refresh_application(
+        self,
+        model: str,
+        application: str,
+        revision: int | None = None,
+        channel: str | None = None,
+    ) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
     def remove_applications(self, model: str, *applications: str) -> None:
         raise NotImplementedError
 
@@ -210,6 +243,10 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def wait_for_model_to_exist(self, model: str, timeout: timedelta | None) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
     def application_charm(self, model: str, application: str) -> str | None:
         raise NotImplementedError
 
@@ -218,11 +255,11 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def exec_unit(self, model: str, unit: str, task: str) -> JujuExecOutput:
+    def exec_unit(self, model: str, unit: str, task: str, operator: bool = False) -> JujuExecOutput:
         raise NotImplementedError
 
     @abstractmethod
-    def run_action(self, model: str, unit: str, action: str, arguments: dict[str, str]) -> None:
+    def run_action(self, model: str, unit: str, action: str, arguments: dict[str, Any]) -> JujuTask:
         raise NotImplementedError
 
     @abstractmethod
@@ -242,11 +279,40 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def deploy_application(self, model: str, charm: str, application: str | None = None) -> None:
+    def deploy_application(
+        self,
+        model: str,
+        charm: str,
+        application: str | None = None,
+        config: dict[str, Any] | None = None,
+        trust: bool = False,
+    ) -> None:
         raise NotImplementedError
 
     @abstractmethod
     def configure_application(self, model: str, application: str, values: dict[str, str]) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_application_config(self, model: str, application: str) -> dict[str, Any]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def bootstrap_controller(
+        self,
+        cloud: str,
+        controller: str,
+        controller_constraints: dict[str, str],
+        agent_version: str | None = None,
+    ) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def add_model(self, controller: str, model: str, model_config: dict[str, str]) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def switch(self, controller: str, model: str) -> None:
         raise NotImplementedError
 
     @abstractmethod
@@ -262,9 +328,43 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def get_charm_revisions(self, model: str) -> set[tuple[str, int]]:
+    def version(self, model: str) -> JujuVersion:
         raise NotImplementedError
 
     @abstractmethod
-    def version(self, model: str) -> str:
+    def cli_version(self) -> JujuVersion:
+        raise NotImplementedError
+
+    @abstractmethod
+    def validate_application(self, model: str, application: str, level: str) -> dict[str, list[ValidationResult]]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def kill_controller(self, controller: str) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def migrate_model(self, model_name: str, source_controller: str, target_controller: str) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def upgrade_controller(self, controller: str, agent_version: str | None = None) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def upgrade_model(self, model: str, agent_version: str | None = None) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def wait_for_application_revision(
+        self,
+        application: str,
+        expected_revision: int,
+        timeout: timedelta | None,
+        model: str = "default",
+    ) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def debug_log(self, model: str) -> str:
         raise NotImplementedError

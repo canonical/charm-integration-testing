@@ -17,3 +17,8 @@ unlisted_charms:
   - tensorboard-controller
   - tensorboards-web-app
   - training-operator
+  # Data Integrator charm not listed in Charmhub search
+  # Remove after: https://github.com/canonical/data-integrator/issues/243
+  - data-integrator
+  # Remove after: https://github.com/canonical/istio-beacon-k8s-operator/issues/164
+  - istio-beacon-k8s

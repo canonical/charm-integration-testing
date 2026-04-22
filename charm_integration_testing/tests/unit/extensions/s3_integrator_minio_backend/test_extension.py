@@ -3,7 +3,6 @@
 
 import logging
 from dataclasses import dataclass, field
-from datetime import timedelta
 from pathlib import Path
 from subprocess import CalledProcessError
 from typing import Generator  # nosec
@@ -16,116 +15,14 @@ from extensions.s3_integrator_minio_backend.extension import (
     MINIO_SECRET_KEY,
     S3IntegratorMinIOBackendExtension,
 )
-from juju.backend import JujuBackend
+
+from ..shared import JujuStub as JujuStubBase
 
 
 @dataclass
-class JujuStub(JujuBackend):
-    deployed: list[tuple[str, str, str]] = field(default_factory=list)
-    configured: list[tuple[str, str, dict[str, str]]] = field(default_factory=list)
-    waited_scaled: list[tuple[str, str, str]] = field(default_factory=list)
-    waited_settled: list[tuple[str, str, str]] = field(default_factory=list)
-    scp_calls: list[tuple[str, str, str]] = field(default_factory=list)
-    ssh_calls: list[tuple[str, str, str]] = field(default_factory=list)
-    actions: list[tuple[str, str, str, dict[str, str]]] = field(default_factory=list)
+class JujuStub(JujuStubBase):
     applications: dict[str, str] = field(default_factory=lambda: {"s3-app": "s3-integrator"})
     unit_ips: dict[str, str] = field(default_factory=lambda: {"s3-app-minio/leader": "10.0.0.1"})
-
-    def scale_application(self) -> None:  # type: ignore[override]
-        pass
-
-    def num_units(self) -> None:  # type: ignore[override]
-        pass
-
-    def list_applications(self, model: str) -> list[str]:  # type: ignore[override]
-        return list(self.applications.keys())
-
-    def list_integrations(self) -> None:  # type: ignore[override]
-        pass
-
-    def integration_exists(self) -> None:  # type: ignore[override]
-        pass
-
-    def wait_idle(self) -> None:  # type: ignore[override]
-        pass
-
-    def wait_for_unit_message(self) -> None:  # type: ignore[override]
-        pass
-
-    def juju_status_text(self) -> None:  # type: ignore[override]
-        pass
-
-    def integrate(self) -> None:  # type: ignore[override]
-        pass
-
-    def remove_integration(self) -> None:  # type: ignore[override]
-        pass
-
-    def deploy_bundle_file(self) -> None:  # type: ignore[override]
-        pass
-
-    def remove_applications(self) -> None:  # type: ignore[override]
-        pass
-
-    def wait_for_removal(self) -> None:  # type: ignore[override]
-        pass
-
-    def wait_for_removal_of_integration(self) -> None:  # type: ignore[override]
-        pass
-
-    def wait_for_removal_of_units(self) -> None:  # type: ignore[override]
-        pass
-
-    def application_units(self) -> None:  # type: ignore[override]
-        pass
-
-    def exec_unit(self) -> None:  # type: ignore[override]
-        pass
-
-    def add_secret(self) -> None:  # type: ignore[override]
-        pass
-
-    def read_secret(self) -> None:  # type: ignore[override]
-        pass
-
-    def grant_secret(self) -> None:  # type: ignore[override]
-        pass
-
-    def remove_secret(self) -> None:  # type: ignore[override]
-        pass
-
-    def get_charm_revisions(self) -> None:  # type: ignore[override]
-        pass
-
-    def version(self) -> None:  # type: ignore[override]
-        pass
-
-    def application_charm(self, model: str, application: str) -> str:
-        return self.applications[application]
-
-    def deploy_application(self, model: str, charm: str, application: str) -> None:  # type: ignore[override]
-        self.deployed.append((model, charm, application))
-
-    def configure_application(self, model: str, application: str, values: dict[str, str]) -> None:
-        self.configured.append((model, application, values))
-
-    def wait_application_scaled(self, model: str, application: str, timeout: timedelta) -> None:  # type: ignore[override]
-        self.waited_scaled.append((model, application, str(timeout)))
-
-    def wait_application_settled(self, model: str, application: str, timeout: timedelta) -> None:  # type: ignore[override]
-        self.waited_settled.append((model, application, str(timeout)))
-
-    def scp(self, model: str, source: str, destination: str) -> None:
-        self.scp_calls.append((model, source, destination))
-
-    def ssh(self, model: str, target: str, command: str) -> None:
-        self.ssh_calls.append((model, target, command))
-
-    def run_action(self, model: str, unit: str, action: str, params: dict[str, str]) -> None:
-        self.actions.append((model, unit, action, params))
-
-    def unit_ip(self, model: str, unit: str) -> str:
-        return self.unit_ips[unit]
 
 
 class TestS3IntegratorMinIOBackendExtension:
@@ -160,6 +57,19 @@ class TestS3IntegratorMinIOBackendExtension:
             assert juju.deployed == []
 
     class TestDeployMinIO:
+        def test_skips_if_endpoint_already_configured(
+            self, extension: S3IntegratorMinIOBackendExtension, juju: JujuStub
+        ) -> None:
+            # GIVEN an s3-integrator application that already has an endpoint configured
+            juju.configured_applications.append(("test-model", "s3-app", {"endpoint": "http://existing:9000"}))
+
+            # WHEN deploy_minio_s3_backend is called
+            extension.deploy_minio_s3_backend("test-model", "s3-app")
+
+            # THEN nothing is deployed or additionally configured
+            assert juju.deployed == []
+            assert len(juju.configured_applications) == 1  # unchanged from pre-populated value
+
         def test_deploy_flow_sets_up_everything(
             self, extension: S3IntegratorMinIOBackendExtension, juju: JujuStub
         ) -> None:
@@ -179,7 +89,7 @@ class TestS3IntegratorMinIOBackendExtension:
                     "access-key": MINIO_ACCESS_KEY,
                     "secret-key": MINIO_SECRET_KEY,
                 },
-            ) in juju.configured
+            ) in juju.configured_applications
 
             assert ("test-model", "s3-app", "0:10:00") in juju.waited_scaled
             assert ("test-model", "s3-app-minio", "0:10:00") in juju.waited_scaled
@@ -201,7 +111,7 @@ class TestS3IntegratorMinIOBackendExtension:
                     "endpoint": "http://10.0.0.1:9000",
                     "bucket": MINIO_BUCKET,
                 },
-            ) in juju.configured
+            ) in juju.configured_applications
 
             assert (
                 "test-model",
@@ -289,7 +199,7 @@ class TestS3IntegratorMinIOBackendExtension:
                     "endpoint": "http://10.0.0.1:9000",
                     "bucket": MINIO_BUCKET,
                 },
-            ) in juju.configured
+            ) in juju.configured_applications
 
             # AND credentials are synced
             assert (
@@ -301,6 +211,77 @@ class TestS3IntegratorMinIOBackendExtension:
                     "secret-key": MINIO_SECRET_KEY,
                 },
             ) in juju.actions
+
+    class TestPreRemove:
+        def test_removes_minio_for_s3_integrator(
+            self, extension: S3IntegratorMinIOBackendExtension, juju: JujuStub
+        ) -> None:
+            # GIVEN a model with s3-app and its associated minio application
+            juju.applications = {"s3-app": "s3-integrator", "s3-app-minio": "minio"}
+
+            # WHEN pre_remove is called for the s3 integrator
+            extension.pre_remove("test-model", "s3-app")
+
+            # THEN the minio app is removed
+            assert ("test-model", "s3-app-minio") in juju.removed
+
+        def test_waits_for_minio_removal(self, extension: S3IntegratorMinIOBackendExtension, juju: JujuStub) -> None:
+            # GIVEN a model with s3-app and its associated minio application
+            juju.applications = {"s3-app": "s3-integrator", "s3-app-minio": "minio"}
+
+            # WHEN pre_remove is called
+            extension.pre_remove("test-model", "s3-app")
+
+            # THEN it waits for the minio app to be removed
+            assert any("s3-app-minio" in apps for _, apps, _ in juju.waited_removal)
+
+        def test_skips_application_not_in_model(
+            self, extension: S3IntegratorMinIOBackendExtension, juju: JujuStub
+        ) -> None:
+            # GIVEN a model where the application to be removed doesn't exist
+            juju.applications = {}
+
+            # WHEN pre_remove is called
+            extension.pre_remove("test-model", "s3-app")
+
+            # THEN nothing is removed
+            assert juju.removed == []
+
+        def test_skips_non_s3_integrator_apps(
+            self, extension: S3IntegratorMinIOBackendExtension, juju: JujuStub
+        ) -> None:
+            # GIVEN a model with a non-s3-integrator application
+            juju.applications = {"other-app": "other-charm"}
+
+            # WHEN pre_remove is called for that application
+            extension.pre_remove("test-model", "other-app")
+
+            # THEN nothing is removed
+            assert juju.removed == []
+
+        def test_skips_if_minio_not_in_model(
+            self, extension: S3IntegratorMinIOBackendExtension, juju: JujuStub
+        ) -> None:
+            # GIVEN a model with s3-app but no associated minio application
+            juju.applications = {"s3-app": "s3-integrator"}
+
+            # WHEN pre_remove is called
+            extension.pre_remove("test-model", "s3-app")
+
+            # THEN nothing is removed
+            assert juju.removed == []
+
+        def test_does_not_wait_if_nothing_removed(
+            self, extension: S3IntegratorMinIOBackendExtension, juju: JujuStub
+        ) -> None:
+            # GIVEN a model with s3-app but no associated minio application
+            juju.applications = {"s3-app": "s3-integrator"}
+
+            # WHEN pre_remove is called
+            extension.pre_remove("test-model", "s3-app")
+
+            # THEN no wait for removal is triggered
+            assert juju.waited_removal == []
 
     class TestGetMinioClientFile:
         def test_downloads_only_once(self, extension: S3IntegratorMinIOBackendExtension) -> None:

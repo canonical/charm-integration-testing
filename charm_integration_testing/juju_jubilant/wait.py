@@ -5,15 +5,36 @@
 from typing import Iterator
 
 import jubilant
+import yaml
 from jubilant.statustypes import AppStatusRelation
 from juju import (
     JujuApplicationState,
-    JujuIntegration,
     JujuIntegrationApplication,
     JujuUnitAgentState,
     JujuUnitState,
     JujuWaitState,
 )
+
+
+def _parse_bundle(
+    bundle_path: str,
+) -> tuple[list[str], list[tuple[JujuIntegrationApplication, JujuIntegrationApplication]]]:
+    with open(bundle_path) as f:
+        data = yaml.safe_load(f)
+
+    app_names = list(data.get("applications", {}).keys())
+
+    integrations = []
+    for relation in data.get("relations", []):
+        # Normalise nested lists: [["app1:ep1"], ["app2:ep2"]] → ["app1:ep1", "app2:ep2"]
+        endpoints = [r[0] if isinstance(r, list) else r for r in relation]
+        left_app, left_ep = endpoints[0].split(":", 1)
+        right_app, right_ep = endpoints[1].split(":", 1)
+        integrations.append(
+            (JujuIntegrationApplication(left_app, left_ep), JujuIntegrationApplication(right_app, right_ep))
+        )
+
+    return app_names, integrations
 
 
 def get_unit_info(status: jubilant.Status, unit: str) -> jubilant.statustypes.UnitStatus | None:
@@ -33,17 +54,9 @@ def generate_endpoint_integrations(status: jubilant.Status) -> Iterator[tuple[st
                 yield (application, endpoint, integration)
 
 
-def get_integrations(status: jubilant.Status) -> set[JujuIntegration]:
+def get_integrations(status: jubilant.Status) -> set[tuple[JujuIntegrationApplication, JujuIntegrationApplication]]:
     return {
-        JujuIntegration(
-            interface=integration_1.interface,
-            applications=frozenset(
-                {
-                    JujuIntegrationApplication(application_1, endpoint_1),
-                    JujuIntegrationApplication(application_2, endpoint_2),
-                }
-            ),
-        )
+        (JujuIntegrationApplication(application_1, endpoint_1), JujuIntegrationApplication(application_2, endpoint_2))
         # Iterate over every integration on every endpoint
         for application_1, endpoint_1, integration_1 in generate_endpoint_integrations(status)
         # Then for each also iterate over every integration on every endpoint again
@@ -180,6 +193,20 @@ def applications_are_scaled(status: jubilant.Status, *application_args: str) -> 
     )
 
 
+def application_is_on_revision(status: jubilant.Status, application: str, revision: int) -> tuple[bool, JujuWaitState]:
+    noncompliant_applications: dict[str, JujuApplicationState | None] = {}
+
+    if application not in status.apps:
+        noncompliant_applications[application] = None
+    elif status.apps[application].charm_rev != revision:
+        noncompliant_applications[application] = get_application_state(status, application)
+
+    return len(noncompliant_applications) == 0, JujuWaitState(
+        message=f"waiting for application revision {revision}",
+        noncompliant_applications=noncompliant_applications,
+    )
+
+
 def units_have_message(message: str, status: jubilant.Status, *unit_args: str) -> tuple[bool, JujuWaitState]:
     if unit_args:
         units = set(unit_args)
@@ -221,17 +248,36 @@ def applications_are_removed(status: jubilant.Status, *application_args: str) ->
 def integrations_are_removed(
     status: jubilant.Status, *integrations_args: tuple[JujuIntegrationApplication, JujuIntegrationApplication]
 ) -> tuple[bool, JujuWaitState]:
-    existing_integrations = {integration.applications for integration in get_integrations(status)}
+    existing_integrations = get_integrations(status)
     integrations = integrations_args if integrations_args else existing_integrations
 
     noncompliant_applications: dict[str, JujuApplicationState | None] = {}
     for integration in integrations:
-        if set(integration) in existing_integrations:
+        if integration in existing_integrations:
             for endpoint in integration:
                 noncompliant_applications[endpoint.application] = get_application_state(status, endpoint.application)
 
     return len(noncompliant_applications) == 0, JujuWaitState(
         message="waiting for integration removal",
+        noncompliant_applications=noncompliant_applications,
+    )
+
+
+def bundle_integrations_exist(
+    status: jubilant.Status, *integrations_args: tuple[JujuIntegrationApplication, JujuIntegrationApplication]
+) -> tuple[bool, JujuWaitState]:
+    existing_integrations = {frozenset(i) for i in get_integrations(status)}
+
+    noncompliant_applications: dict[str, JujuApplicationState | None] = {}
+    for integration in integrations_args:
+        if frozenset(integration) not in existing_integrations:
+            for endpoint in integration:
+                noncompliant_applications[endpoint.application] = (
+                    get_application_state(status, endpoint.application) if endpoint.application in status.apps else None
+                )
+
+    return len(noncompliant_applications) == 0, JujuWaitState(
+        message="waiting for bundle integrations",
         noncompliant_applications=noncompliant_applications,
     )
 
@@ -257,3 +303,19 @@ def applications_have_no_units(status: jubilant.Status, *application_args: str) 
         noncompliant_applications=noncompliant_applications,
         noncompliant_units=noncompliant_units,
     )
+
+
+def bundle_applications_integrations_exist(status: jubilant.Status, bundle: str) -> tuple[bool, JujuWaitState]:
+    app_names, integrations = _parse_bundle(bundle)
+
+    if app_names:
+        ok, state = all_statuses_are_in(status, *app_names)
+        if not ok:
+            return ok, state
+
+    if integrations:
+        ok, state = bundle_integrations_exist(status, *integrations)
+        if not ok:
+            return ok, state
+
+    return True, JujuWaitState()

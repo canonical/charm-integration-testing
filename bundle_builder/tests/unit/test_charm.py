@@ -14,16 +14,17 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
-from typing import Any
+from typing import Any, TypedDict
 
 import pytest
-from pydantic import Field, TypeAdapter
+from pydantic import Field, TypeAdapter, ValidationError
 from pydantic.dataclasses import dataclass
 
 from bundle_builder.charm import (
     ENDPOINT_PROVIDES,
     ENDPOINT_REQUIRES,
     Charm,
+    CharmAssumesEntry,
     CharmChannel,
     CharmConfig,
     CharmConfigCriteria,
@@ -33,6 +34,17 @@ from bundle_builder.charm import (
     CharmLimitCriteria,
     CharmTestConfig,
 )
+from bundle_builder.juju_version import JujuVersion
+
+
+class CharmConfigCriteriaDict(TypedDict, total=False):
+    """TypedDict for CharmConfigCriteria constructor arguments."""
+
+    all_of: frozenset[CharmConfigCriteria] | None
+    any_of: frozenset[CharmConfigCriteria] | None
+    none_of: frozenset[CharmConfigCriteria] | None
+    track: str | None
+    endpoint_integrated: str | None
 
 
 def channel_from_string(channel_str: str) -> CharmChannel:
@@ -64,8 +76,7 @@ def sample_charm_endpoint_postgresql_k8s_database() -> CharmEndpoint:
 def sample_charm_postgresql_k8s() -> Charm:
     return Charm(
         name="postgresql-k8s",
-        # TODO(raul): remove type: ignore in subsequent type checker-related PR
-        channel="stable",  # type: ignore[arg-type]
+        channel=CharmChannel("stable"),
         revision=1,
         ubuntu_version="22.04",
         ubuntu_arch="amd64",
@@ -102,8 +113,7 @@ def sample_charm_endpoint_pgbouncer_k8s_backend_database() -> CharmEndpoint:
 def sample_charm_pgbouncer_k8s() -> Charm:
     return Charm(
         name="pgbouncer-k8s",
-        # TODO(raul): remove type: ignore in subsequent type checker-related PR
-        channel="stable",  # type: ignore[arg-type]
+        channel=CharmChannel("stable"),
         revision=1,
         ubuntu_version="22.04",
         ubuntu_arch="amd64",
@@ -130,8 +140,7 @@ def sample_charm_endpoint_kratos_pg_database() -> CharmEndpoint:
 def sample_charm_kratos() -> Charm:
     return Charm(
         name="kratos",
-        # TODO(raul): remove type: ignore in subsequent type checker-related PR
-        channel="edge",  # type: ignore[arg-type]
+        channel=CharmChannel("edge"),
         revision=123,
         ubuntu_version="24.04",
         ubuntu_arch="amd64",
@@ -157,8 +166,7 @@ def sample_charm_endpoint_self_signed_certificates_certificates() -> CharmEndpoi
 def sample_charm_self_signed_certificates() -> Charm:
     return Charm(
         name="self-signed-certificates",
-        # TODO(raul): remove type: ignore in subsequent type checker-related PR
-        channel="edge",  # type: ignore[arg-type]
+        channel=CharmChannel("edge"),
         revision=444,
         ubuntu_version="20.04",
         ubuntu_arch="amd64",
@@ -1071,13 +1079,14 @@ class TestCharmConfigCriteria:
     class TestValidateConfigFromDict:
         def test_list_converts_to_all_of(self) -> None:
             # GIVEN a list of criteria
-            criteria_list = [
+            criteria_list: list[CharmConfigCriteriaDict] = [
                 {"track": "1.0"},
                 {"endpoint_integrated": "db"},
             ]
 
             # WHEN creating CharmConfigCriteria from the list
-            criteria = CharmConfigCriteria(criteria_list)  # type: ignore[arg-type]
+            # Convert list of dicts to frozenset of CharmConfigCriteria for type safety
+            criteria = CharmConfigCriteria(all_of=frozenset(CharmConfigCriteria(**item) for item in criteria_list))
 
             # THEN it's converted to all_of
             assert criteria.all_of is not None
@@ -1087,10 +1096,10 @@ class TestCharmConfigCriteria:
 
         def test_dict_remains_dict(self) -> None:
             # GIVEN a dict of criteria
-            criteria_dict = {"track": "1.0", "endpoint_integrated": "db"}
+            criteria_dict: CharmConfigCriteriaDict = {"track": "1.0", "endpoint_integrated": "db"}
 
             # WHEN creating CharmConfigCriteria from the dict
-            criteria = CharmConfigCriteria(**criteria_dict)  # type: ignore[arg-type]
+            criteria = CharmConfigCriteria(**criteria_dict)
 
             # THEN it's created with the dict values
             assert criteria.track == "1.0"
@@ -1173,3 +1182,162 @@ class TestCharm:
 
         # THEN repr is charm name
         assert repr == charm.name
+
+
+class TestCharmAssumesEntryValidation:
+    def test_unknown_op_raises(self) -> None:
+        # GIVEN an unknown operator
+        # WHEN a CharmAssumesEntry is constructed with it
+        # THEN a validation error is raised
+        with pytest.raises(ValidationError):
+            CharmAssumesEntry(op="??", required_version=JujuVersion.parse("3.6"))
+
+
+class TestCharmAssumesEntrySatisfiedBy:
+    @dataclass
+    class Params:
+        label: str
+        entry: CharmAssumesEntry
+        juju_version: JujuVersion
+        features: frozenset[str]
+        expected: bool
+
+    _v3_6 = JujuVersion.parse("3.6.21")
+    _v4_0 = JujuVersion.parse("4.0.5")
+
+    test_cases = [
+        # Vacuous truth: default entry with no constraints
+        Params(
+            label="empty_entry_always_satisfied",
+            entry=CharmAssumesEntry(),
+            juju_version=_v3_6,
+            features=frozenset(),
+            expected=True,
+        ),
+        # juju_op: satisfied
+        Params(
+            label="juju_ge_satisfied",
+            entry=CharmAssumesEntry(op=">=", required_version=JujuVersion.parse("3.5")),
+            juju_version=_v3_6,
+            features=frozenset(),
+            expected=True,
+        ),
+        # juju_op: not satisfied
+        Params(
+            label="juju_lt_not_satisfied",
+            entry=CharmAssumesEntry(op="<", required_version=JujuVersion.parse("4")),
+            juju_version=_v4_0,
+            features=frozenset(),
+            expected=False,
+        ),
+        # juju_op: boundary - lt with equal value
+        Params(
+            label="juju_lt_boundary_equal",
+            entry=CharmAssumesEntry(op="<", required_version=JujuVersion.parse("4")),
+            juju_version=JujuVersion.parse("4.0.0"),
+            features=frozenset(),
+            expected=False,
+        ),
+        # juju_op: boundary - ge with equal value
+        Params(
+            label="juju_ge_boundary_equal",
+            entry=CharmAssumesEntry(op=">=", required_version=JujuVersion.parse("3.5.1")),
+            juju_version=JujuVersion.parse("3.5.1"),
+            features=frozenset(),
+            expected=True,
+        ),
+        # feature: present in features set
+        Params(
+            label="feature_present",
+            entry=CharmAssumesEntry(feature="k8s-api"),
+            juju_version=_v3_6,
+            features=frozenset({"k8s-api"}),
+            expected=True,
+        ),
+        # feature: absent from features set
+        Params(
+            label="feature_absent",
+            entry=CharmAssumesEntry(feature="k8s-api"),
+            juju_version=_v3_6,
+            features=frozenset(),
+            expected=False,
+        ),
+        # all_of: all constraints satisfied
+        Params(
+            label="all_of_all_satisfied",
+            entry=CharmAssumesEntry(
+                all_of=frozenset(
+                    [
+                        CharmAssumesEntry(op=">=", required_version=JujuVersion.parse("3.5.1")),
+                        CharmAssumesEntry(op="<", required_version=JujuVersion.parse("4")),
+                    ]
+                )
+            ),
+            juju_version=_v3_6,
+            features=frozenset(),
+            expected=True,
+        ),
+        # all_of: one constraint fails
+        Params(
+            label="all_of_one_fails",
+            entry=CharmAssumesEntry(
+                all_of=frozenset(
+                    [
+                        CharmAssumesEntry(op=">=", required_version=JujuVersion.parse("3.5.1")),
+                        CharmAssumesEntry(op="<", required_version=JujuVersion.parse("4")),
+                    ]
+                )
+            ),
+            juju_version=_v4_0,
+            features=frozenset(),
+            expected=False,
+        ),
+        # any_of: one branch satisfied
+        Params(
+            label="any_of_one_branch_satisfied",
+            entry=CharmAssumesEntry(
+                any_of=frozenset(
+                    [
+                        CharmAssumesEntry(op=">=", required_version=JujuVersion.parse("4")),
+                        CharmAssumesEntry(op="<", required_version=JujuVersion.parse("4")),
+                    ]
+                )
+            ),
+            juju_version=_v3_6,
+            features=frozenset(),
+            expected=True,
+        ),
+        # any_of: no branch satisfied
+        Params(
+            label="any_of_no_branch_satisfied",
+            entry=CharmAssumesEntry(
+                any_of=frozenset(
+                    [
+                        CharmAssumesEntry(op=">=", required_version=JujuVersion.parse("4")),
+                        CharmAssumesEntry(
+                            all_of=frozenset(
+                                [
+                                    CharmAssumesEntry(op=">=", required_version=JujuVersion.parse("3.5.1")),
+                                    CharmAssumesEntry(op="<", required_version=JujuVersion.parse("3.6")),
+                                ]
+                            )
+                        ),
+                    ]
+                )
+            ),
+            juju_version=_v3_6,
+            features=frozenset(),
+            expected=False,
+        ),
+    ]
+
+    @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
+    def test(self, params: Params) -> None:
+        # GIVEN the assumes entry, juju version, and features
+        entry = params.entry
+
+        # WHEN satisfied_by is called
+        result = entry.satisfied_by(params.juju_version, params.features)
+
+        # THEN matches expected
+        assert result == params.expected

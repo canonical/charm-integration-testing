@@ -23,7 +23,6 @@ from pydantic import Field
 from pydantic.dataclasses import dataclass
 
 from bundle_builder.charm import (
-    CharmConfigCriteria,
     CharmEndpointOptionality,
     CharmLimit,
     CharmLimitCriteria,
@@ -303,7 +302,7 @@ class TestOverridesClient:
             label: str
             charm: str = "charm-a"
             overrides: dict[str, Any] = Field(default_factory=dict)
-            expected: list[CharmTestConfig] = Field(default_factory=list)
+            expected: list[tuple[tuple[str, Any], ...]] = Field(default_factory=list)
             overrides_directory: bool = True
 
         test_cases = [
@@ -316,18 +315,14 @@ class TestOverridesClient:
                         "configs": [
                             {"config": {"a": 1, "b": "x"}},
                             {"config": {"c": 2}},
+                            {"config": {"c": True}},
                         ]
                     }
                 },
                 expected=[
-                    CharmTestConfig(
-                        criteria=CharmConfigCriteria.from_bool(True),
-                        config=(("a", 1), ("b", "x")),
-                    ),
-                    CharmTestConfig(
-                        criteria=CharmConfigCriteria.from_bool(True),
-                        config=(("c", 2),),
-                    ),
+                    (("a", 1), ("b", "x")),
+                    (("c", 2),),
+                    (("c", True),),
                 ],
             ),
         ]
@@ -346,7 +341,15 @@ class TestOverridesClient:
             actual = overrides_client.get_charm_test_configs(params.charm)
 
             # THEN
-            assert actual == params.expected
+            assert actual == [CharmTestConfig(config=config) for config in params.expected]
+            # AND types match
+            # Pydantic automatically converts True to 1, so this can assertion pass even
+            # if the types of the values don't match, hence the explicit check.
+            for expected_config, actual_config in zip(params.expected, actual):
+                for (expected_key, expected_value), (_, actual_value) in zip(expected_config, actual_config.config):
+                    assert (
+                        type(expected_value) is type(actual_value)
+                    ), f"Expected type {type(expected_value)} for key '{expected_key}', but got type {type(actual_value)}"
 
     class TestGetCharmPrioritiesMapping:
         @dataclass
@@ -382,3 +385,111 @@ class TestOverridesClient:
 
             # THEN the resulting priorities are as defined in the file
             assert actual == params.expected_priorities
+
+    class TestGetCharmDefaultChannel:
+        @dataclass
+        class Params:
+            label: str
+            charm: str = "redis-k8s"
+            overrides: dict[str, Any] = Field(default_factory=dict)
+            expected_channel: str | None = None
+            supply_file: bool = True
+
+        test_cases = [
+            Params(label="overrides_file_not_given", supply_file=False, expected_channel=None),
+            Params(
+                label="charm_not_in_overrides",
+                charm="postgresql-k8s",
+                overrides={"defaults": {}},
+                expected_channel=None,
+            ),
+            Params(
+                label="charm_has_only_revision",
+                charm="redis-k8s",
+                overrides={"defaults": {"redis-k8s": {"revision": 123}}},
+                expected_channel=None,
+            ),
+            Params(
+                label="charm_has_default_channel",
+                charm="redis-k8s",
+                overrides={"defaults": {"redis-k8s": {"channel": "latest/edge"}}},
+                expected_channel="latest/edge",
+            ),
+            Params(
+                label="charm_has_both_channel_and_revision",
+                charm="redis-k8s",
+                overrides={"defaults": {"redis-k8s": {"channel": "latest/stable", "revision": 456}}},
+                expected_channel="latest/stable",
+            ),
+        ]
+
+        @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
+        def test(self, params: Params, tmp_path: Path) -> None:
+            # GIVEN a yaml file
+            override_file = tmp_path / "default-versions.yaml"
+            # AND its content according to params.overrides
+            if params.supply_file:
+                with override_file.open("w") as file:
+                    yaml.dump(params.overrides, file)
+            # AND an OverridesClient constructed from it
+            overrides_client = OverridesClient(charm_default_versions=override_file if params.supply_file else None)
+
+            # WHEN the default channel is retrieved
+            actual = overrides_client.get_charm_default_channel(params.charm)
+
+            # THEN the resulting channel is as expected
+            assert actual == params.expected_channel
+
+    class TestGetCharmDefaultRevision:
+        @dataclass
+        class Params:
+            label: str
+            charm: str = "redis-k8s"
+            overrides: dict[str, Any] = Field(default_factory=dict)
+            expected_revision: int | None = None
+            supply_file: bool = True
+
+        test_cases = [
+            Params(label="overrides_file_not_given", supply_file=False, expected_revision=None),
+            Params(
+                label="charm_not_in_overrides",
+                charm="postgresql-k8s",
+                overrides={"defaults": {}},
+                expected_revision=None,
+            ),
+            Params(
+                label="charm_has_only_channel",
+                charm="redis-k8s",
+                overrides={"defaults": {"redis-k8s": {"channel": "latest/edge"}}},
+                expected_revision=None,
+            ),
+            Params(
+                label="charm_has_default_revision",
+                charm="redis-k8s",
+                overrides={"defaults": {"redis-k8s": {"revision": 123}}},
+                expected_revision=123,
+            ),
+            Params(
+                label="charm_has_both_channel_and_revision",
+                charm="redis-k8s",
+                overrides={"defaults": {"redis-k8s": {"channel": "latest/stable", "revision": 456}}},
+                expected_revision=456,
+            ),
+        ]
+
+        @pytest.mark.parametrize("params", test_cases, ids=[params.label for params in test_cases])
+        def test(self, params: Params, tmp_path: Path) -> None:
+            # GIVEN a yaml file
+            override_file = tmp_path / "default-versions.yaml"
+            # AND its content according to params.overrides
+            if params.supply_file:
+                with override_file.open("w") as file:
+                    yaml.dump(params.overrides, file)
+            # AND an OverridesClient constructed from it
+            overrides_client = OverridesClient(charm_default_versions=override_file if params.supply_file else None)
+
+            # WHEN the default revision is retrieved
+            actual = overrides_client.get_charm_default_revision(params.charm)
+
+            # THEN the resulting revision is as expected
+            assert actual == params.expected_revision

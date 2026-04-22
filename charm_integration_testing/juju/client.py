@@ -4,8 +4,25 @@
 import logging
 from datetime import timedelta
 
-from .backend import JujuBackend, JujuIntegrationApplication
+from validators.base import ValidationResult
+
+from .backend import JujuBackend
 from .extension import JujuExtension
+from .models import JujuApplicationInfo, JujuIntegration, JujuIntegrationApplication
+from .version import JujuVersion
+
+
+class JujuValidationError(Exception):
+    """Raised when validation of a Juju model fails."""
+
+    failed_validations: dict[str, list[ValidationResult]]
+
+    def __init__(self, failed_validations: dict[str, list[ValidationResult]]):
+        self.failed_validations = failed_validations
+
+        units = ", ".join(failed_validations.keys())
+        num_failed_validations = sum(len(validations) for validations in failed_validations.values())
+        super().__init__(f"Model validation failed with {num_failed_validations} failed validations (units: {units}).")
 
 
 class JujuClient:
@@ -52,6 +69,18 @@ class JujuClient:
         separator = "-" * 80
         self.logger.info(f"Juju Status:\n{separator}\n{self.backend.juju_status_text(model)}{separator}")
 
+    def debug_log(self, model: str = "default") -> str:
+        """Retrieve the Juju debug log for the model.
+
+        Args:
+            model: Juju model name
+
+        Returns:
+            Debug log content as a string
+        """
+        self.logger.info(f"Collecting debug log from model {model}")
+        return self.backend.debug_log(model)
+
     def integrate(
         self,
         application_1: str,
@@ -96,7 +125,27 @@ class JujuClient:
         for extension in self.extensions:
             extension.post_deploy(model)
 
+    def refresh_application(
+        self,
+        application: str,
+        revision: int | None = None,
+        channel: str | None = None,
+        model: str = "default",
+    ) -> None:
+        options: list[str] = []
+        if revision is not None:
+            options.append(f"revision={revision}")
+        if channel:
+            options.append(f"channel={channel}")
+        options_suffix = f" ({', '.join(options)})" if options else ""
+        self.logger.info(f"Refreshing application {application}{options_suffix}.")
+        self.backend.refresh_application(model, application, revision=revision, channel=channel)
+
     def remove_applications(self, *applications: str, model: str = "default") -> None:
+        # Call extensions
+        for extension in self.extensions:
+            extension.pre_remove(model, *applications)
+
         self.logger.info(f"Removing applications: {', '.join(applications)}.")
         self.backend.remove_applications(model, *applications)
 
@@ -130,6 +179,10 @@ class JujuClient:
         )
         self.backend.wait_for_removal_of_units(model, list(applications), timeout)
 
+    def wait_for_model_to_exist(self, model: str = "default", timeout: timedelta | None = None) -> None:
+        self.logger.info(f"Waiting {self._waiting_timeout_log(timeout)} for model {model} to exist before continuing.")
+        self.backend.wait_for_model_to_exist(model=model, timeout=timeout)
+
     def application_exists(self, application: str, model: str = "default") -> bool:
         self.logger.info(f"Checking that application exists: {application}.")
         return application in self.backend.list_applications(model)
@@ -140,13 +193,162 @@ class JujuClient:
         self.logger.info(
             f"Checking that integration exists: {application_1}:{endpoint_1}/{application_2}:{endpoint_2}."
         )
-        return {
-            JujuIntegrationApplication(application_1, endpoint_1),
-            JujuIntegrationApplication(application_2, endpoint_2),
-        } in {integration.applications for integration in self.backend.list_integrations(model)}
+        return self.backend.integration_exists(application_1, endpoint_1, application_2, endpoint_2, model)
 
-    def get_charm_revisions(self, model: str = "default") -> set[tuple[str, int]]:
-        return self.backend.get_charm_revisions(model)
+    def list_applications(self, model: str = "default") -> dict[str, JujuApplicationInfo]:
+        self.logger.info("Getting list of applications.")
+        return self.backend.list_applications(model)
 
-    def version(self, model: str = "default") -> str:
+    def application_revision(self, application: str, model: str = "default") -> int:
+        self.logger.info(f"Getting charm revision for application '{application}'.")
+        applications = self.backend.list_applications(model)
+        if application not in applications:
+            raise KeyError(f"Application '{application}' not found in model '{model}'")
+        return applications[application].revision
+
+    def wait_for_application_revision(
+        self,
+        application: str,
+        expected_revision: int,
+        timeout: timedelta | None,
+        model: str = "default",
+    ) -> None:
+        self.logger.info(
+            f"Waiting {timeout} for application '{application}' to reach charm revision {expected_revision}."
+        )
+        self.backend.wait_for_application_revision(application, expected_revision, timeout, model)
+
+    def list_integrations(self, model: str = "default") -> set[JujuIntegration]:
+        self.logger.info("Getting list of integrations.")
+        return self.backend.list_integrations(model)
+
+    def reboot_model_controller(self, model: str = "default") -> None:
+        self.logger.info("Restarting model controller.")
+        return self.backend.reboot_model_controller(model)
+
+    def version(self, model: str = "default") -> JujuVersion:
+        self.logger.info("Collecting Juju model version.")
         return self.backend.version(model)
+
+    def cli_version(self) -> JujuVersion:
+        self.logger.info("Collecting Juju CLI version.")
+        return self.backend.cli_version()
+
+    def upgrade_model(self, model: str, agent_version: str | None = None) -> None:
+        version_suffix = f" to agent version '{agent_version}'" if agent_version else ""
+        self.logger.info(f"Upgrading model '{model}'{version_suffix}.")
+        self.backend.upgrade_model(model=model, agent_version=agent_version)
+
+    def validate_model(self, model: str = "default", level: str = "simple") -> None:
+        """Validate all applications in the model.
+
+        In Phase 2, this will trigger the Ops framework's native validation.
+        In Phase 1, this calls the backend (no-op) then extensions (actual work).
+
+        Args:
+            model: Juju model name
+            level: Validation level ("simple" or "deep", default: "simple")
+
+        Raises:
+            JujuValidationError: If any validation checks fail.
+        """
+        # Collect applications for validators
+        applications = self.backend.list_applications(model)
+        self.logger.info(f"Running validators on {len(applications)} applications (level={level})")
+
+        # Run validators on each application
+        failed_validations: dict[str, list[ValidationResult]] = {}
+        for application in applications:
+            results: dict[str, list[ValidationResult]] = {}
+
+            # Phase 2: This will trigger Ops framework validation
+            # Phase 1: This is a no-op, just a placeholder
+            for unit, unit_results in self.backend.validate_application(model, application, level).items():
+                results.setdefault(unit, []).extend(unit_results)
+
+            # Call extensions (Phase 1 validation happens here)
+            for extension in self.extensions:
+                for unit, unit_results in extension.post_validate(model, application, level).items():
+                    results.setdefault(unit, []).extend(unit_results)
+
+            if not results:
+                self.logger.info(f"No validation results for application '{application}'.")
+                continue
+
+            # Log results for this application
+            for unit, unit_results in results.items():
+                if not unit_results:
+                    self.logger.info(f"No validation results for unit '{unit}'.")
+                    continue
+
+                elif all(r.status == "SKIPPED" for r in unit_results):
+                    self.logger.info(f"Validation skipped for unit '{unit}'.")
+                    continue
+
+                failed = [r for r in unit_results if r.status in ("FAIL", "ERROR")]
+                if not failed:
+                    self.logger.info(f"Validation passed for unit '{unit}' ({len(unit_results)} results)")
+                    for result in unit_results:
+                        self.logger.debug(
+                            f"  endpoint '{result.endpoint}' (interface='{result.interface}', "
+                            f"relation_id={result.relation_id}): {result.status}"
+                        )
+                else:
+                    for result in failed:
+                        self.logger.error(
+                            f"Validation failed for unit '{unit}' on endpoint '{result.endpoint}' "
+                            f"(interface='{result.interface}', relation_id={result.relation_id}, status={result.status})."
+                        )
+                        for check in result.checks:
+                            if not check.passed:
+                                self.logger.error(f"  Check '{check.name}' failed: {check.message}")
+                        if result.error:
+                            self.logger.error(f"  Error: {result.error}")
+                    failed_validations.setdefault(unit, []).extend(failed)
+
+        # Raise exception for any failed validation results
+        if sum(len(results) for results in failed_validations.values()) > 0:
+            raise JujuValidationError(failed_validations)
+
+    def bootstrap_controller(
+        self,
+        cloud: str,
+        controller: str,
+        controller_constraints: dict[str, str],
+        agent_version: str | None = None,
+    ) -> None:
+        version_suffix = f" at agent version '{agent_version}'" if agent_version else ""
+        self.logger.info(
+            f"Bootstrapping Juju controller in cloud '{cloud}' with name '{controller}'{version_suffix}, "
+            f"using constraints '{controller_constraints}'."
+        )
+        self.backend.bootstrap_controller(
+            cloud=cloud,
+            controller=controller,
+            controller_constraints=controller_constraints,
+            agent_version=agent_version,
+        )
+
+    def add_model(self, controller: str, model: str, model_config: dict[str, str]) -> None:
+        self.logger.info(
+            f"Creating model '{model}' with configuration '{model_config}' on controller '{controller}' and switching to it."
+        )
+        self.backend.add_model(controller=controller, model=model, model_config=model_config)
+        self.backend.switch(controller=controller, model=model)
+
+    def kill_controller(self, controller: str) -> None:
+        self.logger.info(f"Killing controller '{controller}'.")
+        self.backend.kill_controller(controller=controller)
+
+    def migrate_model(self, model_name: str, source_controller: str, target_controller: str) -> None:
+        self.logger.info(
+            f"Migrating model '{model_name}' from source controller '{source_controller}' to target controller '{target_controller}'"
+        )
+        self.backend.migrate_model(
+            model_name=model_name, source_controller=source_controller, target_controller=target_controller
+        )
+
+    def upgrade_controller(self, controller: str, agent_version: str | None = None) -> None:
+        version_suffix = f" to agent version '{agent_version}'" if agent_version else ""
+        self.logger.info(f"Upgrading controller '{controller}'{version_suffix}.")
+        self.backend.upgrade_controller(controller=controller, agent_version=agent_version)

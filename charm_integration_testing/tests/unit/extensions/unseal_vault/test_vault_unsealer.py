@@ -1,38 +1,55 @@
 # Copyright 2025 Canonical Ltd.
 # See LICENSE file for licensing details.
-
 import logging
 import subprocess
 from dataclasses import dataclass, field
 from datetime import timedelta
+from io import StringIO
+from typing import Any, NamedTuple
+from unittest import mock
 
-from extensions.unseal_vault.vault_client import VaultClient, VaultStatus, VaultTokenSecret
-from extensions.unseal_vault.vault_unsealer import CharmInfo, VaultUnsealer
-from juju.backend import JujuBackend
+import pytest
+import yaml
+from extensions.unseal_vault.vault_client import (
+    VaultClient,
+    VaultClientJujuExec,
+    VaultClientJujuExecPebble,
+    VaultStatus,
+    VaultTokenSecret,
+)
+from extensions.unseal_vault.vault_unsealer import CharmInfo, VaultUnsealer, order_apps_by_dependency
+from juju import JujuExecOutput
+from juju.backend import JujuTask
+from juju.models import JujuApplicationInfo, JujuIntegration, JujuIntegrationApplication
+
+from ..shared import NullJujuBackend
 
 
 @dataclass
-class JujuStub(JujuBackend):
+class JujuStub(NullJujuBackend):
     apps: list[str] = field(default_factory=list)
     charm_name: str = ""
     scaled_apps: list[str] = field(default_factory=list)
     settled_apps: list[str] = field(default_factory=list)
     units: dict[str, list[str]] = field(default_factory=dict)
-    messages: list[tuple[str, str, timedelta]] = field(default_factory=list)
+    messages: list[tuple[str, str, timedelta | None]] = field(default_factory=list)
     secrets: dict[str, dict[str, str]] = field(default_factory=dict)
     secrets_granted: list[tuple[str, str]] = field(default_factory=list)
     actions_run: list[tuple[str, str, dict[str, str]]] = field(default_factory=list)
+    integrations: set[JujuIntegration] = field(default_factory=set)
+    exec_unit_calls: list[tuple[str, str, str]] = field(default_factory=list)
+    exec_units_output: list[JujuExecOutput] = field(default_factory=list)
 
-    def list_applications(self, model: str) -> list[str]:  # type: ignore[override]
-        return self.apps
+    def list_applications(self, model: str) -> dict[str, JujuApplicationInfo]:
+        return {app: JujuApplicationInfo(charm=self.charm_name, revision=0) for app in self.apps}
 
     def application_charm(self, model: str, application: str) -> str:
         return self.charm_name
 
-    def wait_application_scaled(self, model: str, app: str, timeout: timedelta) -> None:  # type: ignore[override]
+    def wait_application_scaled(self, model: str, app: str, timeout: timedelta | None) -> None:
         self.scaled_apps.append(app)
 
-    def wait_application_settled(self, model: str, app: str, timeout: timedelta) -> None:  # type: ignore[override]
+    def wait_application_settled(self, model: str, app: str, timeout: timedelta | None) -> None:
         self.settled_apps.append(app)
 
     def application_units(self, model: str, app: str) -> list[str]:
@@ -41,7 +58,7 @@ class JujuStub(JujuBackend):
     def num_units(self, model: str, app: str) -> int:
         return len(self.units.get(app, []))
 
-    def wait_for_unit_message(self, model: str, unit: str, message: str, timeout: timedelta) -> None:  # type: ignore[override]
+    def wait_for_unit_message(self, model: str, unit: str, message: str, timeout: timedelta | None) -> None:
         self.messages.append((unit, message, timeout))
 
     def add_secret(self, model: str, name: str, content: dict[str, str]) -> str:
@@ -51,8 +68,9 @@ class JujuStub(JujuBackend):
     def grant_secret(self, model: str, name: str, app: str) -> None:
         self.secrets_granted.append((name, app))
 
-    def run_action(self, model: str, unit: str, action: str, params: dict[str, str]) -> None:
+    def run_action(self, model: str, unit: str, action: str, params: dict[str, Any]) -> JujuTask:
         self.actions_run.append((unit, action, params))
+        return JujuTask("", 0, "", "", "")  # Dummy; provided to satisfy return type
 
     def remove_secret(self, model: str, name: str) -> None:
         try:
@@ -63,65 +81,29 @@ class JujuStub(JujuBackend):
     def read_secret(self, model: str, name: str) -> dict[str, str]:
         return self.secrets[name]
 
-    def scale_application(self) -> None:  # type: ignore[override]
-        pass
+    def list_integrations(self, model: str) -> set[JujuIntegration]:
+        _ = model
+        return self.integrations
 
-    def list_integrations(self) -> None:  # type: ignore[override]
-        pass
+    def set_integrations(self, integrations: set[tuple[str, str]]) -> None:
+        for provider, requirer in integrations:
+            self.integrations.add(
+                JujuIntegration(
+                    provider=JujuIntegrationApplication(
+                        application=provider,
+                        endpoint=f"{provider}_endpoint",
+                    ),
+                    requirer=JujuIntegrationApplication(
+                        application=requirer,
+                        endpoint=f"endpoint_{requirer}",
+                    ),
+                    interface=f"{provider}-to-{requirer}",
+                )
+            )
 
-    def integration_exists(self) -> None:  # type: ignore[override]
-        pass
-
-    def wait_idle(self) -> None:  # type: ignore[override]
-        pass
-
-    def juju_status_text(self) -> None:  # type: ignore[override]
-        pass
-
-    def integrate(self) -> None:  # type: ignore[override]
-        pass
-
-    def remove_integration(self) -> None:  # type: ignore[override]
-        pass
-
-    def deploy_bundle_file(self) -> None:  # type: ignore[override]
-        pass
-
-    def remove_applications(self) -> None:  # type: ignore[override]
-        pass
-
-    def wait_for_removal(self) -> None:  # type: ignore[override]
-        pass
-
-    def wait_for_removal_of_integration(self) -> None:  # type: ignore[override]
-        pass
-
-    def wait_for_removal_of_units(self) -> None:  # type: ignore[override]
-        pass
-
-    def exec_unit(self) -> None:  # type: ignore[override]
-        pass
-
-    def deploy_application(self) -> None:  # type: ignore[override]
-        pass
-
-    def configure_application(self) -> None:  # type: ignore[override]
-        pass
-
-    def scp(self) -> None:  # type: ignore[override]
-        pass
-
-    def ssh(self) -> None:  # type: ignore[override]
-        pass
-
-    def unit_ip(self) -> None:  # type: ignore[override]
-        pass
-
-    def get_charm_revisions(self) -> None:  # type: ignore[override]
-        pass
-
-    def version(self) -> None:  # type: ignore[override]
-        pass
+    def exec_unit(self, model: str, unit: str, task: str, operator: bool = False) -> JujuExecOutput:
+        self.exec_unit_calls.append((model, unit, task))
+        return self.exec_units_output.pop(0)
 
 
 @dataclass
@@ -129,6 +111,7 @@ class VaultStub(VaultClient):
     initialized_units: dict[str, bool] = field(default_factory=dict)
     sealed_units: dict[str, bool] = field(default_factory=dict)
     inits: list[str] = field(default_factory=list)
+    inits_auto_unsealed: list[str] = field(default_factory=list)
     unseals: list[str] = field(default_factory=list)
     tokens: VaultTokenSecret = field(default_factory=lambda: VaultTokenSecret(root_token="root", unseal_key="key"))
 
@@ -136,10 +119,14 @@ class VaultStub(VaultClient):
         return VaultStatus(
             initialized=self.initialized_units.get(unit, False),
             sealed=self.sealed_units.get(unit, True),
+            type="shamir",
         )
 
-    def init(self, model: str, unit: str) -> VaultTokenSecret:
-        self.inits.append(unit)
+    def init(self, model: str, unit: str, will_auto_unseal: bool = False) -> VaultTokenSecret:
+        if will_auto_unseal:
+            self.inits_auto_unsealed.append(unit)
+        else:
+            self.inits.append(unit)
         return self.tokens
 
     def unseal(self, model: str, unit: str, tokens: VaultTokenSecret) -> None:
@@ -154,6 +141,7 @@ class LoggerStub(logging.Logger):
         self.messages.append(message)
 
 
+@mock.patch("time.sleep", new=lambda _: None)
 class TestVaultUnsealer:
     def test_try_init_or_unseal_all_vaults(self) -> None:
         # GIVEN
@@ -168,6 +156,29 @@ class TestVaultUnsealer:
         # THEN
         assert "vault" in juju.scaled_apps
         assert "vault/leader" in vault.inits
+
+    def test_try_init_or_unseal_all_vaults_will_order_provider_first(self) -> None:
+        # GIVEN
+        juju = JujuStub(
+            apps=["vault1", "vault2"],
+            charm_name="vault",
+            units={"vault1": ["vault1/leader"], "vault2": ["vault2/leader"]},
+        )
+        juju.set_integrations({("vault2", "vault1")})  # using convenience method
+
+        vault = VaultStub(initialized_units={"vault1/leader": False, "vault2/leader": False})
+        logger = LoggerStub()
+        charm = CharmInfo(name="vault")
+
+        # WHEN
+        VaultUnsealer(charm, vault, juju, logger).try_init_or_unseal_all_vaults("test-model")
+
+        # THEN
+        assert "vault1" in juju.scaled_apps
+        assert "vault2" in juju.scaled_apps
+        assert "vault1/leader" in vault.inits
+        assert "vault2/leader" in vault.inits
+        assert vault.inits.index("vault2/leader") < vault.inits.index("vault1/leader")
 
     def test_try_init_vault_skips_if_already_initialized(self) -> None:
         # GIVEN
@@ -329,3 +340,393 @@ class TestVaultUnsealer:
             assert "some other error occurred" in str(e).lower()
         else:
             assert False, "Expected RuntimeError was not raised"
+
+
+class TestOrderAppsByDependency:
+    class Params(NamedTuple):
+        label: str
+        applications: list[str]
+        integrations: set[tuple[str, str]]
+        expected: list[str]
+
+    test_cases = [
+        # no changes to original order
+        Params(
+            label="no integrations between 2",
+            applications=["vault1", "vault2"],
+            integrations=set(),
+            expected=["vault1", "vault2"],
+        ),
+        Params(
+            label="irrelevant integrations",
+            applications=["vault1", "vault2"],
+            integrations={("something1", "something2")},
+            expected=["vault1", "vault2"],
+        ),
+        Params(
+            label="no integrations preordered",
+            applications=["vault2", "vault1", "vault3"],
+            integrations=set(),
+            expected=["vault2", "vault1", "vault3"],
+        ),
+        Params(
+            label="irrelevant integrations preordered",
+            applications=["vault2", "vault1", "vault3"],
+            integrations={("something1", "something2")},
+            expected=["vault2", "vault1", "vault3"],
+        ),
+        # flip order between 2 inter-dependents
+        Params(
+            label="direct dependency between 2",
+            applications=["vault1", "vault2"],
+            integrations={("vault2", "vault1")},
+            expected=["vault2", "vault1"],
+        ),
+        Params(
+            label="transient dependency between 2",
+            applications=["vault1", "vault2"],
+            integrations={("vault2", "something"), ("something", "vault1")},
+            expected=["vault2", "vault1"],
+        ),
+        # flip order between 2 inter-dependents, moving duplicates along
+        Params(
+            label="direct dependency between 2 with many duplicates",
+            applications=["vault1", "vault1", "vault2", "vault1"],
+            integrations={("vault2", "vault1")},
+            expected=["vault2", "vault1", "vault1", "vault1"],
+        ),
+        Params(
+            label="transient dependency between 2 with 1 duplicate",
+            applications=["vault1", "vault1", "vault2"],
+            integrations={("vault2", "something"), ("something", "vault1")},
+            expected=["vault2", "vault1", "vault1"],
+        ),
+        # flip order between 2 when the other has more dependencies
+        Params(
+            label="when 1 has dependencies but the other doesn't",
+            applications=["vault1", "vault2"],
+            integrations={("something", "vault1")},
+            expected=["vault2", "vault1"],
+        ),
+        Params(
+            label="when 1 has more direct dependencies than other",
+            applications=["vault1", "vault2"],
+            integrations={("something1", "vault2"), ("something1", "vault1"), ("something2", "vault1")},
+            expected=["vault2", "vault1"],
+        ),
+        Params(
+            label="when 1 has more transitive dependencies than other",
+            applications=["vault1", "vault2"],
+            integrations={("something1", "vault2"), ("something2", "vault1"), ("that", "something2")},
+            expected=["vault2", "vault1"],
+        ),
+        # order dependent after keeping rest same order
+        Params(
+            label="direct dependency between first and last of 3",
+            applications=["vault1", "vault2", "vault3"],
+            integrations={("vault1", "vault3")},
+            expected=["vault1", "vault2", "vault3"],
+        ),
+        Params(
+            label="direct dependency between first and last of 3 preordered",
+            applications=["vault3", "vault2", "vault1"],
+            integrations={("vault1", "vault3")},
+            expected=["vault2", "vault1", "vault3"],
+        ),
+        Params(
+            label="direct dependency between first and last of 4 preordered",
+            applications=["vault4", "vault3", "vault2", "vault1"],
+            integrations={("vault1", "vault4")},
+            expected=["vault3", "vault2", "vault1", "vault4"],
+        ),
+        Params(
+            label="transient dependency between first and last of 3 preordered",
+            applications=["vault3", "vault2", "vault1"],
+            integrations={("vault1", "something"), ("something", "vault3")},
+            expected=["vault2", "vault1", "vault3"],
+        ),
+        Params(
+            label="2 level transient dependency between first and last of 3 preordered",
+            applications=["vault3", "vault2", "vault1"],
+            integrations={("vault1", "something"), ("something", "other"), ("other", "vault3")},
+            expected=["vault2", "vault1", "vault3"],
+        ),
+        Params(
+            label="transient dependency between first and last of 4 preordered",
+            applications=["vault4", "vault3", "vault2", "vault1"],
+            integrations={("vault1", "something"), ("something", "vault4")},
+            expected=["vault3", "vault2", "vault1", "vault4"],
+        ),
+        Params(
+            label="2 level transient dependency between first and last of 4 preordered",
+            applications=["vault4", "vault3", "vault2", "vault1"],
+            integrations={("vault1", "something"), ("something", "other"), ("other", "vault4")},
+            expected=["vault3", "vault2", "vault1", "vault4"],
+        ),
+        Params(
+            label="direct dependency between first and second-last of 4 preordered",
+            applications=["vault4", "vault3", "vault2", "vault1"],
+            integrations={("vault1", "vault3")},
+            expected=["vault4", "vault2", "vault1", "vault3"],
+        ),
+        Params(
+            label="transient dependency between first and second last of 4 preordered",
+            applications=["vault4", "vault3", "vault2", "vault1"],
+            integrations={("vault1", "something"), ("something", "vault3")},
+            expected=["vault4", "vault2", "vault1", "vault3"],
+        ),
+        Params(
+            label="2 level transient dependency between first and second last of 4 preordered",
+            applications=["vault4", "vault3", "vault2", "vault1"],
+            integrations={("vault1", "something"), ("something", "other"), ("other", "vault3")},
+            expected=["vault4", "vault2", "vault1", "vault3"],
+        ),
+        # order multiple dependents after original order
+        Params(
+            label="direct dependency between 1,3 and 1,4 of 4 preordered",
+            applications=["vault4", "vault3", "vault2", "vault1"],
+            integrations={("vault1", "vault3"), ("vault1", "vault4")},
+            expected=["vault2", "vault1", "vault4", "vault3"],
+        ),
+        Params(
+            label="direct dependency between 1,3 and 3,4 of 4 preordered",
+            applications=["vault4", "vault3", "vault2", "vault1"],
+            integrations={("vault1", "vault3"), ("vault3", "vault4")},
+            expected=["vault2", "vault1", "vault3", "vault4"],
+        ),
+        Params(
+            label="transient dependency between 1,3 and 4,3 of 4 preordered",
+            applications=["vault4", "vault3", "vault2", "vault1"],
+            integrations={("vault1", "something"), ("something", "vault3"), ("that", "something"), ("that", "vault4")},
+            expected=["vault2", "vault1", "vault4", "vault3"],
+        ),
+    ]
+
+    @pytest.mark.parametrize("params", test_cases, ids=[p.label for p in test_cases])
+    def test(self, params: Params) -> None:
+        result = order_apps_by_dependency(params.applications, params.integrations)
+        assert result == params.expected
+
+
+def dump_to_yaml_str(**kwargs: Any) -> str:
+    buffer = StringIO()
+    yaml.dump(kwargs, buffer)
+    return buffer.getvalue()
+
+
+@mock.patch("time.sleep", new=lambda _: None)
+class TestAutoUnsealedVault:
+    @pytest.mark.parametrize(
+        "status,will_auto_unseal",
+        [
+            (VaultStatus(True, True, "shamir"), False),
+            (VaultStatus(True, False, "shamir"), False),
+            (VaultStatus(False, True, "shamir"), False),
+            (VaultStatus(False, True, "transit"), True),
+            (VaultStatus(False, True, "awskms"), True),
+            (VaultStatus(False, True, "azurekeyvault"), True),
+            (VaultStatus(False, True, "gcpckms"), True),
+            (VaultStatus(False, True, "whatever"), True),  # yeah, it's a dumb match
+        ],
+    )
+    def test_status_says_it_will_auto_unseal(self, status: VaultStatus, will_auto_unseal: bool) -> None:
+        assert status.will_auto_unseal == will_auto_unseal
+
+    @pytest.mark.parametrize("vault_impl", [VaultClientJujuExec, VaultClientJujuExecPebble])
+    def test_vault_client_init_not_auto_unsealed_vault_asks_to_create_keys(
+        self, vault_impl: type[VaultClientJujuExec] | type[VaultClientJujuExecPebble]
+    ) -> None:
+        # GIVEN exec_unit will return a usable response
+        exec_output = dump_to_yaml_str(root_token="root", unseal_keys_b64=["unseal-key"])
+        juju = JujuStub(exec_units_output=[JujuExecOutput(0, exec_output, "")])
+
+        # WHEN we ask to init vault that will NOT auto-unseal
+        vault_impl(juju).init("test-model", "vault-leader", will_auto_unseal=False)
+
+        # THEN the call was made for the unit
+        call, *_ = juju.exec_unit_calls
+        model, unit, task = call
+        assert model == "test-model"
+        assert unit == "vault-leader"
+
+        # AND vault was initialized with 1 key share and key threshold 1
+        assert "vault operator init" in task
+        assert "-key-shares=1" in task
+        assert "-key-threshold=1" in task
+
+    @pytest.mark.parametrize("vault_impl", [VaultClientJujuExec, VaultClientJujuExecPebble])
+    def test_vault_client_init_auto_unsealed_vault_does_not_create_keys(
+        self, vault_impl: type[VaultClientJujuExec] | type[VaultClientJujuExecPebble]
+    ) -> None:
+        # GIVEN exec_unit will return a usable response
+        exec_output = dump_to_yaml_str(root_token="root", unseal_keys_b64=[])
+        juju = JujuStub(exec_units_output=[JujuExecOutput(0, exec_output, "")])
+
+        # WHEN we ask to init vault that will auto-unseal
+        vault_impl(juju).init("test-model", "vault-leader", will_auto_unseal=True)
+
+        # THEN the call was made for the unit
+        call, *_ = juju.exec_unit_calls
+        model, unit, task = call
+        assert model == "test-model"
+        assert unit == "vault-leader"
+
+        # AND vault was initialized without asking for key-shares
+        assert "vault operator init" in task
+        assert "-key-shares" not in task
+        assert "-key-threshold" not in task
+
+    def test_endpoint_for_auto_unsealing(self) -> None:
+        assert CharmInfo("vault").auto_unseal_requirer_endpoint == "vault-autounseal-requires"
+
+    def test_vault_with_integrated_endpoint_should_auto_unseal(self) -> None:
+        # GIVEN
+        charm = CharmInfo(name="vault")
+        juju = JujuStub(
+            apps=["vault1", "vault2", "vault3"],
+            charm_name=charm.name,
+            units={"vault1": ["vault1/leader"], "vault2": ["vault2/leader"], "vault3": ["vault3/leader"]},
+        )
+        juju.integrations.add(
+            JujuIntegration(
+                provider=JujuIntegrationApplication("vault2", "irrelevant"),
+                requirer=JujuIntegrationApplication("vault1", charm.auto_unseal_requirer_endpoint),
+                interface="not-relevant",
+            )
+        )
+        juju.integrations.add(
+            JujuIntegration(
+                provider=JujuIntegrationApplication("some-other-charm", "not-important"),
+                requirer=JujuIntegrationApplication("vault3", "anything-else"),
+                interface="again-not-relevant",
+            )
+        )
+
+        vault = VaultStub(initialized_units={"vault1/leader": False, "vault2/leader": False, "vault3/leader": False})
+        logger = LoggerStub()
+
+        # WHEN
+        vault1_should_auto_unseal = VaultUnsealer(charm, vault, juju, logger).vault_app_should_auto_unseal(
+            "test-model", "vault1"
+        )
+        vault2_should_auto_unseal = VaultUnsealer(charm, vault, juju, logger).vault_app_should_auto_unseal(
+            "test-model", "vault2"
+        )
+        vault3_should_auto_unseal = VaultUnsealer(charm, vault, juju, logger).vault_app_should_auto_unseal(
+            "test-model", "vault3"
+        )
+
+        # THEN
+        assert vault1_should_auto_unseal is True
+        assert vault2_should_auto_unseal is False
+        assert vault3_should_auto_unseal is False
+
+    def test_try_init_or_unseal_vault_indicates_auto_unseal_and_does_not_unseal(self) -> None:
+        # GIVEN vault should auto-unseal
+        charm = CharmInfo(name="vault")
+        leader = "vault/leader"
+        juju = JujuStub(units={"vault": [leader]})
+        juju.integrations.add(
+            JujuIntegration(
+                JujuIntegrationApplication("something", "irrelevant"),
+                JujuIntegrationApplication("vault", charm.auto_unseal_requirer_endpoint),
+                "not-relevant",
+            )
+        )
+        logger = LoggerStub()
+
+        # AND vault will unseal
+        def vault_status_that_will_auto_unseal(_: VaultClient, unit: str) -> VaultStatus:
+            assert unit == leader
+            return VaultStatus(False, True, "transit")
+
+        vault = VaultStub(initialized_units={leader: False})
+        vault.status = vault_status_that_will_auto_unseal  # type: ignore
+
+        # WHEN asked to init
+        VaultUnsealer(charm, vault, juju, logger).try_init_or_unseal_vault("test-model", "vault")
+
+        # THEN
+        assert vault.inits_auto_unsealed == [leader]
+        assert vault.inits == []
+        assert vault.unseals == []
+
+    def test_try_init_or_unseal_vault_times_out_on_auto_unseal(self) -> None:
+        # GIVEN vault should unseal
+        charm = CharmInfo(name="vault")
+        leader = "vault/leader"
+        juju = JujuStub(units={"vault": [leader]})
+        juju.integrations.add(
+            JujuIntegration(
+                JujuIntegrationApplication("something", "irrelevant"),
+                JujuIntegrationApplication("vault", charm.auto_unseal_requirer_endpoint),
+                "not-relevant",
+            )
+        )
+        logger = LoggerStub()
+
+        # AND vault will never unseal
+        def vault_status_that_will_never_auto_unseal(_: VaultClient, unit: str) -> VaultStatus:
+            assert unit == leader
+            result = VaultStatus(False, True, "shamir")
+            assert result.will_auto_unseal is False
+            return result
+
+        vault = VaultStub(initialized_units={leader: False})
+        vault.status = vault_status_that_will_never_auto_unseal  # type: ignore
+
+        # WHEN asked to init
+        # THEN it will timeout
+        with pytest.raises(TimeoutError):
+            VaultUnsealer(charm, vault, juju, logger).try_init_or_unseal_vault("test-model", "vault")
+
+        # AND
+        assert vault.inits_auto_unsealed == []
+        assert vault.inits == []
+        assert vault.unseals == []
+
+    def test_try_init_or_unseal_vault_auto_unseal_after_a_few_tries(self) -> None:
+        # GIVEN vault should unseal
+        charm = CharmInfo(name="vault")
+        leader = "vault/leader"
+        juju = JujuStub(units={"vault": [leader]})
+        juju.integrations.add(
+            JujuIntegration(
+                JujuIntegrationApplication("something", "irrelevant"),
+                JujuIntegrationApplication("vault", charm.auto_unseal_requirer_endpoint),
+                "not-relevant",
+            )
+        )
+        logger = LoggerStub()
+
+        denials = [True] * 10  # checking status for other things, and then not yet auto-unsealing
+
+        # AND vault will unseal after a few tries
+        def vault_status_that_will_auto_unseal_after_a_few_tries(_: VaultClient, unit: str) -> VaultStatus:
+            assert unit == leader
+
+            not_ready = VaultStatus(False, True, "shamir")
+            ready = VaultStatus(False, True, "transit")
+            assert not_ready.will_auto_unseal is False
+            assert ready.will_auto_unseal is True
+
+            try:
+                if denials.pop():
+                    return not_ready
+            except IndexError:
+                # ran out of denials
+                return ready
+
+            raise RuntimeError("unreachable")
+
+        vault = VaultStub(initialized_units={leader: False})
+        vault.status = vault_status_that_will_auto_unseal_after_a_few_tries  # type: ignore
+
+        # WHEN asked to init
+        # THEN it will not timeout
+        VaultUnsealer(charm, vault, juju, logger).try_init_or_unseal_vault("test-model", "vault")
+
+        # AND
+        assert vault.inits_auto_unsealed == [leader]
+        assert vault.inits == []
+        assert vault.unseals == []

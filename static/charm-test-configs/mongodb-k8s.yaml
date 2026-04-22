@@ -1,10 +1,10 @@
 ---
 configs:
   - criteria:
-      - endpoint_integrated: config-server
+      endpoint_integrated: config-server
     config:
       role: config-server
   - criteria:
-      - endpoint_integrated: sharding
+      endpoint_integrated: sharding
     config:
       role: shard

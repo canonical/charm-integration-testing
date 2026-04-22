@@ -85,3 +85,16 @@ jobs:
     permissions:
       contents: read
       actions: write
+  validators-unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Install poetry
+        run: pipx install poetry==2.0.1
+      - name: Install dependencies
+        run: poetry install
+      - name: Run Validators Unit Tests
+        run: ./scripts/validators-unit-tests.sh

@@ -77,6 +77,7 @@ def test_frozen_enforcement() -> None:
     # WHEN attempting to mutate an attribute
     # THEN it should raise FrozenInstanceError
     with pytest.raises(FrozenInstanceError):
+        # mypy complains about the exact behaviour being tested, so we ignore it
         u.first = "Charles"  # type: ignore[misc]
 
 
@@ -143,7 +144,7 @@ class Loose:
     foo: int
 
     @computed_property
-    def bar(self):  # type: ignore[no-untyped-def]
+    def bar(self) -> int:
         return self.foo * 2
 
 

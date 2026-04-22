@@ -7,9 +7,11 @@ import pytest
 from juju import JujuIntegrationApplication
 from juju_jubilant.wait import (
     all_statuses_are_in,
+    application_is_on_revision,
     applications_are_removed,
     applications_are_scaled,
     applications_have_no_units,
+    bundle_integrations_exist,
     get_application_state,
     get_integrations,
     get_unit_info,
@@ -161,10 +163,19 @@ class TestWaitConditions:
         # GIVEN / WHEN
         result = get_integrations(sample_database_webapp_status)
 
-        # THEN
-        assert len(result) == 1
-        integration = next(iter(result))
-        assert integration.interface == "dbi"
+        # THEN - returns both directions of the integration
+        assert len(result) == 2
+        # Check that both directions exist
+        expected_endpoints = {
+            frozenset(
+                [
+                    JujuIntegrationApplication("database", "db"),
+                    JujuIntegrationApplication("webapp", "db"),
+                ]
+            )
+        }
+        actual_endpoints = {frozenset(integration) for integration in result}
+        assert actual_endpoints == expected_endpoints
 
     def test_get_application_state(self, sample_database_webapp_status: jubilant.Status) -> None:
         # GIVEN / WHEN
@@ -238,6 +249,32 @@ class TestWaitConditions:
         assert result is False
         assert "missing" in wait.noncompliant_applications
 
+    def test_application_is_on_revision_match(self, sample_database_webapp_status: jubilant.Status) -> None:
+        # GIVEN / WHEN
+        result, wait = application_is_on_revision(sample_database_webapp_status, "database", 0)
+
+        # THEN
+        assert result is True
+        assert wait.noncompliant_applications == {}
+
+    def test_application_is_on_revision_mismatch(self, sample_database_webapp_status: jubilant.Status) -> None:
+        # GIVEN / WHEN
+        result, wait = application_is_on_revision(sample_database_webapp_status, "database", 1)
+
+        # THEN
+        assert result is False
+        assert "database" in wait.noncompliant_applications
+
+    def test_application_is_on_revision_application_not_in_status(
+        self, sample_database_webapp_status: jubilant.Status
+    ) -> None:
+        # GIVEN / WHEN
+        result, wait = application_is_on_revision(sample_database_webapp_status, "missing", 0)
+
+        # THEN
+        assert result is False
+        assert "missing" in wait.noncompliant_applications
+
     def test_units_have_message_match(self, sample_database_webapp_status: jubilant.Status) -> None:
         # GIVEN / WHEN
         result, wait = units_have_message("secret", sample_database_webapp_status, "database/0")
@@ -271,7 +308,7 @@ class TestWaitConditions:
         assert wait.noncompliant_applications == {}
 
     def test_integrations_are_removed_not_removed(self, sample_database_webapp_status: jubilant.Status) -> None:
-        # GIVEN
+        # GIVEN - integration that exists in the status
         integration = (
             JujuIntegrationApplication("database", "db"),
             JujuIntegrationApplication("webapp", "db"),
@@ -280,9 +317,9 @@ class TestWaitConditions:
         # WHEN
         result, wait = integrations_are_removed(sample_database_webapp_status, integration)
 
-        # THEN
+        # THEN - The integration still exists, so it's not removed
         assert result is False
-        assert "database" in wait.noncompliant_applications
+        assert len(wait.noncompliant_applications) == 2
 
     def test_integrations_are_removed_all_removed(self, sample_minimal_status: jubilant.Status) -> None:
         # GIVEN
@@ -315,3 +352,46 @@ class TestWaitConditions:
         assert result is True
         assert wait.noncompliant_applications == {}
         assert wait.noncompliant_units == {}
+
+    def test_bundle_integrations_exist_present(self, sample_database_webapp_status: jubilant.Status) -> None:
+        # GIVEN - an integration that exists in the status
+        integration = (
+            JujuIntegrationApplication("database", "db"),
+            JujuIntegrationApplication("webapp", "db"),
+        )
+
+        # WHEN
+        result, wait = bundle_integrations_exist(sample_database_webapp_status, integration)
+
+        # THEN
+        assert result is True
+        assert wait.noncompliant_applications == {}
+
+    def test_bundle_integrations_exist_missing(self, sample_minimal_status: jubilant.Status) -> None:
+        # GIVEN - an integration that does NOT exist in the (empty) status
+        integration = (
+            JujuIntegrationApplication("database", "db"),
+            JujuIntegrationApplication("webapp", "db"),
+        )
+
+        # WHEN
+        result, wait = bundle_integrations_exist(sample_minimal_status, integration)
+
+        # THEN
+        assert result is False
+        assert len(wait.noncompliant_applications) == 2
+
+    def test_bundle_integrations_exist_app_not_in_status(self, sample_minimal_status: jubilant.Status) -> None:
+        # GIVEN - an integration where the apps don't exist in status at all
+        integration = (
+            JujuIntegrationApplication("ghost-app", "ep"),
+            JujuIntegrationApplication("other-ghost", "ep"),
+        )
+
+        # WHEN
+        result, wait = bundle_integrations_exist(sample_minimal_status, integration)
+
+        # THEN
+        assert result is False
+        assert wait.noncompliant_applications["ghost-app"] is None
+        assert wait.noncompliant_applications["other-ghost"] is None

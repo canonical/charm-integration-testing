@@ -21,10 +21,12 @@ from bundle_builder.charm import (
     ENDPOINT_PROVIDES,
     ENDPOINT_REQUIRES,
     Charm,
+    CharmChannel,
     CharmEndpoint,
     CharmEndpointOptionality,
     CharmLimit,
 )
+from bundle_builder.juju_version import JujuVersion
 
 from .conftest import CharmhubClientStub
 
@@ -34,8 +36,7 @@ class TestDependencyCycle:
         # GIVEN a charm that provides and requires the same interface
         provides_and_requires_same_interface_charm = Charm(
             name="charm-a",
-            # TODO(raul): remove type: ignore in subsequent type checker-related PR
-            channel="stable",  # type: ignore[arg-type]
+            channel=CharmChannel("stable"),
             revision=1,
             ubuntu_version="22.04",
             ubuntu_arch="amd64",
@@ -69,6 +70,7 @@ class TestDependencyCycle:
             integrations=frozenset(),
             platform="machine",
             arch="amd64",
+            juju_version=JujuVersion.parse("3.6"),
         )
         # AND a bundle builder with a charmhub client that knows about the charm
         builder = BundleBuilder(CharmhubClientStub(provides_and_requires_same_interface_charm))
@@ -101,8 +103,7 @@ class TestDependencyCycle:
         # GIVEN a charm that provides and requires the same interface
         provides_and_requires_same_interface_charm = Charm(
             name="charm-a",
-            # TODO(raul): remove type: ignore in subsequent type checker-related PR
-            channel="stable",  # type: ignore[arg-type]
+            channel=CharmChannel("stable"),
             revision=1,
             ubuntu_version="22.04",
             ubuntu_arch="amd64",
@@ -136,6 +137,7 @@ class TestDependencyCycle:
             integrations=frozenset(),
             platform="machine",
             arch="amd64",
+            juju_version=JujuVersion.parse("3.6"),
         )
         # AND a bundle builder with a charmhub client that knows about the charm
         builder = BundleBuilder(CharmhubClientStub(provides_and_requires_same_interface_charm))
@@ -168,8 +170,7 @@ class TestDependencyCycle:
         # GIVEN a charm that provides and requires the same interface
         charm_a = Charm(
             name="charm-a",
-            # TODO(raul): remove type: ignore in subsequent type checker-related PR
-            channel="stable",  # type: ignore[arg-type]
+            channel=CharmChannel("stable"),
             revision=1,
             ubuntu_version="22.04",
             ubuntu_arch="amd64",
@@ -196,8 +197,7 @@ class TestDependencyCycle:
         # AND a second charm that only provides the interface
         charm_b = Charm(
             name="charm-b",
-            # TODO(raul): remove type: ignore in subsequent type checker-related PR
-            channel="stable",  # type: ignore[arg-type]
+            channel=CharmChannel("stable"),
             revision=1,
             ubuntu_version="22.04",
             ubuntu_arch="amd64",
@@ -226,6 +226,7 @@ class TestDependencyCycle:
             integrations=frozenset(),
             platform="machine",
             arch="amd64",
+            juju_version=JujuVersion.parse("3.6"),
         )
         # AND a bundle builder with a charmhub client that knows about the charms
         builder = BundleBuilder(CharmhubClientStub(charm_a, charm_b))
@@ -248,8 +249,7 @@ class TestDependencyCycle:
         # GIVEN a charm that provides and requires some interface
         charm_a = Charm(
             name="charm-a",
-            # TODO(raul): remove type: ignore in subsequent type checker-related PR
-            channel="stable",  # type: ignore[arg-type]
+            channel=CharmChannel("stable"),
             revision=1,
             ubuntu_version="22.04",
             ubuntu_arch="amd64",
@@ -276,8 +276,7 @@ class TestDependencyCycle:
         # AND a second charm that provides and requires the opposite interfaces
         charm_b = Charm(
             name="charm-b",
-            # TODO(raul): remove type: ignore in subsequent type checker-related PR
-            channel="stable",  # type: ignore[arg-type]
+            channel=CharmChannel("stable"),
             revision=1,
             ubuntu_version="22.04",
             ubuntu_arch="amd64",
@@ -311,6 +310,7 @@ class TestDependencyCycle:
             integrations=frozenset(),
             platform="machine",
             arch="amd64",
+            juju_version=JujuVersion.parse("3.6"),
         )
         # AND a bundle builder with a charmhub client that knows about the charms
         builder = BundleBuilder(CharmhubClientStub(charm_a, charm_b), avoid_application_dependency_cycles=True)

@@ -71,7 +71,7 @@ jobs:
         run: |
           kubectl get namespaces --output json | jq --raw-output --argjson age "$AGE_THRESHOLD" '
             .items[] |
-            select(.metadata.name | test("^(controller|model)-[0-9]+-[0-9]+$")) |
+            select(.metadata.name | test("^(controller|model)-[0-9]+-[0-9]+$|^controller-pytest-tmp-controller-[a-z0-9]{8}$")) |
             select((now - (.metadata.creationTimestamp | fromdateiso8601)) > ($age * 60)) |
             .kind + "/" + .metadata.name
           ' >> resources_to_remove.txt
@@ -88,7 +88,7 @@ jobs:
         run: |
           kubectl get serviceaccounts --all-namespaces --output json | jq --raw-output --argjson age "$AGE_THRESHOLD" '
             .items[] |
-            select(.metadata.name | test("^juju-credentials-[a-zA-Z0-9]{8}$")) |
+            select(.metadata.name | test("^juju-credentials?-[a-zA-Z0-9]{8}$")) |
             select((now - (.metadata.creationTimestamp | fromdateiso8601)) > ($age * 60)) |
             .metadata.namespace + ":" + .kind + "/" + .metadata.name
           ' >> resources_to_remove.txt
@@ -98,9 +98,22 @@ jobs:
           kubectl get secrets --all-namespaces --output json | jq --raw-output --argjson age "$AGE_THRESHOLD" '
             .items[] |
             select(.type == "kubernetes.io/service-account-token") |
-            select(.metadata.name | test("^juju-credentials-[a-zA-Z0-9]{8}$")) |
+            select(.metadata.name | test("^juju-credentials?-[a-zA-Z0-9]{8}$")) |
             select((now - (.metadata.creationTimestamp | fromdateiso8601)) > ($age * 60)) |
             .metadata.namespace + ":" + .kind + "/" + .metadata.name
+          ' >> resources_to_remove.txt
+      - name: Find Released rawfile PersistentVolumes
+        shell: bash
+        run: |
+          # Released rawfile PVs should be cleaned up by the CSI driver automatically, but
+          # will get stuck if the node they were provisioned on no longer exists. Add them to
+          # the delete list
+          kubectl get pv --output json | jq --raw-output --argjson age "$AGE_THRESHOLD" '
+            .items[] |
+            select(.status.phase == "Released") |
+            select(.spec.storageClassName == "csi-rawfile-default") |
+            select((now - (.metadata.creationTimestamp | fromdateiso8601)) > ($age * 60)) |
+            .kind + "/" + .metadata.name
           ' >> resources_to_remove.txt
       - name: Remove all resources
         shell: bash

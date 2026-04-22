@@ -1,0 +1,16 @@
+---
+configs:
+  - criteria:
+      none_of:
+        - endpoint_integrated: trino-coordinator
+        - endpoint_integrated: trino-worker
+    config:
+      charm-function: all
+  - criteria:
+      endpoint_integrated: trino-coordinator
+    config:
+      charm-function: worker
+  - criteria:
+      endpoint_integrated: trino-worker
+    config:
+      charm-function: coordinator

@@ -43,8 +43,39 @@ class S3IntegratorMinIOBackendExtension(JujuExtension, ABC):
             if self.juju.application_charm(model, application) == S3_INTEGRATOR_CHARM:
                 self.deploy_minio_s3_backend(model, application)
 
+    def pre_remove(self, model: str, *applications: str) -> None:
+        # Remove MinIO applications related to s3 integrator applications being removed
+        all_applications = self.juju.list_applications(model)
+        to_remove: list[str] = []
+        for application in applications:
+            if application not in all_applications:
+                continue
+            if all_applications[application].charm != S3_INTEGRATOR_CHARM:
+                continue
+            minio_application = self.minio_application(application)
+            if minio_application not in all_applications:
+                continue
+            to_remove.append(minio_application)
+
+        # If no applications to remove do nothing
+        if not to_remove:
+            return
+
+        # Remove applications
+        self.logger.info(f"Removing MinIO applications '{to_remove}' related to s3 integrators '{applications}'")
+        self.juju.remove_applications(model, *to_remove)
+
+        # Wait for applications to be removed
+        self.logger.info(f"Waiting for MinIO applications related to removed s3 integrators to be removed: {to_remove}")
+        self.juju.wait_for_removal(model, to_remove, timeout=timedelta(minutes=15))
+
     def deploy_minio_s3_backend(self, model: str, s3_integrator_application: str) -> None:
         # Follows guide: https://discourse.charmhub.io/t/cos-lite-docs-set-up-minio-for-s3-testing/15211
+
+        # Skip if already configured
+        if self.juju.get_application_config(model, s3_integrator_application).get("endpoint"):
+            self.logger.info(f"Application '{s3_integrator_application}' already has endpoint set, skipping")
+            return
 
         # Deploy MinIO
         self.logger.info(

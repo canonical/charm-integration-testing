@@ -26,6 +26,14 @@ class VaultTokenSecret:
 class VaultStatus:
     initialized: bool
     sealed: bool
+    type: str
+
+    @property
+    def will_auto_unseal(self) -> bool:
+        # We know that `shamir` type seals won't be auto-unsealed if vault is sealed
+        #   Other documented ones include: transit, awskms, azurekeyvault, gcpckms
+        #   but who knows what else might
+        return not self.initialized and self.sealed and self.type != "shamir"
 
 
 class VaultClient(ABC):
@@ -34,7 +42,7 @@ class VaultClient(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def init(self, model: str, unit: str) -> VaultTokenSecret:
+    def init(self, model: str, unit: str, will_auto_unseal: bool = False) -> VaultTokenSecret:
         raise NotImplementedError
 
     @abstractmethod
@@ -45,6 +53,7 @@ class VaultClient(ABC):
 class VaultClientJujuExec(VaultClient):
     JUJU_EXEC_VAULT_STATUS = "VAULT_SKIP_VERIFY=true vault status -format=yaml"
     JUJU_EXEC_VAULT_INIT = "VAULT_SKIP_VERIFY=true vault operator init -format=yaml -key-shares=1 -key-threshold=1"
+    JUJU_EXEC_VAULT_INIT_AUTO_UNSEALED = "VAULT_SKIP_VERIFY=true vault operator init -format=yaml"
     JUJU_EXEC_VAULT_UNSEAL = 'VAULT_SKIP_VERIFY=true VAULT_TOKEN="{root_token}" vault operator unseal "{unseal_key}"'
 
     juju: JujuBackend
@@ -66,9 +75,10 @@ class VaultClientJujuExec(VaultClient):
         return VaultStatus(**yaml.safe_load(result.stdout))
 
     @retry_on_failure(message="connection refused", max_retries=5, delay=1.0)
-    def init(self, model: str, unit: str) -> VaultTokenSecret:
+    def init(self, model: str, unit: str, will_auto_unseal: bool = False) -> VaultTokenSecret:
         # Initialize vault
-        init_result = self.juju.exec_unit(model, unit, self.JUJU_EXEC_VAULT_INIT)
+        init_command = self.JUJU_EXEC_VAULT_INIT_AUTO_UNSEALED if will_auto_unseal else self.JUJU_EXEC_VAULT_INIT
+        init_result = self.juju.exec_unit(model, unit, init_command)
 
         # Check for error
         if init_result.return_code != 0:
@@ -78,7 +88,8 @@ class VaultClientJujuExec(VaultClient):
         init_response = VaultInitResponse(**yaml.safe_load(init_result.stdout))
 
         # Return tokens
-        return VaultTokenSecret(root_token=init_response.root_token, unseal_key=init_response.unseal_keys_b64[0])
+        unseal_key = "<should-have-auto-unsealed>" if will_auto_unseal else init_response.unseal_keys_b64[0]
+        return VaultTokenSecret(root_token=init_response.root_token, unseal_key=unseal_key)
 
     @retry_on_failure(message="connection refused", max_retries=5, delay=1.0)
     def unseal(self, model: str, unit: str, tokens: VaultTokenSecret) -> None:
@@ -93,4 +104,5 @@ class VaultClientJujuExec(VaultClient):
 class VaultClientJujuExecPebble(VaultClientJujuExec):
     JUJU_EXEC_VAULT_STATUS = "PEBBLE_SOCKET=/charm/containers/vault/pebble.socket pebble exec --env VAULT_SKIP_VERIFY=true -- vault status -format=yaml"
     JUJU_EXEC_VAULT_INIT = "PEBBLE_SOCKET=/charm/containers/vault/pebble.socket pebble exec --env VAULT_SKIP_VERIFY=true -- vault operator init -format=yaml -key-shares=1 -key-threshold=1"
+    JUJU_EXEC_VAULT_INIT_AUTO_UNSEALED = "PEBBLE_SOCKET=/charm/containers/vault/pebble.socket pebble exec --env VAULT_SKIP_VERIFY=true -- vault operator init -format=yaml"
     JUJU_EXEC_VAULT_UNSEAL = 'PEBBLE_SOCKET=/charm/containers/vault/pebble.socket pebble exec --env VAULT_SKIP_VERIFY=true --env VAULT_TOKEN="{root_token}" -- vault operator unseal "{unseal_key}"'

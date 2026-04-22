@@ -32,6 +32,8 @@ This guide will reference variables that need to contain values specific to your
   The name to use for the Juju model that is created and used in the testing. For example, ``charm-testing``.
 ``OUTPUT_FILE``:
   A filename to use for for the charm bundle output produced by the ``build-bundle.sh`` script. For example, ``generated-bundle.yaml``.
+``JUJU_MODEL_CONFIG_FILE``:
+  Path to a JSON file containing Juju model configuration values passed at model creation time. For example, ``./static/juju-model-config.json``.
 
 Optional environment variables
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -40,8 +42,12 @@ The following environment variables are optional and only needed when testing sp
 
 ``MINIO_CLIENT_FILE``:
   Path to the MinIO client configuration file. Will be downloaded automatically by the test scripts if not provided. Used when deploying the `minio-k8s` charm with `s3-integrator`.
+``UV_FILE``:
+  Path to a pre-downloaded ``uv`` binary. Will be downloaded automatically if not provided. Used when injecting validators onto units to create the Python virtualenv.
 ``UBUNTU_PRO_TOKEN``:
   Ubuntu Pro token for configuring the livepatch server. Required when testing the `canonical-livepatch-server-k8s`` charms.
+``VALIDATORS_PATH``:
+  Path to a local directory containing the validator packages (each a sub-directory with its own ``pyproject.toml``). When set, the test framework will ``scp`` the directory to each unit under test, install the validators in a virtualenv, and run them after each validation phase. If not provided, validator injection is skipped. For example, ``${PWD}/validators``.
 
 Set up Juju and k8s
 -------------------
@@ -75,10 +81,10 @@ It is also needed to setup the k8s cloud in juju. Do this with the following com
 .. code:: bash
 
    juju add-k8s ${K8S_CLOUD_NAME} --client
-   juju bootstrap k8s ${K8S-CONTROLLER} --bootstrap-constraints root-disk=5G
+   juju bootstrap ${K8S_CLOUD_NAME} ${K8S_CONTROLLER_NAME} --bootstrap-constraints root-disk=5G
    juju add-model ${MODEL_NAME} \
-    --config "logging-config=DEBUG" \
-    --config="update-status-hook-interval=2m"
+     --config "logging-config=DEBUG" \
+     --config="update-status-hook-interval=2m"
 
 Install the repository dependencies
 -----------------------------------
@@ -135,35 +141,47 @@ The contents of the output file will look something like the following:
   - - neighbor:grafana-dashboard
     - target:grafana-dashboard
 
-Deploy bundles
---------------
-The first step is deploying the bundle. Do this with the following command:
+Run tests
+---------
+
+Run all tests with the following command. The state-driven scheduler
+automatically handles deploy, integration tests, and teardown in the
+correct order:
 
 .. code:: bash
 
-   ./scripts/test-deploy.sh \
+   ./scripts/run-tests.sh \
+     --juju-cloud "${K8S_CLOUD_NAME}" \
+     --juju-controller "${K8S_CONTROLLER_NAME}" \
      --model "${MODEL_NAME}" \
-     --bundles "${OUTPUT_FILE}"
+     --current-state "no_controller" \
+     --bundle "${OUTPUT_FILE}" \
+     --juju-model-config "${JUJU_MODEL_CONFIG_FILE}" \
+     --target-application "target" \
+     --target-endpoint "${TARGET_ENDPOINT}" \
+     --neighbor-application "neighbor" \
+     --neighbor-endpoint "${NEIGHBOR_ENDPOINT}"
 
-Execute tests
--------------
-Run the following command to run the tests:
+To increase test verbosity while debugging, pass ``--log-cli-level`` to stream
+logs live to your terminal.
 
-.. code:: bash
+The ``--current-state`` option tells the scheduler the current state of
+the environment so it knows which setup steps (if any) still need to run:
 
-  ./scripts/test-integration.sh \
-    --model "${MODEL_NAME}" \
-    --target-application "target" \
-    --target-endpoint "${TARGET_ENDPOINT}" \
-    --neighbor-application "neighbor" \
-    --neighbor-endpoint "${NEIGHBOR_ENDPOINT}"
+- ``no_controller`` — no Juju controller exists yet (default)
+- ``no_model`` — a controller exists, but the model does not
+- ``empty_model`` — controller and model are ready but nothing is deployed
+- ``deployed`` — the charm bundle is already deployed; skip straight to
+  integration tests and teardown
+- ``neighbor_only`` — only the neighbor application remains after teardown
+- ``deployed_with_old_revision`` — the charm bundle is deployed with the target on an
+  old revision
+- ``deployed_with_upgraded_controller`` — the charm bundle is deployed with an upgraded Juju controller
 
-Tear charm under test down
---------------------------
-Finally, execute the test teardown:
+Use a non-default ``--current-state`` when resuming a partial run or
+iterating locally against an already-deployed model to avoid re-running
+expensive setup transitions.
 
-.. code:: bash
-
-   ./scripts/test-teardown.sh \
-     --model "${MODEL_NAME}" \
-     --applications "target"
+The ``--juju-model-config`` file is optional. If omitted, tests create the model
+without extra configuration; if provided, pass a JSON object of string keys and values
+matching Juju model configuration options.

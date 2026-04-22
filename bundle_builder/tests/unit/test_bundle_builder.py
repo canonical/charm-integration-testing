@@ -23,11 +23,15 @@ from bundle_builder.bundle import Application, ApplicationEndpoint, Bundle, Inte
 from bundle_builder.bundle_builder import BundleBuilder, Node
 from bundle_builder.charm import (
     Charm,
+    CharmAssumesEntry,
+    CharmChannel,
     CharmConfigCriteria,
     CharmEndpointOptionality,
     CharmLimit,
     CharmTestConfig,
 )
+from bundle_builder.charmhub import CharmhubClient
+from bundle_builder.juju_version import JujuVersion
 
 from .test_bundle import sample_bundle_postgresql_k8s_kratos
 from .test_charm import (
@@ -40,8 +44,8 @@ from .test_charm import (
 
 
 @dataclass
-class CharmhubClientStub:
-    def find_charms(
+class CharmhubClientStub(CharmhubClient):
+    def find_charms(  # type: ignore[override]
         self, provides: str | None = None, requires: str | None = None, platform: str | None = None
     ) -> frozenset[str]:
         if provides == "db":
@@ -52,7 +56,7 @@ class CharmhubClientStub:
             return frozenset()
         return frozenset()
 
-    def charm_from_store(
+    def charm_from_store(  # type: ignore[override]
         self,
         charm_name: str,
         ubuntu_arch: str,
@@ -157,7 +161,7 @@ class TestNode:
 class TestBundleBuilder:
     def test_build_returns_best_node_bundle(self) -> None:
         stub = CharmhubClientStub()
-        builder = BundleBuilder(charmhub_client=stub, logger=logging.getLogger("test"))  # type: ignore[arg-type]
+        builder = BundleBuilder(charmhub_client=stub, logger=logging.getLogger("test"))
         base = sample_node_kratos().bundle
         result = builder.build(base)
         assert isinstance(result, Bundle)
@@ -166,7 +170,7 @@ class TestBundleBuilder:
 
     def test_child_nodes_returns_possible_children(self) -> None:
         stub = CharmhubClientStub()
-        builder = BundleBuilder(charmhub_client=stub)  # type: ignore[arg-type]
+        builder = BundleBuilder(charmhub_client=stub)
         node = sample_node_kratos()
         children = builder.child_nodes(node)
         assert isinstance(children, set)
@@ -175,7 +179,7 @@ class TestBundleBuilder:
 
     def test_child_nodes_existing_applications_filters_cycles_and_limits(self) -> None:
         stub = CharmhubClientStub()
-        builder = BundleBuilder(charmhub_client=stub, avoid_application_dependency_cycles=True)  # type: ignore[arg-type]
+        builder = BundleBuilder(charmhub_client=stub, avoid_application_dependency_cycles=True)
         node = sample_node_kratos()
         # Should not create cycles
         children = builder.child_nodes_existing_applications(node, ApplicationEndpoint("kratos", "pg-database"))
@@ -184,11 +188,38 @@ class TestBundleBuilder:
 
     def test_child_nodes_new_applications_adds_valid_children(self) -> None:
         stub = CharmhubClientStub()
-        builder = BundleBuilder(charmhub_client=stub)  # type: ignore[arg-type]
+        builder = BundleBuilder(charmhub_client=stub)
         node = sample_node_kratos()
         children = builder.child_nodes_new_applications(node, ApplicationEndpoint("kratos", "pg-database"))
         for child in children:
             assert any(app.name.startswith("postgresql-k8s") for app in child.bundle.applications)
+
+    def test_child_nodes_new_applications_skips_assumes_incompatible_charm(self) -> None:
+        # GIVEN a candidate charm that requires a juju version incompatible with the bundle
+        incompatible_charm = dataclasses.replace(
+            sample_charm_postgresql_k8s(),
+            assumes=CharmAssumesEntry(
+                all_of=frozenset([CharmAssumesEntry(op=">=", required_version=JujuVersion(major=99, minor=0))])
+            ),
+        )
+
+        class IncompatibleCharmStub(CharmhubClientStub):
+            def charm_from_store(self, charm_name: str, ubuntu_arch: str, **kwargs: object) -> Charm | None:  # type: ignore[override]
+                if charm_name == "postgresql-k8s":
+                    return incompatible_charm
+                return super().charm_from_store(charm_name, ubuntu_arch)
+
+        stub = IncompatibleCharmStub()
+        builder = BundleBuilder(charmhub_client=stub)
+        node = sample_node_kratos()
+
+        # WHEN child nodes are generated for an unfulfilled endpoint
+        children = builder.child_nodes_new_applications(node, ApplicationEndpoint("kratos", "pg-database"))
+
+        # THEN the incompatible charm is not added as a child
+        assert all(
+            not any(app.charm.name == "postgresql-k8s" for app in child.bundle.applications) for child in children
+        )
 
     def test_child_nodes_existing_applications_validates_endpoint_features(self) -> None:
         # GIVEN a provider charm with limited features (only compression, not SSL)
@@ -247,11 +278,11 @@ class TestBundleBuilder:
             integrations=frozenset(),
             platform="machine",
             arch="amd64",
+            juju_version=JujuVersion.parse("3.0"),
         )
 
         stub = CharmhubClientStub()
-        # TODO(raul): remove type ignore in subsequent type checker PRs
-        builder = BundleBuilder(charmhub_client=stub)  # type: ignore[arg-type]
+        builder = BundleBuilder(charmhub_client=stub)
         node = Node(bundle=bundle, aggression=0.0)
 
         # WHEN checking child nodes for the SSL requirer endpoint
@@ -319,11 +350,11 @@ class TestBundleBuilder:
             integrations=frozenset(),
             platform="machine",
             arch="amd64",
+            juju_version=JujuVersion.parse("3.0"),
         )
 
         stub = CharmhubClientStub()
-        # TODO(raul): remove type ignore in subsequent type checker PRs
-        builder = BundleBuilder(charmhub_client=stub)  # type: ignore[arg-type]
+        builder = BundleBuilder(charmhub_client=stub)
         node = Node(bundle=bundle, aggression=0.0)
 
         # WHEN checking child nodes for the requirer endpoint
@@ -383,11 +414,11 @@ class TestBundleBuilder:
             integrations=frozenset(),
             platform="machine",
             arch="amd64",
+            juju_version=JujuVersion.parse("3.0"),
         )
 
         stub = CharmhubClientStub()
-        # TODO(raul): remove type ignore in subsequent type checker PRs
-        builder = BundleBuilder(charmhub_client=stub)  # type: ignore[arg-type]
+        builder = BundleBuilder(charmhub_client=stub)
         node = Node(bundle=bundle, aggression=0.0)
 
         # WHEN checking child nodes for the requirer endpoint
@@ -473,6 +504,7 @@ class TestBundleBuilder:
                 ),
                 platform="machine",
                 arch="amd64",
+                juju_version=JujuVersion.parse("3.0"),
             )
 
             # WHEN checking if we can add another integration
@@ -532,6 +564,7 @@ class TestBundleBuilder:
                 ),
                 platform="machine",
                 arch="amd64",
+                juju_version=JujuVersion.parse("3.0"),
             )
 
             # WHEN checking if we can add another integration
@@ -590,6 +623,7 @@ class TestBundleBuilder:
                 ),
                 platform="machine",
                 arch="amd64",
+                juju_version=JujuVersion.parse("3.0"),
             )
 
             # WHEN checking if we can add another integration
@@ -618,6 +652,7 @@ class TestDuplicateCharms:
             integrations=frozenset(),
             platform="kubernetes",
             arch="amd64",
+            juju_version=JujuVersion.parse("3.0"),
         )
 
         # WHEN checking if we would exceed the limit
@@ -644,6 +679,7 @@ class TestDuplicateCharms:
             integrations=frozenset(),
             platform="kubernetes",
             arch="amd64",
+            juju_version=JujuVersion.parse("3.0"),
         )
 
         # WHEN checking if we would exceed the limit
@@ -668,6 +704,7 @@ class TestDuplicateCharms:
             integrations=frozenset(),
             platform="kubernetes",
             arch="amd64",
+            juju_version=JujuVersion.parse("3.0"),
         )
 
         bundle2 = Bundle(
@@ -679,6 +716,7 @@ class TestDuplicateCharms:
             integrations=frozenset(),
             platform="kubernetes",
             arch="amd64",
+            juju_version=JujuVersion.parse("3.0"),
         )
 
         # WHEN creating nodes from these bundles
@@ -747,6 +785,7 @@ class TestDuplicateCharms:
             ),
             platform="kubernetes",
             arch="amd64",
+            juju_version=JujuVersion.parse("3.0"),
         )
 
         # THEN each database should have exactly one connection (respecting the limit)
@@ -768,8 +807,7 @@ class TestAddTestConfigs:
             charm = dataclasses.replace(
                 sample_charm_postgresql_k8s(),
                 name="test-charm",
-                # TODO(raul): remove type: ignore in subsequent type checker-related PR
-                channel="1.0/stable",  # type: ignore[arg-type]
+                channel=CharmChannel("1.0/stable"),
                 test_configs=(
                     CharmTestConfig(
                         criteria=CharmConfigCriteria(track="1.0"),
@@ -786,6 +824,7 @@ class TestAddTestConfigs:
                 integrations=frozenset(),
                 platform="kubernetes",
                 arch="amd64",
+                juju_version=JujuVersion.parse("3.0"),
             )
 
             # WHEN add_test_configs is called
@@ -854,6 +893,7 @@ class TestAddTestConfigs:
                 ),
                 platform="kubernetes",
                 arch="amd64",
+                juju_version=JujuVersion.parse("3.0"),
             )
 
             # WHEN add_test_configs is called
@@ -875,6 +915,7 @@ class TestAddTestConfigs:
                 integrations=frozenset(),
                 platform="kubernetes",
                 arch="amd64",
+                juju_version=JujuVersion.parse("3.0"),
             )
 
             # WHEN add_test_configs is called
@@ -901,6 +942,7 @@ class TestAddTestConfigs:
                 integrations=frozenset(),
                 platform="kubernetes",
                 arch="amd64",
+                juju_version=JujuVersion.parse("3.0"),
             )
 
             # WHEN add_test_configs is called (channel is latest/stable, not 1.0/stable)
@@ -915,8 +957,7 @@ class TestAddTestConfigs:
             charm1 = dataclasses.replace(
                 sample_charm_postgresql_k8s(),
                 name="charm1",
-                # TODO(raul): remove type: ignore in subsequent type checker-related PR
-                channel="1.0/stable",  # type: ignore[arg-type]
+                channel=CharmChannel("1.0/stable"),
                 test_configs=(
                     CharmTestConfig(
                         criteria=CharmConfigCriteria(track="1.0"),
@@ -927,8 +968,7 @@ class TestAddTestConfigs:
             charm2 = dataclasses.replace(
                 sample_charm_kratos(),
                 name="charm2",
-                # TODO(raul): remove type: ignore in subsequent type checker-related PR
-                channel="2.0/stable",  # type: ignore[arg-type]
+                channel=CharmChannel("2.0/stable"),
                 test_configs=(
                     CharmTestConfig(
                         criteria=CharmConfigCriteria(track="2.0"),
@@ -946,6 +986,7 @@ class TestAddTestConfigs:
                 integrations=frozenset(),
                 platform="kubernetes",
                 arch="amd64",
+                juju_version=JujuVersion.parse("3.0"),
             )
 
             # WHEN add_test_configs is called
@@ -978,6 +1019,7 @@ class TestAddTestConfigs:
                 integrations=frozenset(),
                 platform="kubernetes",
                 arch="amd64",
+                juju_version=JujuVersion.parse("3.0"),
             )
 
             # WHEN add_test_configs is called
@@ -992,8 +1034,7 @@ class TestAddTestConfigs:
             charm = dataclasses.replace(
                 sample_charm_kratos(),
                 name="test-charm",
-                # TODO(raul): remove type: ignore in subsequent type checker-related PR
-                channel="1.0/stable",  # type: ignore[arg-type]
+                channel=CharmChannel("1.0/stable"),
                 endpoints=frozenset(
                     {
                         dataclasses.replace(
@@ -1053,6 +1094,7 @@ class TestAddTestConfigs:
                 ),
                 platform="kubernetes",
                 arch="amd64",
+                juju_version=JujuVersion.parse("3.0"),
             )
 
             # WHEN add_test_configs is called
