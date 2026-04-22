@@ -18,7 +18,7 @@ def _create_bundle_with_revision_override(
     target_revision: int,
 ) -> None:
     with source_bundle.open("r", encoding="utf-8") as file:
-        bundle_data = yaml.safe_load(file)
+        bundle_data = next(yaml.safe_load_all(file))
 
     if not isinstance(bundle_data, dict):
         raise ValueError(f"Invalid bundle file: {source_bundle}")
