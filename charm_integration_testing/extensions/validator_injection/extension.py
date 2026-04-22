@@ -73,6 +73,7 @@ class ValidatorInjectorExtension(JujuExtension):
         return ValidatorRunnerResults.model_validate_json(run_result.stdout).results
 
     def _inject_validators(self, model: str, unit: str) -> None:
+        is_k8s = self._is_k8s_model(model)
         # Ensure validators path is provided
         if self.validators_path is None:
             raise ValueError("validators_path must be provided to inject validators")
@@ -80,8 +81,16 @@ class ValidatorInjectorExtension(JujuExtension):
 
         # Copy validators
         self.logger.debug(f"[{unit}] copying validators to {remote_validators_path}")
-        self.juju.ssh(model, unit, f"mkdir -p {remote_validators_path}")
-        self.juju.scp(model, str(self.validators_path.resolve()), f"{unit}:{remote_validators_path}/packages")
+        mkdir = f"mkdir -p {remote_validators_path}"
+        if not is_k8s:
+            mkdir = f"sudo {mkdir}; sudo chown -R $(id -u) {remote_validators_path}"
+        self.juju.ssh(model, unit, mkdir)
+        self.juju.scp(
+            model,
+            str(self.validators_path.resolve()),
+            f"{unit}:{remote_validators_path}/packages",
+            *([] if is_k8s else ["--", "-r"]),
+        )
 
         # Copy uv binary
         uv_file = self._get_uv_file()
