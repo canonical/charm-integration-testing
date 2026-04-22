@@ -22,8 +22,9 @@ runs:
         MAX_ATTEMPTS: ${{ inputs.max-attempts }}
         SLEEP_SECONDS: ${{ inputs.sleep-seconds }}
       run: |-
+        set -euo pipefail
         for ((attempt = 1; ; attempt++)); do
-          if eval "$INSTALL_COMMAND"; then
+          if bash -c "$INSTALL_COMMAND"; then
             break
           elif [ "$attempt" -lt "$MAX_ATTEMPTS" ]; then
             echo "Failed, retrying..."
