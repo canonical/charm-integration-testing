@@ -78,6 +78,7 @@ def test_logs_privacy_check(
 
     trufflehog_cmd = [
         "trufflehog",
+        "--no-update",
         "filesystem",
         str(debug_logs_directory),
     ]
