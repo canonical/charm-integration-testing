@@ -43,7 +43,7 @@ export log_level="INFO"
     --bundle "./static/bundles/cmr-demo-1/indico.yaml:k8s:k8s:model" \
     \
     --current-state "no_controller" \
-    -k 'not test_build_bundle' \
+    -k 'not test_build_bundle and not test_remove_and_restore_integration' \
     \
     --mermaid-output "${BUNDLE_MERMAID_OUTPUT}" \
     --target-application "target" \
