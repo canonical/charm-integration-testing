@@ -92,40 +92,6 @@ def test_observer_client(
         client.close()
 
 
-@pytest.fixture
-def historical_revision_with_passing_deploy(
-    test_observer_client: TestObserverAPIClient,
-    target_charm: str,
-    target_channel: str | None,
-    target_revision: int | None,
-) -> int:
-    """Historical revision with a passing test_deploy for the target charm."""
-    if target_revision is None or target_channel is None:
-        pytest.fail(
-            "--target-revision and --target-channel must be provided for this test to select a historical revision."
-        )
-
-    parts = target_channel.split("/", maxsplit=1)
-    track = parts[0]
-    stage = parts[1] if len(parts) > 1 else "stable"
-
-    try:
-        previous_revision = test_observer_client.choose_historical_revision_with_passing_deploy(
-            charm_name=target_charm,
-            stage=stage,
-            current_revision=target_revision,
-            track=track,
-        )
-        if previous_revision is None:
-            pytest.fail(
-                "Unable to find a historical revision with a passing test_deploy result "
-                f"for charm '{target_charm}' in channel '{target_channel}'."
-            )
-        return previous_revision
-    except TestObserverClientError as exc:
-        raise RuntimeError(f"Test Observer query failed: {exc}") from exc
-
-
 @pytest.fixture(scope="session")
 def logger() -> logging.Logger:
     jubilant_logger = logging.getLogger("jubilant")
@@ -279,6 +245,12 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         type=str,
         default="default",
         help="Revision of the charm under test (integer). Use 'default' to defer to charm-default-versions.",
+    )
+    parser.addoption(
+        "--target-downgrade-revision",
+        type=str,
+        default="default",
+        help="Revision to downgrade to (integer). Use 'default' to query Test Observer for a historical revision with a passing deploy.",
     )
     parser.addoption(
         "--target-series",
@@ -534,6 +506,49 @@ def target_revision(request: pytest.FixtureRequest) -> int | None:
     """
     value = request.config.getoption("--target-revision")
     return None if value == "default" else int(value)
+
+
+@pytest.fixture
+def target_downgrade_revision(request: pytest.FixtureRequest) -> int:
+    """Revision to downgrade to for the charm under test.
+
+    When ``--target-downgrade-revision`` is an explicit integer, that value is
+    returned directly. When the value is ``"default"``, Test Observer is queried
+    for a historical revision with a passing deploy for the target charm.
+    """
+    value = request.config.getoption("--target-downgrade-revision")
+    if value != "default":
+        return int(value)
+
+    test_observer_client: TestObserverAPIClient = request.getfixturevalue("test_observer_client")
+    target_charm: str = request.getfixturevalue("target_charm")
+    target_channel: str | None = request.getfixturevalue("target_channel")
+    target_revision: int | None = request.getfixturevalue("target_revision")
+
+    if target_revision is None or target_channel is None:
+        pytest.fail(
+            "--target-revision and --target-channel must be provided for this test to select a historical revision."
+        )
+
+    parts = target_channel.split("/", maxsplit=1)
+    track = parts[0]
+    stage = parts[1] if len(parts) > 1 else "stable"
+
+    try:
+        previous_revision = test_observer_client.choose_historical_revision_with_passing_deploy(
+            charm_name=target_charm,
+            stage=stage,
+            current_revision=target_revision,
+            track=track,
+        )
+        if previous_revision is None:
+            pytest.fail(
+                "Unable to find a historical revision with a passing test_deploy result "
+                f"for charm '{target_charm}' in channel '{target_channel}'."
+            )
+        return previous_revision
+    except TestObserverClientError as exc:
+        raise RuntimeError(f"Test Observer query failed: {exc}") from exc
 
 
 @pytest.fixture

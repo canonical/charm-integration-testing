@@ -40,28 +40,25 @@ def _create_bundle_with_revision_override(
 @pytest.mark.state(requires=State.NEIGHBOR_ONLY, provides=State.DEPLOYED_WITH_OLD_REVISION)
 def test_deploy_target_old_revision(
     juju_client: JujuClient,
-    historical_revision_with_passing_deploy: int,
+    target_downgrade_revision: int,
     model: str,
     bundle: Path,
     target_application: str,
     target_charm: str,
     tmp_path: Path,
 ) -> None:
-    # Use historical revision selected by the fixture.
-    selected_revision = historical_revision_with_passing_deploy
-
     juju_client.logger.info(
-        f"Selected historical revision {selected_revision} for {target_application} ({target_charm})"
+        f"Selected historical revision {target_downgrade_revision} for {target_application} ({target_charm})"
     )
 
     ### Create a temporary bundle file with target revision overridden
     ### Should be replaced by bundle-builder with old revision in the future
-    overridden_bundle = tmp_path / f"bundle-{target_application}-rev-{selected_revision}.yaml"
+    overridden_bundle = tmp_path / f"bundle-{target_application}-rev-{target_downgrade_revision}.yaml"
     _create_bundle_with_revision_override(
         source_bundle=bundle,
         destination_bundle=overridden_bundle,
         target_application=target_application,
-        target_revision=selected_revision,
+        target_revision=target_downgrade_revision,
     )
 
     # Deploy the original bundle with only the target app revision overridden
@@ -72,9 +69,9 @@ def test_deploy_target_old_revision(
 
     # Verify the application is deployed at the target revision and the model is healthy
     deployed_revision = juju_client.application_revision(application=target_application, model=model)
-    if deployed_revision != selected_revision:
+    if deployed_revision != target_downgrade_revision:
         pytest.fail(
-            f"Expected '{target_application}' to be deployed at revision {selected_revision}, "
+            f"Expected '{target_application}' to be deployed at revision {target_downgrade_revision}, "
             f"got {deployed_revision}."
         )
 
