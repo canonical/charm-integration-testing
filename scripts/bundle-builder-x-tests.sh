@@ -3,4 +3,11 @@
 # See LICENSE file for licensing details.
 
 cd "$(dirname "$0")/.."
-poetry run -- pytest "./bundle_builder_x/tests/$1" "${@:2}"
+
+IFS='|' read -ra TYPES <<< "$1"
+PATHS=()
+for t in "${TYPES[@]}"; do
+    PATHS+=("./bundle_builder_x/tests/$t")
+done
+
+poetry run -- pytest "${PATHS[@]}" "${@:2}"

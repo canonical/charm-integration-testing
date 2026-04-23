@@ -23,6 +23,18 @@ from pydantic import BaseModel, ConfigDict, Field
 from .charm import Charm, CharmConfigValue, EndpointType
 from .juju_version import JujuVersion
 
+# Mermaid reserved keywords that cannot be used bare as subgraph/node IDs.
+_MERMAID_RESERVED = frozenset(
+    {"default", "end", "subgraph", "graph", "class", "click", "style", "linkstyle", "classDef"}
+)
+
+
+def _mermaid_id(name: str) -> str:
+    """Return a Mermaid-safe identifier for a model name."""
+    if name.lower() in _MERMAID_RESERVED:
+        return f"m_{name}"
+    return name
+
 
 class Application(BaseModel):
     charm: Charm
@@ -186,12 +198,13 @@ class Solution(BaseModel):
         # Render each model as a subgraph
         for bundle in sorted(self.bundles, key=lambda b: b.model or ""):
             model_name = bundle.model or "_default"
-            lines.append(f"    subgraph {model_name}[{model_name}]")
+            model_id = _mermaid_id(model_name)
+            lines.append(f"    subgraph {model_id}[{model_name}]")
 
             # Application nodes, namespaced to avoid ID collisions across models
             for application in sorted(bundle.applications):
                 info = bundle.applications[application]
-                node_id = f"{model_name}__{application}"
+                node_id = f"{model_id}__{application}"
                 charm_info = f"{info.charm.channel} rev:{info.charm.revision}"
                 if application == info.charm.name:
                     lines.append(f'        {node_id}["{application}<br/>{charm_info}"]')
@@ -216,8 +229,8 @@ class Solution(BaseModel):
                 else:
                     requirer_ep, provider_ep = ep_2, ep_1
                 label = f"{provider_ep.endpoint}&lt;{interface}&gt;{requirer_ep.endpoint}"
-                provider_id = f"{model_name}__{provider_ep.application}"
-                requirer_id = f"{model_name}__{requirer_ep.application}"
+                provider_id = f"{model_id}__{provider_ep.application}"
+                requirer_id = f"{model_id}__{requirer_ep.application}"
                 lines.append(f"        {provider_id} -->|{label}| {requirer_id}")
 
             lines.append("    end")
@@ -227,6 +240,7 @@ class Solution(BaseModel):
         has_cmr = False
         for bundle in sorted(self.bundles, key=lambda b: b.model or ""):
             model_name = bundle.model or "_default"
+            model_id = _mermaid_id(model_name)
             for cmr in sorted(
                 bundle.cross_model_integrations,
                 key=lambda c: (c.local.application, c.local.endpoint, c.remote_model, c.remote_application),
@@ -234,8 +248,8 @@ class Solution(BaseModel):
                 if cmr.local_role != EndpointType.PROVIDES:
                     continue
                 has_cmr = True
-                local_id = f"{model_name}__{cmr.local.application}"
-                remote_id = f"{cmr.remote_model}__{cmr.remote_application}"
+                local_id = f"{model_id}__{cmr.local.application}"
+                remote_id = f"{_mermaid_id(cmr.remote_model)}__{cmr.remote_application}"
                 interface = bundle.applications[cmr.local.application].charm.endpoints[cmr.local.endpoint].interface
                 label = f"{cmr.local.endpoint}&lt;{interface}&gt;{cmr.remote_endpoint}"
                 lines.append(f"    {local_id} -.->|{label}| {remote_id}")

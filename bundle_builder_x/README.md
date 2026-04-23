@@ -40,7 +40,7 @@ models:
         charm: kratos
 ```
 
-See the [spec file reference](../docs/reference/spec-file.md) for the full format.
+See the [spec file reference](../docs/reference/spec-file.rst) for the full format.
 
 ## Documentation
 
@@ -49,9 +49,9 @@ See the [spec file reference](../docs/reference/spec-file.md) for the full forma
 - [Algorithm explanation](../docs/explanation/bundle-builder-x-algorithm.rst) --
   how the solver loop works and how it differs from the original graph-search
   builder.
-- [Constraint DSL reference](../docs/reference/constraint-dsl.md) --
+- [Constraint DSL reference](../docs/reference/constraint-dsl.rst) --
   the expression language used in per-charm override files.
-- [Spec file reference](../docs/reference/spec-file.md) --
+- [Spec file reference](../docs/reference/spec-file.rst) --
   full field reference and validation rules.
 
 ## Module layout

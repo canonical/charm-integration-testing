@@ -52,9 +52,9 @@ Arguments:
     Path to the spec YAML file.
 
 ``--overrides``
-    Path to the directory containing per-charm override folders. Each
-    subfolder is named after a charm and contains a ``metadata.yaml`` with
-    endpoint overrides, constraints, proxy declarations, and config defaults.
+    Path to a directory of per-charm YAML files. Each file is named
+    ``<charm-name>.yaml`` and may contain endpoint overrides, constraints,
+    proxy declarations, and config defaults.
 
 ``--output-bundles``
     Directory to write per-model bundle YAML files. One file per model,

@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 
 import yaml
 from pydantic import BaseModel, ConfigDict, model_validator
@@ -106,9 +107,13 @@ class SpecFile(BaseModel):
                 raise ValueError(f"Duplicate model name: '{model_spec.name}'")
             seen.add(model_spec.name)
 
+            if not model_spec.applications:
+                raise ValueError(f"Model '{model_spec.name}' must have at least one application")
+
         all_models = self.models_by_name
         for model_spec in self.models:
             model_name = model_spec.name
+            seen_local: set[tuple[str, str, str, str]] = set()
             seen_cmrs: set[tuple[str, str, str, str, str]] = set()
             for integration in model_spec.integrations:
                 if not integration.is_cross_model:
@@ -132,10 +137,20 @@ class SpecFile(BaseModel):
                             f"Model '{model_name}': application '{integration.application}' cannot "
                             f"integrate with itself on endpoint '{integration.endpoint}'"
                         )
+                    # Duplicate local integration: canonical key sorts endpoints so order doesn't matter
+                    ep_a = (integration.application, integration.endpoint)
+                    ep_b = (integration.remote_application, integration.remote_endpoint)
+                    local_key = (*min(ep_a, ep_b), *max(ep_a, ep_b))
+                    if local_key in seen_local:
+                        raise ValueError(
+                            f"Model '{model_name}': duplicate local integration "
+                            f"'{integration.application}:{integration.endpoint} -- "
+                            f"{integration.remote_application}:{integration.remote_endpoint}'"
+                        )
+                    seen_local.add(local_key)
                     continue
 
-                remote_model = integration.remote_model
-                assert remote_model is not None  # guaranteed by is_cross_model
+                remote_model = cast(str, integration.remote_model)  # guaranteed by is_cross_model
 
                 # A CMR whose remote_model is the current model is nonsensical; use a local integration instead.
                 if remote_model == model_name:

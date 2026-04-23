@@ -628,22 +628,22 @@ class TestSpecFileEdgeCases:
                 ]
             )
 
-    def test_duplicate_local_integration_silently_deduped(self) -> None:
+    def test_duplicate_local_integration_rejected(self) -> None:
         # GIVEN the same local integration listed twice
-        # THEN spec parsing succeeds (list semantics; dedup happens in domain layer)
-        spec = SpecFile(
-            models=[
-                ModelSpec(
-                    name="m",
-                    applications={"a": AppSpec(charm="ca"), "b": AppSpec(charm="cb")},
-                    integrations=[
-                        IntegrationSpec(application="a", endpoint="e", remote_application="b", remote_endpoint="f"),
-                        IntegrationSpec(application="a", endpoint="e", remote_application="b", remote_endpoint="f"),
-                    ],
-                )
-            ]
-        )
-        assert len(spec.models[0].integrations) == 2  # kept in list; set-dedup is in domain layer
+        # THEN spec parsing raises a validation error
+        with pytest.raises(ValueError, match="duplicate local integration"):
+            SpecFile(
+                models=[
+                    ModelSpec(
+                        name="m",
+                        applications={"a": AppSpec(charm="ca"), "b": AppSpec(charm="cb")},
+                        integrations=[
+                            IntegrationSpec(application="a", endpoint="e", remote_application="b", remote_endpoint="f"),
+                            IntegrationSpec(application="a", endpoint="e", remote_application="b", remote_endpoint="f"),
+                        ],
+                    )
+                ]
+            )
 
     def test_in_spec_cmr_explicit_url_does_not_require_controller(self) -> None:
         # GIVEN an in-spec CMR where the remote model has no controller but url is provided
@@ -694,10 +694,11 @@ class TestSpecFileEdgeCases:
         # THEN the explicit url is used, not the auto-generated one
         assert cmr[0].remote.url == "EXPLICIT_URL"
 
-    def test_empty_applications_allowed(self) -> None:
+    def test_empty_applications_rejected(self) -> None:
         # GIVEN a model with no applications
-        spec = SpecFile(models=[ModelSpec(name="m", applications={})])
-        assert spec.models[0].applications == {}
+        # THEN spec parsing raises a validation error
+        with pytest.raises(ValueError, match="at least one application"):
+            SpecFile(models=[ModelSpec(name="m", applications={})])
 
     def test_converts_app_specs_to_constraints(self) -> None:
         # GIVEN a model spec with applications

@@ -12,7 +12,7 @@ Structure
 
    models:
      - name: my-model
-       platform: kubernetes       # or "vm"
+       platform: kubernetes       # or "machine"
        arch: amd64                # default: amd64
        juju: 3/stable             # Juju snap channel
        controller: my-controller  # optional
@@ -67,7 +67,7 @@ Model
    * - ``platform``
      - no
      - ``kubernetes``
-     - ``kubernetes`` or ``vm``.
+     - ``kubernetes`` or ``machine``.
    * - ``arch``
      - no
      - ``amd64``
