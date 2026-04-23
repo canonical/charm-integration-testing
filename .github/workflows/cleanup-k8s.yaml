@@ -40,19 +40,14 @@ jobs:
     env:
       AGE_THRESHOLD: ${{ inputs.age_threshold }}
     steps:
+      - name: Clone Repo
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
       - name: Install kubectl
-        shell: bash
-        run: |
-          for ((attempt = 1; ; attempt++)); do
-            if sudo snap install kubectl --classic; then
-              break
-            elif [ "$attempt" -lt 3 ]; then
-              echo "Failed, retrying..."
-              sleep 5
-            else
-              exit 1
-            fi
-          done
+        uses: ./.github/actions/install-with-retry
+        with:
+          command: sudo snap install kubectl --classic
       - name: Setup kube config
         shell: bash
         env:

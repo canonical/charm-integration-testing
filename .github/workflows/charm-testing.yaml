@@ -188,22 +188,12 @@ jobs:
           event_name: job_start
           detail: Charm integration test job started.
       - name: Install Juju
+        uses: ./.github/actions/install-with-retry
+        with:
+          command: sudo snap install juju --channel "${{ inputs.juju_channel }}"
+      - name: Ensure Juju home directory exists
         shell: bash
-        env:
-          juju_channel: ${{ inputs.juju_channel }}
-        run: |
-          for ((attempt = 1; ; attempt++)); do
-            if sudo snap install juju --channel "${juju_channel}"; then
-              break
-            elif [ "$attempt" -lt 3 ]; then
-              echo "Failed, retrying..."
-              sleep 5
-            else
-              exit 1
-            fi
-          done
-          # Ensure the juju home directory exists
-          mkdir -p $HOME/.local/share/juju
+        run: mkdir -p $HOME/.local/share/juju
       - name: Setup K8s Cloud
         if: ${{ inputs.substrate == 'kubernetes'}}
         id: setup_k8s
@@ -265,6 +255,18 @@ jobs:
         shell: bash
         run: |
           curl -sSfL https://raw.githubusercontent.com/trufflesecurity/trufflehog/main/scripts/install.sh | sh -s -- -b /usr/local/bin v3.56.0
+      - name: Install juju-k8s-crashdump
+        uses: ./.github/actions/install-with-retry
+        with:
+          command: pipx install "git+https://github.com/canonical/juju-k8s-crashdump@22ef04caaeeb94ad6ed49f8392b6bada65184569"
+      - name: Install juju-crashdump
+        uses: ./.github/actions/install-with-retry
+        with:
+          command: sudo snap install juju-crashdump --classic
+      - name: Install kubectl
+        uses: ./.github/actions/install-with-retry
+        with:
+          command: sudo snap install kubectl --classic
       - name: Post 'test_start' event
         if: ${{ env.TEST_OBSERVER_API != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-events
@@ -322,6 +324,7 @@ jobs:
             --juju-controller-bootstrap-constraints "./static/juju-bootstrap-constraints.json" \
             --log-cli-level "${log_level}" \
             --log-level "${log_level}" \
+            --log-dir "./test-logs" \
             --junit-xml=junit.xml
       - name: Post 'test_end' event
         if: ${{ env.TEST_OBSERVER_API != '' && inputs.execution_id != '' }}
@@ -362,62 +365,18 @@ jobs:
           test_observer_token: ${{ env.TEST_OBSERVER_TOKEN }}
           test_execution_id: ${{ inputs.execution_id }}
           junit_xml: ${{ steps.run_tests.outputs.junit_xml }}
-      # TODO(SQT-871): temporary fix - skip crashdump and teardown when no controller was ever created (e.g. bundle builder failure)
-      # See https://warthogs.atlassian.net/browse/SQT-871 for the complete solution.
-      - name: Check controller exists
-        id: check_controller
-        if: ${{ always() }}
-        shell: bash
-        env:
-          controller: ${{ steps.juju_resources.outputs.controller }}
-        run: |
-          echo "exists=false" >> $GITHUB_OUTPUT
-          # Check local Juju client metadata rather than making a live API connection.
-          if grep -qF "  ${controller}:" ~/.local/share/juju/controllers.yaml 2>/dev/null; then
-            echo "exists=true" >> $GITHUB_OUTPUT
-          fi
-      - name: Call Juju K8s Crashdump
-        id: juju_k8s_crashdump
-        # TODO(SQT-871): temporary fix - skip if controller was never created
-        if: ${{ !cancelled() && inputs.substrate == 'kubernetes' && steps.check_controller.outputs.exists == 'true' }}
-        uses: canonical/juju-k8s-crashdump/actions/juju-k8s-crashdump@22ef04caaeeb94ad6ed49f8392b6bada65184569  # zizmor disallows the use of latest or tags for actions, so we have to pin to a specific commit
-        with:
-          kubeconf: ${{ steps.setup_k8s.outputs.kubeconfig_path }}
-          controller: ${{ steps.juju_resources.outputs.controller }}
-          proxy: http://squid.internal:3128
-      - name: Call Juju Crashdump
-        id: juju_crashdump
-        env:
-          controller: ${{ steps.juju_resources.outputs.controller }}
-          model: ${{ steps.juju_resources.outputs.model }}
-        # TODO(SQT-871): temporary fix - skip if controller was never created
-        if: ${{ always() && inputs.substrate == 'openstack' && steps.check_controller.outputs.exists == 'true' }}
-        shell: bash
-        run: |
-          MODEL_CRASHDUMP=model-logs.tar.gz
-          CONTROLLER_CRASHDUMP=controller-logs.tar.gz
-          sudo snap install juju-crashdump --classic
-          juju-crashdump --model ${controller}:${model} --timeout 300 --small -f 100000000 --compression gz --unit-dump-location ${MODEL_CRASHDUMP} --as-root || True
-          juju-crashdump --model ${controller}:controller --timeout 300 --small -f 100000000 --compression gz --unit-dump-location ${CONTROLLER_CRASHDUMP} --as-root || True
-          echo "OS_MODEL_CRASHDUMP=$(realpath ${MODEL_CRASHDUMP})" >> $GITHUB_OUTPUT
-          echo "OS_CONTROLLER_CRASHDUMP=$(realpath ${CONTROLLER_CRASHDUMP})" >> $GITHUB_OUTPUT
       - name: Collect logs
         id: collect_logs
         if: ${{ !cancelled() }}
         shell: bash
         env:
-          crashdump: ${{ steps.juju_k8s_crashdump.outputs.crashdump_path }}
           junit_xml: ${{ steps.run_tests.outputs.junit_xml }}
           generated_bundle: ./generated-bundle.yaml
-          openstack_model_crashdump: ${{ steps.juju_crashdump.outputs.OS_MODEL_CRASHDUMP }}
-          openstack_controller_crashdump: ${{ steps.juju_crashdump.outputs.OS_CONTROLLER_CRASHDUMP }}
         run: |
           mkdir -p "logs"
-          [ -f "${crashdump}" ] && cp "${crashdump}" "logs/juju-logs.tar.gz"
+          [ -d "./test-logs" ] && cp -r ./test-logs/. "logs/"
           [ -f "${junit_xml}" ] && cp "${junit_xml}" "logs/junit.xml"
           [ -f "${generated_bundle}" ] && cp "${generated_bundle}" "logs/generated-bundle.yaml"
-          [ -f "${openstack_model_crashdump}" ] && cp "${openstack_model_crashdump}" "logs/model-logs.tar.gz"
-          [ -f "${openstack_controller_crashdump}" ] && cp "${openstack_controller_crashdump}" "logs/controller-logs.tar.gz"
           echo "directory_path=$(realpath "logs")" >> $GITHUB_OUTPUT
       - name: Post Logs To Swift
         id: post_logs_to_swift
@@ -483,11 +442,3 @@ jobs:
           test_observer_api: ${{ env.TEST_OBSERVER_API }}
           test_observer_token: ${{ env.TEST_OBSERVER_TOKEN }}
           test_execution_id: ${{ inputs.execution_id }}
-      - name: Teardown Controller
-        # TODO(SQT-871): temporary fix - skip if controller was never created
-        if: ${{ always() && steps.check_controller.outputs.exists == 'true' }}
-        shell: bash
-        env:
-          controller: ${{ steps.juju_resources.outputs.controller }}
-        run: timeout 15m juju kill-controller "${controller}" --no-prompt --timeout
-          2m

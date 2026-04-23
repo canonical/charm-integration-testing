@@ -24,10 +24,12 @@ from extensions import (
     ValidatorInjectorExtension,
 )
 from juju import JujuBackend, JujuClient, JujuValidationError, JujuVersion, JujuWaitTimeoutError
+from juju.resource_registry import JujuCrashdumpCollector, JujuResourceRegistryExtension
 from juju_jubilant import JubilantBackend
 from kubernetes_client import KubernetesBackend, KubernetesClient
 from pydantic import TypeAdapter, ValidationError
 from pytest import StashKey
+from resource_registry import ResourceRegistry, ResourceTeardownWarning
 from test_observer_client import TestObserverClient as TestObserverAPIClient
 from test_observer_client import TestObserverClientError
 from utils import normalize_string, normalize_string_multiline
@@ -124,7 +126,7 @@ def historical_revision_with_passing_deploy(
         raise RuntimeError(f"Test Observer query failed: {exc}") from exc
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def logger() -> logging.Logger:
     jubilant_logger = logging.getLogger("jubilant")
     jubilant_logger.setLevel(logging.WARNING)
@@ -140,6 +142,49 @@ def juju_backend(kubernetes_client: KubernetesClient | None) -> JujuBackend:
     return JubilantBackend(kubernetes_client=kubernetes_client)
 
 
+@pytest.fixture(scope="session")
+def log_dir(request: pytest.FixtureRequest) -> Path | None:
+    """Session-scoped log directory for resource registry output.
+
+    Set via ``--log-dir``. Returns ``None`` when not provided; log collection
+    is skipped but resource cleanup still runs.
+    """
+    value = request.config.getoption("--log-dir", default=None)
+    if not value:
+        return None
+    assert isinstance(value, str)
+    path = Path(value).resolve()
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+@pytest.fixture(scope="session")
+def kubeconfig_path() -> Path | None:
+    raw = os.environ.get("KUBECONFIG")
+    stripped = None if raw is None else raw.strip() or None
+    return Path(stripped) if stripped is not None else None
+
+
+@pytest.fixture(scope="session")
+def session_resource_registry(
+    log_dir: Path | None,
+    logger: logging.Logger,
+    kubeconfig_path: Path | None,
+) -> Iterator[ResourceRegistry]:
+    """Session-scoped resource registry for the main workflow controller."""
+    registry = ResourceRegistry(
+        global_collectors=[JujuCrashdumpCollector(logger, output_dir=log_dir, kubeconfig_path=kubeconfig_path)],
+        logger=logger,
+    )
+    try:
+        yield registry
+    finally:
+        try:
+            registry.teardown_all()
+        except Exception as exc:
+            warnings.warn(f"session_resource_registry teardown_all raised: {exc}", ResourceTeardownWarning)
+
+
 @pytest.fixture
 def juju_client(
     juju_backend: JujuBackend,
@@ -148,6 +193,7 @@ def juju_client(
     ubuntu_pro_token: str | None,
     uv_file: Path | None,
     validators_path: Path | None,
+    session_resource_registry: ResourceRegistry,
 ) -> JujuClient:
     return JujuClient(
         juju_backend,
@@ -161,12 +207,19 @@ def juju_client(
             UnsealVaultJujuExtension(juju_backend, logger),
             UnsealVaultK8sJujuExtension(juju_backend, logger),
             ValidatorInjectorExtension(validators_path, juju_backend, logger, uv_file),
+            JujuResourceRegistryExtension(juju_backend, session_resource_registry),
         ],
     )
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption("--model", type=str, required=True, help="Juju model to test in.")
+    parser.addoption(
+        "--log-dir",
+        type=str,
+        default=None,
+        help="Directory to write resource logs (e.g. crashdumps) to. When omitted, log collection is skipped but cleanup still runs.",
+    )
     parser.addoption(
         "--bundle",
         type=str,
@@ -988,10 +1041,10 @@ def _is_running_on_kubernetes(juju_backend: JujuBackend, model: str) -> None:
 @pytest.fixture
 def kubernetes_client(
     logger: logging.Logger,
+    kubeconfig_path: Path | None,
 ) -> KubernetesClient | None:
-    kubeconfig = os.environ.get("KUBECONFIG")
-    if kubeconfig:
-        return KubernetesClient(KubernetesBackend.k8s_client(kubeconfig=kubeconfig), logger=logger)
+    if kubeconfig_path:
+        return KubernetesClient(KubernetesBackend.k8s_client(kubeconfig=kubeconfig_path), logger=logger)
     return None
 
 
