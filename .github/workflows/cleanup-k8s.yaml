@@ -61,6 +61,78 @@ jobs:
             *) echo "Unknown environment '$environment'"; exit 1 ;;
           esac
           echo "KUBECONFIG=$(realpath kubeconfig)" >> $GITHUB_ENV
+      - name: Remove orphaned rawfile PV directories from nodes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # On Juju 4 with K8s, destroy-controller --destroy-storage can leave workload PVCs
+          # undeleted. Because the PVC remains Bound, the PV never transitions to Released, the
+          # rawfile CSI external-provisioner never calls DeleteVolume, and the on-disk directory
+          # under /var/snap/k8s/common/rawfile-storage is never removed. This step iterates over
+          # every node and deletes any on-disk rawfile directory that has no corresponding PV
+          # still known to k8s.
+          # Related: https://github.com/juju/juju/issues/22309
+          STORAGE_PATH="/var/snap/k8s/common/rawfile-storage"
+
+          # Collect names of all PVs still known to k8s after the deletions above.
+          # Any on-disk directory not in this list is an orphan and should be removed.
+          if ! KNOWN_PVS_RAW=$(kubectl get pv \
+            --output jsonpath='{range .items[*]}{.metadata.name}{" "}{end}'); then
+            echo "Failed to retrieve PersistentVolumes; aborting orphan cleanup"
+            exit 1
+          fi
+          KNOWN_PVS=$(xargs <<< "$KNOWN_PVS_RAW")
+          echo "Known PVs: ${KNOWN_PVS:-none}"
+          NODES=$(kubectl get nodes \
+            --output jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}')
+          if [[ -z "$NODES" ]]; then
+            echo "No nodes found, skipping orphan cleanup"
+            exit 0
+          fi
+          while IFS= read -r node; do
+            echo "==> Checking node: $node"
+
+            # kubectl debug creates the pod and returns immediately without streaming output.
+            # Capture the pod name from its output, then wait for completion and print logs.
+            pod_name=$(kubectl debug "node/$node" \
+              --image=ubuntu:24.04 \
+              --profile=sysadmin \
+              -- bash -c "
+                storage=\"/host${STORAGE_PATH}\"
+                known_pvs='${KNOWN_PVS}'
+                [[ -d \"\$storage\" ]] || { echo '  (no rawfile-storage directory)'; exit 0; }
+                for dir in \$(ls \"\$storage\" 2>/dev/null); do
+                  found=false
+                  for pv in \$known_pvs; do
+                    [[ \"\$dir\" == \"\$pv\" ]] && found=true && break
+                  done
+                  if \$found; then
+                    echo \"  OK: \$dir\"
+                  else
+                    size=\$(stat --format='%s' \"\$storage/\$dir/disk.img\" 2>/dev/null || echo 0)
+                    human=\$(numfmt --to=iec \"\$size\" 2>/dev/null || echo \"\${size}B\")
+                    echo \"  DELETING orphan: \$dir (apparent: \$human)\"
+                    rm -rf \"\$storage/\$dir\"
+                  fi
+                done
+              " 2>&1 | grep -oE 'node-debugger-[^ .]+' | head -1)
+            if [[ -z "$pod_name" ]]; then
+              echo "  Warning: could not determine debug pod name for $node"
+              continue
+            fi
+
+            # Wait up to 5 minutes for the pod to finish, then print its logs
+            kubectl wait "pod/$pod_name" \
+              --for=jsonpath='{.status.phase}'=Succeeded \
+              --timeout=5m 2>/dev/null \
+              || kubectl wait "pod/$pod_name" \
+                   --for=jsonpath='{.status.phase}'=Failed \
+                   --timeout=10s 2>/dev/null \
+              || true
+            kubectl logs "pod/$pod_name" || echo "  Warning: could not retrieve logs for $pod_name"
+            kubectl delete "pod/$pod_name" --ignore-not-found=true --timeout=2m
+          done <<< "$NODES"
       - name: Find all model and controller namespaces older than an hour
         shell: bash
         run: |
