@@ -94,8 +94,8 @@ class StateGraph:
                 found_dist = dist.get(neighbor, float("inf"))
                 if new_cost <= found_dist:
                     dist[neighbor] = new_cost
-                    heapq.heappush(heap, (new_cost, neighbor))
                     if new_cost < found_dist:
+                        heapq.heappush(heap, (new_cost, neighbor))
                         pars[neighbor] = []
                     pars[neighbor].append((transition, item))
 

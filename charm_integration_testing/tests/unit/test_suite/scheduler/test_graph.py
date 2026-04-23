@@ -246,17 +246,18 @@ class TestStateGraph:
                 expected_hops=None,
             ),
             Params(
-                label="multiple_equal_cost_paths_returns_valid_shortest_path",
+                label="multiple_equal_cost_paths_with_tail_returns_valid_shortest_path",
                 edges=[
-                    # Diamond-shaped graph with two equal-cost paths to NEIGHBOR_ONLY
+                    # Diamond with tail: two equal-cost paths converge, then continue to destination
                     (State.EMPTY_MODEL, State.DEPLOYED, 1),
                     (State.EMPTY_MODEL, State.NO_CONTROLLER, 1),
                     (State.DEPLOYED, State.NEIGHBOR_ONLY, 1),
                     (State.NO_CONTROLLER, State.NEIGHBOR_ONLY, 1),
+                    (State.NEIGHBOR_ONLY, State.DEPLOYED_WITH_OLD_REVISION, 1),
                 ],
                 from_state=State.EMPTY_MODEL,
-                to_state=State.NEIGHBOR_ONLY,
-                expected_hops=2,
+                to_state=State.DEPLOYED_WITH_OLD_REVISION,
+                expected_hops=3,
             ),
         ]
 
@@ -307,27 +308,32 @@ class TestStateGraph:
             assert path[0][1] is sentinel
 
         def test_multiple_shortest_paths_returns_valid_path(self) -> None:
-            # GIVEN a diamond-shaped graph with two equal-cost paths to the destination
+            # GIVEN a diamond graph with tail: two equal-cost paths converge then continue
             graph = StateGraph()
             t1 = StateTransition(State.EMPTY_MODEL, State.DEPLOYED, 1)
             t2 = StateTransition(State.EMPTY_MODEL, State.NO_CONTROLLER, 1)
             t3 = StateTransition(State.DEPLOYED, State.NEIGHBOR_ONLY, 1)
             t4 = StateTransition(State.NO_CONTROLLER, State.NEIGHBOR_ONLY, 1)
+            t5 = StateTransition(State.NEIGHBOR_ONLY, State.DEPLOYED_WITH_OLD_REVISION, 1)
             graph.register_transition(t1, _ITEM)
             graph.register_transition(t2, _ITEM)
             graph.register_transition(t3, _ITEM)
             graph.register_transition(t4, _ITEM)
+            graph.register_transition(t5, _ITEM)
 
-            # WHEN the path from EMPTY_MODEL to NEIGHBOR_ONLY is queried
-            path = graph.shortest_path(State.EMPTY_MODEL, State.NEIGHBOR_ONLY)
+            # WHEN the path from EMPTY_MODEL to DEPLOYED_WITH_OLD_REVISION is queried
+            path = graph.shortest_path(State.EMPTY_MODEL, State.DEPLOYED_WITH_OLD_REVISION)
 
-            # THEN a valid shortest path (of length 2) is returned with connected transitions
+            # THEN a valid shortest path (of length 3) is returned with connected transitions
             assert path is not None
-            assert len(path) == 2
+            assert len(path) == 3
 
             # Verify the path is valid: each transition's to_state must match the next's from_state
-            first_transition, _ = path[0]
-            second_transition, _ = path[1]
-            assert first_transition.from_state == State.EMPTY_MODEL
-            assert first_transition.to_state == second_transition.from_state
-            assert second_transition.to_state == State.NEIGHBOR_ONLY
+            transition1, _ = path[0]
+            transition2, _ = path[1]
+            transition3, _ = path[2]
+            assert transition1.from_state == State.EMPTY_MODEL
+            assert transition1.to_state == transition2.from_state
+            assert transition2.to_state == transition3.from_state
+            assert transition3.to_state == State.DEPLOYED_WITH_OLD_REVISION
+
