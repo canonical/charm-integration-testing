@@ -8,7 +8,7 @@ a Z3 constraint solver to produce minimal, valid bundles.
 Prerequisites
 -------------
 
-The tool is installed as part of the monorepo's Poetry environment::
+The tool is installed as part of the monorepo Poetry environment::
 
     poetry install
 

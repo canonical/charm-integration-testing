@@ -619,11 +619,11 @@ implementation is whoever is on my ``via`` endpoint":
    # traefik-k8s overrides
    proxies:
      - interface: certificates
-       via: certificates    # traefik's requires endpoint, wired to ssc
+       via: certificates    # traefik requires endpoint, wired to ssc
 
 Proxy resolution walks the chain from the physical wire outward: ssc is in the
-set (physical); traefik's ``via`` is wired to ssc so traefik is added; hydra's ``via``
-is wired to traefik which is now in the set, so hydra is added.
+set (physical); the ``via`` for traefik is wired to ssc so traefik is added; the ``via``
+for hydra is wired to traefik which is now in the set, so hydra is added.
 
 To assert that only a directly wired connection is acceptable (no proxy chain):
 
