@@ -245,6 +245,19 @@ class TestStateGraph:
                 to_state=State.EMPTY_MODEL,
                 expected_hops=None,
             ),
+            Params(
+                label="multiple_equal_cost_paths_returns_valid_shortest_path",
+                edges=[
+                    # Diamond-shaped graph with two equal-cost paths to NEIGHBOR_ONLY
+                    (State.EMPTY_MODEL, State.DEPLOYED, 1),
+                    (State.EMPTY_MODEL, State.NO_CONTROLLER, 1),
+                    (State.DEPLOYED, State.NEIGHBOR_ONLY, 1),
+                    (State.NO_CONTROLLER, State.NEIGHBOR_ONLY, 1),
+                ],
+                from_state=State.EMPTY_MODEL,
+                to_state=State.NEIGHBOR_ONLY,
+                expected_hops=2,
+            ),
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[p.label for p in test_cases])
@@ -292,3 +305,29 @@ class TestStateGraph:
             # THEN the item in the path tuple is the registered sentinel
             assert path is not None
             assert path[0][1] is sentinel
+
+        def test_multiple_shortest_paths_returns_valid_path(self) -> None:
+            # GIVEN a diamond-shaped graph with two equal-cost paths to the destination
+            graph = StateGraph()
+            t1 = StateTransition(State.EMPTY_MODEL, State.DEPLOYED, 1)
+            t2 = StateTransition(State.EMPTY_MODEL, State.NO_CONTROLLER, 1)
+            t3 = StateTransition(State.DEPLOYED, State.NEIGHBOR_ONLY, 1)
+            t4 = StateTransition(State.NO_CONTROLLER, State.NEIGHBOR_ONLY, 1)
+            graph.register_transition(t1, _ITEM)
+            graph.register_transition(t2, _ITEM)
+            graph.register_transition(t3, _ITEM)
+            graph.register_transition(t4, _ITEM)
+
+            # WHEN the path from EMPTY_MODEL to NEIGHBOR_ONLY is queried
+            path = graph.shortest_path(State.EMPTY_MODEL, State.NEIGHBOR_ONLY)
+
+            # THEN a valid shortest path (of length 2) is returned with connected transitions
+            assert path is not None
+            assert len(path) == 2
+
+            # Verify the path is valid: each transition's to_state must match the next's from_state
+            first_transition, _ = path[0]
+            second_transition, _ = path[1]
+            assert first_transition.from_state == State.EMPTY_MODEL
+            assert first_transition.to_state == second_transition.from_state
+            assert second_transition.to_state == State.NEIGHBOR_ONLY

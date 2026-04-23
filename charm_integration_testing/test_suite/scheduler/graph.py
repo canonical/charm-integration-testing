@@ -12,6 +12,7 @@ path between any two states.
 from __future__ import annotations
 
 import heapq
+import random
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -66,8 +67,8 @@ class StateGraph:
 
         # dist[state] -> cheapest total cost to reach that state
         dist: dict[State, int] = {from_state: 0}
-        # par[state] -> (transition, item) to get to this state in a shortest path
-        par: dict[State, tuple[StateTransition, Any]] = {}
+        # pars[state] -> list of (transition, item) that serve as parents to this state in a shortest path
+        pars: dict[State, list[tuple[StateTransition, Any]]] = {from_state: []}
         # heap entries: (cost, state)
         heap: list[tuple[int, State]] = [(0, from_state)]
 
@@ -76,9 +77,9 @@ class StateGraph:
 
             if state == to_state:
                 # reconstruct the shortest path
-                path = [par[state]]
+                path = [random.choice(pars[state])]
                 while (last_state := path[-1][0].from_state) != from_state:
-                    path.append(par[last_state])
+                    path.append(random.choice(pars[last_state]))
                 return path[::-1]
 
             # Skip stale heap entries.
@@ -88,9 +89,12 @@ class StateGraph:
             for transition, item in self._edges.get(state, []):
                 new_cost = cost + transition.cost
                 neighbor = transition.to_state
-                if new_cost < dist.get(neighbor, float("inf")):
+                found_dist = dist.get(neighbor, float("inf"))
+                if new_cost <= found_dist:
                     dist[neighbor] = new_cost
-                    par[neighbor] = (transition, item)
                     heapq.heappush(heap, (new_cost, neighbor))
+                    if new_cost < found_dist:
+                        pars[neighbor] = []
+                    pars[neighbor].append((transition, item))
 
         return None  # to_state is unreachable from from_state
