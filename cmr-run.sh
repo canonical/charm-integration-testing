@@ -17,7 +17,8 @@ export controller="k8s"
 export KUBECONFIG="$HOME/.kube/config"
 
 export charm_under_test="indico"
-export revision="default"
+export revision="330"
+export downgrade_revision="233"
 export channel="default"
 export series="default"
 
@@ -33,6 +34,7 @@ export log_level="INFO"
     --target-charm "${charm_under_test}" \
     --target-channel "${channel}" \
     --target-revision "${revision}" \
+    --target-downgrade-revision "${downgrade_revision}" \
     --target-series "${series}" \
     --neighbor-charm "${neighbor}" \
     --model "${model}" \
