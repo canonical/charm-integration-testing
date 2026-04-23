@@ -17,6 +17,12 @@ on:
       target_base:
         type: string
         required: true
+      target_track:
+        type: string
+        required: true
+      target_risk:
+        type: string
+        required: true
       neighbor_charm:
         type: string
         required: true
@@ -51,8 +57,8 @@ jobs:
           arch: charm-testing-integration-test-assert-pass-arch
           environment: charm-testing-integration-test-assert-pass-environment
           test_plan: charm-testing-integration-test-assert-pass-test_plan
-          track: '14'
-          risk: stable
+          track: ${{ inputs.target_track }}
+          risk: ${{ inputs.target_risk }}
           status: NOT_STARTED
       - name: Trigger Charm Tests
         id: trigger-charm-tests
@@ -75,8 +81,8 @@ jobs:
               "neighbor_endpoint": "${{ inputs.neighbor_endpoint }}",
               "revision": "${{ inputs.target_revision }}",
               "series": "${{ inputs.target_base }}",
-              "substrate": "${{ inputs.substrate }}",
-              "channel": "14/stable"
+              "channel": "${{ inputs.target_track }}/${{ inputs.target_risk }}",
+              "substrate": "${{ inputs.substrate }}"
             }
       - name: Ensure Charm Tests Workflow Success
         shell: bash
