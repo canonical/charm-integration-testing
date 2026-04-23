@@ -1,0 +1,15 @@
+---
+# Remove after: https://github.com/canonical/temporal-worker-k8s-operator/pull/88
+overrides:
+  - provides:
+      metrics-endpoint:
+        optional: true
+      grafana-dashboard:
+        optional: true
+    requires:
+      logging:
+        optional: true
+    configs:
+      host: [charmqa.canonical.com]
+      namespace: [charm-test]
+      queue: [test-queue]

@@ -1,0 +1,13 @@
+---
+# Remove after: https://github.com/canonical/charm-integration-testing/issues/282
+overrides:
+  - provides:
+      metrics-endpoint:
+        optional: true
+      grafana-dashboard:
+        optional: true
+    requires:
+      k8s-service-info:
+        features: [katib-service]
+    constraints:
+      - '"katib-service" in features(endpoint[k8s-service-info])'

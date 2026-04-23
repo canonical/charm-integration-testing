@@ -1,0 +1,13 @@
+---
+# Remove after: https://github.com/canonical/mysql-router-k8s-operator/pull/448
+priority: 2.0
+overrides:
+  - provides:
+      metrics-endpoint:
+        optional: true
+      grafana-dashboard:
+        optional: true
+    constraints:
+      # Backend database must have the same track/risk
+      - 'tracks(charms(endpoint[backend-database])) == tracks({self})'
+      - 'risks(charms(endpoint[backend-database])) == risks({self})'

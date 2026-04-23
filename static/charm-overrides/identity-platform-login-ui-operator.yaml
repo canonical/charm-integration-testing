@@ -1,0 +1,23 @@
+---
+# Remove after: https://github.com/canonical/identity-platform-login-ui-operator/pull/282
+overrides:
+  - provides:
+      ui-endpoint-info:
+        optional: true
+      metrics-endpoint:
+        optional: true
+      grafana-dashboard:
+        optional: true
+    requires:
+      kratos-info:
+        optional: true
+      hydra-endpoint-info:
+        optional: true
+      logging:
+        optional: true
+      tracing:
+        optional: true
+      receive-ca-cert:
+        optional: true
+      public-route:
+        optional: true

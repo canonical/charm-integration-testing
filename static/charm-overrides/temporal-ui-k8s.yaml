@@ -1,0 +1,14 @@
+---
+overrides:
+  - provides:
+      # https://github.com/canonical/temporal-k8s-operator/issues/120
+      ui:
+        limit: 1
+        optional: false
+        features: [ui]
+    requires:
+      nginx-route:
+        optional: true
+    constraints:
+      # ui endpoint must use ui feature
+      - 'bool(endpoint[ui]) => features(endpoint[ui]) == {"ui"}'

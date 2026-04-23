@@ -1,0 +1,8 @@
+---
+# KFP Visualization Server - renders pipeline graphs and metrics
+overrides:
+  - provides:
+      kfp-viz:
+        features: [kfp-viz]
+    constraints:
+      - '"kfp-viz" in features(endpoint[kfp-viz])'

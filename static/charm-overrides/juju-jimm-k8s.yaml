@@ -1,0 +1,33 @@
+---
+overrides:
+  - requires:
+      receive-ca-cert:
+        optional: false
+      oauth:
+        optional: false
+        features: [tls]
+      ingress:
+        optional: true
+      ingress-ssh:
+        optional: true
+      nginx-route:
+        optional: true
+    provides:
+      dashboard:
+        optional: true
+      grafana-dashboard:
+        optional: true
+      metrics-endpoint:
+        optional: true
+    configs:
+      uuid: ['aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa']
+      public-key: ['pE8oX25fmNPzg7i195spacUxTPLpioiSv/BG9FLgtDY=']
+      private-key: ['SdAKRHy3LW7vkmXFhOPTM43kwhgcot0mZrHX8rkHDlM=']
+      dns-name: ['jimm-test.local']
+      postgres-secret-storage: [true, null]
+    constraints:
+      # If the oauth integration uses tls, the cert chain must be rooted in receive-ca-cert
+      - '"tls" in features(endpoint[oauth]) => reachable(endpoint[receive-ca-cert])
+        >= charms(endpoint[oauth])'
+      # postgres-secret-storage is required when vault is not used for secret storage
+      - 'not bool(endpoint[vault]) => set(config[postgres-secret-storage])'

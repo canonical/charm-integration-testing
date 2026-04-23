@@ -30,6 +30,7 @@ poetry run bandit \
     scripts \
     || die 'Failed on "bandit"'
 poetry run mypy bundle_builder || die 'Failed on "mypy bundle_builder"'
+poetry run mypy bundle_builder_x || die 'Failed on "mypy bundle_builder_x"'
 poetry run mypy charm_integration_testing || die 'Failed on "mypy charm_integration_testing"'
 poetry run mypy --explicit-package-bases validators/* || die 'Failed on "mypy validators"'
 poetry run yamlfix --check $(find . -name '*.yaml' -o -name '*.yml') \
