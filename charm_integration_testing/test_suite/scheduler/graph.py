@@ -61,6 +61,8 @@ class StateGraph:
         Uses Dijkstra's algorithm. Returns the ordered list of
         ``(transition, pytest_item)`` pairs along the path, or ``None`` if no
         path exists.  Returns an empty list when ``from_state == to_state``.
+
+        The returned shortest path is randomly chosen among all minimum-cost paths, if there are multiple.
         """
         if from_state == to_state:
             return []
