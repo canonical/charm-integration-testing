@@ -69,8 +69,8 @@ class StateGraph:
 
         # dist[state] -> cheapest total cost to reach that state
         dist: dict[State, int] = {from_state: 0}
-        # pars[state] -> list of (transition, item) that serve as parents to this state in a shortest path
-        pars: dict[State, list[tuple[StateTransition, Any]]] = {from_state: []}
+        # parents[state] -> list of (transition, item) that serve as parents to this state in a shortest path
+        parents: dict[State, list[tuple[StateTransition, Any]]] = {from_state: []}
         # heap entries: (cost, state)
         heap: list[tuple[int, State]] = [(0, from_state)]
 
@@ -79,9 +79,9 @@ class StateGraph:
 
             if state == to_state:
                 # reconstruct the shortest path
-                path = [random.choice(pars[state])]  # nosec: B311
+                path = [random.choice(parents[state])]  # nosec: B311
                 while (last_state := path[-1][0].from_state) != from_state:
-                    path.append(random.choice(pars[last_state]))  # nosec: B311
+                    path.append(random.choice(parents[last_state]))  # nosec: B311
                 return path[::-1]
 
             # Skip stale heap entries.
@@ -96,7 +96,7 @@ class StateGraph:
                     dist[neighbor] = new_cost
                     if new_cost < found_dist:
                         heapq.heappush(heap, (new_cost, neighbor))
-                        pars[neighbor] = []
-                    pars[neighbor].append((transition, item))
+                        parents[neighbor] = []
+                    parents[neighbor].append((transition, item))
 
         return None  # to_state is unreachable from from_state

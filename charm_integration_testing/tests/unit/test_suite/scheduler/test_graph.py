@@ -336,4 +336,3 @@ class TestStateGraph:
             assert transition1.to_state == transition2.from_state
             assert transition2.to_state == transition3.from_state
             assert transition3.to_state == State.DEPLOYED_WITH_OLD_REVISION
-
