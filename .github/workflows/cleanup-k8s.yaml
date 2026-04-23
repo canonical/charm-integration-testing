@@ -136,3 +136,78 @@ jobs:
             kubectl delete ${namespaced_resources[$namespace]} --namespace="$namespace" --timeout=25m &
           done
           wait
+  cleanup-rawfile-orphans:
+    name: Remove orphaned rawfile PV directories from nodes
+    needs: cleanup-k8s
+    runs-on: [self-hosted, charm_qa]
+    steps:
+      - name: Clone Repo
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Install kubectl
+        uses: ./.github/actions/install-with-retry
+        with:
+          command: sudo snap install kubectl --classic
+      - name: Setup kube config
+        shell: bash
+        env:
+          environment: ${{ inputs.environment }}
+          production_kubeconfig: ${{ secrets.PROD_SQA_KUBECONFIG }}
+          staging_kubeconfig: ${{ secrets.STG_SQA_KUBECONFIG }}
+        run: |
+          case "$environment" in
+            "production") echo "$production_kubeconfig" > "kubeconfig" ;;
+            "staging") echo "$staging_kubeconfig" > "kubeconfig" ;;
+            *) echo "Unknown environment '$environment'"; exit 1 ;;
+          esac
+          echo "KUBECONFIG=$(realpath kubeconfig)" >> $GITHUB_ENV
+      - name: Remove orphaned rawfile PV directories from nodes
+        shell: bash
+        run: |
+          STORAGE_PATH="/var/snap/k8s/common/rawfile-storage"
+
+          # Collect names of all PVs still known to k8s after the deletions above.
+          # Any on-disk directory not in this list is an orphan and should be removed.
+          KNOWN_PVS=$(kubectl get pv \
+            --output jsonpath='{range .items[*]}{.metadata.name}{" "}{end}' 2>/dev/null | xargs)
+          echo "Known PVs: ${KNOWN_PVS:-none}"
+
+          NODES=$(kubectl get nodes \
+            --output jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null)
+
+          if [[ -z "$NODES" ]]; then
+            echo "No nodes found, skipping orphan cleanup"
+            exit 0
+          fi
+
+          while IFS= read -r node; do
+            echo "==> Checking node: $node"
+            timeout 5m kubectl debug "node/$node" \
+              --image=ubuntu \
+              --profile=sysadmin \
+              -- bash -c "
+                storage=\"/host${STORAGE_PATH}\"
+                known_pvs='${KNOWN_PVS}'
+                [[ -d \"\$storage\" ]] || { echo '  (no rawfile-storage directory)'; exit 0; }
+                for dir in \$(ls \"\$storage\" 2>/dev/null); do
+                  found=false
+                  for pv in \$known_pvs; do
+                    [[ \"\$dir\" == \"\$pv\" ]] && found=true && break
+                  done
+                  if \$found; then
+                    echo \"  OK: \$dir\"
+                  else
+                    size=\$(stat --format='%s' \"\$storage/\$dir/disk.img\" 2>/dev/null || echo 0)
+                    human=\$(numfmt --to=iec \"\$size\" 2>/dev/null || echo \"\${size}B\")
+                    echo \"  DELETING orphan: \$dir (apparent: \$human)\"
+                    rm -rf \"\$storage/\$dir\"
+                  fi
+                done
+              " || echo "  Warning: debug pod on $node exited non-zero"
+          done <<< "$NODES"
+
+          # Remove debug pods left behind by kubectl debug
+          kubectl get pods --output name 2>/dev/null \
+            | grep "^pod/node-debugger-" \
+            | xargs --no-run-if-empty kubectl delete --ignore-not-found=true --timeout=2m
