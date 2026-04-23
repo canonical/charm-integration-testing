@@ -92,7 +92,7 @@ def test_observer_client(
         client.close()
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def logger() -> logging.Logger:
     jubilant_logger = logging.getLogger("jubilant")
     jubilant_logger.setLevel(logging.WARNING)
