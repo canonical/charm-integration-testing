@@ -42,7 +42,7 @@ applications:
 bundle: kubernetes
 saas:
   target-offer:
-    url: lxd:admin/model.target-offer
+    url: lxd:model.target-offer
 relations:
 - - content-cache-k8s:nginx-proxy
   - neighbor:nginx-route
