@@ -12,34 +12,31 @@ from .scheduler.states import State
 @pytest.mark.state(requires=State.DEPLOYED, provides=State.DEPLOYED_WITH_OLD_REVISION)
 def test_downgrade_charm(
     juju_client: JujuClient,
-    historical_revision_with_passing_deploy: int,
+    target_downgrade_revision: int,
     model: str,
     target_charm: str,
     target_application: str,
     target_revision: int | None,
     target_channel: str | None,
 ) -> None:
-    # Use historical revision selected by the fixture.
-    selected_revision = historical_revision_with_passing_deploy
-
     juju_client.logger.info(
-        f"Selected historical revision {selected_revision} for {target_application} ({target_charm})"
+        f"Selected historical revision {target_downgrade_revision} for {target_application} ({target_charm})"
     )
 
     # Downgrading the charm to the target revision specified by the fixture
     juju_client.logger.info(
         f"Refreshing {target_application} from current revision "
-        f"{target_revision} to older bundle revision {selected_revision}."
+        f"{target_revision} to older bundle revision {target_downgrade_revision}."
     )
     juju_client.refresh_application(
         application=target_application,
-        revision=selected_revision,
+        revision=target_downgrade_revision,
         channel=target_channel,
         model=model,
     )
     juju_client.wait_for_application_revision(
         application=target_application,
-        expected_revision=selected_revision,
+        expected_revision=target_downgrade_revision,
         model=model,
         timeout=timedelta(minutes=5),
     )
@@ -47,9 +44,9 @@ def test_downgrade_charm(
 
     # Verify the application is downgraded to the selected revision and the model is healthy
     downgraded_revision = juju_client.application_revision(application=target_application, model=model)
-    if downgraded_revision != selected_revision:
+    if downgraded_revision != target_downgrade_revision:
         pytest.fail(
             f"Expected '{target_application}' to be on downgraded revision "
-            f"{selected_revision}, got {downgraded_revision}."
+            f"{target_downgrade_revision}, got {downgraded_revision}."
         )
     juju_client.validate_model(model=model, level="simple")
