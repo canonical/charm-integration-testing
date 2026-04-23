@@ -1,5 +1,5 @@
 applications:
-  target:
+  neighbor:
     charm: postgresql
     channel: 14/stable
     scale: 1
@@ -7,8 +7,8 @@ applications:
 # bundle: machine
 --- # overlay.yaml
 applications:
-  target:
+  neighbor:
     offers:
-      target-offer:
+      neighbor-offer:
         endpoints:
         - database

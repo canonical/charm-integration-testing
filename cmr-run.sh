@@ -10,21 +10,23 @@ export BUNDLE_OUTPUT="./k8s-generated-bundle.yaml"
 export BUNDLE_MERMAID_OUTPUT="./k8s-generated-bundle.mmd"
 
 export model="model"
-export controller="lxd"
-export cloud="localhost"
+# export controller="lxd"
+# export cloud="localhost"
+export cloud="k8s"
+export controller="k8s"
 # export KUBECONFIG="$HOME/.kube/config"
 
-export charm_under_test="postgresql"
+export charm_under_test="indico"
 export revision="default"
 export channel="default"
 export series="default"
 
-export neighbor="indico"
+export neighbor="postgresql"
 
 export charm_endpoint="database"
 export neighbor_endpoint="database"
 
-export platform="machine"
+export platform="kubernetes"
 export log_level="INFO"
 
 ./scripts/run-tests.sh \

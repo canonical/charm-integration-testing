@@ -31,7 +31,7 @@ applications:
     revision: 42
     scale: 1
     trust: true
-  neighbor:
+  target:
     base: ubuntu@20.04
     channel: latest/edge
     charm: indico
@@ -41,22 +41,22 @@ applications:
     trust: true
 bundle: kubernetes
 saas:
-  target-offer:
-    url: lxd:model.target-offer
+  neighbor-offer:
+    url: lxd:model.neighbor-offer
 relations:
 - - content-cache-k8s:nginx-proxy
-  - neighbor:nginx-route
+  - target:nginx-route
 - - grafana-k8s:grafana-dashboard
   - redis-k8s:grafana-dashboard
 - - grafana-k8s:grafana-dashboard
-  - neighbor:grafana-dashboard
+  - target:grafana-dashboard
 - - prometheus-k8s:metrics-endpoint
   - redis-k8s:metrics-endpoint
 - - prometheus-k8s:metrics-endpoint
-  - neighbor:metrics-endpoint
+  - target:metrics-endpoint
 - - redis-k8s:redis
-  - neighbor:redis-broker
+  - target:redis-broker
 - - redis-k8s:redis
-  - neighbor:redis-cache
-- - neighbor:database
-  - target-offer:database
+  - target:redis-cache
+- - target:database
+  - neighbor-offer:database
