@@ -79,9 +79,9 @@ class StateGraph:
 
             if state == to_state:
                 # reconstruct the shortest path
-                path = [random.choice(parents[state])]  # nosec: B311
+                path = [random.choice(parents[state])]  # nosec B311
                 while (last_state := path[-1][0].from_state) != from_state:
-                    path.append(random.choice(parents[last_state]))  # nosec: B311
+                    path.append(random.choice(parents[last_state]))  # nosec B311
                 return path[::-1]
 
             # Skip stale heap entries.

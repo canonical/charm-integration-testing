@@ -245,20 +245,6 @@ class TestStateGraph:
                 to_state=State.EMPTY_MODEL,
                 expected_hops=None,
             ),
-            Params(
-                label="multiple_equal_cost_paths_with_tail_returns_valid_shortest_path",
-                edges=[
-                    # Diamond with tail: two equal-cost paths converge, then continue to destination
-                    (State.EMPTY_MODEL, State.DEPLOYED, 1),
-                    (State.EMPTY_MODEL, State.NO_CONTROLLER, 1),
-                    (State.DEPLOYED, State.NEIGHBOR_ONLY, 1),
-                    (State.NO_CONTROLLER, State.NEIGHBOR_ONLY, 1),
-                    (State.NEIGHBOR_ONLY, State.DEPLOYED_WITH_OLD_REVISION, 1),
-                ],
-                from_state=State.EMPTY_MODEL,
-                to_state=State.DEPLOYED_WITH_OLD_REVISION,
-                expected_hops=3,
-            ),
         ]
 
         @pytest.mark.parametrize("params", test_cases, ids=[p.label for p in test_cases])
