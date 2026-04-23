@@ -15,5 +15,5 @@ overrides:
     configs:
       ldaps_enabled: [true, null]
     constraints:
-      # If ldap endpoint is used, then ldaps_enabled config must be set to true
+      # If certificates endpoint is used, then ldaps_enabled config must be set to true
       - 'bool(endpoint[send-ca-cert]) => set(config[ldaps_enabled])'
