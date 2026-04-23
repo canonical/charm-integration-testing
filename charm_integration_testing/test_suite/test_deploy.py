@@ -19,10 +19,12 @@ def test_deploy(
     all_bundles: list[tuple[Path, str]],
 ) -> None:
     if not len(all_bundles):
-        all_bundles = [(bundle, model)]
+        all_bundles = [(bundle, f"::{model}")]
 
     # Deploy all bundles
     for bundle_path, model_uri in all_bundles:  # IDEA(@motjuste): could be parallelised
+        _, controller, model = model_uri.split(":")
+        model_uri = f"{controller}:{model}"
         juju_client.deploy_bundle_file(str(bundle_path), model=model_uri)
 
         # Wait until all idle
@@ -30,4 +32,6 @@ def test_deploy(
 
     # Validate all applications and relations
     for _, model_uri in all_bundles:
+        _, controller, model = model_uri.split(":")
+        model_uri = f"{controller}:{model}"
         juju_client.validate_model(model=model_uri, level="deep")

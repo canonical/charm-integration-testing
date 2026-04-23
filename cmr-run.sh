@@ -14,7 +14,7 @@ export model="model"
 # export cloud="localhost"
 export cloud="k8s"
 export controller="k8s"
-# export KUBECONFIG="$HOME/.kube/config"
+export KUBECONFIG="$HOME/.kube/config"
 
 export charm_under_test="indico"
 export revision="default"
@@ -39,12 +39,11 @@ export log_level="INFO"
     --juju-cloud "${cloud}" \
     --juju-controller "${controller}" \
     \
-    --bundle "./static/bundles/cmr-demo-1/postgresql.yaml:lxd:model" \
-    --bundle "./static/bundles/cmr-demo-1/indico.yaml:k8s:model" \
+    --bundle "./static/bundles/cmr-demo-1/postgresql.yaml:localhost:lxd:model" \
+    --bundle "./static/bundles/cmr-demo-1/indico.yaml:k8s:k8s:model" \
     \
-    --current-state "empty_model" \
-    -k 'test_deploy' \
-    -m 'not injected' \
+    --current-state "no_controller" \
+    -k 'not test_build_bundle' \
     \
     --mermaid-output "${BUNDLE_MERMAID_OUTPUT}" \
     --target-application "target" \
@@ -62,4 +61,4 @@ export log_level="INFO"
     --juju-controller-bootstrap-constraints "./static/juju-bootstrap-constraints.json" \
     --log-cli-level "${log_level}" \
     --log-level "${log_level}" \
-    --junit-xml=k8s-junit.xml
+    --junit-xml=junit.xml
