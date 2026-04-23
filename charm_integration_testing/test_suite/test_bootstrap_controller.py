@@ -9,6 +9,7 @@ from juju import JujuClient
 from .scheduler.states import State
 
 
+@pytest.mark.core
 @pytest.mark.state(requires=State.NO_CONTROLLER, provides=State.NO_MODEL, bridge_only=True)
 def test_bootstrap_controller(
     juju_client: JujuClient,
