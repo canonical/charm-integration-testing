@@ -78,7 +78,9 @@ class StateGraph:
             cost, state = heapq.heappop(heap)
 
             if state == to_state:
-                # reconstruct the shortest path
+                # reconstruct the shortest path backwards using parents[state] from to_state until
+                # we reach from_state, randomly choosing among multiple parents when they exist.
+                # since all parents of a state have the same cost, we can pick any one
                 path = [random.choice(parents[state])]  # nosec B311
                 while (last_state := path[-1][0].from_state) != from_state:
                     path.append(random.choice(parents[last_state]))  # nosec B311
