@@ -25,10 +25,9 @@ import pytest
 
 from bundle_builder_x.bundle_builder import BundleBuilder, UncompletableBundleError
 from bundle_builder_x.charm import CharmEndpoint, EndpointType
-from bundle_builder_x.domain import ApplicationConstraint, ModelInit, initialize_global_domain
-from bundle_builder_x.extract import extract_solution
+from bundle_builder_x.spec import AppSpec, ModelSpec
 
-from .conftest import JUJU, CharmhubClientStub, make_charm
+from .conftest import JUJU_VERSION, CharmhubClientStub, build_multi_model, make_charm
 
 
 class TestSameApplicationNameAcrossModels:
@@ -42,24 +41,23 @@ class TestSameApplicationNameAcrossModels:
         builder = BundleBuilder(charmhub_client=stub)
 
         # WHEN two models both declare an application called "db" with different charms
-        domain = initialize_global_domain(
-            {
-                "k8s-model": ModelInit(
-                    applications={"db": ApplicationConstraint(charm="postgresql-k8s")},
+        solution = build_multi_model(
+            builder,
+            [
+                ModelSpec(
+                    name="k8s-model",
                     platform="kubernetes",
-                    arch="amd64",
-                    juju_version=JUJU,
+                    juju=JUJU_VERSION,
+                    applications={"db": AppSpec(charm="postgresql-k8s")},
                 ),
-                "machine-model": ModelInit(
-                    applications={"db": ApplicationConstraint(charm="postgresql")},
+                ModelSpec(
+                    name="machine-model",
                     platform="machine",
-                    arch="amd64",
-                    juju_version=JUJU,
+                    juju=JUJU_VERSION,
+                    applications={"db": AppSpec(charm="postgresql")},
                 ),
-            }
+            ],
         )
-        z3_model = builder._solve(domain)
-        solution = extract_solution(z3_model, domain, builder.logger)
         k8s_bundle = next(b for b in solution.bundles if b.model == "k8s-model")
         machine_bundle = next(b for b in solution.bundles if b.model == "machine-model")
 
@@ -97,24 +95,23 @@ class TestSameApplicationNameAcrossModels:
         stub = CharmhubClientStub(needs_db, provider, standalone)
         builder = BundleBuilder(charmhub_client=stub)
 
-        domain = initialize_global_domain(
-            {
-                "k8s-model": ModelInit(
-                    applications={"app": ApplicationConstraint(charm="webapp")},
+        solution = build_multi_model(
+            builder,
+            [
+                ModelSpec(
+                    name="k8s-model",
                     platform="kubernetes",
-                    arch="amd64",
-                    juju_version=JUJU,
+                    juju=JUJU_VERSION,
+                    applications={"app": AppSpec(charm="webapp")},
                 ),
-                "machine-model": ModelInit(
-                    applications={"app": ApplicationConstraint(charm="standalone-app")},
+                ModelSpec(
+                    name="machine-model",
                     platform="machine",
-                    arch="amd64",
-                    juju_version=JUJU,
+                    juju=JUJU_VERSION,
+                    applications={"app": AppSpec(charm="standalone-app")},
                 ),
-            }
+            ],
         )
-        z3_model = builder._solve(domain)
-        solution = extract_solution(z3_model, domain, builder.logger)
         k8s_bundle = next(b for b in solution.bundles if b.model == "k8s-model")
         machine_bundle = next(b for b in solution.bundles if b.model == "machine-model")
 
@@ -146,23 +143,22 @@ class TestSameApplicationNameAcrossModels:
         stub = CharmhubClientStub(needs_db, standalone)
         builder = BundleBuilder(charmhub_client=stub)
 
-        domain = initialize_global_domain(
-            {
-                "k8s-model": ModelInit(
-                    applications={"app": ApplicationConstraint(charm="webapp")},
-                    platform="kubernetes",
-                    arch="amd64",
-                    juju_version=JUJU,
-                ),
-                "machine-model": ModelInit(
-                    applications={"app": ApplicationConstraint(charm="standalone-app")},
-                    platform="machine",
-                    arch="amd64",
-                    juju_version=JUJU,
-                ),
-            }
-        )
-
         # THEN the solver fails because k8s-model cannot be completed
         with pytest.raises(UncompletableBundleError):
-            builder._solve(domain)
+            build_multi_model(
+                builder,
+                [
+                    ModelSpec(
+                        name="k8s-model",
+                        platform="kubernetes",
+                        juju=JUJU_VERSION,
+                        applications={"app": AppSpec(charm="webapp")},
+                    ),
+                    ModelSpec(
+                        name="machine-model",
+                        platform="machine",
+                        juju=JUJU_VERSION,
+                        applications={"app": AppSpec(charm="standalone-app")},
+                    ),
+                ],
+            )

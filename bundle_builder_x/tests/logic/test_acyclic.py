@@ -33,9 +33,9 @@ import pytest
 
 from bundle_builder_x.bundle_builder import BundleBuilder, UncompletableBundleError
 from bundle_builder_x.charm import CharmEndpoint, EndpointType
-from bundle_builder_x.domain import ApplicationConstraint, IntegrationConstraint
+from bundle_builder_x.spec import AppSpec, IntegrationSpec, ModelSpec
 
-from .conftest import JUJU, CharmhubClientStub, build_single_model, make_charm
+from .conftest import JUJU_VERSION, CharmhubClientStub, build_multi_model, build_single_model, make_charm
 
 
 class TestAcyclicConstraints:
@@ -67,11 +67,7 @@ class TestAcyclicConstraints:
         with pytest.raises(UncompletableBundleError):
             build_single_model(
                 builder,
-                applications={"proxy": ApplicationConstraint(charm="pgbouncer-k8s")},
-                integrations=set(),
-                platform="kubernetes",
-                arch="amd64",
-                juju_version=JUJU,
+                applications={"proxy": AppSpec(charm="pgbouncer-k8s")},
             )
 
     def test_two_pgbouncers_chained_in_cycle_is_rejected(self) -> None:
@@ -100,28 +96,25 @@ class TestAcyclicConstraints:
             build_single_model(
                 builder,
                 applications={
-                    "proxy-a": ApplicationConstraint(charm="pgbouncer-k8s"),
-                    "proxy-b": ApplicationConstraint(charm="pgbouncer-k8s"),
+                    "proxy-a": AppSpec(charm="pgbouncer-k8s"),
+                    "proxy-b": AppSpec(charm="pgbouncer-k8s"),
                 },
-                integrations={
+                integrations=[
                     # proxy-a requires database from proxy-b
-                    IntegrationConstraint(
-                        application_1="proxy-a",
-                        endpoint_1="backend-database",
-                        application_2="proxy-b",
-                        endpoint_2="database",
+                    IntegrationSpec(
+                        application="proxy-a",
+                        endpoint="backend-database",
+                        remote_application="proxy-b",
+                        remote_endpoint="database",
                     ),
                     # proxy-b requires database from proxy-a  <-- cycle
-                    IntegrationConstraint(
-                        application_1="proxy-b",
-                        endpoint_1="backend-database",
-                        application_2="proxy-a",
-                        endpoint_2="database",
+                    IntegrationSpec(
+                        application="proxy-b",
+                        endpoint="backend-database",
+                        remote_application="proxy-a",
+                        remote_endpoint="database",
                     ),
-                },
-                platform="kubernetes",
-                arch="amd64",
-                juju_version=JUJU,
+                ],
             )
 
     def test_acyclic_chain_is_valid(self) -> None:
@@ -157,11 +150,7 @@ class TestAcyclicConstraints:
         # WHEN building with proxy -> postgresql (no cycle - a linear chain)
         bundle = build_single_model(
             builder,
-            applications={"proxy": ApplicationConstraint(charm="pgbouncer-k8s")},
-            integrations=set(),
-            platform="kubernetes",
-            arch="amd64",
-            juju_version=JUJU,
+            applications={"proxy": AppSpec(charm="pgbouncer-k8s")},
         )
 
         # THEN the solver adds postgresql as the backend (no cycle, chain is valid)
@@ -194,21 +183,18 @@ class TestAcyclicConstraints:
         bundle = build_single_model(
             builder,
             applications={
-                "pg-primary": ApplicationConstraint(charm="postgresql-k8s"),
-                "pg-standby": ApplicationConstraint(charm="postgresql-k8s"),
+                "pg-primary": AppSpec(charm="postgresql-k8s"),
+                "pg-standby": AppSpec(charm="postgresql-k8s"),
             },
-            integrations={
+            integrations=[
                 # pg-standby replicates from pg-primary
-                IntegrationConstraint(
-                    application_1="pg-standby",
-                    endpoint_1="replication",
-                    application_2="pg-primary",
-                    endpoint_2="replication-offer",
+                IntegrationSpec(
+                    application="pg-standby",
+                    endpoint="replication",
+                    remote_application="pg-primary",
+                    remote_endpoint="replication-offer",
                 )
-            },
-            platform="kubernetes",
-            arch="amd64",
-            juju_version=JUJU,
+            ],
         )
 
         # THEN both instances are in the bundle (cyclic=True bypasses the rank check)
@@ -246,24 +232,137 @@ class TestAcyclicConstraints:
             build_single_model(
                 builder,
                 applications={
-                    "pg-primary": ApplicationConstraint(charm="postgresql-k8s"),
-                    "pg-standby": ApplicationConstraint(charm="postgresql-k8s"),
+                    "pg-primary": AppSpec(charm="postgresql-k8s"),
+                    "pg-standby": AppSpec(charm="postgresql-k8s"),
                 },
-                integrations={
-                    IntegrationConstraint(
-                        application_1="pg-standby",
-                        endpoint_1="replication",
-                        application_2="pg-primary",
-                        endpoint_2="replication-offer",
+                integrations=[
+                    IntegrationSpec(
+                        application="pg-standby",
+                        endpoint="replication",
+                        remote_application="pg-primary",
+                        remote_endpoint="replication-offer",
                     ),
-                    IntegrationConstraint(
-                        application_1="pg-primary",
-                        endpoint_1="replication",
-                        application_2="pg-standby",
-                        endpoint_2="replication-offer",
+                    IntegrationSpec(
+                        application="pg-primary",
+                        endpoint="replication",
+                        remote_application="pg-standby",
+                        remote_endpoint="replication-offer",
                     ),
-                },
-                platform="kubernetes",
-                arch="amd64",
-                juju_version=JUJU,
+                ],
+            )
+
+
+class TestCrossModelAcyclicConstraints:
+    """Section 6 (cross-model): user-specified CMR direction is preserved; explicit
+    bidirectional CMRs between two models form a rank cycle and are rejected.
+
+    When a charm exposes both sides of an interface (e.g. vault can both provide
+    and require vault-autounseal), the solver must not freely activate the reverse
+    cross-model integration if the user has already pinned one direction via a user CMR.
+    """
+
+    def test_user_specified_cmr_direction_is_not_reversed(self) -> None:
+        # GIVEN a charm that exposes both sides of the same interface
+        # (like vault, which can both seal and be sealed via vault-autounseal)
+        symmetric = make_charm(
+            "vault-like",
+            endpoints={
+                "my-provides": CharmEndpoint(type=EndpointType.PROVIDES, interface="vault-autounseal", optional=True),
+                "my-requires": CharmEndpoint(type=EndpointType.REQUIRES, interface="vault-autounseal", optional=True),
+            },
+        )
+        builder = BundleBuilder(charmhub_client=CharmhubClientStub(symmetric))
+
+        # WHEN the spec pins only one direction: model-a.a requires from model-b.b
+        solution = build_multi_model(
+            builder,
+            [
+                ModelSpec(
+                    name="model-a",
+                    applications={"a": AppSpec(charm="vault-like")},
+                    integrations=[
+                        IntegrationSpec(
+                            application="a",
+                            endpoint="my-requires",
+                            remote_model="model-b",
+                            remote_application="b",
+                            remote_endpoint="my-provides",
+                            offer_name="vault-offer",
+                            url="ctrl:admin/model-b.vault-offer",
+                        ),
+                    ],
+                    juju=JUJU_VERSION,
+                ),
+                ModelSpec(
+                    name="model-b",
+                    applications={"b": AppSpec(charm="vault-like")},
+                    juju=JUJU_VERSION,
+                ),
+            ],
+        )
+
+        # THEN model-a's bundle contains exactly the user-specified CMR (requires side)
+        bundle_a = next(b for b in solution.bundles if b.model == "model-a")
+        requires_cmrs = [c for c in bundle_a.cross_model_integrations if c.local.endpoint == "my-requires"]
+        assert len(requires_cmrs) == 1
+
+        # AND no reverse CMR (a:my-provides -> b:my-requires) is present
+        reverse_cmrs = [
+            c
+            for c in bundle_a.cross_model_integrations
+            if c.local.endpoint == "my-provides" and c.remote_model == "model-b"
+        ]
+        assert len(reverse_cmrs) == 0
+
+    def test_both_cmr_directions_simultaneously_is_rejected(self) -> None:
+        # GIVEN the same symmetric charm
+        symmetric = make_charm(
+            "vault-like",
+            endpoints={
+                "my-provides": CharmEndpoint(type=EndpointType.PROVIDES, interface="vault-autounseal", optional=True),
+                "my-requires": CharmEndpoint(type=EndpointType.REQUIRES, interface="vault-autounseal", optional=True),
+            },
+        )
+        builder = BundleBuilder(charmhub_client=CharmhubClientStub(symmetric))
+
+        # WHEN both directions are explicitly specified as user CMRs
+        # (a requires from b, AND b requires from a simultaneously)
+        # THEN the solver rejects this as a rank cycle
+        with pytest.raises(UncompletableBundleError):
+            build_multi_model(
+                builder,
+                [
+                    ModelSpec(
+                        name="model-a",
+                        applications={"a": AppSpec(charm="vault-like")},
+                        integrations=[
+                            IntegrationSpec(
+                                application="a",
+                                endpoint="my-requires",
+                                remote_model="model-b",
+                                remote_application="b",
+                                remote_endpoint="my-provides",
+                                offer_name="vault-offer",
+                                url="ctrl:admin/model-b.vault-offer",
+                            )
+                        ],
+                        juju=JUJU_VERSION,
+                    ),
+                    ModelSpec(
+                        name="model-b",
+                        applications={"b": AppSpec(charm="vault-like")},
+                        integrations=[
+                            IntegrationSpec(
+                                application="b",
+                                endpoint="my-requires",
+                                remote_model="model-a",
+                                remote_application="a",
+                                remote_endpoint="my-provides",
+                                offer_name="vault-offer-reverse",
+                                url="ctrl:admin/model-a.vault-offer-reverse",
+                            )
+                        ],
+                        juju=JUJU_VERSION,
+                    ),
+                ],
             )

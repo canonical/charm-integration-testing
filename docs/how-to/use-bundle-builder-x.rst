@@ -85,7 +85,7 @@ Each model produces a standard Juju bundle YAML:
        charm: postgresql-k8s
        channel: 14/stable
        revision: 495
-       num_units: 1
+       scale: 1
        base: ubuntu@22.04
    relations:
      - - kratos:pg-database

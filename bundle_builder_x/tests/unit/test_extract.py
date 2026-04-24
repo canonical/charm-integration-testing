@@ -22,18 +22,24 @@ import z3  # type: ignore[import-untyped]
 from bundle_builder_x.charm import Charm, CharmChannel, CharmEndpoint, EndpointType
 from bundle_builder_x.constraints import add_constraints
 from bundle_builder_x.domain import (
-    ApplicationConstraint,
-    CrossModelIntegrationConstraint,
-    CrossModelRemote,
-    IntegrationConstraint,
-    ModelInit,
-    initialize_global_domain,
+    Domain,
+    DomainApplication,
+    DomainApplicationEndpoint,
+    DomainApplicationIntegration,
+    DomainModel,
+    ModelRef,
 )
 from bundle_builder_x.extract import extract_solution
 from bundle_builder_x.juju_version import JujuVersion
 
 _JUJU = JujuVersion(major=3, minor=6, patch=0)
 _LOGGER = logging.getLogger("test_extract")
+
+
+def _make_domain(models: dict[ModelRef, DomainModel]) -> Domain:
+    domain = Domain()
+    domain.models.update(models)
+    return domain
 
 
 def _make_charm(
@@ -67,13 +73,13 @@ class TestExtractSingleModel:
         # GIVEN a domain with one pinned application
         from bundle_builder_x.domain import add_charm_to_domain
 
-        domain = initialize_global_domain(
+        domain = _make_domain(
             {
-                "m": ModelInit(
-                    applications={"my-pg": ApplicationConstraint(charm="postgresql-k8s")},
-                    platform="kubernetes",
+                ModelRef(name="m"): DomainModel(
                     arch="amd64",
+                    platform="kubernetes",
                     juju_version=_JUJU,
+                    applications={"my-pg": DomainApplication(charm="postgresql-k8s")},
                 )
             }
         )
@@ -81,7 +87,7 @@ class TestExtractSingleModel:
             "postgresql-k8s",
             endpoints={"database": CharmEndpoint(type=EndpointType.PROVIDES, interface="postgresql", optional=True)},
         )
-        add_charm_to_domain(charm, domain, "m")
+        add_charm_to_domain(charm, domain, ModelRef(name="m"))
 
         # WHEN extracting
         model = _solve(domain)
@@ -96,18 +102,17 @@ class TestExtractSingleModel:
         # GIVEN a domain where a charm exists but has no application constraint mapping
         from bundle_builder_x.domain import add_charm_to_domain
 
-        domain = initialize_global_domain(
+        domain = _make_domain(
             {
-                "m": ModelInit(
-                    applications={},
-                    platform="kubernetes",
+                ModelRef(name="m"): DomainModel(
                     arch="amd64",
+                    platform="kubernetes",
                     juju_version=_JUJU,
                 )
             }
         )
         charm = _make_charm("grafana-agent-k8s")
-        add_charm_to_domain(charm, domain, "m")
+        add_charm_to_domain(charm, domain, ModelRef(name="m"))
         # Force the charm to exist
         solver = z3.Solver()
         solver.add(domain.charms[0].exists)
@@ -125,20 +130,19 @@ class TestExtractSingleModel:
         # GIVEN a domain with two instances of the same charm (no app constraint match)
         from bundle_builder_x.domain import add_charm_to_domain
 
-        domain = initialize_global_domain(
+        domain = _make_domain(
             {
-                "m": ModelInit(
-                    applications={},
-                    platform="kubernetes",
+                ModelRef(name="m"): DomainModel(
                     arch="amd64",
+                    platform="kubernetes",
                     juju_version=_JUJU,
                 )
             }
         )
         charm_a = _make_charm("my-charm", revision=1)
         charm_b = _make_charm("my-charm", revision=2)
-        add_charm_to_domain(charm_a, domain, "m")
-        add_charm_to_domain(charm_b, domain, "m")
+        add_charm_to_domain(charm_a, domain, ModelRef(name="m"))
+        add_charm_to_domain(charm_b, domain, ModelRef(name="m"))
 
         # Force both to exist
         solver = z3.Solver()
@@ -169,26 +173,28 @@ class TestExtractSingleModel:
             "app",
             endpoints={"db": CharmEndpoint(type=EndpointType.REQUIRES, interface="postgresql", optional=True)},
         )
-        domain = initialize_global_domain(
+        apps = {
+            "pg": DomainApplication(charm="postgresql-k8s"),
+            "app": DomainApplication(charm="app"),
+        }
+        domain = _make_domain(
             {
-                "m": ModelInit(
-                    applications={
-                        "pg": ApplicationConstraint(charm="postgresql-k8s"),
-                        "app": ApplicationConstraint(charm="app"),
-                    },
-                    integrations={
-                        IntegrationConstraint(
-                            application_1="pg", endpoint_1="database", application_2="app", endpoint_2="db"
-                        )
-                    },
-                    platform="kubernetes",
+                ModelRef(name="m"): DomainModel(
                     arch="amd64",
+                    platform="kubernetes",
                     juju_version=_JUJU,
+                    applications=apps,
+                    application_integrations=[
+                        DomainApplicationIntegration(
+                            endpoint_1=DomainApplicationEndpoint(application="app", endpoint="db"),
+                            endpoint_2=DomainApplicationEndpoint(application="pg", endpoint="database"),
+                        )
+                    ],
                 )
             }
         )
-        add_charm_to_domain(provider, domain, "m")
-        add_charm_to_domain(requirer, domain, "m")
+        add_charm_to_domain(provider, domain, ModelRef(name="m"))
+        add_charm_to_domain(requirer, domain, ModelRef(name="m"))
 
         # WHEN extracting
         model = _solve(domain)
@@ -213,38 +219,34 @@ class TestExtractSingleModel:
             "app",
             endpoints={"db": CharmEndpoint(type=EndpointType.REQUIRES, interface="postgresql", optional=True)},
         )
-        domain = initialize_global_domain(
+        cmr_integration = DomainApplicationIntegration(
+            endpoint_1=DomainApplicationEndpoint(application="app", endpoint="db"),
+            endpoint_2=DomainApplicationEndpoint(
+                application="pg", endpoint="database", model=ModelRef(name="provider-model")
+            ),
+            offer_name="pg-offer",
+            url="lxd:admin/provider-model.pg-offer",
+        )
+        domain = _make_domain(
             {
-                "provider-model": ModelInit(
-                    applications={"pg": ApplicationConstraint(charm="postgresql-k8s")},
-                    platform="kubernetes",
+                ModelRef(name="provider-model"): DomainModel(
                     arch="amd64",
+                    platform="kubernetes",
                     juju_version=_JUJU,
+                    applications={"pg": DomainApplication(charm="postgresql-k8s")},
                     controller="lxd",
                 ),
-                "consumer-model": ModelInit(
-                    applications={"app": ApplicationConstraint(charm="app")},
-                    platform="kubernetes",
+                ModelRef(name="consumer-model"): DomainModel(
                     arch="amd64",
+                    platform="kubernetes",
                     juju_version=_JUJU,
-                    cross_model_integrations=[
-                        CrossModelIntegrationConstraint(
-                            local_application="app",
-                            local_endpoint="db",
-                            remote=CrossModelRemote(
-                                model="provider-model",
-                                application="pg",
-                                endpoint="database",
-                                offer_name="pg-offer",
-                                url="lxd:admin/provider-model.pg-offer",
-                            ),
-                        )
-                    ],
+                    applications={"app": DomainApplication(charm="app")},
+                    application_integrations=[cmr_integration],
                 ),
             }
         )
-        add_charm_to_domain(provider, domain, "provider-model")
-        add_charm_to_domain(requirer, domain, "consumer-model")
+        add_charm_to_domain(provider, domain, ModelRef(name="provider-model"))
+        add_charm_to_domain(requirer, domain, ModelRef(name="consumer-model"))
 
         # WHEN extracting
         model = _solve(domain)
@@ -275,17 +277,17 @@ class TestExtractSingleModel:
         )
         # Override configs to declare a fixed value
         charm = charm.model_copy(update={"configs": {"common_name": ["my-cn"]}})
-        domain = initialize_global_domain(
+        domain = _make_domain(
             {
-                "m": ModelInit(
-                    applications={"vault": ApplicationConstraint(charm="vault-k8s")},
-                    platform="kubernetes",
+                ModelRef(name="m"): DomainModel(
                     arch="amd64",
+                    platform="kubernetes",
                     juju_version=_JUJU,
+                    applications={"vault": DomainApplication(charm="vault-k8s")},
                 )
             }
         )
-        add_charm_to_domain(charm, domain, "m")
+        add_charm_to_domain(charm, domain, ModelRef(name="m"))
 
         # WHEN extracting
         model = _solve(domain)
@@ -302,24 +304,24 @@ class TestExtractMultiModel:
 
         charm_a = _make_charm("charm-a")
         charm_b = _make_charm("charm-b")
-        domain = initialize_global_domain(
+        domain = _make_domain(
             {
-                "model-a": ModelInit(
-                    applications={"app-a": ApplicationConstraint(charm="charm-a")},
-                    platform="kubernetes",
+                ModelRef(name="model-a"): DomainModel(
                     arch="amd64",
+                    platform="kubernetes",
                     juju_version=_JUJU,
+                    applications={"app-a": DomainApplication(charm="charm-a")},
                 ),
-                "model-b": ModelInit(
-                    applications={"app-b": ApplicationConstraint(charm="charm-b")},
-                    platform="kubernetes",
+                ModelRef(name="model-b"): DomainModel(
                     arch="amd64",
+                    platform="kubernetes",
                     juju_version=_JUJU,
+                    applications={"app-b": DomainApplication(charm="charm-b")},
                 ),
             }
         )
-        add_charm_to_domain(charm_a, domain, "model-a")
-        add_charm_to_domain(charm_b, domain, "model-b")
+        add_charm_to_domain(charm_a, domain, ModelRef(name="model-a"))
+        add_charm_to_domain(charm_b, domain, ModelRef(name="model-b"))
 
         # WHEN extracting
         model = _solve(domain)

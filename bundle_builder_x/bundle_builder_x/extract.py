@@ -19,13 +19,13 @@ import z3  # type: ignore[import-untyped]
 
 from .bundle import Application, ApplicationEndpoint, Bundle, CrossModelIntegration, Integration, Solution
 from .charm import EndpointType
-from .domain import Domain
+from .domain import Domain, ModelRef
 
 
 def _extract_single_model(
     model: z3.ModelRef,
     domain: Domain,
-    model_name: str,
+    model_ref: ModelRef,
     logger: logging.Logger,
 ) -> tuple[Bundle, dict[int, str]]:
     """Extract a Bundle for a single model from the global Z3 solution.
@@ -33,26 +33,26 @@ def _extract_single_model(
     Returns the Bundle and a mapping of charm_id -> application name for
     cross-referencing discovered CMRs.
     """
-    mc = domain.models[model_name]
+    mc = domain.models[model_ref]
 
     # Find existing charms in this model
     existing_charm_ids = [
         cid
         for cid in range(len(domain.charms))
-        if domain.charm_to_model.get(cid) == model_name
-        and model.evaluate(domain.charms[cid].exists, model_completion=True)
+        if domain.charms[cid].model == model_ref and model.evaluate(domain.charms[cid].exists, model_completion=True)
     ]
 
     charm_id_to_app_name: dict[int, str] = {}
     used_names: set[str] = set()
 
     for charm_id in existing_charm_ids:
-        for mapping, mapping_var in mc.application_to_charm.items():
-            if mapping.charm_id == charm_id and model.evaluate(mapping_var, model_completion=True):
-                charm_id_to_app_name[charm_id] = mapping.application
-                used_names.add(mapping.application)
+        for app_name, domain_app in mc.applications.items():
+            mapping_var = domain_app.charm_ids.get(charm_id)
+            if mapping_var is not None and model.evaluate(mapping_var, model_completion=True):
+                charm_id_to_app_name[charm_id] = app_name
+                used_names.add(app_name)
                 logger.info(
-                    f"[{model_name}] Application {mapping.application} mapped to charm "
+                    f"[{model_ref.key}] Application {app_name} mapped to charm "
                     f"{domain.charms[charm_id].spec.name} (id={charm_id})"
                 )
                 break
@@ -109,58 +109,69 @@ def _extract_single_model(
         applications[app_name] = Application(charm=charm.spec, config=config)
 
     integrations = set()
-    for charm_integration, integration_var in domain.charm_integrations.items():
-        if model.evaluate(integration_var.exists, model_completion=True):
-            charm_id_1 = charm_integration.requires_endpoint.charm_id
-            endpoint_1 = charm_integration.requires_endpoint.endpoint
-            charm_id_2 = charm_integration.provides_endpoint.charm_id
-            endpoint_2 = charm_integration.provides_endpoint.endpoint
+    for integration in domain.charm_integrations:
+        if domain.is_cross_model(integration):
+            continue
+        if not model.evaluate(integration.exists, model_completion=True):
+            continue
 
-            # Only include if both charms belong to this model
-            if charm_id_1 not in charm_id_to_app_name or charm_id_2 not in charm_id_to_app_name:
-                continue
+        charm_id_1 = integration.requires_charm_id
+        endpoint_1 = integration.requires_endpoint
+        charm_id_2 = integration.provides_charm_id
+        endpoint_2 = integration.provides_endpoint
 
-            app_name_1 = charm_id_to_app_name[charm_id_1]
-            app_name_2 = charm_id_to_app_name[charm_id_2]
+        # Only include if both charms belong to this model
+        if charm_id_1 not in charm_id_to_app_name or charm_id_2 not in charm_id_to_app_name:
+            continue
 
-            integrations.add(
-                Integration.create(
-                    ApplicationEndpoint(application=app_name_1, endpoint=endpoint_1),
-                    ApplicationEndpoint(application=app_name_2, endpoint=endpoint_2),
-                )
+        app_name_1 = charm_id_to_app_name[charm_id_1]
+        app_name_2 = charm_id_to_app_name[charm_id_2]
+
+        integrations.add(
+            Integration.create(
+                ApplicationEndpoint(application=app_name_1, endpoint=endpoint_1),
+                ApplicationEndpoint(application=app_name_2, endpoint=endpoint_2),
             )
+        )
 
-    # Build cross-model integrations from user-specified CMR constraints
+    # Build cross-model integrations from integration constraints with a non-None model
     cross_model_integrations: list[CrossModelIntegration] = []
-    for cmr in mc.cross_model_constraints:
-        app = applications.get(cmr.local_application)
+    for app_int in mc.application_integrations:
+        if app_int.endpoint_1.model == app_int.endpoint_2.model:
+            continue  # local integration
+        local_ep = app_int.endpoint_1 if app_int.endpoint_1.model == ModelRef() else app_int.endpoint_2
+        remote_ep = app_int.endpoint_2 if app_int.endpoint_1.model == ModelRef() else app_int.endpoint_1
+        app = applications.get(local_ep.application)
         if app is None:
             continue
-        charm_ep = app.charm.endpoints.get(cmr.local_endpoint)
+        charm_ep = app.charm.endpoints.get(local_ep.endpoint)
         if charm_ep is None:
             logger.warning(
-                f"Cross-model integration local endpoint '{cmr.local_endpoint}' "
-                f"not found on charm '{app.charm.name}' for application '{cmr.local_application}'"
+                f"Cross-model integration local endpoint '{local_ep.endpoint}' "
+                f"not found on charm '{app.charm.name}' for application '{local_ep.application}'"
             )
             continue
+        remote_model_ref = remote_ep.model
+        if remote_model_ref is None:
+            continue  # shouldn't happen, but defensive
         cross_model_integrations.append(
             CrossModelIntegration(
                 local=ApplicationEndpoint(
-                    application=cmr.local_application,
-                    endpoint=cmr.local_endpoint,
+                    application=local_ep.application,
+                    endpoint=local_ep.endpoint,
                 ),
                 local_role=charm_ep.type,
-                remote_model=cmr.remote.model,
-                remote_application=cmr.remote.application,
-                remote_endpoint=cmr.remote.endpoint,
-                offer_name=cmr.remote.offer_name,
-                url=cmr.remote.url,
+                remote_model=remote_model_ref.key,
+                remote_application=remote_ep.application,
+                remote_endpoint=remote_ep.endpoint,
+                offer_name=app_int.offer_name,
+                url=app_int.url,
             )
         )
 
     bundle = Bundle(
-        model=model_name,
-        controller=mc.controller,
+        model=model_ref.key,
+        controller=mc.ref.controller,
         applications=applications,
         integrations=integrations,
         cross_model_integrations=cross_model_integrations,
@@ -179,85 +190,108 @@ def extract_solution(
 ) -> Solution:
     """Extract a Solution from the global Z3 model.
 
-    Includes both user-specified CMRs and solver-discovered PotentialCMRs.
+    Includes both user-specified CMRs and solver-discovered cross-model integrations.
     For discovered CMRs, URLs are synthesized from the domain's controller info
     where available.
     """
-    bundles: dict[str, Bundle] = {}
-    all_charm_maps: dict[str, dict[int, str]] = {}
+    bundles: dict[ModelRef, Bundle] = {}
+    all_charm_maps: dict[ModelRef, dict[int, str]] = {}
 
-    for model_name in domain.models:
-        bundle, charm_map = _extract_single_model(z3_model, domain, model_name, logger)
-        bundles[model_name] = bundle
-        all_charm_maps[model_name] = charm_map
+    for model_ref in domain.models:
+        bundle, charm_map = _extract_single_model(z3_model, domain, model_ref, logger)
+        bundles[model_ref] = bundle
+        all_charm_maps[model_ref] = charm_map
 
-    # Add solver-discovered PotentialCMRs to the relevant bundles
-    for pcmr in domain.potential_cmrs:
-        if not z3_model.evaluate(pcmr.exists, model_completion=True):
+    # Add solver-discovered cross-model integrations to the relevant bundles.
+    # Skip any integration that was forced active by a user-specified CMR: those
+    # are already present in the bundle via _extract_single_model (which preserves
+    # the user-specified URL and offer name).
+    user_covered_idxs: set[int] = set()
+    for mc in domain.models.values():
+        for app_int in mc.application_integrations:
+            is_cmr = app_int.endpoint_1.model != app_int.endpoint_2.model
+            if not is_cmr:
+                continue
+            for i_idx, mapping_var in app_int.charm_integration_ids.items():
+                if z3_model.evaluate(mapping_var, model_completion=True):
+                    user_covered_idxs.add(i_idx)
+
+    for i_idx, integration in enumerate(domain.charm_integrations):
+        if not domain.is_cross_model(integration):
             continue
+        if not z3_model.evaluate(integration.exists, model_completion=True):
+            continue
+        if i_idx in user_covered_idxs:
+            continue  # user CMR already covers this; skip to avoid duplicate entries
 
-        req_model = pcmr.requires_model
-        prov_model = pcmr.provides_model
-        req_app = all_charm_maps.get(req_model, {}).get(pcmr.requires_charm_id)
-        prov_app = all_charm_maps.get(prov_model, {}).get(pcmr.provides_charm_id)
+        req_model_ref = domain.charms[integration.requires_charm_id].model
+        prov_model_ref = domain.charms[integration.provides_charm_id].model
+        req_app = all_charm_maps.get(req_model_ref, {}).get(integration.requires_charm_id)
+        prov_app = all_charm_maps.get(prov_model_ref, {}).get(integration.provides_charm_id)
 
         if req_app is None or prov_app is None:
             logger.warning(
-                f"Discovered CMR between {prov_model}:{pcmr.provides_charm_id} and "
-                f"{req_model}:{pcmr.requires_charm_id} but application names could not be resolved"
+                f"Discovered CMR between {prov_model_ref.key}:{integration.provides_charm_id} and "
+                f"{req_model_ref.key}:{integration.requires_charm_id} but application names could not be resolved"
             )
             continue
 
+        interface = domain.integration_interface(integration)
+        offer_name = domain.integration_offer_name(integration)
+
         logger.info(
-            f"Discovered CMR: {prov_model}.{prov_app}:{pcmr.provides_endpoint} "
-            f"-> {req_model}.{req_app}:{pcmr.requires_endpoint} "
-            f"(interface: {pcmr.interface})"
+            f"Discovered CMR: {prov_model_ref.key}.{prov_app}:{integration.provides_endpoint} "
+            f"-> {req_model_ref.key}.{req_app}:{integration.requires_endpoint} "
+            f"(interface: {interface})"
         )
 
         # Synthesize URL for discovered CMRs from the providing model's controller info
         url: str | None = None
-        prov_mc = domain.models.get(prov_model)
-        if prov_mc is not None and prov_mc.controller is not None:
-            url = f"{prov_mc.controller}:admin/{prov_model}.{pcmr.offer_name}"
+        prov_mc = domain.models.get(prov_model_ref)
+        if prov_mc is not None and prov_mc.ref.controller is not None:
+            url = f"{prov_mc.ref.controller}:admin/{prov_mc.ref.name}.{offer_name}"
 
         # Add REQUIRES side to the requiring model's bundle
-        if req_model in bundles:
-            bundles[req_model].cross_model_integrations.append(
+        if req_model_ref in bundles:
+            bundles[req_model_ref].cross_model_integrations.append(
                 CrossModelIntegration(
-                    local=ApplicationEndpoint(application=req_app, endpoint=pcmr.requires_endpoint),
+                    local=ApplicationEndpoint(application=req_app, endpoint=integration.requires_endpoint),
                     local_role=EndpointType.REQUIRES,
-                    remote_model=prov_model,
+                    remote_model=prov_model_ref.key,
                     remote_application=prov_app,
-                    remote_endpoint=pcmr.provides_endpoint,
-                    offer_name=pcmr.offer_name,
+                    remote_endpoint=integration.provides_endpoint,
+                    offer_name=offer_name,
                     url=url,
                 )
             )
 
         # Add PROVIDES side to the providing model's bundle
-        if prov_model in bundles:
-            bundles[prov_model].cross_model_integrations.append(
+        if prov_model_ref in bundles:
+            bundles[prov_model_ref].cross_model_integrations.append(
                 CrossModelIntegration(
-                    local=ApplicationEndpoint(application=prov_app, endpoint=pcmr.provides_endpoint),
+                    local=ApplicationEndpoint(application=prov_app, endpoint=integration.provides_endpoint),
                     local_role=EndpointType.PROVIDES,
-                    remote_model=req_model,
+                    remote_model=req_model_ref.key,
                     remote_application=req_app,
-                    remote_endpoint=pcmr.requires_endpoint,
-                    offer_name=pcmr.offer_name,
+                    remote_endpoint=integration.requires_endpoint,
+                    offer_name=offer_name,
                     url=url,
                 )
             )
 
     # Mirror user-specified CMRs to the providing model so export_mermaid can draw edges.
     # Only applies to in-spec CMRs where the remote model is also in this solution.
-    for model_name, bundle in list(bundles.items()):
+    # Build a string-key index for reverse lookups from CrossModelIntegration.remote_model (str).
+    bundles_by_key: dict[str, Bundle] = {ref.key: b for ref, b in bundles.items()}
+    for model_ref, bundle in list(bundles.items()):
+        model_name = model_ref.key
         for cmr in bundle.cross_model_integrations:
             if cmr.local_role != EndpointType.REQUIRES:
                 continue
-            if cmr.remote_model not in bundles:
+            if cmr.remote_model not in bundles_by_key:
                 continue
-            remote_bundle = bundles[cmr.remote_model]
-            # Skip if a PROVIDES entry already exists (e.g. added by PotentialCMR logic).
+            remote_bundle = bundles_by_key[cmr.remote_model]
+            # Skip if a PROVIDES entry already exists (e.g. added by discovered CMR logic).
             already_present = any(
                 c.local_role == EndpointType.PROVIDES
                 and c.local.application == cmr.remote_application

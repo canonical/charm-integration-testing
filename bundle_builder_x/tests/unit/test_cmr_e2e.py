@@ -29,6 +29,7 @@ from bundle_builder_x.bundle import (
     Integration,
 )
 from bundle_builder_x.charm import Charm, CharmChannel, CharmEndpoint, EndpointType
+from bundle_builder_x.domain import ModelRef
 from bundle_builder_x.domain_builder import (
     applications_from_spec,
     classify_integrations,
@@ -97,37 +98,47 @@ class TestCMREndToEnd:
         """Validate spec parsing and integration classification for both models."""
         spec = SpecFile.model_validate(yaml.safe_load(SPEC_YAML))
 
-        assert set(spec.models_by_name) == {"k8s-model", "machine-model"}
+        # k8s-model has no controller so its key is the plain name;
+        # machine-model has a controller so both the full key and a plain alias are present.
+        assert "k8s-model" in spec.models_by_name
+        assert "machine-model" in spec.models_by_name
+        assert "lxd-controller/machine-model" in spec.models_by_name
 
-        # k8s-model has one local and one in-spec CMR
-        local_k8s, cmr_k8s = classify_integrations(
-            "k8s-model",
+        # k8s-model has one local and one in-spec CMR: both appear as integration constraints
+        integrations_k8s = classify_integrations(
             spec.models_by_name["k8s-model"],
             spec.models_by_name,
         )
-        assert len(local_k8s) == 1
-        assert len(cmr_k8s) == 1
+        assert len(integrations_k8s) == 2
 
-        ic = next(iter(local_k8s))
-        assert {ic.application_1, ic.application_2} == {"webapp", "db-proxy"}
+        local_only = [i for i in integrations_k8s if i.endpoint_1.model == i.endpoint_2.model]
+        assert len(local_only) == 1
+        ic = local_only[0]
+        assert {ic.endpoint_1.application, ic.endpoint_2.application} == {"webapp", "db-proxy"}
 
-        cmr = cmr_k8s[0]
-        assert cmr.local_application == "db-proxy"
-        assert cmr.local_endpoint == "backend-database"
-        assert cmr.remote.model == "machine-model"
-        assert cmr.remote.application == "postgresql"
-        assert cmr.remote.offer_name == "postgresql-db-offer"
-        assert cmr.remote.url == "lxd-controller:admin/machine-model.postgresql-db-offer"
+        cmr_ints = [i for i in integrations_k8s if i.offer_name is not None]
+        assert len(cmr_ints) == 1
+        cmr_int = cmr_ints[0]
+        # Identify the remote endpoint (the one with a model set)
+        remote_ep = cmr_int.endpoint_1 if cmr_int.endpoint_1.model != ModelRef() else cmr_int.endpoint_2
+        local_ep = cmr_int.endpoint_2 if cmr_int.endpoint_1.model != ModelRef() else cmr_int.endpoint_1
+        assert local_ep.application == "db-proxy"
+        assert local_ep.endpoint == "backend-database"
+        # The CMR references machine-model by plain name; classify_integrations resolves
+        # it to a ModelRef with controller and name for consistent domain lookups.
+        assert remote_ep.model == ModelRef(name="machine-model", controller="lxd-controller")
+        assert remote_ep.application == "postgresql"
+        assert cmr_int.offer_name == "postgresql-db-offer"
+        assert cmr_int.url == "lxd-controller:admin/machine-model.postgresql-db-offer"
 
-        # machine-model has one external CMR
-        local_m, cmr_m = classify_integrations(
-            "machine-model",
+        # machine-model has one external CMR: produces one integration constraint
+        integrations_m = classify_integrations(
             spec.models_by_name["machine-model"],
             spec.models_by_name,
         )
-        assert len(local_m) == 0
-        assert len(cmr_m) == 1
-        assert cmr_m[0].remote.url == "cos:admin/monitoring.prometheus-scrape"
+        assert len(integrations_m) == 1
+        ext_cmr = next(iter(integrations_m))
+        assert ext_cmr.url == "cos:admin/monitoring.prometheus-scrape"
 
     def test_applications_from_spec_for_both_models(self) -> None:
         """Verify all application constraints are produced."""
@@ -144,8 +155,8 @@ class TestCMREndToEnd:
     def test_bundle_export_round_trip(self) -> None:
         """Build bundles from classified constraints and verify exported YAML structure."""
         spec = SpecFile.model_validate(yaml.safe_load(SPEC_YAML))
-        _, cmr_k8s = classify_integrations("k8s-model", spec.models_by_name["k8s-model"], spec.models_by_name)
-        _, cmr_m = classify_integrations("machine-model", spec.models_by_name["machine-model"], spec.models_by_name)
+        classify_integrations(spec.models_by_name["k8s-model"], spec.models_by_name)
+        classify_integrations(spec.models_by_name["machine-model"], spec.models_by_name)
 
         # Build k8s-model bundle (the requires side of the CMR)
         k8s_bundle = Bundle(

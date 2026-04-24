@@ -114,10 +114,22 @@ class TestModelSpec:
         assert spec.admin == "admin"
         assert spec.integrations == []
 
+    def test_key_without_controller(self) -> None:
+        # GIVEN a model with a name but no controller
+        spec = ModelSpec(name="prod", applications={"app": AppSpec(charm="c")})
+        # THEN the key is just the name
+        assert spec.key == "prod"
+
+    def test_key_with_controller(self) -> None:
+        # GIVEN a model with both name and controller
+        spec = ModelSpec(name="prod", controller="lxd", applications={"app": AppSpec(charm="c")})
+        # THEN the key is controller/name
+        assert spec.key == "lxd/prod"
+
 
 class TestSpecFile:
     def test_duplicate_model_names_raises(self) -> None:
-        # GIVEN two models with the same name
+        # GIVEN two models with the same name and no controllers
         with pytest.raises(ValueError, match="Duplicate model name"):
             SpecFile(
                 models=[
@@ -125,6 +137,64 @@ class TestSpecFile:
                     ModelSpec(name="model-a", applications={"app": AppSpec(charm="c")}),
                 ]
             )
+
+    def test_duplicate_model_names_same_controller_raises(self) -> None:
+        # GIVEN two models with the same name on the same controller
+        with pytest.raises(ValueError, match="Duplicate model name 'prod' on controller 'lxd'"):
+            SpecFile(
+                models=[
+                    ModelSpec(name="prod", controller="lxd", applications={"app": AppSpec(charm="c")}),
+                    ModelSpec(name="prod", controller="lxd", applications={"app": AppSpec(charm="c")}),
+                ]
+            )
+
+    def test_duplicate_model_names_different_controllers_allowed(self) -> None:
+        # GIVEN two models with the same name on different controllers
+        spec = SpecFile(
+            models=[
+                ModelSpec(name="prod", controller="lxd", applications={"app": AppSpec(charm="c")}),
+                ModelSpec(name="prod", controller="k8s", applications={"app": AppSpec(charm="c")}),
+            ]
+        )
+        # THEN validation passes and models_by_name keys are controller/name
+        assert "lxd/prod" in spec.models_by_name
+        assert "k8s/prod" in spec.models_by_name
+        assert len(spec.models_by_name) == 2
+
+    def test_models_by_name_uses_key(self) -> None:
+        # GIVEN a spec with one model that has a controller
+        spec = SpecFile(
+            models=[
+                ModelSpec(name="my-model", controller="my-ctrl", applications={"app": AppSpec(charm="c")}),
+            ]
+        )
+        # THEN models_by_name includes both the full key and the plain-name alias
+        # (unambiguous name gets both entries for backward compatibility)
+        assert "my-ctrl/my-model" in spec.models_by_name
+        assert "my-model" in spec.models_by_name
+
+    def test_models_by_name_no_controller_uses_plain_name(self) -> None:
+        # GIVEN a spec with one model that has no controller
+        spec = SpecFile(
+            models=[
+                ModelSpec(name="my-model", applications={"app": AppSpec(charm="c")}),
+            ]
+        )
+        # THEN models_by_name uses the plain name as key
+        assert "my-model" in spec.models_by_name
+
+    def test_models_by_name_ambiguous_name_no_plain_alias(self) -> None:
+        # GIVEN two models with the same name on different controllers
+        spec = SpecFile(
+            models=[
+                ModelSpec(name="prod", controller="lxd", applications={"app": AppSpec(charm="c")}),
+                ModelSpec(name="prod", controller="k8s", applications={"app": AppSpec(charm="c")}),
+            ]
+        )
+        # THEN plain name is NOT in models_by_name (ambiguous); only full keys are
+        assert "prod" not in spec.models_by_name
+        assert "lxd/prod" in spec.models_by_name
+        assert "k8s/prod" in spec.models_by_name
 
     def test_model_missing_name_raises(self) -> None:
         # GIVEN a model list entry without a name
@@ -435,14 +505,13 @@ class TestClassifyIntegrations:
         )
 
         # WHEN classifying
-        local, cmr = classify_integrations("model-a", model_spec, {"model-a": model_spec})
+        local = classify_integrations(model_spec, {"model-a": model_spec})
 
-        # THEN one local, zero cross-model
+        # THEN one integration constraint, zero cross-model
         assert len(local) == 1
-        assert len(cmr) == 0
         ic = next(iter(local))
-        assert ic.application_1 == "app-a"
-        assert ic.endpoint_1 == "ep-a"
+        assert ic.endpoint_1.application == "app-a"
+        assert ic.endpoint_1.endpoint == "ep-a"
 
     def test_in_spec_cmr_generates_url(self) -> None:
         # GIVEN two models in spec with a CMR between them
@@ -469,15 +538,13 @@ class TestClassifyIntegrations:
         all_models = {"model-a": model_a, "model-b": model_b}
 
         # WHEN classifying
-        local, cmr = classify_integrations("model-a", model_a, all_models)
+        local = classify_integrations(model_a, all_models)
 
-        # THEN one cross-model constraint with auto-generated url
-        assert len(local) == 0
-        assert len(cmr) == 1
-        c = cmr[0]
-        assert c.remote.model == "model-b"
-        assert c.remote.offer_name == "postgresql-offer"
-        assert c.remote.url == "lxd:admin/model-b.postgresql-offer"
+        # THEN one integration constraint (CMR-derived) with offer_name and url
+        assert len(local) == 1
+        cmr_int = next(iter(local))
+        assert cmr_int.offer_name == "postgresql-offer"
+        assert cmr_int.url == "lxd:admin/model-b.postgresql-offer"
 
     def test_external_cmr_uses_provided_url(self) -> None:
         # GIVEN a model with an external CMR
@@ -496,11 +563,12 @@ class TestClassifyIntegrations:
         )
 
         # WHEN classifying
-        local, cmr = classify_integrations("model-a", model_spec, {"model-a": model_spec})
+        local = classify_integrations(model_spec, {"model-a": model_spec})
 
-        # THEN one cross-model constraint with the provided url
-        assert len(cmr) == 1
-        assert cmr[0].remote.url == "lxd:admin/monitoring.prometheus-scrape-offer"
+        # THEN one cross-model integration with the provided url
+        cmr_ints = [i for i in local if i.url is not None]
+        assert len(cmr_ints) == 1
+        assert cmr_ints[0].url == "lxd:admin/monitoring.prometheus-scrape-offer"
 
     def test_default_offer_name(self) -> None:
         # GIVEN a CMR without an explicit offer_name
@@ -519,10 +587,12 @@ class TestClassifyIntegrations:
         )
 
         # WHEN classifying
-        _, cmr = classify_integrations("model-a", model_spec, {"model-a": model_spec})
+        result = classify_integrations(model_spec, {"model-a": model_spec})
 
         # THEN offer_name defaults to <remote_application>-offer
-        assert cmr[0].remote.offer_name == "prometheus-offer"
+        cmr_ints = [i for i in result if i.offer_name is not None]
+        assert len(cmr_ints) == 1
+        assert cmr_ints[0].offer_name == "prometheus-offer"
 
 
 class TestApplicationsFromSpec:
@@ -711,9 +781,11 @@ class TestSpecFileEdgeCases:
             ],
         )
         model_b = ModelSpec(controller="other-ctrl", applications={"rapp": AppSpec(charm="rc")})
-        _, cmr = classify_integrations("m-a", model_a, {"m-a": model_a, "m-b": model_b})
+        result = classify_integrations(model_a, {"m-a": model_a, "m-b": model_b})
         # THEN the explicit url is used, not the auto-generated one
-        assert cmr[0].remote.url == "EXPLICIT_URL"
+        cmr_ints = [i for i in result if i.url is not None]
+        assert len(cmr_ints) == 1
+        assert cmr_ints[0].url == "EXPLICIT_URL"
 
     def test_empty_applications_rejected(self) -> None:
         # GIVEN a model with no applications

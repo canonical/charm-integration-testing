@@ -33,9 +33,9 @@ import pytest
 
 from bundle_builder_x.bundle_builder import BundleBuilder, UncompletableBundleError
 from bundle_builder_x.charm import CharmEndpoint, EndpointType
-from bundle_builder_x.domain import ApplicationConstraint
+from bundle_builder_x.spec import AppSpec
 
-from .conftest import JUJU, CharmhubClientStub, build_single_model, make_charm
+from .conftest import CharmhubClientStub, build_single_model, make_charm
 
 
 class TestCapabilityRequirements:
@@ -94,11 +94,7 @@ class TestCapabilityRequirements:
         # WHEN building with just temporal-k8s (admin endpoint is non-optional)
         bundle = build_single_model(
             builder,
-            applications={"temporal": ApplicationConstraint(charm="temporal-k8s")},
-            integrations=set(),
-            platform="kubernetes",
-            arch="amd64",
-            juju_version=JUJU,
+            applications={"temporal": AppSpec(charm="temporal-k8s")},
         )
 
         # THEN temporal-admin-k8s is added (it has the "admin" feature)
@@ -155,11 +151,7 @@ class TestCapabilityRequirements:
         with pytest.raises(UncompletableBundleError):
             build_single_model(
                 builder,
-                applications={"temporal": ApplicationConstraint(charm="temporal-k8s")},
-                integrations=set(),
-                platform="kubernetes",
-                arch="amd64",
-                juju_version=JUJU,
+                applications={"temporal": AppSpec(charm="temporal-k8s")},
             )
 
     def test_feature_constraint_without_features_accepts_any_provider(self) -> None:
@@ -193,11 +185,7 @@ class TestCapabilityRequirements:
         # WHEN building - either provider is acceptable
         bundle = build_single_model(
             builder,
-            applications={"app": ApplicationConstraint(charm="my-app")},
-            integrations=set(),
-            platform="kubernetes",
-            arch="amd64",
-            juju_version=JUJU,
+            applications={"app": AppSpec(charm="my-app")},
         )
 
         # THEN one of the two providers is selected (no feature constraint to discriminate)

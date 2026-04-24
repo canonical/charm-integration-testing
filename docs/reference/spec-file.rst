@@ -152,6 +152,10 @@ Integration
      - no
      - --
      - If set, this is a cross-model integration.
+   * - ``remote_controller``
+     - no
+     - --
+     - Controller hosting the remote model. When set, the remote model is identified as ``remote_controller/remote_model`` in the domain.
    * - ``offer_name``
      - no
      - ``<remote_application>-offer``

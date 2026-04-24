@@ -30,9 +30,9 @@ with a parent CA (such as self-signed-certificates).
 
 from bundle_builder_x.bundle_builder import BundleBuilder
 from bundle_builder_x.charm import CharmEndpoint, EndpointType
-from bundle_builder_x.domain import ApplicationConstraint, IntegrationConstraint
+from bundle_builder_x.spec import AppSpec, IntegrationSpec
 
-from .conftest import JUJU, CharmhubClientStub, build_single_model, make_charm
+from .conftest import CharmhubClientStub, build_single_model, make_charm
 
 
 class TestConditionalRequirements:
@@ -75,20 +75,17 @@ class TestConditionalRequirements:
         bundle = build_single_model(
             builder,
             applications={
-                "vault": ApplicationConstraint(charm="vault-k8s"),
-                "consumer": ApplicationConstraint(charm="pki-consumer"),
+                "vault": AppSpec(charm="vault-k8s"),
+                "consumer": AppSpec(charm="pki-consumer"),
             },
-            integrations={
-                IntegrationConstraint(
-                    application_1="vault",
-                    endpoint_1="vault-pki",
-                    application_2="consumer",
-                    endpoint_2="vault-pki",
+            integrations=[
+                IntegrationSpec(
+                    application="vault",
+                    endpoint="vault-pki",
+                    remote_application="consumer",
+                    remote_endpoint="vault-pki",
                 )
-            },
-            platform="kubernetes",
-            arch="amd64",
-            juju_version=JUJU,
+            ],
         )
 
         # THEN the solver adds self-signed-certificates to satisfy the conditional
@@ -129,11 +126,7 @@ class TestConditionalRequirements:
         # WHEN building vault alone (no vault-pki consumer, so vault-pki is NOT integrated)
         bundle = build_single_model(
             builder,
-            applications={"vault": ApplicationConstraint(charm="vault-k8s")},
-            integrations=set(),
-            platform="kubernetes",
-            arch="amd64",
-            juju_version=JUJU,
+            applications={"vault": AppSpec(charm="vault-k8s")},
         )
 
         # THEN self-signed-certificates is NOT added (condition not triggered)
@@ -185,20 +178,17 @@ class TestConditionalRequirements:
         bundle = build_single_model(
             builder,
             applications={
-                "chain": ApplicationConstraint(charm="chain-app"),
-                "consumer": ApplicationConstraint(charm="a-consumer"),
+                "chain": AppSpec(charm="chain-app"),
+                "consumer": AppSpec(charm="a-consumer"),
             },
-            integrations={
-                IntegrationConstraint(
-                    application_1="chain",
-                    endpoint_1="ep-a",
-                    application_2="consumer",
-                    endpoint_2="ep-a",
+            integrations=[
+                IntegrationSpec(
+                    application="chain",
+                    endpoint="ep-a",
+                    remote_application="consumer",
+                    remote_endpoint="ep-a",
                 )
-            },
-            platform="kubernetes",
-            arch="amd64",
-            juju_version=JUJU,
+            ],
         )
 
         # THEN both b-provider and c-provider are added (full chain triggered)

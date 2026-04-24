@@ -38,9 +38,9 @@ import pytest
 
 from bundle_builder_x.bundle_builder import BundleBuilder, UncompletableBundleError
 from bundle_builder_x.charm import CharmEndpoint, EndpointType
-from bundle_builder_x.domain import ApplicationConstraint
+from bundle_builder_x.spec import AppSpec
 
-from .conftest import JUJU, CharmhubClientStub, build_single_model, make_charm
+from .conftest import CharmhubClientStub, build_single_model, make_charm
 
 
 class TestMinimumObservability:
@@ -102,11 +102,7 @@ class TestMinimumObservability:
         # WHEN building with just grafana-agent
         bundle = build_single_model(
             builder,
-            applications={"agent": ApplicationConstraint(charm="grafana-agent-k8s")},
-            integrations=set(),
-            platform="kubernetes",
-            arch="amd64",
-            juju_version=JUJU,
+            applications={"agent": AppSpec(charm="grafana-agent-k8s")},
         )
 
         # THEN the solver adds at least one input source to satisfy the or-constraint
@@ -152,11 +148,7 @@ class TestMinimumObservability:
         with pytest.raises(UncompletableBundleError):
             build_single_model(
                 builder,
-                applications={"agent": ApplicationConstraint(charm="grafana-agent-k8s")},
-                integrations=set(),
-                platform="kubernetes",
-                arch="amd64",
-                juju_version=JUJU,
+                applications={"agent": AppSpec(charm="grafana-agent-k8s")},
             )
 
     def test_multiple_or_options_satisfies_constraint_with_one_expansion(self) -> None:
@@ -190,11 +182,7 @@ class TestMinimumObservability:
 
         bundle = build_single_model(
             builder,
-            applications={"agg": ApplicationConstraint(charm="aggregator")},
-            integrations=set(),
-            platform="kubernetes",
-            arch="amd64",
-            juju_version=JUJU,
+            applications={"agg": AppSpec(charm="aggregator")},
         )
 
         # THEN at least one provider was added (not necessarily all three)

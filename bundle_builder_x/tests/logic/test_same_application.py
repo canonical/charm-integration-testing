@@ -36,9 +36,9 @@ here we focus on the simpler equality and implication forms.
 
 from bundle_builder_x.bundle_builder import BundleBuilder
 from bundle_builder_x.charm import CharmEndpoint, EndpointType
-from bundle_builder_x.domain import ApplicationConstraint, IntegrationConstraint
+from bundle_builder_x.spec import AppSpec, IntegrationSpec
 
-from .conftest import JUJU, CharmhubClientStub, build_single_model, make_charm
+from .conftest import CharmhubClientStub, build_single_model, make_charm
 
 
 class TestSameApplicationConstraints:
@@ -88,11 +88,7 @@ class TestSameApplicationConstraints:
         # WHEN building with only mongodb (ldap is non-optional -> glauth is added)
         bundle = build_single_model(
             builder,
-            applications={"mongo": ApplicationConstraint(charm="mongodb-k8s")},
-            integrations=set(),
-            platform="kubernetes",
-            arch="amd64",
-            juju_version=JUJU,
+            applications={"mongo": AppSpec(charm="mongodb-k8s")},
         )
 
         # THEN glauth is added (to satisfy ldap)
@@ -143,20 +139,17 @@ class TestSameApplicationConstraints:
         bundle = build_single_model(
             builder,
             applications={
-                "mongo": ApplicationConstraint(charm="mongodb-k8s"),
-                "glauth": ApplicationConstraint(charm="glauth-k8s"),
+                "mongo": AppSpec(charm="mongodb-k8s"),
+                "glauth": AppSpec(charm="glauth-k8s"),
             },
-            integrations={
-                IntegrationConstraint(
-                    application_1="mongo",
-                    endpoint_1="ldap",
-                    application_2="glauth",
-                    endpoint_2="ldap",
+            integrations=[
+                IntegrationSpec(
+                    application="mongo",
+                    endpoint="ldap",
+                    remote_application="glauth",
+                    remote_endpoint="ldap",
                 )
-            },
-            platform="kubernetes",
-            arch="amd64",
-            juju_version=JUJU,
+            ],
         )
 
         # THEN the equality constraint forces ldap-certificate-transfer to also be integrated
@@ -189,11 +182,7 @@ class TestSameApplicationConstraints:
         # WHEN building with only mongodb
         bundle = build_single_model(
             builder,
-            applications={"mongo": ApplicationConstraint(charm="mongodb-k8s")},
-            integrations=set(),
-            platform="kubernetes",
-            arch="amd64",
-            juju_version=JUJU,
+            applications={"mongo": AppSpec(charm="mongodb-k8s")},
         )
 
         # THEN the bundle is valid: both endpoints inactive satisfies bool(A) == bool(B)

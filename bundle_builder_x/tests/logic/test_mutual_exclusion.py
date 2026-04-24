@@ -30,9 +30,9 @@ import pytest
 
 from bundle_builder_x.bundle_builder import BundleBuilder, UncompletableBundleError
 from bundle_builder_x.charm import CharmEndpoint, EndpointType
-from bundle_builder_x.domain import ApplicationConstraint
+from bundle_builder_x.spec import AppSpec
 
-from .conftest import JUJU, CharmhubClientStub, build_single_model, make_charm
+from .conftest import CharmhubClientStub, build_single_model, make_charm
 
 
 class TestMutualExclusion:
@@ -69,11 +69,7 @@ class TestMutualExclusion:
         # WHEN building with only livepatch
         bundle = build_single_model(
             builder,
-            applications={"livepatch": ApplicationConstraint(charm="livepatch-k8s")},
-            integrations=set(),
-            platform="kubernetes",
-            arch="amd64",
-            juju_version=JUJU,
+            applications={"livepatch": AppSpec(charm="livepatch-k8s")},
         )
 
         # THEN exactly one provider was added (the constraint allows only one)
@@ -106,11 +102,7 @@ class TestMutualExclusion:
         with pytest.raises(UncompletableBundleError):
             build_single_model(
                 builder,
-                applications={"livepatch": ApplicationConstraint(charm="livepatch-k8s")},
-                integrations=set(),
-                platform="kubernetes",
-                arch="amd64",
-                juju_version=JUJU,
+                applications={"livepatch": AppSpec(charm="livepatch-k8s")},
             )
 
     def test_both_mutex_endpoints_simultaneously_violates_constraint(self) -> None:
@@ -138,11 +130,7 @@ class TestMutualExclusion:
         # WHEN building - the solver will try to satisfy the constraint
         bundle = build_single_model(
             builder,
-            applications={"livepatch": ApplicationConstraint(charm="livepatch-k8s")},
-            integrations=set(),
-            platform="kubernetes",
-            arch="amd64",
-            juju_version=JUJU,
+            applications={"livepatch": AppSpec(charm="livepatch-k8s")},
         )
 
         # THEN only one of the two endpoints is integrated (== 1, not == 2)

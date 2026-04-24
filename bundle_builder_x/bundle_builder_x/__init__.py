@@ -19,14 +19,6 @@ from .charm import Charm, CharmChannel, CharmEndpoint, EndpointType
 from .charmhub import CharmhubClient
 from .charmhub_http import CharmReleaseNotFoundException
 from .constraints_dsl import DSLSyntaxError, DSLTypeError
-from .domain import (
-    ApplicationConstraint,
-    CrossModelIntegrationConstraint,
-    CrossModelRemote,
-    IntegrationConstraint,
-    ModelConstraints,
-    PotentialCMR,
-)
 from .dsl_lowering import DSLLoweringError
 from .juju_version import JujuVersion
 from .overrides import OverridesClient
@@ -37,7 +29,6 @@ from .timing import Timeline
 __all__ = [
     "AppSpec",
     "Application",
-    "ApplicationConstraint",
     "ApplicationEndpoint",
     "Bundle",
     "BundleBuilder",
@@ -47,20 +38,15 @@ __all__ = [
     "CharmhubClient",
     "CharmReleaseNotFoundException",
     "CrossModelIntegration",
-    "CrossModelIntegrationConstraint",
-    "CrossModelRemote",
     "DSLLoweringError",
     "DSLSyntaxError",
     "DSLTypeError",
     "EndpointType",
     "Integration",
-    "IntegrationConstraint",
     "IntegrationSpec",
     "JujuVersion",
-    "ModelConstraints",
     "ModelSpec",
     "OverridesClient",
-    "PotentialCMR",
     "Solution",
     "SnapVersionNotFoundException",
     "SpecFile",

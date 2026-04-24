@@ -263,26 +263,14 @@ def _lower_as_features(expr: AnyExpr, ctx: LoweringContext) -> _FeatureSet:
 def _charm_set_for_endpoints(charm_id: int, endpoint_names: _EndpointNames, domain: Domain) -> z3.ExprRef:
     """Build a Z3 Set(Int) of peer charm IDs integrated on the given endpoints."""
     result: z3.ExprRef = z3.EmptySet(z3.IntSort())
-    for integration_key, integration in domain.charm_integrations.items():
-        req = integration_key.requires_endpoint
-        prov = integration_key.provides_endpoint
-        if req.charm_id == charm_id and req.endpoint in endpoint_names:
-            peer_id = prov.charm_id
-        elif prov.charm_id == charm_id and prov.endpoint in endpoint_names:
-            peer_id = req.charm_id
+    for integration in domain.charm_integrations:
+        if integration.requires_charm_id == charm_id and integration.requires_endpoint in endpoint_names:
+            peer_id = integration.provides_charm_id
+        elif integration.provides_charm_id == charm_id and integration.provides_endpoint in endpoint_names:
+            peer_id = integration.requires_charm_id
         else:
             continue
         result = z3.If(integration.exists, z3.SetAdd(result, z3.IntVal(peer_id)), result)
-
-    # Include peers connected via PotentialCMRs (cross-model relations)
-    for pcmr in domain.potential_cmrs:
-        if pcmr.requires_charm_id == charm_id and pcmr.requires_endpoint in endpoint_names:
-            peer_id = pcmr.provides_charm_id
-        elif pcmr.provides_charm_id == charm_id and pcmr.provides_endpoint in endpoint_names:
-            peer_id = pcmr.requires_charm_id
-        else:
-            continue
-        result = z3.If(pcmr.exists, z3.SetAdd(result, z3.IntVal(peer_id)), result)
 
     return result
 
@@ -311,13 +299,19 @@ def _reachable_set(charm_id: int, endpoint_name: str, spec: object, domain: Doma
                 # Rule: if peer_charm's 'requires' endpoint (proxy.requires) connects
                 # to a charm already in result, peer_charm itself is reachable.
                 peer_in_chain: z3.ExprRef = z3.BoolVal(False)
-                for integration_key, integration in domain.charm_integrations.items():
-                    req = integration_key.requires_endpoint
-                    prov = integration_key.provides_endpoint
-                    if req.charm_id == peer_charm_id and req.endpoint == proxy.requires:
-                        other_id = prov.charm_id
-                    elif prov.charm_id == peer_charm_id and prov.endpoint == proxy.requires:
-                        other_id = req.charm_id
+                for integration in domain.charm_integrations:
+                    if domain.is_cross_model(integration):
+                        continue  # proxy chains are local-only
+                    if (
+                        integration.requires_charm_id == peer_charm_id
+                        and integration.requires_endpoint == proxy.requires
+                    ):
+                        other_id = integration.provides_charm_id
+                    elif (
+                        integration.provides_charm_id == peer_charm_id
+                        and integration.provides_endpoint == proxy.requires
+                    ):
+                        other_id = integration.requires_charm_id
                     else:
                         continue
                     peer_in_chain = z3.Or(

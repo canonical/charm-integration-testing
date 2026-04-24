@@ -37,9 +37,9 @@ import pytest
 
 from bundle_builder_x.bundle_builder import BundleBuilder, UncompletableBundleError
 from bundle_builder_x.charm import CharmEndpoint, EndpointType
-from bundle_builder_x.domain import ApplicationConstraint, IntegrationConstraint
+from bundle_builder_x.spec import AppSpec, IntegrationSpec
 
-from .conftest import JUJU, CharmhubClientStub, build_single_model, make_charm
+from .conftest import CharmhubClientStub, build_single_model, make_charm
 
 
 class TestVersionCompatibility:
@@ -77,26 +77,23 @@ class TestVersionCompatibility:
         bundle = build_single_model(
             builder,
             applications={
-                "pg-primary": ApplicationConstraint(
+                "pg-primary": AppSpec(
                     charm="postgresql-k8s",
-                    channel=pg_14.channel,
+                    channel="14/stable",
                 ),
-                "pg-standby": ApplicationConstraint(
+                "pg-standby": AppSpec(
                     charm="postgresql-k8s",
-                    channel=pg_14.channel,
+                    channel="14/stable",
                 ),
             },
-            integrations={
-                IntegrationConstraint(
-                    application_1="pg-standby",
-                    endpoint_1="replication",
-                    application_2="pg-primary",
-                    endpoint_2="replication-offer",
+            integrations=[
+                IntegrationSpec(
+                    application="pg-standby",
+                    endpoint="replication",
+                    remote_application="pg-primary",
+                    remote_endpoint="replication-offer",
                 )
-            },
-            platform="kubernetes",
-            arch="amd64",
-            juju_version=JUJU,
+            ],
         )
 
         # THEN both instances are in the bundle (same track satisfies the constraint)
@@ -159,26 +156,23 @@ class TestVersionCompatibility:
             build_single_model(
                 builder,
                 applications={
-                    "pg-primary": ApplicationConstraint(
+                    "pg-primary": AppSpec(
                         charm="postgresql-k8s",
-                        channel=pg_14.channel,
+                        channel="14/stable",
                     ),
-                    "pg-standby": ApplicationConstraint(
+                    "pg-standby": AppSpec(
                         charm="postgresql-k8s",
-                        channel=pg_15.channel,
+                        channel="15/stable",
                     ),
                 },
-                integrations={
-                    IntegrationConstraint(
-                        application_1="pg-standby",
-                        endpoint_1="replication",
-                        application_2="pg-primary",
-                        endpoint_2="replication-offer",
+                integrations=[
+                    IntegrationSpec(
+                        application="pg-standby",
+                        endpoint="replication",
+                        remote_application="pg-primary",
+                        remote_endpoint="replication-offer",
                     )
-                },
-                platform="kubernetes",
-                arch="amd64",
-                juju_version=JUJU,
+                ],
             )
 
     def test_channel_mismatch_resolved_when_correct_version_available(self) -> None:
@@ -220,20 +214,17 @@ class TestVersionCompatibility:
         bundle = build_single_model(
             builder,
             applications={
-                "pg-primary": ApplicationConstraint(charm="postgresql-k8s", channel=pg_14.channel),
-                "pg-standby": ApplicationConstraint(charm="postgresql-k8s", channel=pg_14.channel),
+                "pg-primary": AppSpec(charm="postgresql-k8s", channel="14/stable"),
+                "pg-standby": AppSpec(charm="postgresql-k8s", channel="14/stable"),
             },
-            integrations={
-                IntegrationConstraint(
-                    application_1="pg-standby",
-                    endpoint_1="replication",
-                    application_2="pg-primary",
-                    endpoint_2="replication-offer",
+            integrations=[
+                IntegrationSpec(
+                    application="pg-standby",
+                    endpoint="replication",
+                    remote_application="pg-primary",
+                    remote_endpoint="replication-offer",
                 )
-            },
-            platform="kubernetes",
-            arch="amd64",
-            juju_version=JUJU,
+            ],
         )
 
         # Both instances on same track -> builds fine

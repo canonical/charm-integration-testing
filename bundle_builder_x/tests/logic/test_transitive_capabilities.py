@@ -35,9 +35,9 @@ self-signed-certs <-> jimm integration.
 
 from bundle_builder_x.bundle_builder import BundleBuilder
 from bundle_builder_x.charm import CharmEndpoint, EndpointType
-from bundle_builder_x.domain import ApplicationConstraint
+from bundle_builder_x.spec import AppSpec
 
-from .conftest import JUJU, CharmhubClientStub, build_single_model, make_charm
+from .conftest import CharmhubClientStub, build_single_model, make_charm
 
 
 class TestTransitiveCapabilities:
@@ -114,11 +114,7 @@ class TestTransitiveCapabilities:
         # WHEN building with only jimm
         bundle = build_single_model(
             builder,
-            applications={"jimm": ApplicationConstraint(charm="juju-jimm-k8s")},
-            integrations=set(),
-            platform="kubernetes",
-            arch="amd64",
-            juju_version=JUJU,
+            applications={"jimm": AppSpec(charm="juju-jimm-k8s")},
         )
 
         # THEN the full chain is built: hydra + traefik + self-signed-certs
@@ -167,11 +163,7 @@ class TestTransitiveCapabilities:
 
         bundle = build_single_model(
             builder,
-            applications={"jimm": ApplicationConstraint(charm="juju-jimm-k8s")},
-            integrations=set(),
-            platform="kubernetes",
-            arch="amd64",
-            juju_version=JUJU,
+            applications={"jimm": AppSpec(charm="juju-jimm-k8s")},
         )
 
         # THEN there is a direct integration between jimm and self-signed-certs
@@ -216,11 +208,7 @@ class TestTransitiveCapabilities:
 
         bundle = build_single_model(
             builder,
-            applications={"app-a": ApplicationConstraint(charm="charm-a")},
-            integrations=set(),
-            platform="kubernetes",
-            arch="amd64",
-            juju_version=JUJU,
+            applications={"app-a": AppSpec(charm="charm-a")},
         )
 
         # THEN all four charms are in the bundle

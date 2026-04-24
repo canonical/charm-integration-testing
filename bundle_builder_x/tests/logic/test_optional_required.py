@@ -24,9 +24,9 @@ import pytest
 
 from bundle_builder_x.bundle_builder import BundleBuilder, UncompletableBundleError
 from bundle_builder_x.charm import CharmEndpoint, EndpointType
-from bundle_builder_x.domain import ApplicationConstraint, IntegrationConstraint
+from bundle_builder_x.spec import AppSpec, IntegrationSpec
 
-from .conftest import JUJU, CharmhubClientStub, build_single_model, make_charm
+from .conftest import CharmhubClientStub, build_single_model, make_charm
 
 
 class TestRequiredEndpoints:
@@ -52,11 +52,7 @@ class TestRequiredEndpoints:
         # WHEN building a bundle with only the main app
         bundle = build_single_model(
             builder,
-            applications={"app": ApplicationConstraint(charm="my-app")},
-            integrations=set(),
-            platform="kubernetes",
-            arch="amd64",
-            juju_version=JUJU,
+            applications={"app": AppSpec(charm="my-app")},
         )
 
         # THEN the solver expands the domain and adds the provider
@@ -84,11 +80,7 @@ class TestRequiredEndpoints:
         with pytest.raises(UncompletableBundleError):
             build_single_model(
                 builder,
-                applications={"app": ApplicationConstraint(charm="my-app")},
-                integrations=set(),
-                platform="kubernetes",
-                arch="amd64",
-                juju_version=JUJU,
+                applications={"app": AppSpec(charm="my-app")},
             )
 
     def test_optional_endpoint_not_expanded_when_no_provider(self) -> None:
@@ -105,11 +97,7 @@ class TestRequiredEndpoints:
         # WHEN building
         bundle = build_single_model(
             builder,
-            applications={"app": ApplicationConstraint(charm="my-app")},
-            integrations=set(),
-            platform="kubernetes",
-            arch="amd64",
-            juju_version=JUJU,
+            applications={"app": AppSpec(charm="my-app")},
         )
 
         # THEN it succeeds with just the one charm, no extra integrations
@@ -138,11 +126,7 @@ class TestRequiredEndpoints:
         # WHEN building with only the provider
         bundle = build_single_model(
             builder,
-            applications={"db": ApplicationConstraint(charm="database")},
-            integrations=set(),
-            platform="kubernetes",
-            arch="amd64",
-            juju_version=JUJU,
+            applications={"db": AppSpec(charm="database")},
         )
 
         # THEN the solver adds the consumer to satisfy the provider's non-optional endpoint
@@ -180,20 +164,17 @@ class TestIntegrationLimits:
         bundle = build_single_model(
             builder,
             applications={
-                "proxy": ApplicationConstraint(charm="content-cache-k8s"),
-                "web": ApplicationConstraint(charm="webapp"),
+                "proxy": AppSpec(charm="content-cache-k8s"),
+                "web": AppSpec(charm="webapp"),
             },
-            integrations={
-                IntegrationConstraint(
-                    application_1="proxy",
-                    endpoint_1="nginx-proxy",
-                    application_2="web",
-                    endpoint_2="nginx-route",
+            integrations=[
+                IntegrationSpec(
+                    application="proxy",
+                    endpoint="nginx-proxy",
+                    remote_application="web",
+                    remote_endpoint="nginx-route",
                 )
-            },
-            platform="kubernetes",
-            arch="amd64",
-            juju_version=JUJU,
+            ],
         )
 
         # THEN the bundle is valid - one integration, limit respected
@@ -227,27 +208,24 @@ class TestIntegrationLimits:
             build_single_model(
                 builder,
                 applications={
-                    "proxy": ApplicationConstraint(charm="content-cache-k8s"),
-                    "web-a": ApplicationConstraint(charm="webapp"),
-                    "web-b": ApplicationConstraint(charm="webapp"),
+                    "proxy": AppSpec(charm="content-cache-k8s"),
+                    "web-a": AppSpec(charm="webapp"),
+                    "web-b": AppSpec(charm="webapp"),
                 },
-                integrations={
-                    IntegrationConstraint(
-                        application_1="proxy",
-                        endpoint_1="nginx-proxy",
-                        application_2="web-a",
-                        endpoint_2="nginx-route",
+                integrations=[
+                    IntegrationSpec(
+                        application="proxy",
+                        endpoint="nginx-proxy",
+                        remote_application="web-a",
+                        remote_endpoint="nginx-route",
                     ),
-                    IntegrationConstraint(
-                        application_1="proxy",
-                        endpoint_1="nginx-proxy",
-                        application_2="web-b",
-                        endpoint_2="nginx-route",
+                    IntegrationSpec(
+                        application="proxy",
+                        endpoint="nginx-proxy",
+                        remote_application="web-b",
+                        remote_endpoint="nginx-route",
                     ),
-                },
-                platform="kubernetes",
-                arch="amd64",
-                juju_version=JUJU,
+                ],
             )
 
     def test_unlimited_endpoint_allows_multiple_consumers(self) -> None:
@@ -280,34 +258,31 @@ class TestIntegrationLimits:
         bundle = build_single_model(
             builder,
             applications={
-                "ssc": ApplicationConstraint(charm="self-signed-certificates"),
-                "app-a": ApplicationConstraint(charm="app"),
-                "app-b": ApplicationConstraint(charm="app"),
-                "app-c": ApplicationConstraint(charm="app"),
+                "ssc": AppSpec(charm="self-signed-certificates"),
+                "app-a": AppSpec(charm="app"),
+                "app-b": AppSpec(charm="app"),
+                "app-c": AppSpec(charm="app"),
             },
-            integrations={
-                IntegrationConstraint(
-                    application_1="ssc",
-                    endpoint_1="certificates",
-                    application_2="app-a",
-                    endpoint_2="certificates",
+            integrations=[
+                IntegrationSpec(
+                    application="ssc",
+                    endpoint="certificates",
+                    remote_application="app-a",
+                    remote_endpoint="certificates",
                 ),
-                IntegrationConstraint(
-                    application_1="ssc",
-                    endpoint_1="certificates",
-                    application_2="app-b",
-                    endpoint_2="certificates",
+                IntegrationSpec(
+                    application="ssc",
+                    endpoint="certificates",
+                    remote_application="app-b",
+                    remote_endpoint="certificates",
                 ),
-                IntegrationConstraint(
-                    application_1="ssc",
-                    endpoint_1="certificates",
-                    application_2="app-c",
-                    endpoint_2="certificates",
+                IntegrationSpec(
+                    application="ssc",
+                    endpoint="certificates",
+                    remote_application="app-c",
+                    remote_endpoint="certificates",
                 ),
-            },
-            platform="kubernetes",
-            arch="amd64",
-            juju_version=JUJU,
+            ],
         )
 
         # THEN the bundle is valid with all three integrations

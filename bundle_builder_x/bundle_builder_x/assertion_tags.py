@@ -16,7 +16,9 @@
 import json
 from enum import Enum
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
+
+from .domain import ModelRef
 
 
 class Assertions(str, Enum):
@@ -33,7 +35,6 @@ class Assertions(str, Enum):
     CHARM_EXISTS_FROM_INTEGRATION = "charm_exists_from_integration"
     ENDPOINT_COUNT_MATCHES_INTEGRATIONS = "endpoint_count_matches_integrations"
     ENDPOINT_INTEGRATED_MATCHES_COUNT = "endpoint_integrated_matches_count"
-    ENDPOINT_MODE_MATCHES = "endpoint_mode_matches"
     ENDPOINT_RESPECTS_LIMIT = "endpoint_respects_limit"
     APPLICATION_INTEGRATION_APPS_MAP_TO_CHARMS = "application_integration_apps_map_to_charms"
     CHARM_CUSTOM_CONSTRAINT = "charm_custom_constraint"
@@ -71,6 +72,7 @@ class AppEndpointPayload(BaseModel):
 
     application: str
     endpoint: str
+    model: ModelRef = Field(default_factory=ModelRef)
 
 
 class CharmPayload(BaseModel):
@@ -90,7 +92,7 @@ class CharmEndpointPayload(BaseModel):
 
 class ApplicationExistsTag(AssertionTag):
     kind: Assertions = Assertions.APPLICATION_EXISTS
-    model: str
+    model: ModelRef
     application: str
 
 
@@ -107,7 +109,7 @@ class CharmExistsFromApplicationTag(AssertionTag):
 
 class ApplicationIntegrationExistsTag(AssertionTag):
     kind: Assertions = Assertions.APPLICATION_INTEGRATION_EXISTS
-    model: str
+    model: ModelRef
     integration: list[AppEndpointPayload]
 
 
@@ -149,11 +151,6 @@ class EndpointCountMatchesIntegrationsTag(AssertionTag):
 class EndpointIntegratedMatchesCountTag(AssertionTag):
     kind: Assertions = Assertions.ENDPOINT_INTEGRATED_MATCHES_COUNT
     charm: CharmEndpointPayload
-
-
-class EndpointModeMatchesTag(AssertionTag):
-    kind: Assertions = Assertions.ENDPOINT_MODE_MATCHES
-    integration: list[CharmEndpointPayload]
 
 
 class CharmEndpointNonOptionalTag(AssertionTag):
@@ -214,7 +211,6 @@ _ASSERTION_TYPE_REGISTRY: dict[Assertions, type[AssertionTag]] = {
     Assertions.CHARM_EXISTS_FROM_INTEGRATION: CharmExistsFromIntegrationTag,
     Assertions.ENDPOINT_COUNT_MATCHES_INTEGRATIONS: EndpointCountMatchesIntegrationsTag,
     Assertions.ENDPOINT_INTEGRATED_MATCHES_COUNT: EndpointIntegratedMatchesCountTag,
-    Assertions.ENDPOINT_MODE_MATCHES: EndpointModeMatchesTag,
     Assertions.ENDPOINT_RESPECTS_LIMIT: EndpointRespectsLimitTag,
     Assertions.APPLICATION_INTEGRATION_APPS_MAP_TO_CHARMS: ApplicationIntegrationAppsMapToCharmsTag,
     Assertions.CHARM_CUSTOM_CONSTRAINT: CharmCustomConstraintTag,
