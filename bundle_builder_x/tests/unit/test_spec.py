@@ -345,6 +345,27 @@ class TestSpecFile:
         assert spec.models_by_name["model-a"].applications["my-app"].channel == "1/stable"
         assert len(spec.models_by_name["model-a"].integrations) == 1
 
+    def test_load_from_string_path(self, tmp_path: Path) -> None:
+        # GIVEN a valid spec YAML file path as a string
+        spec_data = {
+            "models": [
+                {
+                    "name": "model-a",
+                    "applications": {
+                        "my-app": {"charm": "my-charm"},
+                    },
+                },
+            ]
+        }
+        spec_path = tmp_path / "spec.yaml"
+        spec_path.write_text(yaml.dump(spec_data), encoding="utf-8")
+
+        # WHEN loading via a string path
+        spec = SpecFile.load(str(spec_path))
+
+        # THEN the spec is valid
+        assert "model-a" in spec.models_by_name
+
     def test_cross_model_local_app_must_exist(self) -> None:
         # GIVEN a CMR where the local app doesn't exist
         with pytest.raises(ValueError, match="not defined in this model's applications"):

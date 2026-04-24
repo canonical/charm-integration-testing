@@ -40,15 +40,21 @@ class Timeline:
         logger: logging.Logger | None = None,
         _spans: list[Span] | None = None,
         _prefix: str = "",
+        _logger_is_timeline: bool = False,
     ) -> None:
-        self.logger = logger.getChild("timeline") if logger else None
+        if logger is None:
+            self.logger = None
+        elif _logger_is_timeline:
+            self.logger = logger
+        else:
+            self.logger = logger.getChild("timeline")
         self._spans: list[Span] = _spans if _spans is not None else []
         self._prefix = _prefix
 
     def child(self, name: str) -> "Timeline":
         """Return a child Timeline that shares the same span list with a label prefix."""
         prefix = f"{self._prefix}{name}/" if self._prefix else f"{name}/"
-        return Timeline(logger=self.logger, _spans=self._spans, _prefix=prefix)
+        return Timeline(logger=self.logger, _spans=self._spans, _prefix=prefix, _logger_is_timeline=True)
 
     def on(self, label: str) -> _SpanToken:
         """Start a timing span. Returns a token to pass to off()."""

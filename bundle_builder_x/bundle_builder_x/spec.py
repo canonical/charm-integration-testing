@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import cast
 
 import yaml
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class AppSpec(BaseModel):
@@ -77,7 +77,7 @@ class ModelSpec(BaseModel):
     controller: str | None = None
     admin: str = "admin"
     applications: dict[str, AppSpec]
-    integrations: list[IntegrationSpec] = []
+    integrations: list[IntegrationSpec] = Field(default_factory=list)
 
 
 class SpecFile(BaseModel):
@@ -207,7 +207,8 @@ class SpecFile(BaseModel):
         return self
 
     @classmethod
-    def load(cls, path: Path) -> SpecFile:
+    def load(cls, path: str | Path) -> SpecFile:
         """Load and validate a spec file from a YAML path."""
-        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+        spec_path = Path(path)
+        raw = yaml.safe_load(spec_path.read_text(encoding="utf-8"))
         return cls.model_validate(raw)
