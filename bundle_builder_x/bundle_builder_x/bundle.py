@@ -29,11 +29,19 @@ _MERMAID_RESERVED = frozenset(
 )
 
 
+_IND = "    "  # one Mermaid indent level (4 spaces)
+
+
 def _mermaid_id(name: str) -> str:
     """Return a Mermaid-safe identifier for a model name."""
     if name.lower() in _MERMAID_RESERVED:
         return f"m_{name}"
     return name
+
+
+def _mermaid_node_id(model_id: str, application: str) -> str:
+    """Return a namespaced Mermaid node ID to avoid collisions across models."""
+    return f"{model_id}__{application}"
 
 
 class Application(BaseModel):
@@ -183,6 +191,64 @@ class Bundle(BaseModel):
         )
 
 
+def _mermaid_subgraph_lines(bundle: Bundle, model_name: str, model_id: str) -> list[str]:
+    """Return Mermaid lines for one model subgraph: application nodes and local integration edges."""
+    lines: list[str] = [
+        f"{_IND}subgraph {model_id}[{model_name}]",
+        f"{_IND * 2}direction TB",
+    ]
+
+    for application in sorted(bundle.applications):
+        info = bundle.applications[application]
+        node_id = _mermaid_node_id(model_id, application)
+        charm_info = f"{info.charm.channel} rev:{info.charm.revision}"
+        if application == info.charm.name:
+            lines.append(f'{_IND * 2}{node_id}["{application}<br/>{charm_info}"]:::app')
+        else:
+            lines.append(f'{_IND * 2}{node_id}["{application}<br/>({info.charm.name})<br/>{charm_info}"]:::app')
+
+    lines.append("")
+
+    for integration in sorted(
+        bundle.integrations,
+        key=lambda i: (
+            min((e.application, e.endpoint) for e in i),
+            max((e.application, e.endpoint) for e in i),
+        ),
+    ):
+        ep_1, ep_2 = sorted(integration, key=lambda e: (e.application, e.endpoint))
+        charm_ep_1 = bundle.applications[ep_1.application].charm.endpoints[ep_1.endpoint]
+        interface = charm_ep_1.interface
+        if charm_ep_1.type == EndpointType.REQUIRES:
+            requirer_ep, provider_ep = ep_1, ep_2
+        else:
+            requirer_ep, provider_ep = ep_2, ep_1
+        label = f"{provider_ep.endpoint}<br/>&lt;{interface}&gt;<br/>{requirer_ep.endpoint}"
+        provider_id = _mermaid_node_id(model_id, provider_ep.application)
+        requirer_id = _mermaid_node_id(model_id, requirer_ep.application)
+        lines.append(f'{_IND * 2}{provider_id} -->|"{label}"| {requirer_id}')
+
+    lines.append(f"{_IND}end")
+    return lines
+
+
+def _mermaid_cmr_edge_lines(bundle: Bundle, model_id: str) -> list[str]:
+    """Return Mermaid edge lines for PROVIDES-side cross-model integrations."""
+    lines: list[str] = []
+    for cmr in sorted(
+        bundle.cross_model_integrations,
+        key=lambda c: (c.local.application, c.local.endpoint, c.remote_model, c.remote_application),
+    ):
+        if cmr.local_role != EndpointType.PROVIDES:
+            continue
+        local_id = _mermaid_node_id(model_id, cmr.local.application)
+        remote_id = _mermaid_node_id(_mermaid_id(cmr.remote_model), cmr.remote_application)
+        interface = bundle.applications[cmr.local.application].charm.endpoints[cmr.local.endpoint].interface
+        label = f"{cmr.local.endpoint}<br/>&lt;{interface}&gt;<br/>{cmr.remote_endpoint}"
+        lines.append(f'{_IND}{local_id} -.->|"{label}"| {remote_id}')
+    return lines
+
+
 class Solution(BaseModel):
     """The full multi-model result produced by BundleBuilder."""
 
@@ -193,68 +259,39 @@ class Solution(BaseModel):
 
         Cross-model integration edges are drawn across subgraph boundaries.
         """
-        lines = ["graph TB"]
+        sorted_bundles = sorted(self.bundles, key=lambda b: b.model or "")
 
-        # Render each model as a subgraph
-        for bundle in sorted(self.bundles, key=lambda b: b.model or ""):
+        lines: list[str] = [
+            "%%{init: {'theme': 'base', 'themeVariables': {'lineColor': '#64748b', 'edgeLabelBackground': '#f8fafc'}}}%%",
+            "graph TB",
+            f"{_IND}classDef app fill:#dbeafe,stroke:#3b82f6,color:#1e3a5f",
+            "",
+        ]
+
+        # Render each model as a subgraph, collecting one anchor node per model for ordering
+        anchor_nodes: list[str] = []
+        for bundle in sorted_bundles:
             model_name = bundle.model or "_default"
             model_id = _mermaid_id(model_name)
-            lines.append(f"    subgraph {model_id}[{model_name}]")
+            lines.extend(_mermaid_subgraph_lines(bundle, model_name, model_id))
+            lines.append(f"{_IND}style {model_id} fill:#f0f9ff,stroke:#0ea5e9,color:#0c4a6e")
+            lines.append("")
+            if bundle.applications:
+                anchor_nodes.append(_mermaid_node_id(model_id, sorted(bundle.applications)[0]))
 
-            # Application nodes, namespaced to avoid ID collisions across models
-            for application in sorted(bundle.applications):
-                info = bundle.applications[application]
-                node_id = f"{model_id}__{application}"
-                charm_info = f"{info.charm.channel} rev:{info.charm.revision}"
-                if application == info.charm.name:
-                    lines.append(f'        {node_id}["{application}<br/>{charm_info}"]')
-                else:
-                    lines.append(f'        {node_id}["{application}<br/>({info.charm.name})<br/>{charm_info}"]')
-
+        # Invisible links between consecutive anchor nodes force subgraphs into a vertical stack
+        for top, bottom in zip(anchor_nodes, anchor_nodes[1:]):
+            lines.append(f"{_IND}{top} ~~~ {bottom}")
+        if len(anchor_nodes) > 1:
             lines.append("")
 
-            # Local integrations within this model
-            for integration in sorted(
-                bundle.integrations,
-                key=lambda i: (
-                    min((e.application, e.endpoint) for e in i),
-                    max((e.application, e.endpoint) for e in i),
-                ),
-            ):
-                ep_1, ep_2 = sorted(integration, key=lambda e: (e.application, e.endpoint))
-                charm_ep_1 = bundle.applications[ep_1.application].charm.endpoints[ep_1.endpoint]
-                interface = charm_ep_1.interface
-                if charm_ep_1.type == EndpointType.REQUIRES:
-                    requirer_ep, provider_ep = ep_1, ep_2
-                else:
-                    requirer_ep, provider_ep = ep_2, ep_1
-                label = f"{provider_ep.endpoint}&lt;{interface}&gt;{requirer_ep.endpoint}"
-                provider_id = f"{model_id}__{provider_ep.application}"
-                requirer_id = f"{model_id}__{requirer_ep.application}"
-                lines.append(f"        {provider_id} -->|{label}| {requirer_id}")
-
-            lines.append("    end")
-            lines.append("")
-
-        # Cross-model edges - render once from the PROVIDES side to avoid duplicates
-        has_cmr = False
-        for bundle in sorted(self.bundles, key=lambda b: b.model or ""):
-            model_name = bundle.model or "_default"
-            model_id = _mermaid_id(model_name)
-            for cmr in sorted(
-                bundle.cross_model_integrations,
-                key=lambda c: (c.local.application, c.local.endpoint, c.remote_model, c.remote_application),
-            ):
-                if cmr.local_role != EndpointType.PROVIDES:
-                    continue
-                has_cmr = True
-                local_id = f"{model_id}__{cmr.local.application}"
-                remote_id = f"{_mermaid_id(cmr.remote_model)}__{cmr.remote_application}"
-                interface = bundle.applications[cmr.local.application].charm.endpoints[cmr.local.endpoint].interface
-                label = f"{cmr.local.endpoint}&lt;{interface}&gt;{cmr.remote_endpoint}"
-                lines.append(f"    {local_id} -.->|{label}| {remote_id}")
-
-        if has_cmr:
+        # Cross-model edges - rendered once from the PROVIDES side to avoid duplicates
+        cmr_lines: list[str] = []
+        for bundle in sorted_bundles:
+            model_id = _mermaid_id(bundle.model or "_default")
+            cmr_lines.extend(_mermaid_cmr_edge_lines(bundle, model_id))
+        lines.extend(cmr_lines)
+        if cmr_lines:
             lines.append("")
 
         result = "\n".join(lines) + "\n"
