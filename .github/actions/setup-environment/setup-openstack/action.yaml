@@ -14,7 +14,7 @@ inputs:
 outputs:
   cloud-name:
     description: Name of the cloud created and bootstrapped to
-    value: ${{ steps.cloud.outputs.cloud }}
+    value: ${{ steps.cloud.outputs.cloud-name }}
 runs:
   using: composite
   steps:
