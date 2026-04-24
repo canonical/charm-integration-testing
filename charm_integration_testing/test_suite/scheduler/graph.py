@@ -12,6 +12,7 @@ path between any two states.
 from __future__ import annotations
 
 import heapq
+import random
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -60,14 +61,16 @@ class StateGraph:
         Uses Dijkstra's algorithm. Returns the ordered list of
         ``(transition, pytest_item)`` pairs along the path, or ``None`` if no
         path exists.  Returns an empty list when ``from_state == to_state``.
+
+        The returned shortest path is randomly chosen among all minimum-cost paths, if there are multiple.
         """
         if from_state == to_state:
             return []
 
         # dist[state] -> cheapest total cost to reach that state
         dist: dict[State, int] = {from_state: 0}
-        # path[state] -> list of (transition, item) to get there
-        path: dict[State, list[tuple[StateTransition, Any]]] = {from_state: []}
+        # parents[state] -> list of (transition, item) that serve as parents to this state in a shortest path
+        parents: dict[State, list[tuple[StateTransition, Any]]] = {from_state: []}
         # heap entries: (cost, state)
         heap: list[tuple[int, State]] = [(0, from_state)]
 
@@ -75,7 +78,13 @@ class StateGraph:
             cost, state = heapq.heappop(heap)
 
             if state == to_state:
-                return path[state]
+                # reconstruct the shortest path backwards using parents[state] from to_state until
+                # we reach from_state, randomly choosing among multiple parents when they exist.
+                # since all parents of a state have the same cost, we can pick any one
+                path = [random.choice(parents[state])]  # nosec B311
+                while (last_state := path[-1][0].from_state) != from_state:
+                    path.append(random.choice(parents[last_state]))  # nosec B311
+                return path[::-1]
 
             # Skip stale heap entries.
             if cost > dist.get(state, float("inf")):
@@ -84,9 +93,12 @@ class StateGraph:
             for transition, item in self._edges.get(state, []):
                 new_cost = cost + transition.cost
                 neighbor = transition.to_state
-                if new_cost < dist.get(neighbor, float("inf")):
+                found_dist = dist.get(neighbor, float("inf"))
+                if new_cost <= found_dist:
                     dist[neighbor] = new_cost
-                    path[neighbor] = path[state] + [(transition, item)]
-                    heapq.heappush(heap, (new_cost, neighbor))
+                    if new_cost < found_dist:
+                        heapq.heappush(heap, (new_cost, neighbor))
+                        parents[neighbor] = []
+                    parents[neighbor].append((transition, item))
 
         return None  # to_state is unreachable from from_state
