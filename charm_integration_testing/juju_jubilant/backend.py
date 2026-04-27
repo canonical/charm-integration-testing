@@ -457,12 +457,10 @@ class JubilantBackend(JujuCmdBackend):
         cloud: str,
         controller: str,
         controller_constraints: dict[str, str],
+        bootstrap_configuration: dict[str, str],
+        metadata_source: pathlib.Path | None = None,
         agent_version: str | None = None,
     ) -> None:
-        # XXX (@mbenzan): we have to be able to pass in `extra_arguments` for Openstack integrations.
-        # This is currently not supported by Jubilant. I'll open a PR there to add this functionality
-        # and then update the code here to use it. In the meantime, O11 will fail to provision.
-        # PR: https://github.com/canonical/jubilant/pull/272
         if agent_version:
             bootstrap_args: list[str] = ["bootstrap", cloud, controller]
             if controller_constraints:
@@ -473,10 +471,16 @@ class JubilantBackend(JujuCmdBackend):
                     ]
                 )
             bootstrap_args.extend(["--agent-version", agent_version])
+            if metadata_source:
+                bootstrap_args.extend(["--metadata-source", str(metadata_source)])
             self.client.model(None).cli(*bootstrap_args, include_model=False)
         else:
             self.client.model(None).bootstrap(
-                cloud=cloud, controller=controller, bootstrap_constraints=controller_constraints
+                cloud=cloud,
+                controller=controller,
+                bootstrap_constraints=controller_constraints,
+                metadata_source=str(metadata_source),
+                config=bootstrap_configuration,
             )
 
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(5), reraise=True)

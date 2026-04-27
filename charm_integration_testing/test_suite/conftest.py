@@ -325,12 +325,24 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         help="Path to a json file containing the controller constraints configurations to be passed down to Juju on controller bootstrap.",
     )
     parser.addoption(
+        "--juju-controller-bootstrap-config",
+        type=str,
+        default=None,
+        help="Path to a json file containing the controller bootstrap configurations to be passed down to Juju on controller bootstrap.",
+    )
+    parser.addoption(
         "--juju-upgrade-target-version",
         type=str,
         default=None,
         help="Explicit Juju version to upgrade the controller to, e.g. '3.6.21'. "
         "When omitted, an upgrade target is resolved from GitHub, preferring stable patch releases "
         "in the current minor version before higher minor releases.",
+    )
+    parser.addoption(
+        "--juju-controller-bootstrap-metadata-source",
+        type=str,
+        default=None,
+        help="Only used by juju in Openstack based clouds. Path to the local folder where the metadata sources should be fetched and stored.",
     )
 
 
@@ -371,6 +383,24 @@ def juju_model_config(request: pytest.FixtureRequest) -> dict[str, str]:
 
 
 @pytest.fixture
+def juju_controller_bootstrap_metadata_source(request: pytest.FixtureRequest) -> Path | None:
+    """Juju controller bootstrap metadata source folder path passed via ``--juju-controller-bootstrap-metadata-source``.
+    Only used in Openstack based deployments by juju. Has no-op on other substrates."""
+    value = request.config.getoption("--juju-controller-bootstrap-metadata-source")
+
+    if not value:
+        return None
+
+    assert isinstance(value, str)
+    value = Path(value).resolve()
+    if not value.exists() or not value.is_dir():
+        pytest.fail(
+            "Juju controller bootstrap constraints config file passed via the --juju-controller-bootstrap-metadata-source parameter does not exist or is not a directory."
+        )
+    return value
+
+
+@pytest.fixture
 def juju_controller_bootstrap_constraints(request: pytest.FixtureRequest) -> dict[str, str]:
     """Juju controller bootstrap constraints config file path passed via ``--juju-controller-bootstrap-constraints``."""
     value = request.config.getoption("--juju-controller-bootstrap-constraints")
@@ -398,6 +428,37 @@ def juju_controller_bootstrap_constraints(request: pytest.FixtureRequest) -> dic
     except json.JSONDecodeError as e:
         pytest.fail(
             f"Juju controller bootstrap constraints config file passed via the --juju-controller-bootstrap-constraints parameter does not contain valid JSON: {e}"
+        )
+
+
+@pytest.fixture
+def juju_controller_bootstrap_config(request: pytest.FixtureRequest) -> dict[str, str]:
+    """Juju controller bootstrap config file path passed via ``--juju-controller-bootstrap-config``."""
+    value = request.config.getoption("--juju-controller-bootstrap-config")
+
+    if not value:
+        return dict()
+
+    assert isinstance(value, str)
+    value = Path(value).resolve()
+    if not value.exists() or not value.is_file():
+        pytest.fail(
+            "Juju controller bootstrap constraints config file passed via the --juju-controller-bootstrap-config parameter does not exist or is not a file."
+        )
+
+    # Define the expected shape
+    ConfigSchema = TypeAdapter(dict[str, str])
+
+    try:
+        content = json.loads(value.read_text())
+        return ConfigSchema.validate_python(content)
+    except ValidationError as e:
+        pytest.fail(
+            f"Invalid Juju controller bootstrap constraints config passed via the --juju-controller-bootstrap-config parameter: {e}"
+        )
+    except json.JSONDecodeError as e:
+        pytest.fail(
+            f"Juju controller bootstrap constraints config file passed via the --juju-controller-bootstrap-config parameter does not contain valid JSON: {e}"
         )
 
 

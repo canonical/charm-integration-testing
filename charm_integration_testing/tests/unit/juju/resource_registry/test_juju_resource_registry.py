@@ -6,6 +6,7 @@ import logging
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -43,7 +44,9 @@ class BootstrapKillBackendStub(NullJujuBackend):
         cloud: str,
         controller: str,
         controller_constraints: dict[str, str],
+        bootstrap_configuration: dict[str, str],
         agent_version: str | None = None,
+        metadata_source: Any | None = None,
     ) -> None:
         self.bootstrapped.append(controller)
 
@@ -209,7 +212,7 @@ class TestJujuResourceRegistryExtensionPostBootstrap:
         client = JujuClient(backend, LoggerStub(), [ext])
 
         # WHEN a controller is bootstrapped via the client
-        client.bootstrap_controller(cloud="mycloud", controller="my-ctrl", controller_constraints={})
+        client.bootstrap_controller(cloud="mycloud", controller="my-ctrl", controller_constraints={}, bootstrap_configuration={})
 
         # THEN the handle is registered in the registry
         handle = JujuControllerHandle(controller="my-ctrl")
@@ -221,7 +224,7 @@ class TestJujuResourceRegistryExtensionPostBootstrap:
         registry = self._make_registry()
         ext = JujuResourceRegistryExtension(backend, registry)
         client = JujuClient(backend, LoggerStub(), [ext])
-        client.bootstrap_controller(cloud="mycloud", controller="my-ctrl", controller_constraints={})
+        client.bootstrap_controller(cloud="mycloud", controller="my-ctrl", controller_constraints={}, bootstrap_configuration={})
 
         # WHEN the registry tears down the handle
         handle = JujuControllerHandle(controller="my-ctrl")
@@ -241,7 +244,7 @@ class TestJujuResourceRegistryExtensionPreKill:
         registry = self._make_registry()
         ext = JujuResourceRegistryExtension(backend, registry)
         client = JujuClient(backend, LoggerStub(), [ext])
-        client.bootstrap_controller(cloud="mycloud", controller="my-ctrl", controller_constraints={})
+        client.bootstrap_controller(cloud="mycloud", controller="my-ctrl", controller_constraints={}, bootstrap_configuration={})
 
         handle = JujuControllerHandle(controller="my-ctrl")
         assert handle.resource_id in registry._entries

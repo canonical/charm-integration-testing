@@ -1,15 +1,17 @@
 ---
 name: Execute tests against two charms and their integrations
-run-name: "Testing ${{ inputs.charm_under_test }}:${{ inputs.charm_endpoint }} against\
+run-name:
+  "Testing ${{ inputs.charm_under_test }}:${{ inputs.charm_endpoint }} against\
   \ ${{ inputs.neighbor }}:${{ inputs.neighbor_endpoint }}. (environment: ${{ inputs.environment }}${{\
   \ inputs.execution_id != '' && ', test execution: ' || '' }}${{ inputs.execution_id\
   \ }}, substrate: ${{ inputs.substrate }})"
 concurrency:
-  group: ${{ github.workflow }}-${{ inputs.environment }}-${{ inputs.execution_id
+  group:
+    ${{ github.workflow }}-${{ inputs.environment }}-${{ inputs.execution_id
     || github.run_id }}
   cancel-in-progress: true
 permissions:
-  contents: read  # only needed for private repos
+  contents: read # only needed for private repos
 on:
   workflow_dispatch:
     inputs:
@@ -59,7 +61,7 @@ on:
         description: Series to run the charm tests under.
         required: false
         type: choice
-        options: [default, '20.04', '22.04', '24.04']
+        options: [default, "20.04", "22.04", "24.04"]
         default: default
       substrate:
         description: Substrate to run the tests on
@@ -220,7 +222,7 @@ jobs:
           detail: Setup of OpenStack cloud failed.
       - name: Debug Setup
         if: ${{ inputs.debug_sleep_after== 'setup' && !cancelled() }}
-        uses: canonical/action-tmate@main  # zizmor: ignore[unpinned-uses] no releases in the repo
+        uses: canonical/action-tmate@main # zizmor: ignore[unpinned-uses] no releases in the repo
       - name: Install Repository
         shell: bash
         run: |
@@ -301,6 +303,8 @@ jobs:
             --charm-default-versions "./static/charm-default-versions.yaml" \
             --juju-model-config "./static/juju-model-config.json" \
             --juju-controller-bootstrap-constraints "./static/juju-bootstrap-constraints.json" \
+            --juju-controller-bootstrap-config "./static/juju-bootstrap-configs.json" \
+            --juju-controller-bootstrap-metadata-source "$HOME/openstack/images" \
             --log-cli-level "${log_level}" \
             --log-level "${log_level}" \
             --log-dir "./test-logs" \
@@ -384,7 +388,7 @@ jobs:
           detail: Log collection has completed.
       - name: Debug Post Log Collection
         if: ${{ inputs.debug_sleep_after == 'log_collection' && !cancelled() }}
-        uses: canonical/action-tmate@main  # zizmor: ignore[unpinned-uses] no releases in the repo
+        uses: canonical/action-tmate@main # zizmor: ignore[unpinned-uses] no releases in the repo
       - name: Post links to Test Observer
         if: ${{ !cancelled() && steps.post_logs_to_swift.outcome == 'success' && env.TEST_OBSERVER_API != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-links

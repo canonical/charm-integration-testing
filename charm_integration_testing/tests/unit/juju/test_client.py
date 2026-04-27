@@ -679,7 +679,9 @@ class BootstrapControllerBackendStub(NullJujuBackend):
         cloud: str,
         controller: str,
         controller_constraints: dict[str, str],
+        bootstrap_configuration: dict[str, str],
         agent_version: str | None = None,
+        metadata_source: Any | None = None,
     ) -> None:
         self.bootstrapped.append(controller)
 
@@ -724,7 +726,7 @@ class TestJujuClientBootstrapControllerHooks:
         client = self._client(logger, backend, [ext])
 
         # WHEN a controller is bootstrapped
-        client.bootstrap_controller(cloud="mycloud", controller="my-ctrl", controller_constraints={})
+        client.bootstrap_controller(cloud="mycloud", controller="my-ctrl", controller_constraints={}, bootstrap_configuration={})
 
         # THEN the extension hook received the controller name
         assert ext.post_bootstrap_calls == ["my-ctrl"]
@@ -737,7 +739,7 @@ class TestJujuClientBootstrapControllerHooks:
         client = self._client(logger, backend, [ext1, ext2])
 
         # WHEN a controller is bootstrapped
-        client.bootstrap_controller(cloud="mycloud", controller="my-ctrl", controller_constraints={})
+        client.bootstrap_controller(cloud="mycloud", controller="my-ctrl", controller_constraints={}, bootstrap_configuration={})
 
         # THEN both extensions received the hook
         assert ext1.post_bootstrap_calls == ["my-ctrl"]

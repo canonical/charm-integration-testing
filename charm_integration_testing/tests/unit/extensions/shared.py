@@ -138,7 +138,9 @@ class NullJujuBackend(JujuBackend):
         cloud: str,
         controller: str,
         controller_constraints: dict[str, str],
+        bootstrap_configuration: dict[str, str],
         agent_version: str | None = None,
+        metadata_source: Any | None = None,
     ) -> None:
         raise NotImplementedError
 
