@@ -1,0 +1,10 @@
+---
+# Kubeflow Profiles - manages user namespaces and access control
+overrides:
+  - provides:
+      kubeflow-profiles:
+        features: [kubeflow-profiles]
+      metrics-endpoint:
+        optional: true
+    constraints:
+      - '"kubeflow-profiles" in features(endpoint[kubeflow-profiles])'

@@ -11,6 +11,7 @@ package-mode = false
 [tool.poetry.dependencies]
 charm-integration-testing = { path = "./charm_integration_testing", develop = true }
 bundle-builder = { path = "./bundle_builder", develop = true }
+bundle-builder-x = { path = "./bundle_builder_x", develop = true }
 validators-base = { path = "./validators/base", develop = true }
 validators-runner = { path = "./validators/runner", develop = true }
 validators-postgresql-client = { path = "./validators/postgresql_client", develop = true, extras = ["dev", "deep", "uat"] }
@@ -51,6 +52,10 @@ junit_duration_report = "total"
 
 [tool.bandit.assert_used]
 skips = ['charm_integration_testing/test_suite/*']
+
+[tool.yamlfix]
+sequence_style = "keep_style"
+preserve_quotes = true
 
 [tool.mypy]
 python_version = "3.10"

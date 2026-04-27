@@ -1,0 +1,13 @@
+---
+# https://github.com/canonical/istio-operators/issues/672
+platforms: [kubernetes]
+overrides:
+  - provides:
+      istio-pilot:
+        features: [istio-pilot]
+      metrics-endpoint:
+        optional: true
+      grafana-dashboard:
+        optional: true
+    constraints:
+      - '"istio-pilot" in features(endpoint[istio-pilot])'

@@ -1,0 +1,19 @@
+---
+# Remove after: https://github.com/canonical/glauth-k8s-operator/pull/151
+overrides:
+  - provides:
+      metrics-endpoint:
+        optional: true
+      grafana-dashboard:
+        optional: true
+      ldap:
+        optional: true
+      glauth-auxiliary:
+        optional: true
+      send-ca-cert:
+        optional: true
+    configs:
+      ldaps_enabled: [true, null]
+    constraints:
+      # If certificates endpoint is used, then ldaps_enabled config must be set to true
+      - 'bool(endpoint[send-ca-cert]) => set(config[ldaps_enabled])'

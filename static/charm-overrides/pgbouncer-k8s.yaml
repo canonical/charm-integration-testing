@@ -1,0 +1,30 @@
+---
+priority: 2.0
+# pgbouncer needs at least one of these to exit blocked state
+# (db and db-admin are legacy endpoints)
+# https://github.com/canonical/pgbouncer-operator/pull/548
+overrides:
+  - provides:
+      database:
+        optional: true
+        features: [tls]
+      db:
+        optional: true
+        features: [tls]
+      db-admin:
+        optional: true
+        features: [tls]
+    requires:
+      certificates:
+        optional: true
+    constraints:
+      # At least one database endpoint must be integrated
+      - len(endpoint[database]) + len(endpoint[db]) + len(endpoint[db-admin]) >= 1
+      # If database endpoint uses tls mode, certificates is required
+      - '"tls" in features(endpoint[database]) => bool(endpoint[certificates])'
+      # If db endpoint uses tls mode, certificates is required
+      - '"tls" in features(endpoint[db]) => bool(endpoint[certificates])'
+      # If db-admin endpoint uses tls mode, certificates is required
+      - '"tls" in features(endpoint[db-admin]) => bool(endpoint[certificates])'
+      # Backend database must have the same risk
+      - 'risks(charms(endpoint[backend-database])) == risks({self})'

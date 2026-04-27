@@ -1,0 +1,22 @@
+---
+# trino-coordinator and trino-worker are mutually exclusive roles
+overrides:
+  - provides:
+      metrics-endpoint:
+        optional: true
+      grafana-dashboard:
+        optional: true
+      trino-coordinator:
+        optional: true
+    requires:
+      trino-worker:
+        optional: true
+    configs:
+      charm-function: [all, worker, coordinator]
+    constraints:
+      # A Trino instance cannot be both coordinator and worker
+      - 'not (bool(endpoint[trino-coordinator]) and bool(endpoint[trino-worker]))'
+      - 'bool(endpoint[trino-coordinator]) => config[charm-function] == "worker"'
+      - 'bool(endpoint[trino-worker]) => config[charm-function] == "coordinator"'
+      - 'not bool(endpoint[trino-coordinator]) and not bool(endpoint[trino-worker])
+        => config[charm-function] == "all"'

@@ -1,0 +1,18 @@
+---
+# Remove after: https://github.com/canonical/zookeeper-k8s-operator/pull/136
+overrides:
+  - provides:
+      zookeeper:
+        optional: true
+        features: [tls]
+      metrics-endpoint:
+        optional: true
+      grafana-dashboard:
+        optional: true
+    proxies:
+      - interface: certificates
+        provides: zookeeper
+        requires: certificates
+    constraints:
+      # TLS support in zookeeper-k8s is gated behind the presence of certificates endpoint, so these two features should be co-present or co-absent.
+      - 'bool(endpoint[certificates]) == ("tls" in features(endpoint[zookeeper]))'

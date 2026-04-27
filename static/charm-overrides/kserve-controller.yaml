@@ -1,0 +1,7 @@
+---
+# Remove after: https://github.com/canonical/charm-integration-testing/issues/282
+listed: true
+overrides:
+  - provides:
+      metrics-endpoint:
+        optional: true

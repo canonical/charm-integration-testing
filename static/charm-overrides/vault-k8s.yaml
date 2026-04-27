@@ -1,0 +1,41 @@
+---
+# Remove after: https://github.com/canonical/vault-k8s-operator/pull/659
+overrides:
+  # Track 1.18+ renamed common_name to pki_ca_common_name
+  - criteria:
+      - any_of:
+          - track: '1.18'
+          - track: '1.19'
+    provides: &vault_provides
+      vault-autounseal-provides:
+        optional: true
+      vault-kv:
+        optional: true
+      vault-pki:
+        optional: true
+      metrics-endpoint:
+        optional: true
+      send-ca-cert:
+        optional: true
+      grafana-dashboard:
+        optional: true
+    requires: &vault_requires
+      ingress:
+        optional: true
+      ingress-per-unit:
+        optional: true
+      tls-certificates-pki:
+        optional: true
+    configs:
+      pki_ca_common_name: [charmqa, null]
+    constraints:
+      - 'bool(endpoint[vault-pki]) => bool(endpoint[tls-certificates-pki])'
+      - 'bool(endpoint[vault-pki]) or bool(endpoint[tls-certificates-pki]) => set(config[pki_ca_common_name])'
+  # All other tracks (1.15, 1.16, 1.17, ...)
+  - provides: *vault_provides
+    requires: *vault_requires
+    configs:
+      common_name: [charmqa, null]
+    constraints:
+      - 'bool(endpoint[vault-pki]) => bool(endpoint[tls-certificates-pki])'
+      - 'bool(endpoint[vault-pki]) or bool(endpoint[tls-certificates-pki]) => set(config[common_name])'

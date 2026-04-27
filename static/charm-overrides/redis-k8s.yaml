@@ -1,0 +1,4 @@
+---
+# https://github.com/canonical/redis-k8s-operator/issues/115
+listed: true
+default_channel: latest/edge
