@@ -3,6 +3,7 @@
 
 import logging
 from datetime import timedelta
+from pathlib import Path
 
 from validators.base import ValidationResult
 
@@ -315,7 +316,9 @@ class JujuClient:
         cloud: str,
         controller: str,
         controller_constraints: dict[str, str],
+        bootstrap_configuration: dict[str, str],
         agent_version: str | None = None,
+        metadata_source: Path | None = None,
     ) -> None:
         version_suffix = f" at agent version '{agent_version}'" if agent_version else ""
         self.logger.info(
@@ -327,6 +330,8 @@ class JujuClient:
             controller=controller,
             controller_constraints=controller_constraints,
             agent_version=agent_version,
+            bootstrap_configuration=bootstrap_configuration,
+            metadata_source=metadata_source,
         )
 
         # Call extensions

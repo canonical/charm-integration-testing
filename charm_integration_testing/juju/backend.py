@@ -7,6 +7,7 @@ from collections.abc import Callable
 from dataclasses import field
 from datetime import datetime, timedelta
 from functools import wraps
+from pathlib import Path
 from typing import Any, ParamSpec, TypeVar
 
 from pydantic.dataclasses import dataclass
@@ -303,6 +304,8 @@ class JujuBackend(ABC):
         cloud: str,
         controller: str,
         controller_constraints: dict[str, str],
+        bootstrap_configuration: dict[str, str],
+        metadata_source: Path | None = None,
         agent_version: str | None = None,
     ) -> None:
         raise NotImplementedError
