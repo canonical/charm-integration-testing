@@ -389,7 +389,6 @@ class Bundle:
                     }
                     for application in self.applications
                 },
-                "bundle": self.platform,
                 "relations": sorted(
                     [
                         sorted(
@@ -401,7 +400,8 @@ class Bundle:
                         for integration in sorted(self.integrations)
                     ]
                 ),
-            },
+            }
+            | ({} if self.platform != "kubernetes" else {"bundle": self.platform}),
             default_flow_style=False,
             sort_keys=True,
         )
