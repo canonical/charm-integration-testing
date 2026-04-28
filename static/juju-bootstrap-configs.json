@@ -1,8 +1,1 @@
-{
-  "apt-http-proxy": "http://egress.ps7.internal:3128",
-  "apt-https-proxy": "http://egress.ps7.internal:3128",
-  "http-proxy": "http://egress.ps7.internal:3128",
-  "https-proxy": "http://egress.ps7.internal:3128",
-  "snap-http-proxy": "http://egress.ps7.internal:3128",
-  "snap-https-proxy": "http://egress.ps7.internal:3128"
-}
+{}
