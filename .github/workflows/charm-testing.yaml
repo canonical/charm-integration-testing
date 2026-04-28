@@ -1,15 +1,17 @@
 ---
 name: Execute tests against two charms and their integrations
-run-name: "Testing ${{ inputs.charm_under_test }}:${{ inputs.charm_endpoint }} against\
+run-name:
+  "Testing ${{ inputs.charm_under_test }}:${{ inputs.charm_endpoint }} against\
   \ ${{ inputs.neighbor }}:${{ inputs.neighbor_endpoint }}. (environment: ${{ inputs.environment }}${{\
   \ inputs.execution_id != '' && ', test execution: ' || '' }}${{ inputs.execution_id\
   \ }}, substrate: ${{ inputs.substrate }})"
 concurrency:
-  group: ${{ github.workflow }}-${{ inputs.environment }}-${{ inputs.execution_id
+  group:
+    ${{ github.workflow }}-${{ inputs.environment }}-${{ inputs.execution_id
     || github.run_id }}
   cancel-in-progress: true
 permissions:
-  contents: read  # only needed for private repos
+  contents: read # only needed for private repos
 on:
   workflow_dispatch:
     inputs:
@@ -59,7 +61,7 @@ on:
         description: Series to run the charm tests under.
         required: false
         type: choice
-        options: [default, '20.04', '22.04', '24.04']
+        options: [default, "20.04", "22.04", "24.04"]
         default: default
       substrate:
         description: Substrate to run the tests on
@@ -68,30 +70,21 @@ on:
         options: [kubernetes, openstack]
         default: kubernetes
       debug_sleep_after:
-        description: The stage of the workflow to sleep after. Enables SSH access.
+        description: The stage of the workflow to sleep after. Enables a tmate session.
         required: false
         type: choice
         options: [none, setup, log_collection]
         default: none
-      debug_extra_ssh_imports:
-        # The IDs take the form of lp:<value> for Launchpad and gh:<value> for GitHub.
-        # The GitHub Actor's key is always included.
-        description: A comma-separated list of IDs to use with ssh-import-id in debug
-          mode.
-        required: false
-        default: ''
       log_level:
         description: Log level to use for the tests.
         required: false
         type: choice
         options: [DEBUG, INFO, WARNING, ERROR]
         default: INFO
-env:
-  DEBUG_SLEEP_SECONDS: 7200  # 2 hours
 jobs:
   execute-charm-test:
     name: Execute integration tests against the charms
-    runs-on: [self-hosted, charm_qa]
+    runs-on: [self-hosted-linux-amd64-noble-private-endpoint-small]
     env:
       TEST_OBSERVER_API: ${{ inputs.environment == 'production' && vars.PROD_TEST_OBSERVER_API || (inputs.environment == 'staging' && vars.STG_TEST_OBSERVER_API || '') }}
       TEST_OBSERVER_TOKEN: ${{ inputs.environment == 'production' && secrets.PROD_TEST_OBSERVER_TOKEN || (inputs.environment == 'staging' && secrets.STG_TEST_OBSERVER_TOKEN || '') }}
@@ -106,19 +99,6 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
-      - name: Enable Debug Session
-        if: ${{ inputs.debug_sleep_after != 'none' }}
-        shell: bash
-        env:
-          SSH_IDS: ${{ inputs.debug_extra_ssh_imports }}
-        run: |
-          # Always include the GitHub Actor
-          mkdir --parents ~/.ssh/
-          ssh-import-id "gh:${GITHUB_ACTOR}"
-          SSH_IDS=$(echo "${SSH_IDS}" | tr ',' ' ')
-          ssh-import-id ${SSH_IDS} || true
-          echo "Debug mode enabled. SSH connection details:"
-          echo "ssh $(whoami)@$(hostname -I | cut -d ' ' -f 1)"
       - name: Create swap file
         shell: bash
         run: |
@@ -241,22 +221,15 @@ jobs:
           event_name: setup_o7k_failed
           detail: Setup of OpenStack cloud failed.
       - name: Debug Setup
-        if: ${{ !cancelled() && inputs.debug_sleep_after == 'setup' }}
-        shell: bash
-        run: |
-          echo "Sleeping to debug setup"
-          sleep ${DEBUG_SLEEP_SECONDS}
+        if: ${{ inputs.debug_sleep_after== 'setup' && !cancelled() }}
+        uses: canonical/action-tmate@main # zizmor: ignore[unpinned-uses] no releases in the repo
       - name: Install Repository
         shell: bash
         run: |
           sudo apt-get update --quiet
           sudo apt-get install pipx --quiet --assume-yes
-          sudo tee /etc/pip.conf <<EOF
-          [global]
-          proxy= http://squid.internal:3128
-          EOF
           pipx install poetry==2.3
-          HTTPS_PROXY="http://squid.internal:3128" poetry install
+          poetry install
       - name: Install TruffleHog CLI
         shell: bash
         run: |
@@ -415,11 +388,8 @@ jobs:
           event_name: log_collection_finished
           detail: Log collection has completed.
       - name: Debug Post Log Collection
-        if: ${{ !cancelled() && inputs.debug_sleep_after == 'log_collection' }}
-        shell: bash
-        run: |
-          echo "Sleeping to debug post log collection"
-          sleep ${DEBUG_SLEEP_SECONDS}
+        if: ${{ inputs.debug_sleep_after == 'log_collection' && !cancelled() }}
+        uses: canonical/action-tmate@main # zizmor: ignore[unpinned-uses] no releases in the repo
       - name: Post links to Test Observer
         if: ${{ !cancelled() && steps.post_logs_to_swift.outcome == 'success' && env.TEST_OBSERVER_API != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-links
