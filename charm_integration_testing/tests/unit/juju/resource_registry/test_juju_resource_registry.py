@@ -212,7 +212,9 @@ class TestJujuResourceRegistryExtensionPostBootstrap:
         client = JujuClient(backend, LoggerStub(), [ext])
 
         # WHEN a controller is bootstrapped via the client
-        client.bootstrap_controller(cloud="mycloud", controller="my-ctrl", controller_constraints={}, bootstrap_configuration={})
+        client.bootstrap_controller(
+            cloud="mycloud", controller="my-ctrl", controller_constraints={}, bootstrap_configuration={}
+        )
 
         # THEN the handle is registered in the registry
         handle = JujuControllerHandle(controller="my-ctrl")
@@ -224,7 +226,9 @@ class TestJujuResourceRegistryExtensionPostBootstrap:
         registry = self._make_registry()
         ext = JujuResourceRegistryExtension(backend, registry)
         client = JujuClient(backend, LoggerStub(), [ext])
-        client.bootstrap_controller(cloud="mycloud", controller="my-ctrl", controller_constraints={}, bootstrap_configuration={})
+        client.bootstrap_controller(
+            cloud="mycloud", controller="my-ctrl", controller_constraints={}, bootstrap_configuration={}
+        )
 
         # WHEN the registry tears down the handle
         handle = JujuControllerHandle(controller="my-ctrl")
@@ -244,7 +248,9 @@ class TestJujuResourceRegistryExtensionPreKill:
         registry = self._make_registry()
         ext = JujuResourceRegistryExtension(backend, registry)
         client = JujuClient(backend, LoggerStub(), [ext])
-        client.bootstrap_controller(cloud="mycloud", controller="my-ctrl", controller_constraints={}, bootstrap_configuration={})
+        client.bootstrap_controller(
+            cloud="mycloud", controller="my-ctrl", controller_constraints={}, bootstrap_configuration={}
+        )
 
         handle = JujuControllerHandle(controller="my-ctrl")
         assert handle.resource_id in registry._entries
