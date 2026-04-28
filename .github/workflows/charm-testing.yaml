@@ -185,7 +185,7 @@ jobs:
         id: setup_k8s
         uses: ./.github/actions/setup-environment/setup-k8s
         env:
-          k8sprod: ${{ secrets.PROD_SQA_KUBECONFIG }}
+          k8sprod: ${{ secrets.PROD_PS7_KUBECONFIG }}
           k8sstg: ${{ secrets.STG_SQA_KUBECONFIG }}
         with:
           environment: ${{ inputs.environment }}
