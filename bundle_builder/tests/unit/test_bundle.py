@@ -1398,6 +1398,7 @@ class TestBundle:
             platform: str
             expected_scale_key: str
             should_raise_error: bool = False
+            expect_bundle_key: bool = True
 
         test_cases = [
             Params(
@@ -1409,12 +1410,14 @@ class TestBundle:
                 label="machine_platform_uses_num_units",
                 platform="machine",
                 expected_scale_key="num_units",
+                expect_bundle_key=False,
             ),
             Params(
                 label="unsupported_platform_raises_error",
                 platform="invalid-platform",
                 expected_scale_key="",
                 should_raise_error=True,
+                expect_bundle_key=False,
             ),
         ]
 
@@ -1442,7 +1445,10 @@ class TestBundle:
                     assert parsed_yaml["applications"][app_name][params.expected_scale_key] == 1
 
                 # AND the platform is correctly set
-                assert parsed_yaml["bundle"] == params.platform
+                if params.expect_bundle_key:
+                    assert parsed_yaml["bundle"] == params.platform
+                else:
+                    assert "bundle" not in parsed_yaml
 
         def test_platform_yaml_structure_consistency(self) -> None:
             # GIVEN bundles with different platforms
@@ -1461,7 +1467,7 @@ class TestBundle:
 
             # THEN structure is identical except for scale/unit key and bundle platform
             assert k8s_yaml["bundle"] == "kubernetes"
-            assert machine_yaml["bundle"] == "machine"
+            assert "bundle" not in machine_yaml
 
             # AND applications have the same structure except for scale/unit key
             k8s_apps = k8s_yaml["applications"]
