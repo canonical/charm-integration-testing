@@ -185,7 +185,7 @@ jobs:
         id: setup_k8s
         uses: ./.github/actions/setup-environment/setup-k8s
         env:
-          k8sprod: ${{ secrets.PROD_SQA_KUBECONFIG }}
+          k8sprod: ${{ secrets.PROD_PS7_KUBECONFIG }}
           k8sstg: ${{ secrets.STG_SQA_KUBECONFIG }}
         with:
           environment: ${{ inputs.environment }}
@@ -204,7 +204,7 @@ jobs:
         id: setup_o7k
         uses: ./.github/actions/setup-environment/setup-openstack
         env:
-          o7kprod: ${{ secrets.PROD_SQA_NOVARC }}
+          o7kprod: ${{ secrets.PROD_PS7_NOVARC }}
           o7kstg: ${{ secrets.STG_SQA_NOVARC }}
         with:
           environment: ${{ inputs.environment }}
