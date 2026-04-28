@@ -275,6 +275,7 @@ jobs:
           neighbor: ${{ inputs.neighbor }}
           platform: ${{ inputs.substrate == 'openstack' && 'machine' || inputs.substrate }}
           log_level: ${{ inputs.log_level }}
+          bootstrap_config: ./static/juju-bootstrap-configs.ps7.json
         run: |
           mkdir -p $HOME/openstack/images
           echo "junit_xml=$(realpath junit.xml)" >> $GITHUB_OUTPUT
@@ -304,7 +305,7 @@ jobs:
             --charm-default-versions "./static/charm-default-versions.yaml" \
             --juju-model-config "./static/juju-model-config.json" \
             --juju-controller-bootstrap-constraints "./static/juju-bootstrap-constraints.json" \
-            --juju-controller-bootstrap-config "./static/juju-bootstrap-configs.json" \
+            --juju-controller-bootstrap-config "${bootstrap_config}" \
             --juju-controller-bootstrap-metadata-source "$HOME/openstack/images" \
             --log-cli-level "${log_level}" \
             --log-level "${log_level}" \
