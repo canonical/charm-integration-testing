@@ -700,7 +700,7 @@ class CharmhubClient:
 
     def _get_charm_constraints(self, charm_name: str, channel: CharmChannel) -> list[AnyExpr]:
         """Parse raw DSL constraint strings from overrides into typed AST nodes."""
-        result = []
+        result: list[AnyExpr] = []
         for text in self.overrides_client.get_charm_constraints_overrides(charm_name, channel):
             expr = parse_constraint(text)
             if expr.dsl_type not in (DSLType.BOOL, DSLType.RUNTIME):

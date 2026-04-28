@@ -1739,7 +1739,14 @@ class TestJubilantBackend:
             add_model_calls: int = 0
             switch_calls: int = 0
 
-            def bootstrap(self, cloud: str, controller: str, bootstrap_constraints: dict[str, str]) -> None:
+            def bootstrap(
+                self,
+                cloud: str,
+                controller: str,
+                bootstrap_constraints: dict[str, str],
+                metadata_source: str | None = None,
+                config: dict[str, str] | None = None,
+            ) -> None:
                 self.bootstrap_calls += 1
                 if self.bootstrap_failures_remaining > 0:
                     self.bootstrap_failures_remaining -= 1
@@ -1761,7 +1768,9 @@ class TestJubilantBackend:
             backend = JubilantBackend(JubilantClientStub(client=stub))
 
             with patch("tenacity.nap.sleep", return_value=None):
-                backend.bootstrap_controller(cloud="k8s-stg", controller="test-controller", controller_constraints={})
+                backend.bootstrap_controller(
+                    cloud="k8s-stg", controller="test-controller", controller_constraints={}, bootstrap_configuration={}
+                )
 
             assert stub.bootstrap_calls == 3
 
@@ -1772,7 +1781,10 @@ class TestJubilantBackend:
             with patch("tenacity.nap.sleep", return_value=None):
                 with pytest.raises(RuntimeError, match="transient bootstrap failure"):
                     backend.bootstrap_controller(
-                        cloud="k8s-stg", controller="test-controller", controller_constraints={}
+                        cloud="k8s-stg",
+                        controller="test-controller",
+                        controller_constraints={},
+                        bootstrap_configuration={},
                     )
 
             assert stub.bootstrap_calls == 3
