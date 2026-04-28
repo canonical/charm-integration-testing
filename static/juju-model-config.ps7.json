@@ -1,0 +1,9 @@
+{
+  "logging-config": "DEBUG",
+  "update-status-hook-interval": "2m",
+  "juju-http-proxy": "http://egress.ps7.internal:3128",
+  "juju-https-proxy": "http://egress.ps7.internal:3128",
+  "juju-no-proxy": "127.0.0.1,localhost,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.canonical.com,.launchpad.net,.internal,.jujucharms.com,.svc.cluster.local",
+  "snap-http-proxy": "http://egress.ps7.internal:3128",
+  "snap-https-proxy": "http://egress.ps7.internal:3128"
+}
