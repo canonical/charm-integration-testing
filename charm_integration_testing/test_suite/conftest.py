@@ -1134,6 +1134,8 @@ def temp_juju_controller(
     juju_client: JujuClient,
     juju_cloud: str,
     juju_controller_bootstrap_constraints: dict[str, str],
+    juju_controller_bootstrap_config: dict[str, str],
+    juju_controller_bootstrap_metadata_source: Path | None,
     logger: logging.Logger,
 ) -> Iterator[str]:
     temp_controller_name = f"pytest-tmp-controller-{generate_short_id(length=8)}"
@@ -1142,7 +1144,8 @@ def temp_juju_controller(
         cloud=juju_cloud,
         controller=temp_controller_name,
         controller_constraints=juju_controller_bootstrap_constraints,
-        bootstrap_configuration={},
+        bootstrap_configuration=juju_controller_bootstrap_config,
+        metadata_source=juju_controller_bootstrap_metadata_source,
     )
 
     yield temp_controller_name
@@ -1156,6 +1159,8 @@ def juju_controller_at_version(
     juju_cloud: str,
     juju_controller_bootstrap_constraints: dict[str, str],
     juju_upgrade_target_version: JujuVersion,
+    juju_controller_bootstrap_config: dict[str, str],
+    juju_controller_bootstrap_metadata_source: Path | None,
     logger: logging.Logger,
 ) -> Iterator[str]:
     """Bootstrap a controller pinned to the upgrade target version."""
@@ -1167,7 +1172,8 @@ def juju_controller_at_version(
         controller=temp_controller_name,
         controller_constraints=juju_controller_bootstrap_constraints,
         agent_version=agent_version,
-        bootstrap_configuration={},
+        bootstrap_configuration=juju_controller_bootstrap_config,
+        metadata_source=juju_controller_bootstrap_metadata_source,
     )
 
     yield temp_controller_name

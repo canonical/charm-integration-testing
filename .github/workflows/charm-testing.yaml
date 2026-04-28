@@ -304,7 +304,6 @@ jobs:
           log_level: ${{ inputs.log_level }}
         run: |
           mkdir -p $HOME/openstack/images
-
           echo "junit_xml=$(realpath junit.xml)" >> $GITHUB_OUTPUT
           ./scripts/run-tests.sh \
             --target-charm "${charm_under_test}" \
