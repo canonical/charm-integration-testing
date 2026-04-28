@@ -1139,7 +1139,8 @@ def temp_juju_controller(
     temp_controller_name = f"pytest-tmp-controller-{generate_short_id(length=8)}"
     logger.info(f"Creating temporary fixture controller '{temp_controller_name}'.")
     juju_client.bootstrap_controller(
-        cloud=juju_cloud, controller=temp_controller_name, controller_constraints=juju_controller_bootstrap_constraints
+        cloud=juju_cloud, controller=temp_controller_name, controller_constraints=juju_controller_bootstrap_constraints,
+        bootstrap_configuration={},
     )
 
     yield temp_controller_name
@@ -1164,6 +1165,7 @@ def juju_controller_at_version(
         controller=temp_controller_name,
         controller_constraints=juju_controller_bootstrap_constraints,
         agent_version=agent_version,
+        bootstrap_configuration={},
     )
 
     yield temp_controller_name
