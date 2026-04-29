@@ -330,7 +330,7 @@ class TestValidatorInjectorExtension:
                 # GIVEN a K8s model and the venv is already present
                 juju.k8s_models.add("mymodel")
                 juju.units_by_app["myapp"] = ["myapp/0"]
-                juju.exec_responses.extend(_preinstalled_responses())
+                juju.exec_responses.extend(_inject_and_pass_responses())
 
                 # WHEN
                 extension.post_validate("mymodel", "myapp", "simple")
@@ -344,7 +344,7 @@ class TestValidatorInjectorExtension:
             ) -> None:
                 # GIVEN a non-K8s model and the venv is already present
                 juju.units_by_app["myapp"] = ["myapp/0"]
-                juju.exec_responses.extend(_preinstalled_responses())
+                juju.exec_responses.extend(_inject_and_pass_responses())
 
                 # WHEN
                 extension.post_validate("mymodel", "myapp", "simple")
