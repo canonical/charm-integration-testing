@@ -96,6 +96,7 @@ on:
         default: INFO
 jobs:
   determine-runner:
+    name: Determine GitHub Actions runner to use
     runs-on: ubuntu-latest
     outputs:
       runner: ${{ steps.pick.outputs.runner-labels }}
@@ -159,6 +160,10 @@ jobs:
           name="${run_id}-$(date +'%y%m%d%H%M%S')"
           echo "model=model-$name" >> $GITHUB_OUTPUT
           echo "controller=$name" >> $GITHUB_OUTPUT
+      - name: Install yq
+        uses: ./.github/actions/install-with-retry
+        with:
+          command: sudo snap install yq
       - name: Get target environment info
         id: target_env_info
         uses: ./.github/actions/get-environment-info
