@@ -276,6 +276,7 @@ jobs:
           platform: ${{ inputs.substrate == 'openstack' && 'machine' || inputs.substrate }}
           log_level: ${{ inputs.log_level }}
           bootstrap_config: ./static/juju-bootstrap-configs.ps7.json
+          model_config: ./static/juju-model-config.ps7.json
         run: |
           mkdir -p $HOME/openstack/images
           echo "junit_xml=$(realpath junit.xml)" >> $GITHUB_OUTPUT
@@ -303,7 +304,7 @@ jobs:
             --charm-test-configs "./static/charm-test-configs/" \
             --charm-priorities-config "./static/charm-priorities.yaml" \
             --charm-default-versions "./static/charm-default-versions.yaml" \
-            --juju-model-config "./static/juju-model-config.json" \
+            --juju-model-config "${model_config}" \
             --juju-controller-bootstrap-constraints "./static/juju-bootstrap-constraints.json" \
             --juju-controller-bootstrap-config "${bootstrap_config}" \
             --juju-controller-bootstrap-metadata-source "$HOME/openstack/images" \
