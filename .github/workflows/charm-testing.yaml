@@ -503,7 +503,6 @@ jobs:
             --model "${model}" \
             --juju-cloud "${cloud}" \
             --juju-controller "${controller}" \
-            --bundle "${BUNDLE_OUTPUT}" \
             --mermaid-output "${BUNDLE_MERMAID_OUTPUT}" \
             --current-state "no_bundle" \
             --target-application "target" \
