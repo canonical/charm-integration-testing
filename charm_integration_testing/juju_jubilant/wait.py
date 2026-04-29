@@ -20,7 +20,8 @@ def _parse_bundle(
     bundle_path: str,
 ) -> tuple[list[str], list[tuple[JujuIntegrationApplication, JujuIntegrationApplication]]]:
     with open(bundle_path) as f:
-        data = yaml.safe_load(f)
+        # HACK(@motjuste): we may have multi-document yaml, just take first
+        data = next(yaml.safe_load_all(f))
 
     app_names = list(data.get("applications", {}).keys())
 
