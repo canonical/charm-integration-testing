@@ -241,10 +241,10 @@ jobs:
         env:
           KUBECONFIG_SECRET_NAME: ${{ steps.target_env_info.outputs.kubeconfig-secret }}
           NOVARC_SECRET_NAME: ${{ steps.target_env_info.outputs.novarc-secret }}
-          PROD_PS6_KUBECONFIG: ${{ secrets.PROD_PS6_KUBECONFIG }}
+          PROD_SQA_KUBECONFIG: ${{ secrets.PROD_SQA_KUBECONFIG }}
+          STG_SQA_KUBECONFIG: ${{ secrets.STG_SQA_KUBECONFIG }}
           PROD_PS7_KUBECONFIG: ${{ secrets.PROD_PS7_KUBECONFIG }}
-          PROD_PS6_SQA_NOVARC: ${{ secrets.PROD_PS6_SQA_NOVARC }}
-          PROD_PS7_SQA_NOVARC: ${{ secrets.PROD_PS7_SQA_NOVARC }}
+          PROD_SQA_NOVARC: ${{ secrets.PROD_SQA_NOVARC }}
         run: |
           [[ -n "${KUBECONFIG_SECRET_NAME}" ]] && echo "kubeconfig=${!KUBECONFIG_SECRET_NAME}" >> "$GITHUB_OUTPUT"
           [[ -n "${NOVARC_SECRET_NAME}" ]] && echo "novarc=${!NOVARC_SECRET_NAME}" >> "$GITHUB_OUTPUT"
@@ -255,10 +255,10 @@ jobs:
         env:
           KUBECONFIG_SECRET_NAME: ${{ steps.neighbor_env_info.outputs.kubeconfig-secret }}
           NOVARC_SECRET_NAME: ${{ steps.neighbor_env_info.outputs.novarc-secret }}
-          PROD_PS6_KUBECONFIG: ${{ secrets.PROD_PS6_KUBECONFIG }}
+          PROD_SQA_KUBECONFIG: ${{ secrets.PROD_SQA_KUBECONFIG }}
+          STG_SQA_KUBECONFIG: ${{ secrets.STG_SQA_KUBECONFIG }}
           PROD_PS7_KUBECONFIG: ${{ secrets.PROD_PS7_KUBECONFIG }}
-          PROD_PS6_SQA_NOVARC: ${{ secrets.PROD_PS6_SQA_NOVARC }}
-          PROD_PS7_SQA_NOVARC: ${{ secrets.PROD_PS7_SQA_NOVARC }}
+          PROD_SQA_NOVARC: ${{ secrets.PROD_SQA_NOVARC }}
         run: |
           [[ -n "${KUBECONFIG_SECRET_NAME}" ]] && echo "kubeconfig=${!KUBECONFIG_SECRET_NAME}" >> "$GITHUB_OUTPUT"
           [[ -n "${NOVARC_SECRET_NAME}" ]] && echo "novarc=${!NOVARC_SECRET_NAME}" >> "$GITHUB_OUTPUT"
