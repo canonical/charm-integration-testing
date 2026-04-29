@@ -1,0 +1,15 @@
+---
+# Lookup table mapping GitHub Actions environment names to platform and arch.
+# Add new environments here as they are provisioned.
+ps6-sqa-prod_charm_qa_kubernetes-1:
+  platform: kubernetes
+  arch: amd64
+ps6-sqa-prod_charm_qa_kubernetes-2:
+  platform: kubernetes
+  arch: amd64
+ps6-sqa-prod_charm_qa_openstack-1:
+  platform: machine
+  arch: amd64
+ps6-sqa-prod_charm_qa_openstack-2:
+  platform: machine
+  arch: amd64

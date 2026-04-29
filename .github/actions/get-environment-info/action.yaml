@@ -1,0 +1,33 @@
+---
+name: Get Environment Info
+description: Look up the platform and arch for a named GitHub Actions environment.
+inputs:
+  environment_name:
+    description: The named GitHub Actions environment (e.g. ps6-sqa-prod_charm_qa_kubernetes-1).
+    required: true
+outputs:
+  platform:
+    description: Platform string for run-tests.sh (kubernetes or machine).
+    value: ${{ steps.lookup.outputs.platform }}
+  arch:
+    description: Architecture string (e.g. amd64).
+    value: ${{ steps.lookup.outputs.arch }}
+runs:
+  using: composite
+  steps:
+    - name: Look up environment topology
+      id: lookup
+      shell: bash
+      env:
+        ENVIRONMENT_NAME: ${{ inputs.environment_name }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: |-
+        table="${ACTION_PATH}/environments.yaml"
+        platform=$(yq ".[\"${ENVIRONMENT_NAME}\"].platform" "${table}")
+        arch=$(yq ".[\"${ENVIRONMENT_NAME}\"].arch" "${table}")
+        if [[ "${platform}" == "null" ]]; then
+          echo "::error::Unknown environment '${ENVIRONMENT_NAME}'. Add it to get-environment-info/environments.yaml."
+          exit 1
+        fi
+        echo "platform=${platform}" >> "${GITHUB_OUTPUT}"
+        echo "arch=${arch}" >> "${GITHUB_OUTPUT}"

@@ -1,11 +1,12 @@
 ---
 name: Execute tests against two charms and their integrations
 run-name: "Testing ${{ inputs.charm_under_test }}:${{ inputs.charm_endpoint }} against\
-  \ ${{ inputs.neighbor }}:${{ inputs.neighbor_endpoint }}. (environment: ${{ inputs.environment }}${{\
-  \ inputs.execution_id != '' && ', test execution: ' || '' }}${{ inputs.execution_id\
-  \ }}, substrate: ${{ inputs.substrate }})"
+  \ ${{ inputs.neighbor }}:${{ inputs.neighbor_endpoint }} (environment: ${{ inputs.target_environment }}${{\
+  \ inputs.neighbor_environment != '' && '|' || '' }}${{ inputs.neighbor_environment\
+  \ }}${{ inputs.execution_id != '' && ', test execution: ' || '' }}${{ inputs.execution_id\
+  \ }})"
 concurrency:
-  group: ${{ github.workflow }}-${{ inputs.environment }}-${{ inputs.execution_id
+  group: ${{ github.workflow }}-${{ inputs.test_observer_environment }}-${{ inputs.execution_id
     || github.run_id }}
   cancel-in-progress: true
 permissions:
@@ -13,17 +14,23 @@ permissions:
 on:
   workflow_dispatch:
     inputs:
-      environment:
-        description: Environment to run in.
-        type: choice
-        default: testing
-        options: [testing, staging, production]
-      arch:
-        description: Architecture of the charms being tested.
+      target_environment:
+        description: Named GitHub Actions environment to run on (e.g. ps6-sqa-prod_charm_qa_kubernetes-1).
+          Replaces the implicit runner label.
+        required: true
+        type: string
+      test_observer_environment:
+        description: Test Observer environment to report results to.
         required: false
         type: choice
-        options: [amd64]
-        default: amd64
+        options: [none, staging, production]
+        default: none
+      neighbor_environment:
+        description: Named GitHub Actions environment for the cross-model neighbor.
+          Empty if not cross-model.
+        required: false
+        type: string
+        default: ''
       charm_under_test:
         description: charmhub.io name of the primary charm under test
         required: true
@@ -61,12 +68,6 @@ on:
         type: choice
         options: [default, '20.04', '22.04', '24.04']
         default: default
-      substrate:
-        description: Substrate to run the tests on
-        required: false
-        type: choice
-        options: [kubernetes, openstack]
-        default: kubernetes
       debug_sleep_after:
         description: The stage of the workflow to sleep after. Enables SSH access.
         required: false
@@ -93,8 +94,8 @@ jobs:
     name: Execute integration tests against the charms
     runs-on: [self-hosted, charm_qa]
     env:
-      TEST_OBSERVER_API: ${{ inputs.environment == 'production' && vars.PROD_TEST_OBSERVER_API || (inputs.environment == 'staging' && vars.STG_TEST_OBSERVER_API || '') }}
-      TEST_OBSERVER_TOKEN: ${{ inputs.environment == 'production' && secrets.PROD_TEST_OBSERVER_TOKEN || (inputs.environment == 'staging' && secrets.STG_TEST_OBSERVER_TOKEN || '') }}
+      TEST_OBSERVER_API: ${{ vars.TEST_OBSERVER_API }}
+      TEST_OBSERVER_TOKEN: ${{ secrets.TEST_OBSERVER_TOKEN }}
       MINIO_CLIENT_FILE: ${{ github.workspace }}/static/mc
       UV_FILE: ${{ github.workspace }}/static/uv
       UBUNTU_PRO_TOKEN: ${{ secrets.UBUNTU_PRO_TOKEN }}
@@ -106,6 +107,11 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
+      - name: Get environment info
+        id: env_info
+        uses: ./.github/actions/get-environment-info
+        with:
+          environment_name: ${{ inputs.target_environment }}
       - name: Enable Debug Session
         if: ${{ inputs.debug_sleep_after != 'none' }}
         shell: bash
@@ -139,7 +145,9 @@ jobs:
       - name: Log job information
         shell: bash
         env:
-          environment: ${{ inputs.environment }}
+          target_environment: ${{ inputs.target_environment }}
+          neighbor_environment: ${{ inputs.neighbor_environment }}
+          test_observer_environment: ${{ inputs.test_observer_environment }}
           charm_under_test: ${{ inputs.charm_under_test }}
           charm_endpoint: ${{ inputs.charm_endpoint }}
           execution_id: ${{ inputs.execution_id }}
@@ -150,14 +158,15 @@ jobs:
           downgrade_revision: ${{ inputs.downgrade_revision }}
           channel: ${{ inputs.channel }}
           series: ${{ inputs.series }}
-          substrate: ${{ inputs.substrate }}
           model: ${{ steps.juju_resources.outputs.model }}
           controller: ${{ steps.juju_resources.outputs.controller }}
         run: |
           echo "### Job inputs" >> $GITHUB_STEP_SUMMARY
           echo "| Input | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|---|---|" >> $GITHUB_STEP_SUMMARY
-          echo "| \`environment\` | \`${environment}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| \`target_environment\` | \`${target_environment}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| \`neighbor_environment\` | \`${neighbor_environment}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| \`test_observer_environment\` | \`${test_observer_environment}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| \`charm_under_test\` | \`${charm_under_test}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| \`charm_endpoint\` | \`${charm_endpoint}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| \`execution_id\` | \`${execution_id}\` |" >> $GITHUB_STEP_SUMMARY
@@ -168,7 +177,6 @@ jobs:
           echo "| \`downgrade_revision\` | \`${downgrade_revision}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| \`channel\` | \`${channel}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| \`series\` | \`${series}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| \`substrate\` | \`${substrate}\` |" >> $GITHUB_STEP_SUMMARY
           echo "### Job variables" >> $GITHUB_STEP_SUMMARY
           echo "| Variable | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|---|---|" >> $GITHUB_STEP_SUMMARY
@@ -190,7 +198,7 @@ jobs:
           test_observer_api: ${{ env.TEST_OBSERVER_API }}
           test_observer_token: ${{ env.TEST_OBSERVER_TOKEN }}
           test_execution_id: ${{ inputs.execution_id }}
-          job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
+          job_uuid: ${{ inputs.target_environment }}/${{ inputs.execution_id }}
           event_name: job_start
           detail: Charm integration test job started.
       - name: Install Juju
@@ -201,14 +209,14 @@ jobs:
         shell: bash
         run: mkdir -p $HOME/.local/share/juju
       - name: Setup K8s Cloud
-        if: ${{ inputs.substrate == 'kubernetes'}}
+        if: ${{ steps.env_info.outputs.platform == 'kubernetes'}}
         id: setup_k8s
         uses: ./.github/actions/setup-environment/setup-k8s
         env:
           k8sprod: ${{ secrets.PROD_SQA_KUBECONFIG }}
           k8sstg: ${{ secrets.STG_SQA_KUBECONFIG }}
         with:
-          environment: ${{ inputs.environment }}
+          environment: ${{ inputs.target_environment }}
       - name: Post 'setup_k8s_failed' event
         if: ${{ failure() && env.TEST_OBSERVER_API != '' && inputs.execution_id != '' && steps.setup_k8s.conclusion == 'failure' }}
         uses: ./.github/actions/test-observer/post-events
@@ -216,18 +224,18 @@ jobs:
           test_observer_api: ${{ env.TEST_OBSERVER_API }}
           test_observer_token: ${{ env.TEST_OBSERVER_TOKEN }}
           test_execution_id: ${{ inputs.execution_id }}
-          job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
+          job_uuid: ${{ inputs.target_environment }}/${{ inputs.execution_id }}
           event_name: setup_k8s_failed
           detail: Setup of Kubernetes cloud failed.
       - name: Setup O7k Cloud
-        if: ${{ inputs.substrate == 'openstack'}}
+        if: ${{ steps.env_info.outputs.platform == 'machine'}}
         id: setup_o7k
         uses: ./.github/actions/setup-environment/setup-openstack
         env:
           o7kprod: ${{ secrets.PROD_SQA_NOVARC }}
           o7kstg: ${{ secrets.STG_SQA_NOVARC }}
         with:
-          environment: ${{ inputs.environment }}
+          environment: ${{ inputs.target_environment }}
           controller: ${{ steps.juju_resources.outputs.controller }}
           model: ${{ steps.juju_resources.outputs.model }}
       - name: Post 'setup_o7k_failed' event
@@ -237,7 +245,7 @@ jobs:
           test_observer_api: ${{ env.TEST_OBSERVER_API }}
           test_observer_token: ${{ env.TEST_OBSERVER_TOKEN }}
           test_execution_id: ${{ inputs.execution_id }}
-          job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
+          job_uuid: ${{ inputs.target_environment }}/${{ inputs.execution_id }}
           event_name: setup_o7k_failed
           detail: Setup of OpenStack cloud failed.
       - name: Debug Setup
@@ -280,7 +288,7 @@ jobs:
           test_observer_api: ${{ env.TEST_OBSERVER_API }}
           test_observer_token: ${{ env.TEST_OBSERVER_TOKEN }}
           test_execution_id: ${{ inputs.execution_id }}
-          job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
+          job_uuid: ${{ inputs.target_environment }}/${{ inputs.execution_id }}
           event_name: test_start
           detail: Tests started.
       - name: Run charm tests
@@ -290,7 +298,7 @@ jobs:
         env:
           KUBECONFIG: ${{ steps.setup_k8s.outputs.kubeconfig_path }}
           model: ${{ steps.juju_resources.outputs.model }}
-          cloud: ${{ inputs.substrate == 'openstack' && steps.setup_o7k.outputs.cloud-name || steps.setup_k8s.outputs.cloud-name }}
+          cloud: ${{ steps.env_info.outputs.platform == 'machine' && steps.setup_o7k.outputs.cloud-name || steps.setup_k8s.outputs.cloud-name }}
           controller: ${{ steps.juju_resources.outputs.controller }}
           charm_endpoint: ${{ inputs.charm_endpoint }}
           neighbor_endpoint: ${{ inputs.neighbor_endpoint }}
@@ -300,7 +308,8 @@ jobs:
           channel: ${{ inputs.channel }}
           series: ${{ inputs.series }}
           neighbor: ${{ inputs.neighbor }}
-          platform: ${{ inputs.substrate == 'openstack' && 'machine' || inputs.substrate }}
+          platform: ${{ steps.env_info.outputs.platform }}
+          arch: ${{ steps.env_info.outputs.arch }}
           log_level: ${{ inputs.log_level }}
         run: |
           mkdir -p $HOME/openstack/images
@@ -344,7 +353,7 @@ jobs:
           test_observer_api: ${{ env.TEST_OBSERVER_API }}
           test_observer_token: ${{ env.TEST_OBSERVER_TOKEN }}
           test_execution_id: ${{ inputs.execution_id }}
-          job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
+          job_uuid: ${{ inputs.target_environment }}/${{ inputs.execution_id }}
           event_name: test_end
           detail: Tests finished.
       - name: Post bundles to github
@@ -394,7 +403,7 @@ jobs:
         if: ${{ !cancelled() && inputs.execution_id != '' }}
         uses: canonical/sqa-cloud-deployment-pipeline/.github/actions/upload-to-swift@173b1936e2c96e317b0f1167509b068b2020e233
         with:
-          job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
+          job_uuid: ${{ inputs.target_environment }}/${{ inputs.execution_id }}
           log_path: ${{ steps.collect_logs.outputs.directory_path }}
           swift_bucket: charm-qa
           SWIFT_OS_AUTH_URL: ${{ secrets.SWIFT_OS_AUTH_URL }}
@@ -411,7 +420,7 @@ jobs:
           test_observer_api: ${{ env.TEST_OBSERVER_API }}
           test_observer_token: ${{ env.TEST_OBSERVER_TOKEN }}
           test_execution_id: ${{ inputs.execution_id }}
-          job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
+          job_uuid: ${{ inputs.target_environment }}/${{ inputs.execution_id }}
           event_name: log_collection_finished
           detail: Log collection has completed.
       - name: Debug Post Log Collection
@@ -427,7 +436,7 @@ jobs:
           test_observer_api: ${{ env.TEST_OBSERVER_API }}
           test_observer_token: ${{ env.TEST_OBSERVER_TOKEN }}
           test_execution_id: ${{ inputs.execution_id }}
-          job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
+          job_uuid: ${{ inputs.target_environment }}/${{ inputs.execution_id }}
       - name: Post 'job_end' event
         if: ${{ !cancelled() && env.TEST_OBSERVER_API != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-events
@@ -435,7 +444,7 @@ jobs:
           test_observer_api: ${{ env.TEST_OBSERVER_API }}
           test_observer_token: ${{ env.TEST_OBSERVER_TOKEN }}
           test_execution_id: ${{ inputs.execution_id }}
-          job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
+          job_uuid: ${{ inputs.target_environment }}/${{ inputs.execution_id }}
           event_name: job_end
           detail: Charm integration test job completed.
       - name: Mark Test Execution completed on Test Observer with the correct status
