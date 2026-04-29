@@ -135,6 +135,89 @@ def sample_database_webapp_status() -> jubilant.Status:
     )
 
 
+@pytest.fixture
+def sample_non_k8s_status() -> jubilant.Status:
+    return jubilant.Status._from_dict(
+        {
+            "model": {
+                "name": "tt",
+                "type": "iaas",
+                "controller": "some-controller",
+                "cloud": "aws",
+                "region": "us-east-1",
+                "version": "3.6.1",
+                "model-status": {"current": "available", "since": "24 Feb 2025 12:02:57+13:00"},
+                "sla": "unsupported",
+            },
+            "machines": {},
+            "applications": {
+                "myapp": {
+                    "charm": "local:myapp-0",
+                    "base": {"name": "ubuntu", "channel": "22.04"},
+                    "charm-origin": "local",
+                    "charm-name": "myapp",
+                    "charm-rev": 0,
+                    "exposed": False,
+                    "application-status": {
+                        "current": "active",
+                        "message": "ready",
+                        "since": "24 Feb 2025 16:59:43+13:00",
+                    },
+                    "units": {
+                        "myapp/0": {
+                            "workload-status": {
+                                "current": "active",
+                                "message": "ready",
+                                "since": "24 Feb 2025 16:59:43+13:00",
+                            },
+                            "juju-status": {
+                                "current": "idle",
+                                "since": "24 Feb 2025 16:59:44+13:00",
+                                "version": "3.6.1",
+                            },
+                            "leader": True,
+                            "address": "10.0.0.1",
+                        },
+                    },
+                    "endpoint-bindings": {"": "alpha"},
+                },
+                "badapp": {
+                    "charm": "local:badapp-0",
+                    "base": {"name": "ubuntu", "channel": "22.04"},
+                    "charm-origin": "local",
+                    "charm-name": "badapp",
+                    "charm-rev": 0,
+                    "exposed": False,
+                    "application-status": {
+                        "current": "waiting",
+                        "message": "installing charm software",
+                        "since": "24 Feb 2025 16:59:43+13:00",
+                    },
+                    "units": {
+                        "badapp/0": {
+                            "workload-status": {
+                                "current": "waiting",
+                                "message": "installing charm software",
+                                "since": "24 Feb 2025 16:59:43+13:00",
+                            },
+                            "juju-status": {
+                                "current": "installing agent",
+                                "since": "24 Feb 2025 16:59:44+13:00",
+                                "version": "3.6.1",
+                            },
+                            "leader": True,
+                            "address": "10.0.0.2",
+                        },
+                    },
+                    "endpoint-bindings": {"": "alpha"},
+                },
+            },
+            "storage": {},
+            "controller": {"timestamp": "17:00:33+13:00"},
+        }
+    )
+
+
 class TestWaitConditions:
     def test_get_unit_info_leader(self, sample_database_webapp_status: jubilant.Status) -> None:
         # GIVEN / WHEN
@@ -248,6 +331,24 @@ class TestWaitConditions:
         # THEN
         assert result is False
         assert "missing" in wait.noncompliant_applications
+
+    def test_applications_are_scaled_non_k8s_compliant(self, sample_non_k8s_status: jubilant.Status) -> None:
+        # GIVEN / WHEN
+        result, wait = applications_are_scaled(sample_non_k8s_status, "myapp")
+
+        # THEN
+        assert result is True
+        assert wait.noncompliant_applications == {}
+        assert wait.noncompliant_units == {}
+
+    def test_applications_are_scaled_non_k8s_noncompliant(self, sample_non_k8s_status: jubilant.Status) -> None:
+        # GIVEN / WHEN
+        result, wait = applications_are_scaled(sample_non_k8s_status, "badapp")
+
+        # THEN
+        assert result is False
+        assert "badapp" in wait.noncompliant_applications
+        assert "badapp/0" in wait.noncompliant_units
 
     def test_application_is_on_revision_match(self, sample_database_webapp_status: jubilant.Status) -> None:
         # GIVEN / WHEN

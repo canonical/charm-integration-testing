@@ -182,7 +182,7 @@ class TestJujuCrashdumpCollectorK8s:
 
         cmd = mock_run.call_args[0][0]
         assert cmd[0] == "juju-k8s-crashdump"
-        assert "/tmp/kubeconfig" in cmd
+        assert str(Path("/tmp/kubeconfig").resolve()) in cmd
         assert "my-ctrl" in cmd
         assert any("juju-controller-my-ctrl" in str(arg) for arg in cmd)
 
