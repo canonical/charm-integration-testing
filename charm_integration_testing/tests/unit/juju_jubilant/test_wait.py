@@ -157,7 +157,6 @@ def sample_non_k8s_status() -> jubilant.Status:
                     "charm-origin": "local",
                     "charm-name": "myapp",
                     "charm-rev": 0,
-                    "scale": 0,
                     "exposed": False,
                     "application-status": {
                         "current": "active",
@@ -188,7 +187,6 @@ def sample_non_k8s_status() -> jubilant.Status:
                     "charm-origin": "local",
                     "charm-name": "badapp",
                     "charm-rev": 0,
-                    "scale": 0,
                     "exposed": False,
                     "application-status": {
                         "current": "waiting",
