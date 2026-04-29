@@ -1,0 +1,68 @@
+---
+name: Pick Runner
+description: >
+  Select a GitHub Actions runner compatible with the target (and optionally neighbor)
+  environment.
+  Validates that both environments use the same runner type - cross-runner-type cross-model
+  tests
+  are not supported.
+inputs:
+  target_environment:
+    description: Named GitHub Actions environment for the primary test (e.g. ps6-sqa-prod_charm_qa_kubernetes-1).
+    required: true
+  neighbor_environment:
+    description: Named GitHub Actions environment for the cross-model neighbor. Empty
+      if not cross-model.
+    required: false
+    default: ''
+outputs:
+  runner-labels:
+    description: GitHub Actions runner labels as a JSON array, suitable for use in
+      runs-on.
+    value: ${{ steps.pick.outputs.runner-labels }}
+  debug-mode:
+    description: Debug mode for this runner type (ssh or tmate).
+    value: ${{ steps.pick.outputs.debug-mode }}
+  pip-proxy:
+    description: HTTP proxy to use for pip/poetry, or empty string if none.
+    value: ${{ steps.pick.outputs.pip-proxy }}
+runs:
+  using: composite
+  steps:
+    - name: Pick compatible runner
+      id: pick
+      shell: bash
+      env:
+        TARGET_ENV: ${{ inputs.target_environment }}
+        NEIGHBOR_ENV: ${{ inputs.neighbor_environment }}
+        WORKSPACE: ${{ github.workspace }}
+      run: |-
+        envs="${WORKSPACE}/static/environments.yaml"
+        runners="${WORKSPACE}/static/github-runners.yaml"
+        lookup_runner_type() {
+          local env_name="$1"
+          local runner_type
+          runner_type=$(yq ".environments[\"${env_name}\"][\"github-runner\"]" "${envs}")
+          if [[ "${runner_type}" == "null" ]]; then
+            echo "::error::Unknown environment '${env_name}'. Add it to static/environments.yaml."
+            exit 1
+          fi
+          echo "${runner_type}"
+        }
+        target_runner=$(lookup_runner_type "${TARGET_ENV}")
+        if [[ -n "${NEIGHBOR_ENV}" ]]; then
+          neighbor_runner=$(lookup_runner_type "${NEIGHBOR_ENV}")
+          # Both environments must use the same runner type so the job lands on a
+          # runner that has network access to both clouds.
+          if [[ "${target_runner}" != "${neighbor_runner}" ]]; then
+            echo "::error::Runner type mismatch: '${TARGET_ENV}' uses '${target_runner}' but '${NEIGHBOR_ENV}' uses '${neighbor_runner}'. Cross-runner-type tests are not supported."
+            exit 1
+          fi
+        fi
+        runner_labels=$(yq -o=json -I=0 ".[\"github-runners\"][\"${target_runner}\"].labels" "${runners}")
+        debug_mode=$(yq ".[\"github-runners\"][\"${target_runner}\"][\"debug-mode\"]" "${runners}")
+        pip_proxy=$(yq ".[\"github-runners\"][\"${target_runner}\"][\"pip-proxy\"]" "${runners}")
+        if [[ "${pip_proxy}" == "null" ]]; then pip_proxy=""; fi
+        echo "runner-labels=${runner_labels}" >> "${GITHUB_OUTPUT}"
+        echo "debug-mode=${debug_mode}" >> "${GITHUB_OUTPUT}"
+        echo "pip-proxy=${pip_proxy}" >> "${GITHUB_OUTPUT}"

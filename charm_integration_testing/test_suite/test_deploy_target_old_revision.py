@@ -16,7 +16,7 @@ def _create_bundle_with_revision_override(
     destination_bundle: Path,
     target_application: str,
     target_revision: int,
-    all_bundles: list[Path]
+    all_bundles: list[Path],
 ) -> None:
     if len(all_bundles) == 0:
         all_bundles = [source_bundle]
@@ -27,7 +27,6 @@ def _create_bundle_with_revision_override(
             bundle_data = next(yaml.safe_load_all(file))
 
         try:
-
             if not isinstance(bundle_data, dict):
                 raise ValueError(f"Invalid bundle file: {source_bundle}")
 
@@ -54,7 +53,6 @@ def _create_bundle_with_revision_override(
             raise exception
         else:
             raise RuntimeError("FIXME(@motjuste): this should not happen") from exception
-
 
 
 @pytest.mark.state(requires=State.NEIGHBOR_ONLY, provides=State.DEPLOYED_WITH_OLD_REVISION)

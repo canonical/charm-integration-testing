@@ -1,3 +1,4 @@
+---
 applications:
   content-cache-k8s:
     base: ubuntu@22.04
@@ -45,19 +46,19 @@ saas:
     # url: lxd:model.neighbor-offer
     url: REMOTE_OFFER
 relations:
-- - content-cache-k8s:nginx-proxy
-  - target:nginx-route
-- - grafana-k8s:grafana-dashboard
-  - redis-k8s:grafana-dashboard
-- - grafana-k8s:grafana-dashboard
-  - target:grafana-dashboard
-- - prometheus-k8s:metrics-endpoint
-  - redis-k8s:metrics-endpoint
-- - prometheus-k8s:metrics-endpoint
-  - target:metrics-endpoint
-- - redis-k8s:redis
-  - target:redis-broker
-- - redis-k8s:redis
-  - target:redis-cache
-- - target:database
-  - neighbor-offer:database
+  -   - content-cache-k8s:nginx-proxy
+      - target:nginx-route
+  -   - grafana-k8s:grafana-dashboard
+      - redis-k8s:grafana-dashboard
+  -   - grafana-k8s:grafana-dashboard
+      - target:grafana-dashboard
+  -   - prometheus-k8s:metrics-endpoint
+      - redis-k8s:metrics-endpoint
+  -   - prometheus-k8s:metrics-endpoint
+      - target:metrics-endpoint
+  -   - redis-k8s:redis
+      - target:redis-broker
+  -   - redis-k8s:redis
+      - target:redis-cache
+  -   - target:database
+      - neighbor-offer:database

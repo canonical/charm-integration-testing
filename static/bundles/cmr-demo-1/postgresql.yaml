@@ -1,3 +1,4 @@
+---
 applications:
   neighbor:
     charm: postgresql
@@ -5,10 +6,11 @@ applications:
     scale: 1
     trust: true
 # bundle: machine
---- # overlay.yaml
+---
+    # overlay.yaml
 applications:
   neighbor:
     offers:
       neighbor-offer:
         endpoints:
-        - database
+          - database
