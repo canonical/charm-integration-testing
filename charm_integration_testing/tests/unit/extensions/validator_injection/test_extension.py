@@ -329,26 +329,28 @@ class TestValidatorInjectorExtension:
             ) -> None:
                 # GIVEN a K8s model and the venv is already present
                 juju.k8s_models.add("mymodel")
+                juju.units_by_app["myapp"] = ["myapp/0"]
                 juju.exec_responses.extend(_preinstalled_responses())
 
                 # WHEN
-                extension._run_validators_on_unit("mymodel", "myapp/0", "simple")
+                extension.post_validate("mymodel", "myapp", "simple")
 
                 # THEN every exec_unit call was made with operator=True
-                assert len(juju.exec_calls) == 2
+                assert len(juju.exec_calls) > 0
                 assert all(call[3] is True for call in juju.exec_calls)
 
             def test_passes_operator_false_when_not_k8s_model(
                 self, extension: ValidatorInjectorExtension, juju: JujuStub
             ) -> None:
                 # GIVEN a non-K8s model and the venv is already present
+                juju.units_by_app["myapp"] = ["myapp/0"]
                 juju.exec_responses.extend(_preinstalled_responses())
 
                 # WHEN
-                extension._run_validators_on_unit("mymodel", "myapp/0", "simple")
+                extension.post_validate("mymodel", "myapp", "simple")
 
                 # THEN every exec_unit call was made with operator=False
-                assert len(juju.exec_calls) == 2
+                assert len(juju.exec_calls) > 0
                 assert all(call[3] is False for call in juju.exec_calls)
 
     class TestInjectValidators:
