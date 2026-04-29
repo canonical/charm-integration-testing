@@ -5,6 +5,9 @@ permissions:
 on:
   workflow_call:
     inputs:
+      target_environment:
+        type: string
+        required: true
       target_charm:
         type: string
         required: true
@@ -27,9 +30,6 @@ on:
         type: string
         required: true
       neighbor_endpoint:
-        type: string
-        required: true
-      substrate:
         type: string
         required: true
     secrets:
@@ -67,12 +67,13 @@ jobs:
           workflow: charm-testing.yaml
           ref: ${{ github.head_ref || github.ref_name }}
           title: 'Testing ${{ inputs.target_charm }}:${{ inputs.target_endpoint }}
-            against ${{ inputs.neighbor_charm }}:${{ inputs.neighbor_endpoint }}.
-            (environment: staging, test execution: ${{ steps.create-test-execution.outputs.test_execution_id }},
-            substrate: ${{ inputs.substrate }})'
+            against ${{ inputs.neighbor_charm }}:${{ inputs.neighbor_endpoint }}
+            (environment: ${{ inputs.target_environment }}, test execution: ${{
+            steps.create-test-execution.outputs.test_execution_id }})'
           inputs: |
             {
-              "environment": "staging",
+              "test_observer_environment": "staging",
+              "target_environment": "${{ inputs.target_environment }}",
               "charm_under_test": "${{ inputs.target_charm }}",
               "charm_endpoint": "${{ inputs.target_endpoint }}",
               "execution_id": "${{ steps.create-test-execution.outputs.test_execution_id }}",
@@ -81,8 +82,7 @@ jobs:
               "neighbor_endpoint": "${{ inputs.neighbor_endpoint }}",
               "revision": "${{ inputs.target_revision }}",
               "series": "${{ inputs.target_base }}",
-              "channel": "${{ inputs.target_track }}/${{ inputs.target_risk }}",
-              "substrate": "${{ inputs.substrate }}"
+              "channel": "${{ inputs.target_track }}/${{ inputs.target_risk }}"
             }
       - name: Ensure Charm Tests Workflow Success
         shell: bash
