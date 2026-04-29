@@ -67,7 +67,7 @@ on:
         description: Substrate to run the tests on
         required: false
         type: choice
-        options: [kubernetes, openstack]
+        options: [kubernetes, openstack, cmr]
         default: kubernetes
       debug_sleep_after:
         description: The stage of the workflow to sleep after. Enables a tmate session.
@@ -181,7 +181,7 @@ jobs:
         shell: bash
         run: mkdir -p $HOME/.local/share/juju
       - name: Setup K8s Cloud
-        if: ${{ inputs.substrate == 'kubernetes'}}
+        if: ${{ inputs.substrate == 'kubernetes' || inputs.substrate == 'cmr'}}
         id: setup_k8s
         uses: ./.github/actions/setup-environment/setup-k8s
         env:
@@ -200,7 +200,7 @@ jobs:
           event_name: setup_k8s_failed
           detail: Setup of Kubernetes cloud failed.
       - name: Setup O7k Cloud
-        if: ${{ inputs.substrate == 'openstack'}}
+        if: ${{ inputs.substrate == 'openstack' || inputs.substrate == 'cmr' }}
         id: setup_o7k
         uses: ./.github/actions/setup-environment/setup-openstack
         env:
@@ -273,7 +273,7 @@ jobs:
           channel: ${{ inputs.channel }}
           series: ${{ inputs.series }}
           neighbor: ${{ inputs.neighbor }}
-          platform: ${{ inputs.substrate == 'openstack' && 'machine' || inputs.substrate }}
+          platform: ${{ inputs.substrate == 'openstack' && 'machine' || 'kubernetes' }}
           log_level: ${{ inputs.log_level }}
           bootstrap_config: ./static/juju-bootstrap-configs.ps7.json
           model_config: ./static/juju-model-config.ps7.json
