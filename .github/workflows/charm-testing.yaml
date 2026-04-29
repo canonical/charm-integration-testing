@@ -256,8 +256,77 @@ jobs:
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
           event_name: test_start
           detail: Tests started.
+      - name: 🚀 Run CMR tests
+        id: run_tests_cmr
+        if: ${{ inputs.substrate == 'cmr' }}
+        continue-on-error: true
+        shell: bash
+        env:
+          KUBECONFIG: ${{ steps.setup_k8s.outputs.kubeconfig_path }}
+          model: ${{ steps.juju_resources.outputs.model }}
+          k8s_cloud: ${{ steps.setup_k8s.outputs.cloud-name }}
+          o7k_cloud: ${{ steps.setup_o7k.outputs.cloud-name }}
+          controller: ${{ steps.juju_resources.outputs.controller }}
+          charm_endpoint: ${{ inputs.charm_endpoint }}
+          neighbor_endpoint: ${{ inputs.neighbor_endpoint }}
+          charm_under_test: ${{ inputs.charm_under_test }}
+          revision: ${{ inputs.revision }}
+          downgrade_revision: ${{ inputs.downgrade_revision }}
+          channel: ${{ inputs.channel }}
+          series: ${{ inputs.series }}
+          neighbor: ${{ inputs.neighbor }}
+          platform: ${{ 'kubernetes' }}
+          log_level: ${{ inputs.log_level }}
+          bootstrap_config: ./static/juju-bootstrap-configs.ps7.json
+          model_config: ./static/juju-model-config.ps7.json
+        run: |
+          mkdir -p $HOME/openstack/images
+          echo "junit_xml=$(realpath junit.xml)" >> $GITHUB_OUTPUT
+
+          # set the REMOTE_OFFER url in the template bundle yaml
+          REMOTE_OFFER="o7k-${controller}:o7k-${model}.neighbor-offer"
+          sed -i "s|REMOTE_OFFER|${REMOTE_OFFER}|g" "./static/bundles/cmr-demo-1/indico.yaml"
+
+          ./scripts/run-tests.sh \
+            --target-charm "${charm_under_test}" \
+            --target-channel "${channel}" \
+            --target-revision "${revision}" \
+            --target-downgrade-revision "${downgrade_revision}" \
+            --target-series "${series}" \
+            --neighbor-charm "${neighbor}" \
+            --model "k8s-${model}" \
+            \
+            --juju-cloud "${k8s_cloud}" \
+            --bundle "./static/bundles/cmr-demo-1/postgresql.yaml:${o7k_cloud}:o7k-${controller}:o7k-${model}" \
+            --bundle "./static/bundles/cmr-demo-1/indico.yaml:${k8s_cloud}:k8s-${controller}:k8s-${model}" \
+            --juju-controller "k8s-${controller}" \
+            \
+            --current-state "no_controller" \
+            -k 'not test_build_bundle and not test_remove_and_restore_integration' \
+            \
+            --mermaid-output "${BUNDLE_MERMAID_OUTPUT}" \
+            --target-application "target" \
+            --target-endpoint "${charm_endpoint}" \
+            --neighbor-application "neighbor" \
+            --neighbor-endpoint "${neighbor_endpoint}" \
+            --platform "${platform}" \
+            --charm-metadata-overrides "./static/charm-metadata-overrides/" \
+            --charm-platform-overrides "./static/charm-platform-overrides/" \
+            --charm-listing-overrides "./static/charm-listing-overrides.yaml" \
+            --charm-test-configs "./static/charm-test-configs/" \
+            --charm-priorities-config "./static/charm-priorities.yaml" \
+            --charm-default-versions "./static/charm-default-versions.yaml" \
+            --juju-model-config "${model_config}" \
+            --juju-controller-bootstrap-constraints "./static/juju-bootstrap-constraints.json" \
+            --juju-controller-bootstrap-config "${bootstrap_config}" \
+            --juju-controller-bootstrap-metadata-source "$HOME/openstack/images" \
+            --log-cli-level "${log_level}" \
+            --log-level "${log_level}" \
+            --log-dir "./test-logs" \
+            --junit-xml=junit.xml
       - name: Run charm tests
         id: run_tests
+        if: ${{ inputs.substrate != 'cmr' }}
         continue-on-error: true
         shell: bash
         env:
@@ -342,7 +411,7 @@ jobs:
           test_observer_api: ${{ env.TEST_OBSERVER_API }}
           test_observer_token: ${{ env.TEST_OBSERVER_TOKEN }}
           test_execution_id: ${{ inputs.execution_id }}
-          junit_xml: ${{ steps.run_tests.outputs.junit_xml }}
+          junit_xml: ${{ inputs.substrate == 'cmr' && steps.run_tests_cmr.outputs.junit_xml || steps.run_tests.outputs.junit_xml }}
       - name: Post results to Test Observer
         if: ${{ env.TEST_OBSERVER_API != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-results
@@ -350,13 +419,13 @@ jobs:
           test_observer_api: ${{ env.TEST_OBSERVER_API }}
           test_observer_token: ${{ env.TEST_OBSERVER_TOKEN }}
           test_execution_id: ${{ inputs.execution_id }}
-          junit_xml: ${{ steps.run_tests.outputs.junit_xml }}
+          junit_xml: ${{ inputs.substrate == 'cmr' && steps.run_tests_cmr.outputs.junit_xml || steps.run_tests.outputs.junit_xml }}
       - name: Collect logs
         id: collect_logs
         if: ${{ !cancelled() }}
         shell: bash
         env:
-          junit_xml: ${{ steps.run_tests.outputs.junit_xml }}
+          junit_xml: ${{ inputs.substrate == 'cmr' && steps.run_tests_cmr.outputs.junit_xml || steps.run_tests.outputs.junit_xml }}
           generated_bundle: ./generated-bundle.yaml
         run: |
           mkdir -p "logs"

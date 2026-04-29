@@ -42,7 +42,8 @@ applications:
 bundle: kubernetes
 saas:
   neighbor-offer:
-    url: lxd:model.neighbor-offer
+    # url: lxd:model.neighbor-offer
+    url: REMOTE_OFFER
 relations:
 - - content-cache-k8s:nginx-proxy
   - target:nginx-route
