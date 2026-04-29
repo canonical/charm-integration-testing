@@ -17,11 +17,17 @@ def test_bootstrap_controller(
     juju_controller_bootstrap_constraints: dict[str, str],
     juju_controller_bootstrap_config: dict[str, str],
     juju_controller_bootstrap_metadata_source: Path | None,
+    all_bundles: list[tuple[str, str]],
 ) -> None:
-    juju_client.bootstrap_controller(
-        cloud=juju_cloud,
-        controller=juju_controller,
-        controller_constraints=juju_controller_bootstrap_constraints,
-        bootstrap_configuration=juju_controller_bootstrap_config,
-        metadata_source=juju_controller_bootstrap_metadata_source,
-    )
+    if not len(all_bundles):
+        all_bundles = [("unused", f"{juju_cloud}:{juju_controller}:irrelevant")]
+
+    for _, model_info in all_bundles:
+        juju_cloud, juju_controller, *_ = model_info.split(":")
+        juju_client.bootstrap_controller(
+                cloud=juju_cloud,
+                controller=juju_controller,
+                controller_constraints=juju_controller_bootstrap_constraints,
+                bootstrap_configuration=juju_controller_bootstrap_config,
+                metadata_source=juju_controller_bootstrap_metadata_source,
+            )

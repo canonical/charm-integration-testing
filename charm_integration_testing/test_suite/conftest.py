@@ -189,8 +189,9 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption(
         "--bundle",
         type=str,
+        action="append",
         default=None,
-        help="Bundle file path to deploy (used by deploy and idempotent-redeploy phases).",
+        help="Bundle file path to deploy (used by deploy and idempotent-redeploy phases). Can be specified multiple times; the first value is used.",
     )
     parser.addoption(
         "--mermaid-output",
@@ -465,16 +466,30 @@ def juju_controller_bootstrap_config(request: pytest.FixtureRequest) -> dict[str
 @pytest.fixture
 def bundle(request: pytest.FixtureRequest) -> Path:
     """Bundle file path passed via ``--bundle``."""
-    value = request.config.getoption("--bundle")
+    values = request.config.getoption("--bundle")
 
-    if not value:
+    if not values:
         return Path(request.config.rootpath) / "generated-bundle.yaml"
 
-    assert isinstance(value, str)
-    value = Path(value).resolve()
+    value = Path(values[0].split(":")[0]).resolve()
     # Ensures parents path exists for the output when calling .write_text
     value.parent.mkdir(parents=True, exist_ok=True)
     return value
+
+
+@pytest.fixture
+def all_bundles(request: pytest.FixtureRequest) -> list[tuple[Path, str]]:
+    """Bundle file path passed via ``--bundle``."""
+    values = request.config.getoption("--bundle")
+
+    if not values:
+        return []  # HACK(@motjuste): Not returning anything for all_bundles when None
+
+    values = [(Path(path).resolve(), model) for path, model in map(lambda v: v.split(":", maxsplit=1), values)]
+    # Ensures parents path exists for the output when calling .write_text
+    for value, _ in values:
+        value.parent.mkdir(parents=True, exist_ok=True)
+    return values
 
 
 @pytest.fixture
