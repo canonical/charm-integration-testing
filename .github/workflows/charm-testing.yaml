@@ -251,8 +251,16 @@ jobs:
           PROD_PS7_KUBECONFIG: ${{ secrets.PROD_PS7_KUBECONFIG }}
           PROD_SQA_NOVARC: ${{ secrets.PROD_SQA_NOVARC }}
         run: |
-          [[ -n "${KUBECONFIG_SECRET_NAME}" ]] && echo "kubeconfig=${!KUBECONFIG_SECRET_NAME}" >> "$GITHUB_OUTPUT"
-          [[ -n "${NOVARC_SECRET_NAME}" ]] && echo "novarc=${!NOVARC_SECRET_NAME}" >> "$GITHUB_OUTPUT"
+          if [[ -n "${KUBECONFIG_SECRET_NAME}" ]]; then
+            echo "kubeconfig<<EOF" >> "$GITHUB_OUTPUT"
+            echo "${!KUBECONFIG_SECRET_NAME}" >> "$GITHUB_OUTPUT"
+            echo "EOF" >> "$GITHUB_OUTPUT"
+          fi
+          if [[ -n "${NOVARC_SECRET_NAME}" ]]; then
+            echo "novarc<<EOF" >> "$GITHUB_OUTPUT"
+            echo "${!NOVARC_SECRET_NAME}" >> "$GITHUB_OUTPUT"
+            echo "EOF" >> "$GITHUB_OUTPUT"
+          fi
       - name: Resolve neighbor credentials
         id: neighbor_creds
         if: ${{ inputs.neighbor_environment != '' }}
@@ -265,8 +273,16 @@ jobs:
           PROD_PS7_KUBECONFIG: ${{ secrets.PROD_PS7_KUBECONFIG }}
           PROD_SQA_NOVARC: ${{ secrets.PROD_SQA_NOVARC }}
         run: |
-          [[ -n "${KUBECONFIG_SECRET_NAME}" ]] && echo "kubeconfig=${!KUBECONFIG_SECRET_NAME}" >> "$GITHUB_OUTPUT"
-          [[ -n "${NOVARC_SECRET_NAME}" ]] && echo "novarc=${!NOVARC_SECRET_NAME}" >> "$GITHUB_OUTPUT"
+          if [[ -n "${KUBECONFIG_SECRET_NAME}" ]]; then
+            echo "kubeconfig<<EOF" >> "$GITHUB_OUTPUT"
+            echo "${!KUBECONFIG_SECRET_NAME}" >> "$GITHUB_OUTPUT"
+            echo "EOF" >> "$GITHUB_OUTPUT"
+          fi
+          if [[ -n "${NOVARC_SECRET_NAME}" ]]; then
+            echo "novarc<<EOF" >> "$GITHUB_OUTPUT"
+            echo "${!NOVARC_SECRET_NAME}" >> "$GITHUB_OUTPUT"
+            echo "EOF" >> "$GITHUB_OUTPUT"
+          fi
       - name: Setup Target K8s Cloud
         if: ${{ steps.target_env_info.outputs.cloud-type == 'k8s' }}
         id: setup_target_k8s
