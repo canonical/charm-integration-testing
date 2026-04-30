@@ -52,6 +52,10 @@ def generate_endpoint_integrations(status: jubilant.Status) -> Iterator[tuple[st
         for endpoint, integrations in application_info.relations.items():
             for integration in integrations:
                 yield (application, endpoint, integration)
+    for offer, info in status.app_endpoints.items():
+        for endpoint, integrated_apps in info.relations.items():
+            for related_app in integrated_apps:
+                yield (offer, endpoint, AppStatusRelation(related_app, info.endpoints[endpoint].interface))
 
 
 def get_integrations(status: jubilant.Status) -> set[tuple[JujuIntegrationApplication, JujuIntegrationApplication]]:

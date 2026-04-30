@@ -9,7 +9,7 @@ from validators.base import ValidationResult
 
 from .backend import JujuBackend
 from .extension import JujuExtension
-from .models import JujuApplicationInfo, JujuIntegration, JujuIntegrationApplication
+from .models import JujuApplicationInfo, JujuConsumedOfferInfo, JujuIntegration, JujuIntegrationApplication
 from .version import JujuVersion
 
 
@@ -199,6 +199,10 @@ class JujuClient:
     def list_applications(self, model: str = "default") -> dict[str, JujuApplicationInfo]:
         self.logger.info("Getting list of applications.")
         return self.backend.list_applications(model)
+
+    def list_consumed_offers(self, model: str = "default") -> dict[str, JujuConsumedOfferInfo]:
+        self.logger.info("Getting list of consumed offers.")
+        return self.backend.list_consumed_offers(model)
 
     def application_revision(self, application: str, model: str = "default") -> int:
         self.logger.info(f"Getting charm revision for application '{application}'.")

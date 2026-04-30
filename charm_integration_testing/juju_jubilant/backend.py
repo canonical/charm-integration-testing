@@ -14,6 +14,7 @@ import jubilant
 import yaml
 from juju import (
     JujuApplicationInfo,
+    JujuConsumedOfferInfo,
     JujuExecOutput,
     JujuIntegration,
     JujuIntegrationApplication,
@@ -395,6 +396,9 @@ class JubilantBackend(JujuCmdBackend):
             app_name: JujuApplicationInfo(charm=app_info.charm, revision=app_info.charm_rev)
             for app_name, app_info in self.status(model).apps.items()
         }
+
+    def list_consumed_offers(self, model: str) -> dict[str, JujuConsumedOfferInfo]:
+        return {offer: JujuConsumedOfferInfo(url=info.url) for offer, info in self.status(model).app_endpoints.items()}
 
     def list_integrations(self, model: str) -> set[JujuIntegration]:
         # Juju status yaml format doesn't expose provider/requirer information or
