@@ -16,7 +16,6 @@ jobs:
             actions: write
         with:
             full_test_suite: true
-        secrets: inherit
     merge-main-to-production:
         needs: run-all-tests
         runs-on: ubuntu-latest
