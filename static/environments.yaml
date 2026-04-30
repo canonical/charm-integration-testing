@@ -50,7 +50,7 @@ environments:
     cloud-type: k8s
     kubeconfig-secret: PROD_PS7_KUBECONFIG
     arch: amd64
-    bootstrap-config:
+    bootstrap-config: &ps7-bootstrap-config
       apt-http-proxy: "http://egress.ps7.internal:3128"
       apt-https-proxy: "http://egress.ps7.internal:3128"
       http-proxy: "http://egress.ps7.internal:3128"
@@ -60,7 +60,7 @@ environments:
       snap-https-proxy: "http://egress.ps7.internal:3128"
     bootstrap-constraints:
       root-disk: '5G'
-    model-config:
+    model-config: &ps7-model-config
       logging-config: "DEBUG"
       update-status-hook-interval: "2m"
       juju-http-proxy: "http://egress.ps7.internal:3128"
@@ -68,3 +68,12 @@ environments:
       juju-no-proxy: "127.0.0.1,localhost,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.canonical.com,.launchpad.net,.internal,.jujucharms.com,.svc.cluster.local"
       snap-http-proxy: "http://egress.ps7.internal:3128"
       snap-https-proxy: "http://egress.ps7.internal:3128"
+  ps7-sqa-prod_charm_qa_openstack-1: &ps7-sqa-prod_charm_qa_openstack
+    github-runner: ps7
+    platform: machine
+    cloud-type: o7k
+    novarc-secret: PROD_PS7_NOVARC
+    arch: amd64
+    bootstrap-config: *ps7-bootstrap-config
+    model-config: *ps7-model-config
+  ps7-sqa-prod_charm_qa_openstack-2: *ps7-sqa-prod_charm_qa_openstack
