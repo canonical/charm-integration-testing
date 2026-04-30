@@ -165,6 +165,8 @@ jobs:
           substrate: ${{ inputs.substrate }}
           model: ${{ steps.juju_resources.outputs.model }}
           controller: ${{ steps.juju_resources.outputs.controller }}
+          full_test_suite: ${{ inputs.full_test_suite }}
+          additional_tests: ${{ inputs.additional_tests }}
         run: |
           echo "### Job inputs" >> $GITHUB_STEP_SUMMARY
           echo "| Input | Value |" >> $GITHUB_STEP_SUMMARY
@@ -186,6 +188,8 @@ jobs:
           echo "|---|---|" >> $GITHUB_STEP_SUMMARY
           echo "| Juju model | \`${model}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Juju controller | \`${controller}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Full Test Suite Ran | \`${full_test_suite}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Additional Tests | \`${additional_tests}\` |" >> $GITHUB_STEP_SUMMARY
       - name: Report Test Execution Start To Test Observer
         if: ${{ !cancelled() && env.TEST_OBSERVER_API != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/patch-test-execution
