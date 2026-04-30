@@ -931,15 +931,26 @@ def record_charms_and_revisions_execution_metadata_instantaneous(
         # Save the revision
         execution_metadata(f"charm:{application_info.charm}:revision", str(application_info.revision))
 
+    consumed_offers = juju_client.list_consumed_offers(model=model).keys()
+
     # Get all integrations and record them
     for integration in juju_client.list_integrations(model=model):
         # Record integration in format: provider:endpoint/interface/requirer:endpoint
-        integration_str = (
-            f"{applications[integration.provider.application].charm}:{integration.provider.endpoint}/"
-            f"{integration.interface}/"
-            f"{applications[integration.requirer.application].charm}:{integration.requirer.endpoint}"
-        )
-        execution_metadata("integration", integration_str)
+        try:
+            integration_str = (
+                f"{applications[integration.provider.application].charm}:{integration.provider.endpoint}/"
+                f"{integration.interface}/"
+                f"{applications[integration.requirer.application].charm}:{integration.requirer.endpoint}"
+            )
+            execution_metadata("integration", integration_str)
+        except KeyError as err:
+            if consumed_offers.isdisjoint({integration.provider.application, integration.requirer.application}):
+                raise KeyError("neither app nor consumed offer") from err
+
+            # FIXME(@motjuste): not recording execution metadata for consumed offers
+            #   either use the URL which does not have charm info,
+            #   or do a second status-check for offering model to get that info,
+            #   AND, only do it for **actually** integrated offers
 
 
 @pytest.fixture
