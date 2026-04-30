@@ -40,7 +40,7 @@ extend-select = ["I"]
 
 [tool.pytest.ini_options]
 timeout = 14400
-core = ["core: marks tests are part of the core suite"]
+markers = ["core: marks tests are part of the core suite"]
 
 log_cli = true
 log_cli_level = "INFO"
