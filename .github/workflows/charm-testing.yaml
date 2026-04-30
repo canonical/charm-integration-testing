@@ -86,6 +86,11 @@ on:
         type: choice
         options: [DEBUG, INFO, WARNING, ERROR]
         default: INFO
+      run_full_test_suite:
+        description: Whether to run the full test suite or just a subset of tests.
+        required: false
+        default: true
+        type: boolean
 env:
   DEBUG_SLEEP_SECONDS: 7200  # 2 hours
 jobs:

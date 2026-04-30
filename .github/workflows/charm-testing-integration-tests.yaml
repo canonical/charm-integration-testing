@@ -4,7 +4,20 @@ permissions:
   contents: read
 on:
   workflow_dispatch:
+    inputs:
+      full_test_suite:
+        description: 'Whether to run the full test suite or just a subset of tests.'
+        required: false
+        default: false
+        type: boolean
   workflow_call:
+    inputs:
+      full_test_suite:
+        description: 'Whether to run the full test suite or just a subset of tests.'
+        required: false
+        default: false
+        type: boolean
+
 jobs:
   assert-pass:
     strategy:
@@ -34,5 +47,6 @@ jobs:
       neighbor_charm: ${{ matrix.params.neighbor_charm }}
       neighbor_endpoint: ${{ matrix.params.neighbor_endpoint }}
       substrate: ${{ matrix.params.substrate }}
+      full_test_suite: ${{ inputs.full_test_suite }}
     secrets:
       STG_TEST_OBSERVER_TOKEN: ${{ secrets.STG_TEST_OBSERVER_TOKEN }}
