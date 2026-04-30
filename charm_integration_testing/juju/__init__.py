@@ -16,7 +16,7 @@ from .backend import (
 )
 from .client import JujuClient, JujuValidationError
 from .extension import JujuExtension
-from .models import JujuApplicationInfo, JujuIntegration, JujuIntegrationApplication
+from .models import JujuApplicationInfo, JujuConsumedOfferInfo, JujuIntegration, JujuIntegrationApplication
 from .version import JujuVersion
 
 __all__ = [
@@ -24,6 +24,7 @@ __all__ = [
     "JujuApplicationState",
     "JujuBackend",
     "JujuClient",
+    "JujuConsumedOfferInfo",
     "JujuExecOutput",
     "JujuExtension",
     "JujuIntegration",
