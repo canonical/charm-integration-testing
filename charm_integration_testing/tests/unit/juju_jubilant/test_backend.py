@@ -1122,15 +1122,24 @@ class TestJubilantBackend:
 
     class TestScp:
         @dataclass
+        class ModelStub:
+            type: str = "kubernetes"
+
+        @dataclass
         class ScpStub:
             args: list[str] = field(default_factory=list)
+            model: Any = None
+
+            def show_model(self) -> Any:
+                return self.model
 
             def cli(self, *args: str) -> None:
                 self.args = list(args)
 
-        def test(self) -> None:
+        def test_k8s_model(self) -> None:
             # GIVEN
             stub = self.ScpStub()
+            stub.model = self.ModelStub(type="kubernetes")
             client = JubilantClientStub(client=stub)
 
             # WHEN
@@ -1139,16 +1148,17 @@ class TestJubilantBackend:
             # THEN
             assert stub.args == ["scp", "a", "b"]
 
-        def test_places_options_before_rest(self) -> None:
+        def test_non_k8s_model_specifies_recursive(self) -> None:
             # GIVEN
             stub = self.ScpStub()
+            stub.model = self.ModelStub(type="not-kubernetes")
             client = JubilantClientStub(client=stub)
 
             # WHEN
-            JubilantBackend(client).scp("test-model", "a", "b", "option-x", "option-y")
+            JubilantBackend(client).scp("test-model", source="a", destination="b")
 
             # THEN
-            assert stub.args == ["scp", "option-x", "option-y", "a", "b"]
+            assert stub.args == ["scp", "--", "-r", "a", "b"]
 
     class TestSsh:
         @dataclass

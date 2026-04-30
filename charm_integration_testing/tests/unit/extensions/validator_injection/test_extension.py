@@ -29,7 +29,7 @@ class JujuStub(NullJujuBackend):
 
     exec_responses: deque[JujuExecOutput] = field(default_factory=deque)
     exec_calls: list[tuple[str, str, str, bool]] = field(default_factory=list)
-    scp_calls: list[tuple[str, str, str, tuple[str, ...]]] = field(default_factory=list)
+    scp_calls: list[tuple[str, str, str]] = field(default_factory=list)
     ssh_calls: list[tuple[str, str, str]] = field(default_factory=list)
     units_by_app: dict[str, list[str]] = field(default_factory=dict)
     k8s_models: set[str] = field(default_factory=set)
@@ -43,8 +43,8 @@ class JujuStub(NullJujuBackend):
             return self.exec_responses.popleft()
         return JujuExecOutput(return_code=0, stdout="", stderr="")
 
-    def scp(self, model: str, source: str, destination: str, *options: str) -> None:
-        self.scp_calls.append((model, source, destination, options))
+    def scp(self, model: str, source: str, destination: str) -> None:
+        self.scp_calls.append((model, source, destination))
 
     def ssh(self, model: str, unit: str, cmd: str) -> None:
         self.ssh_calls.append((model, unit, cmd))
@@ -374,29 +374,9 @@ class TestValidatorInjectorExtension:
 
             # THEN scp is called with the resolved source path and correct destination
             assert len(juju.scp_calls) == 2  # validators + uv
-            _, source, dest, options = juju.scp_calls[0]
+            _, source, dest = juju.scp_calls[0]
             assert source == str(validators_path.resolve())
             assert dest == f"myapp/0:{remote_validators_path}/packages"
-            assert options == ()  # empty for k8s models
-
-        def test_calls_scp_with_recursive_option_for_non_k8s_model(
-            self,
-            extension: ValidatorInjectorExtension,
-            juju: JujuStub,
-            validators_path: Path,
-        ) -> None:
-            # GIVEN all install commands succeed
-            juju.exec_responses.extend([_ok(), _ok(), _ok()])
-
-            # WHEN
-            extension._inject_validators("mymodel", "myapp/0", is_k8s=False)
-
-            # THEN scp is called with the resolved source path and correct destination
-            assert len(juju.scp_calls) == 2  # validators + uv
-            _, source, dest, options = juju.scp_calls[0]
-            assert source == str(validators_path.resolve())
-            assert dest == f"myapp/0:{remote_validators_path}/packages"
-            assert options == ("--", "-r")
 
         def test_calls_ssh_mkdir_before_scp(
             self,

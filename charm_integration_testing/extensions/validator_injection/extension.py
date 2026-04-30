@@ -81,12 +81,7 @@ class ValidatorInjectorExtension(JujuExtension):
         if not is_k8s:
             mkdir = f"sudo {mkdir} && sudo chown -R $(id -u) {remote_validators_path}"
         self.juju.ssh(model, unit, mkdir)
-        self.juju.scp(
-            model,
-            str(self.validators_path.resolve()),
-            f"{unit}:{remote_validators_path}/packages",
-            *([] if is_k8s else ["--", "-r"]),
-        )
+        self.juju.scp(model, str(self.validators_path.resolve()), f"{unit}:{remote_validators_path}/packages")
 
         # Copy uv binary
         uv_file = self._get_uv_file()

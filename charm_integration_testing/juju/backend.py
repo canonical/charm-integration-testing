@@ -323,7 +323,7 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def scp(self, model: str, source: str, destination: str, *options: str) -> None:
+    def scp(self, model: str, source: str, destination: str) -> None:
         raise NotImplementedError
 
     @abstractmethod

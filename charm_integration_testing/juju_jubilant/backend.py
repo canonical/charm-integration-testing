@@ -372,9 +372,13 @@ class JubilantBackend(JujuCmdBackend):
             stderr=task_result.results.stderr,
         )
 
-    def scp(self, model: str, source: str, destination: str, *options: str) -> None:
+    def scp(self, model: str, source: str, destination: str) -> None:
         # Jubilant scp doesn't work for directories
         # https://github.com/canonical/jubilant/issues/266
+        #
+        # Furthermore, machine charms need to specify -r if source is a directory
+        #   we'll always specify -r to be safe
+        options = () if self.is_k8s_model(model) else ("--", "-r")
         self.client.model(model).cli("scp", *options, source, destination)
 
     def ssh(self, model: str, application: str, command: str) -> None:
