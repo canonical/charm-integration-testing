@@ -11,7 +11,8 @@ on:
         default: false
         type: boolean
       additional_tests:
-        description: 'Extra pytest -k expression to run alongside the base suite (e.g. "test_upgrade_charm").'
+        description: 'Extra pytest -k expression to run alongside the base suite (e.g.
+          "test_upgrade_charm").'
         required: false
         default: ''
         type: string
@@ -27,7 +28,6 @@ on:
         required: false
         default: ''
         type: string
-
 jobs:
   assert-pass:
     strategy:

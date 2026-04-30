@@ -100,7 +100,6 @@ jobs:
           import os
           import re
           import subprocess
-
           base_ref = os.environ["BASE_REF"]
           result = subprocess.run(
               ["git", "diff", "--name-only", f"origin/{base_ref}...HEAD"],
@@ -110,7 +109,6 @@ jobs:
           )
           changed_files = result.stdout.splitlines()
           print("Changed files:\n" + "\n".join(changed_files))
-
           CRITICAL_PATTERNS = [
               "charm_integration_testing/test_suite/conftest.py",
               "charm_integration_testing/test_suite/scheduler/",
@@ -122,9 +120,7 @@ jobs:
               "scripts/run-tests.sh",
               "static/",
           ]
-
           github_output = os.environ["GITHUB_OUTPUT"]
-
           for pattern in CRITICAL_PATTERNS:
               if any(f.startswith(pattern) for f in changed_files):
                   print(f"Critical path changed ({pattern}). Running full test suite.")
@@ -132,7 +128,6 @@ jobs:
                       fh.write("full_test_suite=true\n")
                       fh.write("additional_tests=\n")
                   raise SystemExit(0)
-
           test_pattern = re.compile(
               r"^charm_integration_testing/test_suite/(test_[^/]+)\.py$"
           )
@@ -142,11 +137,9 @@ jobs:
               if (m := test_pattern.match(f))
           ]
           additional_tests = " or ".join(affected)
-
           with open(github_output, "a") as fh:
               fh.write("full_test_suite=false\n")
               fh.write(f"additional_tests={additional_tests}\n")
-
   charm-testing-integration-tests:
     needs: detect-affected-tests
     uses: ./.github/workflows/charm-testing-integration-tests.yaml

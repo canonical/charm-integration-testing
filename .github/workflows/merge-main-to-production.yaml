@@ -1,38 +1,38 @@
 ---
 name: Merge Main to Production
 on:
-    schedule:
-        - cron: '0 */12 * * *' # Runs every 12 hours
-    workflow_dispatch:  # Allows manual triggering of the workflow
+  schedule:
+    - cron: '0 */12 * * *'     # Runs every 12 hours
+  workflow_dispatch:  # Allows manual triggering of the workflow
 permissions: {}
 concurrency:
-    group: ${{ github.workflow }}-${{ github.ref }}
-    cancel-in-progress: false
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 jobs:
-    run-all-tests:
-        uses: ./.github/workflows/charm-testing-integration-tests.yaml
-        permissions:
-            contents: read
-            actions: write
+  run-all-tests:
+    uses: ./.github/workflows/charm-testing-integration-tests.yaml
+    permissions:
+      contents: read
+      actions: write
+    with:
+      full_test_suite: true
+  merge-main-to-production:
+    needs: run-all-tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-            full_test_suite: true
-    merge-main-to-production:
-        needs: run-all-tests
-        runs-on: ubuntu-latest
-        permissions:
-            contents: write
-        steps:
-            - name: Checkout main
-              uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-              with:
-                  ref: main
-                  fetch-depth: 0
-                  persist-credentials: true
-            - name: Merge main into production
-              run: |
-                  git config user.name "github-actions[bot]"
-                  git config user.email "github-actions[bot]@users.noreply.github.com"
-                  git fetch origin production
-                  git checkout production
-                  git merge --ff-only origin/main
-                  git push origin production
+          ref: main
+          fetch-depth: 0
+          persist-credentials: true
+      - name: Merge main into production
+        run: |-
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git fetch origin production
+          git checkout production
+          git merge --ff-only origin/main
+          git push origin production
