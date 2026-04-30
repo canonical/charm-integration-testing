@@ -95,7 +95,7 @@ class TestS3IntegratorMinIOBackendExtension:
             assert ("test-model", "s3-app-minio", "0:10:00") in juju.waited_scaled
 
             assert juju.scp_calls == [
-                ("test-model", str(Path("mc").resolve()), "s3-app-minio/leader:/usr/local/bin/mc")
+                ("test-model", str(Path("mc").resolve()), "s3-app-minio/leader:/usr/local/bin/mc", ())
             ]
 
             assert any("/usr/local/bin/mc alias set local" in cmd for _, _, cmd in juju.ssh_calls)

@@ -372,10 +372,10 @@ class JubilantBackend(JujuCmdBackend):
             stderr=task_result.results.stderr,
         )
 
-    def scp(self, model: str, source: str, destination: str) -> None:
+    def scp(self, model: str, source: str, destination: str, *options: str) -> None:
         # Jubilant scp doesn't work for directories
         # https://github.com/canonical/jubilant/issues/266
-        self.client.model(model).cli("scp", source, destination)
+        self.client.model(model).cli("scp", *options, source, destination)
 
     def ssh(self, model: str, application: str, command: str) -> None:
         self.client.model(model).ssh(

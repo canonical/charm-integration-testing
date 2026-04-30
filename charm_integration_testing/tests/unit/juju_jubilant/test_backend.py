@@ -1139,6 +1139,17 @@ class TestJubilantBackend:
             # THEN
             assert stub.args == ["scp", "a", "b"]
 
+        def test_places_options_before_rest(self) -> None:
+            # GIVEN
+            stub = self.ScpStub()
+            client = JubilantClientStub(client=stub)
+
+            # WHEN
+            JubilantBackend(client).scp("test-model", "a", "b", "option-x", "option-y")
+
+            # THEN
+            assert stub.args == ["scp", "option-x", "option-y", "a", "b"]
+
     class TestSsh:
         @dataclass
         class SshStub:

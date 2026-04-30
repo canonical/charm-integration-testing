@@ -153,7 +153,7 @@ class NullJujuBackend(JujuBackend):
     def switch(self, controller: str, model: str) -> None:
         raise NotImplementedError
 
-    def scp(self, model: str, source: str, destination: str) -> None:
+    def scp(self, model: str, source: str, destination: str, *options: str) -> None:
         raise NotImplementedError
 
     def ssh(self, model: str, application: str, command: str) -> None:
@@ -308,9 +308,9 @@ class JujuStub(NullJujuBackend):
         """Wait for a specific message from a unit (captures call for verification)"""
         self.waited_messages.append((model, unit, message, str(timeout)))
 
-    def scp(self, model: str, source: str, destination: str) -> None:
+    def scp(self, model: str, source: str, destination: str, *options: str) -> None:
         """Mock SCP file transfer (captures call for verification)"""
-        self.scp_calls.append((model, source, destination))
+        self.scp_calls.append((model, source, destination, options))
 
     def ssh(self, model: str, target: str, command: str) -> None:
         """Mock SSH command execution (captures call for verification)"""
