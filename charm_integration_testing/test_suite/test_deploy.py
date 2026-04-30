@@ -10,7 +10,6 @@ from juju import JujuClient
 from .scheduler.states import State
 
 
-@pytest.mark.core
 @pytest.mark.state(requires=State.EMPTY_MODEL, provides=State.DEPLOYED)
 def test_deploy(
     juju_client: JujuClient,
