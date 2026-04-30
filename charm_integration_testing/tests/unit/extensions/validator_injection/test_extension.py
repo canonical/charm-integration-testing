@@ -370,7 +370,7 @@ class TestValidatorInjectorExtension:
             juju.exec_responses.extend([_ok(), _ok(), _ok()])
 
             # WHEN
-            extension._inject_validators("mymodel", "myapp/0")
+            extension._inject_validators("mymodel", "myapp/0", is_k8s=True)
 
             # THEN scp is called with the resolved source path and correct destination
             assert len(juju.scp_calls) == 2  # validators + uv
@@ -387,13 +387,32 @@ class TestValidatorInjectorExtension:
             juju.exec_responses.extend([_ok(), _ok(), _ok()])
 
             # WHEN
-            extension._inject_validators("mymodel", "myapp/0")
+            extension._inject_validators("mymodel", "myapp/0", is_k8s=True)
 
             # THEN ssh was called to create the remote directory before copying files
             assert len(juju.ssh_calls) == 1
             _, unit, cmd = juju.ssh_calls[0]
             assert unit == "myapp/0"
             assert cmd == f"mkdir -p {remote_validators_path}"
+
+        def test_calls_ssh_mkdir_before_scp_with_sudo_in_non_k8s_model_and_chowns_it(
+            self,
+            extension: ValidatorInjectorExtension,
+            juju: JujuStub,
+        ) -> None:
+            # GIVEN all install commands succeed
+            juju.exec_responses.extend([_ok(), _ok(), _ok()])
+
+            # WHEN
+            extension._inject_validators("mymodel", "myapp/0", is_k8s=False)
+
+            # THEN ssh was called to create the remote directory before copying files
+            assert len(juju.ssh_calls) == 1
+            _, unit, cmd = juju.ssh_calls[0]
+            mkdir, chown = cmd.split(" && ")
+            assert unit == "myapp/0"
+            assert mkdir == f"sudo mkdir -p {remote_validators_path}"
+            assert chown == f"sudo chown -R $(id -u) {remote_validators_path}"
 
         def test_runs_three_install_commands(self, extension: ValidatorInjectorExtension, juju: JujuStub) -> None:
             # GIVEN all install commands succeed
