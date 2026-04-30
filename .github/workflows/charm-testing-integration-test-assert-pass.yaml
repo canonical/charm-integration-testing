@@ -32,6 +32,14 @@ on:
       substrate:
         type: string
         required: true
+      full_test_suite:
+        type: boolean
+        required: false
+        default: false
+      additional_tests:
+        type: string
+        required: false
+        default: ''
     secrets:
       STG_TEST_OBSERVER_TOKEN:
         required: true
@@ -65,7 +73,7 @@ jobs:
         uses: ./.github/actions/workflow-dispatch
         with:
           workflow: charm-testing.yaml
-          ref: ${{ github.head_ref || github.ref_name }}
+          ref: ${{ github.head_ref || 'production' }}
           title: 'Testing ${{ inputs.target_charm }}:${{ inputs.target_endpoint }}
             against ${{ inputs.neighbor_charm }}:${{ inputs.neighbor_endpoint }}.
             (environment: staging, test execution: ${{ steps.create-test-execution.outputs.test_execution_id }},
@@ -82,7 +90,9 @@ jobs:
               "revision": "${{ inputs.target_revision }}",
               "series": "${{ inputs.target_base }}",
               "channel": "${{ inputs.target_track }}/${{ inputs.target_risk }}",
-              "substrate": "${{ inputs.substrate }}"
+              "substrate": "${{ inputs.substrate }}",
+              "full_test_suite": "${{ inputs.full_test_suite }}",
+              "additional_tests": "${{ inputs.additional_tests }}"
             }
       - name: Ensure Charm Tests Workflow Success
         shell: bash
