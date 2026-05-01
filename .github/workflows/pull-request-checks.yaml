@@ -111,7 +111,6 @@ jobs:
               check=True,
           )
           changed_files = result.stdout.splitlines()
-
           print("Changed files:\n" + "\n".join(changed_files))
           CRITICAL_PATTERNS = [
               "charm_integration_testing/test_suite/conftest.py",
