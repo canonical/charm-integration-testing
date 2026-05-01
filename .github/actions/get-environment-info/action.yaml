@@ -17,10 +17,12 @@ outputs:
     description: Cloud setup type (k8s or o7k).
     value: ${{ steps.lookup.outputs.cloud-type }}
   kubeconfig-secret:
-    description: Name of the GitHub Actions secret holding the kubeconfig (k8s environments only).
+    description: Name of the GitHub Actions secret holding the kubeconfig (k8s environments
+      only).
     value: ${{ steps.lookup.outputs.kubeconfig-secret }}
   novarc-secret:
-    description: Name of the GitHub Actions secret holding the novarc (o7k environments only).
+    description: Name of the GitHub Actions secret holding the novarc (o7k environments
+      only).
     value: ${{ steps.lookup.outputs.novarc-secret }}
   bootstrap-config:
     description: Path to a temporary file containing the Juju bootstrap config as

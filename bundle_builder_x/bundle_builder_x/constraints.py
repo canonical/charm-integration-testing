@@ -281,7 +281,10 @@ def add_charm_metadata_constraints(solver: z3.Solver, domain: Domain) -> None:
             if not spec_endpoint.optional:
                 solver.assert_and_track(
                     z3.Implies(charm.exists, charm.endpoints[endpoint_name].count >= 1),
-                    CharmEndpointNonOptionalTag(charm=_charm_endpoint_payload(charm, charm_id, endpoint_name)).encode(),
+                    CharmEndpointNonOptionalTag(
+                        charm=_charm_endpoint_payload(charm, charm_id, endpoint_name),
+                        interface=spec_endpoint.interface,
+                    ).encode(),
                 )
 
     # Ensure endpoint count respects limit if charm exists

@@ -124,7 +124,8 @@ jobs:
       UV_FILE: ${{ github.workspace }}/static/uv
       UBUNTU_PRO_TOKEN: ${{ secrets.UBUNTU_PRO_TOKEN }}
       VALIDATORS_PATH: ${{ github.workspace }}/validators
-      BUNDLE_OUTPUT: ./generated-bundle.yaml
+      TARGET_BUNDLE_OUTPUT: ./generated-target-bundle.yaml
+      NEIGHBOR_BUNDLE_OUTPUT: ./generated-neighbor-bundle.yaml
       BUNDLE_MERMAID_OUTPUT: ./generated-bundle.mmd
     steps:
       - name: Clone Repo
@@ -423,46 +424,51 @@ jobs:
           bootstrap_config: ${{ steps.target_env_info.outputs.bootstrap-config }}
           bootstrap_constraints: ${{ steps.target_env_info.outputs.bootstrap-constraints }}
           model_config: ${{ steps.target_env_info.outputs.model-config }}
+          neighbor_bootstrap_config: ${{ steps.neighbor_env_info.outputs.bootstrap-config }}
+          neighbor_bootstrap_constraints: ${{ steps.neighbor_env_info.outputs.bootstrap-constraints }}
+          neighbor_model_config: ${{ steps.neighbor_env_info.outputs.model-config }}
+          neighbor_platform: ${{ steps.neighbor_env_info.outputs.platform }}
         run: |
-          mkdir -p $HOME/openstack/images
           echo "junit_xml=$(realpath junit.xml)" >> $GITHUB_OUTPUT
-
-          # set the REMOTE_OFFER url in the template bundle yaml
-          REMOTE_OFFER="o7k-${controller}:o7k-${model}.neighbor-offer"
-          sed -i "s|REMOTE_OFFER|${REMOTE_OFFER}|g" "./static/bundles/cmr-demo-1/indico.yaml"
           ./scripts/run-tests.sh \
+            --target-cloud "${k8s_cloud}" \
+            --target-controller "k8s-${controller}" \
+            --target-model "k8s-${model}" \
+            --target-bundle "${TARGET_BUNDLE_OUTPUT}" \
+            \
+            --neighbor-cloud "${o7k_cloud}" \
+            --neighbor-controller "o7k-${controller}" \
+            --neighbor-model "o7k-${model}" \
+            --neighbor-bundle "${NEIGHBOR_BUNDLE_OUTPUT}" \
+            \
+            --target-controller-bootstrap-config "${bootstrap_config}" \
+            --target-controller-bootstrap-constraints "${bootstrap_constraints}" \
+            --target-controller-bootstrap-metadata-source "./openstack/images" \
+            --target-model-config "${model_config}" \
+            \
+            --neighbor-controller-bootstrap-config "${neighbor_bootstrap_config}" \
+            --neighbor-controller-bootstrap-constraints "${neighbor_bootstrap_constraints}" \
+            --neighbor-controller-bootstrap-metadata-source "./openstack/images" \
+            --neighbor-model-config "${neighbor_model_config}" \
+            \
             --target-charm "${charm_under_test}" \
             --target-channel "${channel}" \
             --target-revision "${revision}" \
             --target-downgrade-revision "${downgrade_revision}" \
             --target-series "${series}" \
+            --target-platform "${platform}" \
+            \
             --neighbor-charm "${neighbor}" \
-            --model "k8s-${model}" \
+            --neighbor-platform "${neighbor_platform}" \
             \
-            --juju-cloud "${k8s_cloud}" \
-            --bundle "./static/bundles/cmr-demo-1/postgresql.yaml:${o7k_cloud}:o7k-${controller}:o7k-${model}" \
-            --bundle "./static/bundles/cmr-demo-1/indico.yaml:${k8s_cloud}:k8s-${controller}:k8s-${model}" \
-            --juju-controller "k8s-${controller}" \
-            \
-            --current-state "no_controller" \
-            -k 'not test_build_bundle and not test_remove_and_restore_integration' \
-            \
-            --mermaid-output "${BUNDLE_MERMAID_OUTPUT}" \
             --target-application "target" \
             --target-endpoint "${charm_endpoint}" \
             --neighbor-application "neighbor" \
             --neighbor-endpoint "${neighbor_endpoint}" \
-            --platform "${platform}" \
-            --charm-metadata-overrides "./static/charm-metadata-overrides/" \
-            --charm-platform-overrides "./static/charm-platform-overrides/" \
-            --charm-listing-overrides "./static/charm-listing-overrides.yaml" \
-            --charm-test-configs "./static/charm-test-configs/" \
-            --charm-priorities-config "./static/charm-priorities.yaml" \
-            --charm-default-versions "./static/charm-default-versions.yaml" \
-            --juju-model-config "${model_config}" \
-            --juju-controller-bootstrap-constraints "${bootstrap_constraints}" \
-            --juju-controller-bootstrap-config "${bootstrap_config}" \
-            --juju-controller-bootstrap-metadata-source "$HOME/openstack/images" \
+            \
+            --current-state "no_bundle" \
+            --charm-overrides "./static/charm-overrides/" \
+            --mermaid-output "${BUNDLE_MERMAID_OUTPUT}" \
             --log-cli-level "${log_level}" \
             --log-level "${log_level}" \
             --log-dir "./test-logs" \
@@ -491,35 +497,35 @@ jobs:
           bootstrap_constraints: ${{ steps.target_env_info.outputs.bootstrap-constraints }}
           model_config: ${{ steps.target_env_info.outputs.model-config }}
         run: |
-          mkdir -p $HOME/openstack/images
           echo "junit_xml=$(realpath junit.xml)" >> $GITHUB_OUTPUT
           ./scripts/run-tests.sh \
+            --target-cloud "${cloud}" \
+            --target-controller "${controller}" \
+            --target-model "${model}" \
+            --target-bundle "${TARGET_BUNDLE_OUTPUT}" \
+            \
+            --target-controller-bootstrap-config "${bootstrap_config}" \
+            --target-controller-bootstrap-constraints "${bootstrap_constraints}" \
+            --target-controller-bootstrap-metadata-source "./openstack/images" \
+            --target-model-config "${model_config}" \
+            \
             --target-charm "${charm_under_test}" \
             --target-channel "${channel}" \
             --target-revision "${revision}" \
             --target-downgrade-revision "${downgrade_revision}" \
             --target-series "${series}" \
+            --target-platform "${platform}" \
+            \
             --neighbor-charm "${neighbor}" \
-            --model "${model}" \
-            --juju-cloud "${cloud}" \
-            --juju-controller "${controller}" \
-            --mermaid-output "${BUNDLE_MERMAID_OUTPUT}" \
-            --current-state "no_bundle" \
+            \
             --target-application "target" \
             --target-endpoint "${charm_endpoint}" \
             --neighbor-application "neighbor" \
             --neighbor-endpoint "${neighbor_endpoint}" \
-            --platform "${platform}" \
-            --charm-metadata-overrides "./static/charm-metadata-overrides/" \
-            --charm-platform-overrides "./static/charm-platform-overrides/" \
-            --charm-listing-overrides "./static/charm-listing-overrides.yaml" \
-            --charm-test-configs "./static/charm-test-configs/" \
-            --charm-priorities-config "./static/charm-priorities.yaml" \
-            --charm-default-versions "./static/charm-default-versions.yaml" \
-            --juju-model-config "${model_config}" \
-            --juju-controller-bootstrap-constraints "${bootstrap_constraints}" \
-            --juju-controller-bootstrap-config "${bootstrap_config}" \
-            --juju-controller-bootstrap-metadata-source "$HOME/openstack/images" \
+            \
+            --current-state "no_bundle" \
+            --charm-overrides "./static/charm-overrides/" \
+            --mermaid-output "${BUNDLE_MERMAID_OUTPUT}" \
             --log-cli-level "${log_level}" \
             --log-level "${log_level}" \
             --log-dir "./test-logs" \
@@ -542,9 +548,13 @@ jobs:
           echo '```mermaid' >> $GITHUB_STEP_SUMMARY
           cat ${BUNDLE_MERMAID_OUTPUT} >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-          echo '### Generated Juju Bundle' >> $GITHUB_STEP_SUMMARY
+          echo '### Generated Target Juju Bundle' >> $GITHUB_STEP_SUMMARY
           echo '```yaml' >> $GITHUB_STEP_SUMMARY
-          cat ${BUNDLE_OUTPUT} >> $GITHUB_STEP_SUMMARY
+          cat ${TARGET_BUNDLE_OUTPUT} >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo '### Generated Neighbor Juju Bundle' >> $GITHUB_STEP_SUMMARY
+          echo '```yaml' >> $GITHUB_STEP_SUMMARY
+          cat ${NEIGHBOR_BUNDLE_OUTPUT} >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
       - name: Post execution metadata to Test Observer
         if: ${{ env.TEST_OBSERVER_API != '' && inputs.execution_id != '' }}
@@ -568,12 +578,12 @@ jobs:
         shell: bash
         env:
           junit_xml: ${{ inputs.neighbor_environment != '' && steps.run_tests_cmr.outputs.junit_xml || steps.run_tests.outputs.junit_xml }}
-          generated_bundle: ./generated-bundle.yaml
         run: |
           mkdir -p "logs"
           [ -d "./test-logs" ] && cp -r ./test-logs/. "logs/"
           [ -f "${junit_xml}" ] && cp "${junit_xml}" "logs/junit.xml"
-          [ -f "${generated_bundle}" ] && cp "${generated_bundle}" "logs/generated-bundle.yaml"
+          [ -f "${TARGET_BUNDLE_OUTPUT}" ] && cp "${TARGET_BUNDLE_OUTPUT}" "logs/generated-target-bundle.yaml"
+          [ -f "${NEIGHBOR_BUNDLE_OUTPUT}" ] && cp "${NEIGHBOR_BUNDLE_OUTPUT}" "logs/generated-neighbor-bundle.yaml"
           echo "directory_path=$(realpath "logs")" >> $GITHUB_OUTPUT
       - name: Post Logs To Swift
         id: post_logs_to_swift
@@ -616,7 +626,8 @@ jobs:
           test_observer_api: ${{ env.TEST_OBSERVER_API }}
           test_observer_token: ${{ env.TEST_OBSERVER_TOKEN }}
           test_execution_id: ${{ inputs.execution_id }}
-          job_uuid: ${{ inputs.test_observer_environment }}/${{ inputs.execution_id }}
+          job_uuid: ${{ inputs.test_observer_environment }}/${{ inputs.execution_id
+            }}
       - name: Post 'job_end' event
         if: ${{ !cancelled() && env.TEST_OBSERVER_API != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-events

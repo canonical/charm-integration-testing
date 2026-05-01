@@ -14,32 +14,31 @@ from .scheduler.states import State
 @pytest.mark.state(requires=State.NEIGHBOR_ONLY, provides=State.DEPLOYED)
 def test_idempotent_redeploy(
     juju_client: JujuClient,
-    model: str,
+    is_cmr_test: bool,
     target_application: str,
-    bundle: Path,
-    all_bundles: list[tuple[Path, str]],
+    target_bundle: Path,
+    neighbor_bundle: Path | None,
+    model: str,
+    target_controller: str,
+    neighbor_model: str | None,
+    neighbor_controller: str | None,
 ) -> None:
-    if not len(all_bundles):
-        all_bundles = [(bundle, model)]
+    target_model_uri = f"{target_controller}:{model}"
+    all_bundles: list[tuple[Path, str]] = [(target_bundle, target_model_uri)]
+    if is_cmr_test:
+        assert neighbor_bundle is not None
+        assert neighbor_controller is not None
+        assert neighbor_model is not None
+        all_bundles.append((neighbor_bundle, f"{neighbor_controller}:{neighbor_model}"))
 
-    target_found = False
-    for bundle, model_uri in all_bundles:
-        _, controller, model = model_uri.split(":")
-        model = f"{controller}:{model}"
-        # Redeploy the bundle, which should redeploy the target application
-        # existing applications will be ignored
-        juju_client.deploy_bundle_file(str(bundle), model=model)
+    for bundle_path, model_uri in all_bundles:
+        # Redeploy the bundle; existing applications will be ignored
+        juju_client.deploy_bundle_file(str(bundle_path), model=model_uri)
+        juju_client.idle_for_period(model=model_uri, timeout=timedelta(minutes=15))
 
-        # Wait to become idle
-        juju_client.idle_for_period(model=model, timeout=timedelta(minutes=15))
+    assert juju_client.application_exists(
+        target_application, model=target_model_uri
+    ), f"Application '{target_application}' was not found in target model after redeploy"
 
-        # Assert applications are present after redeploy
-        target_found = juju_client.application_exists(target_application, model=model)
-
-    assert target_found, f"Application '{target_application}' was not found after redeploy"
-
-    for bundle, model_uri in all_bundles:
-        _, controller, model = model_uri.split(":")
-        model = f"{controller}:{model}"
-        # Validate all applications and relations
-        juju_client.validate_model(model=model, level="simple")
+    for _, model_uri in all_bundles:
+        juju_client.validate_model(model=model_uri, level="simple")

@@ -21,7 +21,7 @@ environments:
   ps6-sqa-prod_charm_qa_kubernetes-4: *ps6-sqa-prod_charm_qa_kubernetes
   ps6-sqa-prod_charm_qa_kubernetes-5: *ps6-sqa-prod_charm_qa_kubernetes
   ps6-sqa-prod_charm_qa_kubernetes-6: *ps6-sqa-prod_charm_qa_kubernetes
-  ps6-sqa-stg_charm_qa_kubernetes-1: &ps6-sqa-stg_charm_qa_kubernetes
+  ps6-sqa-stg_charm_qa_kubernetes-1:
     github-runner: ps6
     platform: kubernetes
     cloud-type: k8s

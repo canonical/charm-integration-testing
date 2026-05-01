@@ -10,14 +10,20 @@ from .scheduler.states import State
 @pytest.mark.state(requires=State.NO_MODEL, provides=State.EMPTY_MODEL, bridge_only=True)
 def test_create_model(
     juju_client: JujuClient,
-    juju_controller: str,
+    is_cmr_test: bool,
+    target_controller: str,
     model: str,
-    juju_model_config: dict[str, str],
-    all_bundles: list[tuple[str, str]],
+    target_model_config: dict[str, str],
+    neighbor_controller: str | None,
+    neighbor_model: str | None,
+    neighbor_model_config: dict[str, str] | None,
 ) -> None:
-    if not len(all_bundles):
-        all_bundles = [("unused", f"cloud:{juju_controller}:{model}")]
+    # Create neighbor model
+    if is_cmr_test:
+        assert neighbor_controller is not None
+        assert neighbor_model is not None
+        assert neighbor_model_config is not None
+        juju_client.add_model(controller=neighbor_controller, model=neighbor_model, model_config=neighbor_model_config)
 
-    for _, model_info in all_bundles:
-        _, juju_controller, model = model_info.split(":")
-        juju_client.add_model(controller=juju_controller, model=model, model_config=juju_model_config)
+    # Create target model
+    juju_client.add_model(controller=target_controller, model=model, model_config=target_model_config)

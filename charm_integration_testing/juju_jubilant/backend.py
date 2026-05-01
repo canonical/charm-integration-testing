@@ -461,7 +461,7 @@ class JubilantBackend(JujuCmdBackend):
         metadata_source: pathlib.Path | None = None,
         agent_version: str | None = None,
     ) -> None:
-        if agent_version:
+        if agent_version or metadata_source:
             bootstrap_args: list[str] = ["bootstrap", cloud, controller]
             if controller_constraints:
                 bootstrap_args.extend(
@@ -470,16 +470,19 @@ class JubilantBackend(JujuCmdBackend):
                         " ".join(f"{k}={v}" for k, v in controller_constraints.items()),
                     ]
                 )
-            bootstrap_args.extend(["--agent-version", agent_version])
+            if agent_version:
+                bootstrap_args.extend(["--agent-version", agent_version])
             if metadata_source:
                 bootstrap_args.extend(["--metadata-source", str(metadata_source)])
+            if bootstrap_configuration:
+                for key, val in bootstrap_configuration.items():
+                    bootstrap_args.extend(["--config", f"{key}={val}"])
             self.client.model(None).cli(*bootstrap_args, include_model=False)
         else:
             self.client.model(None).bootstrap(
                 cloud=cloud,
                 controller=controller,
                 bootstrap_constraints=controller_constraints,
-                metadata_source=str(metadata_source),
                 config=bootstrap_configuration,
             )
 
