@@ -139,7 +139,7 @@ jobs:
           ]
               
           print(f"Affected tests: {affected}")
-          additional_tests = " or ".join(affected)
+          additional_tests = ",".join(affected)
           with open(github_output, "a") as fh:
               fh.write("full_test_suite=false\n")
               fh.write(f"additional_tests={additional_tests}\n")

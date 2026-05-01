@@ -305,7 +305,7 @@ jobs:
         env:
           additional_tests: ${{ inputs.additional_tests }}
         run: |
-          echo "k_expr=core${additional_tests:+ or ${additional_tests}}" >> $GITHUB_OUTPUT
+          echo "k_expr=core${additional_tests:+ or ${additional_tests//,/ or }}" >> $GITHUB_OUTPUT
       - name: Run charm tests
         id: run_tests
         continue-on-error: true
