@@ -299,6 +299,13 @@ jobs:
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
           event_name: test_start
           detail: Tests started.
+      - name: Compute test selection
+        id: test_selection
+        if: ${{ inputs.full_test_suite != 'true' }}
+        env:
+          additional_tests: ${{ inputs.additional_tests }}
+        run: |
+          echo "k_expr=core${additional_tests:+ or ${additional_tests}}" >> $GITHUB_OUTPUT
       - name: Run charm tests
         id: run_tests
         continue-on-error: true
@@ -318,20 +325,9 @@ jobs:
           neighbor: ${{ inputs.neighbor }}
           platform: ${{ inputs.substrate == 'openstack' && 'machine' || inputs.substrate }}
           log_level: ${{ inputs.log_level }}
-          full_test_suite: ${{ inputs.full_test_suite }}
-          additional_tests: ${{ inputs.additional_tests }}
+          k_expr: ${{ steps.test_selection.outputs.k_expr }}
         run: |
-          # Build test-selection arguments.
-          # full_test_suite=true  → run everything (no filter).
-          # full_test_suite=false → run base (core-marked) tests only, plus any
-          #                         extra tests listed in additional_tests.
-          TEST_SELECTION_ARGS=()
-          if [[ "${full_test_suite}" != "true" ]]; then
-            TEST_SELECTION_ARGS=(-m core)
-            if [[ -n "${additional_tests}" ]]; then
-              TEST_SELECTION_ARGS+=(-k "${additional_tests}")
-            fi
-          fi
+          TEST_SELECTION_ARGS=(); [[ -n "${k_expr}" ]] && TEST_SELECTION_ARGS=(-k "${k_expr}")
           mkdir -p $HOME/openstack/images
           echo "junit_xml=$(realpath junit.xml)" >> $GITHUB_OUTPUT
           ./scripts/run-tests.sh \
