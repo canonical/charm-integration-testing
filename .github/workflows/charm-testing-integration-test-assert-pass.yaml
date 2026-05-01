@@ -69,7 +69,7 @@ jobs:
         uses: ./.github/actions/workflow-dispatch
         with:
           workflow: charm-testing.yaml
-          ref: ${{ github.head_ref || github.ref_name }}
+          ref: ${{ github.head_ref || 'production' }}
           title: 'Testing ${{ inputs.target_charm }}:${{ inputs.target_endpoint }}
             against ${{ inputs.neighbor_charm }}:${{ inputs.neighbor_endpoint }}.
             (environment: staging, test execution: ${{ steps.create-test-execution.outputs.test_execution_id }},

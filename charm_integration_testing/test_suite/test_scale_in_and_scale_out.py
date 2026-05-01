@@ -10,6 +10,7 @@ from juju import JujuClient
 from .scheduler.states import State
 
 
+@pytest.mark.core
 @pytest.mark.state(requires=State.DEPLOYED)
 def test_scale_in_and_scale_out_charm(juju_client: JujuClient, model: str, target_application: str) -> None:
     # Get units
