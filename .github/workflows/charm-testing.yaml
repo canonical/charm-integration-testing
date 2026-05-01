@@ -301,7 +301,7 @@ jobs:
           detail: Tests started.
       - name: Compute test selection
         id: test_selection
-        if: ${{ inputs.full_test_suite }}
+        if: ${{ !inputs.full_test_suite }}
         env:
           additional_tests: ${{ inputs.additional_tests }}
         run: |
