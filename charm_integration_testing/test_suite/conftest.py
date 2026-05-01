@@ -727,6 +727,10 @@ def record_charms_and_revisions_execution_metadata_instantaneous(
 
     # Get all integrations and record them
     for integration in juju_client.list_integrations(model=model):
+        # Skip cross-model integrations where one side is a remote SAAS entry
+        # TODO: record CMRs in a future iteration
+        if integration.provider.application not in applications or integration.requirer.application not in applications:
+            continue
         # Record integration in format: provider:endpoint/interface/requirer:endpoint
         integration_str = (
             f"{applications[integration.provider.application].charm}:{integration.provider.endpoint}/"
