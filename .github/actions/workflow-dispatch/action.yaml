@@ -41,10 +41,10 @@ runs:
         echo "Preparing to trigger workflow $workflow on ref $ref"
 
         # Convert JSON inputs to workflow input format
-        mapfile -t input_args < <(echo "$inputs" | jq -r 'to_entries[] | "-f \(.key)=\(.value)"')
+        input_args=$(echo "$inputs" | jq -r '[to_entries[] | "-f \(.key)=\(.value)"] | join(" ")')
 
         # Trigger workflow
-        gh workflow run "$workflow" --ref "$ref" "${input_args[@]}"
+        gh workflow run "$workflow" --ref "$ref" $input_args
 
         # Give GitHub time to register the run
         sleep 10
