@@ -327,11 +327,9 @@ jobs:
           #                         extra tests listed in additional_tests.
           TEST_SELECTION_ARGS=()
           if [[ "${full_test_suite}" != "true" ]]; then
-            BASE_TESTS="test_build_bundle or test_deploy or test_scale_in_and_scale_out or test_teardown"
+            TEST_SELECTION_ARGS=(-m core)
             if [[ -n "${additional_tests}" ]]; then
-              TEST_SELECTION_ARGS=(-k "${BASE_TESTS} or ${additional_tests}")
-            else
-              TEST_SELECTION_ARGS=(-m core)
+              TEST_SELECTION_ARGS+=(-k "${additional_tests}")
             fi
           fi
           mkdir -p $HOME/openstack/images
