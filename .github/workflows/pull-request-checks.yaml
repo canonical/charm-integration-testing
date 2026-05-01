@@ -100,7 +100,10 @@ jobs:
           import os
           import re
           import subprocess
+          # Base ref is the branch against which the PR is being merged
           base_ref = os.environ["BASE_REF"]
+
+          # Get the list of changed files in the PR compared to the base ref
           result = subprocess.run(
               ["git", "diff", "--name-only", f"origin/{base_ref}...HEAD"],
               capture_output=True,
@@ -108,6 +111,7 @@ jobs:
               check=True,
           )
           changed_files = result.stdout.splitlines()
+
           print("Changed files:\n" + "\n".join(changed_files))
           CRITICAL_PATTERNS = [
               "charm_integration_testing/test_suite/conftest.py",
@@ -116,9 +120,7 @@ jobs:
               "charm_integration_testing/extensions/",
               "charm_integration_testing/kubernetes_client/",
               "charm_integration_testing/utils/",
-              "validators/",
               "scripts/run-tests.sh",
-              "static/",
           ]
           github_output = os.environ["GITHUB_OUTPUT"]
           for pattern in CRITICAL_PATTERNS:
@@ -136,6 +138,8 @@ jobs:
               for f in changed_files
               if (m := test_pattern.match(f))
           ]
+              
+          print(f"Affected tests: {affected}")
           additional_tests = " or ".join(affected)
           with open(github_output, "a") as fh:
               fh.write("full_test_suite=false\n")
