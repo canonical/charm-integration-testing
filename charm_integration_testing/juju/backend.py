@@ -14,7 +14,7 @@ from pydantic.dataclasses import dataclass
 
 from validators.base.validator import ValidationResult
 
-from .models import JujuApplicationInfo, JujuIntegration, JujuIntegrationApplication
+from .models import JujuApplicationInfo, JujuConsumedOfferInfo, JujuIntegration, JujuIntegrationApplication
 from .version import JujuVersion
 
 _P = ParamSpec("_P")
@@ -150,6 +150,10 @@ class JujuBackend(ABC):
 
     @abstractmethod
     def list_applications(self, model: str) -> dict[str, JujuApplicationInfo]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_consumed_offers(self, model: str) -> dict[str, JujuConsumedOfferInfo]:
         raise NotImplementedError
 
     @abstractmethod

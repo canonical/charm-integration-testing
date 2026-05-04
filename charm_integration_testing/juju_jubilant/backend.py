@@ -14,6 +14,7 @@ import jubilant
 import yaml
 from juju import (
     JujuApplicationInfo,
+    JujuConsumedOfferInfo,
     JujuExecOutput,
     JujuIntegration,
     JujuIntegrationApplication,
@@ -374,7 +375,11 @@ class JubilantBackend(JujuCmdBackend):
     def scp(self, model: str, source: str, destination: str) -> None:
         # Jubilant scp doesn't work for directories
         # https://github.com/canonical/jubilant/issues/266
-        self.client.model(model).cli("scp", source, destination)
+        #
+        # Furthermore, machine charms need to specify -r if source is a directory
+        #   we'll always specify -r to be safe
+        options = () if self.is_k8s_model(model) else ("--", "-r")
+        self.client.model(model).cli("scp", *options, source, destination)
 
     def ssh(self, model: str, application: str, command: str) -> None:
         self.client.model(model).ssh(
@@ -395,6 +400,9 @@ class JubilantBackend(JujuCmdBackend):
             app_name: JujuApplicationInfo(charm=app_info.charm, revision=app_info.charm_rev)
             for app_name, app_info in self.status(model).apps.items()
         }
+
+    def list_consumed_offers(self, model: str) -> dict[str, JujuConsumedOfferInfo]:
+        return {offer: JujuConsumedOfferInfo(url=info.url) for offer, info in self.status(model).app_endpoints.items()}
 
     def list_integrations(self, model: str) -> set[JujuIntegration]:
         # Juju status yaml format doesn't expose provider/requirer information or

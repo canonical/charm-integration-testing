@@ -10,7 +10,7 @@ from unittest.mock import patch
 import jubilant
 import pytest
 import yaml
-from juju import JujuIntegrationApplication, JujuWaitState, JujuWaitTimeoutError
+from juju import JujuConsumedOfferInfo, JujuIntegrationApplication, JujuWaitState, JujuWaitTimeoutError
 from juju.version import JujuVersion
 from juju_jubilant.backend import JubilantBackend
 from juju_jubilant.client import JubilantClient
@@ -1122,15 +1122,24 @@ class TestJubilantBackend:
 
     class TestScp:
         @dataclass
+        class ModelStub:
+            type: str = "kubernetes"
+
+        @dataclass
         class ScpStub:
             args: list[str] = field(default_factory=list)
+            model: Any = None
+
+            def show_model(self) -> Any:
+                return self.model
 
             def cli(self, *args: str) -> None:
                 self.args = list(args)
 
-        def test(self) -> None:
+        def test_k8s_model(self) -> None:
             # GIVEN
             stub = self.ScpStub()
+            stub.model = self.ModelStub(type="kubernetes")
             client = JubilantClientStub(client=stub)
 
             # WHEN
@@ -1138,6 +1147,18 @@ class TestJubilantBackend:
 
             # THEN
             assert stub.args == ["scp", "a", "b"]
+
+        def test_non_k8s_model_specifies_recursive(self) -> None:
+            # GIVEN
+            stub = self.ScpStub()
+            stub.model = self.ModelStub(type="not-kubernetes")
+            client = JubilantClientStub(client=stub)
+
+            # WHEN
+            JubilantBackend(client).scp("test-model", source="a", destination="b")
+
+            # THEN
+            assert stub.args == ["scp", "--", "-r", "a", "b"]
 
     class TestSsh:
         @dataclass
@@ -1450,6 +1471,34 @@ class TestJubilantBackend:
             app_info = applications["my-app"]
             assert app_info.charm == "my-charm"
             assert app_info.revision == 1
+
+    class TestListConsumedOffers:
+        class Client(JubilantClientStub):
+            def __init__(self) -> None:
+                super().__init__(client=self)
+
+            def status(self) -> Any:
+                return self
+
+            @property
+            def app_endpoints(self) -> dict[str, jubilant.statustypes.RemoteAppStatus]:
+                return {
+                    "consumed-offer": jubilant.statustypes.RemoteAppStatus(
+                        url="neighbor-controller:admin/neighbor-model.neighbor-offer"
+                    )
+                }
+
+        def test(self) -> None:
+            # GIVEN
+            client = self.Client()
+
+            # WHEN
+            consumed_offers = JubilantBackend(client).list_consumed_offers("ignored-in-stub")
+
+            # THEN
+            assert consumed_offers == {
+                "consumed-offer": JujuConsumedOfferInfo(url="neighbor-controller:admin/neighbor-model.neighbor-offer")
+            }
 
     class TestListIntegrations:
         class CliStub:
