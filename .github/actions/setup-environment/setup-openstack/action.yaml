@@ -5,16 +5,13 @@ inputs:
   novarc:
     description: Novarc content for the OpenStack cloud.
     required: true
-  controller:
-    description: Name of the controller to create
-    required: true
-  model:
-    description: Name of the model to create
+  cloud-name:
+    description: Name to register the Juju cloud under.
     required: true
 outputs:
   cloud-name:
     description: Name of the cloud created and bootstrapped to
-    value: ${{ steps.cloud-setup.outputs.cloud-name }}
+    value: ${{ inputs.cloud-name }}
 runs:
   using: composite
   steps:
@@ -34,11 +31,11 @@ runs:
           juju metadata generate-image -a amd64 -i ${id} -r ${OS_REGION_NAME} -u ${OS_AUTH_URL} -d /home/ubuntu/openstack
         done
     - name: Add Openstack
+      env:
+        CLOUD: ${{ inputs.cloud-name }}
       shell: bash
-      id: cloud-setup
-      run: |
+      run: |-
         source $HOME/openstack/novarc
-        CLOUD="openstack-machine-env"
         cat >> $HOME/openstack/openstack-cloud.yaml << EOF
         clouds:
           ${CLOUD}:
@@ -63,8 +60,3 @@ runs:
         EOF
         juju add-cloud $CLOUD $HOME/openstack/openstack-cloud.yaml --client
         juju add-credential $CLOUD -f $HOME/openstack/openstack-credentials.yaml --client
-        echo "cloud-name=${CLOUD}" >> $GITHUB_OUTPUT
-    - name: Set extra-options
-      shell: bash
-      id: extra-options
-      run: echo "extra-options=--metadata-source $HOME/openstack/images" >> $GITHUB_OUTPUT

@@ -532,7 +532,7 @@ class JubilantBackend(JujuCmdBackend):
 
     def kill_controller(self, controller: str) -> None:
         self.client.model(None).cli(
-            "kill-controller", controller, "--no-prompt", "--timeout", "5m", include_model=False
+            "kill-controller", controller, "--no-prompt", "--timeout", "2m", include_model=False
         )
 
     def migrate_model(self, model_name: str, source_controller: str, target_controller: str) -> None:

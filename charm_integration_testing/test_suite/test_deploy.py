@@ -73,6 +73,7 @@ def test_deploy(
         juju_client.deploy_bundle_file(str(bundle_path), model=model_uri)
 
     # TODO: Add multi-model wait
+    # https://github.com/canonical/charm-integration-testing/issues/515
     for _, model_uri in all_bundles:
         juju_client.idle_for_period(model=model_uri, timeout=timedelta(minutes=15))
 

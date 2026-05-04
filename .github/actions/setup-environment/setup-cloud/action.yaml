@@ -1,0 +1,44 @@
+---
+name: Setup Cloud
+description: >
+  Set up a Juju cloud (K8s or OpenStack), delegating to the appropriate
+  setup action based on cloud type.
+inputs:
+  cloud-name:
+    description: Name to register the Juju cloud under.
+    required: true
+  cloud-type:
+    description: Cloud type - either 'k8s' or 'o7k'.
+    required: true
+  kubeconfig:
+    description: Kubeconfig content. Required when cloud-type is 'k8s'.
+    required: false
+    default: ''
+  novarc:
+    description: Novarc content. Required when cloud-type is 'o7k'.
+    required: false
+    default: ''
+outputs:
+  cloud-name:
+    description: Name of the Juju cloud registered on this runner.
+    value: ${{ inputs.cloud-name }}
+  kubeconfig_path:
+    description: Path to the kubeconfig file written to disk (k8s only).
+    value: ${{ steps.setup-k8s.outputs.kubeconfig_path }}
+runs:
+  using: composite
+  steps:
+    - name: Setup K8s Cloud
+      id: setup-k8s
+      if: ${{ inputs.cloud-type == 'k8s' }}
+      uses: ./.github/actions/setup-environment/setup-k8s
+      with:
+        kubeconfig: ${{ inputs.kubeconfig }}
+        cloud-name: ${{ inputs.cloud-name }}
+    - name: Setup OpenStack Cloud
+      id: setup-o7k
+      if: ${{ inputs.cloud-type == 'o7k' }}
+      uses: ./.github/actions/setup-environment/setup-openstack
+      with:
+        novarc: ${{ inputs.novarc }}
+        cloud-name: ${{ inputs.cloud-name }}

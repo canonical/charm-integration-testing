@@ -152,15 +152,6 @@ jobs:
           sudo mkswap /swapfile
           sudo swapon /swapfile
           sudo swapon --show
-      - name: Generate Juju Model and Controller Name
-        id: juju_resources
-        shell: bash
-        env:
-          run_id: ${{ github.run_id }}
-        run: |
-          name="${run_id}-$(date +'%y%m%d%H%M%S')"
-          echo "model=model-$name" >> $GITHUB_OUTPUT
-          echo "controller=$name" >> $GITHUB_OUTPUT
       - name: Install yq
         uses: ./.github/actions/install-with-retry
         with:
@@ -192,8 +183,6 @@ jobs:
           downgrade_revision: ${{ inputs.downgrade_revision }}
           channel: ${{ inputs.channel }}
           series: ${{ inputs.series }}
-          model: ${{ steps.juju_resources.outputs.model }}
-          controller: ${{ steps.juju_resources.outputs.controller }}
         run: |
           echo "### Job inputs" >> $GITHUB_STEP_SUMMARY
           echo "| Input | Value |" >> $GITHUB_STEP_SUMMARY
@@ -211,11 +200,6 @@ jobs:
           echo "| \`downgrade_revision\` | \`${downgrade_revision}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| \`channel\` | \`${channel}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| \`series\` | \`${series}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "### Job variables" >> $GITHUB_STEP_SUMMARY
-          echo "| Variable | Value |" >> $GITHUB_STEP_SUMMARY
-          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
-          echo "| Juju model | \`${model}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Juju controller | \`${controller}\` |" >> $GITHUB_STEP_SUMMARY
       - name: Report Test Execution Start To Test Observer
         if: ${{ !cancelled() && env.TEST_OBSERVER_API != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/patch-test-execution
@@ -286,70 +270,41 @@ jobs:
             echo "${!NOVARC_SECRET_NAME}" >> "$GITHUB_OUTPUT"
             echo "EOF" >> "$GITHUB_OUTPUT"
           fi
-      - name: Setup Target K8s Cloud
-        if: ${{ steps.target_env_info.outputs.cloud-type == 'k8s' }}
-        id: setup_target_k8s
-        uses: ./.github/actions/setup-environment/setup-k8s
+      - name: Setup Target Cloud
+        id: setup_target
+        uses: ./.github/actions/setup-environment/setup-cloud
         with:
+          cloud-name: target-cloud
+          cloud-type: ${{ steps.target_env_info.outputs.cloud-type }}
           kubeconfig: ${{ steps.target_creds.outputs.kubeconfig }}
-      - name: Post 'setup_k8s_failed' event
-        if: ${{ failure() && env.TEST_OBSERVER_API != '' && inputs.execution_id != '' && steps.setup_target_k8s.conclusion == 'failure' }}
-        uses: ./.github/actions/test-observer/post-events
-        with:
-          test_observer_api: ${{ env.TEST_OBSERVER_API }}
-          test_observer_token: ${{ env.TEST_OBSERVER_TOKEN }}
-          test_execution_id: ${{ inputs.execution_id }}
-          event_name: setup_k8s_failed
-          detail: Setup of Kubernetes cloud failed.
-      - name: Setup Target O7k Cloud
-        if: ${{ steps.target_env_info.outputs.cloud-type == 'o7k' }}
-        id: setup_target_o7k
-        uses: ./.github/actions/setup-environment/setup-openstack
-        with:
           novarc: ${{ steps.target_creds.outputs.novarc }}
-          controller: ${{ steps.juju_resources.outputs.controller }}
-          model: ${{ steps.juju_resources.outputs.model }}
-      - name: Post 'setup_o7k_failed' event
-        if: ${{ failure() && env.TEST_OBSERVER_API != '' && inputs.execution_id != '' && steps.setup_target_o7k.conclusion == 'failure' }}
+      - name: Post 'setup_target_failed' event
+        if: ${{ failure() && env.TEST_OBSERVER_API != '' && inputs.execution_id != '' && steps.setup_target.conclusion == 'failure' }}
         uses: ./.github/actions/test-observer/post-events
         with:
           test_observer_api: ${{ env.TEST_OBSERVER_API }}
           test_observer_token: ${{ env.TEST_OBSERVER_TOKEN }}
           test_execution_id: ${{ inputs.execution_id }}
-          event_name: setup_o7k_failed
-          detail: Setup of OpenStack cloud failed.
-      - name: Setup Neighbor K8s Cloud
-        if: ${{ inputs.neighbor_environment != '' && steps.neighbor_env_info.outputs.cloud-type == 'k8s' }}
-        id: setup_neighbor_k8s
-        uses: ./.github/actions/setup-environment/setup-k8s
+          event_name: setup_target_failed
+          detail: Setup of target cloud failed.
+      - name: Setup Neighbor Cloud
+        id: setup_neighbor
+        if: ${{ inputs.neighbor_environment != '' }}
+        uses: ./.github/actions/setup-environment/setup-cloud
         with:
+          cloud-name: neighbor-cloud
+          cloud-type: ${{ steps.neighbor_env_info.outputs.cloud-type }}
           kubeconfig: ${{ steps.neighbor_creds.outputs.kubeconfig }}
-      - name: Post 'setup_neighbor_k8s_failed' event
-        if: ${{ failure() && env.TEST_OBSERVER_API != '' && inputs.execution_id != '' && steps.setup_neighbor_k8s.conclusion == 'failure' }}
-        uses: ./.github/actions/test-observer/post-events
-        with:
-          test_observer_api: ${{ env.TEST_OBSERVER_API }}
-          test_observer_token: ${{ env.TEST_OBSERVER_TOKEN }}
-          test_execution_id: ${{ inputs.execution_id }}
-          event_name: setup_neighbor_k8s_failed
-          detail: Setup of neighbor Kubernetes cloud failed.
-      - name: Setup Neighbor O7k Cloud
-        if: ${{ inputs.neighbor_environment != '' && steps.neighbor_env_info.outputs.cloud-type == 'o7k' }}
-        id: setup_neighbor_o7k
-        uses: ./.github/actions/setup-environment/setup-openstack
-        with:
           novarc: ${{ steps.neighbor_creds.outputs.novarc }}
-          controller: ${{ steps.juju_resources.outputs.controller }}
-          model: ${{ steps.juju_resources.outputs.model }}
-      - name: Post 'setup_neighbor_o7k_failed' event
-        if: ${{ failure() && env.TEST_OBSERVER_API != '' && inputs.execution_id != '' && steps.setup_neighbor_o7k.conclusion == 'failure' }}
+      - name: Post 'setup_neighbor_failed' event
+        if: ${{ failure() && env.TEST_OBSERVER_API != '' && inputs.execution_id != '' && steps.setup_neighbor.conclusion == 'failure' }}
         uses: ./.github/actions/test-observer/post-events
         with:
           test_observer_api: ${{ env.TEST_OBSERVER_API }}
           test_observer_token: ${{ env.TEST_OBSERVER_TOKEN }}
           test_execution_id: ${{ inputs.execution_id }}
-          event_name: setup_neighbor_o7k_failed
-          detail: Setup of neighbor OpenStack cloud failed.
+          event_name: setup_neighbor_failed
+          detail: Setup of neighbor cloud failed.
       - name: Debug Setup
         if: ${{ inputs.debug_sleep_after == 'setup' && !cancelled() && needs.determine-runner.outputs.debug-mode == 'ssh' }}
         shell: bash
@@ -408,12 +363,9 @@ jobs:
         continue-on-error: true
         shell: bash
         env:
-          # TODO: these options need better abstraction
-          KUBECONFIG: ${{ steps.setup_target_k8s.outputs.kubeconfig_path }}
-          model: ${{ steps.juju_resources.outputs.model }}
-          k8s_cloud: ${{ steps.setup_target_k8s.outputs.cloud-name }}
-          o7k_cloud: ${{ steps.setup_neighbor_o7k.outputs.cloud-name }}
-          controller: ${{ steps.juju_resources.outputs.controller }}
+          KUBECONFIG: ${{ steps.setup_target.outputs.kubeconfig_path }}
+          target_cloud: ${{ steps.setup_target.outputs.cloud-name }}
+          neighbor_cloud: ${{ steps.setup_neighbor.outputs.cloud-name }}
           charm_endpoint: ${{ inputs.charm_endpoint }}
           neighbor_endpoint: ${{ inputs.neighbor_endpoint }}
           charm_under_test: ${{ inputs.charm_under_test }}
@@ -431,17 +383,14 @@ jobs:
           neighbor_bootstrap_constraints: ${{ steps.neighbor_env_info.outputs.bootstrap-constraints }}
           neighbor_model_config: ${{ steps.neighbor_env_info.outputs.model-config }}
           neighbor_platform: ${{ steps.neighbor_env_info.outputs.platform }}
+          run_id: ${{ github.run_id }}
         run: |
           echo "junit_xml=$(realpath junit.xml)" >> $GITHUB_OUTPUT
           ./scripts/run-tests.sh \
-            --target-cloud "${k8s_cloud}" \
-            --target-controller "k8s-${controller}" \
-            --target-model "k8s-${model}" \
+            --target-cloud "${target_cloud}" \
             --target-bundle "${TARGET_BUNDLE_OUTPUT}" \
             \
-            --neighbor-cloud "${o7k_cloud}" \
-            --neighbor-controller "o7k-${controller}" \
-            --neighbor-model "o7k-${model}" \
+            --neighbor-cloud "${neighbor_cloud}" \
             --neighbor-bundle "${NEIGHBOR_BUNDLE_OUTPUT}" \
             \
             --target-controller-bootstrap-config "${bootstrap_config}" \
@@ -475,6 +424,7 @@ jobs:
             --log-cli-level "${log_level}" \
             --log-level "${log_level}" \
             --log-dir "./test-logs" \
+            --prefix "charmqa-${run_id}" \
             --junit-xml=junit.xml
       - name: Run charm tests
         id: run_tests
@@ -482,10 +432,8 @@ jobs:
         continue-on-error: true
         shell: bash
         env:
-          KUBECONFIG: ${{ steps.setup_target_k8s.outputs.kubeconfig_path }}
-          model: ${{ steps.juju_resources.outputs.model }}
-          cloud: ${{ steps.setup_target_k8s.outputs.cloud-name || steps.setup_target_o7k.outputs.cloud-name }}
-          controller: ${{ steps.juju_resources.outputs.controller }}
+          KUBECONFIG: ${{ steps.setup_target.outputs.kubeconfig_path }}
+          target_cloud: ${{ steps.setup_target.outputs.cloud-name }}
           charm_endpoint: ${{ inputs.charm_endpoint }}
           neighbor_endpoint: ${{ inputs.neighbor_endpoint }}
           charm_under_test: ${{ inputs.charm_under_test }}
@@ -502,9 +450,7 @@ jobs:
         run: |
           echo "junit_xml=$(realpath junit.xml)" >> $GITHUB_OUTPUT
           ./scripts/run-tests.sh \
-            --target-cloud "${cloud}" \
-            --target-controller "${controller}" \
-            --target-model "${model}" \
+            --target-cloud "${target_cloud}" \
             --target-bundle "${TARGET_BUNDLE_OUTPUT}" \
             \
             --target-controller-bootstrap-config "${bootstrap_config}" \
@@ -532,6 +478,7 @@ jobs:
             --log-cli-level "${log_level}" \
             --log-level "${log_level}" \
             --log-dir "./test-logs" \
+            --prefix "charmqa-${{ github.run_id }}" \
             --junit-xml=junit.xml
       - name: Post 'test_end' event
         if: ${{ env.TEST_OBSERVER_API != '' && inputs.execution_id != '' }}

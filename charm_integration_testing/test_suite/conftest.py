@@ -5,8 +5,6 @@
 import json
 import logging
 import os
-import secrets
-import string
 import warnings
 from pathlib import Path
 from subprocess import CalledProcessError, run  # nosec
@@ -31,7 +29,7 @@ from pytest import StashKey
 from resource_registry import ResourceRegistry, ResourceTeardownWarning
 from test_observer_client import TestObserverClient as TestObserverAPIClient
 from test_observer_client import TestObserverClientError
-from utils import normalize_string, normalize_string_multiline
+from utils import generate_juju_name, normalize_string, normalize_string_multiline
 from utils.juju_releases import (
     fetch_stable_juju_versions,
     select_upgrade_target,
@@ -923,11 +921,6 @@ def kubernetes_client(
     return None
 
 
-def generate_short_id(length: int = 8) -> str:
-    alphabet = string.ascii_lowercase + string.digits
-    return "".join(secrets.choice(alphabet) for _ in range(length))
-
-
 @pytest.fixture(scope="function")
 def temp_juju_controller(
     juju_client: JujuClient,
@@ -935,9 +928,10 @@ def temp_juju_controller(
     target_controller_bootstrap_constraints: dict[str, str],
     target_controller_bootstrap_config: dict[str, str],
     target_controller_bootstrap_metadata_source: Path | None,
+    prefix: str,
     logger: logging.Logger,
 ) -> Iterator[str]:
-    temp_controller_name = f"pytest-tmp-controller-{generate_short_id(length=8)}"
+    temp_controller_name = generate_juju_name(prefix)
     logger.info(f"Creating temporary fixture controller '{temp_controller_name}'.")
     juju_client.bootstrap_controller(
         cloud=target_cloud,
@@ -960,10 +954,11 @@ def juju_controller_at_version(
     target_upgrade_version: JujuVersion,
     target_controller_bootstrap_config: dict[str, str],
     target_controller_bootstrap_metadata_source: Path | None,
+    prefix: str,
     logger: logging.Logger,
 ) -> Iterator[str]:
     """Bootstrap a controller pinned to the upgrade target version."""
-    temp_controller_name = f"pytest-upgrade-controller-{generate_short_id(length=8)}"
+    temp_controller_name = generate_juju_name(prefix)
     agent_version = str(target_upgrade_version)
     logger.info(f"Bootstrapping controller '{temp_controller_name}' at Juju {agent_version}.")
     juju_client.bootstrap_controller(

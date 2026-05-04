@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 from pydantic import TypeAdapter, ValidationError
+from utils import generate_juju_name
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -13,18 +14,11 @@ def pytest_configure(config: pytest.Config) -> None:
     controller = config.getoption("--neighbor-controller", default=None)
     model = config.getoption("--neighbor-model", default=None)
 
-    routing_opts = [
-        ("--neighbor-cloud", cloud),
-        ("--neighbor-controller", controller),
-        ("--neighbor-model", model),
-    ]
-    provided_routing = [opt for opt, val in routing_opts if val]
-    missing_routing = [opt for opt, val in routing_opts if not val]
-    is_cmr = len(provided_routing) == 3
+    is_cmr = cloud is not None
 
-    if provided_routing and not is_cmr:
+    if (controller or model) and not is_cmr:
         pytest.exit(
-            f"CMR routing options must all be provided together. Missing: {', '.join(missing_routing)}",
+            "--neighbor-cloud is required when providing --neighbor-controller or --neighbor-model.",
             returncode=4,
         )
 
@@ -38,16 +32,21 @@ def pytest_configure(config: pytest.Config) -> None:
         spurious = [opt for opt in neighbor_config_opts if config.getoption(opt, default=None)]
         if spurious:
             pytest.exit(
-                f"Neighbor config options require CMR routing options "
-                f"(--neighbor-cloud, --neighbor-controller, --neighbor-model). "
-                f"Spurious options: {', '.join(spurious)}",
+                f"Neighbor config options require --neighbor-cloud. " f"Spurious options: {', '.join(spurious)}",
                 returncode=4,
             )
         return
 
     target_controller = config.getoption("--target-controller", default=None)
     target_model = config.getoption("--target-model", default=None)
-    if controller == target_controller and model == target_model:
+    if (
+        controller is not None
+        and target_controller is not None
+        and model is not None
+        and target_model is not None
+        and controller == target_controller
+        and model == target_model
+    ):
         pytest.exit(
             f"--neighbor-controller and --neighbor-model must not be the same as "
             f"--target-controller and --target-model (got '{controller}:{model}'). "
@@ -57,7 +56,13 @@ def pytest_configure(config: pytest.Config) -> None:
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
-    parser.addoption("--target-model", type=str, required=True, help="Juju model to test in.")
+    parser.addoption("--target-model", type=str, default=None, help="Juju model to test in.")
+    parser.addoption(
+        "--prefix",
+        type=str,
+        default=None,
+        help="Prefix for auto-generated Juju controller and model names (e.g. 'charmqa-12345678' in CI).",
+    )
     parser.addoption(
         "--target-cloud",
         type=str,
@@ -67,7 +72,7 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption(
         "--target-controller",
         type=str,
-        default="charmqa",
+        default=None,
         help="Name of the Juju controller to create the target model on.",
     )
     parser.addoption(
@@ -165,14 +170,26 @@ def _load_json_config(option_name: str, value: str) -> dict[str, str]:
         pytest.fail(f"File passed via {option_name} does not contain valid JSON: {e}")
 
 
-@pytest.fixture
-def model(request: pytest.FixtureRequest) -> str:
-    option = request.config.getoption("--target-model")
-    assert isinstance(option, str)
-    return option
+@pytest.fixture(scope="session")
+def prefix(request: pytest.FixtureRequest) -> str:
+    """Prefix for auto-generated Juju resource names."""
+    value = request.config.getoption("--prefix")
+    if value:
+        assert isinstance(value, str)
+        return value
+    return "charmqa"
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
+def model(request: pytest.FixtureRequest, prefix: str) -> str:
+    value = request.config.getoption("--target-model")
+    if value:
+        assert isinstance(value, str)
+        return value
+    return generate_juju_name(prefix)
+
+
+@pytest.fixture(scope="session")
 def target_cloud(request: pytest.FixtureRequest) -> str:
     value = request.config.getoption("--target-cloud")
     if not value:
@@ -181,13 +198,13 @@ def target_cloud(request: pytest.FixtureRequest) -> str:
     return value
 
 
-@pytest.fixture
-def target_controller(request: pytest.FixtureRequest) -> str:
+@pytest.fixture(scope="session")
+def target_controller(request: pytest.FixtureRequest, prefix: str) -> str:
     value = request.config.getoption("--target-controller")
-    if not value:
-        pytest.fail("--target-controller is required by this test but was not provided.")
-    assert isinstance(value, str)
-    return value
+    if value:
+        assert isinstance(value, str)
+        return value
+    return generate_juju_name(prefix)
 
 
 @pytest.fixture
@@ -233,17 +250,13 @@ def target_controller_bootstrap_metadata_source(request: pytest.FixtureRequest) 
     return path
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def is_cmr_test(request: pytest.FixtureRequest) -> bool:
-    """True when neighbor routing options indicate a cross-model relation test."""
-    return bool(
-        request.config.getoption("--neighbor-cloud")
-        or request.config.getoption("--neighbor-controller")
-        or request.config.getoption("--neighbor-model")
-    )
+    """True when a neighbor cloud is configured, indicating a cross-model relation test."""
+    return bool(request.config.getoption("--neighbor-cloud"))
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def neighbor_cloud(request: pytest.FixtureRequest, is_cmr_test: bool) -> str | None:
     """Juju cloud for the neighbor model's controller. Returns ``None`` in non-CMR tests."""
     if not is_cmr_test:
@@ -253,24 +266,28 @@ def neighbor_cloud(request: pytest.FixtureRequest, is_cmr_test: bool) -> str | N
     return value
 
 
-@pytest.fixture
-def neighbor_controller(request: pytest.FixtureRequest, is_cmr_test: bool) -> str | None:
+@pytest.fixture(scope="session")
+def neighbor_controller(request: pytest.FixtureRequest, is_cmr_test: bool, prefix: str) -> str | None:
     """Juju controller for the neighbor model. Returns ``None`` in non-CMR tests."""
     if not is_cmr_test:
         return None
     value = request.config.getoption("--neighbor-controller")
-    assert isinstance(value, str)
-    return value
+    if value:
+        assert isinstance(value, str)
+        return value
+    return generate_juju_name(prefix)
 
 
-@pytest.fixture
-def neighbor_model(request: pytest.FixtureRequest, is_cmr_test: bool) -> str | None:
+@pytest.fixture(scope="session")
+def neighbor_model(request: pytest.FixtureRequest, is_cmr_test: bool, prefix: str) -> str | None:
     """Juju model name for the neighbor model. Returns ``None`` in non-CMR tests."""
     if not is_cmr_test:
         return None
     value = request.config.getoption("--neighbor-model")
-    assert isinstance(value, str)
-    return value
+    if value:
+        assert isinstance(value, str)
+        return value
+    return generate_juju_name(prefix)
 
 
 @pytest.fixture

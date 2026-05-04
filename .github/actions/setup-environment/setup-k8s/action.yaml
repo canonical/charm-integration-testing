@@ -9,10 +9,13 @@ inputs:
     description: Path to write the kubeconfig file to.
     required: false
     default: /home/ubuntu/.kube/config
+  cloud-name:
+    description: Name to register the Juju cloud under.
+    required: true
 outputs:
   cloud-name:
     description: Name of the cloud created and bootstrapped to
-    value: ${{ steps.cloud.outputs.cloud }}
+    value: ${{ inputs.cloud-name }}
   kubeconfig_path:
     description: Path to kubeconfig file
     value: ${{ inputs.kubeconfig_path }}
@@ -29,11 +32,10 @@ runs:
         echo "${KUBECONFIG_CONTENT}" > "${kubeconfig_path}"
     - name: Add K8s
       env:
+        CLOUD: ${{ inputs.cloud-name }}
         kubeconfig_path: ${{ inputs.kubeconfig_path }}
       shell: bash
-      id: cloud
       run: |-
-        export CLOUD="k8s-cloud"
         for ((attempt = 1; ; attempt++)); do
           if KUBECONFIG="${kubeconfig_path}" juju add-k8s $CLOUD --client; then
             break
@@ -44,4 +46,3 @@ runs:
             exit 1
           fi
         done
-        echo "cloud=$CLOUD" >> $GITHUB_OUTPUT
