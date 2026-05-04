@@ -1,6 +1,7 @@
 ---
 name: Post events to Test Observer
-description: Post a timestamped event to the Test Observer API for the given job UUID.
+description: Post a timestamped event to the Test Observer API for the given test
+  execution.
 inputs:
   test_observer_api:
     description: Base URL of the Test Observer API

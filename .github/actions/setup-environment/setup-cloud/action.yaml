@@ -23,7 +23,8 @@ outputs:
     description: Name of the Juju cloud registered on this runner.
     value: ${{ inputs.cloud-name }}
   kubeconfig_path:
-    description: Path to the kubeconfig file written to disk (k8s only).
+    description: Path to the kubeconfig file written to disk (k8s only; empty string
+      for o7k).
     value: ${{ steps.setup-k8s.outputs.kubeconfig_path }}
 runs:
   using: composite

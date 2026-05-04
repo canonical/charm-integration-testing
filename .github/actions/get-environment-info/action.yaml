@@ -35,6 +35,11 @@ outputs:
   model-config:
     description: Path to a temporary file containing the Juju model config as JSON.
     value: ${{ steps.lookup.outputs.model-config }}
+  metadata-source:
+    description: >
+      Path to the local directory containing Juju simplestreams image metadata.
+      Set for OpenStack (o7k) environments; empty for k8s environments.
+    value: ${{ steps.lookup.outputs.metadata-source }}
 runs:
   using: composite
   steps:
@@ -73,3 +78,8 @@ runs:
         echo "bootstrap-config=${bootstrap_config_file}" >> "${GITHUB_OUTPUT}"
         echo "bootstrap-constraints=${bootstrap_constraints_file}" >> "${GITHUB_OUTPUT}"
         echo "model-config=${model_config_file}" >> "${GITHUB_OUTPUT}"
+        if [[ "${cloud_type}" == "o7k" ]]; then
+          echo "metadata-source=${HOME}/openstack/images" >> "${GITHUB_OUTPUT}"
+        else
+          echo "metadata-source=" >> "${GITHUB_OUTPUT}"
+        fi

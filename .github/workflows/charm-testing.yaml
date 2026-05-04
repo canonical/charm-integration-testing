@@ -379,9 +379,11 @@ jobs:
           bootstrap_config: ${{ steps.target_env_info.outputs.bootstrap-config }}
           bootstrap_constraints: ${{ steps.target_env_info.outputs.bootstrap-constraints }}
           model_config: ${{ steps.target_env_info.outputs.model-config }}
+          metadata_source: ${{ steps.target_env_info.outputs.metadata-source }}
           neighbor_bootstrap_config: ${{ steps.neighbor_env_info.outputs.bootstrap-config }}
           neighbor_bootstrap_constraints: ${{ steps.neighbor_env_info.outputs.bootstrap-constraints }}
           neighbor_model_config: ${{ steps.neighbor_env_info.outputs.model-config }}
+          neighbor_metadata_source: ${{ steps.neighbor_env_info.outputs.metadata-source }}
           neighbor_platform: ${{ steps.neighbor_env_info.outputs.platform }}
           run_id: ${{ github.run_id }}
         run: |
@@ -395,12 +397,12 @@ jobs:
             \
             --target-controller-bootstrap-config "${bootstrap_config}" \
             --target-controller-bootstrap-constraints "${bootstrap_constraints}" \
-            --target-controller-bootstrap-metadata-source "./openstack/images" \
+            ${metadata_source:+--target-controller-bootstrap-metadata-source "${metadata_source}"} \
             --target-model-config "${model_config}" \
             \
             --neighbor-controller-bootstrap-config "${neighbor_bootstrap_config}" \
             --neighbor-controller-bootstrap-constraints "${neighbor_bootstrap_constraints}" \
-            --neighbor-controller-bootstrap-metadata-source "./openstack/images" \
+            ${neighbor_metadata_source:+--neighbor-controller-bootstrap-metadata-source "${neighbor_metadata_source}"} \
             --neighbor-model-config "${neighbor_model_config}" \
             \
             --target-charm "${charm_under_test}" \
@@ -447,6 +449,7 @@ jobs:
           bootstrap_config: ${{ steps.target_env_info.outputs.bootstrap-config }}
           bootstrap_constraints: ${{ steps.target_env_info.outputs.bootstrap-constraints }}
           model_config: ${{ steps.target_env_info.outputs.model-config }}
+          metadata_source: ${{ steps.target_env_info.outputs.metadata-source }}
         run: |
           echo "junit_xml=$(realpath junit.xml)" >> $GITHUB_OUTPUT
           ./scripts/run-tests.sh \
@@ -455,7 +458,7 @@ jobs:
             \
             --target-controller-bootstrap-config "${bootstrap_config}" \
             --target-controller-bootstrap-constraints "${bootstrap_constraints}" \
-            --target-controller-bootstrap-metadata-source "./openstack/images" \
+            ${metadata_source:+--target-controller-bootstrap-metadata-source "${metadata_source}"} \
             --target-model-config "${model_config}" \
             \
             --target-charm "${charm_under_test}" \
@@ -502,10 +505,12 @@ jobs:
           echo '```yaml' >> $GITHUB_STEP_SUMMARY
           cat ${TARGET_BUNDLE_OUTPUT} >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-          echo '### Generated Neighbor Juju Bundle' >> $GITHUB_STEP_SUMMARY
-          echo '```yaml' >> $GITHUB_STEP_SUMMARY
-          cat ${NEIGHBOR_BUNDLE_OUTPUT} >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
+          if [[ -f "${NEIGHBOR_BUNDLE_OUTPUT}" ]]; then
+            echo '### Generated Neighbor Juju Bundle' >> $GITHUB_STEP_SUMMARY
+            echo '```yaml' >> $GITHUB_STEP_SUMMARY
+            cat ${NEIGHBOR_BUNDLE_OUTPUT} >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
       - name: Post execution metadata to Test Observer
         if: ${{ env.TEST_OBSERVER_API != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-execution-metadata
