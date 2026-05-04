@@ -47,28 +47,29 @@ class ValidatorInjectorExtension(JujuExtension):
 
     def post_validate(self, model: str, application: str, level: str) -> dict[str, list[ValidationResult]]:
         results: dict[str, list[ValidationResult]] = {}
+        model_is_k8s = self.juju.is_k8s_model(model)
         for unit in self.juju.application_units(model, application):
-            results[unit] = self._run_validators_on_unit(model, unit, level)
+            results[unit] = self._run_validators_on_unit(model, unit, level, model_is_k8s)
         return results
 
-    def _run_validators_on_unit(self, model: str, unit: str, level: str) -> list[ValidationResult]:
+    def _run_validators_on_unit(self, model: str, unit: str, level: str, is_k8s: bool = True) -> list[ValidationResult]:
         # Inject validators
-        if self.juju.exec_unit(model, unit, f"test -f {venv_runner}", operator=True).return_code != 0:
+        if self.juju.exec_unit(model, unit, f"test -f {venv_runner}", operator=is_k8s).return_code != 0:
             if not self.validators_path:
                 self.logger.warning(f"Validators path not provided, skipping injection on {unit}")
                 return []
-            self._inject_validators(model, unit)
+            self._inject_validators(model, unit, is_k8s=is_k8s)
 
         # Run validators
         self.logger.debug(f"Running validation on unit {unit}")
-        run_result = self.juju.exec_unit(model, unit, f"{venv_runner} --level {level}", operator=True)
+        run_result = self.juju.exec_unit(model, unit, f"{venv_runner} --level {level}", operator=is_k8s)
         if run_result.return_code != 0:
             raise RuntimeError(f"Validators failed on {unit} (rc={run_result.return_code}): {run_result.stderr}")
 
         # Collect results
         return ValidatorRunnerResults.model_validate_json(run_result.stdout).results
 
-    def _inject_validators(self, model: str, unit: str) -> None:
+    def _inject_validators(self, model: str, unit: str, is_k8s: bool = True) -> None:
         # Ensure validators path is provided
         if self.validators_path is None:
             raise ValueError("validators_path must be provided to inject validators")
@@ -76,7 +77,10 @@ class ValidatorInjectorExtension(JujuExtension):
 
         # Copy validators
         self.logger.debug(f"[{unit}] copying validators to {remote_validators_path}")
-        self.juju.ssh(model, unit, f"mkdir -p {remote_validators_path}")
+        mkdir = f"mkdir -p {remote_validators_path}"
+        if not is_k8s:
+            mkdir = f"sudo {mkdir} && sudo chown -R $(id -u) {remote_validators_path}"
+        self.juju.ssh(model, unit, mkdir)
         self.juju.scp(model, str(self.validators_path.resolve()), f"{unit}:{remote_validators_path}/packages")
 
         # Copy uv binary
@@ -98,7 +102,7 @@ class ValidatorInjectorExtension(JujuExtension):
             ),
         ]:
             self.logger.debug(f"[{unit}] {desc} with command: {cmd}")
-            result = self.juju.exec_unit(model, unit, cmd, operator=True)
+            result = self.juju.exec_unit(model, unit, cmd, operator=is_k8s)
             if result.return_code != 0:
                 raise RuntimeError(f"Failed to {desc} on {unit} (rc={result.return_code}): {result.stderr}")
 

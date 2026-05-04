@@ -10,7 +10,7 @@ from unittest.mock import patch
 import jubilant
 import pytest
 import yaml
-from juju import JujuIntegrationApplication, JujuWaitState, JujuWaitTimeoutError
+from juju import JujuConsumedOfferInfo, JujuIntegrationApplication, JujuWaitState, JujuWaitTimeoutError
 from juju.version import JujuVersion
 from juju_jubilant.backend import JubilantBackend
 from juju_jubilant.client import JubilantClient
@@ -1122,15 +1122,24 @@ class TestJubilantBackend:
 
     class TestScp:
         @dataclass
+        class ModelStub:
+            type: str = "kubernetes"
+
+        @dataclass
         class ScpStub:
             args: list[str] = field(default_factory=list)
+            model: Any = None
+
+            def show_model(self) -> Any:
+                return self.model
 
             def cli(self, *args: str) -> None:
                 self.args = list(args)
 
-        def test(self) -> None:
+        def test_k8s_model(self) -> None:
             # GIVEN
             stub = self.ScpStub()
+            stub.model = self.ModelStub(type="kubernetes")
             client = JubilantClientStub(client=stub)
 
             # WHEN
@@ -1138,6 +1147,18 @@ class TestJubilantBackend:
 
             # THEN
             assert stub.args == ["scp", "a", "b"]
+
+        def test_non_k8s_model_specifies_recursive(self) -> None:
+            # GIVEN
+            stub = self.ScpStub()
+            stub.model = self.ModelStub(type="not-kubernetes")
+            client = JubilantClientStub(client=stub)
+
+            # WHEN
+            JubilantBackend(client).scp("test-model", source="a", destination="b")
+
+            # THEN
+            assert stub.args == ["scp", "--", "-r", "a", "b"]
 
     class TestSsh:
         @dataclass
@@ -1451,6 +1472,34 @@ class TestJubilantBackend:
             assert app_info.charm == "my-charm"
             assert app_info.revision == 1
 
+    class TestListConsumedOffers:
+        class Client(JubilantClientStub):
+            def __init__(self) -> None:
+                super().__init__(client=self)
+
+            def status(self) -> Any:
+                return self
+
+            @property
+            def app_endpoints(self) -> dict[str, jubilant.statustypes.RemoteAppStatus]:
+                return {
+                    "consumed-offer": jubilant.statustypes.RemoteAppStatus(
+                        url="neighbor-controller:admin/neighbor-model.neighbor-offer"
+                    )
+                }
+
+        def test(self) -> None:
+            # GIVEN
+            client = self.Client()
+
+            # WHEN
+            consumed_offers = JubilantBackend(client).list_consumed_offers("ignored-in-stub")
+
+            # THEN
+            assert consumed_offers == {
+                "consumed-offer": JujuConsumedOfferInfo(url="neighbor-controller:admin/neighbor-model.neighbor-offer")
+            }
+
     class TestListIntegrations:
         class CliStub:
             def __init__(self, status_output: str) -> None:
@@ -1739,7 +1788,14 @@ class TestJubilantBackend:
             add_model_calls: int = 0
             switch_calls: int = 0
 
-            def bootstrap(self, cloud: str, controller: str, bootstrap_constraints: dict[str, str]) -> None:
+            def bootstrap(
+                self,
+                cloud: str,
+                controller: str,
+                bootstrap_constraints: dict[str, str],
+                metadata_source: str | None = None,
+                config: dict[str, str] | None = None,
+            ) -> None:
                 self.bootstrap_calls += 1
                 if self.bootstrap_failures_remaining > 0:
                     self.bootstrap_failures_remaining -= 1
@@ -1761,7 +1817,9 @@ class TestJubilantBackend:
             backend = JubilantBackend(JubilantClientStub(client=stub))
 
             with patch("tenacity.nap.sleep", return_value=None):
-                backend.bootstrap_controller(cloud="k8s-stg", controller="test-controller", controller_constraints={})
+                backend.bootstrap_controller(
+                    cloud="k8s-stg", controller="test-controller", controller_constraints={}, bootstrap_configuration={}
+                )
 
             assert stub.bootstrap_calls == 3
 
@@ -1772,7 +1830,10 @@ class TestJubilantBackend:
             with patch("tenacity.nap.sleep", return_value=None):
                 with pytest.raises(RuntimeError, match="transient bootstrap failure"):
                     backend.bootstrap_controller(
-                        cloud="k8s-stg", controller="test-controller", controller_constraints={}
+                        cloud="k8s-stg",
+                        controller="test-controller",
+                        controller_constraints={},
+                        bootstrap_configuration={},
                     )
 
             assert stub.bootstrap_calls == 3

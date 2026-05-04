@@ -3,12 +3,13 @@
 
 import logging
 from datetime import timedelta
+from pathlib import Path
 
 from validators.base import ValidationResult
 
 from .backend import JujuBackend
 from .extension import JujuExtension
-from .models import JujuApplicationInfo, JujuIntegration, JujuIntegrationApplication
+from .models import JujuApplicationInfo, JujuConsumedOfferInfo, JujuIntegration, JujuIntegrationApplication
 from .version import JujuVersion
 
 
@@ -199,6 +200,10 @@ class JujuClient:
         self.logger.info("Getting list of applications.")
         return self.backend.list_applications(model)
 
+    def list_consumed_offers(self, model: str = "default") -> dict[str, JujuConsumedOfferInfo]:
+        self.logger.info("Getting list of consumed offers.")
+        return self.backend.list_consumed_offers(model)
+
     def application_revision(self, application: str, model: str = "default") -> int:
         self.logger.info(f"Getting charm revision for application '{application}'.")
         applications = self.backend.list_applications(model)
@@ -315,7 +320,9 @@ class JujuClient:
         cloud: str,
         controller: str,
         controller_constraints: dict[str, str],
+        bootstrap_configuration: dict[str, str],
         agent_version: str | None = None,
+        metadata_source: Path | None = None,
     ) -> None:
         version_suffix = f" at agent version '{agent_version}'" if agent_version else ""
         self.logger.info(
@@ -327,6 +334,8 @@ class JujuClient:
             controller=controller,
             controller_constraints=controller_constraints,
             agent_version=agent_version,
+            bootstrap_configuration=bootstrap_configuration,
+            metadata_source=metadata_source,
         )
 
         # Call extensions

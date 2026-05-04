@@ -3,7 +3,7 @@ from datetime import timedelta
 from typing import Any, Iterable
 
 from juju.backend import JujuBackend, JujuExecOutput, JujuTask
-from juju.models import JujuApplicationInfo, JujuIntegration, JujuIntegrationApplication
+from juju.models import JujuApplicationInfo, JujuConsumedOfferInfo, JujuIntegration, JujuIntegrationApplication
 from juju.version import JujuVersion
 from kubernetes_client import KubernetesClient
 
@@ -23,6 +23,9 @@ class NullJujuBackend(JujuBackend):
         raise NotImplementedError
 
     def list_applications(self, model: str) -> dict[str, JujuApplicationInfo]:
+        raise NotImplementedError
+
+    def list_consumed_offers(self, model: str) -> dict[str, JujuConsumedOfferInfo]:
         raise NotImplementedError
 
     def list_integrations(self, model: str) -> set[JujuIntegration]:
@@ -138,6 +141,8 @@ class NullJujuBackend(JujuBackend):
         cloud: str,
         controller: str,
         controller_constraints: dict[str, str],
+        bootstrap_configuration: dict[str, str],
+        metadata_source: Any | None = None,
         agent_version: str | None = None,
     ) -> None:
         raise NotImplementedError

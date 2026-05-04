@@ -6,6 +6,7 @@ import logging
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -43,6 +44,8 @@ class BootstrapKillBackendStub(NullJujuBackend):
         cloud: str,
         controller: str,
         controller_constraints: dict[str, str],
+        bootstrap_configuration: dict[str, str],
+        metadata_source: Any | None = None,
         agent_version: str | None = None,
     ) -> None:
         self.bootstrapped.append(controller)
@@ -179,7 +182,7 @@ class TestJujuCrashdumpCollectorK8s:
 
         cmd = mock_run.call_args[0][0]
         assert cmd[0] == "juju-k8s-crashdump"
-        assert "/tmp/kubeconfig" in cmd
+        assert str(Path("/tmp/kubeconfig").resolve()) in cmd
         assert "my-ctrl" in cmd
         assert any("juju-controller-my-ctrl" in str(arg) for arg in cmd)
 
@@ -209,7 +212,9 @@ class TestJujuResourceRegistryExtensionPostBootstrap:
         client = JujuClient(backend, LoggerStub(), [ext])
 
         # WHEN a controller is bootstrapped via the client
-        client.bootstrap_controller(cloud="mycloud", controller="my-ctrl", controller_constraints={})
+        client.bootstrap_controller(
+            cloud="mycloud", controller="my-ctrl", controller_constraints={}, bootstrap_configuration={}
+        )
 
         # THEN the handle is registered in the registry
         handle = JujuControllerHandle(controller="my-ctrl")
@@ -221,7 +226,9 @@ class TestJujuResourceRegistryExtensionPostBootstrap:
         registry = self._make_registry()
         ext = JujuResourceRegistryExtension(backend, registry)
         client = JujuClient(backend, LoggerStub(), [ext])
-        client.bootstrap_controller(cloud="mycloud", controller="my-ctrl", controller_constraints={})
+        client.bootstrap_controller(
+            cloud="mycloud", controller="my-ctrl", controller_constraints={}, bootstrap_configuration={}
+        )
 
         # WHEN the registry tears down the handle
         handle = JujuControllerHandle(controller="my-ctrl")
@@ -241,7 +248,9 @@ class TestJujuResourceRegistryExtensionPreKill:
         registry = self._make_registry()
         ext = JujuResourceRegistryExtension(backend, registry)
         client = JujuClient(backend, LoggerStub(), [ext])
-        client.bootstrap_controller(cloud="mycloud", controller="my-ctrl", controller_constraints={})
+        client.bootstrap_controller(
+            cloud="mycloud", controller="my-ctrl", controller_constraints={}, bootstrap_configuration={}
+        )
 
         handle = JujuControllerHandle(controller="my-ctrl")
         assert handle.resource_id in registry._entries

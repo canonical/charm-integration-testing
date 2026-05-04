@@ -28,16 +28,17 @@ class JujuStub(NullJujuBackend):
     """JujuBackend stub with a response queue for exec_unit and captured calls."""
 
     exec_responses: deque[JujuExecOutput] = field(default_factory=deque)
-    exec_calls: list[tuple[str, str, str]] = field(default_factory=list)
+    exec_calls: list[tuple[str, str, str, bool]] = field(default_factory=list)
     scp_calls: list[tuple[str, str, str]] = field(default_factory=list)
     ssh_calls: list[tuple[str, str, str]] = field(default_factory=list)
     units_by_app: dict[str, list[str]] = field(default_factory=dict)
+    k8s_models: set[str] = field(default_factory=set)
 
     def application_units(self, model: str, application: str) -> list[str]:
         return self.units_by_app.get(application, [])
 
     def exec_unit(self, model: str, unit: str, task: str, operator: bool = False) -> JujuExecOutput:
-        self.exec_calls.append((model, unit, task))
+        self.exec_calls.append((model, unit, task, operator))
         if self.exec_responses:
             return self.exec_responses.popleft()
         return JujuExecOutput(return_code=0, stdout="", stderr="")
@@ -47,6 +48,9 @@ class JujuStub(NullJujuBackend):
 
     def ssh(self, model: str, unit: str, cmd: str) -> None:
         self.ssh_calls.append((model, unit, cmd))
+
+    def is_k8s_model(self, model: str) -> bool:
+        return model in self.k8s_models
 
 
 class LoggerStub(logging.Logger):
@@ -319,6 +323,36 @@ class TestValidatorInjectorExtension:
                 assert results[0].status == "ERROR"
                 assert results[0].error == "connection refused"
 
+        class TestOperatorFlag:
+            def test_passes_operator_true_when_k8s_model(
+                self, extension: ValidatorInjectorExtension, juju: JujuStub
+            ) -> None:
+                # GIVEN a K8s model and the venv is already present
+                juju.k8s_models.add("mymodel")
+                juju.units_by_app["myapp"] = ["myapp/0"]
+                juju.exec_responses.extend(_inject_and_pass_responses())
+
+                # WHEN
+                extension.post_validate("mymodel", "myapp", "simple")
+
+                # THEN every exec_unit call was made with operator=True
+                assert len(juju.exec_calls) > 0
+                assert all(call[3] is True for call in juju.exec_calls)
+
+            def test_passes_operator_false_when_not_k8s_model(
+                self, extension: ValidatorInjectorExtension, juju: JujuStub
+            ) -> None:
+                # GIVEN a non-K8s model and the venv is already present
+                juju.units_by_app["myapp"] = ["myapp/0"]
+                juju.exec_responses.extend(_inject_and_pass_responses())
+
+                # WHEN
+                extension.post_validate("mymodel", "myapp", "simple")
+
+                # THEN every exec_unit call was made with operator=False
+                assert len(juju.exec_calls) > 0
+                assert all(call[3] is False for call in juju.exec_calls)
+
     class TestInjectValidators:
         def test_raises_when_validators_path_is_none(self, extension_no_path: ValidatorInjectorExtension) -> None:
             # GIVEN no validators_path configured
@@ -336,7 +370,7 @@ class TestValidatorInjectorExtension:
             juju.exec_responses.extend([_ok(), _ok(), _ok()])
 
             # WHEN
-            extension._inject_validators("mymodel", "myapp/0")
+            extension._inject_validators("mymodel", "myapp/0", is_k8s=True)
 
             # THEN scp is called with the resolved source path and correct destination
             assert len(juju.scp_calls) == 2  # validators + uv
@@ -353,13 +387,32 @@ class TestValidatorInjectorExtension:
             juju.exec_responses.extend([_ok(), _ok(), _ok()])
 
             # WHEN
-            extension._inject_validators("mymodel", "myapp/0")
+            extension._inject_validators("mymodel", "myapp/0", is_k8s=True)
 
             # THEN ssh was called to create the remote directory before copying files
             assert len(juju.ssh_calls) == 1
             _, unit, cmd = juju.ssh_calls[0]
             assert unit == "myapp/0"
             assert cmd == f"mkdir -p {remote_validators_path}"
+
+        def test_calls_ssh_mkdir_before_scp_with_sudo_in_non_k8s_model_and_chowns_it(
+            self,
+            extension: ValidatorInjectorExtension,
+            juju: JujuStub,
+        ) -> None:
+            # GIVEN all install commands succeed
+            juju.exec_responses.extend([_ok(), _ok(), _ok()])
+
+            # WHEN
+            extension._inject_validators("mymodel", "myapp/0", is_k8s=False)
+
+            # THEN ssh was called to create the remote directory before copying files
+            assert len(juju.ssh_calls) == 1
+            _, unit, cmd = juju.ssh_calls[0]
+            mkdir, chown = cmd.split(" && ")
+            assert unit == "myapp/0"
+            assert mkdir == f"sudo mkdir -p {remote_validators_path}"
+            assert chown == f"sudo chown -R $(id -u) {remote_validators_path}"
 
         def test_runs_three_install_commands(self, extension: ValidatorInjectorExtension, juju: JujuStub) -> None:
             # GIVEN all install commands succeed

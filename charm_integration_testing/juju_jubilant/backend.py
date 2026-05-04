@@ -14,6 +14,7 @@ import jubilant
 import yaml
 from juju import (
     JujuApplicationInfo,
+    JujuConsumedOfferInfo,
     JujuExecOutput,
     JujuIntegration,
     JujuIntegrationApplication,
@@ -374,7 +375,11 @@ class JubilantBackend(JujuCmdBackend):
     def scp(self, model: str, source: str, destination: str) -> None:
         # Jubilant scp doesn't work for directories
         # https://github.com/canonical/jubilant/issues/266
-        self.client.model(model).cli("scp", source, destination)
+        #
+        # Furthermore, machine charms need to specify -r if source is a directory
+        #   we'll always specify -r to be safe
+        options = () if self.is_k8s_model(model) else ("--", "-r")
+        self.client.model(model).cli("scp", *options, source, destination)
 
     def ssh(self, model: str, application: str, command: str) -> None:
         self.client.model(model).ssh(
@@ -395,6 +400,9 @@ class JubilantBackend(JujuCmdBackend):
             app_name: JujuApplicationInfo(charm=app_info.charm, revision=app_info.charm_rev)
             for app_name, app_info in self.status(model).apps.items()
         }
+
+    def list_consumed_offers(self, model: str) -> dict[str, JujuConsumedOfferInfo]:
+        return {offer: JujuConsumedOfferInfo(url=info.url) for offer, info in self.status(model).app_endpoints.items()}
 
     def list_integrations(self, model: str) -> set[JujuIntegration]:
         # Juju status yaml format doesn't expose provider/requirer information or
@@ -457,12 +465,10 @@ class JubilantBackend(JujuCmdBackend):
         cloud: str,
         controller: str,
         controller_constraints: dict[str, str],
+        bootstrap_configuration: dict[str, str],
+        metadata_source: pathlib.Path | None = None,
         agent_version: str | None = None,
     ) -> None:
-        # XXX (@mbenzan): we have to be able to pass in `extra_arguments` for Openstack integrations.
-        # This is currently not supported by Jubilant. I'll open a PR there to add this functionality
-        # and then update the code here to use it. In the meantime, O11 will fail to provision.
-        # PR: https://github.com/canonical/jubilant/pull/272
         if agent_version:
             bootstrap_args: list[str] = ["bootstrap", cloud, controller]
             if controller_constraints:
@@ -473,10 +479,16 @@ class JubilantBackend(JujuCmdBackend):
                     ]
                 )
             bootstrap_args.extend(["--agent-version", agent_version])
+            if metadata_source:
+                bootstrap_args.extend(["--metadata-source", str(metadata_source)])
             self.client.model(None).cli(*bootstrap_args, include_model=False)
         else:
             self.client.model(None).bootstrap(
-                cloud=cloud, controller=controller, bootstrap_constraints=controller_constraints
+                cloud=cloud,
+                controller=controller,
+                bootstrap_constraints=controller_constraints,
+                metadata_source=str(metadata_source),
+                config=bootstrap_configuration,
             )
 
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(5), reraise=True)

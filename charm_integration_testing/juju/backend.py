@@ -7,13 +7,14 @@ from collections.abc import Callable
 from dataclasses import field
 from datetime import datetime, timedelta
 from functools import wraps
+from pathlib import Path
 from typing import Any, ParamSpec, TypeVar
 
 from pydantic.dataclasses import dataclass
 
 from validators.base.validator import ValidationResult
 
-from .models import JujuApplicationInfo, JujuIntegration, JujuIntegrationApplication
+from .models import JujuApplicationInfo, JujuConsumedOfferInfo, JujuIntegration, JujuIntegrationApplication
 from .version import JujuVersion
 
 _P = ParamSpec("_P")
@@ -149,6 +150,10 @@ class JujuBackend(ABC):
 
     @abstractmethod
     def list_applications(self, model: str) -> dict[str, JujuApplicationInfo]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_consumed_offers(self, model: str) -> dict[str, JujuConsumedOfferInfo]:
         raise NotImplementedError
 
     @abstractmethod
@@ -303,6 +308,8 @@ class JujuBackend(ABC):
         cloud: str,
         controller: str,
         controller_constraints: dict[str, str],
+        bootstrap_configuration: dict[str, str],
+        metadata_source: Path | None = None,
         agent_version: str | None = None,
     ) -> None:
         raise NotImplementedError
