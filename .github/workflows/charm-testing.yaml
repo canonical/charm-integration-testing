@@ -251,6 +251,7 @@ jobs:
           STG_SQA_KUBECONFIG: ${{ secrets.STG_SQA_KUBECONFIG }}
           PROD_PS7_KUBECONFIG: ${{ secrets.PROD_PS7_KUBECONFIG }}
           PROD_SQA_NOVARC: ${{ secrets.PROD_SQA_NOVARC }}
+          PROD_PS7_NOVARC: ${{ secrets.PROD_PS7_NOVARC }}
         run: |
           if [[ -n "${KUBECONFIG_SECRET_NAME}" ]]; then
             echo "kubeconfig<<EOF" >> "$GITHUB_OUTPUT"
@@ -273,6 +274,7 @@ jobs:
           STG_SQA_KUBECONFIG: ${{ secrets.STG_SQA_KUBECONFIG }}
           PROD_PS7_KUBECONFIG: ${{ secrets.PROD_PS7_KUBECONFIG }}
           PROD_SQA_NOVARC: ${{ secrets.PROD_SQA_NOVARC }}
+          PROD_PS7_NOVARC: ${{ secrets.PROD_PS7_NOVARC }}
         run: |
           if [[ -n "${KUBECONFIG_SECRET_NAME}" ]]; then
             echo "kubeconfig<<EOF" >> "$GITHUB_OUTPUT"
