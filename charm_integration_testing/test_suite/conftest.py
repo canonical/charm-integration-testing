@@ -616,8 +616,10 @@ def print_setup_and_teardown_info(
     logger: logging.Logger,
     juju_client: JujuClient,
     model: str,
+    target_controller: str,
     record_execution_metadata: None,
 ) -> Iterator[None]:
+    model = f"{target_controller}:{model}"
     state_marker = read_state_marker(request.node)
     if not (
         state_marker
