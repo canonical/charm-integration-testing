@@ -170,9 +170,10 @@ class Bundle(BaseModel):
 
         bundle_dict: dict[str, object] = {
             "applications": applications_dict,
-            "bundle": self.platform,
             "relations": local_relations + cmr_relations,
         }
+        if self.platform == "kubernetes":
+            bundle_dict["bundle"] = self.platform
 
         # Add saas section if there are consuming CMRs
         if saas_entries:

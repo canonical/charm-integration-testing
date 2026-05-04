@@ -181,7 +181,7 @@ class TestBundleExport:
         # Relations should be deterministically sorted
         assert relations == sorted(relations)
 
-    def test_bundle_key_matches_platform(self) -> None:
+    def test_bundle_key_matches_platform_k8s(self) -> None:
         # GIVEN a kubernetes bundle
         bundle = _make_bundle(
             platform="kubernetes",
@@ -193,6 +193,19 @@ class TestBundleExport:
 
         # THEN the bundle key is 'kubernetes'
         assert exported["bundle"] == "kubernetes"
+
+    def test_bundle_key_is_skipped_for_platform_machine(self) -> None:
+        # GIVEN a kubernetes bundle
+        bundle = _make_bundle(
+            platform="machine",
+            applications={"app": Application(charm=_make_charm("app"))},
+        )
+
+        # WHEN exporting
+        exported = yaml.safe_load(bundle.export())
+
+        # THEN the bundle key is 'kubernetes'
+        assert "bundle" not in exported
 
     def test_export_round_trip_is_valid_yaml(self) -> None:
         # GIVEN a moderately complex bundle
