@@ -29,6 +29,10 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Install yq
+      uses: ./.github/actions/install-with-retry
+      with:
+        command: sudo snap install yq
     - name: Pick compatible runner
       id: pick
       shell: bash

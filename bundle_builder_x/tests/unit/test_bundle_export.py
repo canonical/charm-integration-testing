@@ -195,7 +195,7 @@ class TestBundleExport:
         assert exported["bundle"] == "kubernetes"
 
     def test_bundle_key_is_skipped_for_platform_machine(self) -> None:
-        # GIVEN a kubernetes bundle
+        # GIVEN a machine bundle
         bundle = _make_bundle(
             platform="machine",
             applications={"app": Application(charm=_make_charm("app"))},
@@ -204,7 +204,7 @@ class TestBundleExport:
         # WHEN exporting
         exported = yaml.safe_load(bundle.export())
 
-        # THEN the bundle key is 'kubernetes'
+        # THEN the bundle key is absent (it is only emitted for kubernetes bundles)
         assert "bundle" not in exported
 
     def test_export_round_trip_is_valid_yaml(self) -> None:
