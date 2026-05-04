@@ -58,7 +58,7 @@ environments:
       no-proxy: "127.0.0.1,localhost,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.canonical.com,.launchpad.net,.internal,.jujucharms.com,.svc.cluster.local"
       snap-http-proxy: "http://egress.ps7.internal:3128"
       snap-https-proxy: "http://egress.ps7.internal:3128"
-    bootstrap-constraints:
+    bootstrap-constraints: &ps7-model-constraints
       root-disk: '5G'
     model-config: &ps7-model-config
       logging-config: "DEBUG"
@@ -75,5 +75,6 @@ environments:
     novarc-secret: PROD_PS7_NOVARC
     arch: amd64
     bootstrap-config: *ps7-bootstrap-config
+    bootstrap-constraints: *ps7-model-constraints
     model-config: *ps7-model-config
   ps7-sqa-prod_charm_qa_openstack-2: *ps7-sqa-prod_charm_qa_openstack
