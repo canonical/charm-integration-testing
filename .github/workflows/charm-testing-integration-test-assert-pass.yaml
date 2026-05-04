@@ -68,8 +68,7 @@ jobs:
           ref: ${{ github.head_ref || github.ref_name }}
           title: 'Testing ${{ inputs.target_charm }}:${{ inputs.target_endpoint }}
             against ${{ inputs.neighbor_charm }}:${{ inputs.neighbor_endpoint }} (environments:
-            ${{ inputs.target_environment }}, test execution: ${{ steps.create-test-execution.outputs.test_execution_id
-            }})'
+            ${{ inputs.target_environment }}, test execution: ${{ steps.create-test-execution.outputs.test_execution_id }})'
           inputs: |
             {
               "test_observer_environment": "staging",
