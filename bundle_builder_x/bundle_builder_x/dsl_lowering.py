@@ -730,6 +730,8 @@ def _lower(expr: AnyExpr, ctx: LoweringContext) -> _LoweredValue:  # noqa: C901
             z3_result: z3.ExprRef = z3.EmptySet(z3.StringSort())
             entries: list[_ChannelSetEntry] = []
             for i, dc in enumerate(ctx.domain.charms):
+                if isinstance(arg, SelfExpr) and i != ctx.charm_id:
+                    continue  # {self} is a singleton; non-self charms have a provably-False condition
                 condition = z3.And(dc.exists, z3.IsMember(z3.IntVal(i), charm_set))
                 z3_result = z3.If(
                     condition, z3.SetAdd(z3_result, z3.StringVal(dc.spec.channel.explicit_track)), z3_result
@@ -751,6 +753,8 @@ def _lower(expr: AnyExpr, ctx: LoweringContext) -> _LoweredValue:  # noqa: C901
             z3_result = z3.EmptySet(z3.StringSort())
             entries = []
             for i, dc in enumerate(ctx.domain.charms):
+                if isinstance(arg, SelfExpr) and i != ctx.charm_id:
+                    continue  # {self} is a singleton; non-self charms have a provably-False condition
                 condition = z3.And(dc.exists, z3.IsMember(z3.IntVal(i), charm_set))
                 z3_result = z3.If(condition, z3.SetAdd(z3_result, z3.StringVal(dc.spec.channel.risk)), z3_result)
                 entries.append(
@@ -770,6 +774,8 @@ def _lower(expr: AnyExpr, ctx: LoweringContext) -> _LoweredValue:  # noqa: C901
             z3_result = z3.EmptySet(z3.StringSort())
             entries = []
             for i, dc in enumerate(ctx.domain.charms):
+                if isinstance(arg, SelfExpr) and i != ctx.charm_id:
+                    continue  # {self} is a singleton; non-self charms have a provably-False condition
                 condition = z3.And(dc.exists, z3.IsMember(z3.IntVal(i), charm_set))
                 z3_result = z3.If(condition, z3.SetAdd(z3_result, z3.StringVal(str(dc.spec.channel))), z3_result)
                 entries.append(
@@ -789,6 +795,8 @@ def _lower(expr: AnyExpr, ctx: LoweringContext) -> _LoweredValue:  # noqa: C901
             z3_result = z3.EmptySet(z3.IntSort())
             entries = []
             for i, dc in enumerate(ctx.domain.charms):
+                if isinstance(arg, SelfExpr) and i != ctx.charm_id:
+                    continue  # {self} is a singleton; non-self charms have a provably-False condition
                 condition = z3.And(dc.exists, z3.IsMember(z3.IntVal(i), charm_set))
                 z3_result = z3.If(condition, z3.SetAdd(z3_result, z3.IntVal(dc.spec.revision)), z3_result)
                 entries.append(

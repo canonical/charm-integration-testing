@@ -337,6 +337,11 @@ def add_charm_metadata_constraints(solver: z3.Solver, domain: Domain) -> None:
         if not charm.spec.constraints:
             continue
         ctx = LoweringContext(charm_id=charm_id, domain_charm=charm, domain=domain)
+        # Collect sub-assertion tags across all constraints for this charm to
+        # avoid duplicate named assertions.  Two different constraints can
+        # legitimately emit the same expansion hint (e.g. "re-fetch charm X on
+        # track 8"); adding it once is sufficient.
+        seen_sub_tags: set[str] = set()
         for idx, expr in enumerate(charm.spec.constraints):
             try:
                 result = lower(expr, ctx)
@@ -347,9 +352,13 @@ def add_charm_metadata_constraints(solver: z3.Solver, domain: Domain) -> None:
                 CharmCustomConstraintTag(charm=_charm_payload(charm, charm_id), assertion_idx=idx).encode(),
             )
             for sub in result.sub_assertions:
+                tag = sub.tag.encode()
+                if tag in seen_sub_tags:
+                    continue
+                seen_sub_tags.add(tag)
                 solver.assert_and_track(
                     z3.Implies(charm.exists, sub.expr),
-                    sub.tag.encode(),
+                    tag,
                 )
 
 
