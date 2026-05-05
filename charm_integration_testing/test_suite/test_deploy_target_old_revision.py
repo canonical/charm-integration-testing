@@ -12,24 +12,24 @@ from .scheduler.states import State
 
 
 def _create_bundle_with_revision_override(
-    source_bundle: Path,
+    bundle_path: Path,
     destination_bundle: Path,
     target_application: str,
     target_revision: int,
 ) -> None:
-    with source_bundle.open("r", encoding="utf-8") as file:
-        bundle_data = yaml.safe_load(file)
+    with bundle_path.open("r", encoding="utf-8") as file:
+        bundle_data = next(yaml.safe_load_all(file))
 
     if not isinstance(bundle_data, dict):
-        raise ValueError(f"Invalid bundle file: {source_bundle}")
+        raise ValueError(f"Invalid bundle file: {bundle_path}")
 
     applications = bundle_data.get("applications")
     if not isinstance(applications, dict) or target_application not in applications:
-        raise ValueError(f"Application '{target_application}' not found in bundle: {source_bundle}")
+        raise ValueError(f"Application '{target_application}' not found in bundle: {bundle_path}")
 
     target_application_data = applications[target_application]
     if not isinstance(target_application_data, dict):
-        raise ValueError(f"Invalid application definition for '{target_application}' in {source_bundle}")
+        raise ValueError(f"Invalid application definition for '{target_application}' in {bundle_path}")
 
     target_application_data["revision"] = target_revision
 
@@ -42,20 +42,19 @@ def test_deploy_target_old_revision(
     juju_client: JujuClient,
     target_downgrade_revision: int,
     model: str,
-    bundle: Path,
     target_application: str,
     target_charm: str,
     tmp_path: Path,
+    target_bundle: Path,
 ) -> None:
     juju_client.logger.info(
         f"Selected historical revision {target_downgrade_revision} for {target_application} ({target_charm})"
     )
 
-    ### Create a temporary bundle file with target revision overridden
-    ### Should be replaced by bundle-builder with old revision in the future
+    # Create a temporary bundle file with target revision overridden
     overridden_bundle = tmp_path / f"bundle-{target_application}-rev-{target_downgrade_revision}.yaml"
     _create_bundle_with_revision_override(
-        source_bundle=bundle,
+        bundle_path=target_bundle,
         destination_bundle=overridden_bundle,
         target_application=target_application,
         target_revision=target_downgrade_revision,

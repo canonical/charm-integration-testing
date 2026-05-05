@@ -36,7 +36,7 @@ on:
 jobs:
   cleanup-k8s:
     name: Clean up any leftover K8s artifacts from old Charm QA environments
-    runs-on: [self-hosted, charm_qa]
+    runs-on: [self-hosted, private-endpoint, linux]
     env:
       AGE_THRESHOLD: ${{ inputs.age_threshold }}
     steps:
@@ -138,7 +138,7 @@ jobs:
         run: |
           kubectl get namespaces --output json | jq --raw-output --argjson age "$AGE_THRESHOLD" '
             .items[] |
-            select(.metadata.name | test("^(controller|model)-[0-9]+-[0-9]+$|^controller-pytest-tmp-controller-[a-z0-9]{8}$")) |
+            select(.metadata.name | test("^(controller-)?charmqa-")) |
             select((now - (.metadata.creationTimestamp | fromdateiso8601)) > ($age * 60)) |
             .kind + "/" + .metadata.name
           ' >> resources_to_remove.txt

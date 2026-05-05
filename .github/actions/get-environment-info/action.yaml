@@ -1,0 +1,85 @@
+---
+name: Get Environment Info
+description: Look up the platform, arch, cloud-type and Juju config for a named GitHub
+  Actions environment.
+inputs:
+  environment_name:
+    description: The named GitHub Actions environment (e.g. ps6-sqa-prod_charm_qa_kubernetes-1).
+    required: true
+outputs:
+  platform:
+    description: Platform string for run-tests.sh (kubernetes or machine).
+    value: ${{ steps.lookup.outputs.platform }}
+  arch:
+    description: Architecture string (e.g. amd64).
+    value: ${{ steps.lookup.outputs.arch }}
+  cloud-type:
+    description: Cloud setup type (k8s or o7k).
+    value: ${{ steps.lookup.outputs.cloud-type }}
+  kubeconfig-secret:
+    description: Name of the GitHub Actions secret holding the kubeconfig (k8s environments
+      only).
+    value: ${{ steps.lookup.outputs.kubeconfig-secret }}
+  novarc-secret:
+    description: Name of the GitHub Actions secret holding the novarc (o7k environments
+      only).
+    value: ${{ steps.lookup.outputs.novarc-secret }}
+  bootstrap-config:
+    description: Path to a temporary file containing the Juju bootstrap config as
+      JSON.
+    value: ${{ steps.lookup.outputs.bootstrap-config }}
+  bootstrap-constraints:
+    description: Path to a temporary file containing the Juju bootstrap constraints
+      as JSON.
+    value: ${{ steps.lookup.outputs.bootstrap-constraints }}
+  model-config:
+    description: Path to a temporary file containing the Juju model config as JSON.
+    value: ${{ steps.lookup.outputs.model-config }}
+  metadata-source:
+    description: >
+      Path to the local directory containing Juju simplestreams image metadata.
+      Set for OpenStack (o7k) environments; empty for k8s environments.
+    value: ${{ steps.lookup.outputs.metadata-source }}
+runs:
+  using: composite
+  steps:
+    - name: Look up environment topology
+      id: lookup
+      shell: bash
+      env:
+        ENVIRONMENT_NAME: ${{ inputs.environment_name }}
+        WORKSPACE: ${{ github.workspace }}
+      run: |-
+        table="${WORKSPACE}/static/environments.yaml"
+        platform=$(yq ".environments[\"${ENVIRONMENT_NAME}\"].platform" "${table}")
+        if [[ "${platform}" == "null" ]]; then
+          echo "::error::Unknown environment '${ENVIRONMENT_NAME}'. Add it to static/environments.yaml."
+          exit 1
+        fi
+        arch=$(yq ".environments[\"${ENVIRONMENT_NAME}\"].arch" "${table}")
+        cloud_type=$(yq ".environments[\"${ENVIRONMENT_NAME}\"][\"cloud-type\"]" "${table}")
+        kubeconfig_secret=$(yq ".environments[\"${ENVIRONMENT_NAME}\"][\"kubeconfig-secret\"] // \"\"" "${table}")
+        novarc_secret=$(yq ".environments[\"${ENVIRONMENT_NAME}\"][\"novarc-secret\"] // \"\"" "${table}")
+
+        # Write Juju config objects to per-environment temp files so that
+        # multiple calls (e.g. target + neighbor) don't overwrite each other.
+        safe_name="${ENVIRONMENT_NAME//[^a-zA-Z0-9_-]/-}"
+        bootstrap_config_file="${RUNNER_TEMP}/env-${safe_name}-bootstrap-config.json"
+        bootstrap_constraints_file="${RUNNER_TEMP}/env-${safe_name}-bootstrap-constraints.json"
+        model_config_file="${RUNNER_TEMP}/env-${safe_name}-model-config.json"
+        yq -o=json -I=0 ".environments[\"${ENVIRONMENT_NAME}\"][\"bootstrap-config\"] // {}" "${table}" > "${bootstrap_config_file}"
+        yq -o=json -I=0 ".environments[\"${ENVIRONMENT_NAME}\"][\"bootstrap-constraints\"] // {}" "${table}" > "${bootstrap_constraints_file}"
+        yq -o=json -I=0 ".environments[\"${ENVIRONMENT_NAME}\"][\"model-config\"] // {}" "${table}" > "${model_config_file}"
+        echo "platform=${platform}" >> "${GITHUB_OUTPUT}"
+        echo "arch=${arch}" >> "${GITHUB_OUTPUT}"
+        echo "cloud-type=${cloud_type}" >> "${GITHUB_OUTPUT}"
+        echo "kubeconfig-secret=${kubeconfig_secret}" >> "${GITHUB_OUTPUT}"
+        echo "novarc-secret=${novarc_secret}" >> "${GITHUB_OUTPUT}"
+        echo "bootstrap-config=${bootstrap_config_file}" >> "${GITHUB_OUTPUT}"
+        echo "bootstrap-constraints=${bootstrap_constraints_file}" >> "${GITHUB_OUTPUT}"
+        echo "model-config=${model_config_file}" >> "${GITHUB_OUTPUT}"
+        if [[ "${cloud_type}" == "o7k" ]]; then
+          echo "metadata-source=${HOME}/openstack/images" >> "${GITHUB_OUTPUT}"
+        else
+          echo "metadata-source=" >> "${GITHUB_OUTPUT}"
+        fi
