@@ -2,7 +2,7 @@
 environments:
   # PS6
   ps6-sqa-prod_charm_qa_kubernetes-1: &ps6-sqa-prod_charm_qa_kubernetes
-    github-runner: ps6
+    github-runner: solqa
     platform: kubernetes
     cloud-type: k8s
     kubeconfig-secret: PROD_SQA_KUBECONFIG
@@ -22,7 +22,7 @@ environments:
   ps6-sqa-prod_charm_qa_kubernetes-5: *ps6-sqa-prod_charm_qa_kubernetes
   ps6-sqa-prod_charm_qa_kubernetes-6: *ps6-sqa-prod_charm_qa_kubernetes
   ps6-sqa-stg_charm_qa_kubernetes-1:
-    github-runner: ps6
+    github-runner: solqa
     platform: kubernetes
     cloud-type: k8s
     kubeconfig-secret: STG_SQA_KUBECONFIG
@@ -37,15 +37,15 @@ environments:
       juju-https-proxy: "http://squid.internal:3128"
       juju-no-proxy: "127.0.0.1,localhost,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.canonical.com,.launchpad.net,.internal,.jujucharms.com,.svc.cluster.local"
   ps6-sqa-prod_charm_qa_openstack-1: &ps6-sqa-prod_charm_qa_openstack
-    github-runner: ps6
+    github-runner: solqa
     platform: machine
     cloud-type: o7k
     novarc-secret: PROD_SQA_NOVARC
     arch: amd64
   ps6-sqa-prod_charm_qa_openstack-2: *ps6-sqa-prod_charm_qa_openstack
   # PS7
-  ps7-sqa-prod_charm_qa_kubernetes-1:
-    github-runner: ps7
+  ps7-sqa-prod_charm_qa_kubernetes-1: &ps7-sqa-prod_charm_qa_kubernetes
+    github-runner: private-endpoint
     platform: kubernetes
     cloud-type: k8s
     kubeconfig-secret: PROD_PS7_KUBECONFIG
@@ -68,8 +68,9 @@ environments:
       juju-no-proxy: "127.0.0.1,localhost,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.canonical.com,.launchpad.net,.internal,.jujucharms.com,.svc.cluster.local"
       snap-http-proxy: "http://egress.ps7.internal:3128"
       snap-https-proxy: "http://egress.ps7.internal:3128"
+  ps7-sqa-prod_charm_qa_kubernetes-2: *ps7-sqa-prod_charm_qa_kubernetes
   ps7-sqa-prod_charm_qa_openstack-1: &ps7-sqa-prod_charm_qa_openstack
-    github-runner: ps7
+    github-runner: private-endpoint
     platform: machine
     cloud-type: o7k
     novarc-secret: PROD_PS7_NOVARC
