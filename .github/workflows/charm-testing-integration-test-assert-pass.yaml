@@ -37,7 +37,7 @@ on:
         required: true
 jobs:
   run-charm-tests-and-assert-pass:
-    runs-on: [self-hosted, charm_qa]
+    runs-on: [self-hosted, solqa]
     permissions:
       contents: read
       actions: write

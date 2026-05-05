@@ -1,10 +1,10 @@
 ---
 github-runners:
-  ps6:
-    labels: [self-hosted, charm_qa]
+  solqa:
+    labels: [self-hosted, solqa]
     debug-mode: ssh
     pip-proxy: "http://squid.internal:3128"
-  ps7:
+  private-endpoint:
     labels: [self-hosted-linux-amd64-noble-private-endpoint-small]
     debug-mode: tmate
     pip-proxy: ""
