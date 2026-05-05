@@ -14,7 +14,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from .bundle import Application, ApplicationEndpoint, Bundle, CrossModelIntegration, Integration, Solution
-from .bundle_builder import BundleBuilder, UncompletableBundleError
+from .bundle_builder import BundleBuilder, UncompletableBundleError, UnfulfilledEndpointInfo
 from .charm import Charm, CharmChannel, CharmEndpoint, EndpointType
 from .charmhub import CharmhubClient
 from .charmhub_http import CharmReleaseNotFoundException
@@ -52,4 +52,5 @@ __all__ = [
     "SpecFile",
     "Timeline",
     "UncompletableBundleError",
+    "UnfulfilledEndpointInfo",
 ]

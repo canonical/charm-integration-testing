@@ -20,7 +20,8 @@ def _parse_bundle(
     bundle_path: str,
 ) -> tuple[list[str], list[tuple[JujuIntegrationApplication, JujuIntegrationApplication]]]:
     with open(bundle_path) as f:
-        data = yaml.safe_load(f)
+        # HACK(@motjuste): we may have multi-document yaml, just take first
+        data = next(yaml.safe_load_all(f))
 
     app_names = list(data.get("applications", {}).keys())
 
@@ -59,17 +60,42 @@ def generate_endpoint_integrations(status: jubilant.Status) -> Iterator[tuple[st
 
 
 def get_integrations(status: jubilant.Status) -> set[tuple[JujuIntegrationApplication, JujuIntegrationApplication]]:
-    return {
-        (JujuIntegrationApplication(application_1, endpoint_1), JujuIntegrationApplication(application_2, endpoint_2))
-        # Iterate over every integration on every endpoint
-        for application_1, endpoint_1, integration_1 in generate_endpoint_integrations(status)
-        # Then for each also iterate over every integration on every endpoint again
-        for application_2, endpoint_2, integration_2 in generate_endpoint_integrations(status)
-        # Then for all check if the integrations complete a pair
-        if integration_1.interface == integration_2.interface
-        and application_1 == integration_2.related_app
-        and application_2 == integration_1.related_app
-    }
+    pairs: set[tuple[JujuIntegrationApplication, JujuIntegrationApplication]] = set()
+
+    # Local app <-> local app integrations
+    local_endpoint_integrations = list(generate_endpoint_integrations(status))
+    for application_1, endpoint_1, integration_1 in local_endpoint_integrations:
+        for application_2, endpoint_2, integration_2 in local_endpoint_integrations:
+            if (
+                integration_1.interface == integration_2.interface
+                and application_1 == integration_2.related_app
+                and application_2 == integration_1.related_app
+            ):
+                pairs.add(
+                    (
+                        JujuIntegrationApplication(application_1, endpoint_1),
+                        JujuIntegrationApplication(application_2, endpoint_2),
+                    )
+                )
+
+    # Local app <-> SAAS (remote app) integrations: the SAAS side is in status.app_endpoints
+    for application, endpoint, integration in local_endpoint_integrations:
+        if integration.related_app in status.app_endpoints:
+            # Find which endpoint on the remote app corresponds to this interface
+            remote = status.app_endpoints[integration.related_app]
+            remote_endpoint = next(
+                (ep_name for ep_name, ep in remote.endpoints.items() if ep.interface == integration.interface),
+                None,
+            )
+            if remote_endpoint is not None:
+                pairs.add(
+                    (
+                        JujuIntegrationApplication(application, endpoint),
+                        JujuIntegrationApplication(integration.related_app, remote_endpoint),
+                    )
+                )
+
+    return pairs
 
 
 def get_application_state(status: jubilant.Status, application: str) -> JujuApplicationState:

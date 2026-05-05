@@ -19,6 +19,7 @@ from datetime import timedelta
 from typing import cast
 
 import z3  # type: ignore[import-untyped]
+from pydantic import BaseModel
 
 from .assertion_tags import (
     ApplicationExistsTag,
@@ -29,7 +30,7 @@ from .assertion_tags import (
     EndpointCountMatchesIntegrationsTag,
     PeerChannelMismatchTag,
 )
-from .bundle import ApplicationEndpoint, Solution
+from .bundle import Solution
 from .charm import Charm, CharmChannel, EndpointType
 from .charmhub import CharmhubClient
 from .charmhub_http import CharmReleaseNotFoundException
@@ -56,6 +57,14 @@ _EXPANSION_PRIORITY: dict[Assertions, int] = {
 }
 
 
+class UnfulfilledEndpointInfo(BaseModel):
+    """Information about a charm endpoint that could not be fulfilled during bundle building."""
+
+    charm_name: str
+    endpoint: str
+    interface: str | None
+
+
 class UncompletableBundleError(ValueError):
     """Exception raised when bundle builder cannot generate a complete bundle from the base bundle"""
 
@@ -69,22 +78,23 @@ class UncompletableBundleError(ValueError):
         self.unsat_core = unsat_core or []
         if reason is None:
             if self.unfulfilled_endpoints:
-                reason = f"Cannot fulfill application endpoints: {', '.join(str(ep) for ep in sorted(self.unfulfilled_endpoints, key=str))}"
+                reason = f"Cannot fulfill charm endpoints: {', '.join(f'{ep.charm_name}:{ep.endpoint}' for ep in sorted(self.unfulfilled_endpoints, key=lambda e: (e.charm_name, e.endpoint)))}"
             else:
                 reason = "Cannot expand domain to handle failed assertion tags"
         super().__init__(f"Could not build a complete valid bundle: {reason}")
 
     @property
-    def unfulfilled_endpoints(self) -> frozenset[ApplicationEndpoint]:
+    def unfulfilled_endpoints(self) -> list[UnfulfilledEndpointInfo]:
         """Endpoints in the unsat core that could not be fulfilled by any charm."""
-        return frozenset(
-            ApplicationEndpoint(
-                application=cast(CharmEndpointNonOptionalTag, tag).charm.charm_name,
+        return [
+            UnfulfilledEndpointInfo(
+                charm_name=cast(CharmEndpointNonOptionalTag, tag).charm.charm_name,
                 endpoint=cast(CharmEndpointNonOptionalTag, tag).charm.endpoint,
+                interface=cast(CharmEndpointNonOptionalTag, tag).interface,
             )
             for tag in self.unsat_core
             if tag.kind == Assertions.CHARM_ENDPOINT_NON_OPTIONAL
-        )
+        ]
 
 
 class BundleBuilder:

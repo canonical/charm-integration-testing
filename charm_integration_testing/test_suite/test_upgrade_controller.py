@@ -13,12 +13,13 @@ from .scheduler.states import State
 @pytest.mark.state(requires=State.DEPLOYED, provides=State.DEPLOYED_WITH_UPGRADED_CONTROLLER)
 def test_upgrade_controller(
     juju_client: JujuClient,
-    juju_controller: str,
-    juju_upgrade_target_version: JujuVersion | None,
+    target_controller: str,
+    target_upgrade_version: JujuVersion | None,
     model: str,
     request: pytest.FixtureRequest,
 ) -> None:
-    """Upgrade the Juju controller and verify the deployment remains healthy.
+    """
+    Upgrade the Juju controller and verify the deployment remains healthy.
 
     Patch upgrades (same major.minor) use ``juju upgrade-controller``.
     Minor/major upgrades use model migration to a new controller at the target version.
@@ -26,29 +27,29 @@ def test_upgrade_controller(
     If no upgrade target is available the test is skipped automatically.
     """
     # GIVEN the resolved upgrade target
-    if juju_upgrade_target_version is None:
+    if target_upgrade_version is None:
         # No upgrade target is available, so skip instead of reporting the
         # upgraded-controller state as provided.
         pytest.skip("No Juju upgrade target version is available for this environment.")
 
-    target_version_str = str(juju_upgrade_target_version)
-    controller_model = f"{juju_controller}:controller"
+    target_version_str = str(target_upgrade_version)
+    controller_model = f"{target_controller}:controller"
 
     # GIVEN a healthy deployment
     pre_version = juju_client.version(controller_model)
 
     # Classify the upgrade mode
-    upgrade_mode = classify_upgrade_mode(pre_version, juju_upgrade_target_version)
+    upgrade_mode = classify_upgrade_mode(pre_version, target_upgrade_version)
 
     if upgrade_mode == UpgradeMode.PATCH:
-        _upgrade_in_place(juju_client, juju_controller, target_version_str, model)
-        active_controller = juju_controller
+        _upgrade_in_place(juju_client, target_controller, target_version_str, model)
+        active_controller = target_controller
     else:
         # Migration path: bootstrap a new controller at the target version
         # (handled by the fixture), migrate the model to it, and upgrade the
         # model agents to match the new controller.
         temp_controller: str = request.getfixturevalue("juju_controller_at_version")
-        _upgrade_via_migration(juju_client, juju_controller, temp_controller, target_version_str, model)
+        _upgrade_via_migration(juju_client, target_controller, temp_controller, target_version_str, model)
         active_controller = temp_controller
 
     # THEN the controller version should have advanced
@@ -59,7 +60,7 @@ def test_upgrade_controller(
     ), f"Expected controller version to increase after upgrade, but got {post_version} (was {pre_version})."
 
     # And the workload model should still be healthy
-    if active_controller == juju_controller:
+    if active_controller == target_controller:
         juju_client.validate_model(model=model, level="deep")
     else:
         juju_client.validate_model(model=f"{active_controller}:{model}", level="deep")
