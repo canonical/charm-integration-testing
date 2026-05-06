@@ -229,3 +229,56 @@ class TestVersionCompatibility:
 
         # Both instances on same track -> builds fine
         assert len(bundle.applications) == 2
+
+    def test_two_tracks_self_constraints_on_same_charm_do_not_crash(self) -> None:
+        # Regression test: a charm with TWO constraints that both end in `== tracks({self})`
+        # (one per endpoint) previously caused a z3 "named assertion defined twice" crash
+        # because the {self} side produced N-1 spurious entries whose tags collided.
+        #
+        # Modelled after mongodb-k8s, which has both:
+        #   bool(endpoint[config-server]) => tracks(charms(endpoint[config-server])) == tracks({self})
+        #   bool(endpoint[sharding]) => tracks(charms(endpoint[sharding])) == tracks({self})
+        mongo = make_charm(
+            "mongo",
+            channel="8/stable",
+            endpoints={
+                "config-server": CharmEndpoint(
+                    type=EndpointType.PROVIDES,
+                    interface="shards-cfg",
+                    optional=True,
+                ),
+                "sharding": CharmEndpoint(
+                    type=EndpointType.REQUIRES,
+                    interface="shards-cfg",
+                    optional=True,
+                    limit=1,
+                ),
+            },
+            constraint_strs=[
+                "not (bool(endpoint[sharding]) and bool(endpoint[config-server]))",
+                "bool(endpoint[config-server]) => tracks(charms(endpoint[config-server])) == tracks({self})",
+                "bool(endpoint[sharding]) => tracks(charms(endpoint[sharding])) == tracks({self})",
+            ],
+        )
+        builder = BundleBuilder(charmhub_client=CharmhubClientStub(mongo))
+
+        # WHEN two instances are integrated as config-server and shard (same track)
+        bundle = build_single_model(
+            builder,
+            applications={
+                "database-a": AppSpec(charm="mongo", channel="8/stable"),
+                "database-b": AppSpec(charm="mongo", channel="8/stable"),
+            },
+            integrations=[
+                IntegrationSpec(
+                    application="database-a",
+                    endpoint="config-server",
+                    remote_application="database-b",
+                    remote_endpoint="sharding",
+                )
+            ],
+        )
+
+        # THEN the build succeeds (previously raised z3 "named assertion defined twice")
+        assert len(bundle.applications) == 2
+        assert len(bundle.integrations) == 1

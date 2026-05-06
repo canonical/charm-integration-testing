@@ -96,8 +96,11 @@ on:
         default: INFO
 jobs:
   determine-runner:
-    name: Determine GitHub Actions runner to use
-    runs-on: ubuntu-latest
+    name: Determine GitHub Actions runner to use for the environment
+    runs-on: [self-hosted, solqa]
+    env:
+      TEST_OBSERVER_API: ${{ inputs.test_observer_environment == 'production' && vars.PROD_TEST_OBSERVER_API || (inputs.test_observer_environment == 'staging' && vars.STG_TEST_OBSERVER_API || '') }}
+      TEST_OBSERVER_TOKEN: ${{ inputs.test_observer_environment == 'production' && secrets.PROD_TEST_OBSERVER_TOKEN || (inputs.test_observer_environment == 'staging' && secrets.STG_TEST_OBSERVER_TOKEN || '') }}
     outputs:
       runner: ${{ steps.pick.outputs.runner-labels }}
       debug-mode: ${{ steps.pick.outputs.debug-mode }}
@@ -113,6 +116,13 @@ jobs:
         with:
           target_environment: ${{ inputs.target_environment }}
           neighbor_environment: ${{ inputs.neighbor_environment }}
+      - name: Trigger rerun on Test Observer if failure
+        if: ${{ failure() && env.TEST_OBSERVER_API != '' && inputs.execution_id != '' }}
+        uses: ./.github/actions/test-observer/trigger-rerun
+        with:
+          test_observer_api: ${{ env.TEST_OBSERVER_API }}
+          test_observer_token: ${{ env.TEST_OBSERVER_TOKEN }}
+          test_execution_id: ${{ inputs.execution_id }}
   execute-charm-test:
     name: Execute integration tests against the charms
     needs: determine-runner
