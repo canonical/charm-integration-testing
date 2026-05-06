@@ -23,6 +23,7 @@ from extensions import (
 )
 from juju import JujuBackend, JujuClient, JujuValidationError, JujuVersion, JujuWaitTimeoutError
 from juju.resource_registry import (
+    JujuControllerHandle,
     JujuCrashdumpCollector,
     JujuModelHandle,
     JujuResourceRegistryExtension,
@@ -40,6 +41,7 @@ from utils.juju_releases import (
 )
 
 from bundle_builder_x import UncompletableBundleError
+from test_suite.scheduler.states import STATES_WITHOUT_EXISTING_CONTROLLER, STATES_WITHOUT_EXISTING_MODEL, State
 
 pytest_plugins = [
     "test_suite.scheduler.plugin",
@@ -151,6 +153,47 @@ def session_resource_registry(
             registry.teardown_all()
         except Exception as exc:
             warnings.warn(f"session_resource_registry teardown_all raised: {exc}", ResourceTeardownWarning)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def register_preexisting_resources(
+    request: pytest.FixtureRequest,
+    session_resource_registry: ResourceRegistry,
+    target_controller: str,
+    model: str,
+    is_cmr_test: bool,
+    neighbor_controller: str | None,
+    neighbor_model: str | None,
+) -> None:
+    """Register controllers/models that already exist when --current-state skips bootstrap/create_model."""
+    current_state = State(request.config.getoption("--current-state"))
+
+    if current_state in STATES_WITHOUT_EXISTING_CONTROLLER:
+        return
+
+    target_ctrl_handle = JujuControllerHandle(controller=target_controller)
+    if not session_resource_registry.is_registered(target_ctrl_handle):
+        session_resource_registry.register(handle=target_ctrl_handle, destroyer=None)
+
+    if is_cmr_test and neighbor_controller is not None:
+        neighbor_ctrl_handle = JujuControllerHandle(controller=neighbor_controller)
+        if not session_resource_registry.is_registered(neighbor_ctrl_handle):
+            session_resource_registry.register(handle=neighbor_ctrl_handle, destroyer=None)
+
+    if current_state in STATES_WITHOUT_EXISTING_MODEL:
+        return
+
+    session_resource_registry.register(
+        handle=JujuModelHandle(controller=target_controller, model=model),
+        parent=target_ctrl_handle,
+    )
+
+    if is_cmr_test and neighbor_controller is not None and neighbor_model is not None:
+        neighbor_ctrl_handle = JujuControllerHandle(controller=neighbor_controller)
+        session_resource_registry.register(
+            handle=JujuModelHandle(controller=neighbor_controller, model=neighbor_model),
+            parent=neighbor_ctrl_handle,
+        )
 
 
 @pytest.fixture

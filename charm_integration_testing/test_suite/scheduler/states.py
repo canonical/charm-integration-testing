@@ -41,3 +41,21 @@ class State(str, Enum):
     NEIGHBOR_ONLY = "neighbor_only"
     DEPLOYED_WITH_OLD_REVISION = "deployed_with_old_revision"
     DEPLOYED_WITH_UPGRADED_CONTROLLER = "deployed_with_upgraded_controller"
+
+
+#: States where no Juju controller exists yet before the test run starts.
+STATES_WITHOUT_EXISTING_CONTROLLER: frozenset[State] = frozenset(
+    {
+        State.NO_BUNDLE,
+        State.NO_CONTROLLER,
+    }
+)
+
+#: States where no Juju model exists yet before the test run starts.
+STATES_WITHOUT_EXISTING_MODEL: frozenset[State] = frozenset(
+    {
+        State.NO_BUNDLE,
+        State.NO_CONTROLLER,
+        State.NO_MODEL,
+    }
+)
