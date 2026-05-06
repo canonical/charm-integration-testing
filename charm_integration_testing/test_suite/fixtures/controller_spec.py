@@ -8,6 +8,8 @@ import pytest
 from pydantic import TypeAdapter, ValidationError
 from utils import generate_juju_name
 
+from test_suite.scheduler.states import STATES_WITHOUT_EXISTING_CONTROLLER, STATES_WITHOUT_EXISTING_MODEL, State
+
 
 def pytest_configure(config: pytest.Config) -> None:
     cloud = config.getoption("--neighbor-cloud", default=None)
@@ -35,24 +37,61 @@ def pytest_configure(config: pytest.Config) -> None:
                 f"Neighbor config options require --neighbor-cloud. " f"Spurious options: {', '.join(spurious)}",
                 returncode=4,
             )
-        return
 
-    target_controller = config.getoption("--target-controller", default=None)
-    target_model = config.getoption("--target-model", default=None)
-    if (
-        controller is not None
-        and target_controller is not None
-        and model is not None
-        and target_model is not None
-        and controller == target_controller
-        and model == target_model
-    ):
-        pytest.exit(
-            f"--neighbor-controller and --neighbor-model must not be the same as "
-            f"--target-controller and --target-model (got '{controller}:{model}'). "
-            "CMR requires two distinct Juju models.",
-            returncode=4,
-        )
+    if is_cmr:
+        target_controller = config.getoption("--target-controller", default=None)
+        target_model = config.getoption("--target-model", default=None)
+        if (
+            controller is not None
+            and target_controller is not None
+            and model is not None
+            and target_model is not None
+            and controller == target_controller
+            and model == target_model
+        ):
+            pytest.exit(
+                f"--neighbor-controller and --neighbor-model must not be the same as "
+                f"--target-controller and --target-model (got '{controller}:{model}'). "
+                "CMR requires two distinct Juju models.",
+                returncode=4,
+            )
+
+    raw_state = config.getoption("--current-state", default=None)
+    if raw_state:
+        try:
+            current_state = State(raw_state)
+        except ValueError:
+            return  # Invalid value handled by scheduler plugin.
+        if current_state not in STATES_WITHOUT_EXISTING_CONTROLLER and not config.getoption(
+            "--target-controller", default=None
+        ):
+            pytest.exit(
+                f"--target-controller is required when --current-state={current_state.value}.",
+                returncode=4,
+            )
+        if current_state not in STATES_WITHOUT_EXISTING_MODEL and not config.getoption("--target-model", default=None):
+            pytest.exit(
+                f"--target-model is required when --current-state={current_state.value}.",
+                returncode=4,
+            )
+        if (
+            is_cmr
+            and current_state not in STATES_WITHOUT_EXISTING_CONTROLLER
+            and not config.getoption("--neighbor-controller", default=None)
+        ):
+            pytest.exit(
+                f"--neighbor-controller is required when --current-state={current_state.value} with CMR.",
+                returncode=4,
+            )
+        if (
+            is_cmr
+            and current_state not in STATES_WITHOUT_EXISTING_MODEL
+            and not config.getoption("--neighbor-model", default=None)
+        ):
+            pytest.exit(
+                f"--neighbor-model is required when --current-state={current_state.value} with CMR.",
+                returncode=4,
+            )
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:

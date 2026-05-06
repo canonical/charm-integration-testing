@@ -3,10 +3,11 @@
 
 from .collectors import JujuCrashdumpCollector
 from .extension import JujuResourceRegistryExtension
-from .handles import JujuControllerHandle
+from .handles import JujuControllerHandle, JujuModelHandle
 
 __all__ = [
     "JujuControllerHandle",
     "JujuCrashdumpCollector",
+    "JujuModelHandle",
     "JujuResourceRegistryExtension",
 ]
