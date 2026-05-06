@@ -2,3 +2,9 @@
 # https://github.com/canonical/redis-k8s-operator/issues/115
 listed: true
 default_channel: latest/edge
+overrides:
+  - provides:
+      grafana-dashboard:
+        optional: true
+      metrics-endpoint:
+        optional: true
