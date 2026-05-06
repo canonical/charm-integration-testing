@@ -63,7 +63,7 @@ on:
         required: false
         default: default
       series:
-        description: Ubuntu series to run the charm tests under (e.g. 20.04, 22.04, 24.04, 26.04).
+        description: Ubuntu series to run the charm tests under (e.g. 20.04, 22.04).
         required: false
         default: default
       debug_sleep_after:
