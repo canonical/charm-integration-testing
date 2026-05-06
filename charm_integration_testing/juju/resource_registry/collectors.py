@@ -3,7 +3,6 @@
 
 import logging
 import subprocess  # nosec B404
-import warnings
 from pathlib import Path
 
 from resource_registry.protocols import ResourceHandle
@@ -65,19 +64,12 @@ class JujuCrashdumpCollector:
             str(output_path),
         ]
         self._logger.debug(f"Running {' '.join(str(c) for c in cmd)}")
-        try:
-            result = subprocess.run(  # nosec B603
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=_SUBPROCESS_TIMEOUT_SECONDS,
-            )
-        except FileNotFoundError:
-            warnings.warn(
-                f"juju-k8s-crashdump not found, skipping log collection for '{controller}'",
-                stacklevel=2,
-            )
-            return
+        result = subprocess.run(  # nosec B603
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=_SUBPROCESS_TIMEOUT_SECONDS,
+        )
         if result.returncode != 0:
             if result.stdout:
                 self._logger.warning(f"juju-k8s-crashdump stdout:\n{result.stdout}")
@@ -107,19 +99,12 @@ class JujuCrashdumpCollector:
             "--as-root",
         ]
         self._logger.debug(f"Running {' '.join(str(c) for c in cmd)}")
-        try:
-            result = subprocess.run(  # nosec B603
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=_SUBPROCESS_TIMEOUT_SECONDS,
-            )
-        except FileNotFoundError:
-            warnings.warn(
-                f"juju-crashdump not found, skipping log collection for '{controller}'",
-                stacklevel=2,
-            )
-            return
+        result = subprocess.run(  # nosec B603
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=_SUBPROCESS_TIMEOUT_SECONDS,
+        )
         if result.returncode != 0:
             if result.stdout:
                 self._logger.warning(f"juju-crashdump stdout:\n{result.stdout}")
