@@ -25,6 +25,9 @@ overrides:
     constraints:
       # If database endpoint uses tls mode, client-certificates is required
       - '"tls" in features(endpoint[database]) => bool(endpoint[client-certificates])'
+      # replication must be same track/risk
+      - 'bool(endpoint[replication]) => risks(charms(endpoint[replication])) == risks({self})
+        and tracks(charms(endpoint[replication])) == tracks({self})'
   - provides:
       replication-offer:
         optional: true
@@ -60,3 +63,6 @@ overrides:
       - '"tls" in features(endpoint[db]) => bool(endpoint[certificates])'
       # If db-admin endpoint uses tls mode, certificates is required
       - '"tls" in features(endpoint[db-admin]) => bool(endpoint[certificates])'
+      # replication must be same track/risk
+      - 'bool(endpoint[replication]) => risks(charms(endpoint[replication])) == risks({self})
+        and tracks(charms(endpoint[replication])) == tracks({self})'
