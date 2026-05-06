@@ -34,6 +34,7 @@ from .charmhub_http import (
     IncompleteCharmInfoException,
     RefreshAction,
     RefreshResponse,
+    UnparsableCharmException,
 )
 from .constraints_dsl import AnyExpr, DSLType, parse_constraint
 from .juju_version import JujuVersion
@@ -72,12 +73,20 @@ class CharmhubClient:
         self.overrides_client = overrides_client if overrides_client is not None else OverridesClient()
         self.timeline = (timeline if timeline is not None else NullTimeline()).child("charmhub")
 
+    def get_charm_channels(self, charm_name: str) -> list[CharmChannel]:
+        """Return all published channels for a charm, sorted by track then risk."""
+        info = self.http_client.info(charm_name, include_channel_map=True)
+        return sorted(
+            {CharmChannel(track=entry.channel.track, risk=entry.channel.risk, branch="") for entry in info.channel_map},
+            key=lambda c: (c.track, c.risk),
+        )
+
     def charm_from_store(
         self,
         charm_name: str,
         ubuntu_arch: str,
-        juju_version: JujuVersion,
-        platform: str,
+        juju_version: JujuVersion | None = None,
+        platform: str | None = None,
         charm_track: str | None = None,
         charm_risk: str | None = None,
         charm_revision: int | None = None,
@@ -244,14 +253,21 @@ class CharmhubClient:
             endpoints=self._get_charm_endpoints(charm_name, metadata, channel),
             proxies=self.overrides_client.get_charm_proxy_overrides(charm_name, channel),
             priority=self.overrides_client.get_charm_priority(charm_name),
-            configs=self.overrides_client.get_charm_config_overrides(charm_name, channel),
+            configs=self._get_charm_configs(charm_name, channel, config_schema),
             config_defaults={k: v.default for k, v in config_schema.options.items()},
             assumes=self._get_charm_assumes(charm_name, metadata, channel),
             constraints=self._get_charm_constraints(charm_name, channel),
         )
 
-    def _ensure_compatibility(self, charm: Charm, juju_version: JujuVersion, platform: str) -> Charm:
-        if not charm.assumes.satisfied_by(juju_version, _PLATFORM_FEATURES.get(platform, frozenset())):
+    def _ensure_compatibility(self, charm: Charm, juju_version: JujuVersion | None, platform: str | None) -> Charm:
+        if juju_version is None and platform is None:
+            return charm
+        features = (
+            _PLATFORM_FEATURES[platform]
+            if platform is not None and platform in _PLATFORM_FEATURES
+            else frozenset(["juju"])
+        )
+        if not charm.assumes.satisfied_by(juju_version, features):
             raise CharmReleaseNotFoundException(
                 f"Charm {charm.name} revision {charm.revision} in channel {charm.channel} does not satisfy assumes constraints for Juju version {juju_version} and platform {platform}"
             )
@@ -261,8 +277,8 @@ class CharmhubClient:
         self,
         charm_name: str,
         ubuntu_arch: str,
-        juju_version: JujuVersion,
-        platform: str,
+        juju_version: JujuVersion | None,
+        platform: str | None,
         charm_channel: CharmChannel,
         charm_revision: int,
         ubuntu_version: str | None = None,
@@ -304,8 +320,8 @@ class CharmhubClient:
         self,
         charm_name: str,
         ubuntu_arch: str,
-        juju_version: JujuVersion,
-        platform: str,
+        juju_version: JujuVersion | None,
+        platform: str | None,
         charm_revision: int,
         ubuntu_version: str | None = None,
     ) -> Charm:
@@ -364,8 +380,8 @@ class CharmhubClient:
         self,
         charm_name: str,
         ubuntu_arch: str,
-        juju_version: JujuVersion,
-        platform: str,
+        juju_version: JujuVersion | None,
+        platform: str | None,
         charm_channel: CharmChannel,
         ubuntu_version: str | None = None,
     ) -> Charm:
@@ -418,8 +434,8 @@ class CharmhubClient:
         self,
         charm_name: str,
         ubuntu_arch: str,
-        juju_version: JujuVersion,
-        platform: str,
+        juju_version: JujuVersion | None,
+        platform: str | None,
         charm_track: str,
         charm_revision: int,
         ubuntu_version: str | None = None,
@@ -446,8 +462,8 @@ class CharmhubClient:
         self,
         charm_name: str,
         ubuntu_arch: str,
-        juju_version: JujuVersion,
-        platform: str,
+        juju_version: JujuVersion | None,
+        platform: str | None,
         charm_track: str,
         ubuntu_version: str | None = None,
     ) -> Charm:
@@ -472,8 +488,8 @@ class CharmhubClient:
         self,
         charm_name: str,
         ubuntu_arch: str,
-        juju_version: JujuVersion,
-        platform: str,
+        juju_version: JujuVersion | None,
+        platform: str | None,
         ubuntu_version: str | None = None,
     ) -> Charm:
         # Get default ubuntu version if not provided
@@ -648,6 +664,19 @@ class CharmhubClient:
         # Get overrides
         endpoint_overrides = self.overrides_client.get_charm_endpoint_overrides(charm_name, channel)
 
+        # Validate that override keys exist in the charm's metadata.
+        for endpoint_type, metadata_map, label in (
+            (EndpointType.REQUIRES, metadata.requires, "requires"),
+            (EndpointType.PROVIDES, metadata.provides, "provides"),
+        ):
+            override_map = endpoint_overrides.get(endpoint_type, {})
+            stale = sorted(set(override_map) - set(metadata_map))
+            if stale:
+                raise UnparsableCharmException(
+                    f"Charm {charm_name!r} override declares {label} endpoints not present in "
+                    f"charm metadata at channel {channel}: {stale}"
+                )
+
         # Gather endpoints
         endpoints = {}
         for endpoint_type, endpoint_map in (
@@ -697,6 +726,18 @@ class CharmhubClient:
                 )
 
         return endpoints
+
+    def _get_charm_configs(
+        self, charm_name: str, channel: CharmChannel, config_schema: CharmConfigSchema
+    ) -> dict[str, Any]:
+        config_overrides = self.overrides_client.get_charm_config_overrides(charm_name, channel)
+        stale_configs = sorted(set(config_overrides) - set(config_schema.options))
+        if stale_configs:
+            raise UnparsableCharmException(
+                f"Charm {charm_name!r} override declares config keys not present in "
+                f"charm config at channel {channel}: {stale_configs}"
+            )
+        return config_overrides
 
     def _get_charm_constraints(self, charm_name: str, channel: CharmChannel) -> list[AnyExpr]:
         """Parse raw DSL constraint strings from overrides into typed AST nodes."""

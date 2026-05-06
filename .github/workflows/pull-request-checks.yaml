@@ -110,4 +110,5 @@ jobs:
       - name: Install dependencies
         run: poetry install
       - name: Run Bundle Builder X Tests
-        run: ./scripts/bundle-builder-x-tests.sh 'unit|integration|logic'
+        run: ./scripts/bundle-builder-x-tests.sh 'unit|integration|logic|overrides'
+          --overrides ./static/charm-overrides

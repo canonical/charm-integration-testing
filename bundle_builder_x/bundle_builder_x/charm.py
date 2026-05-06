@@ -47,7 +47,7 @@ class CharmAssumesEntry(BaseModel):
             raise ValueError(f"Unknown juju version operator {v!r}. Expected one of: {list(ASSUMES_OPS)}")
         return v
 
-    def satisfied_by(self, juju_version: JujuVersion, features: frozenset[str] = frozenset()) -> bool:
+    def satisfied_by(self, juju_version: JujuVersion | None, features: frozenset[str] = frozenset()) -> bool:
         return all(
             [
                 # all of
@@ -58,9 +58,9 @@ class CharmAssumesEntry(BaseModel):
                 any(entry.satisfied_by(juju_version, features) for entry in self.any_of)
                 if self.any_of is not None
                 else True,
-                # juju version constraint
+                # juju version constraint (skipped when juju_version is unknown)
                 ASSUMES_OPS[self.op](juju_version, self.required_version)
-                if self.op is not None and self.required_version is not None
+                if self.op is not None and self.required_version is not None and juju_version is not None
                 else True,
                 # feature requirement
                 self.feature in features if self.feature is not None else True,
