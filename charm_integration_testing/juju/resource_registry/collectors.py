@@ -73,7 +73,10 @@ class JujuCrashdumpCollector:
                 timeout=_SUBPROCESS_TIMEOUT_SECONDS,
             )
         except FileNotFoundError:
-            warnings.warn("juju-k8s-crashdump not found, skipping log collection", stacklevel=2)
+            warnings.warn(
+                f"juju-k8s-crashdump not found, skipping log collection for '{controller}'",
+                stacklevel=2,
+            )
             return
         if result.returncode != 0:
             if result.stdout:
@@ -112,7 +115,10 @@ class JujuCrashdumpCollector:
                 timeout=_SUBPROCESS_TIMEOUT_SECONDS,
             )
         except FileNotFoundError:
-            warnings.warn("juju-crashdump not found, skipping log collection", stacklevel=2)
+            warnings.warn(
+                f"juju-crashdump not found, skipping log collection for '{controller}'",
+                stacklevel=2,
+            )
             return
         if result.returncode != 0:
             if result.stdout:

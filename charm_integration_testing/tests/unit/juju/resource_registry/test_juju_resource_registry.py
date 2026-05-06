@@ -161,7 +161,7 @@ class TestJujuCrashdumpCollectorMachine:
         handle = JujuControllerHandle(controller="my-ctrl")
 
         with patch("subprocess.run", side_effect=FileNotFoundError):
-            with pytest.warns(UserWarning, match="juju-crashdump not found"):
+            with pytest.warns(UserWarning, match="juju-crashdump not found.*my-ctrl"):
                 collector.collect(handle)
 
     def test_raises_on_timeout(self, tmp_path: Path) -> None:
@@ -209,7 +209,7 @@ class TestJujuCrashdumpCollectorK8s:
         handle = JujuControllerHandle(controller="my-ctrl")
 
         with patch("subprocess.run", side_effect=FileNotFoundError):
-            with pytest.warns(UserWarning, match="juju-k8s-crashdump not found"):
+            with pytest.warns(UserWarning, match="juju-k8s-crashdump not found.*my-ctrl"):
                 collector.collect(handle)
 
 
