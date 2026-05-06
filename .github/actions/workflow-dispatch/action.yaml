@@ -8,9 +8,6 @@ inputs:
   ref:
     description: Branch or tag to run the workflow on
     required: true
-  title:
-    description: Expected workflow title (to discover the workflow on)
-    required: true
   inputs:
     description: JSON object of workflow inputs
     required: false
@@ -29,36 +26,30 @@ runs:
       shell: bash
       run: |
         echo "${{ github.token }}" | gh auth login --with-token
-    - name: Parse inputs and run workflow
+    - name: Trigger workflow
       id: trigger
       shell: bash
       env:
         workflow: ${{ inputs.workflow }}
         ref: ${{ inputs.ref }}
-        title: ${{ inputs.title }}
         inputs: ${{ inputs.inputs }}
       run: |
         echo "Preparing to trigger workflow $workflow on ref $ref"
 
-        # Convert JSON inputs to workflow input format
-        input_args=$(echo "$inputs" | jq -r '[to_entries[] | "-f \(.key)=\(.value)"] | join(" ")')
-
-        # Trigger workflow
-        gh workflow run "$workflow" --ref "$ref" $input_args
-
-        # Give GitHub time to register the run
-        sleep 10
-
-        # Get the run ID
-        run_id=$(gh run list \
-          --workflow="$workflow" \
-          --json databaseId,name \
-          --jq ".[] | select(.name == \"$title\") | .databaseId")
+        # Trigger workflow and capture run ID directly from the API response
+        run_id=$(echo "$inputs" | jq --arg ref "$ref" '{ref: $ref, inputs: .}' | \
+          gh api \
+            --method POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2026-03-10" \
+            "/repos/$GITHUB_REPOSITORY/actions/workflows/$workflow/dispatches" \
+            --input - \
+            --jq '.workflow_run_id')
 
         # Check run was found
         if [[ -z "$run_id" ]]
         then
-          echo "Failed to find a workflow run matching name: $title"
+          echo "Failed to get run ID from workflow dispatch response"
           exit 1
         fi
 
