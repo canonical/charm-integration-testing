@@ -137,6 +137,8 @@ class TestResourceRegistryIsRegistered:
         # WHEN checking registration
         assert registry.is_registered(handle) is False
 
+
+class TestResourceRegistryDeregister:
     def test_deregister_removes_entry(self) -> None:
         # GIVEN a registered resource
         registry = _registry()
