@@ -13,7 +13,7 @@ import pytest
 from juju.client import JujuClient
 from juju.resource_registry.collectors import JujuCrashdumpCollector
 from juju.resource_registry.extension import JujuResourceRegistryExtension
-from juju.resource_registry.handles import JujuControllerHandle
+from juju.resource_registry.handles import JujuControllerHandle, JujuModelHandle
 from resource_registry.registry import ResourceRegistry
 
 from ...extensions.shared import NullJujuBackend
@@ -38,6 +38,8 @@ class LoggerStub(logging.Logger):
 class BootstrapKillBackendStub(NullJujuBackend):
     bootstrapped: list[str] = field(default_factory=list)
     killed: list[str] = field(default_factory=list)
+    models_added: list[tuple[str, str]] = field(default_factory=list)
+    status_calls: list[str] = field(default_factory=list)
 
     def bootstrap_controller(
         self,
@@ -52,6 +54,19 @@ class BootstrapKillBackendStub(NullJujuBackend):
 
     def kill_controller(self, controller: str) -> None:
         self.killed.append(controller)
+
+    def add_model(self, controller: str, model: str, model_config: dict[str, str]) -> None:
+        self.models_added.append((controller, model))
+
+    def switch(self, controller: str, model: str) -> None:
+        pass
+
+    def juju_status_text(self, model: str) -> str:
+        self.status_calls.append(model)
+        return f"status for {model}"
+
+    def migrate_model(self, model_name: str, source_controller: str, target_controller: str) -> None:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -139,14 +154,14 @@ class TestJujuCrashdumpCollectorMachine:
             with pytest.raises(subprocess.CalledProcessError):
                 collector.collect(handle)
 
-    def test_raises_on_tool_not_found(self, tmp_path: Path) -> None:
+    def test_logs_warning_when_tool_not_found(self, tmp_path: Path) -> None:
         # GIVEN juju-crashdump is not installed
-        collector = JujuCrashdumpCollector(LoggerStub(), output_dir=tmp_path, kubeconfig_path=None)
+        logger = LoggerStub()
+        collector = JujuCrashdumpCollector(logger, output_dir=tmp_path, kubeconfig_path=None)
         handle = JujuControllerHandle(controller="my-ctrl")
 
         with patch("subprocess.run", side_effect=FileNotFoundError):
-            with pytest.raises(FileNotFoundError):
-                collector.collect(handle)
+            collector.collect(handle)  # should not raise
 
     def test_raises_on_timeout(self, tmp_path: Path) -> None:
         # GIVEN crashdump times out
@@ -186,13 +201,14 @@ class TestJujuCrashdumpCollectorK8s:
         assert "my-ctrl" in cmd
         assert any("juju-controller-my-ctrl" in str(arg) for arg in cmd)
 
-    def test_raises_on_tool_not_found(self, tmp_path: Path) -> None:
-        collector = JujuCrashdumpCollector(LoggerStub(), output_dir=tmp_path, kubeconfig_path=Path("/tmp/kubeconfig"))
+    def test_logs_warning_when_tool_not_found(self, tmp_path: Path) -> None:
+        # GIVEN juju-k8s-crashdump is not installed
+        logger = LoggerStub()
+        collector = JujuCrashdumpCollector(logger, output_dir=tmp_path, kubeconfig_path=Path("/tmp/kubeconfig"))
         handle = JujuControllerHandle(controller="my-ctrl")
 
         with patch("subprocess.run", side_effect=FileNotFoundError):
-            with pytest.raises(FileNotFoundError):
-                collector.collect(handle)
+            collector.collect(handle)  # should not raise
 
 
 # ---------------------------------------------------------------------------
@@ -270,3 +286,216 @@ class TestJujuResourceRegistryExtensionPreKill:
 
         # WHEN killing a controller that was never registered
         client.kill_controller(controller="ghost-ctrl")  # should not raise
+
+
+# ---------------------------------------------------------------------------
+# Tests: JujuModelHandle
+# ---------------------------------------------------------------------------
+
+
+class TestJujuModelHandle:
+    def test_resource_id(self) -> None:
+        handle = JujuModelHandle(controller="my-ctrl", model="my-model")
+        assert handle.resource_id == "juju:model:my-ctrl:my-model"
+
+    def test_resource_type(self) -> None:
+        handle = JujuModelHandle(controller="my-ctrl", model="my-model")
+        assert handle.resource_type == "juju:model"
+
+    def test_path_segment(self) -> None:
+        handle = JujuModelHandle(controller="my-ctrl", model="my-model")
+        assert handle.path_segment == "juju-model-my-ctrl-my-model"
+
+    def test_path_segment_sanitizes_unsafe_chars(self) -> None:
+        handle = JujuModelHandle(controller="ctrl.with spaces", model="model/with:colons")
+        assert handle.path_segment == "juju-model-ctrl-with-spaces-model-with-colons"
+
+    def test_frozen(self) -> None:
+        handle = JujuModelHandle(controller="my-ctrl", model="my-model")
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            handle.model = "other"  # type: ignore[misc]
+
+
+# ---------------------------------------------------------------------------
+# Tests: JujuResourceRegistryExtension - post_add_model
+# ---------------------------------------------------------------------------
+
+
+class TestJujuResourceRegistryExtensionPostAddModel:
+    def _make_registry(self) -> ResourceRegistry:
+        return ResourceRegistry(global_collectors=[], logger=logging.getLogger("test"))
+
+    def test_registers_pre_existing_controller_and_model_on_add_model(self) -> None:
+        # GIVEN a registry with no bootstrapped controller (pre-existing session)
+        backend = BootstrapKillBackendStub()
+        registry = self._make_registry()
+        ext = JujuResourceRegistryExtension(backend, registry)
+        client = JujuClient(backend, LoggerStub(), [ext])
+
+        # WHEN a model is added for a controller that was never bootstrapped in this session
+        client.add_model(controller="pre-existing-ctrl", model="my-model", model_config={})
+
+        # THEN the controller is registered with no destroyer, and the model is registered as its child
+        controller_handle = JujuControllerHandle(controller="pre-existing-ctrl")
+        model_handle = JujuModelHandle(controller="pre-existing-ctrl", model="my-model")
+        assert controller_handle.resource_id in registry._entries
+        assert registry._entries[controller_handle.resource_id].destroyer is None
+        assert model_handle.resource_id in registry._entries
+        assert registry._entries[model_handle.resource_id].parent_id == controller_handle.resource_id
+
+    def test_registers_model_on_add_model(self) -> None:
+        # GIVEN a client with the extension, and a bootstrapped controller
+        backend = BootstrapKillBackendStub()
+        registry = self._make_registry()
+        ext = JujuResourceRegistryExtension(backend, registry)
+        client = JujuClient(backend, LoggerStub(), [ext])
+        client.bootstrap_controller(
+            cloud="mycloud", controller="my-ctrl", controller_constraints={}, bootstrap_configuration={}
+        )
+
+        # WHEN a model is added
+        client.add_model(controller="my-ctrl", model="my-model", model_config={})
+
+        # THEN the model handle is registered with the controller as parent
+        model_handle = JujuModelHandle(controller="my-ctrl", model="my-model")
+        assert model_handle.resource_id in registry._entries
+        assert registry._entries[model_handle.resource_id].parent_id == "juju:controller:my-ctrl"
+
+    def test_model_is_child_of_controller(self) -> None:
+        # GIVEN a bootstrapped controller with a model
+        backend = BootstrapKillBackendStub()
+        registry = self._make_registry()
+        ext = JujuResourceRegistryExtension(backend, registry)
+        client = JujuClient(backend, LoggerStub(), [ext])
+        client.bootstrap_controller(
+            cloud="mycloud", controller="my-ctrl", controller_constraints={}, bootstrap_configuration={}
+        )
+        client.add_model(controller="my-ctrl", model="my-model", model_config={})
+
+        # WHEN querying children of the controller
+        controller_handle = JujuControllerHandle(controller="my-ctrl")
+        children = registry.children_of(controller_handle)
+
+        # THEN the model is listed as a child
+        assert JujuModelHandle(controller="my-ctrl", model="my-model") in children
+
+    def test_kill_controller_deregisters_models(self) -> None:
+        # GIVEN a controller with two models
+        backend = BootstrapKillBackendStub()
+        registry = self._make_registry()
+        ext = JujuResourceRegistryExtension(backend, registry)
+        client = JujuClient(backend, LoggerStub(), [ext])
+        client.bootstrap_controller(
+            cloud="mycloud", controller="my-ctrl", controller_constraints={}, bootstrap_configuration={}
+        )
+        client.add_model(controller="my-ctrl", model="model-a", model_config={})
+        client.add_model(controller="my-ctrl", model="model-b", model_config={})
+
+        # WHEN the controller is killed
+        client.kill_controller(controller="my-ctrl")
+
+        # THEN all models and the controller are deregistered
+        assert registry._entries == {}
+
+    def test_pre_kill_collects_model_logs_before_controller_logs(self) -> None:
+        # GIVEN a controller with a model, and a collector tracking calls
+        collected_order: list[str] = []
+
+        class OrderTrackingCollector:
+            def supports(self, handle: Any) -> bool:
+                return True
+
+            def collect(self, handle: Any) -> None:
+                collected_order.append(handle.resource_id)
+
+        backend = BootstrapKillBackendStub()
+        registry = ResourceRegistry(global_collectors=[OrderTrackingCollector()], logger=logging.getLogger("test"))
+        ext = JujuResourceRegistryExtension(backend, registry)
+        client = JujuClient(backend, LoggerStub(), [ext])
+        client.bootstrap_controller(
+            cloud="mycloud", controller="my-ctrl", controller_constraints={}, bootstrap_configuration={}
+        )
+        client.add_model(controller="my-ctrl", model="my-model", model_config={})
+
+        # WHEN the controller is killed (pre_kill_controller fires)
+        client.kill_controller(controller="my-ctrl")
+
+        # THEN model logs are collected before controller logs
+        assert collected_order == [
+            "juju:model:my-ctrl:my-model",
+            "juju:controller:my-ctrl",
+        ]
+
+
+# ---------------------------------------------------------------------------
+# Tests: JujuResourceRegistryExtension - post_migrate_model
+# ---------------------------------------------------------------------------
+
+
+class TestJujuResourceRegistryExtensionPostMigrateModel:
+    def _make_registry(self) -> ResourceRegistry:
+        return ResourceRegistry(global_collectors=[], logger=logging.getLogger("test"))
+
+    def test_model_handle_moves_to_target_controller(self) -> None:
+        # GIVEN a bootstrapped source controller with a model
+        backend = BootstrapKillBackendStub()
+        registry = self._make_registry()
+        ext = JujuResourceRegistryExtension(backend, registry)
+        client = JujuClient(backend, LoggerStub(), [ext])
+        client.bootstrap_controller(
+            cloud="mycloud", controller="src-ctrl", controller_constraints={}, bootstrap_configuration={}
+        )
+        client.add_model(controller="src-ctrl", model="my-model", model_config={})
+
+        # WHEN the model is migrated to a new controller
+        client.migrate_model(model_name="my-model", source_controller="src-ctrl", target_controller="dst-ctrl")
+
+        # THEN the old handle is gone and the new one is present under the target controller
+        assert JujuModelHandle(controller="src-ctrl", model="my-model").resource_id not in registry._entries
+        assert JujuModelHandle(controller="dst-ctrl", model="my-model").resource_id in registry._entries
+        assert (
+            registry._entries[JujuModelHandle(controller="dst-ctrl", model="my-model").resource_id].parent_id
+            == JujuControllerHandle(controller="dst-ctrl").resource_id
+        )
+
+    def test_target_controller_auto_registered_with_no_destroyer(self) -> None:
+        # GIVEN a source controller with a model; target controller is unknown
+        backend = BootstrapKillBackendStub()
+        registry = self._make_registry()
+        ext = JujuResourceRegistryExtension(backend, registry)
+        client = JujuClient(backend, LoggerStub(), [ext])
+        client.bootstrap_controller(
+            cloud="mycloud", controller="src-ctrl", controller_constraints={}, bootstrap_configuration={}
+        )
+        client.add_model(controller="src-ctrl", model="my-model", model_config={})
+
+        # WHEN migrating to a controller that was never bootstrapped in this session
+        client.migrate_model(model_name="my-model", source_controller="src-ctrl", target_controller="dst-ctrl")
+
+        # THEN the target controller is registered with no destroyer
+        dst_handle = JujuControllerHandle(controller="dst-ctrl")
+        assert dst_handle.resource_id in registry._entries
+        assert registry._entries[dst_handle.resource_id].destroyer is None
+
+    def test_migrate_to_already_registered_controller(self) -> None:
+        # GIVEN two bootstrapped controllers, each with a model
+        backend = BootstrapKillBackendStub()
+        registry = self._make_registry()
+        ext = JujuResourceRegistryExtension(backend, registry)
+        client = JujuClient(backend, LoggerStub(), [ext])
+        client.bootstrap_controller(
+            cloud="mycloud", controller="src-ctrl", controller_constraints={}, bootstrap_configuration={}
+        )
+        client.bootstrap_controller(
+            cloud="mycloud", controller="dst-ctrl", controller_constraints={}, bootstrap_configuration={}
+        )
+        client.add_model(controller="src-ctrl", model="my-model", model_config={})
+
+        # WHEN migrating to the already-registered target controller
+        client.migrate_model(model_name="my-model", source_controller="src-ctrl", target_controller="dst-ctrl")
+
+        # THEN the target controller is still registered (not double-registered or reset)
+        dst_handle = JujuControllerHandle(controller="dst-ctrl")
+        assert dst_handle.resource_id in registry._entries
+        # Model is now under the target controller
+        assert JujuModelHandle(controller="dst-ctrl", model="my-model").resource_id in registry._entries

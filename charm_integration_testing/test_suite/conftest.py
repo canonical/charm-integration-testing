@@ -22,7 +22,11 @@ from extensions import (
     ValidatorInjectorExtension,
 )
 from juju import JujuBackend, JujuClient, JujuValidationError, JujuVersion, JujuWaitTimeoutError
-from juju.resource_registry import JujuCrashdumpCollector, JujuResourceRegistryExtension
+from juju.resource_registry import (
+    JujuCrashdumpCollector,
+    JujuModelHandle,
+    JujuResourceRegistryExtension,
+)
 from juju_jubilant import JubilantBackend
 from kubernetes_client import KubernetesBackend, KubernetesClient
 from pytest import StashKey
@@ -36,8 +40,6 @@ from utils.juju_releases import (
 )
 
 from bundle_builder_x import UncompletableBundleError
-from test_suite.scheduler.markers import read_state_marker
-from test_suite.scheduler.states import State
 
 pytest_plugins = [
     "test_suite.scheduler.plugin",
@@ -137,7 +139,9 @@ def session_resource_registry(
 ) -> Iterator[ResourceRegistry]:
     """Session-scoped resource registry for the main workflow controller."""
     registry = ResourceRegistry(
-        global_collectors=[JujuCrashdumpCollector(logger, output_dir=log_dir, kubeconfig_path=kubeconfig_path)],
+        global_collectors=[
+            JujuCrashdumpCollector(logger, output_dir=log_dir, kubeconfig_path=kubeconfig_path),
+        ],
         logger=logger,
     )
     try:
@@ -613,21 +617,20 @@ def print_setup_and_teardown_info(
     request: pytest.FixtureRequest,
     logger: logging.Logger,
     juju_client: JujuClient,
-    model: str,
-    target_controller: str,
+    session_resource_registry: ResourceRegistry,
     record_execution_metadata: None,
+    require_temp_juju_controller_alive: None,
 ) -> Iterator[None]:
-    model = f"{target_controller}:{model}"
-    state_marker = read_state_marker(request.node)
-    if not (
-        state_marker
-        and any(state in (State.NO_MODEL, State.NO_CONTROLLER, State.NO_BUNDLE) for state in state_marker.requires)
-    ):
-        # Enforce fixture execution order
-        _ = record_execution_metadata
+    def _print_all_model_statuses() -> None:
+        for handle in session_resource_registry.registered_handles():
+            if isinstance(handle, JujuModelHandle):
+                try:
+                    juju_client.print_status(model=f"{handle.controller}:{handle.model}")
+                except Exception:
+                    logger.warning(f"Failed to print status for model '{handle.controller}:{handle.model}'")
 
-        # Print starting state
-        juju_client.print_status(model=model)
+    # Print starting state for all registered models
+    _print_all_model_statuses()
 
     # Log starting
     logger.info(f"Starting {request.node.name}")
@@ -644,9 +647,8 @@ def print_setup_and_teardown_info(
     else:
         logger.info(f"Successfully ran {request.node.name}")
 
-    if not (state_marker and state_marker.provides in (State.NO_MODEL, State.NO_CONTROLLER, State.NO_BUNDLE)):
-        # Log ending state
-        juju_client.print_status(model=model)
+    # Log ending state for all registered models
+    _print_all_model_statuses()
 
 
 @pytest.fixture
@@ -681,12 +683,7 @@ def record_execution_metadata(
     record_charms_and_revisions_execution_metadata: None,
     record_pipeline_version_execution_metadata: None,
 ) -> None:
-    # Save various execution metadata
-    _ = record_warning_execution_metadata
-    _ = record_failure_execution_metadata
-    _ = record_juju_execution_metadata
-    _ = record_charms_and_revisions_execution_metadata
-    _ = record_pipeline_version_execution_metadata
+    pass
 
 
 @pytest.fixture
@@ -753,24 +750,25 @@ def record_charms_and_revisions_execution_metadata_instantaneous(
 
 @pytest.fixture
 def record_charms_and_revisions_execution_metadata(
-    request: pytest.FixtureRequest,
     juju_client: JujuClient,
-    model: str,
+    session_resource_registry: ResourceRegistry,
     execution_metadata: Callable[[str, str | int], None],
+    require_temp_juju_controller_alive: None,
 ) -> Iterator[None]:
-    state_marker = read_state_marker(request.node)
-    if not (
-        state_marker
-        and any(state in (State.NO_MODEL, State.NO_CONTROLLER, State.NO_BUNDLE) for state in state_marker.requires)
-    ):
-        # Save all charms and revisions at start of test
-        record_charms_and_revisions_execution_metadata_instantaneous(juju_client, model, execution_metadata)
+    def _record_all() -> None:
+        for handle in session_resource_registry.registered_handles():
+            if isinstance(handle, JujuModelHandle):
+                record_charms_and_revisions_execution_metadata_instantaneous(
+                    juju_client, f"{handle.controller}:{handle.model}", execution_metadata
+                )
 
-    # Let the test run
+    # Save all charms and revisions at start of test
+    _record_all()
+
     yield
-    if not (state_marker and state_marker.provides in (State.NO_MODEL, State.NO_CONTROLLER, State.NO_BUNDLE)):
-        # Save all charms and revisions at end of test
-        record_charms_and_revisions_execution_metadata_instantaneous(juju_client, model, execution_metadata)
+
+    # Save all charms and revisions at end of test
+    _record_all()
 
 
 @pytest.fixture
@@ -854,24 +852,17 @@ def record_failure_execution_metadata(
 
 @pytest.fixture
 def record_juju_execution_metadata(
-    request: pytest.FixtureRequest,
     juju_client: JujuClient,
-    model: str,
+    session_resource_registry: ResourceRegistry,
     execution_metadata: Callable[[str, str | int], None],
+    require_temp_juju_controller_alive: None,
 ) -> Iterator[None]:
-    state_marker = read_state_marker(request.node)
-    if state_marker and any(
-        state in (State.NO_BUNDLE, State.NO_MODEL, State.NO_CONTROLLER) for state in state_marker.requires
-    ):
-        yield
-        return
-
-    # Let the test run
     yield
 
-    # Save Juju version
-    juju_version = str(juju_client.version(model))
-    execution_metadata("juju:version", juju_version)
+    # Save Juju version for each registered model
+    for handle in session_resource_registry.registered_handles():
+        if isinstance(handle, JujuModelHandle):
+            execution_metadata("juju:version", str(juju_client.version(f"{handle.controller}:{handle.model}")))
 
 
 @pytest.fixture
@@ -955,6 +946,17 @@ def temp_juju_controller(
     yield temp_controller_name
     logger.info(f"Destroying temporary fixture controller '{temp_controller_name}'.")
     juju_client.kill_controller(controller=temp_controller_name)
+
+
+@pytest.fixture
+def require_temp_juju_controller_alive(request: pytest.FixtureRequest) -> None:
+    """Ensure temp_juju_controller is set up before the depending fixture.
+
+    Any fixture that queries model state during its teardown should depend on
+    this so that the temporary controller is still alive when it runs (LIFO).
+    """
+    if "temp_juju_controller" in request.fixturenames:
+        request.getfixturevalue("temp_juju_controller")
 
 
 @pytest.fixture(scope="function")

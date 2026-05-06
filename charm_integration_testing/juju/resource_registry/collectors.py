@@ -3,6 +3,7 @@
 
 import logging
 import subprocess  # nosec B404
+import warnings
 from pathlib import Path
 
 from resource_registry.protocols import ResourceHandle
@@ -64,12 +65,16 @@ class JujuCrashdumpCollector:
             str(output_path),
         ]
         self._logger.debug(f"Running {' '.join(str(c) for c in cmd)}")
-        result = subprocess.run(  # nosec B603
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=_SUBPROCESS_TIMEOUT_SECONDS,
-        )
+        try:
+            result = subprocess.run(  # nosec B603
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=_SUBPROCESS_TIMEOUT_SECONDS,
+            )
+        except FileNotFoundError:
+            warnings.warn("juju-k8s-crashdump not found, skipping log collection", stacklevel=2)
+            return
         if result.returncode != 0:
             if result.stdout:
                 self._logger.warning(f"juju-k8s-crashdump stdout:\n{result.stdout}")
@@ -99,12 +104,16 @@ class JujuCrashdumpCollector:
             "--as-root",
         ]
         self._logger.debug(f"Running {' '.join(str(c) for c in cmd)}")
-        result = subprocess.run(  # nosec B603
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=_SUBPROCESS_TIMEOUT_SECONDS,
-        )
+        try:
+            result = subprocess.run(  # nosec B603
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=_SUBPROCESS_TIMEOUT_SECONDS,
+            )
+        except FileNotFoundError:
+            warnings.warn("juju-crashdump not found, skipping log collection", stacklevel=2)
+            return
         if result.returncode != 0:
             if result.stdout:
                 self._logger.warning(f"juju-crashdump stdout:\n{result.stdout}")
