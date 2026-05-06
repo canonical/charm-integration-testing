@@ -10,6 +10,9 @@ from .handles import JujuControllerHandle, JujuModelHandle
 
 
 class JujuResourceRegistryExtension(JujuExtension):
+    _backend: JujuBackend
+    _registry: ResourceRegistry
+
     def __init__(
         self,
         backend: JujuBackend,
@@ -40,7 +43,7 @@ class JujuResourceRegistryExtension(JujuExtension):
     def pre_kill_controller(self, controller: str) -> None:
         controller_handle = JujuControllerHandle(controller=controller)
         # Tear down child models (collect logs + deregister) before collecting controller logs.
-        for child_handle in list(self._registry.children_of(controller_handle)):
+        for child_handle in self._registry.children_of(controller_handle):
             self._registry.teardown(child_handle)
         self._registry.collect_logs(controller_handle)
 
