@@ -1,11 +1,12 @@
 ---
 name: Execute tests against two charms and their integrations
 run-name: "Testing ${{ inputs.charm_under_test }}:${{ inputs.charm_endpoint }} against\
-  \ ${{ inputs.neighbor }}:${{ inputs.neighbor_endpoint }}. (environment: ${{ inputs.environment }}${{\
-  \ inputs.execution_id != '' && ', test execution: ' || '' }}${{ inputs.execution_id\
-  \ }}, substrate: ${{ inputs.substrate }})"
+  \ ${{ inputs.neighbor }}:${{ inputs.neighbor_endpoint }} (environments: ${{ inputs.target_environment }}${{\
+  \ inputs.neighbor_environment != '' && '|' || '' }}${{ inputs.neighbor_environment\
+  \ }}${{ inputs.execution_id != '' && ', test execution: ' || '' }}${{ inputs.execution_id\
+  \ }})"
 concurrency:
-  group: ${{ github.workflow }}-${{ inputs.environment }}-${{ inputs.execution_id
+  group: ${{ github.workflow }}-${{ inputs.test_observer_environment }}-${{ inputs.execution_id
     || github.run_id }}
   cancel-in-progress: true
 permissions:
@@ -13,17 +14,23 @@ permissions:
 on:
   workflow_dispatch:
     inputs:
-      environment:
-        description: Environment to run in.
-        type: choice
-        default: testing
-        options: [testing, staging, production]
-      arch:
-        description: Architecture of the charms being tested.
+      test_observer_environment:
+        description: Test Observer environment to report results to.
         required: false
         type: choice
-        options: [amd64]
-        default: amd64
+        options: [none, staging, production]
+        default: none
+      target_environment:
+        description: Named GitHub Actions environment to run on (e.g. ps6-sqa-prod_charm_qa_kubernetes-1).
+          Replaces the implicit runner label.
+        required: true
+        type: string
+      neighbor_environment:
+        description: Named GitHub Actions environment for the cross-model neighbor.
+          Empty if not cross-model.
+        required: false
+        type: string
+        default: ''
       charm_under_test:
         description: charmhub.io name of the primary charm under test
         required: true
@@ -47,6 +54,10 @@ on:
         description: Revision number of the charm under test.
         required: false
         default: default
+      downgrade_revision:
+        description: Revision number to downgrade to during testing, if applicable.
+        required: false
+        default: default
       channel:
         description: Channel of the charm under test.
         required: false
@@ -55,16 +66,11 @@ on:
         description: Series to run the charm tests under.
         required: false
         type: choice
-        options: [default, '20.04', '22.04', '24.04']
+        options: [default, "20.04", "22.04", "24.04"]
         default: default
-      substrate:
-        description: Substrate to run the tests on
-        required: false
-        type: choice
-        options: [kubernetes, openstack]
-        default: kubernetes
       debug_sleep_after:
-        description: The stage of the workflow to sleep after. Enables SSH access.
+        description: The stage of the workflow to sleep after. Enables SSH access
+          or tmate session.
         required: false
         type: choice
         options: [none, setup, log_collection]
@@ -76,26 +82,60 @@ on:
           mode.
         required: false
         default: ''
+      debug_sleep_seconds:
+        description: How long (in seconds) to sleep when debug_sleep_after is set
+          and the runner uses SSH debug mode.
+        required: false
+        type: number
+        default: 1800
       log_level:
         description: Log level to use for the tests.
         required: false
         type: choice
         options: [DEBUG, INFO, WARNING, ERROR]
         default: INFO
-env:
-  DEBUG_SLEEP_SECONDS: 7200  # 2 hours
 jobs:
+  determine-runner:
+    name: Determine GitHub Actions runner to use for the environment
+    runs-on: [self-hosted, solqa]
+    env:
+      TEST_OBSERVER_API: ${{ inputs.test_observer_environment == 'production' && vars.PROD_TEST_OBSERVER_API || (inputs.test_observer_environment == 'staging' && vars.STG_TEST_OBSERVER_API || '') }}
+      TEST_OBSERVER_TOKEN: ${{ inputs.test_observer_environment == 'production' && secrets.PROD_TEST_OBSERVER_TOKEN || (inputs.test_observer_environment == 'staging' && secrets.STG_TEST_OBSERVER_TOKEN || '') }}
+    outputs:
+      runner: ${{ steps.pick.outputs.runner-labels }}
+      debug-mode: ${{ steps.pick.outputs.debug-mode }}
+      pip-proxy: ${{ steps.pick.outputs.pip-proxy }}
+    steps:
+      - name: Clone Repo
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Pick runner
+        id: pick
+        uses: ./.github/actions/pick-runner
+        with:
+          target_environment: ${{ inputs.target_environment }}
+          neighbor_environment: ${{ inputs.neighbor_environment }}
+      - name: Trigger rerun on Test Observer if failure
+        if: ${{ failure() && env.TEST_OBSERVER_API != '' && inputs.execution_id != '' }}
+        uses: ./.github/actions/test-observer/trigger-rerun
+        with:
+          test_observer_api: ${{ env.TEST_OBSERVER_API }}
+          test_observer_token: ${{ env.TEST_OBSERVER_TOKEN }}
+          test_execution_id: ${{ inputs.execution_id }}
   execute-charm-test:
     name: Execute integration tests against the charms
-    runs-on: [self-hosted, charm_qa]
+    needs: determine-runner
+    runs-on: ${{ fromJSON(needs.determine-runner.outputs.runner) }}
     env:
-      TEST_OBSERVER_API: ${{ inputs.environment == 'production' && vars.PROD_TEST_OBSERVER_API || (inputs.environment == 'staging' && vars.STG_TEST_OBSERVER_API || '') }}
-      TEST_OBSERVER_TOKEN: ${{ inputs.environment == 'production' && secrets.PROD_TEST_OBSERVER_TOKEN || (inputs.environment == 'staging' && secrets.STG_TEST_OBSERVER_TOKEN || '') }}
+      TEST_OBSERVER_API: ${{ inputs.test_observer_environment == 'production' && vars.PROD_TEST_OBSERVER_API || (inputs.test_observer_environment == 'staging' && vars.STG_TEST_OBSERVER_API || '') }}
+      TEST_OBSERVER_TOKEN: ${{ inputs.test_observer_environment == 'production' && secrets.PROD_TEST_OBSERVER_TOKEN || (inputs.test_observer_environment == 'staging' && secrets.STG_TEST_OBSERVER_TOKEN || '') }}
       MINIO_CLIENT_FILE: ${{ github.workspace }}/static/mc
       UV_FILE: ${{ github.workspace }}/static/uv
       UBUNTU_PRO_TOKEN: ${{ secrets.UBUNTU_PRO_TOKEN }}
       VALIDATORS_PATH: ${{ github.workspace }}/validators
-      BUNDLE_OUTPUT: ./generated-bundle.yaml
+      TARGET_BUNDLE_OUTPUT: ./generated-target-bundle.yaml
+      NEIGHBOR_BUNDLE_OUTPUT: ./generated-neighbor-bundle.yaml
       BUNDLE_MERMAID_OUTPUT: ./generated-bundle.mmd
     steps:
       - name: Clone Repo
@@ -103,12 +143,11 @@ jobs:
         with:
           persist-credentials: false
       - name: Enable Debug Session
-        if: ${{ inputs.debug_sleep_after != 'none' }}
+        if: ${{ inputs.debug_sleep_after != 'none' && !cancelled() && needs.determine-runner.outputs.debug-mode == 'ssh' }}
         shell: bash
         env:
           SSH_IDS: ${{ inputs.debug_extra_ssh_imports }}
         run: |
-          # Always include the GitHub Actor
           mkdir --parents ~/.ssh/
           ssh-import-id "gh:${GITHUB_ACTOR}"
           SSH_IDS=$(echo "${SSH_IDS}" | tr ',' ' ')
@@ -123,19 +162,27 @@ jobs:
           sudo mkswap /swapfile
           sudo swapon /swapfile
           sudo swapon --show
-      - name: Generate Juju Model and Controller Name
-        id: juju_resources
-        shell: bash
-        env:
-          run_id: ${{ github.run_id }}
-        run: |
-          name="${run_id}-$(date +'%y%m%d%H%M%S')"
-          echo "model=model-$name" >> $GITHUB_OUTPUT
-          echo "controller=$name" >> $GITHUB_OUTPUT
+      - name: Install yq
+        uses: ./.github/actions/install-with-retry
+        with:
+          command: sudo snap install yq
+      - name: Get target environment info
+        id: target_env_info
+        uses: ./.github/actions/get-environment-info
+        with:
+          environment_name: ${{ inputs.target_environment }}
+      - name: Get neighbor environment info
+        id: neighbor_env_info
+        if: ${{ inputs.neighbor_environment != '' }}
+        uses: ./.github/actions/get-environment-info
+        with:
+          environment_name: ${{ inputs.neighbor_environment }}
       - name: Log job information
         shell: bash
         env:
-          environment: ${{ inputs.environment }}
+          target_environment: ${{ inputs.target_environment }}
+          neighbor_environment: ${{ inputs.neighbor_environment }}
+          test_observer_environment: ${{ inputs.test_observer_environment }}
           charm_under_test: ${{ inputs.charm_under_test }}
           charm_endpoint: ${{ inputs.charm_endpoint }}
           execution_id: ${{ inputs.execution_id }}
@@ -143,16 +190,16 @@ jobs:
           neighbor: ${{ inputs.neighbor }}
           neighbor_endpoint: ${{ inputs.neighbor_endpoint }}
           revision: ${{ inputs.revision }}
+          downgrade_revision: ${{ inputs.downgrade_revision }}
           channel: ${{ inputs.channel }}
           series: ${{ inputs.series }}
-          substrate: ${{ inputs.substrate }}
-          model: ${{ steps.juju_resources.outputs.model }}
-          controller: ${{ steps.juju_resources.outputs.controller }}
         run: |
           echo "### Job inputs" >> $GITHUB_STEP_SUMMARY
           echo "| Input | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|---|---|" >> $GITHUB_STEP_SUMMARY
-          echo "| \`environment\` | \`${environment}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| \`target_environment\` | \`${target_environment}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| \`neighbor_environment\` | \`${neighbor_environment}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| \`test_observer_environment\` | \`${test_observer_environment}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| \`charm_under_test\` | \`${charm_under_test}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| \`charm_endpoint\` | \`${charm_endpoint}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| \`execution_id\` | \`${execution_id}\` |" >> $GITHUB_STEP_SUMMARY
@@ -160,14 +207,9 @@ jobs:
           echo "| \`neighbor\` | \`${neighbor}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| \`neighbor_endpoint\` | \`${neighbor_endpoint}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| \`revision\` | \`${revision}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| \`downgrade_revision\` | \`${downgrade_revision}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| \`channel\` | \`${channel}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| \`series\` | \`${series}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| \`substrate\` | \`${substrate}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "### Job variables" >> $GITHUB_STEP_SUMMARY
-          echo "| Variable | Value |" >> $GITHUB_STEP_SUMMARY
-          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
-          echo "| Juju model | \`${model}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Juju controller | \`${controller}\` |" >> $GITHUB_STEP_SUMMARY
       - name: Report Test Execution Start To Test Observer
         if: ${{ !cancelled() && env.TEST_OBSERVER_API != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/patch-test-execution
@@ -184,83 +226,138 @@ jobs:
           test_observer_api: ${{ env.TEST_OBSERVER_API }}
           test_observer_token: ${{ env.TEST_OBSERVER_TOKEN }}
           test_execution_id: ${{ inputs.execution_id }}
-          job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
           event_name: job_start
           detail: Charm integration test job started.
       - name: Install Juju
+        uses: ./.github/actions/install-with-retry
+        with:
+          command: sudo snap install juju --channel "${{ inputs.juju_channel }}"
+      - name: Ensure Juju home directory exists
+        shell: bash
+        run: mkdir -p $HOME/.local/share/juju
+      - name: Resolve target credentials
+        id: target_creds
         shell: bash
         env:
-          juju_channel: ${{ inputs.juju_channel }}
+          KUBECONFIG_SECRET_NAME: ${{ steps.target_env_info.outputs.kubeconfig-secret }}
+          NOVARC_SECRET_NAME: ${{ steps.target_env_info.outputs.novarc-secret }}
+          PROD_SQA_KUBECONFIG: ${{ secrets.PROD_SQA_KUBECONFIG }}
+          STG_SQA_KUBECONFIG: ${{ secrets.STG_SQA_KUBECONFIG }}
+          PROD_PS7_KUBECONFIG: ${{ secrets.PROD_PS7_KUBECONFIG }}
+          PROD_SQA_NOVARC: ${{ secrets.PROD_SQA_NOVARC }}
+          PROD_PS7_NOVARC: ${{ secrets.PROD_PS7_NOVARC }}
         run: |
-          for ((attempt = 1; ; attempt++)); do
-            if sudo snap install juju --channel "${juju_channel}"; then
-              break
-            elif [ "$attempt" -lt 3 ]; then
-              echo "Failed, retrying..."
-              sleep 5
-            else
-              exit 1
-            fi
-          done
-          # Ensure the juju home directory exists
-          mkdir -p $HOME/.local/share/juju
-      - name: Setup K8s Cloud
-        if: ${{ inputs.substrate == 'kubernetes'}}
-        id: setup_k8s
-        uses: ./.github/actions/setup-environment/setup-k8s
+          if [[ -n "${KUBECONFIG_SECRET_NAME}" ]]; then
+            echo "kubeconfig<<EOF" >> "$GITHUB_OUTPUT"
+            echo "${!KUBECONFIG_SECRET_NAME}" >> "$GITHUB_OUTPUT"
+            echo "EOF" >> "$GITHUB_OUTPUT"
+          fi
+          if [[ -n "${NOVARC_SECRET_NAME}" ]]; then
+            echo "novarc<<EOF" >> "$GITHUB_OUTPUT"
+            echo "${!NOVARC_SECRET_NAME}" >> "$GITHUB_OUTPUT"
+            echo "EOF" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Resolve neighbor credentials
+        id: neighbor_creds
+        if: ${{ inputs.neighbor_environment != '' }}
+        shell: bash
         env:
-          k8sprod: ${{ secrets.PROD_SQA_KUBECONFIG }}
-          k8sstg: ${{ secrets.STG_SQA_KUBECONFIG }}
+          KUBECONFIG_SECRET_NAME: ${{ steps.neighbor_env_info.outputs.kubeconfig-secret }}
+          NOVARC_SECRET_NAME: ${{ steps.neighbor_env_info.outputs.novarc-secret }}
+          PROD_SQA_KUBECONFIG: ${{ secrets.PROD_SQA_KUBECONFIG }}
+          STG_SQA_KUBECONFIG: ${{ secrets.STG_SQA_KUBECONFIG }}
+          PROD_PS7_KUBECONFIG: ${{ secrets.PROD_PS7_KUBECONFIG }}
+          PROD_SQA_NOVARC: ${{ secrets.PROD_SQA_NOVARC }}
+          PROD_PS7_NOVARC: ${{ secrets.PROD_PS7_NOVARC }}
+        run: |
+          if [[ -n "${KUBECONFIG_SECRET_NAME}" ]]; then
+            echo "kubeconfig<<EOF" >> "$GITHUB_OUTPUT"
+            echo "${!KUBECONFIG_SECRET_NAME}" >> "$GITHUB_OUTPUT"
+            echo "EOF" >> "$GITHUB_OUTPUT"
+          fi
+          if [[ -n "${NOVARC_SECRET_NAME}" ]]; then
+            echo "novarc<<EOF" >> "$GITHUB_OUTPUT"
+            echo "${!NOVARC_SECRET_NAME}" >> "$GITHUB_OUTPUT"
+            echo "EOF" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Setup Target Cloud
+        id: setup_target
+        uses: ./.github/actions/setup-environment/setup-cloud
         with:
-          environment: ${{ inputs.environment }}
-      - name: Post 'setup_k8s_failed' event
-        if: ${{ failure() && env.TEST_OBSERVER_API != '' && inputs.execution_id != '' && steps.setup_k8s.conclusion == 'failure' }}
+          cloud-name: target-cloud
+          cloud-type: ${{ steps.target_env_info.outputs.cloud-type }}
+          kubeconfig: ${{ steps.target_creds.outputs.kubeconfig }}
+          novarc: ${{ steps.target_creds.outputs.novarc }}
+      - name: Post 'setup_target_failed' event
+        if: ${{ failure() && env.TEST_OBSERVER_API != '' && inputs.execution_id != '' && steps.setup_target.conclusion == 'failure' }}
         uses: ./.github/actions/test-observer/post-events
         with:
           test_observer_api: ${{ env.TEST_OBSERVER_API }}
           test_observer_token: ${{ env.TEST_OBSERVER_TOKEN }}
           test_execution_id: ${{ inputs.execution_id }}
-          job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
-          event_name: setup_k8s_failed
-          detail: Setup of Kubernetes cloud failed.
-      - name: Setup O7k Cloud
-        if: ${{ inputs.substrate == 'openstack'}}
-        id: setup_o7k
-        uses: ./.github/actions/setup-environment/setup-openstack
-        env:
-          o7kprod: ${{ secrets.PROD_SQA_NOVARC }}
-          o7kstg: ${{ secrets.STG_SQA_NOVARC }}
+          event_name: setup_target_failed
+          detail: Setup of target cloud failed.
+      - name: Setup Neighbor Cloud
+        id: setup_neighbor
+        if: ${{ inputs.neighbor_environment != '' }}
+        uses: ./.github/actions/setup-environment/setup-cloud
         with:
-          environment: ${{ inputs.environment }}
-          controller: ${{ steps.juju_resources.outputs.controller }}
-          model: ${{ steps.juju_resources.outputs.model }}
-      - name: Post 'setup_o7k_failed' event
-        if: ${{ failure() && env.TEST_OBSERVER_API != '' && inputs.execution_id != '' && steps.setup_o7k.conclusion == 'failure' }}
+          cloud-name: neighbor-cloud
+          cloud-type: ${{ steps.neighbor_env_info.outputs.cloud-type }}
+          kubeconfig: ${{ steps.neighbor_creds.outputs.kubeconfig }}
+          novarc: ${{ steps.neighbor_creds.outputs.novarc }}
+      - name: Post 'setup_neighbor_failed' event
+        if: ${{ failure() && env.TEST_OBSERVER_API != '' && inputs.execution_id != '' && steps.setup_neighbor.conclusion == 'failure' }}
         uses: ./.github/actions/test-observer/post-events
         with:
           test_observer_api: ${{ env.TEST_OBSERVER_API }}
           test_observer_token: ${{ env.TEST_OBSERVER_TOKEN }}
           test_execution_id: ${{ inputs.execution_id }}
-          job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
-          event_name: setup_o7k_failed
-          detail: Setup of OpenStack cloud failed.
+          event_name: setup_neighbor_failed
+          detail: Setup of neighbor cloud failed.
       - name: Debug Setup
-        if: ${{ !cancelled() && inputs.debug_sleep_after == 'setup' }}
+        if: ${{ inputs.debug_sleep_after == 'setup' && !cancelled() && needs.determine-runner.outputs.debug-mode == 'ssh' }}
         shell: bash
-        run: |
-          echo "Sleeping to debug setup"
-          sleep ${DEBUG_SLEEP_SECONDS}
+        env:
+          DEBUG_SLEEP_SECONDS: ${{ inputs.debug_sleep_seconds }}
+        run: sleep ${DEBUG_SLEEP_SECONDS}
+      - name: Debug Setup
+        if: ${{ inputs.debug_sleep_after == 'setup' && !cancelled() && needs.determine-runner.outputs.debug-mode == 'tmate' }}
+        uses: canonical/action-tmate@main  # zizmor: ignore[unpinned-uses] no releases in the repo
       - name: Install Repository
         shell: bash
+        env:
+          PIP_PROXY: ${{ needs.determine-runner.outputs.pip-proxy }}
         run: |
           sudo apt-get update --quiet
           sudo apt-get install pipx --quiet --assume-yes
-          sudo tee /etc/pip.conf <<EOF
+          if [[ -n "${PIP_PROXY}" ]]; then
+            sudo tee /etc/pip.conf <<EOF
           [global]
-          proxy= http://squid.internal:3128
+          proxy= ${PIP_PROXY}
           EOF
-          pipx install poetry==2.3
-          HTTPS_PROXY="http://squid.internal:3128" poetry install
+            HTTPS_PROXY="${PIP_PROXY}" pipx install poetry==2.3
+            HTTPS_PROXY="${PIP_PROXY}" poetry install
+          else
+            pipx install poetry==2.3
+            poetry install
+          fi
+      - name: Install TruffleHog CLI
+        shell: bash
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/trufflesecurity/trufflehog/main/scripts/install.sh | sh -s -- -b /usr/local/bin v3.56.0
+      - name: Install juju-k8s-crashdump
+        uses: ./.github/actions/install-with-retry
+        with:
+          command: pipx install "git+https://github.com/canonical/juju-k8s-crashdump@22ef04caaeeb94ad6ed49f8392b6bada65184569"
+      - name: Install juju-crashdump
+        uses: ./.github/actions/install-with-retry
+        with:
+          command: sudo snap install juju-crashdump --classic
+      - name: Install kubectl
+        uses: ./.github/actions/install-with-retry
+        with:
+          command: sudo snap install kubectl --classic
       - name: Post 'test_start' event
         if: ${{ env.TEST_OBSERVER_API != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-events
@@ -268,56 +365,133 @@ jobs:
           test_observer_api: ${{ env.TEST_OBSERVER_API }}
           test_observer_token: ${{ env.TEST_OBSERVER_TOKEN }}
           test_execution_id: ${{ inputs.execution_id }}
-          job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
           event_name: test_start
           detail: Tests started.
-      - name: Run charm tests
-        id: run_tests
+      - name: Run charm CMR tests
+        id: run_tests_cmr
+        if: ${{ inputs.neighbor_environment != '' }}
         continue-on-error: true
         shell: bash
         env:
-          KUBECONFIG: ${{ steps.setup_k8s.outputs.kubeconfig_path }}
-          model: ${{ steps.juju_resources.outputs.model }}
-          cloud: ${{ steps.setup_k8s.outputs.cloud-name }}
-          controller: ${{ steps.juju_resources.outputs.controller }}
+          KUBECONFIG: ${{ steps.setup_target.outputs.kubeconfig_path }}
+          target_cloud: ${{ steps.setup_target.outputs.cloud-name }}
+          neighbor_cloud: ${{ steps.setup_neighbor.outputs.cloud-name }}
           charm_endpoint: ${{ inputs.charm_endpoint }}
           neighbor_endpoint: ${{ inputs.neighbor_endpoint }}
           charm_under_test: ${{ inputs.charm_under_test }}
           revision: ${{ inputs.revision }}
+          downgrade_revision: ${{ inputs.downgrade_revision }}
           channel: ${{ inputs.channel }}
           series: ${{ inputs.series }}
           neighbor: ${{ inputs.neighbor }}
-          platform: ${{ inputs.substrate == 'openstack' && 'machine' || inputs.substrate }}
+          platform: ${{ steps.target_env_info.outputs.platform }}
           log_level: ${{ inputs.log_level }}
+          bootstrap_config: ${{ steps.target_env_info.outputs.bootstrap-config }}
+          bootstrap_constraints: ${{ steps.target_env_info.outputs.bootstrap-constraints }}
+          model_config: ${{ steps.target_env_info.outputs.model-config }}
+          metadata_source: ${{ steps.target_env_info.outputs.metadata-source }}
+          neighbor_bootstrap_config: ${{ steps.neighbor_env_info.outputs.bootstrap-config }}
+          neighbor_bootstrap_constraints: ${{ steps.neighbor_env_info.outputs.bootstrap-constraints }}
+          neighbor_model_config: ${{ steps.neighbor_env_info.outputs.model-config }}
+          neighbor_metadata_source: ${{ steps.neighbor_env_info.outputs.metadata-source }}
+          neighbor_platform: ${{ steps.neighbor_env_info.outputs.platform }}
+          run_id: ${{ github.run_id }}
         run: |
           echo "junit_xml=$(realpath junit.xml)" >> $GITHUB_OUTPUT
           ./scripts/run-tests.sh \
+            --target-cloud "${target_cloud}" \
+            --target-bundle "${TARGET_BUNDLE_OUTPUT}" \
+            \
+            --neighbor-cloud "${neighbor_cloud}" \
+            --neighbor-bundle "${NEIGHBOR_BUNDLE_OUTPUT}" \
+            \
+            --target-controller-bootstrap-config "${bootstrap_config}" \
+            --target-controller-bootstrap-constraints "${bootstrap_constraints}" \
+            ${metadata_source:+--target-controller-bootstrap-metadata-source "${metadata_source}"} \
+            --target-model-config "${model_config}" \
+            \
+            --neighbor-controller-bootstrap-config "${neighbor_bootstrap_config}" \
+            --neighbor-controller-bootstrap-constraints "${neighbor_bootstrap_constraints}" \
+            ${neighbor_metadata_source:+--neighbor-controller-bootstrap-metadata-source "${neighbor_metadata_source}"} \
+            --neighbor-model-config "${neighbor_model_config}" \
+            \
             --target-charm "${charm_under_test}" \
             --target-channel "${channel}" \
             --target-revision "${revision}" \
+            --target-downgrade-revision "${downgrade_revision}" \
             --target-series "${series}" \
+            --target-platform "${platform}" \
+            \
             --neighbor-charm "${neighbor}" \
-            --model "${model}" \
-            --juju-cloud "${cloud}" \
-            --juju-controller "${controller}" \
-            --bundle "${BUNDLE_OUTPUT}" \
-            --mermaid-output "${BUNDLE_MERMAID_OUTPUT}" \
-            --current-state "no_bundle" \
+            --neighbor-platform "${neighbor_platform}" \
+            \
             --target-application "target" \
             --target-endpoint "${charm_endpoint}" \
             --neighbor-application "neighbor" \
             --neighbor-endpoint "${neighbor_endpoint}" \
-            --platform "${platform}" \
-            --charm-metadata-overrides "./static/charm-metadata-overrides/" \
-            --charm-platform-overrides "./static/charm-platform-overrides/" \
-            --charm-listing-overrides "./static/charm-listing-overrides.yaml" \
-            --charm-test-configs "./static/charm-test-configs/" \
-            --charm-priorities-config "./static/charm-priorities.yaml" \
-            --charm-default-versions "./static/charm-default-versions.yaml" \
-            --juju-model-config "./static/juju-model-config.json" \
-            --juju-controller-bootstrap-constraints "./static/juju-bootstrap-constraints.json" \
+            \
+            --current-state "no_bundle" \
+            --charm-overrides "./static/charm-overrides/" \
+            --mermaid-output "${BUNDLE_MERMAID_OUTPUT}" \
             --log-cli-level "${log_level}" \
             --log-level "${log_level}" \
+            --log-dir "./test-logs" \
+            --prefix "charmqa-${run_id}" \
+            --junit-xml=junit.xml
+      - name: Run charm tests
+        id: run_tests
+        if: ${{ inputs.neighbor_environment == '' }}
+        continue-on-error: true
+        shell: bash
+        env:
+          KUBECONFIG: ${{ steps.setup_target.outputs.kubeconfig_path }}
+          target_cloud: ${{ steps.setup_target.outputs.cloud-name }}
+          charm_endpoint: ${{ inputs.charm_endpoint }}
+          neighbor_endpoint: ${{ inputs.neighbor_endpoint }}
+          charm_under_test: ${{ inputs.charm_under_test }}
+          revision: ${{ inputs.revision }}
+          downgrade_revision: ${{ inputs.downgrade_revision }}
+          channel: ${{ inputs.channel }}
+          series: ${{ inputs.series }}
+          neighbor: ${{ inputs.neighbor }}
+          platform: ${{ steps.target_env_info.outputs.platform }}
+          log_level: ${{ inputs.log_level }}
+          bootstrap_config: ${{ steps.target_env_info.outputs.bootstrap-config }}
+          bootstrap_constraints: ${{ steps.target_env_info.outputs.bootstrap-constraints }}
+          model_config: ${{ steps.target_env_info.outputs.model-config }}
+          metadata_source: ${{ steps.target_env_info.outputs.metadata-source }}
+        run: |
+          echo "junit_xml=$(realpath junit.xml)" >> $GITHUB_OUTPUT
+          ./scripts/run-tests.sh \
+            --target-cloud "${target_cloud}" \
+            --target-bundle "${TARGET_BUNDLE_OUTPUT}" \
+            \
+            --target-controller-bootstrap-config "${bootstrap_config}" \
+            --target-controller-bootstrap-constraints "${bootstrap_constraints}" \
+            ${metadata_source:+--target-controller-bootstrap-metadata-source "${metadata_source}"} \
+            --target-model-config "${model_config}" \
+            \
+            --target-charm "${charm_under_test}" \
+            --target-channel "${channel}" \
+            --target-revision "${revision}" \
+            --target-downgrade-revision "${downgrade_revision}" \
+            --target-series "${series}" \
+            --target-platform "${platform}" \
+            \
+            --neighbor-charm "${neighbor}" \
+            \
+            --target-application "target" \
+            --target-endpoint "${charm_endpoint}" \
+            --neighbor-application "neighbor" \
+            --neighbor-endpoint "${neighbor_endpoint}" \
+            \
+            --current-state "no_bundle" \
+            --charm-overrides "./static/charm-overrides/" \
+            --mermaid-output "${BUNDLE_MERMAID_OUTPUT}" \
+            --log-cli-level "${log_level}" \
+            --log-level "${log_level}" \
+            --log-dir "./test-logs" \
+            --prefix "charmqa-${{ github.run_id }}" \
             --junit-xml=junit.xml
       - name: Post 'test_end' event
         if: ${{ env.TEST_OBSERVER_API != '' && inputs.execution_id != '' }}
@@ -326,7 +500,6 @@ jobs:
           test_observer_api: ${{ env.TEST_OBSERVER_API }}
           test_observer_token: ${{ env.TEST_OBSERVER_TOKEN }}
           test_execution_id: ${{ inputs.execution_id }}
-          job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
           event_name: test_end
           detail: Tests finished.
       - name: Post bundles to github
@@ -338,10 +511,16 @@ jobs:
           echo '```mermaid' >> $GITHUB_STEP_SUMMARY
           cat ${BUNDLE_MERMAID_OUTPUT} >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-          echo '### Generated Juju Bundle' >> $GITHUB_STEP_SUMMARY
+          echo '### Generated Target Juju Bundle' >> $GITHUB_STEP_SUMMARY
           echo '```yaml' >> $GITHUB_STEP_SUMMARY
-          cat ${BUNDLE_OUTPUT} >> $GITHUB_STEP_SUMMARY
+          cat ${TARGET_BUNDLE_OUTPUT} >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
+          if [[ -f "${NEIGHBOR_BUNDLE_OUTPUT}" ]]; then
+            echo '### Generated Neighbor Juju Bundle' >> $GITHUB_STEP_SUMMARY
+            echo '```yaml' >> $GITHUB_STEP_SUMMARY
+            cat ${NEIGHBOR_BUNDLE_OUTPUT} >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
       - name: Post execution metadata to Test Observer
         if: ${{ env.TEST_OBSERVER_API != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-execution-metadata
@@ -349,7 +528,7 @@ jobs:
           test_observer_api: ${{ env.TEST_OBSERVER_API }}
           test_observer_token: ${{ env.TEST_OBSERVER_TOKEN }}
           test_execution_id: ${{ inputs.execution_id }}
-          junit_xml: ${{ steps.run_tests.outputs.junit_xml }}
+          junit_xml: ${{ inputs.neighbor_environment != '' && steps.run_tests_cmr.outputs.junit_xml || steps.run_tests.outputs.junit_xml }}
       - name: Post results to Test Observer
         if: ${{ env.TEST_OBSERVER_API != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-results
@@ -357,69 +536,27 @@ jobs:
           test_observer_api: ${{ env.TEST_OBSERVER_API }}
           test_observer_token: ${{ env.TEST_OBSERVER_TOKEN }}
           test_execution_id: ${{ inputs.execution_id }}
-          junit_xml: ${{ steps.run_tests.outputs.junit_xml }}
-      # TODO(SQT-871): temporary fix - skip crashdump and teardown when no controller was ever created (e.g. bundle builder failure)
-      # See https://warthogs.atlassian.net/browse/SQT-871 for the complete solution.
-      - name: Check controller exists
-        id: check_controller
-        if: ${{ always() }}
-        shell: bash
-        env:
-          controller: ${{ steps.juju_resources.outputs.controller }}
-        run: |
-          echo "exists=false" >> $GITHUB_OUTPUT
-          if juju show-controller "${controller}" >/dev/null 2>&1; then
-            echo "exists=true" >> $GITHUB_OUTPUT
-          fi
-      - name: Call Juju K8s Crashdump
-        id: juju_k8s_crashdump
-        # TODO(SQT-871): temporary fix - skip if controller was never created
-        if: ${{ !cancelled() && inputs.substrate == 'kubernetes' && steps.check_controller.outputs.exists == 'true' }}
-        uses: canonical/juju-k8s-crashdump/actions/juju-k8s-crashdump@22ef04caaeeb94ad6ed49f8392b6bada65184569  # zizmor disallows the use of latest or tags for actions, so we have to pin to a specific commit
-        with:
-          kubeconf: ${{ steps.setup_k8s.outputs.kubeconfig_path }}
-          controller: ${{ steps.juju_resources.outputs.controller }}
-          proxy: http://squid.internal:3128
-      - name: Call Juju Crashdump
-        id: juju_crashdump
-        env:
-          controller: ${{ steps.juju_resources.outputs.controller }}
-          model: ${{ steps.juju_resources.outputs.model }}
-        # TODO(SQT-871): temporary fix - skip if controller was never created
-        if: ${{ always() && inputs.substrate == 'openstack' && steps.check_controller.outputs.exists == 'true' }}
-        shell: bash
-        run: |
-          MODEL_CRASHDUMP=model-logs.tar.gz
-          CONTROLLER_CRASHDUMP=controller-logs.tar.gz
-          sudo snap install juju-crashdump --classic
-          juju-crashdump --model ${controller}:${model} --timeout 300 --small -f 100000000 --compression gz --unit-dump-location ${MODEL_CRASHDUMP} --as-root || True
-          juju-crashdump --model ${controller}:controller --timeout 300 --small -f 100000000 --compression gz --unit-dump-location ${CONTROLLER_CRASHDUMP} --as-root || True
-          echo "OS_MODEL_CRASHDUMP=$(realpath ${MODEL_CRASHDUMP})" >> $GITHUB_OUTPUT
-          echo "OS_CONTROLLER_CRASHDUMP=$(realpath ${CONTROLLER_CRASHDUMP})" >> $GITHUB_OUTPUT
+          junit_xml: ${{ inputs.neighbor_environment != '' && steps.run_tests_cmr.outputs.junit_xml || steps.run_tests.outputs.junit_xml }}
       - name: Collect logs
         id: collect_logs
         if: ${{ !cancelled() }}
         shell: bash
         env:
-          crashdump: ${{ steps.juju_k8s_crashdump.outputs.crashdump_path }}
-          junit_xml: ${{ steps.run_tests.outputs.junit_xml }}
-          generated_bundle: ./generated-bundle.yaml
-          openstack_model_crashdump: ${{ steps.juju_crashdump.outputs.OS_MODEL_CRASHDUMP }}
-          openstack_controller_crashdump: ${{ steps.juju_crashdump.outputs.OS_CONTROLLER_CRASHDUMP }}
+          junit_xml: ${{ inputs.neighbor_environment != '' && steps.run_tests_cmr.outputs.junit_xml || steps.run_tests.outputs.junit_xml }}
         run: |
           mkdir -p "logs"
-          [ -f "${crashdump}" ] && cp "${crashdump}" "logs/juju-logs.tar.gz"
+          [ -d "./test-logs" ] && cp -r ./test-logs/. "logs/"
           [ -f "${junit_xml}" ] && cp "${junit_xml}" "logs/junit.xml"
-          [ -f "${generated_bundle}" ] && cp "${generated_bundle}" "logs/generated-bundle.yaml"
-          [ -f "${openstack_model_crashdump}" ] && cp "${openstack_model_crashdump}" "logs/model-logs.tar.gz"
-          [ -f "${openstack_controller_crashdump}" ] && cp "${openstack_controller_crashdump}" "logs/controller-logs.tar.gz"
+          [ -f "${TARGET_BUNDLE_OUTPUT}" ] && cp "${TARGET_BUNDLE_OUTPUT}" "logs/generated-target-bundle.yaml"
+          [ -f "${NEIGHBOR_BUNDLE_OUTPUT}" ] && cp "${NEIGHBOR_BUNDLE_OUTPUT}" "logs/generated-neighbor-bundle.yaml"
           echo "directory_path=$(realpath "logs")" >> $GITHUB_OUTPUT
       - name: Post Logs To Swift
         id: post_logs_to_swift
         if: ${{ !cancelled() && inputs.execution_id != '' }}
         uses: canonical/sqa-cloud-deployment-pipeline/.github/actions/upload-to-swift@173b1936e2c96e317b0f1167509b068b2020e233
         with:
-          job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
+          job_uuid: ${{ inputs.test_observer_environment }}/${{ inputs.execution_id
+            }}
           log_path: ${{ steps.collect_logs.outputs.directory_path }}
           swift_bucket: charm-qa
           SWIFT_OS_AUTH_URL: ${{ secrets.SWIFT_OS_AUTH_URL }}
@@ -436,15 +573,17 @@ jobs:
           test_observer_api: ${{ env.TEST_OBSERVER_API }}
           test_observer_token: ${{ env.TEST_OBSERVER_TOKEN }}
           test_execution_id: ${{ inputs.execution_id }}
-          job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
           event_name: log_collection_finished
           detail: Log collection has completed.
       - name: Debug Post Log Collection
-        if: ${{ !cancelled() && inputs.debug_sleep_after == 'log_collection' }}
+        if: ${{ inputs.debug_sleep_after == 'log_collection' && !cancelled() && needs.determine-runner.outputs.debug-mode == 'ssh' }}
         shell: bash
-        run: |
-          echo "Sleeping to debug post log collection"
-          sleep ${DEBUG_SLEEP_SECONDS}
+        env:
+          DEBUG_SLEEP_SECONDS: ${{ inputs.debug_sleep_seconds }}
+        run: sleep ${DEBUG_SLEEP_SECONDS}
+      - name: Debug Post Log Collection
+        if: ${{ inputs.debug_sleep_after == 'log_collection' && !cancelled() && needs.determine-runner.outputs.debug-mode == 'tmate' }}
+        uses: canonical/action-tmate@main  # zizmor: ignore[unpinned-uses] no releases in the repo
       - name: Post links to Test Observer
         if: ${{ !cancelled() && steps.post_logs_to_swift.outcome == 'success' && env.TEST_OBSERVER_API != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-links
@@ -452,7 +591,8 @@ jobs:
           test_observer_api: ${{ env.TEST_OBSERVER_API }}
           test_observer_token: ${{ env.TEST_OBSERVER_TOKEN }}
           test_execution_id: ${{ inputs.execution_id }}
-          job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
+          job_uuid: ${{ inputs.test_observer_environment }}/${{ inputs.execution_id
+            }}
       - name: Post 'job_end' event
         if: ${{ !cancelled() && env.TEST_OBSERVER_API != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-events
@@ -460,7 +600,6 @@ jobs:
           test_observer_api: ${{ env.TEST_OBSERVER_API }}
           test_observer_token: ${{ env.TEST_OBSERVER_TOKEN }}
           test_execution_id: ${{ inputs.execution_id }}
-          job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
           event_name: job_end
           detail: Charm integration test job completed.
       - name: Mark Test Execution completed on Test Observer with the correct status
@@ -478,11 +617,3 @@ jobs:
           test_observer_api: ${{ env.TEST_OBSERVER_API }}
           test_observer_token: ${{ env.TEST_OBSERVER_TOKEN }}
           test_execution_id: ${{ inputs.execution_id }}
-      - name: Teardown Controller
-        # TODO(SQT-871): temporary fix - skip if controller was never created
-        if: ${{ always() && steps.check_controller.outputs.exists == 'true' }}
-        shell: bash
-        env:
-          controller: ${{ steps.juju_resources.outputs.controller }}
-        run: timeout 15m juju kill-controller "${controller}" --no-prompt --timeout
-          2m

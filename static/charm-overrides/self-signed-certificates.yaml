@@ -1,0 +1,12 @@
+---
+platforms: [kubernetes, machine]
+priority: 2.0
+overrides:
+  - provides:
+      certificates:
+        optional: true
+      send-ca-cert:
+        optional: true
+    requires:
+      tracing:
+        optional: true

@@ -1,0 +1,15 @@
+---
+# https://github.com/canonical/istio-operators/issues/672
+platforms: [kubernetes]
+overrides:
+  - provides:
+      metrics-endpoint:
+        optional: true
+    requires:
+      istio-pilot:
+        features: [istio-pilot]
+    configs:
+      kind: [ingress, egress]
+    constraints:
+      - 'set(config[kind])'
+      - '"istio-pilot" in features(endpoint[istio-pilot])'

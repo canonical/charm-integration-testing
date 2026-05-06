@@ -18,3 +18,15 @@ class JujuExtension(ABC):
 
     def post_validate(self, model: str, application: str, level: str) -> dict[str, list[ValidationResult]]:
         return {}
+
+    def post_bootstrap_controller(self, controller: str) -> None:
+        pass
+
+    def pre_kill_controller(self, controller: str) -> None:
+        pass
+
+    def post_kill_controller(self, controller: str) -> None:
+        pass
+
+    def post_migrate_model(self, model: str, source: str, target: str) -> None:
+        pass

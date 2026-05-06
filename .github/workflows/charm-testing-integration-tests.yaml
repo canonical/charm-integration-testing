@@ -11,24 +11,28 @@ jobs:
       max-parallel: 1
       matrix:
         params:
-          - target_charm: postgresql-k8s
+          - target_environment: ps6-sqa-stg_charm_qa_kubernetes-1
+            target_charm: postgresql-k8s
             target_endpoint: certificates
             target_revision: 495
+            target_track: 14
+            target_risk: stable
             target_base: '22.04'
             neighbor_charm: self-signed-certificates
             neighbor_endpoint: certificates
-            substrate: kubernetes
     uses: ./.github/workflows/charm-testing-integration-test-assert-pass.yaml
     permissions:
       contents: read
       actions: write
     with:
+      target_environment: ${{ matrix.params.target_environment }}
       target_charm: ${{ matrix.params.target_charm }}
       target_endpoint: ${{ matrix.params.target_endpoint }}
       target_revision: ${{ matrix.params.target_revision }}
+      target_track: ${{ matrix.params.target_track }}
+      target_risk: ${{ matrix.params.target_risk }}
       target_base: ${{ matrix.params.target_base }}
       neighbor_charm: ${{ matrix.params.neighbor_charm }}
       neighbor_endpoint: ${{ matrix.params.neighbor_endpoint }}
-      substrate: ${{ matrix.params.substrate }}
     secrets:
       STG_TEST_OBSERVER_TOKEN: ${{ secrets.STG_TEST_OBSERVER_TOKEN }}

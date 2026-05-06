@@ -1,0 +1,10 @@
+---
+overrides:
+  - provides:
+      metrics-endpoint:
+        optional: true
+      grafana-dashboard:
+        optional: true
+    requires:
+      ldap:
+        optional: true

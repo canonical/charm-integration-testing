@@ -1,0 +1,8 @@
+---
+# Katib DB Manager - manages database schema and migrations
+overrides:
+  - provides:
+      k8s-service-info:
+        features: [katib-service]
+    constraints:
+      - '"katib-service" in features(endpoint[k8s-service-info])'

@@ -1,0 +1,5 @@
+---
+overrides:
+  - provides:
+      self-metrics-endpoint:
+        cyclic: true

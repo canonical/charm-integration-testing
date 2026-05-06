@@ -3,12 +3,13 @@
 
 import logging
 from datetime import timedelta
+from pathlib import Path
 
 from validators.base import ValidationResult
 
 from .backend import JujuBackend
 from .extension import JujuExtension
-from .models import JujuApplicationInfo, JujuIntegration, JujuIntegrationApplication
+from .models import JujuApplicationInfo, JujuConsumedOfferInfo, JujuIntegration, JujuIntegrationApplication
 from .version import JujuVersion
 
 
@@ -68,6 +69,18 @@ class JujuClient:
     def print_status(self, model: str = "default") -> None:
         separator = "-" * 80
         self.logger.info(f"Juju Status:\n{separator}\n{self.backend.juju_status_text(model)}{separator}")
+
+    def debug_log(self, model: str = "default") -> str:
+        """Retrieve the Juju debug log for the model.
+
+        Args:
+            model: Juju model name
+
+        Returns:
+            Debug log content as a string
+        """
+        self.logger.info(f"Collecting debug log from model {model}")
+        return self.backend.debug_log(model)
 
     def integrate(
         self,
@@ -187,6 +200,10 @@ class JujuClient:
         self.logger.info("Getting list of applications.")
         return self.backend.list_applications(model)
 
+    def list_consumed_offers(self, model: str = "default") -> dict[str, JujuConsumedOfferInfo]:
+        self.logger.info("Getting list of consumed offers.")
+        return self.backend.list_consumed_offers(model)
+
     def application_revision(self, application: str, model: str = "default") -> int:
         self.logger.info(f"Getting charm revision for application '{application}'.")
         applications = self.backend.list_applications(model)
@@ -221,6 +238,11 @@ class JujuClient:
     def cli_version(self) -> JujuVersion:
         self.logger.info("Collecting Juju CLI version.")
         return self.backend.cli_version()
+
+    def upgrade_model(self, model: str, agent_version: str | None = None) -> None:
+        version_suffix = f" to agent version '{agent_version}'" if agent_version else ""
+        self.logger.info(f"Upgrading model '{model}'{version_suffix}.")
+        self.backend.upgrade_model(model=model, agent_version=agent_version)
 
     def validate_model(self, model: str = "default", level: str = "simple") -> None:
         """Validate all applications in the model.
@@ -293,13 +315,32 @@ class JujuClient:
         if sum(len(results) for results in failed_validations.values()) > 0:
             raise JujuValidationError(failed_validations)
 
-    def bootstrap_controller(self, cloud: str, controller: str, controller_constraints: dict[str, str]) -> None:
+    def bootstrap_controller(
+        self,
+        cloud: str,
+        controller: str,
+        controller_constraints: dict[str, str],
+        bootstrap_configuration: dict[str, str],
+        agent_version: str | None = None,
+        metadata_source: Path | None = None,
+    ) -> None:
+        version_suffix = f" at agent version '{agent_version}'" if agent_version else ""
         self.logger.info(
-            f"Bootstrapping Juju controller in cloud '{cloud}' with name '{controller}', using constraints '{controller_constraints}'."
+            f"Bootstrapping Juju controller in cloud '{cloud}' with name '{controller}'{version_suffix}, "
+            f"using constraints '{controller_constraints}'."
         )
         self.backend.bootstrap_controller(
-            cloud=cloud, controller=controller, controller_constraints=controller_constraints
+            cloud=cloud,
+            controller=controller,
+            controller_constraints=controller_constraints,
+            agent_version=agent_version,
+            bootstrap_configuration=bootstrap_configuration,
+            metadata_source=metadata_source,
         )
+
+        # Call extensions
+        for extension in self.extensions:
+            extension.post_bootstrap_controller(controller)
 
     def add_model(self, controller: str, model: str, model_config: dict[str, str]) -> None:
         self.logger.info(
@@ -310,7 +351,16 @@ class JujuClient:
 
     def kill_controller(self, controller: str) -> None:
         self.logger.info(f"Killing controller '{controller}'.")
+
+        # Call extensions
+        for extension in self.extensions:
+            extension.pre_kill_controller(controller)
+
         self.backend.kill_controller(controller=controller)
+
+        # Call extensions
+        for extension in self.extensions:
+            extension.post_kill_controller(controller)
 
     def migrate_model(self, model_name: str, source_controller: str, target_controller: str) -> None:
         self.logger.info(
@@ -319,3 +369,12 @@ class JujuClient:
         self.backend.migrate_model(
             model_name=model_name, source_controller=source_controller, target_controller=target_controller
         )
+
+        # Call extensions
+        for extension in self.extensions:
+            extension.post_migrate_model(model_name, source_controller, target_controller)
+
+    def upgrade_controller(self, controller: str, agent_version: str | None = None) -> None:
+        version_suffix = f" to agent version '{agent_version}'" if agent_version else ""
+        self.logger.info(f"Upgrading controller '{controller}'{version_suffix}.")
+        self.backend.upgrade_controller(controller=controller, agent_version=agent_version)

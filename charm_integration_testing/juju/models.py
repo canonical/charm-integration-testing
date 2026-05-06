@@ -32,3 +32,8 @@ class JujuIntegration:
     provider: JujuIntegrationApplication
     requirer: JujuIntegrationApplication
     interface: str
+
+
+@dataclass(frozen=True)
+class JujuConsumedOfferInfo:
+    url: str

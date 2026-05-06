@@ -1,0 +1,11 @@
+---
+# At least one of s3-credentials or azure-storage-credentials must be integrated.
+overrides:
+  - requires:
+      s3-credentials:
+        optional: true
+      azure-storage-credentials:
+        optional: true
+    constraints:
+      # At least one storage backend must be integrated
+      - 'bool(endpoint[s3-credentials]) or bool(endpoint[azure-storage-credentials])'

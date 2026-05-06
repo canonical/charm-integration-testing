@@ -1,0 +1,22 @@
+---
+# Remove after: https://github.com/canonical/mysql-k8s-operator/pull/626
+overrides:
+  - criteria:
+      - track: "8.0"
+    provides:
+      database:
+        optional: true
+      mysql:
+        optional: true
+      mysql-root:
+        optional: true
+      metrics-endpoint:
+        optional: true
+      grafana-dashboard:
+        optional: true
+      replication-offer:
+        optional: true
+    constraints:
+      # database, mysql, and mysql-root are mutually exclusive (at most one can be used)
+      - len(endpoint[database]) + len(endpoint[mysql]) + len(endpoint[mysql-root])
+        <= 1

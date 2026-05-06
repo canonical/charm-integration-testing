@@ -1,0 +1,45 @@
+---
+# At least one database/service endpoint must be integrated.
+# Remove after: https://github.com/canonical/data-integrator/issues/243
+listed: true
+platforms: [kubernetes, machine]
+priority: 2.0
+overrides:
+  - requires:
+      mysql:
+        optional: true
+      postgresql:
+        optional: true
+      mongodb:
+        optional: true
+      kafka:
+        optional: true
+      zookeeper:
+        optional: true
+      opensearch:
+        optional: true
+      kyuubi:
+        optional: true
+      etcd:
+        optional: true
+    provides:
+      mongos:
+        optional: true
+    configs:
+      database-name: [mydb, null]
+      topic-name: [my-topic, null]
+      index-name: [my-index, null]
+      prefix-name: [myprefix, null]
+      keyspace-name: [mykeyspace, null]
+    constraints:
+      # At least one database/service endpoint must be integrated
+      - 'bool(endpoint[mysql]) or bool(endpoint[postgresql]) or bool(endpoint[mongodb])
+        or bool(endpoint[kafka]) or bool(endpoint[zookeeper]) or bool(endpoint[opensearch])
+        or bool(endpoint[kyuubi]) or bool(endpoint[etcd]) or bool(endpoint[mongos])'
+      # Config values must be set when the corresponding endpoint is integrated
+      - 'bool(endpoint[mysql]) or bool(endpoint[postgresql]) or bool(endpoint[mongodb])
+        or bool(endpoint[zookeeper]) or bool(endpoint[kyuubi]) or bool(endpoint[mongos])
+        => set(config[database-name])'
+      - 'bool(endpoint[kafka]) => set(config[topic-name])'
+      - 'bool(endpoint[opensearch]) => set(config[index-name])'
+      - 'bool(endpoint[etcd]) => set(config[prefix-name])'

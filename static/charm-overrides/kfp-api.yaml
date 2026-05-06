@@ -1,0 +1,16 @@
+---
+# Remove after: https://github.com/canonical/charm-integration-testing/issues/282
+overrides:
+  - provides:
+      kfp-api:
+        features: [kfp-api]
+      metrics-endpoint:
+        optional: true
+      grafana-dashboard:
+        optional: true
+    requires:
+      kfp-viz:
+        features: [kfp-viz]
+    constraints:
+      - '"kfp-api" in features(endpoint[kfp-api])'
+      - '"kfp-viz" in features(endpoint[kfp-viz])'
