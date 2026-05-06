@@ -22,6 +22,9 @@ class JujuExtension(ABC):
     def post_bootstrap_controller(self, controller: str) -> None:
         pass
 
+    def post_add_model(self, controller: str, model: str) -> None:
+        pass
+
     def pre_kill_controller(self, controller: str) -> None:
         pass
 
