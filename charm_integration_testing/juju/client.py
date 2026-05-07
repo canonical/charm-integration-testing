@@ -68,7 +68,8 @@ class JujuClient:
 
     def print_status(self, model: str = "default") -> None:
         separator = "-" * 80
-        self.logger.info(f"Juju Status:\n{separator}\n{self.backend.juju_status_text(model)}{separator}")
+        info = f"Juju status for model '{model}'" if model != "default" else "Juju status"
+        self.logger.info(f"{info}:\n{separator}\n{self.backend.juju_status_text(model)}{separator}")
 
     def debug_log(self, model: str = "default") -> str:
         """Retrieve the Juju debug log for the model.
@@ -348,6 +349,10 @@ class JujuClient:
         )
         self.backend.add_model(controller=controller, model=model, model_config=model_config)
         self.backend.switch(controller=controller, model=model)
+
+        # Call extensions
+        for extension in self.extensions:
+            extension.post_add_model(controller, model)
 
     def kill_controller(self, controller: str) -> None:
         self.logger.info(f"Killing controller '{controller}'.")

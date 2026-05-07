@@ -152,3 +152,16 @@ class ResourceRegistry:
                     stacklevel=2,
                 )
         self._logger.debug("Teardown_all complete")
+
+    def registered_handles(self) -> list[ResourceHandle]:
+        """Return all registered handles in registration order."""
+        return [entry.handle for entry in self._entries.values()]
+
+    def children_of(self, handle: ResourceHandle) -> list[ResourceHandle]:
+        """Return direct child handles of the given parent, in registration order."""
+        child_ids = self._children.get(handle.resource_id, [])
+        return [self._entries[child_id].handle for child_id in child_ids if child_id in self._entries]
+
+    def is_registered(self, handle: ResourceHandle) -> bool:
+        """Return True if the handle is currently registered."""
+        return handle.resource_id in self._entries

@@ -20,3 +20,6 @@ overrides:
       # database, mysql, and mysql-root are mutually exclusive (at most one can be used)
       - len(endpoint[database]) + len(endpoint[mysql]) + len(endpoint[mysql-root])
         <= 1
+      # replication must be same track/risk
+      - 'bool(endpoint[replication]) => risks(charms(endpoint[replication])) == risks({self})
+        and tracks(charms(endpoint[replication])) == tracks({self})'
