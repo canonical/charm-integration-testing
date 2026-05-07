@@ -63,10 +63,8 @@ on:
         required: false
         default: default
       series:
-        description: Series to run the charm tests under.
+        description: Ubuntu series to run the charm tests under (e.g. 20.04, 22.04).
         required: false
-        type: choice
-        options: [default, "20.04", "22.04", "24.04"]
         default: default
       debug_sleep_after:
         description: The stage of the workflow to sleep after. Enables SSH access
