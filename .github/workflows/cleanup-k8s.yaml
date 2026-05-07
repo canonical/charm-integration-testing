@@ -184,6 +184,7 @@ jobs:
           ' >> resources_to_remove.txt
       - name: Remove all resources
         shell: bash
+        if: ${{ !cancelled() }}
         run: |-
           # Group resources by namespace
           declare -A namespaced_resources
