@@ -447,7 +447,7 @@ class TestCharmhubClient:
         def test_risk_order_within_track(self) -> None:
             # GIVEN a charm published on latest/edge, latest/beta, latest/candidate, latest/stable
             class _StubClient(_NullHttpClient):
-                def info(self, charm: str, *, include_channel_map: bool = False) -> InfoResponse:  # type: ignore[override]
+                def info(self, charm: str, *, include_channel_map: bool = False) -> InfoResponse:
                     return _info_response_with_channels(
                         ("latest", "edge"), ("latest", "beta"), ("latest", "candidate"), ("latest", "stable")
                     )
@@ -461,7 +461,7 @@ class TestCharmhubClient:
         def test_track_order_is_alphabetical(self) -> None:
             # GIVEN a charm published on tracks "1.0" and "2.0" (both stable)
             class _StubClient(_NullHttpClient):
-                def info(self, charm: str, *, include_channel_map: bool = False) -> InfoResponse:  # type: ignore[override]
+                def info(self, charm: str, *, include_channel_map: bool = False) -> InfoResponse:
                     return _info_response_with_channels(("2.0", "stable"), ("1.0", "stable"))
 
             client = _make_client(_StubClient())
@@ -473,7 +473,7 @@ class TestCharmhubClient:
         def test_deduplicates_channels(self) -> None:
             # GIVEN a channel-map with duplicate entries for the same channel
             class _StubClient(_NullHttpClient):
-                def info(self, charm: str, *, include_channel_map: bool = False) -> InfoResponse:  # type: ignore[override]
+                def info(self, charm: str, *, include_channel_map: bool = False) -> InfoResponse:
                     return _info_response_with_channels(("latest", "stable"), ("latest", "stable"))
 
             client = _make_client(_StubClient())
@@ -555,4 +555,3 @@ class TestCharmhubClient:
             # WHEN building configs
             # THEN an empty dict is returned
             assert client._get_charm_configs("mycharm", _CHANNEL, _EMPTY_CONFIG) == {}
-
