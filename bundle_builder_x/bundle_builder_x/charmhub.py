@@ -75,11 +75,10 @@ class CharmhubClient:
         self.timeline = (timeline if timeline is not None else NullTimeline()).child("charmhub")
 
     def get_charm_channels(self, charm_name: str) -> list[CharmChannel]:
-        """Return all published channels for a charm, sorted by track then risk."""
+        """Return all published channels for a charm, sorted by track then risk tier (stable first)."""
         info = self.http_client.info(charm_name, include_channel_map=True)
         return sorted(
-            {CharmChannel(track=entry.channel.track, risk=entry.channel.risk, branch="") for entry in info.channel_map},
-            key=lambda c: (c.track, c.risk),
+            {CharmChannel(track=entry.channel.track, risk=entry.channel.risk, branch="") for entry in info.channel_map}
         )
 
     def charm_from_store(

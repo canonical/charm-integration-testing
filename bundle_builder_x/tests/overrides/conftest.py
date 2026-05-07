@@ -74,10 +74,9 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
             global_overrides = CharmGlobalOverrides.model_validate(yaml.safe_load(f.read_text()))
         except Exception:
             continue  # YAML layer will catch this
-        channels = client.get_charm_channels(charm_name)
-        remaining = sorted(channels, key=lambda c: (c.track, c.risk))
+        remaining = client.get_charm_channels(charm_name)
         for override in global_overrides.overrides:
-            matched = sorted([c for c in remaining if override.meets(c)], key=lambda c: (c.track, c.risk))
+            matched = [c for c in remaining if override.meets(c)]
             remaining = [c for c in remaining if not override.meets(c)]
             if not matched:
                 criteria_repr = [c.model_dump(exclude_none=True) for c in override.criteria]

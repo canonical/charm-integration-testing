@@ -15,6 +15,7 @@
 
 import operator
 from enum import Enum
+from functools import total_ordering
 from typing import Callable
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_serializer, model_validator
@@ -74,6 +75,7 @@ class EndpointType(str, Enum):
     PROVIDES = "provides"
 
 
+@total_ordering
 class CharmChannel(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -107,6 +109,10 @@ class CharmChannel(BaseModel):
     @property
     def explicit_track(self) -> str:
         return self.track if self.track != "" else "latest"
+
+    def __lt__(self, other: "CharmChannel") -> bool:
+        _risk_order = {"stable": 0, "candidate": 1, "beta": 2, "edge": 3}
+        return (self.track, _risk_order.get(self.risk, 99)) < (other.track, _risk_order.get(other.risk, 99))
 
 
 class CharmEndpoint(BaseModel):
