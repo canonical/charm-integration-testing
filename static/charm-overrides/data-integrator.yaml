@@ -30,7 +30,6 @@ overrides:
       topic-name: [my-topic, null]
       index-name: [my-index, null]
       prefix-name: [myprefix, null]
-      keyspace-name: [mykeyspace, null]
     constraints:
       # At least one database/service endpoint must be integrated
       - 'bool(endpoint[mysql]) or bool(endpoint[postgresql]) or bool(endpoint[mongodb])
