@@ -28,6 +28,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from pydantic import ValidationError
 
 from bundle_builder_x.charm import CharmChannel
 from bundle_builder_x.charmhub import CharmhubClient
@@ -37,7 +38,8 @@ from bundle_builder_x.overrides import CharmGlobalOverrides, OverridesClient
 def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption(
         "--overrides",
-        required=True,
+        required=False,
+        default=None,
         help="Path to a directory of charm override YAML files to validate.",
     )
     parser.addoption(
@@ -72,7 +74,7 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
         charm_name = f.stem
         try:
             global_overrides = CharmGlobalOverrides.model_validate(yaml.safe_load(f.read_text()))
-        except Exception:
+        except (yaml.YAMLError, ValidationError):
             continue  # YAML layer will catch this
         remaining = client.get_charm_channels(charm_name)
         for override in global_overrides.overrides:

@@ -60,7 +60,7 @@ class _StubHttpClient(CharmhubHttpClient):
     def __init__(self, info_response: InfoResponse) -> None:
         self._response = info_response
 
-    def info(self, charm: str, *, include_channel_map: bool = False) -> InfoResponse:  # type: ignore[override]
+    def info(self, charm: str, include_channel_map: bool = False) -> InfoResponse:  # type: ignore[override]
         return self._response
 
 

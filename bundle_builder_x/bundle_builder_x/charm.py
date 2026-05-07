@@ -112,7 +112,10 @@ class CharmChannel(BaseModel):
 
     def __lt__(self, other: "CharmChannel") -> bool:
         _risk_order = {"stable": 0, "candidate": 1, "beta": 2, "edge": 3}
-        return (self.track, _risk_order.get(self.risk, 99)) < (other.track, _risk_order.get(other.risk, 99))
+        return (self.explicit_track, _risk_order.get(self.risk, 99)) < (
+            other.explicit_track,
+            _risk_order.get(other.risk, 99),
+        )
 
 
 class CharmEndpoint(BaseModel):
