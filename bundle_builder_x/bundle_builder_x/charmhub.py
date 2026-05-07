@@ -22,6 +22,7 @@ from .charm import (
     Charm,
     CharmAssumesEntry,
     CharmChannel,
+    CharmConfigValue,
     CharmEndpoint,
     EndpointType,
 )
@@ -729,7 +730,7 @@ class CharmhubClient:
 
     def _get_charm_configs(
         self, charm_name: str, channel: CharmChannel, config_schema: CharmConfigSchema
-    ) -> dict[str, Any]:
+    ) -> dict[str, list[CharmConfigValue]]:
         config_overrides = self.overrides_client.get_charm_config_overrides(charm_name, channel)
         stale_configs = sorted(set(config_overrides) - set(config_schema.options))
         if stale_configs:
