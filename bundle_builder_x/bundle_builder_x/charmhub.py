@@ -91,83 +91,84 @@ class CharmhubClient:
         ubuntu_version: str | None = None,
     ) -> Charm:
         token = self.timeline.on(f"charm/{charm_name}")
+        try:
+            # Resolve track/risk/revision from overrides when none are specified by the caller.
+            # Note: branch components in override channels are intentionally not supported.
+            if charm_track is None and charm_risk is None and charm_revision is None:
+                raw_channel = self.overrides_client.get_charm_default_channel(charm_name)
+                if raw_channel is not None:
+                    default_channel = CharmChannel.model_validate(raw_channel)
+                    charm_track = default_channel.track or None
+                    charm_risk = default_channel.risk or None
+                charm_revision = self.overrides_client.get_charm_default_revision(charm_name)
 
-        # Resolve track/risk/revision from overrides when none are specified by the caller.
-        # Note: branch components in override channels are intentionally not supported.
-        if charm_track is None and charm_risk is None and charm_revision is None:
-            raw_channel = self.overrides_client.get_charm_default_channel(charm_name)
-            if raw_channel is not None:
-                default_channel = CharmChannel.model_validate(raw_channel)
-                charm_track = default_channel.track or None
-                charm_risk = default_channel.risk or None
-            charm_revision = self.overrides_client.get_charm_default_revision(charm_name)
-
-        # Route to the appropriate fetch strategy.
-        if charm_track is not None and charm_risk is not None and charm_revision is not None:
-            result = self._charm_from_store_by_channel_and_revision(
-                charm_name=charm_name,
-                ubuntu_arch=ubuntu_arch,
-                juju_version=juju_version,
-                platform=platform,
-                charm_channel=CharmChannel(track=charm_track, risk=charm_risk, branch=""),
-                charm_revision=charm_revision,
-                ubuntu_version=ubuntu_version,
-            )
-        elif charm_track is not None and charm_revision is not None:
-            result = self._charm_from_store_by_track_and_revision(
-                charm_name=charm_name,
-                ubuntu_arch=ubuntu_arch,
-                juju_version=juju_version,
-                platform=platform,
-                charm_track=charm_track,
-                charm_revision=charm_revision,
-                ubuntu_version=ubuntu_version,
-            )
-        elif charm_revision is not None:
-            result = self._charm_from_store_by_revision(
-                charm_name=charm_name,
-                ubuntu_arch=ubuntu_arch,
-                juju_version=juju_version,
-                platform=platform,
-                charm_revision=charm_revision,
-                ubuntu_version=ubuntu_version,
-            )
-        elif charm_track is not None and charm_risk is not None:
-            result = self._charm_from_store_by_channel(
-                charm_name=charm_name,
-                ubuntu_arch=ubuntu_arch,
-                juju_version=juju_version,
-                platform=platform,
-                charm_channel=CharmChannel(track=charm_track, risk=charm_risk, branch=""),
-                ubuntu_version=ubuntu_version,
-            )
-        elif charm_track is not None:
-            result = self._charm_from_store_by_track(
-                charm_name=charm_name,
-                ubuntu_arch=ubuntu_arch,
-                juju_version=juju_version,
-                platform=platform,
-                charm_track=charm_track,
-                ubuntu_version=ubuntu_version,
-            )
-        elif charm_risk is not None:
-            result = self._charm_from_store_by_channel(
-                charm_name=charm_name,
-                ubuntu_arch=ubuntu_arch,
-                juju_version=juju_version,
-                platform=platform,
-                charm_channel=CharmChannel(track="", risk=charm_risk, branch=""),
-                ubuntu_version=ubuntu_version,
-            )
-        else:
-            result = self._charm_from_store_default(
-                charm_name=charm_name,
-                ubuntu_arch=ubuntu_arch,
-                juju_version=juju_version,
-                platform=platform,
-                ubuntu_version=ubuntu_version,
-            )
-        self.timeline.off(token)
+            # Route to the appropriate fetch strategy.
+            if charm_track is not None and charm_risk is not None and charm_revision is not None:
+                result = self._charm_from_store_by_channel_and_revision(
+                    charm_name=charm_name,
+                    ubuntu_arch=ubuntu_arch,
+                    juju_version=juju_version,
+                    platform=platform,
+                    charm_channel=CharmChannel(track=charm_track, risk=charm_risk, branch=""),
+                    charm_revision=charm_revision,
+                    ubuntu_version=ubuntu_version,
+                )
+            elif charm_track is not None and charm_revision is not None:
+                result = self._charm_from_store_by_track_and_revision(
+                    charm_name=charm_name,
+                    ubuntu_arch=ubuntu_arch,
+                    juju_version=juju_version,
+                    platform=platform,
+                    charm_track=charm_track,
+                    charm_revision=charm_revision,
+                    ubuntu_version=ubuntu_version,
+                )
+            elif charm_revision is not None:
+                result = self._charm_from_store_by_revision(
+                    charm_name=charm_name,
+                    ubuntu_arch=ubuntu_arch,
+                    juju_version=juju_version,
+                    platform=platform,
+                    charm_revision=charm_revision,
+                    ubuntu_version=ubuntu_version,
+                )
+            elif charm_track is not None and charm_risk is not None:
+                result = self._charm_from_store_by_channel(
+                    charm_name=charm_name,
+                    ubuntu_arch=ubuntu_arch,
+                    juju_version=juju_version,
+                    platform=platform,
+                    charm_channel=CharmChannel(track=charm_track, risk=charm_risk, branch=""),
+                    ubuntu_version=ubuntu_version,
+                )
+            elif charm_track is not None:
+                result = self._charm_from_store_by_track(
+                    charm_name=charm_name,
+                    ubuntu_arch=ubuntu_arch,
+                    juju_version=juju_version,
+                    platform=platform,
+                    charm_track=charm_track,
+                    ubuntu_version=ubuntu_version,
+                )
+            elif charm_risk is not None:
+                result = self._charm_from_store_by_channel(
+                    charm_name=charm_name,
+                    ubuntu_arch=ubuntu_arch,
+                    juju_version=juju_version,
+                    platform=platform,
+                    charm_channel=CharmChannel(track="", risk=charm_risk, branch=""),
+                    ubuntu_version=ubuntu_version,
+                )
+            else:
+                result = self._charm_from_store_default(
+                    charm_name=charm_name,
+                    ubuntu_arch=ubuntu_arch,
+                    juju_version=juju_version,
+                    platform=platform,
+                    ubuntu_version=ubuntu_version,
+                )
+        finally:
+            self.timeline.off(token)
         return result
 
     def find_charms(
@@ -175,29 +176,31 @@ class CharmhubClient:
     ) -> set[str]:
         key = f"find/{provides or ''}/{requires or ''}"
         token = self.timeline.on(key)
-        # Call find API
-        response = self.http_client.find(provides=provides, requires=requires)
+        try:
+            # Call find API
+            response = self.http_client.find(provides=provides, requires=requires)
 
-        # Map charms to deployable on
-        charms = {charm.name: charm.result.deployable_on for charm in response}
+            # Map charms to deployable on
+            charms = {charm.name: charm.result.deployable_on for charm in response}
 
-        # Add charms with listing overrides
-        for charm, platforms in self._find_charms_with_listing_overrides(provides=provides, requires=requires).items():
-            charms[charm] = platforms
+            # Add charms with listing overrides
+            for charm, platforms in self._find_charms_with_listing_overrides(provides=provides, requires=requires).items():
+                charms[charm] = platforms
 
-        # Add platform overrides
-        for charm, platforms in self._find_charms_platform_overrides(set(charms.keys())).items():
-            charms[charm] = platforms
+            # Add platform overrides
+            for charm, platforms in self._find_charms_platform_overrides(set(charms.keys())).items():
+                charms[charm] = platforms
 
-        # Default to machine if empty
-        charms = {charm: platforms if len(platforms) > 0 else {"machine"} for charm, platforms in charms.items()}
+            # Default to machine if empty
+            charms = {charm: platforms if len(platforms) > 0 else {"machine"} for charm, platforms in charms.items()}
 
-        # Return response filtered by platform
-        if platform is None:
-            result = set(charms.keys())
-        else:
-            result = {charm for charm, platforms in charms.items() if platform in platforms}
-        self.timeline.off(token)
+            # Return response filtered by platform
+            if platform is None:
+                result = set(charms.keys())
+            else:
+                result = {charm for charm, platforms in charms.items() if platform in platforms}
+        finally:
+            self.timeline.off(token)
         return result
 
     def _find_charms_with_listing_overrides(
