@@ -81,12 +81,8 @@ class JujuClient:
             Debug log content as a string
         """
         self.logger.info(f"Collecting debug log from model {model}")
-        try:
-            return self.backend.debug_log(model)
-        except Exception as e:
-            self.logger.exception(f"Failed to collect debug log for model {model}: {e}")
-            return ""
-
+        return self.backend.debug_log(model)
+cl
     def integrate(
         self,
         application_1: str,
