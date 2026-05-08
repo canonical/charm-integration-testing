@@ -265,7 +265,7 @@ class ResourceExpr(BaseModel):
 
 
 class SetResourceExpr(BaseModel):
-    """set(resources[key]) - True when the resource key is set.
+    """set(resource[key]) - True when the resource key is set.
 
     Mirrors SetConfigExpr for resources.
     """

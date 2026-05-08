@@ -139,9 +139,8 @@ class Bundle(BaseModel):
                 "trust": True,
                 "options": {key: value for key, value in info.config.items() if value is not None},
             }
-            resources = {key: value for key, value in info.resources.items() if value is not None}
-            if resources:
-                app_dict["resources"] = resources
+            if len(info.resources) > 0:
+                app_dict["resources"] = info.resources
             applications_dict[application] = app_dict
 
         # Build relations list including cross-model relations
