@@ -90,11 +90,13 @@ from .constraints_dsl import (
     NotExpr,
     OrExpr,
     ReachableExpr,
+    ResourceExpr,
     RevisionsExpr,
     RisksExpr,
     SelfExpr,
     SetConfigExpr,
     SetOpExpr,
+    SetResourceExpr,
     StrLit,
     StrLiteralSet,
     TracksExpr,
@@ -702,6 +704,34 @@ def _lower(expr: AnyExpr, ctx: LoweringContext) -> _LoweredValue:  # noqa: C901
             # If the Charmhub default is null, the value is not set by default.
             # If the Charmhub default is a concrete value, the value is always set.
             return z3.BoolVal(cfg.default is not None)
+
+        case ResourceExpr(key=key):
+            res = ctx.domain_charm.resources.get(key)
+            if res is not None and res.var is not None:
+                return res.var
+            if res is not None:
+                res_val = res.default
+                if res_val is None:
+                    raise DSLLoweringError(
+                        f"Resource key {key!r} on charm {ctx.domain_charm.spec.name!r} has no value. "
+                        f"Add it to the override 'resources' list to use it in a constraint."
+                    )
+                return z3.StringVal(res_val)
+            raise DSLLoweringError(
+                f"Resource key {key!r} is not declared in charm {ctx.domain_charm.spec.name!r}. "
+                f"Declared resource keys: {sorted(ctx.domain_charm.resources)}"
+            )
+
+        case SetResourceExpr(key=key):
+            res = ctx.domain_charm.resources.get(key)
+            if res is None:
+                raise DSLLoweringError(
+                    f"Resource key {key!r} is not declared in charm {ctx.domain_charm.spec.name!r}. "
+                    f"Declared resource keys: {sorted(ctx.domain_charm.resources)}"
+                )
+            if res.var is not None:
+                return res.isset_var if res.isset_var is not None else z3.BoolVal(True)
+            return z3.BoolVal(res.default is not None)
 
         case LenExpr(arg=arg):
             endpoints = _lower_as_endpoints(arg, ctx)

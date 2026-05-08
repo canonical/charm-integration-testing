@@ -152,3 +152,28 @@ class TestCharmhubClient:
             # WHEN building configs
             # THEN an empty dict is returned
             assert client._get_charm_configs("mycharm", _CHANNEL, _EMPTY_CONFIG) == {}
+
+    class TestGetCharmResources:
+        def test_stale_resource_key_raises(self) -> None:
+            # GIVEN an override declaring a resource key absent from the charm's metadata
+            client = _client({"overrides": [{"resources": {"gone-image": ["ghcr.io/foo:latest"]}}]})
+            # WHEN building resources
+            # THEN UnparsableCharmException is raised mentioning "resource"
+            with pytest.raises(UnparsableCharmException, match="resource"):
+                client._get_charm_resources("mycharm", _CHANNEL, CharmMetadata())
+
+        def test_valid_resource_key_passes(self) -> None:
+            # GIVEN an override for a resource key that exists in the metadata
+            metadata = CharmMetadata(resources={"my-image": CharmMetadata.Resource(type="oci-image")})
+            client = _client({"overrides": [{"resources": {"my-image": ["ghcr.io/foo:v1"]}}]})
+            # WHEN building resources
+            result = client._get_charm_resources("mycharm", _CHANNEL, metadata)
+            # THEN the override value is returned
+            assert result == {"my-image": ["ghcr.io/foo:v1"]}
+
+        def test_no_resource_override_returns_empty(self) -> None:
+            # GIVEN no resource overrides
+            client = _client({})
+            # WHEN building resources
+            # THEN an empty dict is returned
+            assert client._get_charm_resources("mycharm", _CHANNEL, CharmMetadata()) == {}

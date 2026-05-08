@@ -140,6 +140,32 @@ class TestBundleExport:
         # THEN None values are excluded from options
         assert exported["applications"]["app"]["options"] == {}
 
+    def test_resources_included(self) -> None:
+        # GIVEN an application with resources
+        charm = _make_charm("app")
+        bundle = _make_bundle(
+            applications={"app": Application(charm=charm, resources={"my-image": "ghcr.io/foo:latest"})},
+        )
+
+        # WHEN exporting
+        exported = yaml.safe_load(bundle.export())
+
+        # THEN resources appear under the resources key
+        assert exported["applications"]["app"]["resources"]["my-image"] == "ghcr.io/foo:latest"
+
+    def test_empty_resources_omitted(self) -> None:
+        # GIVEN an application with no resources
+        charm = _make_charm("app")
+        bundle = _make_bundle(
+            applications={"app": Application(charm=charm)},
+        )
+
+        # WHEN exporting
+        exported = yaml.safe_load(bundle.export())
+
+        # THEN no resources key is present
+        assert "resources" not in exported["applications"]["app"]
+
     def test_local_relations_sorted(self) -> None:
         # GIVEN a bundle with two local integrations
         provider = _make_charm(

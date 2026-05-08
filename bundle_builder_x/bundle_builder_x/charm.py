@@ -136,6 +136,8 @@ class CharmEndpointProxy(BaseModel):
 
 CharmConfigValue = str | int | float | bool | None
 
+CharmResourceValue = str | None
+
 
 class Charm(BaseModel):
     name: str
@@ -148,6 +150,7 @@ class Charm(BaseModel):
     priority: float = Field(default=1)
     configs: dict[str, list[CharmConfigValue]] = Field(default_factory=dict)
     config_defaults: dict[str, CharmConfigValue] = Field(default_factory=dict)
+    resources: dict[str, list[CharmResourceValue]] = Field(default_factory=dict)
     assumes: CharmAssumesEntry = Field(default_factory=CharmAssumesEntry)
     constraints: list[AnyExpr] = Field(default_factory=list)
 

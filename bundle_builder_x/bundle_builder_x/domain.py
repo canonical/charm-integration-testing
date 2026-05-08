@@ -16,7 +16,7 @@
 import z3  # type: ignore[import-untyped]
 from pydantic import BaseModel, ConfigDict, Field
 
-from .charm import Charm, CharmChannel, CharmConfigValue, EndpointType
+from .charm import Charm, CharmChannel, CharmConfigValue, CharmResourceValue, EndpointType
 from .juju_version import JujuVersion
 
 
@@ -129,6 +129,26 @@ class DomainCharmConfig(BaseModel):
     fixed_value: bool = False
 
 
+class DomainCharmResource(BaseModel):
+    """Holds Z3 state for a single resource key on a charm instance."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    # Z3 String variable for the resource value.  Present only when the key
+    # has more than one non-null allowed value, or when None is among the
+    # allowed values (optional resource).
+    var: z3.ExprRef | None = None
+    # Z3 Bool that is True when the resource is set.  Present only when var
+    # is set and None is among the allowed values (optional resource).
+    isset_var: z3.BoolRef | None = None
+    # Fixed value when the override declared exactly one non-null value with
+    # no null option.
+    default: CharmResourceValue = None
+    # True when the override declared exactly one non-null value with no null
+    # option: the value is always emitted and no Z3 var is needed.
+    fixed_value: bool = False
+
+
 class DomainCharm(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -137,6 +157,7 @@ class DomainCharm(BaseModel):
     model: ModelRef
     endpoints: dict[str, DomainCharmEndpoint]
     config: dict[str, DomainCharmConfig] = Field(default_factory=dict)
+    resources: dict[str, DomainCharmResource] = Field(default_factory=dict)
     # Dedup tracking: charm IDs added as dependencies of this charm
     charms_added: list[int] = Field(default_factory=list)
 
@@ -233,12 +254,33 @@ def add_charm_to_domain(charm: Charm, domain: Domain, model_ref: ModelRef | None
             default=existing.default if existing is not None else None,
         )
 
+    # Build per-key resource entries from the override 'resources' list.
+    charm_resources: dict[str, DomainCharmResource] = {}
+    for key, allowed in charm.resources.items():
+        non_none = [v for v in allowed if v is not None]
+        if not non_none:
+            continue
+        if len(non_none) == 1 and None not in allowed:
+            charm_resources[key] = DomainCharmResource(
+                fixed_value=True,
+                default=non_none[0],
+            )
+            continue
+        prefix = f"charm_{charm.name}_{charm_id}_resource_{key}"
+        res_var: z3.ExprRef = z3.String(prefix)
+        res_isset_var = z3.Bool(f"{prefix}_is_set") if None in allowed else None
+        charm_resources[key] = DomainCharmResource(
+            var=res_var,
+            isset_var=res_isset_var,
+        )
+
     domain.charms.append(
         DomainCharm(
             exists=z3.Bool(f"charm_{charm.name}_{charm_id}_exists"),
             spec=charm,
             model=model_ref,
             config=charm_config,
+            resources=charm_resources,
             endpoints={
                 name: DomainCharmEndpoint(
                     count=z3.Int(f"charm_{charm.name}_{charm_id}_endpoint_{name}_count"),
