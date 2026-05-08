@@ -85,7 +85,7 @@ class DSLType(str, Enum):
     CHARM_SET = "CharmSet"
     SET_STR = "Set[Str]"
     SET_INT = "Set[Int]"
-    RUNTIME = "Runtime"  # ConfigExpr: type resolved at Z3 lowering time
+    RUNTIME = "Runtime"  # ConfigExpr/ResourceExpr: type resolved at Z3 lowering time
     PENDING = "Pending"  # SetOpExpr: resolved by _check_types; never in final AST
 
 
