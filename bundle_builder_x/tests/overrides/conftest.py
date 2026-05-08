@@ -24,7 +24,6 @@ Run with:
 """
 
 import subprocess
-import warnings
 from pathlib import Path
 
 import pytest
@@ -90,6 +89,7 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
     client = CharmhubClient()
     params: list[tuple[str, CharmChannel]] = []
     ids: list[str] = []
+    unmatched: list[str] = []
     for f in _get_override_files(overrides_dir, modified_since):
         charm_name = f.stem
         try:
@@ -102,11 +102,14 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
             remaining = [c for c in remaining if not override.meets(c)]
             if not matched:
                 criteria_repr = [c.model_dump(exclude_none=True) for c in override.criteria]
-                warnings.warn(f"{charm_name}: override with criteria={criteria_repr} matches no published channels")
+                unmatched.append(f"{charm_name}: override with criteria={criteria_repr} matches no published channels")
                 continue
             for channel in matched if all_channels else matched[:1]:
                 params.append((charm_name, channel))
                 ids.append(f"{charm_name}[{channel}]")
+
+    if unmatched:
+        pytest.fail("One or more overrides match no published channels:\n" + "\n".join(f"  - {m}" for m in unmatched))
 
     metafunc.parametrize("charm_channel", params, ids=ids)
 
