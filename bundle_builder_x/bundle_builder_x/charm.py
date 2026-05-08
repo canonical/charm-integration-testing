@@ -15,6 +15,7 @@
 
 import operator
 from enum import Enum
+from functools import total_ordering
 from typing import Callable
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_serializer, model_validator
@@ -47,7 +48,7 @@ class CharmAssumesEntry(BaseModel):
             raise ValueError(f"Unknown juju version operator {v!r}. Expected one of: {list(ASSUMES_OPS)}")
         return v
 
-    def satisfied_by(self, juju_version: JujuVersion, features: frozenset[str] = frozenset()) -> bool:
+    def satisfied_by(self, juju_version: JujuVersion | None, features: frozenset[str] = frozenset()) -> bool:
         return all(
             [
                 # all of
@@ -58,9 +59,9 @@ class CharmAssumesEntry(BaseModel):
                 any(entry.satisfied_by(juju_version, features) for entry in self.any_of)
                 if self.any_of is not None
                 else True,
-                # juju version constraint
+                # juju version constraint (skipped when juju_version is unknown)
                 ASSUMES_OPS[self.op](juju_version, self.required_version)
-                if self.op is not None and self.required_version is not None
+                if self.op is not None and self.required_version is not None and juju_version is not None
                 else True,
                 # feature requirement
                 self.feature in features if self.feature is not None else True,
@@ -74,6 +75,7 @@ class EndpointType(str, Enum):
     PROVIDES = "provides"
 
 
+@total_ordering
 class CharmChannel(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -107,6 +109,14 @@ class CharmChannel(BaseModel):
     @property
     def explicit_track(self) -> str:
         return self.track if self.track != "" else "latest"
+
+    def __lt__(self, other: "CharmChannel") -> bool:
+        _risk_order = {"stable": 0, "candidate": 1, "beta": 2, "edge": 3}
+        return (self.explicit_track, _risk_order.get(self.risk, 99), self.branch) < (
+            other.explicit_track,
+            _risk_order.get(other.risk, 99),
+            other.branch,
+        )
 
 
 class CharmEndpoint(BaseModel):

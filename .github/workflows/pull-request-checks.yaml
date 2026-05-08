@@ -105,9 +105,14 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
+          fetch-depth: 0
       - name: Install poetry
         run: pipx install poetry==2.0.1
       - name: Install dependencies
         run: poetry install
       - name: Run Bundle Builder X Tests
-        run: ./scripts/bundle-builder-x-tests.sh 'unit|integration|logic'
+        env:
+          GITHUB_BASE_REF: ${{ github.base_ref }}
+        run: |-
+          ./scripts/bundle-builder-x-tests.sh 'unit|integration|logic|overrides' \
+            --overrides ./static/charm-overrides --overrides-modified-since "origin/${GITHUB_BASE_REF}"
