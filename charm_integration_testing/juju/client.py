@@ -5,14 +5,14 @@ import logging
 from datetime import timedelta
 from pathlib import Path
 
+import jubilant
+
 from validators.base import ValidationResult
 
 from .backend import JujuBackend
 from .extension import JujuExtension
 from .models import JujuApplicationInfo, JujuConsumedOfferInfo, JujuIntegration, JujuIntegrationApplication
 from .version import JujuVersion
-
-import jubilant
 
 
 class JujuValidationError(Exception):

@@ -28,7 +28,7 @@ def test_logs_privacy_check(
     - FAILED: Secrets are found in logs
     - PASSED: No secrets found
     """
-    if log_dir is None or next(log_dir.iterdir()) is None:
+    if log_dir is None or not any(log_dir.iterdir()):
         pytest.skip("log-dir parameter not provided (--log-dir)")
 
     logger.info(f"Scanning logs from {log_dir} for secrets")
@@ -78,4 +78,3 @@ def test_logs_privacy_check(
     else:
         output_str = f"Scan output:\n{trufflehog_output}" if trufflehog_output else "No output from TruffleHog."
         pytest.fail(f"TruffleHog scan failed with unexpected exit code {result.returncode}.\n" f"{output_str}")
-
