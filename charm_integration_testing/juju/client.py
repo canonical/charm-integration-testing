@@ -5,8 +5,6 @@ import logging
 from datetime import timedelta
 from pathlib import Path
 
-import jubilant
-
 from validators.base import ValidationResult
 
 from .backend import JujuBackend
@@ -85,7 +83,7 @@ class JujuClient:
         self.logger.info(f"Collecting debug log from model {model}")
         try:
             return self.backend.debug_log(model)
-        except jubilant.CLIError as e:
+        except Exception as e:
             self.logger.exception(f"Failed to collect debug log for model {model}: {e}")
             return ""
 

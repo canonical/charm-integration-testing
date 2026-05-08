@@ -28,8 +28,10 @@ def test_logs_privacy_check(
     - FAILED: Secrets are found in logs
     - PASSED: No secrets found
     """
-    if log_dir is None or not any(log_dir.iterdir()):
+    if log_dir is None:
         pytest.skip("log-dir parameter not provided (--log-dir)")
+    if not any(log_dir.iterdir()):
+        pytest.skip("log-dir is empty, no logs to scan")
 
     logger.info(f"Scanning logs from {log_dir} for secrets")
 
