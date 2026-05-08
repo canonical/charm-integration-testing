@@ -23,6 +23,7 @@ Run with:
     ./scripts/bundle-builder-x-tests.sh overrides --overrides ./static/charm-overrides
 """
 
+import subprocess
 import warnings
 from pathlib import Path
 
@@ -43,6 +44,12 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         help="Path to a directory of charm override YAML files to validate.",
     )
     parser.addoption(
+        "--overrides-modified-since",
+        required=False,
+        default=None,
+        help="Git ref (e.g. origin/main). When provided, only override files modified since that ref are tested.",
+    )
+    parser.addoption(
         "--all-channels",
         action="store_true",
         default=False,
@@ -50,14 +57,27 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     )
 
 
+def _get_override_files(overrides_dir: str, modified_since: str | None) -> list[Path]:
+    all_files = sorted(Path(overrides_dir).glob("*.yaml"))
+    if modified_since is None:
+        return all_files
+    output = subprocess.check_output(
+        ["git", "diff", "--name-only", f"{modified_since}...HEAD", "--", overrides_dir],
+        text=True,
+    )
+    changed = {Path(line).name for line in output.splitlines() if line}
+    return [f for f in all_files if f.name in changed]
+
+
 def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
     overrides_dir = metafunc.config.getoption("--overrides")
+    modified_since = metafunc.config.getoption("--overrides-modified-since")
 
     if "charm_name" in metafunc.fixturenames:
         if overrides_dir is None:
             metafunc.parametrize("charm_name", [])
         else:
-            files = sorted(Path(overrides_dir).glob("*.yaml"))
+            files = _get_override_files(overrides_dir, modified_since)
             metafunc.parametrize("charm_name", [f.stem for f in files])
 
     if "charm_channel" not in metafunc.fixturenames:
@@ -70,7 +90,7 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
     client = CharmhubClient()
     params: list[tuple[str, CharmChannel]] = []
     ids: list[str] = []
-    for f in sorted(Path(overrides_dir).glob("*.yaml")):
+    for f in _get_override_files(overrides_dir, modified_since):
         charm_name = f.stem
         try:
             global_overrides = CharmGlobalOverrides.model_validate(yaml.safe_load(f.read_text()))
