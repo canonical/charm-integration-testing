@@ -34,4 +34,4 @@ def test_logs_privacy_check_with_no_controllers(
         test_logs_privacy_check(log_dir, logger)
 
     # Verify the test was skipped
-    assert "log-dir parameter not provided" in caplog.text
+    assert "log-dir is empty" in caplog.text
