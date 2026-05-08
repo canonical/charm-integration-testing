@@ -335,6 +335,23 @@ def add_charm_metadata_constraints(solver: z3.Solver, domain: Domain) -> None:
                     # Config is always required when the charm exists.
                     solver.add(z3.Implies(charm.exists, value_constraint))
 
+    # Resource domain constraints: when a charm exists, its resource variable must equal
+    # one of the declared allowed values.  Resources are always strings.
+    for charm in domain.charms:
+        for key, res in charm.resources.items():
+            if res.var is None:
+                continue
+            res_allowed = [v for v in charm.spec.resources[key] if v is not None]
+            if res_allowed:
+                value_constraint = z3.Or([res.var == z3.StringVal(v) for v in res_allowed])
+                if res.isset_var is not None:
+                    # Resource is optional (None is an allowed value).  The value constraint
+                    # only applies when isset_var is True.
+                    solver.add(z3.Implies(z3.And(charm.exists, res.isset_var), value_constraint))
+                else:
+                    # Resource is always required when the charm exists.
+                    solver.add(z3.Implies(charm.exists, value_constraint))
+
     # DSL custom constraints from override files.
     for charm_id, charm in enumerate(domain.charms):
         if not charm.spec.constraints:
