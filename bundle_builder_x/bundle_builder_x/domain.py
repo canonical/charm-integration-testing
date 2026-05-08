@@ -256,19 +256,19 @@ def add_charm_to_domain(charm: Charm, domain: Domain, model_ref: ModelRef | None
 
     # Build per-key resource entries from the override 'resources' list.
     charm_resources: dict[str, DomainCharmResource] = {}
-    for key, allowed in charm.resources.items():
-        non_none = [v for v in allowed if v is not None]
-        if not non_none:
+    for key, res_allowed in charm.resources.items():
+        res_non_none = [v for v in res_allowed if v is not None]
+        if not res_non_none:
             continue
-        if len(non_none) == 1 and None not in allowed:
+        if len(res_non_none) == 1 and None not in res_allowed:
             charm_resources[key] = DomainCharmResource(
                 fixed_value=True,
-                default=non_none[0],
+                default=res_non_none[0],
             )
             continue
         prefix = f"charm_{charm.name}_{charm_id}_resource_{key}"
         res_var: z3.ExprRef = z3.String(prefix)
-        res_isset_var = z3.Bool(f"{prefix}_is_set") if None in allowed else None
+        res_isset_var = z3.Bool(f"{prefix}_is_set") if None in res_allowed else None
         charm_resources[key] = DomainCharmResource(
             var=res_var,
             isset_var=res_isset_var,
