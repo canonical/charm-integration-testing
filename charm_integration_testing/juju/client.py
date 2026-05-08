@@ -12,6 +12,8 @@ from .extension import JujuExtension
 from .models import JujuApplicationInfo, JujuConsumedOfferInfo, JujuIntegration, JujuIntegrationApplication
 from .version import JujuVersion
 
+import jubilant
+
 
 class JujuValidationError(Exception):
     """Raised when validation of a Juju model fails."""
@@ -80,7 +82,11 @@ class JujuClient:
             Debug log content as a string
         """
         self.logger.info(f"Collecting debug log from model {model}")
-        return self.backend.debug_log(model)
+        try:
+            return self.backend.debug_log(model)
+        except jubilant.CLIError as e:
+            self.logger.exception(f"Failed to collect debug log for model {model}: {e}")
+            return ""
 
     def integrate(
         self,
