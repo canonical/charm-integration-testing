@@ -82,7 +82,7 @@ class JujuClient:
         """
         self.logger.info(f"Collecting debug log from model {model}")
         return self.backend.debug_log(model)
-cl
+
     def integrate(
         self,
         application_1: str,
