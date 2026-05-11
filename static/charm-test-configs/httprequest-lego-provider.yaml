@@ -1,5 +1,0 @@
----
-configs:
-  - config:
-      git-repo: git+ssh://git@github.com/canonical/httprequest-lego-provider.git@main
-      git-ssh-key: not_a_key
