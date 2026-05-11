@@ -106,7 +106,23 @@ def _extract_single_model(
                 continue
             config[key] = val
 
-        applications[app_name] = Application(charm=charm.spec, config=config)
+        resources: dict[str, str] = {}
+        for key, res in charm.resources.items():
+            if res.fixed_value:
+                if res.default is not None:
+                    resources[key] = res.default
+                continue
+            if res.var is None:
+                continue
+            if res.isset_var is not None:
+                is_set = model.evaluate(res.isset_var, model_completion=True)
+                if not is_set:
+                    continue
+            raw = model.evaluate(res.var, model_completion=True)
+            if z3.is_string_value(raw):
+                resources[key] = raw.as_string()
+
+        applications[app_name] = Application(charm=charm.spec, config=config, resources=resources)
 
     integrations = set()
     for integration in domain.charm_integrations:

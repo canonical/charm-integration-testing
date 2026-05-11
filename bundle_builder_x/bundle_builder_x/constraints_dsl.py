@@ -43,6 +43,7 @@ Grammar (in precedence order, lowest to highest)::
                  | 'channels' '(' constraint ')'
                  | 'revisions' '(' constraint ')'
                  | 'config' '[' NAME ']'
+                 | 'resource' '[' NAME ']'
                  | '{' 'self' '}'
                  | '{' literal (',' literal)* '}'
                  | STRING
@@ -84,7 +85,7 @@ class DSLType(str, Enum):
     CHARM_SET = "CharmSet"
     SET_STR = "Set[Str]"
     SET_INT = "Set[Int]"
-    RUNTIME = "Runtime"  # ConfigExpr: type resolved at Z3 lowering time
+    RUNTIME = "Runtime"  # ConfigExpr/ResourceExpr: type resolved at Z3 lowering time
     PENDING = "Pending"  # SetOpExpr: resolved by _check_types; never in final AST
 
 
@@ -255,6 +256,27 @@ class SetConfigExpr(BaseModel):
     key: str
 
 
+class ResourceExpr(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    kind: Literal["resource"] = "resource"
+    dsl_type: Literal[DSLType.RUNTIME] = DSLType.RUNTIME
+    key: str
+
+
+class SetResourceExpr(BaseModel):
+    """set(resource[key]) - True when the resource key is set.
+
+    Mirrors SetConfigExpr for resources.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    kind: Literal["set_resource"] = "set_resource"
+    dsl_type: Literal[DSLType.BOOL] = DSLType.BOOL
+    key: str
+
+
 class LenExpr(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -417,6 +439,8 @@ AnyExpr = Annotated[
         EndpointExpr,
         ConfigExpr,
         SetConfigExpr,
+        ResourceExpr,
+        SetResourceExpr,
         LenExpr,
         BoolFunc,
         CharmsExpr,
@@ -440,6 +464,7 @@ AnyExpr = Annotated[
 
 # Resolve forward references now that AnyExpr is defined
 SetConfigExpr.model_rebuild()
+SetResourceExpr.model_rebuild()
 LenExpr.model_rebuild()
 BoolFunc.model_rebuild()
 CharmsExpr.model_rebuild()
@@ -640,6 +665,9 @@ class _Parser:
                 # set(config[key]) is a special case - produces SetConfigExpr, not a generic func
                 if name == "set" and isinstance(arg, ConfigExpr):
                     return SetConfigExpr(key=arg.key)
+                # set(resources[key]) is a special case - produces SetResourceExpr
+                if name == "set" and isinstance(arg, ResourceExpr):
+                    return SetResourceExpr(key=arg.key)
                 match name:
                     case "len":
                         return LenExpr(arg=arg)
@@ -675,6 +703,14 @@ class _Parser:
                 key_token = self._expect(TokenKind.IDENT)
                 self._expect(TokenKind.RBRACKET)
                 return ConfigExpr(key=key_token.value)
+
+            # resources[key]
+            if name == "resource":
+                self._advance()
+                self._expect(TokenKind.LBRACKET)
+                key_token = self._expect(TokenKind.IDENT)
+                self._expect(TokenKind.RBRACKET)
+                return ResourceExpr(key=key_token.value)
 
             raise DSLSyntaxError(f"Unexpected identifier {name!r} at position {token.pos}")
 
@@ -761,6 +797,8 @@ def _check_types(node: AnyExpr) -> AnyExpr:  # noqa: C901 (intentionally large s
             | EndpointExpr()
             | ConfigExpr()
             | SetConfigExpr()
+            | ResourceExpr()
+            | SetResourceExpr()
         ):
             return node
 

@@ -24,6 +24,7 @@ from .charm import (
     CharmChannel,
     CharmConfigValue,
     CharmEndpoint,
+    CharmResourceValue,
     EndpointType,
 )
 from .charmhub_http import (
@@ -258,6 +259,7 @@ class CharmhubClient:
             priority=self.overrides_client.get_charm_priority(charm_name),
             configs=self._get_charm_configs(charm_name, channel, config_schema),
             config_defaults={k: v.default for k, v in config_schema.options.items()},
+            resources=self._get_charm_resources(charm_name, channel, metadata),
             assumes=self._get_charm_assumes(charm_name, metadata, channel),
             constraints=self._get_charm_constraints(charm_name, channel),
         )
@@ -753,6 +755,18 @@ class CharmhubClient:
                 f"charm config at channel {channel}: {stale_configs}"
             )
         return config_overrides
+
+    def _get_charm_resources(
+        self, charm_name: str, channel: CharmChannel, metadata: CharmMetadata
+    ) -> dict[str, list[CharmResourceValue]]:
+        resource_overrides = self.overrides_client.get_charm_resource_overrides(charm_name, channel)
+        stale_resources = sorted(set(resource_overrides) - set(metadata.resources))
+        if stale_resources:
+            raise UnparsableCharmException(
+                f"Charm {charm_name!r} override declares resource keys not present in "
+                f"charm metadata at channel {channel}: {stale_resources}"
+            )
+        return resource_overrides
 
     def _get_charm_constraints(self, charm_name: str, channel: CharmChannel) -> list[AnyExpr]:
         """Parse raw DSL constraint strings from overrides into typed AST nodes."""

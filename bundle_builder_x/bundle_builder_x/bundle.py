@@ -47,6 +47,7 @@ def _mermaid_node_id(model_id: str, application: str) -> str:
 class Application(BaseModel):
     charm: Charm
     config: dict[str, CharmConfigValue] = Field(default_factory=dict)
+    resources: dict[str, str] = Field(default_factory=dict)
 
     def __repr__(self) -> str:
         return f"{self.charm.name}"
@@ -138,6 +139,8 @@ class Bundle(BaseModel):
                 "trust": True,
                 "options": {key: value for key, value in info.config.items() if value is not None},
             }
+            if len(info.resources) > 0:
+                app_dict["resources"] = info.resources
             applications_dict[application] = app_dict
 
         # Build relations list including cross-model relations

@@ -47,6 +47,9 @@ string variable in the solver has a finite, known set of possible values.
 - ``config[key]`` for string-typed configs is encoded as a Z3 string variable
   constrained to the finite set of values declared in overrides. Unbounded string
   config variables are not supported.
+- ``resource[key]`` is encoded as a Z3 string variable constrained to the finite set
+  of values declared in the charm's ``resources:`` overrides. As with configs, only
+  override-declared resource keys may appear in constraints.
 - String literals in constraints (e.g. ``{"stable"}``, ``{"broker"}``) are always
   matched against a closed, finite domain.
 
@@ -260,6 +263,17 @@ The value the solver will assign to the named config option. Supports ``int``,
 ``boolean``, and ``string`` config types. String config variables are constrained to
 the finite set of values declared in the charm's ``configs:`` overrides; unbounded
 string configs are not supported.
+
+Resource value
+~~~~~~~~~~~~~~
+
+::
+
+   resource[<key>]  ->  Str
+
+The OCI image URL or file path the solver will assign to the named resource.
+Resource variables are always strings, constrained to the finite set of values
+declared in the charm's ``resources:`` overrides.
 
 Operators
 ---------
@@ -650,6 +664,9 @@ The solver enforces these automatically:
    * - Integration limit
      - ``limit: N``
      - Endpoint count <= N
+   * - Resource value
+     - ``resources: {name: [value]}``
+     - Single-value resource override is always emitted; no DSL expression needed
    * - Capability feature requirement
      - ``features: [...]``
      - Generates ``integrated => feature_x`` automatically

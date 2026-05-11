@@ -70,10 +70,16 @@ class CharmMetadata(BaseModel):
         optional: bool | None = None
         limit: int | None = None
 
+    class Resource(BaseModel):
+        model_config = ConfigDict(frozen=True)
+
+        type: str
+
     peers: dict[str, Endpoint] = Field(default_factory=dict)
     requires: dict[str, Endpoint] = Field(default_factory=dict)
     provides: dict[str, Endpoint] = Field(default_factory=dict)
     assumes: list[str | dict[str, Any]] = Field(default_factory=list)
+    resources: dict[str, Resource] = Field(default_factory=dict)
 
 
 class CharmConfigSchema(BaseModel):

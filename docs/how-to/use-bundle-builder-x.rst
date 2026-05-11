@@ -54,7 +54,21 @@ Arguments:
 ``--overrides``
     Path to a directory of per-charm YAML files. Each file is named
     ``<charm-name>.yaml`` and may contain endpoint overrides, constraints,
-    proxy declarations, and config defaults.
+    proxy declarations, config defaults, and resource values.
+
+    Example override file with resources:
+
+    .. code-block:: yaml
+
+       overrides:
+         - configs:
+             namespace: [my-namespace]
+             queue: [my-queue]
+           resources:
+             my-image: [ghcr.io/canonical/my-image:v1.0]
+           constraints:
+             - 'set(config[namespace]) and set(config[queue])'
+             - 'set(resource[my-image])'
 
 ``--output-bundles``
     Directory to write per-model bundle YAML files. One file per model,
@@ -87,6 +101,17 @@ Each model produces a standard Juju bundle YAML:
        revision: 495
        scale: 1
        base: ubuntu@22.04
+     temporal-worker-k8s:
+       charm: temporal-worker-k8s
+       channel: 1/stable
+       revision: 12
+       scale: 1
+       base: ubuntu@22.04
+       options:
+         namespace: my-namespace
+         queue: my-queue
+       resources:
+         temporal-worker-image: ghcr.io/canonical/my-image:v1.0
    relations:
      - - kratos:pg-database
        - postgresql-k8s:database
