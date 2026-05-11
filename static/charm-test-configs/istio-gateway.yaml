@@ -1,6 +1,0 @@
----
-configs:
-  - config:
-      kind: ingress
-  - config:
-      kind: egress
