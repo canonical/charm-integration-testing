@@ -346,7 +346,8 @@ def add_charm_metadata_constraints(solver: z3.Solver, domain: Domain) -> None:
                 value_constraint = z3.Or([res.var == z3.StringVal(v) for v in res_allowed])
                 if res.isset_var is not None:
                     # Resource is optional (None is an allowed value).  The value constraint
-                    # only applies when isset_var is True.
+                    # only applies when isset_var is True; when isset_var is False the value var
+                    # is unconstrained (solver may choose anything, but set() will be False).
                     solver.add(z3.Implies(z3.And(charm.exists, res.isset_var), value_constraint))
                 else:
                     # Resource is always required when the charm exists.
