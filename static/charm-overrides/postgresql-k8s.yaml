@@ -1,8 +1,8 @@
 ---
 overrides:
-  - # postgresql does not official support juju 4
+    # postgresql does not official support juju 4
     # https://github.com/canonical/postgresql-k8s-operator/issues/1464
-    assumes: &assumes
+  - assumes: &assumes
       - k8s-api
       - any-of:
           - all-of:
