@@ -1,6 +1,22 @@
 ---
 overrides:
-  - criteria:
+  - # postgresql does not official support juju 4
+    # https://github.com/canonical/postgresql-k8s-operator/issues/1464
+    assumes: &assumes
+      - k8s-api
+      - any-of:
+          - all-of:
+              - juju >= 2.9.49
+              - juju < 3
+          - all-of:
+              - juju >= 3.4.3
+              - juju < 3.5
+          - all-of:
+              - juju >= 3.5.1
+              - juju < 4
+          - all-of:
+              - juju >= 4
+    criteria:
       - track: '16'
     provides:
       replication-offer:
@@ -28,7 +44,8 @@ overrides:
       # replication must be same track/risk
       - 'bool(endpoint[replication]) => risks(charms(endpoint[replication])) == risks({self})
         and tracks(charms(endpoint[replication])) == tracks({self})'
-  - provides:
+  - assumes: *assumes
+    provides:
       replication-offer:
         optional: true
       metrics-endpoint:
