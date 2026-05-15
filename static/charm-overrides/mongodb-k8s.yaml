@@ -1,34 +1,6 @@
 ---
-# Remove after: https://github.com/canonical/mongodb-k8s-operator/pull/408
 overrides:
-  - provides:
-      database:
-        optional: true
-      obsolete:
-        optional: true
-      metrics-endpoint:
-        optional: true
-      grafana-dashboard:
-        optional: true
-      config-server:
-        optional: true
-      cluster:
-        optional: true
-    requires:
-      certificates:
-        optional: true
-      s3-credentials:
-        optional: true
-      gcs-credentials:
-        optional: true
-      sharding:
-        optional: true
-        limit: 1
-      ldap:
-        optional: true
-      ldap-certificate-transfer:
-        optional: true
-    configs:
+  - configs:
       role: [config-server, shard, null]
     constraints:
       # config-server and sharding are mutually exclusive

@@ -19,25 +19,10 @@ overrides:
     criteria:
       - track: '16'
     provides:
-      replication-offer:
-        optional: true
-      metrics-endpoint:
-        optional: true
-      grafana-dashboard:
-        optional: true
       database:
         limit: 1
         optional: true
         features: [tls]
-    requires:
-      client-certificates:
-        optional: true
-      peer-certificates:
-        optional: true
-      tracing:
-        optional: true
-      logging:
-        optional: true
     constraints:
       # If database endpoint uses tls mode, client-certificates is required
       - '"tls" in features(endpoint[database]) => bool(endpoint[client-certificates])'
@@ -45,9 +30,9 @@ overrides:
       - 'bool(endpoint[replication]) => risks(charms(endpoint[replication])) == risks({self})
         and tracks(charms(endpoint[replication])) == tracks({self})'
   - assumes: *assumes
+    criteria:
+      - track: '14'
     provides:
-      replication-offer:
-        optional: true
       metrics-endpoint:
         optional: true
       grafana-dashboard:
@@ -58,19 +43,10 @@ overrides:
         features: [tls]
       db:
         limit: 1
-        optional: true
         features: [tls]
       db-admin:
         limit: 1
-        optional: true
         features: [tls]
-    requires:
-      certificates:
-        optional: true
-      tracing:
-        optional: true
-      logging:
-        optional: true
     constraints:
       # database, db, and db-admin are mutually exclusive (at most one can be used at a time)
       - len(endpoint[database]) + len(endpoint[db]) + len(endpoint[db-admin]) <= 1
