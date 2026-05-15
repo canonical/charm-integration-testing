@@ -14,6 +14,7 @@ import z3  # type: ignore[import-untyped]
 
 from bundle_builder_x.charm import Charm, CharmChannel, CharmEndpoint, EndpointType
 from bundle_builder_x.constraints import add_constraints
+from bundle_builder_x.constraints_dsl import parse_constraint
 from bundle_builder_x.domain import (
     Domain,
     DomainApplication,
@@ -93,6 +94,8 @@ class TestAppIntegrationOrderingConstraint:
                 "client": CharmEndpoint(type=EndpointType.REQUIRES, interface="rpc", optional=True),
             },
         )
+        # One add_charm_to_domain call per application instance: each call allocates
+        # a charm pool entry, so the solver has one per app sharing the charm.
         add_charm_to_domain(charm, domain, ModelRef(name="m"))
         add_charm_to_domain(charm, domain, ModelRef(name="m"))
 
@@ -187,8 +190,6 @@ class TestAppIntegrationOrderingConstraint:
                 )
             }
         )
-        from bundle_builder_x.constraints_dsl import parse_constraint
-
         charm = Charm(
             name="node-k8s",
             channel=CharmChannel.model_validate("stable"),
@@ -288,15 +289,11 @@ class TestAppIntegrationOrderingConstraint:
         apps = {ep.application for ep in integration}
         assert apps == {"app-alpha", "app-beta"}
 
-    def test_same_endpoint_name_both_orderings_valid(self) -> None:
-        """When both sides of an integration have the same endpoint name and both apps use the same charm.
+    def test_only_one_valid_ordering_has_matching_keys(self) -> None:
+        """When the two apps use different charms, only one ordering has valid app_to_charm keys.
 
-        Charm has endpoint "a" as provides AND "a" as requires (impossible in Juju - endpoints
-        must have unique names). So instead, test with two apps of the same charm where both
-        orderings have valid app_to_charm keys but different endpoint names disambiguate.
-
-        The real "same endpoint name" case occurs when two DIFFERENT charms each have
-        an endpoint with the same name. That is covered by test_both_orderings_valid_solver_picks_consistent_one.
+        Verifies the Or constraint handles the case where one ordering is pruned because the
+        reverse mapping (app -> wrong charm_id) doesn't exist in app_to_charm.
         """
         # This test verifies the Or constraint doesn't break when only one ordering is valid
         # (because the other ordering's keys don't exist in app_to_charm).
