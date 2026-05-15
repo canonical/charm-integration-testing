@@ -30,8 +30,6 @@ overrides:
       - 'bool(endpoint[replication]) => risks(charms(endpoint[replication])) == risks({self})
         and tracks(charms(endpoint[replication])) == tracks({self})'
   - assumes: *assumes
-    criteria:
-      - track: '14'
     provides:
       metrics-endpoint:
         optional: true
@@ -43,9 +41,11 @@ overrides:
         features: [tls]
       db:
         limit: 1
+        optional: true
         features: [tls]
       db-admin:
         limit: 1
+        optional: true
         features: [tls]
     constraints:
       # database, db, and db-admin are mutually exclusive (at most one can be used at a time)
