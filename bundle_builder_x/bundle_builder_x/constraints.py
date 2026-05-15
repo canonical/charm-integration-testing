@@ -171,7 +171,10 @@ def add_application_constraints(solver: z3.Solver, domain: Domain) -> None:
                 )
 
                 # Force app-to-charm mappings active when the integration mapping is active.
-                # Try both orderings of the application integration endpoints.
+                # Application endpoints are unordered, so we collect every valid
+                # ordering and let the solver pick: the constraint is a disjunction
+                # over all orderings whose app-to-charm keys exist.
+                valid_orderings: list[z3.BoolRef] = []
                 for req_app_ep, prov_app_ep in [
                     (app_integration.endpoint_1, app_integration.endpoint_2),
                     (app_integration.endpoint_2, app_integration.endpoint_1),
@@ -180,17 +183,16 @@ def add_application_constraints(solver: z3.Solver, domain: Domain) -> None:
                     prov_key = (prov_app_ep.application, integration.provides_charm_id)
 
                     if req_key in app_to_charm and prov_key in app_to_charm:
-                        solver.assert_and_track(
-                            z3.Implies(
-                                mapping_var,
-                                z3.And(app_to_charm[req_key], app_to_charm[prov_key]),
-                            ),
-                            ApplicationIntegrationAppsMapToCharmsTag(
-                                application_integration=_app_endpoints_from_integration(app_integration),
-                                charm_integration=_charm_endpoints_from_integration(integration),
-                            ).encode(),
-                        )
-                        break
+                        valid_orderings.append(z3.And(app_to_charm[req_key], app_to_charm[prov_key]))
+
+                if valid_orderings:
+                    solver.assert_and_track(
+                        z3.Implies(mapping_var, z3.Or(*valid_orderings)),
+                        ApplicationIntegrationAppsMapToCharmsTag(
+                            application_integration=_app_endpoints_from_integration(app_integration),
+                            charm_integration=_charm_endpoints_from_integration(integration),
+                        ).encode(),
+                    )
                 else:
                     raise ValueError(
                         f"Integration mapping exists but application-to-charm mappings don't exist: "
