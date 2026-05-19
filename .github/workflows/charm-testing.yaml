@@ -114,7 +114,7 @@ jobs:
   trigger-rerun-on-failure:
     name: Trigger rerun on Test Observer if failure
     needs: [determine-runner]
-    if: ${{ failure() && env.TEST_OBSERVER_API != '' && inputs.execution_id != '' }}
+    if: ${{ failure() && inputs.execution_id != '' }}
     runs-on: [self-hosted, solqa]
     env:
       TEST_OBSERVER_API: ${{ inputs.test_observer_environment == 'production' && vars.PROD_TEST_OBSERVER_API || (inputs.test_observer_environment == 'staging' && vars.STG_TEST_OBSERVER_API || '') }}
