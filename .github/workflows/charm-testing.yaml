@@ -95,10 +95,7 @@ on:
 jobs:
   determine-runner:
     name: Determine GitHub Actions runner to use for the environment
-    runs-on: [self-hosted, solqa]
-    env:
-      TEST_OBSERVER_API: ${{ inputs.test_observer_environment == 'production' && vars.PROD_TEST_OBSERVER_API || (inputs.test_observer_environment == 'staging' && vars.STG_TEST_OBSERVER_API || '') }}
-      TEST_OBSERVER_TOKEN: ${{ inputs.test_observer_environment == 'production' && secrets.PROD_TEST_OBSERVER_TOKEN || (inputs.test_observer_environment == 'staging' && secrets.STG_TEST_OBSERVER_TOKEN || '') }}
+    runs-on: ubuntu-latest
     outputs:
       runner: ${{ steps.pick.outputs.runner-labels }}
       debug-mode: ${{ steps.pick.outputs.debug-mode }}
@@ -114,8 +111,21 @@ jobs:
         with:
           target_environment: ${{ inputs.target_environment }}
           neighbor_environment: ${{ inputs.neighbor_environment }}
-      - name: Trigger rerun on Test Observer if failure
-        if: ${{ failure() && env.TEST_OBSERVER_API != '' && inputs.execution_id != '' }}
+  trigger-rerun-on-failure:
+    name: Trigger rerun on Test Observer if failure
+    needs: [determine-runner]
+    if: ${{ failure() && env.TEST_OBSERVER_API != '' && inputs.execution_id != '' }}
+    runs-on: [self-hosted, solqa]
+    env:
+      TEST_OBSERVER_API: ${{ inputs.test_observer_environment == 'production' && vars.PROD_TEST_OBSERVER_API || (inputs.test_observer_environment == 'staging' && vars.STG_TEST_OBSERVER_API || '') }}
+      TEST_OBSERVER_TOKEN: ${{ inputs.test_observer_environment == 'production' && secrets.PROD_TEST_OBSERVER_TOKEN || (inputs.test_observer_environment == 'staging' && secrets.STG_TEST_OBSERVER_TOKEN || '') }}
+    steps:
+      - name: Clone Repo
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Trigger rerun on Test Observer
+        if: ${{ env.TEST_OBSERVER_API != '' }}
         uses: ./.github/actions/test-observer/trigger-rerun
         with:
           test_observer_api: ${{ env.TEST_OBSERVER_API }}
