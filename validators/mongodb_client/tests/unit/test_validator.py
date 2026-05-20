@@ -59,7 +59,8 @@ def _make_validator(databag: dict[str, str], endpoint: str = "db") -> MongoDBCli
     app = AppStub()
     relation = RelationStub(app=app, databag=databag, name=endpoint)
     charm = cast(ops.CharmBase, CharmStub(endpoint=endpoint))
-    return MongoDBClientValidator(charm, cast(ops.Relation, relation))
+    role = ops.RelationRole.requires
+    return MongoDBClientValidator(charm, cast(ops.Relation, relation), role)
 
 
 @dataclass
@@ -169,7 +170,7 @@ class TestMongoDBClientValidatorSimple:
         # GIVEN a relation whose remote app is not yet known
         relation = RelationStub(app=None, databag={})
         validator = MongoDBClientValidator(
-            cast(ops.CharmBase, CharmStub(endpoint=relation.name)), cast(ops.Relation, relation)
+            cast(ops.CharmBase, CharmStub(endpoint=relation.name)), cast(ops.Relation, relation), ops.RelationRole.requires
         )
 
         # WHEN

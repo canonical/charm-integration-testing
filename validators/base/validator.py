@@ -32,6 +32,7 @@ class ValidationResult(BaseModel):
     status: Literal["PASS", "FAIL", "ERROR", "SKIPPED"]
     endpoint: str
     interface: str
+    role: ops.RelationRole
     level: ValidationLevel
     relation_id: int
     checks: list[ValidationCheck] = Field(default_factory=list)
@@ -41,10 +42,12 @@ class ValidationResult(BaseModel):
 class BaseValidator(ABC):
     charm: ops.CharmBase
     relation: ops.Relation
+    role: ops.RelationRole
 
-    def __init__(self, charm: ops.CharmBase, relation: ops.Relation) -> None:
+    def __init__(self, charm: ops.CharmBase, relation: ops.Relation, role: ops.RelationRole) -> None:
         self.charm = charm
         self.relation = relation
+        self.role = role
 
     @property
     def endpoint(self) -> str:
@@ -66,12 +69,10 @@ class BaseValidator(ABC):
 
     def _skipped_result(self, level: ValidationLevel) -> ValidationResult:
         """Return a SKIPPED result indicating this validator does not support *level*."""
-        return ValidationResult(
+        return self._make_result(
             status="SKIPPED",
-            endpoint=self.endpoint,
-            interface=self.interface,
             level=level,
-            relation_id=self.relation_id,
+            checks=[],
             error=f"Level '{level}' is not supported by {self.__class__.__name__}.",
         )
 
@@ -97,3 +98,31 @@ class BaseValidator(ABC):
             passed=not missing,
             message="OK" if not missing else f"Missing: {', '.join(missing)}",
         )
+
+    def _make_result(
+        self,
+        status: Literal["SKIPPED", "PASS", "FAIL", "ERROR"],
+        level: ValidationLevel,
+        checks: list[ValidationCheck] | None = None,
+        error: str | None = None,
+        endpoint: str | None = None,
+        interface: str | None = None,
+        role: ops.RelationRole | None = None,
+        relation_id: int | None = None,
+    ) -> ValidationResult:
+        return ValidationResult(
+            status=status,
+            endpoint=endpoint or self.endpoint,
+            interface=interface or self.interface,
+            role=role or self.role,
+            level=level,
+            relation_id=relation_id or self.relation_id,
+            checks=checks or [],
+            error=error,
+        )
+
+    def _error_result(self, level: ValidationLevel, error: str) -> ValidationResult:
+        return self._make_result("ERROR", level, [], error)
+
+    def _fail_result(self, level: ValidationLevel, checks: list[ValidationCheck]) -> ValidationResult:
+        return self._make_result("FAIL", level, checks)

@@ -27,12 +27,9 @@ class PostgreSQLClientValidator(BaseValidator):
 
         # --- 1. Remote app presence ---
         if self.relation.app is None:
-            return ValidationResult(
+            return self._make_result(
                 status="ERROR",
-                endpoint=self.endpoint,
-                interface=self.interface,
                 level="simple",
-                relation_id=self.relation_id,
                 error=f"No remote application on relation '{self.endpoint}'.",
             )
 
@@ -59,12 +56,9 @@ class PostgreSQLClientValidator(BaseValidator):
             )
         )
         if missing:
-            return ValidationResult(
+            return self._make_result(
                 status="FAIL",
-                endpoint=self.endpoint,
-                interface=self.interface,
                 level="simple",
-                relation_id=self.relation_id,
                 checks=checks,
             )
 
@@ -83,12 +77,9 @@ class PostgreSQLClientValidator(BaseValidator):
             checks.append(ValidationCheck(name="connect", passed=True, message=f"Connected to {endpoint}."))
         except Exception as exc:
             checks.append(ValidationCheck(name="connect", passed=False, message=str(exc)))
-            return ValidationResult(
+            return self._make_result(
                 status="FAIL",
-                endpoint=self.endpoint,
-                interface=self.interface,
                 level="simple",
-                relation_id=self.relation_id,
                 checks=checks,
             )
 
@@ -103,11 +94,8 @@ class PostgreSQLClientValidator(BaseValidator):
             conn.close()
 
         status = "PASS" if all(c.passed for c in checks) else "FAIL"
-        return ValidationResult(
+        return self._make_result(
             status=status,
-            endpoint=self.endpoint,
-            interface=self.interface,
             level="simple",
-            relation_id=self.relation_id,
             checks=checks,
         )

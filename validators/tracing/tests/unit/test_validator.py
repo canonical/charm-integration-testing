@@ -59,7 +59,8 @@ def _make_validator(databag: dict[str, str], endpoint: str = "tracing") -> Traci
     app = AppStub()
     relation = RelationStub(app=app, databag=databag, name=endpoint)
     charm = cast(ops.CharmBase, CharmStub(endpoint=endpoint))
-    return TracingValidator(charm, cast(ops.Relation, relation))
+    role = ops.RelationRole.requires
+    return TracingValidator(charm, cast(ops.Relation, relation), role)
 
 
 # ---------------------------------------------------------------------------
@@ -98,7 +99,7 @@ class TestTracingValidatorSimple:
     def test_returns_error_when_relation_app_is_none(self) -> None:
         # GIVEN a relation whose remote app is not yet known
         relation = RelationStub(app=None, databag={})
-        validator = TracingValidator(cast(ops.CharmBase, CharmStub()), cast(ops.Relation, relation))
+        validator = TracingValidator(cast(ops.CharmBase, CharmStub()), cast(ops.Relation, relation), ops.RelationRole.requires)
 
         # WHEN
         result = validator.validate(level="simple")

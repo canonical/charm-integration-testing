@@ -58,7 +58,7 @@ def _make_validator(databag: dict[str, str], endpoint: str = "db") -> PostgreSQL
     app = AppStub()
     relation = RelationStub(app=app, databag=databag, name=endpoint)
     charm = cast(ops.CharmBase, CharmStub(endpoint=endpoint))
-    return PostgreSQLClientValidator(charm, cast(ops.Relation, relation))
+    return PostgreSQLClientValidator(charm, cast(ops.Relation, relation), ops.RelationRole.requires)
 
 
 @dataclass
@@ -122,7 +122,7 @@ class TestPostgreSQLClientValidatorSimple:
     def test_returns_error_when_relation_app_is_none(self) -> None:
         # GIVEN a relation whose remote app is not yet known
         relation = RelationStub(app=None, databag={})
-        validator = PostgreSQLClientValidator(cast(ops.CharmBase, CharmStub()), cast(ops.Relation, relation))
+        validator = PostgreSQLClientValidator(cast(ops.CharmBase, CharmStub()), cast(ops.Relation, relation), ops.RelationRole.requires)
 
         # WHEN
         result = validator.validate(level="simple")

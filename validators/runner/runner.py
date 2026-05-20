@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import get_args
 
 import ops
+from ops import RelationRole
 from ops.charm import CharmBase
 from ops.framework import Framework
 from ops.model import Relation, _ModelBackend
@@ -64,18 +65,25 @@ class ValidatorRunner:
     def run(self, charm: CharmBase, level: ValidationLevel) -> ValidatorRunnerResults:
         # Get the list of requires endpoints
         results = []
-        for required_endpoint, endpoint_metadata in charm.meta.requires.items():
-            interface_name = endpoint_metadata.interface_name or required_endpoint
-            for integration in charm.model.relations[required_endpoint]:
-                results += self._run_for_integration(charm, interface_name, integration, level)
+        for relation, metadata in charm.meta.relations.items():
+            if (role := metadata.role) == "peer":
+                continue
+            interface_name = metadata.interface_name or relation
+            for integration in charm.model.relations[relation]:
+                results += self._run_for_integration(charm, interface_name, integration, level, role)
         return ValidatorRunnerResults(results=results)
 
     def _run_for_integration(
-        self, charm: CharmBase, interface_name: str, integration: Relation, level: ValidationLevel
+        self,
+        charm: CharmBase,
+        interface_name: str,
+        integration: Relation,
+        level: ValidationLevel,
+        role: RelationRole,
     ) -> list[ValidationResult]:
         results: list[ValidationResult] = []
         for validator_cls in self.validators.get(interface_name, []):
-            validator = validator_cls(charm, integration)
+            validator = validator_cls(charm, integration, role)
             try:
                 result = validator.validate(level=level)
                 # If the validator doesn't support this level, fall back to the
@@ -93,6 +101,7 @@ class ValidatorRunner:
                         status="ERROR",
                         endpoint=integration.name,
                         interface=interface_name,
+                        role=role,
                         level=level,
                         relation_id=integration.id,
                         error=f"Validator '{validator_cls.__name__}' raised an exception: {exc}",

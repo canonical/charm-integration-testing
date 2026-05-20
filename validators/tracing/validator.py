@@ -43,33 +43,6 @@ class TracingValidator(BaseValidator):
         status: Literal["PASS", "FAIL"] = "PASS" if all(c.passed for c in checks) else "FAIL"
         return self._make_result(status, level, checks)
 
-    # ------------------------------------------------------------------
-    # Result helpers
-    # ------------------------------------------------------------------
-
-    def _make_result(
-        self,
-        status: Literal["PASS", "FAIL", "ERROR"],
-        level: ValidationLevel,
-        checks: list[ValidationCheck],
-        error: str | None = None,
-    ) -> ValidationResult:
-        return ValidationResult(
-            status=status,
-            endpoint=self.endpoint,
-            interface=self.interface,
-            level=level,
-            relation_id=self.relation_id,
-            checks=checks,
-            error=error,
-        )
-
-    def _error_result(self, level: ValidationLevel, error: str) -> ValidationResult:
-        return self._make_result("ERROR", level, [], error)
-
-    def _fail_result(self, level: ValidationLevel, checks: list[ValidationCheck]) -> ValidationResult:
-        return self._make_result("FAIL", level, checks)
-
 
 # ---------------------------------------------------------------------------
 # Pure helpers — schema & connectivity

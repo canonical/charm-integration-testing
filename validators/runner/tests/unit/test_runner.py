@@ -16,6 +16,7 @@
 from dataclasses import dataclass, field
 from typing import Optional
 from unittest.mock import patch
+import ops
 
 from validators.base import BaseValidator, ValidationLevel, ValidationResult
 from validators.runner.runner import ValidatorRunner, ValidatorRunnerResults
@@ -31,6 +32,7 @@ class PassingValidator(BaseValidator):
             status="PASS",
             endpoint=self.endpoint,
             interface="test-interface",
+            role="requires",
             level=level,
             relation_id=self.relation_id,
         )
@@ -42,6 +44,7 @@ class FailingValidator(BaseValidator):
             status="FAIL",
             endpoint=self.endpoint,
             interface="test-interface",
+            role="requires",
             level=level,
             relation_id=self.relation_id,
         )
@@ -62,6 +65,7 @@ class SkippingValidator(BaseValidator):
             status="PASS",
             endpoint=self.endpoint,
             interface="test-interface",
+            role="requires",
             level=level,
             relation_id=self.relation_id,
         )
@@ -75,6 +79,7 @@ class SkippingValidator(BaseValidator):
 @dataclass
 class EndpointMetadataStub:
     interface_name: Optional[str]
+    role: ops.RelationRole = ops.RelationRole.requires
 
 
 @dataclass
