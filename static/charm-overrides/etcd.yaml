@@ -17,9 +17,7 @@
 #     "etcd.ssl.placed", which requires certificates.available.  The charm
 #     cannot reach a running state without this relation.
 #
-#   All provides endpoints - OPTIONAL:
-#     db:                   @when("db.connected") - activated only when joined;
-#                           etcd runs and stays healthy with zero db consumers
+#   provides endpoints - OPTIONAL:
 #     grafana:              @when("endpoint.grafana.joined", ...) - only when joined
 #     nrpe-external-master: @when(NPRE_EXTERNAL_RELATION + ".available")
 #     prometheus:           @when("endpoint.prometheus.joined", ...) - only when joined
