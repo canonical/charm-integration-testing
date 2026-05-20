@@ -1,0 +1,36 @@
+---
+# Override for containerd
+# Source: https://github.com/charmed-kubernetes/charm-containerd
+#
+# Upstream PR: https://github.com/charmed-kubernetes/charm-containerd/pull/102
+#
+# Evidence from src/reactive/containerd.py (main branch, 2025):
+#
+#   containerd (requires, interface: container-runtime) - REQUIRED:
+#     Subordinate principal-attachment endpoint (scope: container).
+#     containerd is deployed alongside kubernetes-control-plane and
+#     kubernetes-worker as their container runtime.  Without a principal
+#     relation the subordinate has no unit to run on.
+#
+#   docker-registry (requires) - OPTIONAL:
+#     @when("endpoint.docker-registry.ready")
+#     def configure_registry(): ...
+#     Only activates when a docker-registry relation is present.
+#     No status.blocked() if absent.  containerd always inserts docker.io
+#     as a default registry via insert_docker_io_to_custom_registries(),
+#     so it functions correctly without a private registry relation.
+#
+#   untrusted (provides, interface: untrusted-container-runtime) - OPTIONAL:
+#     @when("endpoint.untrusted.available")
+#     def untrusted_available(): ...
+#     Only activates when kata (or another untrusted runtime) connects.
+#     containerd installs, starts, and reports active without any untrusted
+#     runtime attached.  The handler merely stores the binary path and calls
+#     config_changed() to re-render config.toml with the kata shim entry.
+overrides:
+  - requires:
+      docker-registry:
+        optional: true
+    provides:
+      untrusted:
+        optional: true
