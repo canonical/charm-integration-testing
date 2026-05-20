@@ -67,13 +67,22 @@ class BaseValidator(ABC):
     def interface(self) -> str:
         return self.charm.meta.relations[self.relation.name].interface_name or ""
 
-    def _skipped_result(self, level: ValidationLevel) -> ValidationResult:
+    def _skipped_result_due_to_level(self, level: ValidationLevel) -> ValidationResult:
         """Return a SKIPPED result indicating this validator does not support *level*."""
         return self._make_result(
             status="SKIPPED",
             level=level,
             checks=[],
             error=f"Level '{level}' is not supported by {self.__class__.__name__}.",
+        )
+
+    def _skipped_result_due_to_role(self, level: ValidationLevel, role: ops.RelationRole) -> ValidationResult:
+        """Return a SKIPPED result indicating this validator does not support *role*."""
+        return self._make_result(
+            status="SKIPPED",
+            level=level,
+            checks=[],
+            error=f"Role '{role}' is not supported by {self.__class__.__name__}.",
         )
 
     @abstractmethod

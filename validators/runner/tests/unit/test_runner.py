@@ -16,6 +16,7 @@
 from dataclasses import dataclass, field
 from typing import Optional
 from unittest.mock import patch
+
 import ops
 
 from validators.base import BaseValidator, ValidationLevel, ValidationResult
@@ -60,7 +61,7 @@ class SkippingValidator(BaseValidator):
 
     def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
         if level != "simple":
-            return self._skipped_result(level)
+            return self._skipped_result_due_to_level(level)
         return ValidationResult(
             status="PASS",
             endpoint=self.endpoint,
@@ -302,7 +303,7 @@ class TestValidatorRunnerRun:
         # GIVEN a validator that skips every level
         class AlwaysSkippingValidator(BaseValidator):
             def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
-                return self._skipped_result(level)
+                return self._skipped_result_due_to_level(level)
 
         runner = self._runner_with("test-interface", AlwaysSkippingValidator)
         charm = _make_charm(requires={"db": "test-interface"}, relations={"db": 2})

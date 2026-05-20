@@ -13,6 +13,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import ops
 import psycopg2
 
 from validators.base import BaseValidator, ValidationCheck, ValidationLevel, ValidationResult
@@ -20,8 +21,10 @@ from validators.base import BaseValidator, ValidationCheck, ValidationLevel, Val
 
 class PostgreSQLClientValidator(BaseValidator):
     def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
+        if self.role != ops.RelationRole.requires:
+            return self._skipped_result_due_to_role(level, self.role)
         if level != "simple":
-            return self._skipped_result(level)
+            return self._skipped_result_due_to_level(level)
 
         checks: list[ValidationCheck] = []
 

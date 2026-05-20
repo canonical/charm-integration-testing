@@ -99,7 +99,9 @@ class TestTracingValidatorSimple:
     def test_returns_error_when_relation_app_is_none(self) -> None:
         # GIVEN a relation whose remote app is not yet known
         relation = RelationStub(app=None, databag={})
-        validator = TracingValidator(cast(ops.CharmBase, CharmStub()), cast(ops.Relation, relation), ops.RelationRole.requires)
+        validator = TracingValidator(
+            cast(ops.CharmBase, CharmStub()), cast(ops.Relation, relation), ops.RelationRole.requires
+        )
 
         # WHEN
         result = validator.validate(level="simple")

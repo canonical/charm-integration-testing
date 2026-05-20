@@ -20,6 +20,7 @@ import uuid
 from typing import Any
 from urllib.parse import quote_plus
 
+import ops
 from pymongo import MongoClient
 
 from validators.base import BaseValidator, ValidationCheck, ValidationLevel, ValidationResult
@@ -31,15 +32,18 @@ class MongoDBClientValidator(BaseValidator):
         self.ca_file_path: str | None = None
 
     def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
+        if self.role != ops.RelationRole.requires:
+            return self._skipped_result_due_to_role(level, self.role)
+
         if level == "uat":
-            return self._skipped_result(level)
+            return self._skipped_result_due_to_level(level)
 
         if level == "simple":
             return self._validate_simple()
         elif level == "deep":
             return self._validate_deep()
         else:
-            return self._skipped_result(level)
+            return self._skipped_result_due_to_level(level)
 
     def _validate_simple(self) -> ValidationResult:
         """L1: Connectivity & Auth with read-only canary query."""

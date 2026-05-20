@@ -18,13 +18,17 @@ import socket
 from typing import Any, Literal
 from urllib.parse import urlparse
 
+import ops
+
 from validators.base import BaseValidator, ValidationCheck, ValidationLevel, ValidationResult
 
 
 class TracingValidator(BaseValidator):
     def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
+        if self.role != ops.RelationRole.requires:
+            return self._skipped_result_due_to_role(level, self.role)
         if level not in ("simple", "deep"):
-            return self._skipped_result(level)
+            return self._skipped_result_due_to_level(level)
 
         if self.relation.app is None:
             return self._error_result(level, f"No remote application on relation '{self.endpoint}'.")

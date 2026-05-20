@@ -170,7 +170,9 @@ class TestMongoDBClientValidatorSimple:
         # GIVEN a relation whose remote app is not yet known
         relation = RelationStub(app=None, databag={})
         validator = MongoDBClientValidator(
-            cast(ops.CharmBase, CharmStub(endpoint=relation.name)), cast(ops.Relation, relation), ops.RelationRole.requires
+            cast(ops.CharmBase, CharmStub(endpoint=relation.name)),
+            cast(ops.Relation, relation),
+            ops.RelationRole.requires,
         )
 
         # WHEN
