@@ -63,7 +63,7 @@ class CharmStub:
         self.meta = type(
             "MetaStub",
             (),
-            {"relations": {self.relation_name: RelationMetaStub(interface_name=self.interface_name)}},
+            {"relations": {self.relation_name: RelationMetaStub(interface_name=self.interface_name, )}},
         )()
 
 
@@ -104,6 +104,22 @@ class TestValidationResult:
 
 
 class TestBaseValidator:
+    def test_role_property_returns_set_value(self) -> None:
+        # GIVEN
+        validator = ConcreteValidator(CharmStub(relation_name="my-db"), RelationStub(name="my-db", id=0))  # type: ignore[arg-type]
+        charm = validator.charm
+        charm.meta = type(
+            "MetaStub",
+            (),
+            {"relations": {**charm.meta.relations, charm.relation_name: RelationMetaStub(interface_name=charm.interface_name, role="provides")}},
+        )()
+
+        # WHEN
+        role = validator.role
+
+        # THEN
+        assert role == "provides"
+
     def test_validate_returns_result(self) -> None:
         # GIVEN
         validator = ConcreteValidator(CharmStub(relation_name="my-db"), RelationStub(name="my-db", id=0))  # type: ignore[arg-type]
