@@ -1,0 +1,35 @@
+---
+# Override for etcd
+# Source: https://github.com/charmed-kubernetes/layer-etcd
+# Upstream PR: https://github.com/charmed-kubernetes/layer-etcd/pull/222
+#
+# All published tracks expose an identical endpoint set; no criteria blocks
+# are needed.  A single default block covers every track.
+#
+# Evidence from src/reactive/etcd.py (main branch, 2025):
+#
+#   certificates (requires) - REQUIRED:
+#     @when_not("certificates.available")
+#     def missing_relation_notice():
+#         status.blocked("Missing relation to certificate authority.")
+#     The entire TLS pipeline (tls_state_control, initialize_new_leader,
+#     register_node_with_leader, send_cluster_connection_details) gates on
+#     "etcd.ssl.placed", which requires certificates.available.  The charm
+#     cannot reach a running state without this relation.
+#
+#   provides endpoints - OPTIONAL:
+#     grafana:              @when("endpoint.grafana.joined", ...) - only when joined
+#     nrpe-external-master: @when(NPRE_EXTERNAL_RELATION + ".available")
+#     prometheus:           @when("endpoint.prometheus.joined", ...) - only when joined
+#     proxy:                @when("proxy.connected") - only when connected;
+#                           no block if absent
+overrides:
+  - provides:
+      grafana:
+        optional: true
+      nrpe-external-master:
+        optional: true
+      prometheus:
+        optional: true
+      proxy:
+        optional: true

@@ -1,0 +1,36 @@
+---
+# Override for kata
+# Source: https://github.com/charmed-kubernetes/charm-kata
+#
+# Upstream PR: https://github.com/charmed-kubernetes/charm-kata/pull/18
+#
+# Evidence from reactive/kata.py (main branch, 2025):
+#
+#   containerd (requires, interface: container-runtime) - REQUIRED:
+#     Subordinate principal-attachment endpoint (scope: container).
+#     kata is deployed alongside kubernetes-control-plane and kubernetes-worker.
+#     Without a principal relation the subordinate has no unit to run on.
+#
+#   untrusted (requires, interface: untrusted-container-runtime) - OPTIONAL:
+#     install_kata() is decorated:
+#       @when_not("kata.installed")
+#       @when_not("endpoint.untrusted.departed")
+#     There is NO @when("endpoint.untrusted.joined") gate on installation.
+#     Kata installs its packages and sets status.active("Kata runtime available")
+#     regardless of whether untrusted is connected:
+#
+#       status.active("Kata runtime available")
+#       set_state("kata.installed")
+#
+#     The only handler that requires untrusted to be joined is publish_config():
+#       @when("kata.installed")
+#       @when("endpoint.untrusted.joined")
+#       def publish_config(): ...
+#         endpoint.set_config(name="kata", binary_path="/usr/bin/kata-runtime")
+#
+#     Without this relation kata is installed but containerd is not configured
+#     to use it as an untrusted runtime handler.  The charm is active either way.
+overrides:
+  - requires:
+      untrusted:
+        optional: true
