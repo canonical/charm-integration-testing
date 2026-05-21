@@ -112,7 +112,7 @@ jobs:
           print("Changed files:\n" + "\n".join(changed_files))
 
           # A list of critical files that are not covered by tests
-          # If they're changed, run the  full test suite to be safe
+          # If they're changed, run the full test suite to be safe
           CRITICAL_PATTERNS = [
               "scripts/run-tests.sh",
           ]
