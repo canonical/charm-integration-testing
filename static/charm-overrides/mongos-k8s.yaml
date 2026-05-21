@@ -1,0 +1,7 @@
+---
+priority: 2.0
+listed: true
+overrides:
+  - constraints:
+      - 'tracks({self}) >= tracks(charms(endpoint[cluster])) and risks({self}) >=
+        risks(charms(endpoint[cluster]))'
