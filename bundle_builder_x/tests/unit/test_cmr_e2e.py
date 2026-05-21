@@ -250,9 +250,10 @@ class TestCMREndToEnd:
         )
         assert ["db-proxy:backend-database", "postgresql-db-offer:database"] in k8s_yaml["relations"]
 
-        # Verify machine-model exported YAML
-        machine_yaml = yaml.safe_load(machine_bundle.export())
-        pg_app = machine_yaml["applications"]["postgresql"]
+        # Verify machine-model exported YAML (offers are in the overlay document)
+        machine_docs = list(yaml.safe_load_all(machine_bundle.export()))
+        machine_overlay = machine_docs[1]
+        pg_app = machine_overlay["applications"]["postgresql"]
         assert "offers" in pg_app
         assert "postgresql-db-offer" in pg_app["offers"]
         assert pg_app["offers"]["postgresql-db-offer"]["endpoints"] == ["database"]

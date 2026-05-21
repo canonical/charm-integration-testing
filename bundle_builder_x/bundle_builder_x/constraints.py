@@ -281,7 +281,10 @@ def add_charm_metadata_constraints(solver: z3.Solver, domain: Domain) -> None:
             if not spec_endpoint.optional:
                 solver.assert_and_track(
                     z3.Implies(charm.exists, charm.endpoints[endpoint_name].count >= 1),
-                    CharmEndpointNonOptionalTag(charm=_charm_endpoint_payload(charm, charm_id, endpoint_name)).encode(),
+                    CharmEndpointNonOptionalTag(
+                        charm=_charm_endpoint_payload(charm, charm_id, endpoint_name),
+                        interface=spec_endpoint.interface,
+                    ).encode(),
                 )
 
     # Ensure endpoint count respects limit if charm exists
@@ -332,11 +335,34 @@ def add_charm_metadata_constraints(solver: z3.Solver, domain: Domain) -> None:
                     # Config is always required when the charm exists.
                     solver.add(z3.Implies(charm.exists, value_constraint))
 
+    # Resource domain constraints: when a charm exists, its resource variable must equal
+    # one of the declared allowed values.  Resources are always strings.
+    for charm in domain.charms:
+        for key, res in charm.resources.items():
+            if res.var is None:
+                continue
+            res_allowed = [v for v in charm.spec.resources[key] if v is not None]
+            if res_allowed:
+                value_constraint = z3.Or([res.var == z3.StringVal(v) for v in res_allowed])
+                if res.isset_var is not None:
+                    # Resource is optional (None is an allowed value).  The value constraint
+                    # only applies when isset_var is True; when isset_var is False the value var
+                    # is unconstrained (solver may choose anything, but set() will be False).
+                    solver.add(z3.Implies(z3.And(charm.exists, res.isset_var), value_constraint))
+                else:
+                    # Resource is always required when the charm exists.
+                    solver.add(z3.Implies(charm.exists, value_constraint))
+
     # DSL custom constraints from override files.
     for charm_id, charm in enumerate(domain.charms):
         if not charm.spec.constraints:
             continue
         ctx = LoweringContext(charm_id=charm_id, domain_charm=charm, domain=domain)
+        # Collect sub-assertion tags across all constraints for this charm to
+        # avoid duplicate named assertions.  Two different constraints can
+        # legitimately emit the same expansion hint (e.g. "re-fetch charm X on
+        # track 8"); adding it once is sufficient.
+        seen_sub_tags: set[str] = set()
         for idx, expr in enumerate(charm.spec.constraints):
             try:
                 result = lower(expr, ctx)
@@ -347,9 +373,13 @@ def add_charm_metadata_constraints(solver: z3.Solver, domain: Domain) -> None:
                 CharmCustomConstraintTag(charm=_charm_payload(charm, charm_id), assertion_idx=idx).encode(),
             )
             for sub in result.sub_assertions:
+                tag = sub.tag.encode()
+                if tag in seen_sub_tags:
+                    continue
+                seen_sub_tags.add(tag)
                 solver.assert_and_track(
                     z3.Implies(charm.exists, sub.expr),
-                    sub.tag.encode(),
+                    tag,
                 )
 
 

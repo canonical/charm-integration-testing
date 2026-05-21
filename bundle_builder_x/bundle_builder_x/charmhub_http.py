@@ -70,10 +70,16 @@ class CharmMetadata(BaseModel):
         optional: bool | None = None
         limit: int | None = None
 
+    class Resource(BaseModel):
+        model_config = ConfigDict(frozen=True)
+
+        type: str
+
     peers: dict[str, Endpoint] = Field(default_factory=dict)
     requires: dict[str, Endpoint] = Field(default_factory=dict)
     provides: dict[str, Endpoint] = Field(default_factory=dict)
     assumes: list[str | dict[str, Any]] = Field(default_factory=list)
+    resources: dict[str, Resource] = Field(default_factory=dict)
 
 
 class CharmConfigSchema(BaseModel):
@@ -162,12 +168,25 @@ class InfoResponse(BaseModel):
 
         revision: Revision = Field(default_factory=Revision)
 
+    class ChannelMapEntry(BaseModel):
+        model_config = ConfigDict(frozen=True, validate_by_name=True)
+
+        class Channel(BaseModel):
+            model_config = ConfigDict(frozen=True)
+
+            name: str
+            track: str
+            risk: str
+
+        channel: Channel
+
     class Result(BaseModel):
         model_config = ConfigDict(frozen=True, validate_by_name=True)
 
         deployable_on: frozenset[str] = Field(default_factory=frozenset, alias="deployable-on")
 
     default_release: DefaultRelease = Field(default_factory=DefaultRelease, alias="default-release")
+    channel_map: list["InfoResponse.ChannelMapEntry"] = Field(default_factory=list, alias="channel-map")
     result: Result = Field(default_factory=Result)
 
 
@@ -271,20 +290,19 @@ class CharmhubHttpClient:
         return RefreshResponse(**next(iter(response_json.get("results"))))
 
     @cache
-    def info(self, charm: str) -> InfoResponse:
+    def info(self, charm: str, include_channel_map: bool = False) -> InfoResponse:
         self.logger.debug(f"Calling info for charm {charm}")
 
         # Formulate request
         request_url = CHARM_INFO_ENDPOINT.format(charm=charm)
         request_headers = {"Content-Type": "application/json"}
-        request_params = {
-            "fields": ",".join(
-                [
-                    "result.deployable-on",
-                    "default-release.revision.metadata-yaml",
-                ]
-            ),
-        }
+        fields = [
+            "result.deployable-on",
+            "default-release.revision.metadata-yaml",
+        ]
+        if include_channel_map:
+            fields.append("channel-map")
+        request_params = {"fields": ",".join(fields)}
 
         # Execute request
         response = self.session.get(

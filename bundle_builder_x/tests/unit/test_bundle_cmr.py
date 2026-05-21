@@ -75,10 +75,15 @@ class TestBundleExportOffers:
         )
 
         # WHEN exporting
-        exported = yaml.safe_load(bundle.export())
+        documents = list(yaml.safe_load_all(bundle.export()))
+        base = documents[0]
+        overlay = documents[1]
 
-        # THEN offers are nested under the application
-        app = exported["applications"]["postgresql"]
+        # THEN the base application has no offers
+        assert "offers" not in base["applications"]["postgresql"]
+
+        # AND offers are in the overlay document
+        app = overlay["applications"]["postgresql"]
         assert "offers" in app
         assert "postgresql-offer" in app["offers"]
         assert app["offers"]["postgresql-offer"]["endpoints"] == ["database"]
@@ -148,10 +153,11 @@ class TestBundleExportOffers:
         )
 
         # WHEN exporting
-        exported = yaml.safe_load(bundle.export())
+        documents = list(yaml.safe_load_all(bundle.export()))
+        overlay = documents[1]
 
-        # THEN the single offer has both endpoints
-        offer = exported["applications"]["postgresql"]["offers"]["postgresql-offer"]
+        # THEN the single offer in the overlay has both endpoints
+        offer = overlay["applications"]["postgresql"]["offers"]["postgresql-offer"]
         assert sorted(offer["endpoints"]) == ["database", "replication"]
 
     def test_no_cmr_produces_no_saas_or_offers(self) -> None:

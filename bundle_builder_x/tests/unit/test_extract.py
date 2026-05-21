@@ -296,6 +296,136 @@ class TestExtractSingleModel:
         # THEN the config is present in the application
         assert solution.bundles[0].applications["vault"].config["common_name"] == "my-cn"
 
+    def test_resource_values_extracted_correctly(self) -> None:
+        # GIVEN a charm with a fixed resource value
+        from bundle_builder_x.domain import add_charm_to_domain
+
+        charm = _make_charm("temporal-worker-k8s")
+        charm = charm.model_copy(
+            update={"resources": {"temporal-worker-image": ["ghcr.io/canonical/temporal-worker-test:abc123"]}}
+        )
+        domain = _make_domain(
+            {
+                ModelRef(name="m"): DomainModel(
+                    arch="amd64",
+                    platform="kubernetes",
+                    juju_version=_JUJU,
+                    applications={"worker": DomainApplication(charm="temporal-worker-k8s")},
+                )
+            }
+        )
+        add_charm_to_domain(charm, domain, ModelRef(name="m"))
+
+        # WHEN extracting
+        model = _solve(domain)
+        solution = extract_solution(model, domain, logger=_LOGGER)
+
+        # THEN the resource is present in the application
+        assert solution.bundles[0].applications["worker"].resources["temporal-worker-image"] == (
+            "ghcr.io/canonical/temporal-worker-test:abc123"
+        )
+
+    def test_optional_resource_omitted_when_unset(self) -> None:
+        # GIVEN a charm with an optional resource (null allowed)
+        import z3
+
+        from bundle_builder_x.constraints import add_constraints
+        from bundle_builder_x.domain import add_charm_to_domain
+
+        charm = _make_charm("temporal-worker-k8s")
+        charm = charm.model_copy(
+            update={"resources": {"temporal-worker-image": ["ghcr.io/canonical/temporal-worker-test:abc123", None]}}
+        )
+        domain = _make_domain(
+            {
+                ModelRef(name="m"): DomainModel(
+                    arch="amd64",
+                    platform="kubernetes",
+                    juju_version=_JUJU,
+                    applications={"worker": DomainApplication(charm="temporal-worker-k8s")},
+                )
+            }
+        )
+        add_charm_to_domain(charm, domain, ModelRef(name="m"))
+
+        # Force the solver to choose the unset option by constraining isset_var to False
+        solver = z3.Solver()
+        add_constraints(solver, domain)
+        res = domain.charms[0].resources["temporal-worker-image"]
+        solver.add(res.isset_var == False)  # noqa: E712
+        assert solver.check() == z3.sat
+        model = solver.model()
+
+        # WHEN extracting
+        solution = extract_solution(model, domain, logger=_LOGGER)
+
+        # THEN the optional resource is absent
+        assert "temporal-worker-image" not in solution.bundles[0].applications["worker"].resources
+
+    def test_multi_value_resource_constrained_to_allowed_set(self) -> None:
+        # GIVEN a charm with two allowed resource values
+        from bundle_builder_x.domain import add_charm_to_domain
+
+        allowed = ["ghcr.io/foo:v1", "ghcr.io/foo:v2"]
+        charm = _make_charm("temporal-worker-k8s")
+        charm = charm.model_copy(update={"resources": {"temporal-worker-image": allowed}})
+        domain = _make_domain(
+            {
+                ModelRef(name="m"): DomainModel(
+                    arch="amd64",
+                    platform="kubernetes",
+                    juju_version=_JUJU,
+                    applications={"worker": DomainApplication(charm="temporal-worker-k8s")},
+                )
+            }
+        )
+        add_charm_to_domain(charm, domain, ModelRef(name="m"))
+
+        # WHEN solving and extracting
+        model = _solve(domain)
+        solution = extract_solution(model, domain, logger=_LOGGER)
+
+        # THEN the extracted value is one of the declared allowed values (not an arbitrary string)
+        result = solution.bundles[0].applications["worker"].resources["temporal-worker-image"]
+        assert result in allowed
+
+    def test_optional_resource_value_constrained_to_allowed_set_when_set(self) -> None:
+        # GIVEN a charm with an optional resource with two allowed non-None values
+        import z3
+
+        from bundle_builder_x.constraints import add_constraints
+        from bundle_builder_x.domain import add_charm_to_domain
+
+        allowed_values = ["ghcr.io/foo:v1", "ghcr.io/foo:v2"]
+        charm = _make_charm("temporal-worker-k8s")
+        charm = charm.model_copy(update={"resources": {"temporal-worker-image": [*allowed_values, None]}})
+        domain = _make_domain(
+            {
+                ModelRef(name="m"): DomainModel(
+                    arch="amd64",
+                    platform="kubernetes",
+                    juju_version=_JUJU,
+                    applications={"worker": DomainApplication(charm="temporal-worker-k8s")},
+                )
+            }
+        )
+        add_charm_to_domain(charm, domain, ModelRef(name="m"))
+
+        # Force the resource to be set
+        solver = z3.Solver()
+        add_constraints(solver, domain)
+        res = domain.charms[0].resources["temporal-worker-image"]
+        solver.add(res.isset_var == True)  # noqa: E712
+        assert solver.check() == z3.sat
+        model = solver.model()
+
+        # WHEN extracting
+        solution = extract_solution(model, domain, logger=_LOGGER)
+
+        # THEN the extracted value is one of the declared allowed values
+        result = solution.bundles[0].applications["worker"].resources["temporal-worker-image"]
+        assert result in allowed_values
+
 
 class TestExtractMultiModel:
     def test_bundles_per_model(self) -> None:

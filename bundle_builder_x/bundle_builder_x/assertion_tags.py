@@ -156,6 +156,7 @@ class EndpointIntegratedMatchesCountTag(AssertionTag):
 class CharmEndpointNonOptionalTag(AssertionTag):
     kind: Assertions = Assertions.CHARM_ENDPOINT_NON_OPTIONAL
     charm: CharmEndpointPayload
+    interface: str | None = None
 
 
 class EndpointRespectsLimitTag(AssertionTag):

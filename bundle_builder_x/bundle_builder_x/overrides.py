@@ -21,7 +21,7 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, Field
 
-from .charm import CharmChannel, CharmConfigValue, CharmEndpointProxy, EndpointType
+from .charm import CharmChannel, CharmConfigValue, CharmEndpointProxy, CharmResourceValue, EndpointType
 from .timing import NullTimeline, Timeline
 
 
@@ -57,6 +57,7 @@ class CharmOverrides(BaseModel):
     provides: dict[str, CharmEndpointOverrides] = Field(default_factory=dict)
     proxies: list[CharmEndpointProxy] = Field(default_factory=list)
     configs: dict[str, list[CharmConfigValue]] = Field(default_factory=dict)
+    resources: dict[str, list[CharmResourceValue]] = Field(default_factory=dict)
     constraints: list[str] = Field(default_factory=list)
     assumes: list[str | dict[str, Any]] | None = None
 
@@ -139,6 +140,9 @@ class OverridesClient:
 
     def get_charm_config_overrides(self, charm: str, channel: CharmChannel) -> dict[str, list[CharmConfigValue]]:
         return self._get_charm_overrides(charm, channel).configs
+
+    def get_charm_resource_overrides(self, charm: str, channel: CharmChannel) -> dict[str, list[CharmResourceValue]]:
+        return self._get_charm_overrides(charm, channel).resources
 
     def get_charm_constraints_overrides(self, charm: str, channel: CharmChannel) -> list[str]:
         return self._get_charm_overrides(charm, channel).constraints

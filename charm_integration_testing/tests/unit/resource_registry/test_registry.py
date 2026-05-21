@@ -110,6 +110,34 @@ class TestResourceRegistryRegister:
             registry.register(child, parent=parent)
 
 
+class TestResourceRegistryIsRegistered:
+    def test_returns_true_for_registered_handle(self) -> None:
+        # GIVEN a registered handle
+        registry = _registry()
+        handle = HandleStub("ctrl")
+        registry.register(handle)
+
+        # WHEN checking registration
+        assert registry.is_registered(handle) is True
+
+    def test_returns_false_for_unregistered_handle(self) -> None:
+        # GIVEN an empty registry
+        registry = _registry()
+
+        # WHEN checking an unregistered handle
+        assert registry.is_registered(HandleStub("ghost")) is False
+
+    def test_returns_false_after_deregister(self) -> None:
+        # GIVEN a handle that has been deregistered
+        registry = _registry()
+        handle = HandleStub("ctrl")
+        registry.register(handle)
+        registry.deregister(handle)
+
+        # WHEN checking registration
+        assert registry.is_registered(handle) is False
+
+
 class TestResourceRegistryDeregister:
     def test_deregister_removes_entry(self) -> None:
         # GIVEN a registered resource
@@ -356,3 +384,81 @@ class TestResourceRegistryTeardownAll:
 
         # THEN A is still destroyed despite B failing
         assert "A" in destroyed
+
+
+class TestResourceRegistryRegisteredHandles:
+    def test_returns_handles_in_registration_order(self) -> None:
+        # GIVEN a registry with three resources
+        registry = _registry()
+        handles = [HandleStub("A"), HandleStub("B"), HandleStub("C")]
+        for h in handles:
+            registry.register(h)
+
+        # WHEN querying registered handles
+        result = registry.registered_handles()
+
+        # THEN they are returned in registration order
+        assert result == handles
+
+    def test_empty_registry_returns_empty_list(self) -> None:
+        # GIVEN an empty registry
+        registry = _registry()
+
+        # WHEN querying registered handles
+        result = registry.registered_handles()
+
+        # THEN an empty list is returned
+        assert result == []
+
+    def test_deregistered_handle_not_in_list(self) -> None:
+        # GIVEN a registry with a handle that has been deregistered
+        registry = _registry()
+        handle = HandleStub("ctrl")
+        registry.register(handle)
+        registry.deregister(handle)
+
+        # WHEN querying registered handles
+        result = registry.registered_handles()
+
+        # THEN the deregistered handle is not present
+        assert result == []
+
+
+class TestResourceRegistryChildrenOf:
+    def test_returns_children_in_registration_order(self) -> None:
+        # GIVEN a parent with two children
+        registry = _registry()
+        parent = HandleStub("parent")
+        child_a = HandleStub("child_a")
+        child_b = HandleStub("child_b")
+        registry.register(parent)
+        registry.register(child_a, parent=parent)
+        registry.register(child_b, parent=parent)
+
+        # WHEN querying children
+        result = registry.children_of(parent)
+
+        # THEN children are returned in registration order
+        assert result == [child_a, child_b]
+
+    def test_returns_empty_for_leaf_handle(self) -> None:
+        # GIVEN a handle with no children
+        registry = _registry()
+        handle = HandleStub("leaf")
+        registry.register(handle)
+
+        # WHEN querying children
+        result = registry.children_of(handle)
+
+        # THEN an empty list is returned
+        assert result == []
+
+    def test_returns_empty_for_unknown_handle(self) -> None:
+        # GIVEN an empty registry
+        registry = _registry()
+
+        # WHEN querying children of an unregistered handle
+        result = registry.children_of(HandleStub("ghost"))
+
+        # THEN an empty list is returned
+        assert result == []

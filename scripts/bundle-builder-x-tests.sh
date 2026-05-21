@@ -6,8 +6,9 @@ cd "$(dirname "$0")/.."
 
 if [[ -z "$1" ]]; then
     echo "Usage: $0 <type>[|<type>...] [pytest-args...]"
-    echo "Types: unit, logic, integration"
+    echo "Types: unit, logic, integration, overrides"
     echo "Example: $0 'unit|logic' -q"
+    echo "Example: $0 overrides --overrides ./static/charm-overrides"
     exit 1
 fi
 

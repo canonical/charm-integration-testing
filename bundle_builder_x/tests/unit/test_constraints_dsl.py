@@ -38,8 +38,10 @@ from bundle_builder_x.constraints_dsl import (
     NotExpr,
     OrExpr,
     ReachableExpr,
+    ResourceExpr,
     SelfExpr,
     SetOpExpr,
+    SetResourceExpr,
     StrLit,
     StrLiteralSet,
     parse_constraint,
@@ -96,6 +98,17 @@ class TestAtoms:
             label="config_hyphenated",
             text="config[num-history-shards]",
             expected=ConfigExpr(key="num-history-shards"),
+        ),
+        Params(label="resource", text="resource[my-image]", expected=ResourceExpr(key="my-image")),
+        Params(
+            label="resource_hyphenated",
+            text="resource[temporal-worker-image]",
+            expected=ResourceExpr(key="temporal-worker-image"),
+        ),
+        Params(
+            label="set_resource",
+            text="set(resource[my-image])",
+            expected=SetResourceExpr(key="my-image"),
         ),
         Params(label="self_expr", text="{self}", expected=SelfExpr()),
         Params(
@@ -485,6 +498,19 @@ class TestRealConstraints:
         Params(
             label="traefik_any_tls_requires_certs",
             text='"tls" in features(endpoint[traefik-route] | endpoint[ingress] | endpoint[ingress-per-unit]) => bool(endpoint[certificates])',
+        ),
+        # temporal-worker-k8s
+        Params(
+            label="temporal_worker_namespace_and_queue_set",
+            text="set(config[namespace]) and set(config[queue])",
+        ),
+        Params(
+            label="temporal_worker_db_implies_db_name",
+            text="bool(endpoint[database]) => set(config[db-name])",
+        ),
+        Params(
+            label="temporal_worker_image_set",
+            text="set(resource[temporal-worker-image])",
         ),
     ]
 

@@ -40,3 +40,8 @@ overrides:
       # role must match the integrated endpoint
       - 'bool(endpoint[config-server]) == (config[role] == "config-server")'
       - 'bool(endpoint[sharding]) == (config[role] == "shard")'
+      # sharding must be on the same track and risk
+      - 'bool(endpoint[sharding]) => tracks(charms(endpoint[sharding])) == tracks({self})
+        and risks(charms(endpoint[sharding])) == risks({self})'
+      - 'bool(endpoint[config-server]) => tracks(charms(endpoint[config-server]))
+        == tracks({self}) and risks(charms(endpoint[config-server])) == risks({self})'

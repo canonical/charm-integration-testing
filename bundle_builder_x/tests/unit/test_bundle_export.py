@@ -140,6 +140,32 @@ class TestBundleExport:
         # THEN None values are excluded from options
         assert exported["applications"]["app"]["options"] == {}
 
+    def test_resources_included(self) -> None:
+        # GIVEN an application with resources
+        charm = _make_charm("app")
+        bundle = _make_bundle(
+            applications={"app": Application(charm=charm, resources={"my-image": "ghcr.io/foo:latest"})},
+        )
+
+        # WHEN exporting
+        exported = yaml.safe_load(bundle.export())
+
+        # THEN resources appear under the resources key
+        assert exported["applications"]["app"]["resources"]["my-image"] == "ghcr.io/foo:latest"
+
+    def test_empty_resources_omitted(self) -> None:
+        # GIVEN an application with no resources
+        charm = _make_charm("app")
+        bundle = _make_bundle(
+            applications={"app": Application(charm=charm)},
+        )
+
+        # WHEN exporting
+        exported = yaml.safe_load(bundle.export())
+
+        # THEN no resources key is present
+        assert "resources" not in exported["applications"]["app"]
+
     def test_local_relations_sorted(self) -> None:
         # GIVEN a bundle with two local integrations
         provider = _make_charm(
@@ -181,7 +207,7 @@ class TestBundleExport:
         # Relations should be deterministically sorted
         assert relations == sorted(relations)
 
-    def test_bundle_key_matches_platform(self) -> None:
+    def test_bundle_key_matches_platform_k8s(self) -> None:
         # GIVEN a kubernetes bundle
         bundle = _make_bundle(
             platform="kubernetes",
@@ -193,6 +219,19 @@ class TestBundleExport:
 
         # THEN the bundle key is 'kubernetes'
         assert exported["bundle"] == "kubernetes"
+
+    def test_bundle_key_is_skipped_for_platform_machine(self) -> None:
+        # GIVEN a machine bundle
+        bundle = _make_bundle(
+            platform="machine",
+            applications={"app": Application(charm=_make_charm("app"))},
+        )
+
+        # WHEN exporting
+        exported = yaml.safe_load(bundle.export())
+
+        # THEN the bundle key is absent (it is only emitted for kubernetes bundles)
+        assert "bundle" not in exported
 
     def test_export_round_trip_is_valid_yaml(self) -> None:
         # GIVEN a moderately complex bundle

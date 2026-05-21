@@ -47,6 +47,7 @@ def _mermaid_node_id(model_id: str, application: str) -> str:
 class Application(BaseModel):
     charm: Charm
     config: dict[str, CharmConfigValue] = Field(default_factory=dict)
+    resources: dict[str, str] = Field(default_factory=dict)
 
     def __repr__(self) -> str:
         return f"{self.charm.name}"
@@ -126,7 +127,7 @@ class Bundle(BaseModel):
             if cmr.local_role == EndpointType.REQUIRES and cmr.url is not None:
                 saas_entries[cmr.offer_name] = {"url": cmr.url}
 
-        # Build applications dict, including offers where applicable
+        # Build applications dict (no offers in the base bundle)
         applications_dict: dict[str, dict[str, object]] = {}
         for application, info in self.applications.items():
             app_dict: dict[str, object] = {
@@ -138,12 +139,8 @@ class Bundle(BaseModel):
                 "trust": True,
                 "options": {key: value for key, value in info.config.items() if value is not None},
             }
-            # Nest offers under the application
-            if application in offers_by_app:
-                app_dict["offers"] = {
-                    offer_name: {"endpoints": sorted(endpoints)}
-                    for offer_name, endpoints in sorted(offers_by_app[application].items())
-                }
+            if len(info.resources) > 0:
+                app_dict["resources"] = info.resources
             applications_dict[application] = app_dict
 
         # Build relations list including cross-model relations
@@ -176,19 +173,34 @@ class Bundle(BaseModel):
 
         bundle_dict: dict[str, object] = {
             "applications": applications_dict,
-            "bundle": self.platform,
             "relations": local_relations + cmr_relations,
         }
+        if self.platform == "kubernetes":
+            bundle_dict["bundle"] = self.platform
 
         # Add saas section if there are consuming CMRs
         if saas_entries:
             bundle_dict["saas"] = dict(sorted(saas_entries.items()))
 
-        return yaml.dump(
-            bundle_dict,
-            default_flow_style=False,
-            sort_keys=True,
-        )
+        base_yaml = yaml.dump(bundle_dict, default_flow_style=False, sort_keys=True)
+
+        # Offers cannot appear in the base bundle section; emit them as a bundle overlay
+        # (second YAML document) so that Juju accepts them.
+        if offers_by_app:
+            overlay_apps: dict[str, object] = {
+                application: {
+                    "offers": {
+                        offer_name: {"endpoints": sorted(endpoints)}
+                        for offer_name, endpoints in sorted(app_offers.items())
+                    }
+                }
+                for application, app_offers in sorted(offers_by_app.items())
+            }
+            overlay_dict: dict[str, object] = {"applications": overlay_apps}
+            overlay_yaml = yaml.dump(overlay_dict, default_flow_style=False, sort_keys=True)
+            return f"---\n{base_yaml}---\n{overlay_yaml}"
+
+        return base_yaml
 
 
 def _mermaid_subgraph_lines(bundle: Bundle, model_name: str, model_id: str) -> list[str]:
