@@ -1,0 +1,263 @@
+---
+# Override for kubernetes-control-plane
+# Source: https://github.com/charmed-kubernetes/charm-kubernetes-control-plane
+#
+# Upstream PR: https://github.com/charmed-kubernetes/charm-kubernetes-control-plane/pull/419
+# (applies to 1.29+ ops charm only)
+#
+# Evidence gathered from src/charm.py, src/cloud_integration.py,
+# src/encryption_at_rest.py (main branch, 2026-05-20).
+#
+# Three criteria blocks cover the three distinct endpoint generations:
+#   1.23:       legacy reactive charm, no external-cloud-provider
+#   1.24-1.28:  legacy reactive charm, adds external-cloud-provider
+#   1.29+:      ops-based rewrite; dropped ceph-storage, loadbalancer, vsphere
+#
+# Truly required in 1.29+ (DO NOT mark optional):
+#   certificates  - assert self.certificates.relation in request_certificates()
+#   etcd          - assert self.etcd.relation + assert self.etcd.is_ready
+#                   in write_etcd_client_credentials()
+# Truly required provides in all tracks (DO NOT mark optional):
+#   container-runtime (scope: container) - assert self.container_runtime.relations
+#   cni           (scope: container) - raises MissingCNIError without it
+overrides:
+
+  # ── 1.23 track (edge only; legacy reactive charm) ──────────────────────────
+  # Endpoint set differs from 1.29+: no external-cloud-provider; has the legacy
+  # ceph-storage, loadbalancer (pre-split), and vsphere endpoints.
+  # Provides set differs from 1.29+: old monitoring/integration provides instead
+  # of cos-agent and tokens.
+  - criteria:
+      - track: '1.23'
+    requires:
+      aws:
+        optional: true
+      azure:
+        optional: true
+      ceph-client:
+        optional: true
+        # Legacy Ceph integration; deprecated in 1.29+.
+      ceph-storage:
+        optional: true
+        # Ceph storage integration; dropped in 1.29+.
+      dns-provider:
+        optional: true
+      gcp:
+        optional: true
+      ha:
+        optional: true
+      keystone-credentials:
+        optional: true
+        # Legacy Keystone auth; deprecated in 1.29+.
+      loadbalancer:
+        optional: true
+        # Pre-split single LB endpoint; replaced by loadbalancer-external
+        # and loadbalancer-internal in 1.29+.
+      loadbalancer-external:
+        optional: true
+      loadbalancer-internal:
+        optional: true
+      openstack:
+        optional: true
+        # Legacy direct OpenStack integration; deprecated in 1.29+.
+      vault-kv:
+        optional: true
+      vsphere:
+        optional: true
+        # VMware vSphere integration; dropped in 1.29+.
+    provides:
+      aws-iam:
+        optional: true
+      grafana:
+        optional: true
+      kube-api-endpoint:
+        optional: true
+      kube-control:
+        optional: true
+      nrpe-external-master:
+        optional: true
+      prometheus:
+        optional: true
+    constraints:
+      # Container-runtime subordinate must be on the same track as this charm.
+      - 'tracks(charms(endpoint[container-runtime])) <= tracks({self})'
+      # OpenStack integration peer must be on the same track.
+      - 'tracks(charms(endpoint[keystone-credentials])) <= tracks({self})'
+      - 'tracks(charms(endpoint[openstack])) <= tracks({self})'
+      # CNI plugin subordinate must be on the same track.
+      - 'tracks(charms(endpoint[cni])) <= tracks({self})'
+      # etcd peer must be on the same track.
+      - 'tracks(charms(endpoint[etcd])) <= tracks({self})'
+
+  # ── 1.24-1.28 tracks (legacy reactive charm) ───────────────────────────────
+  # Same legacy endpoint set as 1.23 but with external-cloud-provider added.
+  # Uses any_of because criteria entries are AND-ed; OR logic requires any_of.
+  - criteria:
+      - any_of:
+          - track: '1.24'
+          - track: '1.25'
+          - track: '1.26'
+          - track: '1.27'
+          - track: '1.28'
+    requires:
+      aws:
+        optional: true
+      azure:
+        optional: true
+      ceph-client:
+        optional: true
+      ceph-storage:
+        optional: true
+        # Dropped in 1.29+.
+      dns-provider:
+        optional: true
+      external-cloud-provider:
+        optional: true
+      gcp:
+        optional: true
+      ha:
+        optional: true
+      keystone-credentials:
+        optional: true
+      loadbalancer:
+        optional: true
+        # Pre-split single LB endpoint; dropped in 1.29+.
+      loadbalancer-external:
+        optional: true
+      loadbalancer-internal:
+        optional: true
+      openstack:
+        optional: true
+      vault-kv:
+        optional: true
+      vsphere:
+        optional: true
+        # Dropped in 1.29+.
+    provides:
+      aws-iam:
+        optional: true
+      grafana:
+        optional: true
+      kube-api-endpoint:
+        optional: true
+      kube-control:
+        optional: true
+      nrpe-external-master:
+        optional: true
+      prometheus:
+        optional: true
+    constraints:
+      # Container-runtime subordinate must be on the same track as this charm.
+      - 'tracks(charms(endpoint[container-runtime])) <= tracks({self})'
+      # OpenStack integration peer must be on the same track.
+      - 'tracks(charms(endpoint[keystone-credentials])) <= tracks({self})'
+      - 'tracks(charms(endpoint[openstack])) <= tracks({self})'
+      # CNI plugin subordinate must be on the same track.
+      - 'tracks(charms(endpoint[cni])) <= tracks({self})'
+      # etcd peer must be on the same track.
+      - 'tracks(charms(endpoint[etcd])) <= tracks({self})'
+
+  # ── 1.29+ tracks (ops-based rewrite; default block) ────────────────────────
+  # Dropped: ceph-storage, loadbalancer (old), vsphere.
+  # Added in provides: cos-agent, tokens.
+  # Dropped from provides: aws-iam, grafana, kube-api-endpoint,
+  #   nrpe-external-master, prometheus.
+  - requires:
+
+      # ── CLOUD INTEGRATIONS ─────────────────────────────────────────────────
+      # Only one cloud integration is ever active per deployment.
+      # src/cloud_integration.py CloudIntegration.cloud (property):
+      #   if not (cloud := cloud_support.get(cloud_name)): return None
+      #   if not cloud.relation: return None
+      # integrate() returns early when cloud is None.
+      aws:
+        optional: true
+        # Active only when external-cloud-provider reports cloud name "aws".
+      azure:
+        optional: true
+        # Same call chain as aws.  Active only when cloud name == "azure".
+      gcp:
+        optional: true
+        # Same call chain as aws/azure.  Active only when cloud name == "gce".
+
+      # ── HIGH AVAILABILITY ──────────────────────────────────────────────────
+      ha:
+        optional: true
+        # src/charm.py configure_hacluster():
+        #   if self.hacluster.is_ready: ...
+        # All hacluster logic is gated on is_ready.
+
+      # ── DNS ────────────────────────────────────────────────────────────────
+      dns-provider:
+        optional: true
+        # src/charm.py get_dns_address():
+        #   return self.kube_dns.address or self.cdk_addons.get_dns_address()
+        # Falls back to cdk-addons-managed CoreDNS when absent.
+
+      # ── LOAD BALANCERS ─────────────────────────────────────────────────────
+      loadbalancer-external:
+        optional: true
+        # src/charm.py configure_loadbalancers():
+        #   if self.lb_external.is_available: ...
+      loadbalancer-internal:
+        optional: true
+        # src/charm.py configure_loadbalancers():
+        #   if self.lb_internal.is_available: ...
+
+      # ── EXTERNAL CLOUD PROVIDER ────────────────────────────────────────────
+      external-cloud-provider:
+        optional: true
+        # src/charm.py get_cloud_name():
+        #   return self.external_cloud_provider.name or ""
+        # All callers degrade gracefully when name is empty.
+
+      # ── SECRETS ENCRYPTION ─────────────────────────────────────────────────
+      vault-kv:
+        optional: true
+        # src/encryption_at_rest.py EncryptionAtRest.prepare():
+        #   if not self.vault_kv.requires.relations:
+        #       return
+        # Encryption at rest is simply disabled when absent.
+
+      # ── DEPRECATED - REMOVE UPSTREAM ───────────────────────────────────────
+      # These endpoints emit BlockedStatus if actually related.  They exist
+      # only for upgrade compatibility.  The correct upstream fix is removal.
+      ceph-client:
+        optional: true
+        # DEPRECATED. src/charm.py warn_ceph_client():
+        #   status.add(ops.BlockedStatus(
+        #       "ceph-client relation is no longer managed"))
+      openstack:
+        optional: true
+        # DEPRECATED. src/charm.py warn_openstack_cloud():
+        #   status.add(ops.BlockedStatus(
+        #       "openstack relation is no longer managed"))
+      keystone-credentials:
+        optional: true
+        # DEPRECATED. src/charm.py warn_keystone_management():
+        #   status.add(ops.BlockedStatus(
+        #       "Keystone credential relation is no longer managed"))
+    provides:
+
+      # ── OBSERVABILITY ──────────────────────────────────────────────────────
+      cos-agent:
+        optional: true
+        # COSAgentProvider registered but never asserted.
+
+      # ── WORKER RELATIONS ───────────────────────────────────────────────────
+      kube-control:
+        optional: true
+        # Control plane runs without workers.
+      tokens:
+        optional: true
+        # generate_tokens() is a no-op when no consumers are related.
+    constraints:
+      # Container-runtime subordinate must be on the same track as this charm.
+      - 'tracks(charms(endpoint[container-runtime])) <= tracks({self})'
+      # OpenStack integration peer must be on the same track.
+      - 'tracks(charms(endpoint[keystone-credentials])) <= tracks({self})'
+      - 'tracks(charms(endpoint[openstack])) <= tracks({self})'
+      # CNI plugin subordinate must be on the same track.
+      - 'tracks(charms(endpoint[cni])) <= tracks({self})'
+      # etcd peer must be on the same track.
+      - 'tracks(charms(endpoint[etcd])) <= tracks({self})'
