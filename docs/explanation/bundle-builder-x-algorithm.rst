@@ -1,26 +1,26 @@
 The bundle builder X algorithm
 ==============================
 
-Bundle builder X is a rewrite of the original :doc:`bundle builder <bundle-builder-algorithm>`
-that replaces graph traversal with an SMT solver (`Z3 <https://github.com/Z3Prover/z3>`_).
+Bundle builder X uses an SMT solver (`Z3 <https://github.com/Z3Prover/z3>`_) to resolve charm
+compatibility constraints, replacing the earlier graph-traversal approach.
 Instead of exploring a search tree of possible bundles, the solver encodes the entire
 problem as a set of logical constraints and finds a satisfying assignment directly.
 
 Why a solver?
 -------------
 
-The original bundle builder uses uniform-cost search over an expanding graph of
-possible bundle configurations. This works, but has limitations:
+An SMT solver is well suited to this problem because:
 
-- The search space grows combinatorially with the number of charms and endpoints.
+- The search space grows combinatorially with the number of charms and endpoints;
+  graph traversal approaches do not scale.
 - Constraint types like "at most one of these three endpoints" or "the charm on
   the other end of this endpoint must share the same channel track" are awkward to
-  express as graph edge weights.
-- Multi-model specs with cross-model relations add another dimension to the search.
+  express as graph edge weights but natural to encode as logical assertions.
+- Multi-model specs with cross-model relations add another dimension that a
+  solver handles in the same pass.
 
-An SMT solver handles all of these naturally. Constraints are first-class: you
-declare what must hold and the solver finds a valid assignment, or proves none
-exists.
+Constraints are first-class: you declare what must hold and the solver finds a
+valid assignment, or proves none exists.
 
 How it works
 ------------
@@ -84,31 +84,14 @@ This loop is bounded (default 100 iterations). If the domain cannot be
 expanded further and the problem is still unsatisfiable, the builder raises
 ``UncompletableBundleError`` with the decoded unsat core.
 
-Differences from the original bundle builder
----------------------------------------------
+Key properties
+--------------
 
-.. list-table::
-   :header-rows: 1
-   :widths: 30 35 35
-
-   * - Aspect
-     - Original (v5/v9)
-     - X (v10)
-   * - Algorithm
-     - Uniform-cost graph search
-     - Z3 SMT solver
-   * - Constraint support
-     - Implicit in scoring and edge expansion
-     - Explicit DSL compiled to Z3 assertions
-   * - Multi-model
-     - Single model per invocation
-     - All models solved simultaneously
-   * - Cross-model relations
-     - Not supported
-     - In-spec and external CMRs
-   * - Optimization
-     - Score-based node selection (UCS)
-     - ``z3.Optimize`` minimization pass
-   * - Failure diagnostics
-     - "No valid bundle found"
-     - Decoded unsat core with specific constraint tags
+- **Explicit constraint DSL** -- constraints are compiled to Z3 assertions rather
+  than embedded implicitly in scoring or edge expansion.
+- **Multi-model** -- all models in a spec are solved simultaneously.
+- **Cross-model relations** -- both in-spec and external CMRs are supported.
+- **Optimization pass** -- after a satisfying assignment is found, a
+  ``z3.Optimize`` pass minimizes the number of applications and integrations.
+- **Failure diagnostics** -- when the problem is unsatisfiable, the unsat core is
+  decoded into specific constraint tags so callers know exactly what went wrong.
