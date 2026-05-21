@@ -461,7 +461,7 @@ jobs:
             --log-dir "./test-logs" \
             --prefix "charmqa-${run_id}" \
             --junit-xml=junit.xml \
-            "${testmon_args}"
+            ${testmon_args}
       - name: Run charm tests
         id: run_tests
         if: ${{ inputs.neighbor_environment == '' }}
@@ -518,7 +518,7 @@ jobs:
             --log-dir "./test-logs" \
             --prefix "charmqa-${{ github.run_id }}" \
             --junit-xml=junit.xml \
-            "${testmon_args}"
+            ${testmon_args}
       - name: Post 'test_end' event
         if: ${{ env.TEST_OBSERVER_API != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-events
