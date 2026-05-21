@@ -92,6 +92,11 @@ on:
         type: choice
         options: [DEBUG, INFO, WARNING, ERROR]
         default: INFO
+      full_test_suite:
+        description: Whether to run the full test suite regardless of testmon results.
+        required: false
+        type: boolean
+        default: true
 jobs:
   determine-runner:
     name: Determine GitHub Actions runner to use for the environment
@@ -465,6 +470,7 @@ jobs:
           bootstrap_constraints: ${{ steps.target_env_info.outputs.bootstrap-constraints }}
           model_config: ${{ steps.target_env_info.outputs.model-config }}
           metadata_source: ${{ steps.target_env_info.outputs.metadata-source }}
+          full_test_suite: ${{ inputs.full_test_suite }}
         run: |
           echo "junit_xml=$(realpath junit.xml)" >> $GITHUB_OUTPUT
           ./scripts/run-tests.sh \
@@ -497,7 +503,8 @@ jobs:
             --log-level "${log_level}" \
             --log-dir "./test-logs" \
             --prefix "charmqa-${{ github.run_id }}" \
-            --junit-xml=junit.xml
+            --junit-xml=junit.xml \
+            --full-test-suite 
       - name: Post 'test_end' event
         if: ${{ env.TEST_OBSERVER_API != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-events
