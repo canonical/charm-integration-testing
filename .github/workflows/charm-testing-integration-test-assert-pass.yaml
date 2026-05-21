@@ -84,7 +84,6 @@ jobs:
               "series": "${{ inputs.target_base }}",
               "channel": "${{ inputs.target_track }}/${{ inputs.target_risk }}",
               "full_test_suite": "${{ inputs.full_test_suite }}"
-
             }
       - name: Ensure Charm Tests Workflow Success
         shell: bash
