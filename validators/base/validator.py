@@ -42,12 +42,14 @@ class ValidationResult(BaseModel):
 class BaseValidator(ABC):
     charm: ops.CharmBase
     relation: ops.Relation
-    role: ops.RelationRole
 
-    def __init__(self, charm: ops.CharmBase, relation: ops.Relation, role: ops.RelationRole) -> None:
+    def __init__(self, charm: ops.CharmBase, relation: ops.Relation) -> None:
         self.charm = charm
         self.relation = relation
-        self.role = role
+
+    @property
+    def role(self) -> ops.RelationRole:
+        return self.charm.meta.relations[self.relation.name].role
 
     @property
     def endpoint(self) -> str:

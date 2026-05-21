@@ -83,7 +83,7 @@ class ValidatorRunner:
     ) -> list[ValidationResult]:
         results: list[ValidationResult] = []
         for validator_cls in self.validators.get(interface_name, []):
-            validator = validator_cls(charm, integration, role)
+            validator = validator_cls(charm, integration)
             try:
                 result = validator.validate(level=level)
                 # If the validator doesn't support this level, fall back to the

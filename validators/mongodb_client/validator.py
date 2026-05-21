@@ -32,7 +32,7 @@ class MongoDBClientValidator(BaseValidator):
         self.ca_file_path: str | None = None
 
     def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
-        if self.role != ops.RelationRole.requires:
+        if self.role != ops.RelationRole.requires.name:
             return self._skipped_result_due_to_role(level, self.role)
 
         if level == "uat":

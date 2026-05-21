@@ -25,7 +25,7 @@ from validators.base import BaseValidator, ValidationCheck, ValidationLevel, Val
 
 class TracingValidator(BaseValidator):
     def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
-        if self.role != ops.RelationRole.requires:
+        if self.role != ops.RelationRole.requires.name:
             return self._skipped_result_due_to_role(level, self.role)
         if level not in ("simple", "deep"):
             return self._skipped_result_due_to_level(level)

@@ -41,8 +41,9 @@ class RelationStub:
 
 
 class RelationMetaStub:
-    def __init__(self, interface_name: str) -> None:
+    def __init__(self, interface_name: str, role: str = "requires") -> None:
         self.interface_name = interface_name
+        self.role = role
 
 
 class CharmMetaStub:
@@ -59,8 +60,7 @@ def _make_validator(databag: dict[str, str], endpoint: str = "tracing") -> Traci
     app = AppStub()
     relation = RelationStub(app=app, databag=databag, name=endpoint)
     charm = cast(ops.CharmBase, CharmStub(endpoint=endpoint))
-    role = ops.RelationRole.requires
-    return TracingValidator(charm, cast(ops.Relation, relation), role)
+    return TracingValidator(charm, cast(ops.Relation, relation))
 
 
 # ---------------------------------------------------------------------------
@@ -100,7 +100,7 @@ class TestTracingValidatorSimple:
         # GIVEN a relation whose remote app is not yet known
         relation = RelationStub(app=None, databag={})
         validator = TracingValidator(
-            cast(ops.CharmBase, CharmStub()), cast(ops.Relation, relation), ops.RelationRole.requires
+            cast(ops.CharmBase, CharmStub()), cast(ops.Relation, relation)
         )
 
         # WHEN

@@ -41,8 +41,9 @@ class RelationStub:
 
 
 class RelationMetaStub:
-    def __init__(self, interface_name: str) -> None:
+    def __init__(self, interface_name: str, role: str = "requires") -> None:
         self.interface_name = interface_name
+        self.role = role
 
 
 class CharmMetaStub:
@@ -59,8 +60,7 @@ def _make_validator(databag: dict[str, str], endpoint: str = "db") -> MongoDBCli
     app = AppStub()
     relation = RelationStub(app=app, databag=databag, name=endpoint)
     charm = cast(ops.CharmBase, CharmStub(endpoint=endpoint))
-    role = ops.RelationRole.requires
-    return MongoDBClientValidator(charm, cast(ops.Relation, relation), role)
+    return MongoDBClientValidator(charm, cast(ops.Relation, relation))
 
 
 @dataclass
@@ -172,7 +172,6 @@ class TestMongoDBClientValidatorSimple:
         validator = MongoDBClientValidator(
             cast(ops.CharmBase, CharmStub(endpoint=relation.name)),
             cast(ops.Relation, relation),
-            ops.RelationRole.requires,
         )
 
         # WHEN

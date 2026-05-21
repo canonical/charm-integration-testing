@@ -31,6 +31,7 @@ class RelationStub:
 @dataclass
 class RelationMetaStub:
     interface_name: str | None
+    role: str = "requires"
 
 
 @dataclass
@@ -105,7 +106,7 @@ class TestValidationResult:
 class TestBaseValidator:
     def test_validate_returns_result(self) -> None:
         # GIVEN
-        validator = ConcreteValidator(object(), RelationStub(name="my-db", id=0), "requires")  # type: ignore[arg-type]
+        validator = ConcreteValidator(CharmStub(relation_name="my-db"), RelationStub(name="my-db", id=0))  # type: ignore[arg-type]
 
         # WHEN
         result = validator.validate(level="simple")
@@ -123,7 +124,7 @@ class TestBaseValidator:
     def test_databag_is_empty_when_relation_has_no_app(self) -> None:
         # GIVEN
         relation = RelationStub(name="my-db", id=1, app=None, data={})
-        validator = ConcreteValidator(CharmStub(relation_name="my-db"), relation, "requires")  # type: ignore[arg-type]
+        validator = ConcreteValidator(CharmStub(relation_name="my-db"), relation)  # type: ignore[arg-type]
 
         # WHEN / THEN
         assert validator.databag == {}
@@ -133,7 +134,7 @@ class TestBaseValidator:
         app = object()
         relation_data = {"username": "admin", "password": "secret"}
         relation = RelationStub(name="my-db", id=1, app=app, data={app: relation_data})
-        validator = ConcreteValidator(CharmStub(relation_name="my-db"), relation, "requires")  # type: ignore[arg-type]
+        validator = ConcreteValidator(CharmStub(relation_name="my-db"), relation)  # type: ignore[arg-type]
 
         # WHEN
         databag = validator.databag
@@ -153,7 +154,7 @@ class TestBaseValidator:
     def test_relation_exists_reflects_presence_of_relation_app(self, app: object | None, exists: bool) -> None:
         # GIVEN
         relation = RelationStub(name="my-db", id=1, app=app, data={})
-        validator = ConcreteValidator(CharmStub(relation_name="my-db"), relation, "requires")  # type: ignore[arg-type]
+        validator = ConcreteValidator(CharmStub(relation_name="my-db"), relation)  # type: ignore[arg-type]
 
         # WHEN / THEN
         assert validator.relation_exists() is exists
@@ -170,7 +171,7 @@ class TestBaseValidator:
         charm = CharmStub(
             relation_name="my-db", secrets={"secret:db-creds": {"username": "secret-user", "password": "pw"}}
         )
-        validator = ConcreteValidator(charm, relation, "requires")  # type: ignore[arg-type]
+        validator = ConcreteValidator(charm, relation)  # type: ignore[arg-type]
 
         # WHEN
         resolved = validator.resolve_secret("secret-uri", "username", "password")
@@ -189,7 +190,7 @@ class TestBaseValidator:
             data={app: {"username": "plain-user", "password": "plain-pw", "extra": "x"}},
         )
         charm = CharmStub(relation_name="my-db")
-        validator = ConcreteValidator(charm, relation, "requires")  # type: ignore[arg-type]
+        validator = ConcreteValidator(charm, relation)  # type: ignore[arg-type]
 
         # WHEN
         resolved = validator.resolve_secret("secret-uri", "username", "password", "missing")
@@ -207,7 +208,7 @@ class TestBaseValidator:
             app=app,
             data={app: {"host": "10.0.0.10", "port": ""}},
         )
-        validator = ConcreteValidator(CharmStub(relation_name="my-db"), relation, "requires")  # type: ignore[arg-type]
+        validator = ConcreteValidator(CharmStub(relation_name="my-db"), relation)  # type: ignore[arg-type]
 
         # WHEN
         check = validator.validate_schema(["host", "port", "user"])
@@ -220,7 +221,7 @@ class TestBaseValidator:
         # GIVEN
         app = object()
         relation = RelationStub(name="my-db", id=1, app=app, data={app: {"host": "10.0.0.10"}})
-        validator = ConcreteValidator(CharmStub(relation_name="my-db"), relation, "requires")  # type: ignore[arg-type]
+        validator = ConcreteValidator(CharmStub(relation_name="my-db"), relation)  # type: ignore[arg-type]
 
         # WHEN
         check = validator.validate_schema(
