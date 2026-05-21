@@ -21,7 +21,6 @@ from bundle_builder import (
 from .scheduler.states import State
 
 
-@pytest.mark.core
 @pytest.mark.state(requires=State.NO_BUNDLE, provides=State.NO_CONTROLLER)
 def test_build_bundle(
     target_charm: str,

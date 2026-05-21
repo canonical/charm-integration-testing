@@ -91,13 +91,6 @@ on:
         required: false
         default: true
         type: boolean
-      additional_tests:
-        description: >-
-          A pytest -k expression for extra tests to run on top of the base suite
-          when full_test_suite is false (e.g. "test_upgrade_charm or test_downgrade_charm").
-        required: false
-        default: ''
-        type: string
 env:
   DEBUG_SLEEP_SECONDS: 7200  # 2 hours
 jobs:
@@ -139,6 +132,14 @@ jobs:
           sudo mkswap /swapfile
           sudo swapon /swapfile
           sudo swapon --show
+      - name: Get Testmon cached result
+        id: testmon_cache
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5.0.5
+        if: ${{ inputs.full_test_suite == 'false' }}
+        with:
+          path: .testmon_data
+          key: testmon-${{ github.sha }}
+          restore-keys: testmon-
       - name: Generate Juju Model and Controller Name
         id: juju_resources
         shell: bash
@@ -166,7 +167,6 @@ jobs:
           model: ${{ steps.juju_resources.outputs.model }}
           controller: ${{ steps.juju_resources.outputs.controller }}
           full_test_suite: ${{ inputs.full_test_suite }}
-          additional_tests: ${{ inputs.additional_tests }}
         run: |
           echo "### Job inputs" >> $GITHUB_STEP_SUMMARY
           echo "| Input | Value |" >> $GITHUB_STEP_SUMMARY
@@ -189,7 +189,6 @@ jobs:
           echo "| Juju model | \`${model}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Juju controller | \`${controller}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Full Test Suite Ran | \`${full_test_suite}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Additional Tests | \`${additional_tests}\` |" >> $GITHUB_STEP_SUMMARY
       - name: Report Test Execution Start To Test Observer
         if: ${{ !cancelled() && env.TEST_OBSERVER_API != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/patch-test-execution
@@ -325,9 +324,13 @@ jobs:
           neighbor: ${{ inputs.neighbor }}
           platform: ${{ inputs.substrate == 'openstack' && 'machine' || inputs.substrate }}
           log_level: ${{ inputs.log_level }}
-          k_expr: ${{ steps.test_selection.outputs.k_expr }}
+          full_test_suite: ${{ inputs.full_test_suite }}
         run: |
-          TEST_SELECTION_ARGS=(); [[ -n "${k_expr}" ]] && TEST_SELECTION_ARGS=(-k "${k_expr}")
+          if [[ "${full_test_suite}" == "true" ]]; then
+            TEST_SELECTION_ARGS=(--testmon-noselect)
+          else
+            TEST_SELECTION_ARGS=(--testmon)
+          fi
           mkdir -p $HOME/openstack/images
           echo "junit_xml=$(realpath junit.xml)" >> $GITHUB_OUTPUT
           ./scripts/run-tests.sh \
@@ -373,6 +376,12 @@ jobs:
           job_uuid: ${{ inputs.environment }}/${{ inputs.execution_id }}
           event_name: test_end
           detail: Tests finished.
+      - name: Cache testmon data
+        if: ${{ !cancelled() && inputs.full_test_suite == 'false' }}
+        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5.0.5
+        with:
+          path: .testmon_data
+          key: testmon-${{ github.sha }}
       - name: Post bundles to github
         shell: bash
         continue-on-error: true

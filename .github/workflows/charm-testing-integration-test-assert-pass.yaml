@@ -36,10 +36,6 @@ on:
         type: boolean
         required: false
         default: false
-      additional_tests:
-        type: string
-        required: false
-        default: ''
     secrets:
       STG_TEST_OBSERVER_TOKEN:
         required: true
@@ -91,8 +87,7 @@ jobs:
               "series": "${{ inputs.target_base }}",
               "channel": "${{ inputs.target_track }}/${{ inputs.target_risk }}",
               "substrate": "${{ inputs.substrate }}",
-              "full_test_suite": "${{ inputs.full_test_suite }}",
-              "additional_tests": "${{ inputs.additional_tests }}"
+              "full_test_suite": "${{ inputs.full_test_suite }}"
             }
       - name: Ensure Charm Tests Workflow Success
         shell: bash

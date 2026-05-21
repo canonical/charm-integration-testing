@@ -84,7 +84,6 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       full_test_suite: ${{ steps.detect.outputs.full_test_suite }}
-      additional_tests: ${{ steps.detect.outputs.additional_tests }}
     steps:
       - name: Checkout repo
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -98,7 +97,6 @@ jobs:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
           import os
-          import re
           import subprocess
           # Base ref is the branch against which the PR is being merged
           base_ref = os.environ["BASE_REF"]
@@ -112,13 +110,19 @@ jobs:
           )
           changed_files = result.stdout.splitlines()
           print("Changed files:\n" + "\n".join(changed_files))
+
+          # A list of critical files that are not covered by tests
+          # If they're changed, run the  full test suite to be safe
           CRITICAL_PATTERNS = [
+<<<<<<< HEAD
               "charm_integration_testing/test_suite/conftest.py",
               "charm_integration_testing/test_suite/scheduler/",
               "charm_integration_testing/juju/",
               "charm_integration_testing/extensions/",
               "charm_integration_testing/kubernetes_client/",
               "charm_integration_testing/utils/",
+=======
+>>>>>>> a039e82 (trying out testmon)
               "scripts/run-tests.sh",
           ]
           github_output = os.environ["GITHUB_OUTPUT"]
@@ -127,8 +131,8 @@ jobs:
                   print(f"Critical path changed ({pattern}). Running full test suite.")
                   with open(github_output, "a") as fh:
                       fh.write("full_test_suite=true\n")
-                      fh.write("additional_tests=\n")
                   raise SystemExit(0)
+<<<<<<< HEAD
           test_pattern = re.compile(
               r"^charm_integration_testing/test_suite/(test_[^/]+)\.py$"
           )
@@ -140,9 +144,10 @@ jobs:
               
           print(f"Affected tests: {affected}")
           additional_tests = ",".join(affected)
+=======
+>>>>>>> a039e82 (trying out testmon)
           with open(github_output, "a") as fh:
               fh.write("full_test_suite=false\n")
-              fh.write(f"additional_tests={additional_tests}\n")
   charm-testing-integration-tests:
     needs: detect-affected-tests
     uses: ./.github/workflows/charm-testing-integration-tests.yaml
@@ -151,7 +156,6 @@ jobs:
       actions: write
     with:
       full_test_suite: ${{ needs.detect-affected-tests.outputs.full_test_suite == 'true' }}
-      additional_tests: ${{ needs.detect-affected-tests.outputs.additional_tests }}
   validators-unit-tests:
     runs-on: ubuntu-latest
     steps:
