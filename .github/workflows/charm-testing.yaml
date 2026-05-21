@@ -208,6 +208,13 @@ jobs:
           echo "| \`downgrade_revision\` | \`${downgrade_revision}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| \`channel\` | \`${channel}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| \`series\` | \`${series}\` |" >> $GITHUB_STEP_SUMMARY
+      - name: Get Testmon cached result
+        id: testmon_cache
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5.0.5
+        if: ${{ !inputs.full_test_suite }}
+        with:
+          path: .testmon_data
+          key: testmon-${{ github.sha }}
       - name: Report Test Execution Start To Test Observer
         if: ${{ !cancelled() && env.TEST_OBSERVER_API != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/patch-test-execution
@@ -501,7 +508,7 @@ jobs:
           event_name: test_end
           detail: Tests finished.
       - name: Cache testmon data
-        if: ${{ !cancelled() && inputs.full_test_suite == 'false' }}
+        if: ${{ !cancelled() && !inputs.full_test_suite}}
         uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5.0.5
         with:
           path: .testmon_data
