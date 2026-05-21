@@ -38,6 +38,6 @@ jobs:
             echo "No changes to merge from main to production"
             exit 0
           fi
-          git checkout -B production origin/production                                                                             
+          git checkout -B production origin/production
           git merge --ff-only origin/main
           git push origin production
