@@ -218,14 +218,16 @@ jobs:
         uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5.0.5
         if: ${{ !inputs.full_test_suite }}
         with:
-          path: .testmon_data
-          key: testmon-data
+          path: .testmondata
+          key: testmon-${{ github.ref_name }}-${{ github.run_id }}
+          restore-keys: |
+            testmon-${{ github.ref_name }}-
       - name: Testmon args
         id: testmon_args
         if: ${{ !inputs.full_test_suite }}
         shell: bash
         run: |
-          if [[ -f .testmon_data/lastfailed.txt ]]; then
+          if [[ -f .testmondata ]]; then
             echo "Found testmon data from previous run. Running only failed tests."
             echo "testmon_args=--testmon" >> "$GITHUB_OUTPUT"
           else
@@ -532,8 +534,8 @@ jobs:
         if: ${{ !cancelled() && !inputs.full_test_suite }}
         uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5.0.5
         with:
-          path: .testmon_data
-          key: testmon-data
+          path: .testmondata
+          key: testmon-${{ github.ref_name }}-${{ github.run_id }}
       - name: Post bundles to github
         shell: bash
         continue-on-error: true
