@@ -114,15 +114,6 @@ jobs:
           # A list of critical files that are not covered by tests
           # If they're changed, run the  full test suite to be safe
           CRITICAL_PATTERNS = [
-<<<<<<< HEAD
-              "charm_integration_testing/test_suite/conftest.py",
-              "charm_integration_testing/test_suite/scheduler/",
-              "charm_integration_testing/juju/",
-              "charm_integration_testing/extensions/",
-              "charm_integration_testing/kubernetes_client/",
-              "charm_integration_testing/utils/",
-=======
->>>>>>> a039e82 (trying out testmon)
               "scripts/run-tests.sh",
           ]
           github_output = os.environ["GITHUB_OUTPUT"]
@@ -132,20 +123,6 @@ jobs:
                   with open(github_output, "a") as fh:
                       fh.write("full_test_suite=true\n")
                   raise SystemExit(0)
-<<<<<<< HEAD
-          test_pattern = re.compile(
-              r"^charm_integration_testing/test_suite/(test_[^/]+)\.py$"
-          )
-          affected = [
-              m.group(1)
-              for f in changed_files
-              if (m := test_pattern.match(f))
-          ]
-              
-          print(f"Affected tests: {affected}")
-          additional_tests = ",".join(affected)
-=======
->>>>>>> a039e82 (trying out testmon)
           with open(github_output, "a") as fh:
               fh.write("full_test_suite=false\n")
   charm-testing-integration-tests:
