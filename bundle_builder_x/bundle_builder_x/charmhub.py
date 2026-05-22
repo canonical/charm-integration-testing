@@ -26,6 +26,7 @@ from .charm import (
     CharmConfigValue,
     CharmEndpoint,
     CharmResourceValue,
+    EndpointScope,
     EndpointType,
 )
 from .charmhub_http import (
@@ -766,7 +767,7 @@ class CharmhubClient:
                 interface=JUJU_INFO_INTERFACE,
                 optional=True,
                 limit=None,
-                scope="global",
+                scope=EndpointScope.GLOBAL,
                 cyclic=False,
                 features=frozenset(),
             )

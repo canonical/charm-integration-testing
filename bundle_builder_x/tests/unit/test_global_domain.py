@@ -3,7 +3,7 @@
 
 """Tests for global multi-model domain behavior."""
 
-from bundle_builder_x.charm import Charm, CharmChannel, CharmEndpoint, EndpointType
+from bundle_builder_x.charm import Charm, CharmChannel, CharmEndpoint, EndpointScope, EndpointType
 from bundle_builder_x.domain import (
     Domain,
     DomainApplication,
@@ -395,11 +395,15 @@ class TestAddCharmToDomainContainerScopeGating:
         domain = _make_domain({ModelRef(name="m"): DomainModel(arch="amd64", platform="machine", juju_version=_JUJU)})
         principal = _make_charm(
             "ubuntu",
-            {"juju-info": CharmEndpoint(type=EndpointType.PROVIDES, interface="juju-info", scope="global")},
+            {"juju-info": CharmEndpoint(type=EndpointType.PROVIDES, interface="juju-info", scope=EndpointScope.GLOBAL)},
         )
         subordinate = _make_charm(
             "nrpe",
-            {"general-info": CharmEndpoint(type=EndpointType.REQUIRES, interface="juju-info", scope="container")},
+            {
+                "general-info": CharmEndpoint(
+                    type=EndpointType.REQUIRES, interface="juju-info", scope=EndpointScope.CONTAINER
+                )
+            },
         )
         add_charm_to_domain(principal, domain, ModelRef(name="m"))
         add_charm_to_domain(subordinate, domain, ModelRef(name="m"))
@@ -413,11 +417,15 @@ class TestAddCharmToDomainContainerScopeGating:
         )
         principal = _make_charm(
             "ubuntu",
-            {"juju-info": CharmEndpoint(type=EndpointType.PROVIDES, interface="juju-info", scope="global")},
+            {"juju-info": CharmEndpoint(type=EndpointType.PROVIDES, interface="juju-info", scope=EndpointScope.GLOBAL)},
         )
         subordinate = _make_charm(
             "nrpe",
-            {"general-info": CharmEndpoint(type=EndpointType.REQUIRES, interface="juju-info", scope="container")},
+            {
+                "general-info": CharmEndpoint(
+                    type=EndpointType.REQUIRES, interface="juju-info", scope=EndpointScope.CONTAINER
+                )
+            },
         )
         add_charm_to_domain(principal, domain, ModelRef(name="k"))
         add_charm_to_domain(subordinate, domain, ModelRef(name="k"))
@@ -443,11 +451,19 @@ class TestAddCharmToDomainContainerScopeGating:
         )
         principal = _make_charm(
             "app",
-            {"custom-sub": CharmEndpoint(type=EndpointType.PROVIDES, interface="custom-sub-iface", scope="global")},
+            {
+                "custom-sub": CharmEndpoint(
+                    type=EndpointType.PROVIDES, interface="custom-sub-iface", scope=EndpointScope.GLOBAL
+                )
+            },
         )
         subordinate = _make_charm(
             "sub",
-            {"custom-sub": CharmEndpoint(type=EndpointType.REQUIRES, interface="custom-sub-iface", scope="container")},
+            {
+                "custom-sub": CharmEndpoint(
+                    type=EndpointType.REQUIRES, interface="custom-sub-iface", scope=EndpointScope.CONTAINER
+                )
+            },
         )
         add_charm_to_domain(principal, domain, ModelRef(name="k"))
         add_charm_to_domain(subordinate, domain, ModelRef(name="k"))
@@ -463,11 +479,15 @@ class TestAddCharmToDomainContainerScopeGating:
         )
         principal = _make_charm(
             "ubuntu",
-            {"juju-info": CharmEndpoint(type=EndpointType.PROVIDES, interface="juju-info", scope="global")},
+            {"juju-info": CharmEndpoint(type=EndpointType.PROVIDES, interface="juju-info", scope=EndpointScope.GLOBAL)},
         )
         subordinate = _make_charm(
             "nrpe",
-            {"general-info": CharmEndpoint(type=EndpointType.REQUIRES, interface="juju-info", scope="container")},
+            {
+                "general-info": CharmEndpoint(
+                    type=EndpointType.REQUIRES, interface="juju-info", scope=EndpointScope.CONTAINER
+                )
+            },
         )
         add_charm_to_domain(principal, domain, ModelRef(name="m"))
         add_charm_to_domain(subordinate, domain, ModelRef(name="k"))
@@ -484,11 +504,15 @@ class TestAddCharmToDomainContainerScopeGating:
         )
         principal = _make_charm(
             "ubuntu",
-            {"juju-info": CharmEndpoint(type=EndpointType.PROVIDES, interface="juju-info", scope="global")},
+            {"juju-info": CharmEndpoint(type=EndpointType.PROVIDES, interface="juju-info", scope=EndpointScope.GLOBAL)},
         )
         subordinate = _make_charm(
             "nrpe",
-            {"general-info": CharmEndpoint(type=EndpointType.REQUIRES, interface="juju-info", scope="container")},
+            {
+                "general-info": CharmEndpoint(
+                    type=EndpointType.REQUIRES, interface="juju-info", scope=EndpointScope.CONTAINER
+                )
+            },
         )
         add_charm_to_domain(principal, domain, ModelRef(name="m1"))
         add_charm_to_domain(subordinate, domain, ModelRef(name="m2"))

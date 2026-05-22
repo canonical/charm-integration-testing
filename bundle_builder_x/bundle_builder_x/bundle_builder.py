@@ -32,7 +32,7 @@ from .assertion_tags import (
     SubordinateBaseMismatchTag,
 )
 from .bundle import Solution
-from .charm import Charm, CharmChannel, EndpointType
+from .charm import Charm, CharmChannel, EndpointScope, EndpointType
 from .charmhub import CharmhubClient
 from .charmhub_http import CharmReleaseNotFoundException
 from .constraints import add_constraints
@@ -398,7 +398,7 @@ class BundleBuilder:
 
         # For container-scoped endpoints the other charm must share the same base
         ubuntu_version: str | None = None
-        if endpoint.scope == "container":
+        if endpoint.scope == EndpointScope.CONTAINER:
             ubuntu_version = domain.charms[charm_id].spec.ubuntu_version
 
         results: list[Charm] = []

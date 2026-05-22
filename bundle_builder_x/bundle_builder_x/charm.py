@@ -80,6 +80,11 @@ class EndpointType(str, Enum):
     PROVIDES = "provides"
 
 
+class EndpointScope(str, Enum):
+    CONTAINER = "container"
+    GLOBAL = "global"
+
+
 @total_ordering
 class CharmChannel(BaseModel):
     model_config = ConfigDict(frozen=True)
@@ -129,7 +134,7 @@ class CharmEndpoint(BaseModel):
     interface: str
     optional: bool = Field(default=False)
     limit: int | None = Field(default=None)
-    scope: str | None = Field(default=None)
+    scope: EndpointScope | None = Field(default=None)
     cyclic: bool = Field(default=False)
     features: frozenset[str] = Field(default_factory=frozenset)
 

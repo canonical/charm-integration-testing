@@ -36,6 +36,7 @@ from .assertion_tags import (
     EndpointRespectsLimitTag,
     SubordinateBaseMismatchTag,
 )
+from .charm import EndpointScope
 from .domain import (
     Domain,
     DomainApplicationIntegration,
@@ -455,11 +456,11 @@ def add_subordinate_constraints(solver: z3.Solver, domain: Domain) -> None:
         # A container-scoped endpoint means this is a subordinate-principal relationship.
         # Conventionally the subordinate requires with scope:container, but handle the
         # reverse (provides side has container scope) for completeness.
-        if req_endpoint.scope != "container" and prov_endpoint.scope != "container":
+        if req_endpoint.scope != EndpointScope.CONTAINER and prov_endpoint.scope != EndpointScope.CONTAINER:
             continue
 
         # Identify subordinate and principal
-        if req_endpoint.scope == "container":
+        if req_endpoint.scope == EndpointScope.CONTAINER:
             sub_charm, sub_id = req_charm, integration.requires_charm_id
             principal_charm, principal_id = prov_charm, integration.provides_charm_id
         else:
@@ -478,12 +479,12 @@ def add_subordinate_constraints(solver: z3.Solver, domain: Domain) -> None:
                 subordinate_charm_name=sub_charm.spec.name,
                 subordinate_charm_id=sub_id,
                 subordinate_endpoint=integration.requires_endpoint
-                if req_endpoint.scope == "container"
+                if req_endpoint.scope == EndpointScope.CONTAINER
                 else integration.provides_endpoint,
                 principal_charm_name=principal_charm.spec.name,
                 principal_charm_id=principal_id,
                 principal_endpoint=integration.provides_endpoint
-                if req_endpoint.scope == "container"
+                if req_endpoint.scope == EndpointScope.CONTAINER
                 else integration.requires_endpoint,
                 subordinate_base=sub_charm.spec.ubuntu_version,
                 principal_base=principal_charm.spec.ubuntu_version,

@@ -35,7 +35,7 @@ Covers:
 import pytest
 
 from bundle_builder_x.bundle_builder import BundleBuilder, UncompletableBundleError
-from bundle_builder_x.charm import CharmEndpoint, EndpointType
+from bundle_builder_x.charm import CharmEndpoint, EndpointScope, EndpointType
 from bundle_builder_x.spec import AppSpec, ModelSpec
 
 from .conftest import JUJU_VERSION, CharmhubClientStub, build_multi_model, build_single_model, make_charm
@@ -50,7 +50,7 @@ class TestSubordinateOnMachine:
             "ubuntu",
             endpoints={
                 "juju-info": CharmEndpoint(
-                    type=EndpointType.PROVIDES, interface="juju-info", optional=True, scope="global"
+                    type=EndpointType.PROVIDES, interface="juju-info", optional=True, scope=EndpointScope.GLOBAL
                 ),
             },
         )
@@ -58,7 +58,7 @@ class TestSubordinateOnMachine:
             "nrpe",
             endpoints={
                 "general-info": CharmEndpoint(
-                    type=EndpointType.REQUIRES, interface="juju-info", optional=False, scope="container"
+                    type=EndpointType.REQUIRES, interface="juju-info", optional=False, scope=EndpointScope.CONTAINER
                 ),
                 "monitors": CharmEndpoint(type=EndpointType.PROVIDES, interface="monitors", optional=True),
             },
@@ -89,7 +89,7 @@ class TestSubordinateOnMachine:
             "ubuntu",
             endpoints={
                 "juju-info": CharmEndpoint(
-                    type=EndpointType.PROVIDES, interface="juju-info", optional=True, scope="global"
+                    type=EndpointType.PROVIDES, interface="juju-info", optional=True, scope=EndpointScope.GLOBAL
                 ),
                 "monitors": CharmEndpoint(type=EndpointType.REQUIRES, interface="monitors", optional=False),
             },
@@ -98,7 +98,7 @@ class TestSubordinateOnMachine:
             "nrpe",
             endpoints={
                 "general-info": CharmEndpoint(
-                    type=EndpointType.REQUIRES, interface="juju-info", optional=True, scope="container"
+                    type=EndpointType.REQUIRES, interface="juju-info", optional=True, scope=EndpointScope.CONTAINER
                 ),
                 "monitors": CharmEndpoint(type=EndpointType.PROVIDES, interface="monitors", optional=True),
             },
@@ -127,7 +127,7 @@ class TestSubordinateBlockedOnKubernetes:
             "app",
             endpoints={
                 "juju-info": CharmEndpoint(
-                    type=EndpointType.PROVIDES, interface="juju-info", optional=True, scope="global"
+                    type=EndpointType.PROVIDES, interface="juju-info", optional=True, scope=EndpointScope.GLOBAL
                 ),
             },
         )
@@ -135,7 +135,7 @@ class TestSubordinateBlockedOnKubernetes:
             "nrpe",
             endpoints={
                 "general-info": CharmEndpoint(
-                    type=EndpointType.REQUIRES, interface="juju-info", optional=False, scope="container"
+                    type=EndpointType.REQUIRES, interface="juju-info", optional=False, scope=EndpointScope.CONTAINER
                 ),
             },
             subordinate=True,
@@ -161,7 +161,7 @@ class TestSubordinateBlockedOnKubernetes:
             "app",
             endpoints={
                 "juju-info": CharmEndpoint(
-                    type=EndpointType.PROVIDES, interface="juju-info", optional=True, scope="global"
+                    type=EndpointType.PROVIDES, interface="juju-info", optional=True, scope=EndpointScope.GLOBAL
                 ),
             },
         )
@@ -169,7 +169,7 @@ class TestSubordinateBlockedOnKubernetes:
             "nrpe",
             endpoints={
                 "general-info": CharmEndpoint(
-                    type=EndpointType.REQUIRES, interface="juju-info", optional=True, scope="container"
+                    type=EndpointType.REQUIRES, interface="juju-info", optional=True, scope=EndpointScope.CONTAINER
                 ),
             },
             subordinate=True,
@@ -204,7 +204,7 @@ class TestSubordinateCrossModelBlocked:
             "ubuntu",
             endpoints={
                 "juju-info": CharmEndpoint(
-                    type=EndpointType.PROVIDES, interface="juju-info", optional=True, scope="global"
+                    type=EndpointType.PROVIDES, interface="juju-info", optional=True, scope=EndpointScope.GLOBAL
                 ),
             },
         )
@@ -212,7 +212,7 @@ class TestSubordinateCrossModelBlocked:
             "nrpe",
             endpoints={
                 "general-info": CharmEndpoint(
-                    type=EndpointType.REQUIRES, interface="juju-info", optional=True, scope="container"
+                    type=EndpointType.REQUIRES, interface="juju-info", optional=True, scope=EndpointScope.CONTAINER
                 ),
             },
             subordinate=True,
@@ -253,7 +253,7 @@ class TestSubordinateBaseMatching:
             "ubuntu",
             endpoints={
                 "juju-info": CharmEndpoint(
-                    type=EndpointType.PROVIDES, interface="juju-info", optional=True, scope="global"
+                    type=EndpointType.PROVIDES, interface="juju-info", optional=True, scope=EndpointScope.GLOBAL
                 ),
             },
             ubuntu_version="22.04",
@@ -262,7 +262,7 @@ class TestSubordinateBaseMatching:
             "nrpe",
             endpoints={
                 "general-info": CharmEndpoint(
-                    type=EndpointType.REQUIRES, interface="juju-info", optional=False, scope="container"
+                    type=EndpointType.REQUIRES, interface="juju-info", optional=False, scope=EndpointScope.CONTAINER
                 ),
             },
             ubuntu_version="22.04",
@@ -292,7 +292,7 @@ class TestSubordinateBaseMatching:
             "ubuntu",
             endpoints={
                 "juju-info": CharmEndpoint(
-                    type=EndpointType.PROVIDES, interface="juju-info", optional=True, scope="global"
+                    type=EndpointType.PROVIDES, interface="juju-info", optional=True, scope=EndpointScope.GLOBAL
                 ),
             },
             ubuntu_version="22.04",
@@ -301,7 +301,7 @@ class TestSubordinateBaseMatching:
             "nrpe",
             endpoints={
                 "general-info": CharmEndpoint(
-                    type=EndpointType.REQUIRES, interface="juju-info", optional=False, scope="container"
+                    type=EndpointType.REQUIRES, interface="juju-info", optional=False, scope=EndpointScope.CONTAINER
                 ),
             },
             ubuntu_version="24.04",
@@ -312,7 +312,7 @@ class TestSubordinateBaseMatching:
             "nrpe",
             endpoints={
                 "general-info": CharmEndpoint(
-                    type=EndpointType.REQUIRES, interface="juju-info", optional=False, scope="container"
+                    type=EndpointType.REQUIRES, interface="juju-info", optional=False, scope=EndpointScope.CONTAINER
                 ),
             },
             ubuntu_version="22.04",
@@ -342,7 +342,7 @@ class TestSubordinateBaseMatching:
             "ubuntu",
             endpoints={
                 "juju-info": CharmEndpoint(
-                    type=EndpointType.PROVIDES, interface="juju-info", optional=True, scope="global"
+                    type=EndpointType.PROVIDES, interface="juju-info", optional=True, scope=EndpointScope.GLOBAL
                 ),
             },
             ubuntu_version="22.04",
@@ -351,7 +351,7 @@ class TestSubordinateBaseMatching:
             "nrpe",
             endpoints={
                 "general-info": CharmEndpoint(
-                    type=EndpointType.REQUIRES, interface="juju-info", optional=False, scope="container"
+                    type=EndpointType.REQUIRES, interface="juju-info", optional=False, scope=EndpointScope.CONTAINER
                 ),
             },
             ubuntu_version="24.04",
@@ -378,7 +378,7 @@ class TestSubordinateBaseMatching:
             "app",
             endpoints={
                 "database": CharmEndpoint(
-                    type=EndpointType.REQUIRES, interface="pgsql", optional=False, scope="global"
+                    type=EndpointType.REQUIRES, interface="pgsql", optional=False, scope=EndpointScope.GLOBAL
                 ),
             },
             ubuntu_version="22.04",
@@ -386,7 +386,9 @@ class TestSubordinateBaseMatching:
         db = make_charm(
             "database",
             endpoints={
-                "database": CharmEndpoint(type=EndpointType.PROVIDES, interface="pgsql", optional=True, scope="global"),
+                "database": CharmEndpoint(
+                    type=EndpointType.PROVIDES, interface="pgsql", optional=True, scope=EndpointScope.GLOBAL
+                ),
             },
             ubuntu_version="24.04",
         )
@@ -417,10 +419,10 @@ class TestSubordinateMultipleContainerEndpoints:
             "ubuntu",
             endpoints={
                 "juju-info": CharmEndpoint(
-                    type=EndpointType.PROVIDES, interface="juju-info", optional=True, scope="global"
+                    type=EndpointType.PROVIDES, interface="juju-info", optional=True, scope=EndpointScope.GLOBAL
                 ),
                 "juju-monitoring": CharmEndpoint(
-                    type=EndpointType.PROVIDES, interface="juju-monitoring", optional=True, scope="global"
+                    type=EndpointType.PROVIDES, interface="juju-monitoring", optional=True, scope=EndpointScope.GLOBAL
                 ),
             },
             ubuntu_version="22.04",
@@ -429,10 +431,13 @@ class TestSubordinateMultipleContainerEndpoints:
             "nrpe",
             endpoints={
                 "general-info": CharmEndpoint(
-                    type=EndpointType.REQUIRES, interface="juju-info", optional=False, scope="container"
+                    type=EndpointType.REQUIRES, interface="juju-info", optional=False, scope=EndpointScope.CONTAINER
                 ),
                 "juju-monitoring": CharmEndpoint(
-                    type=EndpointType.REQUIRES, interface="juju-monitoring", optional=True, scope="container"
+                    type=EndpointType.REQUIRES,
+                    interface="juju-monitoring",
+                    optional=True,
+                    scope=EndpointScope.CONTAINER,
                 ),
             },
             ubuntu_version="22.04",
@@ -461,10 +466,10 @@ class TestSubordinateMultipleContainerEndpoints:
             "ubuntu",
             endpoints={
                 "juju-info": CharmEndpoint(
-                    type=EndpointType.PROVIDES, interface="juju-info", optional=True, scope="global"
+                    type=EndpointType.PROVIDES, interface="juju-info", optional=True, scope=EndpointScope.GLOBAL
                 ),
                 "juju-monitoring": CharmEndpoint(
-                    type=EndpointType.PROVIDES, interface="juju-monitoring", optional=True, scope="global"
+                    type=EndpointType.PROVIDES, interface="juju-monitoring", optional=True, scope=EndpointScope.GLOBAL
                 ),
             },
             ubuntu_version="22.04",
@@ -473,10 +478,13 @@ class TestSubordinateMultipleContainerEndpoints:
             "nrpe",
             endpoints={
                 "general-info": CharmEndpoint(
-                    type=EndpointType.REQUIRES, interface="juju-info", optional=False, scope="container"
+                    type=EndpointType.REQUIRES, interface="juju-info", optional=False, scope=EndpointScope.CONTAINER
                 ),
                 "juju-monitoring": CharmEndpoint(
-                    type=EndpointType.REQUIRES, interface="juju-monitoring", optional=True, scope="container"
+                    type=EndpointType.REQUIRES,
+                    interface="juju-monitoring",
+                    optional=True,
+                    scope=EndpointScope.CONTAINER,
                 ),
             },
             ubuntu_version="24.04",
@@ -486,10 +494,13 @@ class TestSubordinateMultipleContainerEndpoints:
             "nrpe",
             endpoints={
                 "general-info": CharmEndpoint(
-                    type=EndpointType.REQUIRES, interface="juju-info", optional=False, scope="container"
+                    type=EndpointType.REQUIRES, interface="juju-info", optional=False, scope=EndpointScope.CONTAINER
                 ),
                 "juju-monitoring": CharmEndpoint(
-                    type=EndpointType.REQUIRES, interface="juju-monitoring", optional=True, scope="container"
+                    type=EndpointType.REQUIRES,
+                    interface="juju-monitoring",
+                    optional=True,
+                    scope=EndpointScope.CONTAINER,
                 ),
             },
             ubuntu_version="22.04",

@@ -6,7 +6,7 @@ from typing import cast
 import pytest
 from pydantic.dataclasses import dataclass
 
-from bundle_builder_x.charm import CharmChannel, EndpointType
+from bundle_builder_x.charm import CharmChannel, EndpointScope, EndpointType
 from bundle_builder_x.charmhub import CharmhubClient
 from bundle_builder_x.charmhub_http import (
     CharmConfigSchema,
@@ -535,7 +535,7 @@ class TestCharmhubClient:
             assert ep.type == EndpointType.PROVIDES
             assert ep.interface == "juju-info"
             assert ep.optional is True
-            assert ep.scope == "global"
+            assert ep.scope == EndpointScope.GLOBAL
 
         def test_subordinate_does_not_get_implicit_juju_info(self) -> None:
             # Subordinate charms explicitly REQUIRE juju-info; they do not implicitly provide it.
@@ -561,7 +561,7 @@ class TestCharmhubClient:
             )
             client = _client({})
             endpoints = client._get_charm_endpoints("nrpe", metadata, _CHANNEL)
-            assert endpoints["general-info"].scope == "container"
+            assert endpoints["general-info"].scope == EndpointScope.CONTAINER
 
         def test_scope_none_when_metadata_has_no_scope(self) -> None:
             client = _client({})
@@ -583,7 +583,7 @@ class TestCharmMetadataSubordinateFields:
 
     def test_endpoint_scope_stored(self) -> None:
         ep = CharmMetadata.Endpoint(interface="juju-info", scope="container")
-        assert ep.scope == "container"
+        assert ep.scope == EndpointScope.CONTAINER
 
     # ---------------------------------------------------------------------------
     # TestGetCharmConfigs

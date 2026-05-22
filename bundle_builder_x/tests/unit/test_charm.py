@@ -13,7 +13,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from bundle_builder_x.charm import Charm, CharmChannel, CharmEndpoint, EndpointType
+from bundle_builder_x.charm import Charm, CharmChannel, CharmEndpoint, EndpointScope, EndpointType
 
 
 def _ch(track: str, risk: str) -> CharmChannel:
@@ -65,12 +65,12 @@ class TestCharmEndpointScope:
         assert ep.scope is None
 
     def test_scope_stored_when_provided(self) -> None:
-        ep = CharmEndpoint(type=EndpointType.REQUIRES, interface="juju-info", scope="container")
-        assert ep.scope == "container"
+        ep = CharmEndpoint(type=EndpointType.REQUIRES, interface="juju-info", scope=EndpointScope.CONTAINER)
+        assert ep.scope == EndpointScope.CONTAINER
 
     def test_scope_global_stored(self) -> None:
-        ep = CharmEndpoint(type=EndpointType.PROVIDES, interface="juju-info", scope="global")
-        assert ep.scope == "global"
+        ep = CharmEndpoint(type=EndpointType.PROVIDES, interface="juju-info", scope=EndpointScope.GLOBAL)
+        assert ep.scope == EndpointScope.GLOBAL
 
 
 class TestCharmSubordinateField:

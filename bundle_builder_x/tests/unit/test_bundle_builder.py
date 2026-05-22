@@ -19,7 +19,7 @@ from unittest.mock import MagicMock
 
 from bundle_builder_x.assertion_tags import SubordinateBaseMismatchTag
 from bundle_builder_x.bundle_builder import BundleBuilder
-from bundle_builder_x.charm import Charm, CharmChannel, CharmEndpoint, EndpointType
+from bundle_builder_x.charm import Charm, CharmChannel, CharmEndpoint, EndpointScope, EndpointType
 from bundle_builder_x.charmhub import CharmhubClient
 from bundle_builder_x.charmhub_http import CharmReleaseNotFoundException
 from bundle_builder_x.domain import (
@@ -60,7 +60,7 @@ def _domain_with_base_mismatch() -> Domain:
     add_charm_to_domain(
         _make_charm(
             "ubuntu",
-            {"juju-info": CharmEndpoint(type=EndpointType.PROVIDES, interface="juju-info", scope="global")},
+            {"juju-info": CharmEndpoint(type=EndpointType.PROVIDES, interface="juju-info", scope=EndpointScope.GLOBAL)},
             ubuntu_version="22.04",
         ),
         domain,
@@ -69,7 +69,11 @@ def _domain_with_base_mismatch() -> Domain:
     add_charm_to_domain(
         _make_charm(
             "nrpe",
-            {"general-info": CharmEndpoint(type=EndpointType.REQUIRES, interface="juju-info", scope="container")},
+            {
+                "general-info": CharmEndpoint(
+                    type=EndpointType.REQUIRES, interface="juju-info", scope=EndpointScope.CONTAINER
+                )
+            },
             ubuntu_version="24.04",
         ),
         domain,
@@ -98,7 +102,11 @@ class TestHandleSubordinateBaseMismatch:
         domain = _domain_with_base_mismatch()
         nrpe_2204 = _make_charm(
             "nrpe",
-            {"general-info": CharmEndpoint(type=EndpointType.REQUIRES, interface="juju-info", scope="container")},
+            {
+                "general-info": CharmEndpoint(
+                    type=EndpointType.REQUIRES, interface="juju-info", scope=EndpointScope.CONTAINER
+                )
+            },
             ubuntu_version="22.04",
         )
         mock_charmhub = MagicMock(spec=CharmhubClient)
@@ -119,7 +127,7 @@ class TestHandleSubordinateBaseMismatch:
         domain = _domain_with_base_mismatch()
         ubuntu_2404 = _make_charm(
             "ubuntu",
-            {"juju-info": CharmEndpoint(type=EndpointType.PROVIDES, interface="juju-info", scope="global")},
+            {"juju-info": CharmEndpoint(type=EndpointType.PROVIDES, interface="juju-info", scope=EndpointScope.GLOBAL)},
             ubuntu_version="24.04",
         )
         mock_charmhub = MagicMock(spec=CharmhubClient)
@@ -163,7 +171,11 @@ class TestGetCharmsForEndpoint:
         add_charm_to_domain(
             _make_charm(
                 "nrpe",
-                {"general-info": CharmEndpoint(type=EndpointType.REQUIRES, interface="juju-info", scope="container")},
+                {
+                    "general-info": CharmEndpoint(
+                        type=EndpointType.REQUIRES, interface="juju-info", scope=EndpointScope.CONTAINER
+                    )
+                },
                 ubuntu_version=ubuntu_version,
             ),
             domain,
@@ -181,7 +193,9 @@ class TestGetCharmsForEndpoint:
             applications={"app": DomainApplication(charm="app")},
         )
         charm_id = add_charm_to_domain(
-            _make_charm("app", {"db": CharmEndpoint(type=EndpointType.REQUIRES, interface="pgsql", scope="global")}),
+            _make_charm(
+                "app", {"db": CharmEndpoint(type=EndpointType.REQUIRES, interface="pgsql", scope=EndpointScope.GLOBAL)}
+            ),
             domain,
             ModelRef(name="m"),
         )
@@ -192,7 +206,7 @@ class TestGetCharmsForEndpoint:
         domain = self._domain_with_subordinate(ubuntu_version="22.04")
         ubuntu = _make_charm(
             "ubuntu",
-            {"juju-info": CharmEndpoint(type=EndpointType.PROVIDES, interface="juju-info", scope="global")},
+            {"juju-info": CharmEndpoint(type=EndpointType.PROVIDES, interface="juju-info", scope=EndpointScope.GLOBAL)},
         )
         mock_charmhub = MagicMock(spec=CharmhubClient)
         mock_charmhub.find_charms.return_value = {"ubuntu"}
