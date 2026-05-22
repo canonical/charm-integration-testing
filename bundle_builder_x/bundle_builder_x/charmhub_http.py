@@ -69,12 +69,14 @@ class CharmMetadata(BaseModel):
         interface: str
         optional: bool | None = None
         limit: int | None = None
+        scope: str | None = None
 
     class Resource(BaseModel):
         model_config = ConfigDict(frozen=True)
 
         type: str
 
+    subordinate: bool = False
     peers: dict[str, Endpoint] = Field(default_factory=dict)
     requires: dict[str, Endpoint] = Field(default_factory=dict)
     provides: dict[str, Endpoint] = Field(default_factory=dict)

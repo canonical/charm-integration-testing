@@ -34,6 +34,7 @@ from .assertion_tags import (
     EndpointCountMatchesIntegrationsTag,
     EndpointIntegratedMatchesCountTag,
     EndpointRespectsLimitTag,
+    SubordinateBaseMismatchTag,
 )
 from .domain import (
     Domain,
@@ -438,8 +439,61 @@ def add_charm_dependency_constraints(solver: z3.Solver, domain: Domain) -> None:
         )
 
 
+def add_subordinate_constraints(solver: z3.Solver, domain: Domain) -> None:
+    """Enforce base matching for container-scoped integrations (subordinate-principal).
+
+    In Juju, a subordinate charm must share the same base (Ubuntu version) as its
+    principal. Container-scoped integrations indicate a subordinate relationship.
+    When such an integration is active, both charms must have the same ubuntu_version.
+    """
+    for integration in domain.charm_integrations:
+        req_charm = domain.charms[integration.requires_charm_id]
+        prov_charm = domain.charms[integration.provides_charm_id]
+        req_endpoint = req_charm.spec.endpoints[integration.requires_endpoint]
+        prov_endpoint = prov_charm.spec.endpoints[integration.provides_endpoint]
+
+        # A container-scoped endpoint means this is a subordinate-principal relationship.
+        # Conventionally the subordinate requires with scope:container, but handle the
+        # reverse (provides side has container scope) for completeness.
+        if req_endpoint.scope != "container" and prov_endpoint.scope != "container":
+            continue
+
+        # Identify subordinate and principal
+        if req_endpoint.scope == "container":
+            sub_charm, sub_id = req_charm, integration.requires_charm_id
+            principal_charm, principal_id = prov_charm, integration.provides_charm_id
+        else:
+            sub_charm, sub_id = prov_charm, integration.provides_charm_id
+            principal_charm, principal_id = req_charm, integration.requires_charm_id
+
+        # If both charms have the same base already, no constraint needed
+        if sub_charm.spec.ubuntu_version == principal_charm.spec.ubuntu_version:
+            continue
+
+        # When the integration is active, the bases must match - but they don't.
+        # This is a hard contradiction: assert that this integration cannot exist.
+        solver.assert_and_track(
+            z3.Not(integration.exists),
+            SubordinateBaseMismatchTag(
+                subordinate_charm_name=sub_charm.spec.name,
+                subordinate_charm_id=sub_id,
+                subordinate_endpoint=integration.requires_endpoint
+                if req_endpoint.scope == "container"
+                else integration.provides_endpoint,
+                principal_charm_name=principal_charm.spec.name,
+                principal_charm_id=principal_id,
+                principal_endpoint=integration.provides_endpoint
+                if req_endpoint.scope == "container"
+                else integration.requires_endpoint,
+                subordinate_base=sub_charm.spec.ubuntu_version,
+                principal_base=principal_charm.spec.ubuntu_version,
+            ).encode(),
+        )
+
+
 def add_constraints(solver: z3.Solver, domain: Domain) -> None:
     add_application_constraints(solver, domain)
     add_charm_constraints(solver, domain)
     add_charm_metadata_constraints(solver, domain)
     add_charm_dependency_constraints(solver, domain)
+    add_subordinate_constraints(solver, domain)

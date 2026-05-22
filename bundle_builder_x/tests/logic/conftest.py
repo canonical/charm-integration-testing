@@ -71,12 +71,20 @@ class CharmhubClientStub(CharmhubClient):
             for c in candidates:
                 if c.channel.explicit_track == charm_track:
                     if charm_risk is None or c.channel.risk == charm_risk:
-                        return c
+                        if ubuntu_version is None or c.ubuntu_version == ubuntu_version:
+                            return c
 
         # Fall back to risk-only match.
         if charm_risk is not None:
             for c in candidates:
                 if c.channel.risk == charm_risk:
+                    if ubuntu_version is None or c.ubuntu_version == ubuntu_version:
+                        return c
+
+        # Fall back to ubuntu_version match.
+        if ubuntu_version is not None:
+            for c in candidates:
+                if c.ubuntu_version == ubuntu_version:
                     return c
 
         # Fall back to first registered charm with that name.
@@ -109,14 +117,17 @@ def make_charm(
     proxies: list[CharmEndpointProxy] | None = None,
     priority: float = 1.0,
     revision: int = 1,
+    ubuntu_version: str = "22.04",
+    subordinate: bool = False,
 ) -> Charm:
     """Build a minimal Charm suitable for use in logic tests."""
     return Charm(
         name=name,
         channel=CharmChannel.model_validate(channel),
         revision=revision,
-        ubuntu_version="22.04",
+        ubuntu_version=ubuntu_version,
         ubuntu_arch="amd64",
+        subordinate=subordinate,
         endpoints=endpoints or {},
         constraints=[parse_constraint(c) for c in (constraint_strs or [])],
         proxies=proxies or [],

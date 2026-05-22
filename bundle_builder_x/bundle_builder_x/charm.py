@@ -31,6 +31,11 @@ ASSUMES_OPS: dict[str, Callable[["JujuVersion", "JujuVersion"], bool]] = {
     "==": operator.eq,
 }
 
+# The juju-info interface is implicitly provided by every machine charm (mirrors Juju's
+# state/application.go Endpoints()). It is not declared in charm metadata for most principals,
+# so charmhub's find API returns no results when filtering by provides=juju-info.
+JUJU_INFO_INTERFACE = "juju-info"
+
 
 class CharmAssumesEntry(BaseModel):
     model_config = ConfigDict(frozen=True)
@@ -124,6 +129,7 @@ class CharmEndpoint(BaseModel):
     interface: str
     optional: bool = Field(default=False)
     limit: int | None = Field(default=None)
+    scope: str | None = Field(default=None)
     cyclic: bool = Field(default=False)
     features: frozenset[str] = Field(default_factory=frozenset)
 
@@ -145,6 +151,7 @@ class Charm(BaseModel):
     revision: int
     ubuntu_version: str
     ubuntu_arch: str
+    subordinate: bool = False
     endpoints: dict[str, CharmEndpoint]
     proxies: list[CharmEndpointProxy] = Field(default_factory=list)
     priority: float = Field(default=1)

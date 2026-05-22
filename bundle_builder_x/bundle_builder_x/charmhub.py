@@ -19,6 +19,7 @@ from typing import Any
 
 from .charm import (
     ASSUMES_OPS,
+    JUJU_INFO_INTERFACE,
     Charm,
     CharmAssumesEntry,
     CharmChannel,
@@ -175,6 +176,17 @@ class CharmhubClient:
     def find_charms(
         self, provides: str | None = None, requires: str | None = None, platform: str | None = None
     ) -> set[str]:
+        # juju-info is implicitly provided by every machine charm and is never declared
+        # explicitly in most charm metadata. The charmhub find API returns 0 results for
+        # provides=juju-info because principals don't publish that endpoint.
+        # Dropping the filter and returning all charms (for the given platform) is the
+        # correct behaviour: every machine charm is a valid juju-info provider.
+        # Note: the natural optimisation would be to filter find results by subordinate=True
+        # when looking for subordinates, but that field is broken in the find endpoint -
+        # see LP#2140485 (default-release.revision.subordinate not returned by find).
+        if provides == JUJU_INFO_INTERFACE:
+            provides = None
+
         key = f"find/{provides or ''}/{requires or ''}"
         token = self.timeline.on(key)
         try:
@@ -254,6 +266,7 @@ class CharmhubClient:
             revision=revision,
             ubuntu_version=ubuntu_version,
             ubuntu_arch=ubuntu_arch,
+            subordinate=metadata.subordinate,
             endpoints=self._get_charm_endpoints(charm_name, metadata, channel),
             proxies=self.overrides_client.get_charm_proxy_overrides(charm_name, channel),
             priority=self.overrides_client.get_charm_priority(charm_name),
@@ -738,9 +751,25 @@ class CharmhubClient:
                     interface=endpoint.interface,
                     optional=optional,
                     limit=limit,
+                    scope=endpoint.scope,
                     cyclic=cyclic,
                     features=features,
                 )
+
+        # Inject implicit juju-info provides endpoint (mirrors Juju's state/application.go Endpoints()).
+        # Only non-subordinate (principal) charms implicitly provide juju-info with scope: global.
+        # Subordinate charms explicitly require it - they do NOT implicitly provide it.
+        # Only inject if the charm does not already explicitly declare it.
+        if not metadata.subordinate and JUJU_INFO_INTERFACE not in endpoints:
+            endpoints[JUJU_INFO_INTERFACE] = CharmEndpoint(
+                type=EndpointType.PROVIDES,
+                interface=JUJU_INFO_INTERFACE,
+                optional=True,
+                limit=None,
+                scope="global",
+                cyclic=False,
+                features=frozenset(),
+            )
 
         return endpoints
 

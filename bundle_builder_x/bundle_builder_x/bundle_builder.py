@@ -29,6 +29,7 @@ from .assertion_tags import (
     CharmEndpointNonOptionalTag,
     EndpointCountMatchesIntegrationsTag,
     PeerChannelMismatchTag,
+    SubordinateBaseMismatchTag,
 )
 from .bundle import Solution
 from .charm import Charm, CharmChannel, EndpointType
@@ -54,6 +55,7 @@ _EXPANSION_PRIORITY: dict[Assertions, int] = {
     Assertions.CHARM_ENDPOINT_NON_OPTIONAL: 2,
     Assertions.ENDPOINT_COUNT_MATCHES_INTEGRATIONS: 3,
     Assertions.PEER_CHANNEL_MISMATCH: 4,
+    Assertions.SUBORDINATE_BASE_MISMATCH: 5,
 }
 
 
@@ -218,6 +220,10 @@ class BundleBuilder:
             mismatch = cast(PeerChannelMismatchTag, tag)
             return self._handle_peer_channel_mismatch(mismatch, domain)
 
+        elif tag.kind == Assertions.SUBORDINATE_BASE_MISMATCH:
+            base_mismatch = cast(SubordinateBaseMismatchTag, tag)
+            return self._handle_subordinate_base_mismatch(base_mismatch, domain)
+
         return False
 
     def _expand_for_endpoint(
@@ -304,6 +310,56 @@ class BundleBuilder:
         except CharmReleaseNotFoundException:
             self.logger.debug(
                 f"No release found for {tag.charm.charm_name} on {peer_channel.track}/{peer_channel.risk or '*'}"
+            )
+
+        return expanded
+
+    def _handle_subordinate_base_mismatch(
+        self,
+        tag: SubordinateBaseMismatchTag,
+        domain: Domain,
+    ) -> bool:
+        """Expand the domain by fetching a subordinate charm variant matching the principal's base."""
+        owning_model = domain.charms[tag.subordinate_charm_id].model
+        model = domain.models[owning_model]
+        sub_charm_spec = domain.charms[tag.subordinate_charm_id].spec
+        principal_base = tag.principal_base
+        expanded = False
+
+        # Try fetching the subordinate charm at the principal's base.
+        try:
+            sub_charm = self.charmhub_client.charm_from_store(
+                charm_name=tag.subordinate_charm_name,
+                ubuntu_arch=model.arch,
+                juju_version=model.juju_version,
+                platform=model.platform,
+                charm_track=sub_charm_spec.channel.track or None,
+                charm_risk=sub_charm_spec.channel.risk or None,
+                ubuntu_version=principal_base,
+            )
+            expanded |= self._add_charm_for_charm_id(sub_charm, tag.subordinate_charm_id, domain, owning_model)
+        except CharmReleaseNotFoundException:
+            self.logger.debug(
+                f"No release found for subordinate {tag.subordinate_charm_name} " f"on base {principal_base}"
+            )
+
+        # Also try fetching the principal at the subordinate's base, in case
+        # the principal has a variant that matches.
+        try:
+            principal_spec = domain.charms[tag.principal_charm_id].spec
+            principal_charm = self.charmhub_client.charm_from_store(
+                charm_name=tag.principal_charm_name,
+                ubuntu_arch=model.arch,
+                juju_version=model.juju_version,
+                platform=model.platform,
+                charm_track=principal_spec.channel.track or None,
+                charm_risk=principal_spec.channel.risk or None,
+                ubuntu_version=tag.subordinate_base,
+            )
+            expanded |= self._add_charm_for_charm_id(principal_charm, tag.principal_charm_id, domain, owning_model)
+        except CharmReleaseNotFoundException:
+            self.logger.debug(
+                f"No release found for principal {tag.principal_charm_name} " f"on base {tag.subordinate_base}"
             )
 
         return expanded
