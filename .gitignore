@@ -133,9 +133,3 @@ dmypy.json
 
 # uv binary
 /uv
-
-# Temporary
-bundle_builder_v5/
-bundle_builder_v9/
-static/charm-metadata-overrides-v5/
-static/charm-test-configs-v5/

@@ -13,7 +13,7 @@ This is a multi-package monorepo. Dependency direction flows strictly bottom-to-
 2. **Backend** — ABCs and their concrete implementations (`JujuBackend`, `KubernetesBackend`, `BaseValidator`). Depend only on data models.
 3. **Client / Facade** — orchestration classes that accept backends and extensions via constructor injection (`JujuClient`, `KubernetesClient`, `ValidatorRunner`). Depend on backend ABCs and data models.
 4. **Extension** — lifecycle hooks injected into clients (`JujuExtension` subclasses). Depend on backend ABCs.
-5. **Bundle Building** — standalone sub-system (`bundle_builder` package). Depends on `CharmhubClient` and Pydantic models; no dependency on Juju layers.
+5. **Bundle Building** — standalone sub-system (`bundle_builder_x` package). Depends on `CharmhubClient` and Pydantic models; no dependency on Juju layers.
 6. **Test Suite** — top-level orchestration. The only layer allowed to depend on all others.
 
 Flag cross-layer violations: e.g. a data model importing a client, or a backend constructing an extension internally.
@@ -55,7 +55,6 @@ Flag cross-layer violations: e.g. a data model importing a client, or a backend 
 - Keep model responsibilities focused:
   - Transport/validation structures → Pydantic models.
   - Immutable domain-like structures → frozen dataclasses.
-- In the `bundle_builder` package, prefer `@immutable_dataclass` over `@dataclass(frozen=True)` for domain models — it additionally supports `@cached_method` and `@computed_property`.
 - `@serializeable_dataclass` is deprecated alongside `JujuCmdBackend`. Do not use it in new code. Existing uses are expected to disappear as `JujuCmdBackend` is phased out.
 - Flag mutable defaults and recommend default factories.
 
