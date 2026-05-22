@@ -50,7 +50,7 @@ class SnapInfoResponse(BaseModel):
     channel_map: list[SnapChannelMapEntry] = Field(default_factory=list, alias="channel-map")
 
 
-_DEFAULT_SNAPCRAFT_API_URL = "https://api.snapcraft.io"
+DEFAULT_SNAPCRAFT_API_URL = "https://api.snapcraft.io"
 
 
 class SnapstoreHttpClient:
@@ -64,7 +64,7 @@ class SnapstoreHttpClient:
         logger: logging.Logger = logging.getLogger(__name__),
         session: requests.Session | None = None,
         timeout: timedelta = timedelta(seconds=30),
-        base_url: str = _DEFAULT_SNAPCRAFT_API_URL,
+        base_url: str = DEFAULT_SNAPCRAFT_API_URL,
     ) -> None:
         self.logger = logger
         self.timeout = timeout

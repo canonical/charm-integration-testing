@@ -19,10 +19,10 @@ from pathlib import Path
 
 from .bundle_builder import BundleBuilder, UncompletableBundleError
 from .charmhub import CharmhubClient
-from .charmhub_http import _DEFAULT_CHARMHUB_API_URL, CharmhubHttpClient
+from .charmhub_http import DEFAULT_CHARMHUB_API_URL, CharmhubHttpClient
 from .overrides import OverridesClient
 from .snapstore import SnapstoreClient
-from .snapstore_http import _DEFAULT_SNAPCRAFT_API_URL, SnapstoreHttpClient
+from .snapstore_http import DEFAULT_SNAPCRAFT_API_URL, SnapstoreHttpClient
 from .spec import SpecFile
 from .timing import Timeline
 
@@ -85,13 +85,13 @@ def add_args_to_parser(parser: argparse.ArgumentParser) -> None:
         "--charmhub-url",
         type=str,
         help="Base URL for the CharmHub API.",
-        default=_DEFAULT_CHARMHUB_API_URL,
+        default=DEFAULT_CHARMHUB_API_URL,
     )
     parser.add_argument(
         "--snapcraft-url",
         type=str,
         help="Base URL for the Snapcraft API.",
-        default=_DEFAULT_SNAPCRAFT_API_URL,
+        default=DEFAULT_SNAPCRAFT_API_URL,
     )
 
 
@@ -133,7 +133,7 @@ def main() -> None:
     )
 
     # Create HTTP clients
-    charmhub_http = CharmhubHttpClient(logger=logger, base_url=args.charmhub_url)
+    charmhub_http = CharmhubHttpClient(logger=logger.getChild("charmhub"), base_url=args.charmhub_url)
     snapstore_http = SnapstoreHttpClient(logger=logger, base_url=args.snapcraft_url)
 
     # Create Charmhub client

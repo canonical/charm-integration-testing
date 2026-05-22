@@ -69,14 +69,12 @@ class CharmMetadata(BaseModel):
         interface: str
         optional: bool | None = None
         limit: int | None = None
-        scope: str | None = None
 
     class Resource(BaseModel):
         model_config = ConfigDict(frozen=True)
 
         type: str
 
-    subordinate: bool = False
     peers: dict[str, Endpoint] = Field(default_factory=dict)
     requires: dict[str, Endpoint] = Field(default_factory=dict)
     provides: dict[str, Endpoint] = Field(default_factory=dict)
@@ -192,7 +190,7 @@ class InfoResponse(BaseModel):
     result: Result = Field(default_factory=Result)
 
 
-_DEFAULT_CHARMHUB_API_URL = "https://api.charmhub.io"
+DEFAULT_CHARMHUB_API_URL = "https://api.charmhub.io"
 
 
 class CharmhubHttpClient:
@@ -208,7 +206,7 @@ class CharmhubHttpClient:
         logger: logging.Logger = logging.getLogger(__name__),
         session: requests.Session | None = None,
         timeout: int = 180,
-        base_url: str = _DEFAULT_CHARMHUB_API_URL,
+        base_url: str = DEFAULT_CHARMHUB_API_URL,
     ) -> None:
         self.logger = logger
         self.timeout = timeout
