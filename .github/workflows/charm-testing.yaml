@@ -141,7 +141,7 @@ jobs:
       NEIGHBOR_BUNDLE_OUTPUT: ./generated-neighbor-bundle.yaml
       BUNDLE_MERMAID_OUTPUT: ./generated-bundle.mmd
     permissions:
-      actions: write #needed for the cache
+      actions: write  # needed for the cache
     steps:
       - name: Clone Repo
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
