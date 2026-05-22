@@ -9,14 +9,20 @@ needed to reach the required states.
 
 How it works
 ------------
+0. ``pytest_ignore_collect`` (``tryfirst=True``) forces collection of every
+   ``.py`` file inside the test-suite package.  This prevents pytest-testmon
+   from skipping unchanged files entirely, which would starve the scheduler
+   of the transition tests it needs to build the full state graph.
+
 1. ``pytest_itemcollected`` captures *every* test item as it is collected,
    before any ``-k`` / ``-m`` filtering is applied.  This gives the scheduler
    a complete view of all available transitions in the suite.
 
 2. ``pytest_collection_modifyitems`` (``trylast=True``) runs after pytest's
-   own deselection, so ``items`` contains only what the user explicitly
-   selected.  The scheduler treats these as **destinations**: tests that
-   must run, in an order that respects their ``requires`` states.
+   own deselection (and testmon's deselection), so ``items`` contains only
+   what the user explicitly selected.  The scheduler treats these as
+   **destinations**: tests that must run, in an order that respects their
+   ``requires`` states.
 
 3. The **full** state graph is built from all items captured in step 1.
    This means Dijkstra can find bridging paths even when the transition
@@ -49,6 +55,7 @@ The scheduler sees:
 from __future__ import annotations
 
 import logging
+import pathlib
 from collections import defaultdict
 
 import pytest
@@ -58,6 +65,11 @@ from .markers import StateMarker, read_state_marker
 from .states import State
 
 logger = logging.getLogger(__name__)
+
+# Absolute path to the test_suite package directory.
+# Used by pytest_ignore_collect to force-collect test files that testmon
+# would otherwise skip entirely.
+_TEST_SUITE_DIR = pathlib.Path(__file__).resolve().parent.parent
 
 #: State assumed when no ``--current-state`` flag is given.
 _DEFAULT_CURRENT_STATE = State.NO_BUNDLE
@@ -108,6 +120,14 @@ def pytest_configure(config: pytest.Config) -> None:
             "excluded from the run with '-m \"not injected\"'."
         ),
     )
+    config.addinivalue_line(
+        "markers",
+        (
+            "core: Marks a test as part of the core state-transition chain.  "
+            "Use with --testmon-forceselect -m 'core' to ensure these tests "
+            "are always collected and selected even when testmon considers them unchanged."
+        ),
+    )
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -130,6 +150,30 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 def pytest_itemcollected(item: pytest.Item) -> None:
     """Record every item before -k/-m filtering so the full graph is available."""
     _all_collected.append(item)
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_ignore_collect(
+    collection_path: pathlib.Path, config: pytest.Config
+) -> bool | None:
+    """Force collection of test-suite files so the state graph is complete.
+
+    pytest-testmon's ``pytest_ignore_collect`` skips unchanged files
+    entirely, which prevents ``pytest_itemcollected`` from capturing
+    them.  The state scheduler *requires* visibility of every transition
+    test to build the full graph.
+
+    Returning ``False`` with ``tryfirst=True`` short-circuits the
+    ``firstresult`` hook chain and guarantees the items are collected.
+    testmon can still deselect them during ``pytest_collection_modifyitems``;
+    the scheduler will re-inject any that are needed as bridges.
+    """
+    if (
+        collection_path.suffix == ".py"
+        and collection_path.resolve().is_relative_to(_TEST_SUITE_DIR)
+    ):
+        return False
+    return None
 
 
 @pytest.hookimpl(hookwrapper=True)
