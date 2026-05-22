@@ -142,6 +142,7 @@ jobs:
       BUNDLE_MERMAID_OUTPUT: ./generated-bundle.mmd
     permissions:
       actions: write  # needed for the cache
+      contents: read  # only needed for private repos
     steps:
       - name: Clone Repo
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
