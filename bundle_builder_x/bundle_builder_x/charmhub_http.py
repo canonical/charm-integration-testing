@@ -20,10 +20,10 @@ from typing import Any
 import requests
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-
-from .charm import EndpointScope
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+
+from .charm import EndpointScope
 
 
 class UnparsableCharmException(Exception):
