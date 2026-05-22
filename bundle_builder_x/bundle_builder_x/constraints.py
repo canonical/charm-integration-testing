@@ -171,26 +171,40 @@ def add_application_constraints(solver: z3.Solver, domain: Domain) -> None:
                 )
 
                 # Force app-to-charm mappings active when the integration mapping is active.
-                # Try both orderings of the application integration endpoints.
+                # Application endpoints are unordered, so we collect every valid ordering.
+                # A valid ordering requires:
+                #   1. Both app-to-charm keys exist in the domain.
+                #   2. The app integration endpoint names match the charm integration's
+                #      requires/provides endpoint names for the chosen assignment.
+                valid_orderings: list[z3.BoolRef] = []
+                seen_ordering_keys: set[tuple[tuple[str, int], tuple[str, int]]] = set()
                 for req_app_ep, prov_app_ep in [
                     (app_integration.endpoint_1, app_integration.endpoint_2),
                     (app_integration.endpoint_2, app_integration.endpoint_1),
                 ]:
+                    if (
+                        req_app_ep.endpoint != integration.requires_endpoint
+                        or prov_app_ep.endpoint != integration.provides_endpoint
+                    ):
+                        continue
+
                     req_key = (req_app_ep.application, integration.requires_charm_id)
                     prov_key = (prov_app_ep.application, integration.provides_charm_id)
 
                     if req_key in app_to_charm and prov_key in app_to_charm:
-                        solver.assert_and_track(
-                            z3.Implies(
-                                mapping_var,
-                                z3.And(app_to_charm[req_key], app_to_charm[prov_key]),
-                            ),
-                            ApplicationIntegrationAppsMapToCharmsTag(
-                                application_integration=_app_endpoints_from_integration(app_integration),
-                                charm_integration=_charm_endpoints_from_integration(integration),
-                            ).encode(),
-                        )
-                        break
+                        ordering_key = (req_key, prov_key)
+                        if ordering_key not in seen_ordering_keys:
+                            seen_ordering_keys.add(ordering_key)
+                            valid_orderings.append(z3.And(app_to_charm[req_key], app_to_charm[prov_key]))
+
+                if valid_orderings:
+                    solver.assert_and_track(
+                        z3.Implies(mapping_var, z3.Or(*valid_orderings)),
+                        ApplicationIntegrationAppsMapToCharmsTag(
+                            application_integration=_app_endpoints_from_integration(app_integration),
+                            charm_integration=_charm_endpoints_from_integration(integration),
+                        ).encode(),
+                    )
                 else:
                     raise ValueError(
                         f"Integration mapping exists but application-to-charm mappings don't exist: "
