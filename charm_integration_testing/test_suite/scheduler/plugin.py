@@ -249,6 +249,30 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     from ``_all_collected``, and injects any bridging transitions needed to
     reach those destinations.
     """
+    _schedule_items(config, items)
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtestloop(session: pytest.Session) -> object:
+    """Re-schedule session items just before execution begins.
+
+    pytest-testmon may re-add previously-failed tests to ``session.items``
+    *after* all ``pytest_collection_modifyitems`` hooks have finished.  When
+    that happens the scheduler never sees them as destinations, so bridge
+    tests are not injected and the state machine breaks.
+
+    This hook acts as a safety net: it re-runs the scheduling logic on the
+    final ``session.items`` list.  If the scheduler already ran successfully
+    during collection (the common case), the item list already contains the
+    correct bridges and this call is effectively a no-op — the re-scheduling
+    simply rebuilds the same plan.
+    """
+    _schedule_items(session.config, session.items)
+    return (yield)
+
+
+def _schedule_items(config: pytest.Config, items: list[pytest.Item]) -> None:
+    """Core scheduling logic shared by collection and pre-run hooks."""
     raw_state: str = config.getoption("--current-state")
     try:
         current_state = State(raw_state)
