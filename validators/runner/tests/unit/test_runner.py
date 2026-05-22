@@ -16,6 +16,7 @@
 from dataclasses import dataclass, field
 from typing import Optional
 from unittest.mock import patch
+from test_utils.stubs import RelationRoleStub
 
 import ops
 
@@ -75,11 +76,6 @@ class SkippingValidator(BaseValidator):
 # ---------------------------------------------------------------------------
 # Charm / entry-point stubs
 # ---------------------------------------------------------------------------
-
-
-@dataclass
-class RelationRoleStub:
-    name: str
 
 @dataclass
 class EndpointMetadataStub:

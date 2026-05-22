@@ -23,6 +23,7 @@ import ops
 import pytest
 
 from validators.tracing.validator import TracingValidator
+from test_utils.stubs import RelationRoleStub
 
 # ---------------------------------------------------------------------------
 # Stubs
@@ -31,11 +32,6 @@ from validators.tracing.validator import TracingValidator
 
 class AppStub:
     """Minimal stand-in for ops.Application.  Must be hashable (dict key)."""
-
-
-@dataclass
-class RelationRoleStub:
-    name: str
 
 
 class RelationStub:

@@ -17,12 +17,9 @@ from dataclasses import dataclass, field
 
 import pytest
 
-from validators.base import BaseValidator, ValidationCheck, ValidationLevel, ValidationRole, ValidationResult
+from validators.base import BaseValidator, ValidationCheck, ValidationLevel, ValidationResult
 
-
-@dataclass
-class RelationRoleStub:
-    name: ValidationRole
+from test_utils.stubs import RelationRoleStub
 
 @dataclass
 class RelationStub:

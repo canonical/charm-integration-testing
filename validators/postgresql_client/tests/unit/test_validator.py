@@ -16,6 +16,7 @@
 from dataclasses import dataclass, field
 from typing import cast
 from unittest.mock import patch
+from test_utils.stubs import RelationRoleStub
 
 import ops
 import psycopg2
@@ -29,11 +30,6 @@ from validators.postgresql_client.validator import PostgreSQLClientValidator
 
 class AppStub:
     """Minimal stand-in for ops.Application.  Must be hashable (dict key)."""
-
-
-@dataclass
-class RelationRoleStub:
-    name: str
 
 
 class RelationStub:

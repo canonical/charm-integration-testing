@@ -21,6 +21,7 @@ import ops
 import pymongo
 from pymongo.errors import WriteError
 
+from test_utils.stubs import RelationRoleStub
 from validators.mongodb_client.validator import MongoDBClientValidator
 
 # ---------------------------------------------------------------------------
@@ -30,10 +31,6 @@ from validators.mongodb_client.validator import MongoDBClientValidator
 
 class AppStub:
     """Minimal stand-in for ops.Application.  Must be hashable (dict key)."""
-
-@dataclass
-class RelationRoleStub:
-    name: str
 
 class RelationStub:
     def __init__(self, app: AppStub | None, databag: dict[str, str], name: str = "db", id: int = 0) -> None:
