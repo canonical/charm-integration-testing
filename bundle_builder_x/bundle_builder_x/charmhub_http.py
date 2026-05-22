@@ -20,6 +20,8 @@ from typing import Any
 import requests
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from .charm import EndpointScope
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
@@ -69,7 +71,7 @@ class CharmMetadata(BaseModel):
         interface: str
         optional: bool | None = None
         limit: int | None = None
-        scope: str | None = None
+        scope: EndpointScope | None = None
 
     class Resource(BaseModel):
         model_config = ConfigDict(frozen=True)
