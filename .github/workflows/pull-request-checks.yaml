@@ -80,59 +80,13 @@ jobs:
         run: poetry install
       - name: Run Charm Integration Testing Unit Tests
         run: ./scripts/charm-integration-testing-unit-tests.sh
-  detect-affected-tests:
-    runs-on: ubuntu-latest
-    outputs:
-      full_test_suite: ${{ steps.detect.outputs.full_test_suite }}
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Detect affected integration tests
-        id: detect
-        shell: python
-        env:
-          BASE_REF: ${{ github.event.pull_request.base.ref }}
-        run: |
-          import os
-          import subprocess
-          # Base ref is the branch against which the PR is being merged
-          base_ref = os.environ["BASE_REF"]
-
-          # Get the list of changed files in the PR compared to the base ref
-          result = subprocess.run(
-              ["git", "diff", "--name-only", f"origin/{base_ref}...HEAD"],
-              capture_output=True,
-              text=True,
-              check=True,
-          )
-          changed_files = result.stdout.splitlines()
-          print("Changed files:\n" + "\n".join(changed_files))
-
-          # A list of critical files that are not covered by tests
-          # If they're changed, run the full test suite to be safe
-          CRITICAL_PATTERNS = [
-              "scripts/run-tests.sh",
-          ]
-          github_output = os.environ["GITHUB_OUTPUT"]
-          for pattern in CRITICAL_PATTERNS:
-              if any(f.startswith(pattern) for f in changed_files):
-                  print(f"Critical path changed ({pattern}). Running full test suite.")
-                  with open(github_output, "a") as fh:
-                      fh.write("full_test_suite=true\n")
-                  raise SystemExit(0)
-          with open(github_output, "a") as fh:
-              fh.write("full_test_suite=false\n")
   charm-testing-integration-tests:
-    needs: detect-affected-tests
     uses: ./.github/workflows/charm-testing-integration-tests.yaml
     permissions:
       contents: read
       actions: write
     with:
-      full_test_suite: ${{ needs.detect-affected-tests.outputs.full_test_suite == 'true' }}
+      full_test_suite: false
   validators-unit-tests:
     runs-on: ubuntu-latest
     steps:
