@@ -15,7 +15,8 @@
 
 """Unit tests for bundle_builder.py."""
 
-from unittest.mock import MagicMock
+from itertools import repeat
+from typing import Iterator
 
 from bundle_builder_x.assertion_tags import SubordinateBaseMismatchTag
 from bundle_builder_x.bundle_builder import BundleBuilder
@@ -33,6 +34,62 @@ from bundle_builder_x.juju_version import JujuVersion
 
 _JUJU = JujuVersion(major=3, minor=6, patch=0)
 _CHANNEL = CharmChannel(track="latest", risk="stable", branch="")
+
+
+class _FakeCharmhubClient(CharmhubClient):
+    """Minimal typed stub for CharmhubClient, used in BundleBuilder unit tests."""
+
+    def __init__(
+        self,
+        charm_responses: list[Charm | Exception] | Charm | Exception | None = None,
+        find_result: set[str] | None = None,
+    ) -> None:
+        # Bypass CharmhubClient.__init__ - no HTTP client needed for unit tests.
+        if charm_responses is None:
+            self._responses: Iterator[Charm | Exception] = iter([])
+        elif isinstance(charm_responses, list):
+            self._responses = iter(charm_responses)
+        else:
+            # Single Charm or Exception: repeat indefinitely.
+            self._responses = repeat(charm_responses)
+        self._find_result: set[str] = find_result if find_result is not None else set()
+        self.charm_from_store_calls: list[dict[str, object]] = []
+
+    def charm_from_store(
+        self,
+        charm_name: str,
+        ubuntu_arch: str,
+        juju_version: JujuVersion | None = None,
+        platform: str | None = None,
+        charm_track: str | None = None,
+        charm_risk: str | None = None,
+        charm_revision: int | None = None,
+        ubuntu_version: str | None = None,
+    ) -> Charm:
+        self.charm_from_store_calls.append(
+            {
+                "charm_name": charm_name,
+                "ubuntu_arch": ubuntu_arch,
+                "juju_version": juju_version,
+                "platform": platform,
+                "charm_track": charm_track,
+                "charm_risk": charm_risk,
+                "charm_revision": charm_revision,
+                "ubuntu_version": ubuntu_version,
+            }
+        )
+        resp = next(self._responses)
+        if isinstance(resp, Exception):
+            raise resp
+        return resp
+
+    def find_charms(
+        self,
+        provides: str | None = None,
+        requires: str | None = None,
+        platform: str | None = None,
+    ) -> set[str]:
+        return self._find_result
 
 
 def _make_charm(name: str, endpoints: dict[str, CharmEndpoint], ubuntu_version: str = "22.04") -> Charm:
@@ -109,12 +166,13 @@ class TestHandleSubordinateBaseMismatch:
             },
             ubuntu_version="22.04",
         )
-        mock_charmhub = MagicMock(spec=CharmhubClient)
-        mock_charmhub.charm_from_store.side_effect = [
-            nrpe_2204,
-            CharmReleaseNotFoundException("ubuntu", "No release on 24.04"),
-        ]
-        builder = BundleBuilder(charmhub_client=mock_charmhub)
+        fake = _FakeCharmhubClient(
+            charm_responses=[
+                nrpe_2204,
+                CharmReleaseNotFoundException("ubuntu", "No release on 24.04"),
+            ]
+        )
+        builder = BundleBuilder(charmhub_client=fake)
 
         result = builder._handle_subordinate_base_mismatch(_mismatch_tag(), domain)
 
@@ -130,12 +188,13 @@ class TestHandleSubordinateBaseMismatch:
             {"juju-info": CharmEndpoint(type=EndpointType.PROVIDES, interface="juju-info", scope=EndpointScope.GLOBAL)},
             ubuntu_version="24.04",
         )
-        mock_charmhub = MagicMock(spec=CharmhubClient)
-        mock_charmhub.charm_from_store.side_effect = [
-            CharmReleaseNotFoundException("nrpe", "No release on 22.04"),
-            ubuntu_2404,
-        ]
-        builder = BundleBuilder(charmhub_client=mock_charmhub)
+        fake = _FakeCharmhubClient(
+            charm_responses=[
+                CharmReleaseNotFoundException("nrpe", "No release on 22.04"),
+                ubuntu_2404,
+            ]
+        )
+        builder = BundleBuilder(charmhub_client=fake)
 
         result = builder._handle_subordinate_base_mismatch(_mismatch_tag(), domain)
 
@@ -146,9 +205,8 @@ class TestHandleSubordinateBaseMismatch:
 
     def test_returns_false_when_no_variant_found(self) -> None:
         domain = _domain_with_base_mismatch()
-        mock_charmhub = MagicMock(spec=CharmhubClient)
-        mock_charmhub.charm_from_store.side_effect = CharmReleaseNotFoundException("nrpe", "No release")
-        builder = BundleBuilder(charmhub_client=mock_charmhub)
+        fake = _FakeCharmhubClient(charm_responses=CharmReleaseNotFoundException("nrpe", "No release"))
+        builder = BundleBuilder(charmhub_client=fake)
 
         result = builder._handle_subordinate_base_mismatch(_mismatch_tag(), domain)
 
@@ -208,42 +266,37 @@ class TestGetCharmsForEndpoint:
             "ubuntu",
             {"juju-info": CharmEndpoint(type=EndpointType.PROVIDES, interface="juju-info", scope=EndpointScope.GLOBAL)},
         )
-        mock_charmhub = MagicMock(spec=CharmhubClient)
-        mock_charmhub.find_charms.return_value = {"ubuntu"}
-        mock_charmhub.charm_from_store.return_value = ubuntu
-        builder = BundleBuilder(charmhub_client=mock_charmhub)
+        fake = _FakeCharmhubClient(charm_responses=ubuntu, find_result={"ubuntu"})
+        builder = BundleBuilder(charmhub_client=fake)
 
         # WHEN fetching charms to fulfill the subordinate's container-scoped endpoint
         results = builder._get_charms_for_endpoint(0, "general-info", domain, ModelRef(name="m"))
 
         # THEN charm_from_store is called with ubuntu_version matching the subordinate's base
         assert results == [ubuntu]
-        _, kwargs = mock_charmhub.charm_from_store.call_args
-        assert kwargs["ubuntu_version"] == "22.04"
+        assert fake.charm_from_store_calls[0]["ubuntu_version"] == "22.04"
 
     def test_non_container_scope_passes_no_ubuntu_version(self) -> None:
         # GIVEN a charm with a global-scoped requires endpoint
         domain, charm_id = self._domain_with_global_endpoint()
         db = _make_charm("database", {"db": CharmEndpoint(type=EndpointType.PROVIDES, interface="pgsql")})
-        mock_charmhub = MagicMock(spec=CharmhubClient)
-        mock_charmhub.find_charms.return_value = {"database"}
-        mock_charmhub.charm_from_store.return_value = db
-        builder = BundleBuilder(charmhub_client=mock_charmhub)
+        fake = _FakeCharmhubClient(charm_responses=db, find_result={"database"})
+        builder = BundleBuilder(charmhub_client=fake)
 
         # WHEN fetching charms for the global-scoped endpoint
         builder._get_charms_for_endpoint(charm_id, "db", domain, ModelRef(name="m"))
 
         # THEN charm_from_store is called with ubuntu_version=None (base irrelevant for global scope)
-        _, kwargs = mock_charmhub.charm_from_store.call_args
-        assert kwargs["ubuntu_version"] is None
+        assert fake.charm_from_store_calls[0]["ubuntu_version"] is None
 
     def test_container_scope_skips_charm_when_base_not_available(self) -> None:
         # GIVEN no principal charm exists at the subordinate's base
         domain = self._domain_with_subordinate(ubuntu_version="22.04")
-        mock_charmhub = MagicMock(spec=CharmhubClient)
-        mock_charmhub.find_charms.return_value = {"ubuntu"}
-        mock_charmhub.charm_from_store.side_effect = CharmReleaseNotFoundException("ubuntu", "no 22.04 release")
-        builder = BundleBuilder(charmhub_client=mock_charmhub)
+        fake = _FakeCharmhubClient(
+            charm_responses=CharmReleaseNotFoundException("ubuntu", "no 22.04 release"),
+            find_result={"ubuntu"},
+        )
+        builder = BundleBuilder(charmhub_client=fake)
 
         # WHEN fetching charms for the container-scoped endpoint
         results = builder._get_charms_for_endpoint(0, "general-info", domain, ModelRef(name="m"))

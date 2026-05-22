@@ -320,8 +320,10 @@ class BundleBuilder:
         domain: Domain,
     ) -> bool:
         """Expand the domain by fetching a subordinate charm variant matching the principal's base."""
-        owning_model = domain.charms[tag.subordinate_charm_id].model
-        model = domain.models[owning_model]
+        # Subordinate and principal must be in the same model (container-scoped
+        # relations are cross-model-incompatible), so one model_ref covers both.
+        model_ref = domain.charms[tag.subordinate_charm_id].model
+        model = domain.models[model_ref]
         sub_charm_spec = domain.charms[tag.subordinate_charm_id].spec
         principal_base = tag.principal_base
         expanded = False
@@ -337,7 +339,7 @@ class BundleBuilder:
                 charm_risk=sub_charm_spec.channel.risk or None,
                 ubuntu_version=principal_base,
             )
-            expanded |= self._add_charm_for_charm_id(sub_charm, tag.subordinate_charm_id, domain, owning_model)
+            expanded |= self._add_charm_for_charm_id(sub_charm, tag.subordinate_charm_id, domain, model_ref)
         except CharmReleaseNotFoundException:
             self.logger.debug(
                 f"No release found for subordinate {tag.subordinate_charm_name} " f"on base {principal_base}"
@@ -356,7 +358,7 @@ class BundleBuilder:
                 charm_risk=principal_spec.channel.risk or None,
                 ubuntu_version=tag.subordinate_base,
             )
-            expanded |= self._add_charm_for_charm_id(principal_charm, tag.principal_charm_id, domain, owning_model)
+            expanded |= self._add_charm_for_charm_id(principal_charm, tag.principal_charm_id, domain, model_ref)
         except CharmReleaseNotFoundException:
             self.logger.debug(
                 f"No release found for principal {tag.principal_charm_name} " f"on base {tag.subordinate_base}"
