@@ -229,13 +229,8 @@ jobs:
         if: ${{ !inputs.full_test_suite }}
         shell: bash
         run: |
-          if [[ -f .testmondata ]]; then
-            echo "Found testmon data from previous run. Running only failed tests."
-            echo "testmon_args=--testmon" >> "$GITHUB_OUTPUT"
-          else
-            echo "No testmon data found from previous run. Running full test suite."
-            echo "testmon_args=" >> "$GITHUB_OUTPUT"
-          fi
+          # Add testmon parameter if full testsuite was not requested
+          echo "testmon_args=--testmon" >> "$GITHUB_OUTPUT"
       - name: Report Test Execution Start To Test Observer
         if: ${{ !cancelled() && env.TEST_OBSERVER_API != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/patch-test-execution
