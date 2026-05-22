@@ -84,7 +84,7 @@ def add_args_to_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--charmhub-url",
         type=str,
-        help="Base URL for the CharmHub API.",
+        help="Base URL for the Charmhub API.",
         default=DEFAULT_CHARMHUB_API_URL,
     )
     parser.add_argument(
