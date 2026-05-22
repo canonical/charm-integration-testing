@@ -17,8 +17,12 @@ from dataclasses import dataclass, field
 
 import pytest
 
-from validators.base import BaseValidator, ValidationCheck, ValidationLevel, ValidationResult
+from validators.base import BaseValidator, ValidationCheck, ValidationLevel, ValidationRole, ValidationResult
 
+
+@dataclass
+class RelationRoleStub:
+    name: ValidationRole
 
 @dataclass
 class RelationStub:
@@ -31,7 +35,7 @@ class RelationStub:
 @dataclass
 class RelationMetaStub:
     interface_name: str | None
-    role: str = "requires"
+    role: RelationRoleStub
 
 
 @dataclass
@@ -63,7 +67,7 @@ class CharmStub:
         self.meta = type(
             "MetaStub",
             (),
-            {"relations": {self.relation_name: RelationMetaStub(interface_name=self.interface_name, )}},
+            {"relations": {self.relation_name: RelationMetaStub(interface_name=self.interface_name, role=RelationRoleStub("requires"))}},
         )()
 
 
@@ -111,7 +115,7 @@ class TestBaseValidator:
         charm.meta = type(
             "MetaStub",
             (),
-            {"relations": {**charm.meta.relations, charm.relation_name: RelationMetaStub(interface_name=charm.interface_name, role="provides")}},
+            {"relations": {**charm.meta.relations, charm.relation_name: RelationMetaStub(interface_name=charm.interface_name, role=RelationRoleStub("provides"))}},
         )()
 
         # WHEN

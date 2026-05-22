@@ -20,6 +20,7 @@ import ops
 from pydantic import BaseModel, Field
 
 ValidationLevel = Literal["simple", "deep", "uat"]
+ValidationRole = Literal["requires", "provides"]
 
 
 class ValidationCheck(BaseModel):
@@ -32,7 +33,7 @@ class ValidationResult(BaseModel):
     status: Literal["PASS", "FAIL", "ERROR", "SKIPPED"]
     endpoint: str
     interface: str
-    role: ops.RelationRole
+    role: ValidationRole
     level: ValidationLevel
     relation_id: int
     checks: list[ValidationCheck] = Field(default_factory=list)
@@ -48,8 +49,9 @@ class BaseValidator(ABC):
         self.relation = relation
 
     @property
-    def role(self) -> ops.RelationRole:
-        return self.charm.meta.relations[self.relation.name].role
+    def role(self) -> ValidationRole:
+        relation = self.charm.meta.relations[self.relation.name]
+        return relation.role.name
 
     @property
     def endpoint(self) -> str:
@@ -78,7 +80,7 @@ class BaseValidator(ABC):
             error=f"Level '{level}' is not supported by {self.__class__.__name__}.",
         )
 
-    def _skipped_result_due_to_role(self, level: ValidationLevel, role: ops.RelationRole) -> ValidationResult:
+    def _skipped_result_due_to_role(self, level: ValidationLevel, role: ValidationRole) -> ValidationResult:
         """Return a SKIPPED result indicating this validator does not support *role*."""
         return self._make_result(
             status="SKIPPED",
@@ -118,7 +120,7 @@ class BaseValidator(ABC):
         error: str | None = None,
         endpoint: str | None = None,
         interface: str | None = None,
-        role: ops.RelationRole | None = None,
+        role: ValidationRole | None = None,
         relation_id: int | None = None,
     ) -> ValidationResult:
         return ValidationResult(

@@ -21,14 +21,13 @@ from pathlib import Path
 from typing import get_args
 
 import ops
-from ops import RelationRole
 from ops.charm import CharmBase
 from ops.framework import Framework
 from ops.model import Relation, _ModelBackend
 from ops.storage import SQLiteStorage
 from pydantic import BaseModel
 
-from validators.base import BaseValidator, ValidationLevel, ValidationResult
+from validators.base import BaseValidator, ValidationLevel, ValidationRole, ValidationResult
 
 # Ordered from highest to lowest; each level falls back to the next entry.
 _LEVEL_FALLBACK: dict[ValidationLevel, ValidationLevel | None] = {
@@ -66,7 +65,7 @@ class ValidatorRunner:
         # Get the list of requires endpoints
         results = []
         for relation, metadata in charm.meta.relations.items():
-            if (role := metadata.role) == "peer":
+            if (role := metadata.role.name) == "peer":
                 continue
             interface_name = metadata.interface_name or relation
             for integration in charm.model.relations[relation]:
@@ -79,7 +78,7 @@ class ValidatorRunner:
         interface_name: str,
         integration: Relation,
         level: ValidationLevel,
-        role: RelationRole,
+        role: ValidationRole,
     ) -> list[ValidationResult]:
         results: list[ValidationResult] = []
         for validator_cls in self.validators.get(interface_name, []):

@@ -31,6 +31,11 @@ class AppStub:
     """Minimal stand-in for ops.Application.  Must be hashable (dict key)."""
 
 
+@dataclass
+class RelationRoleStub:
+    name: str
+
+
 class RelationStub:
     def __init__(self, app: AppStub | None, databag: dict[str, str], name: str = "db", id: int = 0) -> None:
         self.app = app
@@ -42,7 +47,7 @@ class RelationStub:
 class RelationMetaStub:
     def __init__(self, interface_name: str, role: str = "requires") -> None:
         self.interface_name = interface_name
-        self.role = role
+        self.role = RelationRoleStub(role)
 
 
 class CharmMetaStub:

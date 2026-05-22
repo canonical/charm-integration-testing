@@ -21,7 +21,7 @@ from validators.base import BaseValidator, ValidationCheck, ValidationLevel, Val
 
 class PostgreSQLClientValidator(BaseValidator):
     def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
-        if self.role != ops.RelationRole.requires.name:
+        if self.role != "requires":
             return self._skipped_result_due_to_role(level, self.role)
         if level != "simple":
             return self._skipped_result_due_to_level(level)

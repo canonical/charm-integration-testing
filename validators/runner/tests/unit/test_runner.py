@@ -19,7 +19,7 @@ from unittest.mock import patch
 
 import ops
 
-from validators.base import BaseValidator, ValidationLevel, ValidationResult
+from validators.base import BaseValidator, ValidationLevel, ValidationRole, ValidationResult
 from validators.runner.runner import ValidatorRunner, ValidatorRunnerResults
 
 # ---------------------------------------------------------------------------
@@ -78,9 +78,13 @@ class SkippingValidator(BaseValidator):
 
 
 @dataclass
+class RelationRoleStub:
+    name: str
+
+@dataclass
 class EndpointMetadataStub:
     interface_name: Optional[str]
-    role: ops.RelationRole = ops.RelationRole.requires
+    role: RelationRoleStub 
 
 
 @dataclass
@@ -130,7 +134,7 @@ def _make_charm(requires: dict[str, Optional[str]], relations: dict[str, int]) -
         relations: mapping of endpoint name -> number of integrations.
     """
     return CharmStub(
-        meta=MetaStub(requires={ep: EndpointMetadataStub(interface_name=iface) for ep, iface in requires.items()}),
+        meta=MetaStub(requires={ep: EndpointMetadataStub(interface_name=iface, role=RelationRoleStub("requires")) for ep, iface in requires.items()}),
         model=ModelStub(
             relations={ep: [IntegrationStub(name=ep, id=i) for i in range(n)] for ep, n in relations.items()}
         ),
