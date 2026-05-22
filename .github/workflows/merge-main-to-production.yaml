@@ -13,6 +13,8 @@ jobs:
     runs-on: self-hosted
     outputs:
       changes_to_merge: ${{ steps.check.outputs.changes_to_merge }}
+    permissions:
+      contents: read  # needed for private repos
     steps:
       - name: Checkout main
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
