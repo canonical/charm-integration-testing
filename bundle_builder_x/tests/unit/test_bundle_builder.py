@@ -146,3 +146,93 @@ class TestHandleSubordinateBaseMismatch:
 
         assert result is False
         assert len(domain.charms) == 2
+
+
+class TestGetCharmsForEndpoint:
+    """BundleBuilder._get_charms_for_endpoint: ubuntu_version forwarding for container-scoped endpoints."""
+
+    def _domain_with_subordinate(self, ubuntu_version: str = "22.04") -> Domain:
+        """Domain containing only a subordinate charm (requires juju-info, scope=container)."""
+        domain = Domain()
+        domain.models[ModelRef(name="m")] = DomainModel(
+            arch="amd64",
+            platform="machine",
+            juju_version=_JUJU,
+            applications={"nrpe": DomainApplication(charm="nrpe")},
+        )
+        add_charm_to_domain(
+            _make_charm(
+                "nrpe",
+                {"general-info": CharmEndpoint(type=EndpointType.REQUIRES, interface="juju-info", scope="container")},
+                ubuntu_version=ubuntu_version,
+            ),
+            domain,
+            ModelRef(name="m"),
+        )
+        return domain
+
+    def _domain_with_global_endpoint(self) -> tuple[Domain, int]:
+        """Domain containing a charm with a global-scope requires endpoint."""
+        domain = Domain()
+        domain.models[ModelRef(name="m")] = DomainModel(
+            arch="amd64",
+            platform="machine",
+            juju_version=_JUJU,
+            applications={"app": DomainApplication(charm="app")},
+        )
+        charm_id = add_charm_to_domain(
+            _make_charm("app", {"db": CharmEndpoint(type=EndpointType.REQUIRES, interface="pgsql", scope="global")}),
+            domain,
+            ModelRef(name="m"),
+        )
+        return domain, charm_id
+
+    def test_container_scope_passes_ubuntu_version_to_charm_from_store(self) -> None:
+        # GIVEN a subordinate charm on 22.04 with a container-scoped requires endpoint
+        domain = self._domain_with_subordinate(ubuntu_version="22.04")
+        ubuntu = _make_charm(
+            "ubuntu",
+            {"juju-info": CharmEndpoint(type=EndpointType.PROVIDES, interface="juju-info", scope="global")},
+        )
+        mock_charmhub = MagicMock(spec=CharmhubClient)
+        mock_charmhub.find_charms.return_value = {"ubuntu"}
+        mock_charmhub.charm_from_store.return_value = ubuntu
+        builder = BundleBuilder(charmhub_client=mock_charmhub)
+
+        # WHEN fetching charms to fulfill the subordinate's container-scoped endpoint
+        results = builder._get_charms_for_endpoint(0, "general-info", domain, ModelRef(name="m"))
+
+        # THEN charm_from_store is called with ubuntu_version matching the subordinate's base
+        assert results == [ubuntu]
+        _, kwargs = mock_charmhub.charm_from_store.call_args
+        assert kwargs["ubuntu_version"] == "22.04"
+
+    def test_non_container_scope_passes_no_ubuntu_version(self) -> None:
+        # GIVEN a charm with a global-scoped requires endpoint
+        domain, charm_id = self._domain_with_global_endpoint()
+        db = _make_charm("database", {"db": CharmEndpoint(type=EndpointType.PROVIDES, interface="pgsql")})
+        mock_charmhub = MagicMock(spec=CharmhubClient)
+        mock_charmhub.find_charms.return_value = {"database"}
+        mock_charmhub.charm_from_store.return_value = db
+        builder = BundleBuilder(charmhub_client=mock_charmhub)
+
+        # WHEN fetching charms for the global-scoped endpoint
+        builder._get_charms_for_endpoint(charm_id, "db", domain, ModelRef(name="m"))
+
+        # THEN charm_from_store is called with ubuntu_version=None (base irrelevant for global scope)
+        _, kwargs = mock_charmhub.charm_from_store.call_args
+        assert kwargs["ubuntu_version"] is None
+
+    def test_container_scope_skips_charm_when_base_not_available(self) -> None:
+        # GIVEN no principal charm exists at the subordinate's base
+        domain = self._domain_with_subordinate(ubuntu_version="22.04")
+        mock_charmhub = MagicMock(spec=CharmhubClient)
+        mock_charmhub.find_charms.return_value = {"ubuntu"}
+        mock_charmhub.charm_from_store.side_effect = CharmReleaseNotFoundException("ubuntu", "no 22.04 release")
+        builder = BundleBuilder(charmhub_client=mock_charmhub)
+
+        # WHEN fetching charms for the container-scoped endpoint
+        results = builder._get_charms_for_endpoint(0, "general-info", domain, ModelRef(name="m"))
+
+        # THEN the charm is skipped and the result is empty
+        assert results == []

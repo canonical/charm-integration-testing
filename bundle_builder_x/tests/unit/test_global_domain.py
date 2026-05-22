@@ -388,10 +388,10 @@ class TestCMRIntegrationMapping:
         assert _cmr_mapping_count(domain, ModelRef(name="consumer-model")) == 0
 
 
-class TestAddCharmToDomainJujuInfoGating:
-    """add_charm_to_domain: juju-info integrations are gated to same-model machine platforms."""
+class TestAddCharmToDomainContainerScopeGating:
+    """add_charm_to_domain: container-scoped integrations are gated to same-model machine platforms."""
 
-    def test_juju_info_integration_created_on_machine_model(self) -> None:
+    def test_container_scope_integration_created_on_machine_model(self) -> None:
         domain = _make_domain({ModelRef(name="m"): DomainModel(arch="amd64", platform="machine", juju_version=_JUJU)})
         principal = _make_charm(
             "ubuntu",
@@ -407,7 +407,7 @@ class TestAddCharmToDomainJujuInfoGating:
         juju_info = [i for i in domain.charm_integrations if domain.integration_interface(i) == "juju-info"]
         assert len(juju_info) == 1
 
-    def test_juju_info_integration_not_created_on_k8s_model(self) -> None:
+    def test_container_scope_integration_not_created_on_k8s_model(self) -> None:
         domain = _make_domain(
             {ModelRef(name="k"): DomainModel(arch="amd64", platform="kubernetes", juju_version=_JUJU)}
         )
@@ -425,7 +425,7 @@ class TestAddCharmToDomainJujuInfoGating:
         juju_info = [i for i in domain.charm_integrations if domain.integration_interface(i) == "juju-info"]
         assert len(juju_info) == 0
 
-    def test_non_juju_info_interface_not_gated_on_k8s(self) -> None:
+    def test_non_container_scope_interface_not_gated_on_k8s(self) -> None:
         domain = _make_domain(
             {ModelRef(name="k"): DomainModel(arch="amd64", platform="kubernetes", juju_version=_JUJU)}
         )
@@ -436,7 +436,25 @@ class TestAddCharmToDomainJujuInfoGating:
 
         assert len([i for i in domain.charm_integrations if domain.integration_interface(i) == "pgsql"]) == 1
 
-    def test_juju_info_cross_model_blocked_mixed_platform(self) -> None:
+    def test_non_juju_info_container_scope_also_gated_on_k8s(self) -> None:
+        # container scope gating applies to any interface, not just juju-info
+        domain = _make_domain(
+            {ModelRef(name="k"): DomainModel(arch="amd64", platform="kubernetes", juju_version=_JUJU)}
+        )
+        principal = _make_charm(
+            "app",
+            {"custom-sub": CharmEndpoint(type=EndpointType.PROVIDES, interface="custom-sub-iface", scope="global")},
+        )
+        subordinate = _make_charm(
+            "sub",
+            {"custom-sub": CharmEndpoint(type=EndpointType.REQUIRES, interface="custom-sub-iface", scope="container")},
+        )
+        add_charm_to_domain(principal, domain, ModelRef(name="k"))
+        add_charm_to_domain(subordinate, domain, ModelRef(name="k"))
+
+        assert len(domain.charm_integrations) == 0
+
+    def test_container_scope_cross_model_blocked_mixed_platform(self) -> None:
         domain = _make_domain(
             {
                 ModelRef(name="m"): DomainModel(arch="amd64", platform="machine", juju_version=_JUJU),
@@ -457,7 +475,7 @@ class TestAddCharmToDomainJujuInfoGating:
         juju_info = [i for i in domain.charm_integrations if domain.integration_interface(i) == "juju-info"]
         assert len(juju_info) == 0
 
-    def test_juju_info_cross_model_blocked_both_machine(self) -> None:
+    def test_container_scope_cross_model_blocked_both_machine(self) -> None:
         domain = _make_domain(
             {
                 ModelRef(name="m1"): DomainModel(arch="amd64", platform="machine", juju_version=_JUJU),

@@ -16,7 +16,7 @@
 import z3  # type: ignore[import-untyped]
 from pydantic import BaseModel, ConfigDict, Field
 
-from .charm import JUJU_INFO_INTERFACE, Charm, CharmChannel, CharmConfigValue, CharmResourceValue, EndpointType
+from .charm import Charm, CharmChannel, CharmConfigValue, CharmResourceValue, EndpointType
 from .juju_version import JujuVersion
 
 
@@ -319,11 +319,10 @@ def add_charm_to_domain(charm: Charm, domain: Domain, model_ref: ModelRef | None
                 else:
                     continue
 
-                # Skip juju-info integrations on non-machine models and across models.
-                # Subordinate charms (which use juju-info) must be deployed in the
-                # same model as their principal; cross-model subordinate relations
-                # are not supported by Juju.
-                if endpoint.interface == JUJU_INFO_INTERFACE:
+                # Skip container-scoped integrations on non-machine models and across models.
+                # Container-scoped (subordinate) relations must be co-located with their principal;
+                # cross-model and kubernetes subordinate relations are not supported by Juju.
+                if endpoint.scope == "container" or other_endpoint.scope == "container":
                     if not same_model:
                         continue
                     req_platform = domain.models[req_model_ref].platform if req_model_ref in domain.models else None

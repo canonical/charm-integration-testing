@@ -396,6 +396,11 @@ class BundleBuilder:
         elif endpoint.type == EndpointType.PROVIDES:
             fulfilling_charms = self.charmhub_client.find_charms(requires=endpoint.interface, platform=model.platform)
 
+        # For container-scoped endpoints the other charm must share the same base
+        ubuntu_version: str | None = None
+        if endpoint.scope == "container":
+            ubuntu_version = domain.charms[charm_id].spec.ubuntu_version
+
         results: list[Charm] = []
         for charm_name in fulfilling_charms:
             try:
@@ -405,6 +410,7 @@ class BundleBuilder:
                         ubuntu_arch=model.arch,
                         juju_version=model.juju_version,
                         platform=model.platform,
+                        ubuntu_version=ubuntu_version,
                     )
                 )
             except CharmReleaseNotFoundException:
