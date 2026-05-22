@@ -69,7 +69,7 @@ jobs:
         uses: ./.github/actions/workflow-dispatch
         with:
           workflow: charm-testing.yaml
-          ref: ${{ github.head_ref || 'production' }}
+          ref: ${{ github.head_ref || github.ref_name }}
           inputs: |
             {
               "test_observer_environment": "staging",
