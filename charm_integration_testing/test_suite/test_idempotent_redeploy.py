@@ -41,4 +41,7 @@ def test_idempotent_redeploy(
     ), f"Application '{target_application}' was not found in target model after redeploy"
 
     for _, model_uri in all_bundles:
+        juju_client.idle_for_period(model=model_uri, timeout=timedelta(minutes=15))
+
+    for _, model_uri in all_bundles:
         juju_client.validate_model(model=model_uri, level="simple")
