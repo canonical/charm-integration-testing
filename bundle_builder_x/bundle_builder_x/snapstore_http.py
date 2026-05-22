@@ -50,22 +50,25 @@ class SnapInfoResponse(BaseModel):
     channel_map: list[SnapChannelMapEntry] = Field(default_factory=list, alias="channel-map")
 
 
-SNAP_INFO_ENDPOINT = "https://api.snapcraft.io/v2/snaps/info/{snap_name}"
+_DEFAULT_SNAPCRAFT_API_URL = "https://api.snapcraft.io"
 
 
 class SnapstoreHttpClient:
     session: requests.Session
     logger: logging.Logger
     timeout: timedelta
+    _info_endpoint: str
 
     def __init__(
         self,
         logger: logging.Logger = logging.getLogger(__name__),
         session: requests.Session | None = None,
         timeout: timedelta = timedelta(seconds=30),
+        base_url: str = _DEFAULT_SNAPCRAFT_API_URL,
     ) -> None:
         self.logger = logger
         self.timeout = timeout
+        self._info_endpoint = base_url.rstrip("/") + "/v2/snaps/info/{snap_name}"
 
         retry_strategy = Retry(
             total=10,
@@ -82,7 +85,7 @@ class SnapstoreHttpClient:
     def snap_info(self, snap_name: str) -> SnapInfoResponse:
         self.logger.debug(f"Calling snap info for snap {snap_name}")
 
-        request_url = SNAP_INFO_ENDPOINT.format(snap_name=snap_name)
+        request_url = self._info_endpoint.format(snap_name=snap_name)
         request_headers = {"Snap-Device-Series": "16"}
         response = self.session.get(url=request_url, headers=request_headers, timeout=self.timeout.total_seconds())
         response.raise_for_status()
