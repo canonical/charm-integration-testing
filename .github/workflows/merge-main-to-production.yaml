@@ -9,7 +9,33 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 jobs:
+  check-for-changes:
+    runs-on: self-hosted
+    outputs:
+      changes_to_merge: ${{ steps.check.outputs.changes_to_merge }}
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: true
+      - name: Check for changes between main and production
+        id: check
+        run: |-
+          # Checking if there are any changes between main and production branches
+          git fetch origin main production
+          if git diff --quiet origin/main origin/production
+          then
+            echo "No changes to merge from main to production"
+            echo "changes_to_merge=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Changes detected between main and production"
+            echo "changes_to_merge=true" >> "$GITHUB_OUTPUT"
+          fi
   run-all-tests:
+    needs: check-for-changes
+    if: needs.check-for-changes.outputs.changes_to_merge == 'true'
     uses: ./.github/workflows/charm-testing-integration-tests.yaml
     permissions:
       contents: read
@@ -33,11 +59,6 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git fetch origin main production
-          if git diff --quiet origin/main origin/production
-          then
-            echo "No changes to merge from main to production"
-            exit 0
-          fi
           git checkout -B production origin/production
           git merge --ff-only origin/main
           git push origin production
