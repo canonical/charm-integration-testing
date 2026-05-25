@@ -84,13 +84,19 @@ def add_args_to_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--charmhub-url",
         type=str,
-        help="Base URL for the Charmhub API. Defaults to the CHARMHUB_API_URL environment variable, or the Charmhub production API.",
+        help=(
+            "Base URL for the Charmhub API. "
+            "Defaults to the CHARMHUB_API_URL environment variable, or the Charmhub production API."
+        ),
         default=None,
     )
     parser.add_argument(
         "--snapcraft-url",
         type=str,
-        help="Base URL for the Snapcraft API. Defaults to the SNAPCRAFT_API_URL environment variable, or the Snapcraft production API.",
+        help=(
+            "Base URL for the Snapcraft API. "
+            "Defaults to the SNAPCRAFT_API_URL environment variable, or the Snapcraft production API."
+        ),
         default=None,
     )
 
