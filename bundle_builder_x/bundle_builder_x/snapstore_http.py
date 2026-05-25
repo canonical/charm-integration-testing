@@ -14,6 +14,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import logging
+import os
 from datetime import timedelta
 from functools import cache
 
@@ -51,6 +52,7 @@ class SnapInfoResponse(BaseModel):
 
 
 DEFAULT_SNAPCRAFT_API_URL = "https://api.snapcraft.io"
+SNAPCRAFT_API_URL_ENV = "SNAPCRAFT_API_URL"
 
 
 class SnapstoreHttpClient:
@@ -64,11 +66,12 @@ class SnapstoreHttpClient:
         logger: logging.Logger = logging.getLogger(__name__),
         session: requests.Session | None = None,
         timeout: timedelta = timedelta(seconds=30),
-        base_url: str = DEFAULT_SNAPCRAFT_API_URL,
+        base_url: str | None = None,
     ) -> None:
         self.logger = logger
         self.timeout = timeout
-        self._info_endpoint = base_url.rstrip("/") + "/v2/snaps/info/{snap_name}"
+        resolved_url = base_url or os.environ.get(SNAPCRAFT_API_URL_ENV, DEFAULT_SNAPCRAFT_API_URL)
+        self._info_endpoint = resolved_url.rstrip("/") + "/v2/snaps/info/{snap_name}"
 
         retry_strategy = Retry(
             total=10,
