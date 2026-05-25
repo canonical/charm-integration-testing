@@ -20,7 +20,7 @@ from unittest.mock import patch
 
 import ops
 import pytest
-from test_utils.stubs import RelationRoleStub
+from test_utils.stubs import AppStub, RelationStub, RelationRoleStub, CharmStub
 
 from validators.tracing.validator import TracingValidator
 
@@ -29,38 +29,10 @@ from validators.tracing.validator import TracingValidator
 # ---------------------------------------------------------------------------
 
 
-class AppStub:
-    """Minimal stand-in for ops.Application.  Must be hashable (dict key)."""
-
-
-class RelationStub:
-    def __init__(self, app: AppStub | None, databag: dict[str, str], name: str = "tracing", id: int = 0) -> None:
-        self.app = app
-        self.name = name
-        self.id = id
-        self.data: dict[AppStub | None, dict[str, str]] = {app: databag}
-
-
-class RelationMetaStub:
-    def __init__(self, interface_name: str, role: str = "requires") -> None:
-        self.interface_name = interface_name
-        self.role = RelationRoleStub(role)
-
-
-class CharmMetaStub:
-    def __init__(self, endpoint: str, interface_name: str) -> None:
-        self.relations = {endpoint: RelationMetaStub(interface_name)}
-
-
-class CharmStub:
-    def __init__(self, endpoint: str = "tracing", interface_name: str = "tracing") -> None:
-        self.meta = CharmMetaStub(endpoint, interface_name)
-
-
 def _make_validator(databag: dict[str, str], endpoint: str = "tracing") -> TracingValidator:
     app = AppStub()
-    relation = RelationStub(app=app, databag=databag, name=endpoint)
-    charm = cast(ops.CharmBase, CharmStub(endpoint=endpoint))
+    relation = RelationStub(app=app, data={app: databag}, name=endpoint)
+    charm = cast(ops.CharmBase, CharmStub(relation_name=endpoint, interface_name="tracing"))
     return TracingValidator(charm, cast(ops.Relation, relation))
 
 
@@ -99,7 +71,7 @@ class TestTracingValidatorSimple:
 
     def test_returns_error_when_relation_app_is_none(self) -> None:
         # GIVEN a relation whose remote app is not yet known
-        relation = RelationStub(app=None, databag={})
+        relation = RelationStub(name="test-relation", app=None, data={})
         validator = TracingValidator(cast(ops.CharmBase, CharmStub()), cast(ops.Relation, relation))
 
         # WHEN
