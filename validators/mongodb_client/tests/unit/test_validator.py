@@ -20,8 +20,8 @@ from unittest.mock import patch
 import ops
 import pymongo
 from pymongo.errors import WriteError
+from test_utils.stubs import AppStub, CharmStub, RelationStub
 
-from test_utils.stubs import RelationRoleStub
 from validators.mongodb_client.validator import MongoDBClientValidator
 
 # ---------------------------------------------------------------------------
@@ -29,37 +29,10 @@ from validators.mongodb_client.validator import MongoDBClientValidator
 # ---------------------------------------------------------------------------
 
 
-class AppStub:
-    """Minimal stand-in for ops.Application.  Must be hashable (dict key)."""
-
-class RelationStub:
-    def __init__(self, app: AppStub | None, databag: dict[str, str], name: str = "db", id: int = 0) -> None:
-        self.app = app
-        self.name = name
-        self.id = id
-        self.data: dict[AppStub | None, dict[str, str]] = {app: databag}
-
-
-class RelationMetaStub:
-    def __init__(self, interface_name: str, role: str = "requires") -> None:
-        self.interface_name = interface_name
-        self.role = RelationRoleStub(name=role)
-
-
-class CharmMetaStub:
-    def __init__(self, endpoint: str, interface_name: str) -> None:
-        self.relations = {endpoint: RelationMetaStub(interface_name)}
-
-
-class CharmStub:
-    def __init__(self, endpoint: str = "db", interface_name: str = "mongodb_client") -> None:
-        self.meta = CharmMetaStub(endpoint, interface_name)
-
-
 def _make_validator(databag: dict[str, str], endpoint: str = "db") -> MongoDBClientValidator:
     app = AppStub()
-    relation = RelationStub(app=app, databag=databag, name=endpoint)
-    charm = cast(ops.CharmBase, CharmStub(endpoint=endpoint))
+    relation = RelationStub(app=app, data={app: databag}, name=endpoint, id=0)
+    charm = cast(ops.CharmBase, CharmStub(relation_name=endpoint, interface_name="mongodb_client"))
     return MongoDBClientValidator(charm, cast(ops.Relation, relation))
 
 
@@ -168,9 +141,9 @@ class TestMongoDBClientValidatorSimple:
 
     def test_returns_error_when_relation_app_is_none(self) -> None:
         # GIVEN a relation whose remote app is not yet known
-        relation = RelationStub(app=None, databag={})
+        relation = RelationStub(app=None, data={}, id=0, name="db")
         validator = MongoDBClientValidator(
-            cast(ops.CharmBase, CharmStub(endpoint=relation.name)),
+            cast(ops.CharmBase, CharmStub(relation_name=relation.name, interface_name=relation.name)),
             cast(ops.Relation, relation),
         )
 

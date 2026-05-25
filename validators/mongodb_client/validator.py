@@ -20,7 +20,6 @@ import uuid
 from typing import Any
 from urllib.parse import quote_plus
 
-import ops
 from pymongo import MongoClient
 
 from validators.base import BaseValidator, ValidationCheck, ValidationLevel, ValidationResult

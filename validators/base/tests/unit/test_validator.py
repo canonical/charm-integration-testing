@@ -14,10 +14,9 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import pytest
+from test_utils.stubs import CharmStub, RelationMetaStub, RelationRoleStub, RelationStub
 
 from validators.base import BaseValidator, ValidationCheck, ValidationLevel, ValidationResult
-
-from test_utils.stubs import RelationRoleStub, RelationStub, RelationMetaStub, CharmStub
 
 
 class ConcreteValidator(BaseValidator):
@@ -64,7 +63,14 @@ class TestBaseValidator:
         charm.meta = type(
             "MetaStub",
             (),
-            {"relations": {**charm.meta.relations, charm.relation_name: RelationMetaStub(interface_name=charm.interface_name, role=RelationRoleStub("provides"))}},
+            {
+                "relations": {
+                    **charm.meta.relations,
+                    charm.relation_name: RelationMetaStub(
+                        interface_name=charm.interface_name, role=RelationRoleStub("provides")
+                    ),
+                }
+            },
         )()
 
         # WHEN

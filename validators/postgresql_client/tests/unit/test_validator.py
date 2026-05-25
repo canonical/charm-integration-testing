@@ -16,10 +16,10 @@
 from dataclasses import dataclass, field
 from typing import cast
 from unittest.mock import patch
-from test_utils.stubs import RelationRoleStub
 
 import ops
 import psycopg2
+from test_utils.stubs import RelationRoleStub
 
 from validators.postgresql_client.validator import PostgreSQLClientValidator
 
@@ -124,9 +124,7 @@ class TestPostgreSQLClientValidatorSimple:
     def test_returns_error_when_relation_app_is_none(self) -> None:
         # GIVEN a relation whose remote app is not yet known
         relation = RelationStub(app=None, databag={})
-        validator = PostgreSQLClientValidator(
-            cast(ops.CharmBase, CharmStub()), cast(ops.Relation, relation)
-        )
+        validator = PostgreSQLClientValidator(cast(ops.CharmBase, CharmStub()), cast(ops.Relation, relation))
 
         # WHEN
         result = validator.validate(level="simple")

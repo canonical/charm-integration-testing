@@ -17,13 +17,12 @@ import json
 import socket
 from typing import Any, cast
 from unittest.mock import patch
-from dataclasses import dataclass
 
 import ops
 import pytest
+from test_utils.stubs import RelationRoleStub
 
 from validators.tracing.validator import TracingValidator
-from test_utils.stubs import RelationRoleStub
 
 # ---------------------------------------------------------------------------
 # Stubs
@@ -101,9 +100,7 @@ class TestTracingValidatorSimple:
     def test_returns_error_when_relation_app_is_none(self) -> None:
         # GIVEN a relation whose remote app is not yet known
         relation = RelationStub(app=None, databag={})
-        validator = TracingValidator(
-            cast(ops.CharmBase, CharmStub()), cast(ops.Relation, relation)
-        )
+        validator = TracingValidator(cast(ops.CharmBase, CharmStub()), cast(ops.Relation, relation))
 
         # WHEN
         result = validator.validate(level="simple")
