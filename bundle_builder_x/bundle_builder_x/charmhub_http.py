@@ -190,24 +190,30 @@ class InfoResponse(BaseModel):
     result: Result = Field(default_factory=Result)
 
 
-CHARM_REFRESH_ENDPOINT = "https://api.charmhub.io/v2/charms/refresh"
-CHARM_FIND_ENDPOINT = "https://api.charmhub.io/v2/charms/find"
-CHARM_INFO_ENDPOINT = "https://api.charmhub.io/v2/charms/info/{charm}"
+DEFAULT_CHARMHUB_API_URL = "https://api.charmhub.io"
 
 
 class CharmhubHttpClient:
     session: requests.Session
     logger: logging.Logger
     timeout: int
+    _refresh_endpoint: str
+    _find_endpoint: str
+    _info_endpoint: str
 
     def __init__(
         self,
         logger: logging.Logger = logging.getLogger(__name__),
         session: requests.Session | None = None,
         timeout: int = 180,
+        base_url: str = DEFAULT_CHARMHUB_API_URL,
     ) -> None:
         self.logger = logger
         self.timeout = timeout
+        base = base_url.rstrip("/")
+        self._refresh_endpoint = base + "/v2/charms/refresh"
+        self._find_endpoint = base + "/v2/charms/find"
+        self._info_endpoint = base + "/v2/charms/info/{charm}"
 
         # Setup requests session with retries
         retry_strategy = Retry(
@@ -226,7 +232,7 @@ class CharmhubHttpClient:
         self.logger.debug(f"Calling find with provides {provides} and requires {requires}")
 
         # Formulate request
-        request_url = CHARM_FIND_ENDPOINT
+        request_url = self._find_endpoint
         request_headers = {"Content-Type": "application/json"}
         request_params = {
             "q": "",
@@ -262,7 +268,7 @@ class CharmhubHttpClient:
         self.logger.debug(f"Calling refresh for charm {action.charm_name} ({print_properties})")
 
         # Formulate request
-        request_url = CHARM_REFRESH_ENDPOINT
+        request_url = self._refresh_endpoint
         request_headers = {"Content-Type": "application/json"}
         action_dict: dict[str, Any] = {"name": action.charm_name}
         if action.charm_revision is not None:
@@ -294,7 +300,7 @@ class CharmhubHttpClient:
         self.logger.debug(f"Calling info for charm {charm}")
 
         # Formulate request
-        request_url = CHARM_INFO_ENDPOINT.format(charm=charm)
+        request_url = self._info_endpoint.format(charm=charm)
         request_headers = {"Content-Type": "application/json"}
         fields = [
             "result.deployable-on",
