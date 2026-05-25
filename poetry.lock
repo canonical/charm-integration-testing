@@ -50,26 +50,6 @@ toml = ["tomli (>=1.1.0) ; python_version < \"3.11\""]
 yaml = ["PyYAML"]
 
 [[package]]
-name = "bundle-builder"
-version = "0.1.2"
-description = "Framework to generate Juju compatible bundles from charmhub."
-optional = false
-python-versions = ">=3.10"
-groups = ["main"]
-files = []
-develop = true
-
-[package.dependencies]
-pydantic = ">=2.11.3,<3.0.0"
-pytest-timeout = ">=2.3.1"
-pyyaml = ">=6.0.1"
-requests = "*"
-
-[package.source]
-type = "directory"
-url = "bundle_builder"
-
-[[package]]
 name = "bundle-builder-x"
 version = "10.0.0"
 description = "Framework to generate Juju compatible bundles from charmhub."
@@ -209,6 +189,7 @@ files = []
 develop = true
 
 [package.dependencies]
+bundle-builder-x = "*"
 jubilant = ">=1.6.0,<2.0.0"
 kubernetes = ">=32.0.0,<33.0.0"
 pydantic = ">=2.11.3,<3.0.0"
@@ -768,14 +749,14 @@ protobuf = ["grpcio-tools (>=1.80.0)"]
 
 [[package]]
 name = "idna"
-version = "3.13"
+version = "3.15"
 description = "Internationalized Domain Names in Applications (IDNA)"
 optional = false
 python-versions = ">=3.8"
 groups = ["main"]
 files = [
-    {file = "idna-3.13-py3-none-any.whl", hash = "sha256:892ea0cde124a99ce773decba204c5552b69c3c67ffd5f232eb7696135bc8bb3"},
-    {file = "idna-3.13.tar.gz", hash = "sha256:585ea8fe5d69b9181ec1afba340451fba6ba764af97026f92a91d4eef164a242"},
+    {file = "idna-3.15-py3-none-any.whl", hash = "sha256:048adeaf8c2d788c40fee287673ccaa74c24ffd8dcf09ffa555a2fbb59f10ac8"},
+    {file = "idna-3.15.tar.gz", hash = "sha256:ca962446ea538f7092a95e057da437618e886f4d349216d2b1e294abfdb65fdc"},
 ]
 
 [package.extras]
@@ -2209,14 +2190,14 @@ typing-extensions = ">=4.12.0"
 
 [[package]]
 name = "urllib3"
-version = "2.6.3"
+version = "2.7.0"
 description = "HTTP library with thread-safe connection pooling, file post, and more."
 optional = false
-python-versions = ">=3.9"
+python-versions = ">=3.10"
 groups = ["main", "dev"]
 files = [
-    {file = "urllib3-2.6.3-py3-none-any.whl", hash = "sha256:bf272323e553dfb2e87d9bfd225ca7b0f467b919d7bbd355436d3fd37cb0acd4"},
-    {file = "urllib3-2.6.3.tar.gz", hash = "sha256:1b62b6884944a57dbe321509ab94fd4d3b307075e0c2eae991ac71ee15ad38ed"},
+    {file = "urllib3-2.7.0-py3-none-any.whl", hash = "sha256:9fb4c81ebbb1ce9531cce37674bbc6f1360472bc18ca9a553ede278ef7276897"},
+    {file = "urllib3-2.7.0.tar.gz", hash = "sha256:231e0ec3b63ceb14667c67be60f2f2c40a518cb38b03af60abc813da26505f4c"},
 ]
 
 [package.extras]
@@ -2418,4 +2399,4 @@ type = ["pytest-mypy"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<4.0"
-content-hash = "31d25a28b7f9aa2887a5859590787aa606ab04fcb408c3c0cc25725c4b142447"
+content-hash = "fabc41a8ce382f44b84a29a187c236352d9bd88d6b128a900010077daa48d893"
