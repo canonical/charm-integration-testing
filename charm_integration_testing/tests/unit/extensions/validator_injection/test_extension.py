@@ -91,19 +91,19 @@ def _runner_json(*results: ValidationResult) -> str:
 
 def _pass_result(endpoint: str = "db") -> ValidationResult:
     return ValidationResult(
-        status="PASS", endpoint=endpoint, interface="sample_interface", level="simple", relation_id=0
+        status="PASS", endpoint=endpoint, interface="sample_interface", level="simple", role="requires", relation_id=0
     )
 
 
 def _fail_result(endpoint: str = "db") -> ValidationResult:
     return ValidationResult(
-        status="FAIL", endpoint=endpoint, interface="sample_interface", level="simple", relation_id=0
+        status="FAIL", endpoint=endpoint, interface="sample_interface", level="simple", role="requires", relation_id=0
     )
 
 
 def _error_result(endpoint: str = "db", error: str = "oops") -> ValidationResult:
     return ValidationResult(
-        status="ERROR", endpoint=endpoint, interface="sample_interface", level="simple", relation_id=0, error=error
+        status="ERROR", endpoint=endpoint, interface="sample_interface", level="simple", role="requires", relation_id=0, error=error
     )
 
 

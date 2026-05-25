@@ -126,11 +126,11 @@ class RevisionSequenceBackendStub(NullJujuBackend):
 
 
 def _pass(endpoint: str = "db", interface: str = "postgresql_client") -> ValidationResult:
-    return ValidationResult(status="PASS", endpoint=endpoint, interface=interface, level="simple", relation_id=0)
+    return ValidationResult(status="PASS", endpoint=endpoint, interface=interface, level="simple", role="requires", relation_id=0)
 
 
 def _fail(endpoint: str = "db", interface: str = "postgresql_client") -> ValidationResult:
-    return ValidationResult(status="FAIL", endpoint=endpoint, interface=interface, level="simple", relation_id=0)
+    return ValidationResult(status="FAIL", endpoint=endpoint, interface=interface, level="simple", role="requires", relation_id=0)
 
 
 def _fail_with_check(
@@ -141,6 +141,7 @@ def _fail_with_check(
         endpoint=endpoint,
         interface="postgresql_client",
         level="simple",
+        role="requires",
         relation_id=0,
         checks=[ValidationCheck(name=check_name, passed=False, message=check_message)],
     )
@@ -148,12 +149,12 @@ def _fail_with_check(
 
 def _error(endpoint: str = "db", error: str = "exception occurred") -> ValidationResult:
     return ValidationResult(
-        status="ERROR", endpoint=endpoint, interface="postgresql_client", level="simple", relation_id=0, error=error
+        status="ERROR", endpoint=endpoint, interface="postgresql_client", level="simple", role="requires", relation_id=0, error=error
     )
 
 
 def _skipped(endpoint: str = "db", interface: str = "postgresql_client") -> ValidationResult:
-    return ValidationResult(status="SKIPPED", endpoint=endpoint, interface=interface, level="simple", relation_id=0)
+    return ValidationResult(status="SKIPPED", endpoint=endpoint, interface=interface, level="simple", role="requires", relation_id=0)
 
 
 def _app_info(charm: str = "postgresql") -> JujuApplicationInfo:
