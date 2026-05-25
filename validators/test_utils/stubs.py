@@ -17,9 +17,9 @@ class RelationRoleStub:
 @dataclass
 class RelationStub:
     name: str
-    id: int
     app: AppStub | None = None
     data: dict[AppStub | None, dict[str, str]] = field(default_factory=dict)
+    id: int = 0
 
 
 @dataclass
@@ -53,7 +53,7 @@ class CharmMetaStub:
 
 @dataclass
 class CharmStub:
-    relation_name: str
+    relation_name: str = "test-relation"
     meta: CharmMetaStub = field(default_factory=CharmMetaStub)
     interface_name: str = "test-interface"
     secrets: dict[str, dict[str, str]] = field(default_factory=dict)
