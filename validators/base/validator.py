@@ -132,12 +132,12 @@ class BaseValidator(ABC):
     ) -> ValidationResult:
         return ValidationResult(
             status=status,
-            endpoint=endpoint or self.endpoint,
-            interface=interface or self.interface,
+            endpoint=self.endpoint if endpoint is None else endpoint,
+            interface=self.interface if interface is None else interface,
             role=role or self.role,
             level=level,
-            relation_id=relation_id or self.relation_id,
-            checks=checks or [],
+            relation_id=self.relation_id if relation_id is None else relation_id,
+            checks=[] if checks is None else checks,
             error=error,
         )
 

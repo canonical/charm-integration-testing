@@ -62,7 +62,7 @@ class ValidatorRunner:
         return validators
 
     def run(self, charm: CharmBase, level: ValidationLevel) -> ValidatorRunnerResults:
-        # Get the list of requires endpoints
+        # Get the list of endpoints
         results = []
         for relation, metadata in charm.meta.relations.items():
             if (role := str_to_validation_role(metadata.role.name)) == "peer":
