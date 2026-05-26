@@ -568,22 +568,21 @@ class TestCharmhubClient:
             endpoints = client._get_charm_endpoints("myapp", _METADATA_REQUIRES, _CHANNEL)
             assert endpoints["db"].scope is None
 
+    class TestCharmMetadataSubordinateFields:
+        """CharmMetadata.subordinate and CharmMetadata.Endpoint.scope fields."""
 
-class TestCharmMetadataSubordinateFields:
-    """CharmMetadata.subordinate and CharmMetadata.Endpoint.scope fields."""
+        def test_subordinate_defaults_false(self) -> None:
+            assert CharmMetadata().subordinate is False
 
-    def test_subordinate_defaults_false(self) -> None:
-        assert CharmMetadata().subordinate is False
+        def test_subordinate_set_true(self) -> None:
+            assert CharmMetadata(subordinate=True).subordinate is True
 
-    def test_subordinate_set_true(self) -> None:
-        assert CharmMetadata(subordinate=True).subordinate is True
+        def test_endpoint_scope_defaults_none(self) -> None:
+            assert CharmMetadata.Endpoint(interface="juju-info").scope is None
 
-    def test_endpoint_scope_defaults_none(self) -> None:
-        assert CharmMetadata.Endpoint(interface="juju-info").scope is None
-
-    def test_endpoint_scope_stored(self) -> None:
-        ep = CharmMetadata.Endpoint(interface="juju-info", scope="container")
-        assert ep.scope == EndpointScope.CONTAINER
+        def test_endpoint_scope_stored(self) -> None:
+            ep = CharmMetadata.Endpoint(interface="juju-info", scope="container")
+            assert ep.scope == EndpointScope.CONTAINER
 
     # ---------------------------------------------------------------------------
     # TestGetCharmConfigs

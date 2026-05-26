@@ -319,7 +319,11 @@ class BundleBuilder:
         tag: SubordinateBaseMismatchTag,
         domain: Domain,
     ) -> bool:
-        """Expand the domain by fetching a subordinate charm variant matching the principal's base."""
+        """Expand the domain by fetching charm variants to resolve a subordinate/principal base mismatch.
+
+        Attempts both directions: fetching the subordinate at the principal's base, and
+        fetching the principal at the subordinate's base.
+        """
         # Subordinate and principal must be in the same model (container-scoped
         # relations are cross-model-incompatible), so one model_ref covers both.
         model_ref = domain.charms[tag.subordinate_charm_id].model
@@ -391,6 +395,11 @@ class BundleBuilder:
         """Find charms that can fulfill an endpoint, compatible with target_model's platform/arch."""
         model = domain.models[target_model]
         endpoint = domain.charms[charm_id].spec.endpoints[endpoint_name]
+
+        # Container-scoped endpoints are machine-only; subordinates can't span models
+        # or run on non-machine platforms, so skip querying Charmhub immediately.
+        if endpoint.scope == EndpointScope.CONTAINER and model.platform != "machine":
+            return []
 
         fulfilling_charms: set[str] = set()
         if endpoint.type == EndpointType.REQUIRES:

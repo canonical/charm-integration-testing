@@ -291,3 +291,34 @@ class TestGetCharmsForEndpoint:
 
         # THEN the charm is skipped and the result is empty
         assert results == []
+
+    def test_container_scope_returns_empty_on_non_machine_platform(self) -> None:
+        # GIVEN a subordinate charm on a kubernetes model
+        domain = Domain()
+        domain.models[ModelRef(name="k8s")] = DomainModel(
+            arch="amd64",
+            platform="kubernetes",
+            juju_version=_JUJU,
+            applications={"nrpe": DomainApplication(charm="nrpe")},
+        )
+        add_charm_to_domain(
+            _make_charm(
+                "nrpe",
+                {
+                    "general-info": CharmEndpoint(
+                        type=EndpointType.REQUIRES, interface="juju-info", scope=EndpointScope.CONTAINER
+                    )
+                },
+            ),
+            domain,
+            ModelRef(name="k8s"),
+        )
+        fake = _FakeCharmhubClient(find_result={"ubuntu"})
+        builder = BundleBuilder(charmhub_client=fake)
+
+        # WHEN fetching charms for the container-scoped endpoint on a non-machine model
+        results = builder._get_charms_for_endpoint(0, "general-info", domain, ModelRef(name="k8s"))
+
+        # THEN no results are returned and no Charmhub queries were made
+        assert results == []
+        assert fake.charm_from_store_calls == []
