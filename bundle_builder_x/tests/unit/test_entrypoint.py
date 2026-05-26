@@ -15,9 +15,7 @@
 
 import argparse
 
-from bundle_builder_x.charmhub_http import DEFAULT_CHARMHUB_API_URL
 from bundle_builder_x.entrypoint import add_args_to_parser
-from bundle_builder_x.snapstore_http import DEFAULT_SNAPCRAFT_API_URL
 
 
 def _parse(args: list[str]) -> argparse.Namespace:
@@ -28,12 +26,12 @@ def _parse(args: list[str]) -> argparse.Namespace:
 
 class TestAddArgsToParser:
     class TestCharmhubUrl:
-        def test_defaults_to_production(self) -> None:
+        def test_defaults_to_none(self) -> None:
             # GIVEN no --charmhub-url flag is passed
             # WHEN the parser runs
             args = _parse(["--spec", "spec.yaml"])
-            # THEN the default is the production Charmhub URL
-            assert args.charmhub_url == DEFAULT_CHARMHUB_API_URL
+            # THEN the value is None (env var / hardcoded fallback is resolved by CharmhubHttpClient)
+            assert args.charmhub_url is None
 
         def test_accepts_custom_value(self) -> None:
             # GIVEN a custom --charmhub-url flag
@@ -43,12 +41,12 @@ class TestAddArgsToParser:
             assert args.charmhub_url == "https://staging.charmhub.io"
 
     class TestSnapcraftUrl:
-        def test_defaults_to_production(self) -> None:
+        def test_defaults_to_none(self) -> None:
             # GIVEN no --snapcraft-url flag is passed
             # WHEN the parser runs
             args = _parse(["--spec", "spec.yaml"])
-            # THEN the default is the production Snapcraft URL
-            assert args.snapcraft_url == DEFAULT_SNAPCRAFT_API_URL
+            # THEN the value is None (env var / hardcoded fallback is resolved by SnapstoreHttpClient)
+            assert args.snapcraft_url is None
 
         def test_accepts_custom_value(self) -> None:
             # GIVEN a custom --snapcraft-url flag
