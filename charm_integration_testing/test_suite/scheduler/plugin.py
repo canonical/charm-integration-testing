@@ -56,7 +56,7 @@ from __future__ import annotations
 
 import logging
 import pathlib
-from collections import defaultdict
+from collections import Counter, defaultdict
 
 import pytest
 
@@ -86,6 +86,12 @@ _injected_item_ids: set[int] = set()
 # all subsequent state-marked tests are skipped because the environment state
 # is unknown. Pure test failures do NOT set this: they leave the state intact.
 _failed_state_test: pytest.Item | None = None
+
+# Number of bridge items re-injected during collection-time scheduling.
+# This is added to session.testscollected in pytest_collection_finish so
+# pytest's final "collected / deselected / selected" bookkeeping stays
+# consistent when bridges are re-added after testmon deselection.
+_collection_reinjected_count = 0
 
 
 # ---------------------------------------------------------------------------
@@ -210,10 +216,23 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int | pytest.ExitC
     same Python process (e.g. from a test harness) would see stale data from
     the previous run.
     """
-    global _all_collected, _injected_item_ids, _failed_state_test
+    global _all_collected, _injected_item_ids, _failed_state_test, _collection_reinjected_count
+
+    # pytest-testmon may legitimately deselect every test in incremental CI
+    # runs. In that case pytest returns NO_TESTS_COLLECTED (5), which should
+    # be treated as a successful no-op run.
+    if (
+        session.exitstatus == pytest.ExitCode.NO_TESTS_COLLECTED
+        and session.config.pluginmanager.has_plugin("testmon")
+        and _all_collected
+    ):
+        logger.info("No tests selected after testmon deselection; treating session as successful no-op.")
+        session.exitstatus = pytest.ExitCode.OK
+
     _all_collected.clear()
     _injected_item_ids.clear()
     _failed_state_test = None
+    _collection_reinjected_count = 0
 
 
 def pytest_runtest_setup(item: pytest.Item) -> None:
@@ -244,7 +263,14 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     from ``_all_collected``, and injects any bridging transitions needed to
     reach those destinations.
     """
-    _schedule_items(config, items)
+    global _collection_reinjected_count
+    _collection_reinjected_count += _schedule_items(config, items)
+
+
+def pytest_collection_finish(session: pytest.Session) -> None:
+    """Adjust collected-count bookkeeping for collection-time bridge injection."""
+    if _collection_reinjected_count:
+        session.testscollected += _collection_reinjected_count
 
 
 @pytest.hookimpl(wrapper=True)
@@ -262,12 +288,33 @@ def pytest_runtestloop(session: pytest.Session) -> object:
     correct bridges and this call is effectively a no-op — the re-scheduling
     simply rebuilds the same plan.
     """
-    _schedule_items(session.config, session.items)
+    reinjected_count = _schedule_items(session.config, session.items)
+    if reinjected_count:
+        session.testscollected += reinjected_count
     return (yield)
 
 
-def _schedule_items(config: pytest.Config, items: list[pytest.Item]) -> None:
+def _count_reinjected_items(before: list[pytest.Item], after: list[pytest.Item]) -> int:
+    """Return how many item objects were added to *after* that were not in *before*.
+
+    Uses identity-based multiset comparison so duplicate objects are handled
+    correctly if an item appears multiple times in an execution plan.
+    """
+    before_counts = Counter(id(item) for item in before)
+    added = 0
+    for item in after:
+        item_id = id(item)
+        if before_counts[item_id] > 0:
+            before_counts[item_id] -= 1
+        else:
+            added += 1
+    return added
+
+
+def _schedule_items(config: pytest.Config, items: list[pytest.Item]) -> int:
     """Core scheduling logic shared by collection and pre-run hooks."""
+    original_items = items[:]
+
     raw_state: str = config.getoption("--current-state")
     try:
         current_state = State(raw_state)
@@ -318,7 +365,7 @@ def _schedule_items(config: pytest.Config, items: list[pytest.Item]) -> None:
 
     if not selected_marked:
         # Nothing state-marked in the selection; leave items untouched.
-        return
+        return 0
 
     # ------------------------------------------------------------------
     # 3. From the selected items, build destination clusters.
@@ -362,6 +409,7 @@ def _schedule_items(config: pytest.Config, items: list[pytest.Item]) -> None:
     # 5. Commit new order: scheduled items first, then any unmarked items.
     # ------------------------------------------------------------------
     items[:] = ordered + unmarked
+    return _count_reinjected_items(original_items, items)
 
 
 # ---------------------------------------------------------------------------

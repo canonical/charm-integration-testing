@@ -897,19 +897,44 @@ class TestPytestRuntestSetup:
 
 
 class TestPytestSessionFinish:
+    @staticmethod
+    def _make_session(exitstatus: pytest.ExitCode | int, *, has_testmon: bool) -> SimpleNamespace:
+        pluginmanager = SimpleNamespace(has_plugin=lambda name: has_testmon and name == "testmon")
+        config = SimpleNamespace(pluginmanager=pluginmanager)
+        return SimpleNamespace(config=config, exitstatus=exitstatus)
+
     def test_clears_all_collected(self, make_item: Callable[..., pytest.Item]) -> None:
         _plugin_module._all_collected.append(make_item("test_foo"))
-        pytest_sessionfinish(session=SimpleNamespace(), exitstatus=0)  # type: ignore[arg-type]
+        session = self._make_session(pytest.ExitCode.OK, has_testmon=False)
+        pytest_sessionfinish(session=session, exitstatus=0)  # type: ignore[arg-type]
         assert _plugin_module._all_collected == []
 
     def test_clears_injected_item_ids(self, make_item: Callable[..., pytest.Item]) -> None:
         item = make_item("test_foo")
         _mark_as_injected(item)
         assert _plugin_module._injected_item_ids  # non-empty before
-        pytest_sessionfinish(session=SimpleNamespace(), exitstatus=0)  # type: ignore[arg-type]
+        session = self._make_session(pytest.ExitCode.OK, has_testmon=False)
+        pytest_sessionfinish(session=session, exitstatus=0)  # type: ignore[arg-type]
         assert _plugin_module._injected_item_ids == set()
 
     def test_clears_failed_state_test(self, make_item: Callable[..., pytest.Item]) -> None:
         _plugin_module._failed_state_test = make_item("test_deploy")
-        pytest_sessionfinish(session=SimpleNamespace(), exitstatus=0)  # type: ignore[arg-type]
+        session = self._make_session(pytest.ExitCode.OK, has_testmon=False)
+        pytest_sessionfinish(session=session, exitstatus=0)  # type: ignore[arg-type]
         assert _plugin_module._failed_state_test is None
+
+    def test_no_tests_collected_with_testmon_is_success(self, make_item: Callable[..., pytest.Item]) -> None:
+        _plugin_module._all_collected.append(make_item("test_foo"))
+        session = self._make_session(pytest.ExitCode.NO_TESTS_COLLECTED, has_testmon=True)
+
+        pytest_sessionfinish(session=session, exitstatus=pytest.ExitCode.NO_TESTS_COLLECTED)  # type: ignore[arg-type]
+
+        assert session.exitstatus == pytest.ExitCode.OK
+
+    def test_no_tests_collected_without_testmon_keeps_exit_code(self, make_item: Callable[..., pytest.Item]) -> None:
+        _plugin_module._all_collected.append(make_item("test_foo"))
+        session = self._make_session(pytest.ExitCode.NO_TESTS_COLLECTED, has_testmon=False)
+
+        pytest_sessionfinish(session=session, exitstatus=pytest.ExitCode.NO_TESTS_COLLECTED)  # type: ignore[arg-type]
+
+        assert session.exitstatus == pytest.ExitCode.NO_TESTS_COLLECTED
