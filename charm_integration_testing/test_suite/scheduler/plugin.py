@@ -153,9 +153,7 @@ def pytest_itemcollected(item: pytest.Item) -> None:
 
 
 @pytest.hookimpl(tryfirst=True)
-def pytest_ignore_collect(
-    collection_path: pathlib.Path, config: pytest.Config
-) -> bool | None:
+def pytest_ignore_collect(collection_path: pathlib.Path, config: pytest.Config) -> bool | None:
     """Force collection of test-suite files so the state graph is complete.
 
     pytest-testmon's ``pytest_ignore_collect`` skips unchanged files
@@ -168,10 +166,7 @@ def pytest_ignore_collect(
     testmon can still deselect them during ``pytest_collection_modifyitems``;
     the scheduler will re-inject any that are needed as bridges.
     """
-    if (
-        collection_path.suffix == ".py"
-        and collection_path.resolve().is_relative_to(_TEST_SUITE_DIR)
-    ):
+    if collection_path.suffix == ".py" and collection_path.resolve().is_relative_to(_TEST_SUITE_DIR):
         return False
     return None
 
