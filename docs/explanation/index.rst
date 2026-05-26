@@ -11,4 +11,5 @@ Contents
 
    bundle-builder-x-algorithm
    charm-priorities
+   merge-main-to-production
    wait-conditions

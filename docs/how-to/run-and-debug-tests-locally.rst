@@ -185,3 +185,54 @@ expensive setup transitions.
 The ``--juju-model-config`` file is optional. If omitted, tests create the model
 without extra configuration; if provided, pass a JSON object of string keys and values
 matching Juju model configuration options.
+
+Testmon and re-running tests
+----------------------------
+
+The CI pipeline uses `pytest-testmon <https://testmon.org/>`_ to skip tests
+whose code (and transitive dependencies) has not changed since the last
+successful run.  The cached database (``.testmondata``) is stored per branch
+in the GitHub Actions cache.
+
+During **pull-request checks**, testmon is enabled (``--testmon``) so only
+tests affected by the PR's changes are executed.  During the
+**merge-main-to-production** workflow, ``full_test_suite`` is set to
+``true``, which disables testmon and forces every test to run.
+
+Interaction with the state scheduler
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The state-driven scheduler overrides ``pytest_ignore_collect`` so that
+**every** ``.py`` file under the test suite is always collected, even when
+testmon would skip it.  This ensures the scheduler can build the complete
+state graph and find bridging transitions via Dijkstra.
+
+Testmon still participates later: during ``pytest_collection_modifyitems``
+it deselects unchanged tests from the ``items`` list.  The scheduler treats
+whatever remains as destinations and re-injects any bridge tests needed to
+reach them.
+
+In practice this means:
+
+- Testmon decides **which tests to run** (deselection).
+- The scheduler decides **what order** they run in and **which setup
+  transitions** must be injected to reach the required states.
+- ``--ignore`` / ``--ignore-glob`` have no effect on files inside the test
+  suite directory because the scheduler forces collection.  Use ``-k`` to
+  select or exclude specific tests instead.
+
+Forcing a full re-run locally
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+To bypass testmon and run every test locally, either delete the cache file
+or pass ``--forcerun``:
+
+.. code:: bash
+
+   # Option 1: delete the cache
+   rm -f .testmondata
+
+   # Option 2: force-run everything
+   ./scripts/run-tests.sh \
+     ... \
+     -- --forcerun
