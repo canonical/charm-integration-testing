@@ -14,6 +14,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import logging
+import os
 from functools import cache
 from typing import Any
 
@@ -191,6 +192,7 @@ class InfoResponse(BaseModel):
 
 
 DEFAULT_CHARMHUB_API_URL = "https://api.charmhub.io"
+CHARMHUB_API_URL_ENV = "CHARMHUB_API_URL"
 
 
 class CharmhubHttpClient:
@@ -206,11 +208,12 @@ class CharmhubHttpClient:
         logger: logging.Logger = logging.getLogger(__name__),
         session: requests.Session | None = None,
         timeout: int = 180,
-        base_url: str = DEFAULT_CHARMHUB_API_URL,
+        base_url: str | None = None,
     ) -> None:
         self.logger = logger
         self.timeout = timeout
-        base = base_url.rstrip("/")
+        resolved_url = base_url or os.environ.get(CHARMHUB_API_URL_ENV, DEFAULT_CHARMHUB_API_URL)
+        base = resolved_url.rstrip("/")
         self._refresh_endpoint = base + "/v2/charms/refresh"
         self._find_endpoint = base + "/v2/charms/find"
         self._info_endpoint = base + "/v2/charms/info/{charm}"
