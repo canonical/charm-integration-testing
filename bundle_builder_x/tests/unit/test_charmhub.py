@@ -6,7 +6,7 @@ from typing import cast
 import pytest
 from pydantic.dataclasses import dataclass
 
-from bundle_builder_x.charm import CharmChannel
+from bundle_builder_x.charm import CharmChannel, EndpointScope, EndpointType
 from bundle_builder_x.charmhub import CharmhubClient
 from bundle_builder_x.charmhub_http import (
     CharmConfigSchema,
@@ -526,6 +526,63 @@ class TestCharmhubClient:
             endpoints = client._get_charm_endpoints("mycharm", _METADATA_REQUIRES, _CHANNEL)
             # THEN all metadata endpoints are returned
             assert "db" in endpoints
+
+        def test_injects_juju_info_when_absent(self) -> None:
+            client = _client({})
+            endpoints = client._get_charm_endpoints("myapp", _METADATA_REQUIRES, _CHANNEL)
+            assert "juju-info" in endpoints
+            ep = endpoints["juju-info"]
+            assert ep.type == EndpointType.PROVIDES
+            assert ep.interface == "juju-info"
+            assert ep.optional is True
+            assert ep.scope == EndpointScope.GLOBAL
+
+        def test_subordinate_does_not_get_implicit_juju_info(self) -> None:
+            # Subordinate charms explicitly REQUIRE juju-info; they do not implicitly provide it.
+            # Only non-subordinate (principal) charms get the implicit provides injection.
+            metadata = CharmMetadata(
+                subordinate=True,
+                requires={"general-info": CharmMetadata.Endpoint(interface="juju-info", scope="container")},
+            )
+            client = _client({})
+            endpoints = client._get_charm_endpoints("nrpe", metadata, _CHANNEL)
+            assert "juju-info" not in endpoints
+
+        def test_does_not_overwrite_explicit_juju_info(self) -> None:
+            metadata = CharmMetadata(provides={"juju-info": CharmMetadata.Endpoint(interface="juju-info", limit=5)})
+            client = _client({})
+            endpoints = client._get_charm_endpoints("special", metadata, _CHANNEL)
+            # Explicit declaration wins; the injected one would have limit=None
+            assert endpoints["juju-info"].limit == 5
+
+        def test_preserves_container_scope_from_metadata(self) -> None:
+            metadata = CharmMetadata(
+                requires={"general-info": CharmMetadata.Endpoint(interface="juju-info", scope="container")}
+            )
+            client = _client({})
+            endpoints = client._get_charm_endpoints("nrpe", metadata, _CHANNEL)
+            assert endpoints["general-info"].scope == EndpointScope.CONTAINER
+
+        def test_scope_none_when_metadata_has_no_scope(self) -> None:
+            client = _client({})
+            endpoints = client._get_charm_endpoints("myapp", _METADATA_REQUIRES, _CHANNEL)
+            assert endpoints["db"].scope is None
+
+    class TestCharmMetadataSubordinateFields:
+        """CharmMetadata.subordinate and CharmMetadata.Endpoint.scope fields."""
+
+        def test_subordinate_defaults_false(self) -> None:
+            assert CharmMetadata().subordinate is False
+
+        def test_subordinate_set_true(self) -> None:
+            assert CharmMetadata(subordinate=True).subordinate is True
+
+        def test_endpoint_scope_defaults_none(self) -> None:
+            assert CharmMetadata.Endpoint(interface="juju-info").scope is None
+
+        def test_endpoint_scope_stored(self) -> None:
+            ep = CharmMetadata.Endpoint(interface="juju-info", scope="container")
+            assert ep.scope == EndpointScope.CONTAINER
 
     # ---------------------------------------------------------------------------
     # TestGetCharmConfigs

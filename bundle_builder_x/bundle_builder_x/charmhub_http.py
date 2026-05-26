@@ -24,6 +24,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
+from .charm import EndpointScope
+
 
 class UnparsableCharmException(Exception):
     """Raised when the charm cannot be parsed."""
@@ -70,12 +72,14 @@ class CharmMetadata(BaseModel):
         interface: str
         optional: bool | None = None
         limit: int | None = None
+        scope: EndpointScope | None = None
 
     class Resource(BaseModel):
         model_config = ConfigDict(frozen=True)
 
         type: str
 
+    subordinate: bool = False
     peers: dict[str, Endpoint] = Field(default_factory=dict)
     requires: dict[str, Endpoint] = Field(default_factory=dict)
     provides: dict[str, Endpoint] = Field(default_factory=dict)
