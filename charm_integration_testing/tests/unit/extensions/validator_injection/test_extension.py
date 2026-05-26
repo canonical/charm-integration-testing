@@ -103,7 +103,13 @@ def _fail_result(endpoint: str = "db") -> ValidationResult:
 
 def _error_result(endpoint: str = "db", error: str = "oops") -> ValidationResult:
     return ValidationResult(
-        status="ERROR", endpoint=endpoint, interface="sample_interface", level="simple", role="requires", relation_id=0, error=error
+        status="ERROR",
+        endpoint=endpoint,
+        interface="sample_interface",
+        level="simple",
+        role="requires",
+        relation_id=0,
+        error=error,
     )
 
 

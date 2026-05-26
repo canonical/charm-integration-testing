@@ -14,13 +14,19 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from abc import ABC, abstractmethod
-from typing import Literal, Optional
+from typing import Literal, Optional, cast, get_args
 
 import ops
 from pydantic import BaseModel, Field
 
 ValidationLevel = Literal["simple", "deep", "uat"]
-ValidationRole = Literal["requires", "provides"]
+ValidationRole = Literal["requires", "provides", "peer"]
+
+
+def str_to_validation_role(s: str) -> ValidationRole:
+    if s not in get_args(ValidationRole):
+        raise ValueError(f"Invalid validation role '{s}'. Must be one of {get_args(ValidationRole)}.")
+    return cast(ValidationRole, s)
 
 
 class ValidationCheck(BaseModel):
@@ -51,7 +57,7 @@ class BaseValidator(ABC):
     @property
     def role(self) -> ValidationRole:
         relation = self.charm.meta.relations[self.relation.name]
-        return relation.role.name
+        return str_to_validation_role(relation.role.name)
 
     @property
     def endpoint(self) -> str:

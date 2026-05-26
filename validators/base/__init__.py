@@ -13,6 +13,20 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from .validator import BaseValidator, ValidationCheck, ValidationLevel, ValidationResult, ValidationRole
+from .validator import (
+    BaseValidator,
+    ValidationCheck,
+    ValidationLevel,
+    ValidationResult,
+    ValidationRole,
+    str_to_validation_role,
+)
 
-__all__ = ["BaseValidator", "ValidationCheck", "ValidationLevel", "ValidationRole", "ValidationResult"]
+__all__ = [
+    "BaseValidator",
+    "ValidationCheck",
+    "ValidationLevel",
+    "ValidationRole",
+    "ValidationResult",
+    "str_to_validation_role",
+]
