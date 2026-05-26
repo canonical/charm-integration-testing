@@ -462,10 +462,14 @@ def add_subordinate_constraints(solver: z3.Solver, domain: Domain) -> None:
         # Identify subordinate and principal
         if req_endpoint.scope == EndpointScope.CONTAINER:
             sub_charm, sub_id = req_charm, integration.requires_charm_id
+            sub_endpoint = integration.requires_endpoint
             principal_charm, principal_id = prov_charm, integration.provides_charm_id
+            principal_endpoint = integration.provides_endpoint
         else:
             sub_charm, sub_id = prov_charm, integration.provides_charm_id
+            sub_endpoint = integration.provides_endpoint
             principal_charm, principal_id = req_charm, integration.requires_charm_id
+            principal_endpoint = integration.requires_endpoint
 
         # If both charms have the same base already, no constraint needed
         if sub_charm.spec.ubuntu_version == principal_charm.spec.ubuntu_version:
@@ -478,14 +482,10 @@ def add_subordinate_constraints(solver: z3.Solver, domain: Domain) -> None:
             SubordinateBaseMismatchTag(
                 subordinate_charm_name=sub_charm.spec.name,
                 subordinate_charm_id=sub_id,
-                subordinate_endpoint=integration.requires_endpoint
-                if req_endpoint.scope == EndpointScope.CONTAINER
-                else integration.provides_endpoint,
+                subordinate_endpoint=sub_endpoint,
                 principal_charm_name=principal_charm.spec.name,
                 principal_charm_id=principal_id,
-                principal_endpoint=integration.provides_endpoint
-                if req_endpoint.scope == EndpointScope.CONTAINER
-                else integration.requires_endpoint,
+                principal_endpoint=principal_endpoint,
                 subordinate_base=sub_charm.spec.ubuntu_version,
                 principal_base=principal_charm.spec.ubuntu_version,
             ).encode(),
