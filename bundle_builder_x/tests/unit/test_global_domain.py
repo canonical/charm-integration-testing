@@ -3,7 +3,7 @@
 
 """Tests for global multi-model domain behavior."""
 
-from bundle_builder_x.charm import Charm, CharmChannel, CharmEndpoint, EndpointType
+from bundle_builder_x.charm import Charm, CharmChannel, CharmEndpoint, EndpointScope, EndpointType
 from bundle_builder_x.domain import (
     Domain,
     DomainApplication,
@@ -386,3 +386,136 @@ class TestCMRIntegrationMapping:
 
         # THEN no CMR mapping is created: external CMRs have no DomainCharmIntegration to map to
         assert _cmr_mapping_count(domain, ModelRef(name="consumer-model")) == 0
+
+
+class TestAddCharmToDomainContainerScopeGating:
+    """add_charm_to_domain: container-scoped integrations are gated to same-model machine platforms."""
+
+    def test_container_scope_integration_created_on_machine_model(self) -> None:
+        domain = _make_domain({ModelRef(name="m"): DomainModel(arch="amd64", platform="machine", juju_version=_JUJU)})
+        principal = _make_charm(
+            "ubuntu",
+            {"juju-info": CharmEndpoint(type=EndpointType.PROVIDES, interface="juju-info", scope=EndpointScope.GLOBAL)},
+        )
+        subordinate = _make_charm(
+            "nrpe",
+            {
+                "general-info": CharmEndpoint(
+                    type=EndpointType.REQUIRES, interface="juju-info", scope=EndpointScope.CONTAINER
+                )
+            },
+        )
+        add_charm_to_domain(principal, domain, ModelRef(name="m"))
+        add_charm_to_domain(subordinate, domain, ModelRef(name="m"))
+
+        juju_info = [i for i in domain.charm_integrations if domain.integration_interface(i) == "juju-info"]
+        assert len(juju_info) == 1
+
+    def test_container_scope_integration_not_created_on_k8s_model(self) -> None:
+        domain = _make_domain(
+            {ModelRef(name="k"): DomainModel(arch="amd64", platform="kubernetes", juju_version=_JUJU)}
+        )
+        principal = _make_charm(
+            "ubuntu",
+            {"juju-info": CharmEndpoint(type=EndpointType.PROVIDES, interface="juju-info", scope=EndpointScope.GLOBAL)},
+        )
+        subordinate = _make_charm(
+            "nrpe",
+            {
+                "general-info": CharmEndpoint(
+                    type=EndpointType.REQUIRES, interface="juju-info", scope=EndpointScope.CONTAINER
+                )
+            },
+        )
+        add_charm_to_domain(principal, domain, ModelRef(name="k"))
+        add_charm_to_domain(subordinate, domain, ModelRef(name="k"))
+
+        juju_info = [i for i in domain.charm_integrations if domain.integration_interface(i) == "juju-info"]
+        assert len(juju_info) == 0
+
+    def test_non_container_scope_interface_not_gated_on_k8s(self) -> None:
+        domain = _make_domain(
+            {ModelRef(name="k"): DomainModel(arch="amd64", platform="kubernetes", juju_version=_JUJU)}
+        )
+        charm_a = _make_charm("app", {"db": CharmEndpoint(type=EndpointType.REQUIRES, interface="pgsql")})
+        charm_b = _make_charm("pg", {"database": CharmEndpoint(type=EndpointType.PROVIDES, interface="pgsql")})
+        add_charm_to_domain(charm_a, domain, ModelRef(name="k"))
+        add_charm_to_domain(charm_b, domain, ModelRef(name="k"))
+
+        assert len([i for i in domain.charm_integrations if domain.integration_interface(i) == "pgsql"]) == 1
+
+    def test_non_juju_info_container_scope_also_gated_on_k8s(self) -> None:
+        # container scope gating applies to any interface, not just juju-info
+        domain = _make_domain(
+            {ModelRef(name="k"): DomainModel(arch="amd64", platform="kubernetes", juju_version=_JUJU)}
+        )
+        principal = _make_charm(
+            "app",
+            {
+                "custom-sub": CharmEndpoint(
+                    type=EndpointType.PROVIDES, interface="custom-sub-iface", scope=EndpointScope.GLOBAL
+                )
+            },
+        )
+        subordinate = _make_charm(
+            "sub",
+            {
+                "custom-sub": CharmEndpoint(
+                    type=EndpointType.REQUIRES, interface="custom-sub-iface", scope=EndpointScope.CONTAINER
+                )
+            },
+        )
+        add_charm_to_domain(principal, domain, ModelRef(name="k"))
+        add_charm_to_domain(subordinate, domain, ModelRef(name="k"))
+
+        assert len(domain.charm_integrations) == 0
+
+    def test_container_scope_cross_model_blocked_mixed_platform(self) -> None:
+        domain = _make_domain(
+            {
+                ModelRef(name="m"): DomainModel(arch="amd64", platform="machine", juju_version=_JUJU),
+                ModelRef(name="k"): DomainModel(arch="amd64", platform="kubernetes", juju_version=_JUJU),
+            }
+        )
+        principal = _make_charm(
+            "ubuntu",
+            {"juju-info": CharmEndpoint(type=EndpointType.PROVIDES, interface="juju-info", scope=EndpointScope.GLOBAL)},
+        )
+        subordinate = _make_charm(
+            "nrpe",
+            {
+                "general-info": CharmEndpoint(
+                    type=EndpointType.REQUIRES, interface="juju-info", scope=EndpointScope.CONTAINER
+                )
+            },
+        )
+        add_charm_to_domain(principal, domain, ModelRef(name="m"))
+        add_charm_to_domain(subordinate, domain, ModelRef(name="k"))
+
+        juju_info = [i for i in domain.charm_integrations if domain.integration_interface(i) == "juju-info"]
+        assert len(juju_info) == 0
+
+    def test_container_scope_cross_model_blocked_both_machine(self) -> None:
+        domain = _make_domain(
+            {
+                ModelRef(name="m1"): DomainModel(arch="amd64", platform="machine", juju_version=_JUJU),
+                ModelRef(name="m2"): DomainModel(arch="amd64", platform="machine", juju_version=_JUJU),
+            }
+        )
+        principal = _make_charm(
+            "ubuntu",
+            {"juju-info": CharmEndpoint(type=EndpointType.PROVIDES, interface="juju-info", scope=EndpointScope.GLOBAL)},
+        )
+        subordinate = _make_charm(
+            "nrpe",
+            {
+                "general-info": CharmEndpoint(
+                    type=EndpointType.REQUIRES, interface="juju-info", scope=EndpointScope.CONTAINER
+                )
+            },
+        )
+        add_charm_to_domain(principal, domain, ModelRef(name="m1"))
+        add_charm_to_domain(subordinate, domain, ModelRef(name="m2"))
+
+        juju_info = [i for i in domain.charm_integrations if domain.integration_interface(i) == "juju-info"]
+        assert len(juju_info) == 0

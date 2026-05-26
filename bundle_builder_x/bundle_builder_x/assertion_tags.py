@@ -42,6 +42,7 @@ class Assertions(str, Enum):
     CHARM_CONFIG_INDEX_IN_RANGE = "charm_config_index_in_range"
     CHARM_CONFIG_VALUE_MATCHES_INDEX = "charm_config_value_matches_index"
     CHARM_RANK_BOUNDED = "charm_rank_bounded"
+    SUBORDINATE_BASE_MISMATCH = "subordinate_base_mismatch"
 
 
 class AssertionTag(BaseModel):
@@ -200,6 +201,18 @@ class CharmRankBoundedTag(AssertionTag):
     charm: CharmPayload
 
 
+class SubordinateBaseMismatchTag(AssertionTag):
+    kind: Assertions = Assertions.SUBORDINATE_BASE_MISMATCH
+    subordinate_charm_name: str
+    subordinate_charm_id: int
+    subordinate_endpoint: str
+    principal_charm_name: str
+    principal_charm_id: int
+    principal_endpoint: str
+    subordinate_base: str
+    principal_base: str
+
+
 _ASSERTION_TYPE_REGISTRY: dict[Assertions, type[AssertionTag]] = {
     Assertions.APPLICATION_EXISTS: ApplicationExistsTag,
     Assertions.APPLICATION_INTEGRATION_EXISTS: ApplicationIntegrationExistsTag,
@@ -219,4 +232,5 @@ _ASSERTION_TYPE_REGISTRY: dict[Assertions, type[AssertionTag]] = {
     Assertions.CHARM_CONFIG_INDEX_IN_RANGE: CharmConfigIndexInRangeTag,
     Assertions.CHARM_CONFIG_VALUE_MATCHES_INDEX: CharmConfigValueMatchesIndexTag,
     Assertions.CHARM_RANK_BOUNDED: CharmRankBoundedTag,
+    Assertions.SUBORDINATE_BASE_MISMATCH: SubordinateBaseMismatchTag,
 }
