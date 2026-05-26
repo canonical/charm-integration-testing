@@ -15,7 +15,7 @@
 
 import psycopg2
 
-from validators.base import BaseValidator, ValidationCheck, ValidationLevel, ValidationResult
+from validators.base import BaseValidator, ValidationCheck, ValidationLevel, ValidationResult, ValidationResultStatus
 
 
 class PostgreSQLClientValidator(BaseValidator):
@@ -95,7 +95,7 @@ class PostgreSQLClientValidator(BaseValidator):
         finally:
             conn.close()
 
-        status = "PASS" if all(c.passed for c in checks) else "FAIL"
+        status: ValidationResultStatus = "PASS" if all(c.passed for c in checks) else "FAIL"
         return self._make_result(
             status=status,
             level="simple",

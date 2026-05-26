@@ -22,7 +22,7 @@ from urllib.parse import quote_plus
 
 from pymongo import MongoClient
 
-from validators.base import BaseValidator, ValidationCheck, ValidationLevel, ValidationResult
+from validators.base import BaseValidator, ValidationCheck, ValidationLevel, ValidationResult, ValidationResultStatus
 
 
 class MongoDBClientValidator(BaseValidator):
@@ -260,7 +260,7 @@ class MongoDBClientValidator(BaseValidator):
 
     def _build_result(self, level: ValidationLevel, checks: list[ValidationCheck]) -> ValidationResult:
         """Build a ValidationResult from checks list."""
-        status = "PASS" if all(c.passed for c in checks) else "FAIL"
+        status: ValidationResultStatus = "PASS" if all(c.passed for c in checks) else "FAIL"
         return self._make_result(
             status=status,
             level=level,

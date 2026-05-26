@@ -19,7 +19,7 @@ from unittest.mock import patch
 
 import ops
 import psycopg2
-from test_utils.stubs import AppStub, CharmStub, RelationStub
+from test_utils.stubs import AppStub, CharmStub, RelationStub  # type: ignore[import-not-found]
 
 from validators.postgresql_client.validator import PostgreSQLClientValidator
 

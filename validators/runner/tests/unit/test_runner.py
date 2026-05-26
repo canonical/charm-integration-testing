@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 from unittest.mock import patch
 
-from test_utils.stubs import RelationRoleStub
+from test_utils.stubs import RelationRoleStub  # type: ignore[import-not-found]
 
 from validators.base import BaseValidator, ValidationLevel, ValidationResult
 from validators.runner.runner import ValidatorRunner, ValidatorRunnerResults

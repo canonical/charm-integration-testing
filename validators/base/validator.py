@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 
 ValidationLevel = Literal["simple", "deep", "uat"]
 ValidationRole = Literal["requires", "provides", "peer"]
+ValidationResultStatus = Literal["SKIPPED", "PASS", "FAIL", "ERROR"]
 
 
 def str_to_validation_role(s: str) -> ValidationRole:
@@ -120,7 +121,7 @@ class BaseValidator(ABC):
 
     def _make_result(
         self,
-        status: Literal["SKIPPED", "PASS", "FAIL", "ERROR"],
+        status: ValidationResultStatus,
         level: ValidationLevel,
         checks: list[ValidationCheck] | None = None,
         error: str | None = None,

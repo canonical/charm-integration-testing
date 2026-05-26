@@ -18,6 +18,7 @@ from .validator import (
     ValidationCheck,
     ValidationLevel,
     ValidationResult,
+    ValidationResultStatus,
     ValidationRole,
     str_to_validation_role,
 )
@@ -28,5 +29,6 @@ __all__ = [
     "ValidationLevel",
     "ValidationRole",
     "ValidationResult",
+    "ValidationResultStatus",
     "str_to_validation_role",
 ]
