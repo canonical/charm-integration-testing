@@ -57,7 +57,9 @@ class DomainApplicationIntegration(BaseModel):
     """Represents an integration between two application endpoints.
 
     Endpoints are unordered since we don't know which is requires/provides until charms are resolved.
-    For cross-model integrations, ``offer_name`` and ``url`` carry the user-specified offer metadata.
+    For cross-model integrations, ``offer_name`` carries the offer name and ``url`` carries the
+    user-supplied offer URL when one was explicitly provided in the spec.  When ``url`` is None,
+    extract.py synthesizes the correct URL based on the resolved endpoint role.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -94,6 +96,7 @@ class DomainModel(BaseModel):
     arch: str
     platform: str
     juju_version: JujuVersion
+    admin: str = "admin"
     ref: ModelRef = Field(default_factory=ModelRef)
     applications: dict[str, DomainApplication] = Field(default_factory=dict)
     application_integrations: list[DomainApplicationIntegration] = Field(default_factory=list)
