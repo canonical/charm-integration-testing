@@ -28,7 +28,7 @@ jobs:
           path: static/temporal-worker-test-image
           verbosity: verbose
       - name: Push rock to GHCR
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        # if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           IMAGE_REPO: ghcr.io/${{ github.repository }}/temporal-worker-test-image
           GHCR_CREDS: ${{ github.repository_owner }}:${{ secrets.GITHUB_TOKEN }}
