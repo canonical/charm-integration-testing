@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import pathlib
 from collections import defaultdict
 from collections.abc import Callable, Generator
 from types import SimpleNamespace
@@ -17,13 +16,9 @@ from test_suite.scheduler.graph import StateGraph, StateTransition
 from test_suite.scheduler.plugin import (
     _build_execution_plan,
     _mark_as_injected,
-    _prune_testmon_deselected_state_files,
-    _state_test_files_relative_to_root,
     _UnreachableStateError,
-    pytest_ignore_collect,
     pytest_runtest_setup,
     pytest_sessionfinish,
-    pytest_sessionstart,
 )
 from test_suite.scheduler.states import State
 
@@ -902,150 +897,19 @@ class TestPytestRuntestSetup:
 
 
 class TestPytestSessionFinish:
-    @staticmethod
-    def _make_session(exitstatus: pytest.ExitCode | int, *, testmon_enabled: bool) -> SimpleNamespace:
-        pluginmanager = SimpleNamespace(has_plugin=lambda name: testmon_enabled and name == "testmon")
-        config = SimpleNamespace(pluginmanager=pluginmanager)
-        return SimpleNamespace(config=config, exitstatus=exitstatus)
-
     def test_clears_all_collected(self, make_item: Callable[..., pytest.Item]) -> None:
         _plugin_module._all_collected.append(make_item("test_foo"))
-        session = self._make_session(pytest.ExitCode.OK, testmon_enabled=False)
-        pytest_sessionfinish(session=session, exitstatus=0)  # type: ignore[arg-type]
+        pytest_sessionfinish(session=SimpleNamespace(), exitstatus=0)  # type: ignore[arg-type]
         assert _plugin_module._all_collected == []
 
     def test_clears_injected_item_ids(self, make_item: Callable[..., pytest.Item]) -> None:
         item = make_item("test_foo")
         _mark_as_injected(item)
         assert _plugin_module._injected_item_ids  # non-empty before
-        session = self._make_session(pytest.ExitCode.OK, testmon_enabled=False)
-        pytest_sessionfinish(session=session, exitstatus=0)  # type: ignore[arg-type]
+        pytest_sessionfinish(session=SimpleNamespace(), exitstatus=0)  # type: ignore[arg-type]
         assert _plugin_module._injected_item_ids == set()
 
     def test_clears_failed_state_test(self, make_item: Callable[..., pytest.Item]) -> None:
         _plugin_module._failed_state_test = make_item("test_deploy")
-        session = self._make_session(pytest.ExitCode.OK, testmon_enabled=False)
-        pytest_sessionfinish(session=session, exitstatus=0)  # type: ignore[arg-type]
+        pytest_sessionfinish(session=SimpleNamespace(), exitstatus=0)  # type: ignore[arg-type]
         assert _plugin_module._failed_state_test is None
-
-    def test_no_tests_collected_with_testmon_enabled_is_success(self, make_item: Callable[..., pytest.Item]) -> None:
-        _plugin_module._all_collected.append(make_item("test_foo"))
-        session = self._make_session(pytest.ExitCode.NO_TESTS_COLLECTED, testmon_enabled=True)
-
-        pytest_sessionfinish(session=session, exitstatus=pytest.ExitCode.NO_TESTS_COLLECTED)  # type: ignore[arg-type]
-
-        assert session.exitstatus == pytest.ExitCode.OK
-
-    def test_no_tests_collected_with_testmon_not_enabled_keeps_exit_code(
-        self, make_item: Callable[..., pytest.Item]
-    ) -> None:
-        _plugin_module._all_collected.append(make_item("test_foo"))
-        session = self._make_session(pytest.ExitCode.NO_TESTS_COLLECTED, testmon_enabled=False)
-
-        pytest_sessionfinish(session=session, exitstatus=pytest.ExitCode.NO_TESTS_COLLECTED)  # type: ignore[arg-type]
-
-        assert session.exitstatus == pytest.ExitCode.NO_TESTS_COLLECTED
-
-
-# ---------------------------------------------------------------------------
-# Tests for pytest_ignore_collect
-# ---------------------------------------------------------------------------
-
-
-class TestPytestIgnoreCollect:
-    def test_forces_collection_for_test_suite_directory(self) -> None:
-        # GIVEN pytest is considering the test suite directory itself
-        test_suite_dir = _plugin_module._TEST_SUITE_DIR
-
-        # WHEN the scheduler's ignore hook runs
-        result = pytest_ignore_collect(test_suite_dir, config=cast(pytest.Config, SimpleNamespace()))
-
-        # THEN the directory is never ignored, so unchanged bridge tests remain visible
-        assert result is False
-
-    def test_forces_collection_for_test_suite_python_file(self) -> None:
-        # GIVEN pytest is considering a Python test file inside the suite
-        test_file = _plugin_module._TEST_SUITE_DIR / "test_bootstrap_controller.py"
-
-        # WHEN the scheduler's ignore hook runs
-        result = pytest_ignore_collect(test_file, config=cast(pytest.Config, SimpleNamespace()))
-
-        # THEN the file is never ignored, so its transition stays in the graph
-        assert result is False
-
-    def test_does_not_override_paths_outside_test_suite(self, tmp_path: pathlib.Path) -> None:
-        # GIVEN pytest is considering a Python file outside the integration test suite
-        outside_file = tmp_path / "test_outside.py"
-        outside_file.write_text("def test_placeholder():\n    pass\n")
-
-        # WHEN the scheduler's ignore hook runs
-        result = pytest_ignore_collect(outside_file, config=cast(pytest.Config, SimpleNamespace()))
-
-        # THEN the hook leaves the decision to other plugins
-        assert result is None
-
-
-# ---------------------------------------------------------------------------
-# Tests for testmon compatibility helpers
-# ---------------------------------------------------------------------------
-
-
-class TestTestmonStateFilePruning:
-    def test_state_file_paths_are_discovered_relative_to_root(
-        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        suite_dir = tmp_path / "charm_integration_testing" / "test_suite"
-        suite_dir.mkdir(parents=True)
-        state_file = suite_dir / "test_stateful.py"
-        state_file.write_text("import pytest\n@pytest.mark.state(requires='deployed')\ndef test_x():\n    pass\n")
-        non_state_file = suite_dir / "test_plain.py"
-        non_state_file.write_text("def test_plain():\n    pass\n")
-
-        monkeypatch.setattr(_plugin_module, "_TEST_SUITE_DIR", suite_dir)
-        config = SimpleNamespace(rootpath=tmp_path)
-
-        discovered = _state_test_files_relative_to_root(config)  # type: ignore[arg-type]
-
-        assert discovered == {"charm_integration_testing/test_suite/test_stateful.py"}
-
-    def test_prunes_testmon_deselected_files_for_state_tests(
-        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        suite_dir = tmp_path / "charm_integration_testing" / "test_suite"
-        suite_dir.mkdir(parents=True)
-        state_file = suite_dir / "test_stateful.py"
-        state_file.write_text("import pytest\n@pytest.mark.state(requires='deployed')\ndef test_x():\n    pass\n")
-
-        monkeypatch.setattr(_plugin_module, "_TEST_SUITE_DIR", suite_dir)
-
-        selector = SimpleNamespace(
-            deselected_files=[
-                "charm_integration_testing/test_suite/test_stateful.py",
-                "charm_integration_testing/test_suite/test_other.py",
-            ]
-        )
-        pluginmanager = SimpleNamespace(get_plugin=lambda name: selector if name == "TestmonSelect" else None)
-        config = SimpleNamespace(rootpath=tmp_path, pluginmanager=pluginmanager)
-
-        _prune_testmon_deselected_state_files(config)  # type: ignore[arg-type]
-
-        assert selector.deselected_files == ["charm_integration_testing/test_suite/test_other.py"]
-
-    def test_sessionstart_applies_testmon_state_file_pruning(
-        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        suite_dir = tmp_path / "charm_integration_testing" / "test_suite"
-        suite_dir.mkdir(parents=True)
-        state_file = suite_dir / "test_stateful.py"
-        state_file.write_text("import pytest\n@pytest.mark.state(requires='deployed')\ndef test_x():\n    pass\n")
-
-        monkeypatch.setattr(_plugin_module, "_TEST_SUITE_DIR", suite_dir)
-
-        selector = SimpleNamespace(deselected_files=["charm_integration_testing/test_suite/test_stateful.py"])
-        pluginmanager = SimpleNamespace(get_plugin=lambda name: selector if name == "TestmonSelect" else None)
-        config = SimpleNamespace(rootpath=tmp_path, pluginmanager=pluginmanager)
-        session = SimpleNamespace(config=config)
-
-        pytest_sessionstart(session)  # type: ignore[arg-type]
-
-        assert selector.deselected_files == []

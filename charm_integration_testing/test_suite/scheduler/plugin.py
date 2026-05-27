@@ -9,20 +9,14 @@ needed to reach the required states.
 
 How it works
 ------------
-0. ``pytest_ignore_collect`` (``tryfirst=True``) forces collection of every
-   ``.py`` file inside the test-suite package.  This prevents pytest-testmon
-   from skipping unchanged files entirely, which would starve the scheduler
-   of the transition tests it needs to build the full state graph.
-
 1. ``pytest_itemcollected`` captures *every* test item as it is collected,
    before any ``-k`` / ``-m`` filtering is applied.  This gives the scheduler
    a complete view of all available transitions in the suite.
 
 2. ``pytest_collection_modifyitems`` (``trylast=True``) runs after pytest's
-   own deselection (and testmon's deselection), so ``items`` contains only
-   what the user explicitly selected.  The scheduler treats these as
-   **destinations**: tests that must run, in an order that respects their
-   ``requires`` states.
+   own deselection, so ``items`` contains only what the user explicitly
+   selected.  The scheduler treats these as **destinations**: tests that
+   must run, in an order that respects their ``requires`` states.
 
 3. The **full** state graph is built from all items captured in step 1.
    This means Dijkstra can find bridging paths even when the transition
@@ -55,8 +49,7 @@ The scheduler sees:
 from __future__ import annotations
 
 import logging
-import pathlib
-from collections import Counter, defaultdict
+from collections import defaultdict
 
 import pytest
 
@@ -65,11 +58,6 @@ from .markers import StateMarker, read_state_marker
 from .states import State
 
 logger = logging.getLogger(__name__)
-
-# Absolute path to the test_suite package directory.
-# Used by pytest_ignore_collect to force-collect test files that testmon
-# would otherwise skip entirely.
-_TEST_SUITE_DIR = pathlib.Path(__file__).resolve().parent.parent
 
 #: State assumed when no ``--current-state`` flag is given.
 _DEFAULT_CURRENT_STATE = State.NO_BUNDLE
@@ -86,64 +74,6 @@ _injected_item_ids: set[int] = set()
 # all subsequent state-marked tests are skipped because the environment state
 # is unknown. Pure test failures do NOT set this: they leave the state intact.
 _failed_state_test: pytest.Item | None = None
-
-# Number of bridge items re-injected during collection-time scheduling.
-# This is added to session.testscollected in pytest_collection_finish so
-# pytest's final "collected / deselected / selected" bookkeeping stays
-# consistent when bridges are re-added after testmon deselection.
-_collection_reinjected_count = 0
-
-
-def _state_test_files_relative_to_root(config: pytest.Config) -> set[str]:
-    """Return test-suite files that declare scheduler state markers.
-
-    testmon tracks deselected files by repository-relative path strings.
-    This helper computes the same representation for every test file in the
-    suite that contains a ``pytest.mark.state`` marker.
-    """
-    root = pathlib.Path(str(config.rootpath)).resolve()
-    state_files: set[str] = set()
-    for path in _TEST_SUITE_DIR.glob("test_*.py"):
-        try:
-            text = path.read_text(encoding="utf-8")
-        except OSError:
-            continue
-        if "pytest.mark.state(" not in text:
-            continue
-        try:
-            rel = path.resolve().relative_to(root)
-        except ValueError:
-            # Path lies outside the configured root (unexpected in this repo).
-            continue
-        state_files.add(rel.as_posix())
-    return state_files
-
-
-def _prune_testmon_deselected_state_files(config: pytest.Config) -> None:
-    """Keep state-test files collectable even when testmon marks them stable.
-
-    The scheduler requires these files to be collected so bridging transition
-    tests are available for path-finding and injection.
-    """
-    testmon_selector = config.pluginmanager.get_plugin("TestmonSelect")
-    if testmon_selector is None:
-        return
-    deselected_files = getattr(testmon_selector, "deselected_files", None)
-    if not isinstance(deselected_files, list):
-        return
-
-    required_state_files = _state_test_files_relative_to_root(config)
-    if not required_state_files:
-        return
-
-    before = len(deselected_files)
-    testmon_selector.deselected_files = [path for path in deselected_files if path not in required_state_files]
-    removed = before - len(testmon_selector.deselected_files)
-    if removed:
-        logger.info(
-            "Scheduler kept %d state-test files from testmon file-level deselection.",
-            removed,
-        )
 
 
 # ---------------------------------------------------------------------------
@@ -178,14 +108,6 @@ def pytest_configure(config: pytest.Config) -> None:
             "excluded from the run with '-m \"not injected\"'."
         ),
     )
-    config.addinivalue_line(
-        "markers",
-        (
-            "core: Marks a test as part of the core state-transition chain.  "
-            "Use with --testmon-forceselect -m 'core' to ensure these tests "
-            "are always collected and selected even when testmon considers them unchanged."
-        ),
-    )
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -205,39 +127,9 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     )
 
 
-def pytest_sessionstart(session: pytest.Session) -> None:
-    """Ensure testmon does not suppress collection of scheduler-critical files."""
-    _prune_testmon_deselected_state_files(session.config)
-
-
 def pytest_itemcollected(item: pytest.Item) -> None:
     """Record every item before -k/-m filtering so the full graph is available."""
     _all_collected.append(item)
-
-
-@pytest.hookimpl(tryfirst=True)
-def pytest_ignore_collect(collection_path: pathlib.Path, config: pytest.Config) -> bool | None:
-    """Force collection of the test-suite tree so the state graph is complete.
-
-    pytest-testmon's ``pytest_ignore_collect`` skips unchanged files
-    entirely, which prevents ``pytest_itemcollected`` from capturing
-    them.  The state scheduler *requires* visibility of every transition
-    test to build the full graph.
-
-    Returning ``False`` with ``tryfirst=True`` short-circuits the
-    ``firstresult`` hook chain and guarantees the items are collected.
-    This must apply to the test-suite directory itself as well as leaf
-    ``.py`` files, otherwise an ignore decision on a parent path can still
-    prune unchanged transition tests before pytest ever visits the files.
-    testmon can still deselect them during ``pytest_collection_modifyitems``;
-    the scheduler will re-inject any that are needed as bridges.
-    """
-    resolved_path = collection_path.resolve()
-    if resolved_path == _TEST_SUITE_DIR or (
-        resolved_path.is_relative_to(_TEST_SUITE_DIR) and (resolved_path.is_dir() or resolved_path.suffix == ".py")
-    ):
-        return False
-    return None
 
 
 @pytest.hookimpl(hookwrapper=True)
@@ -279,35 +171,10 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int | pytest.ExitC
     same Python process (e.g. from a test harness) would see stale data from
     the previous run.
     """
-    global _all_collected, _injected_item_ids, _failed_state_test, _collection_reinjected_count
-
-    # pytest-testmon may legitimately deselect every test in incremental CI
-    # runs. In that case pytest returns NO_TESTS_COLLECTED (5), which should
-    # be treated as a successful no-op run.
-    #
-    # Important: testmon may be auto-loaded when installed, even when this
-    # run did not enable it. We only rewrite the exit status when testmon is
-    # explicitly active for this invocation.
-    if (
-        session.exitstatus == pytest.ExitCode.NO_TESTS_COLLECTED
-        and _is_testmon_enabled(session.config)
-        and _all_collected
-    ):
-        logger.info("No tests selected after testmon deselection; treating session as successful no-op.")
-        session.exitstatus = pytest.ExitCode.OK
-
+    global _all_collected, _injected_item_ids, _failed_state_test
     _all_collected.clear()
     _injected_item_ids.clear()
     _failed_state_test = None
-    _collection_reinjected_count = 0
-
-
-def _is_testmon_enabled(config: pytest.Config) -> bool:
-    """Return True when pytest-testmon is enabled for the current run."""
-    try:
-        return bool(config.getoption("testmon"))
-    except (ValueError, AttributeError):
-        return False
 
 
 def pytest_runtest_setup(item: pytest.Item) -> None:
@@ -338,58 +205,6 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     from ``_all_collected``, and injects any bridging transitions needed to
     reach those destinations.
     """
-    global _collection_reinjected_count
-    _collection_reinjected_count += _schedule_items(config, items)
-
-
-def pytest_collection_finish(session: pytest.Session) -> None:
-    """Adjust collected-count bookkeeping for collection-time bridge injection."""
-    if _collection_reinjected_count:
-        session.testscollected += _collection_reinjected_count
-
-
-@pytest.hookimpl(wrapper=True)
-def pytest_runtestloop(session: pytest.Session) -> object:
-    """Re-schedule session items just before execution begins.
-
-    pytest-testmon may re-add previously-failed tests to ``session.items``
-    *after* all ``pytest_collection_modifyitems`` hooks have finished.  When
-    that happens the scheduler never sees them as destinations, so bridge
-    tests are not injected and the state machine breaks.
-
-    This hook acts as a safety net: it re-runs the scheduling logic on the
-    final ``session.items`` list.  If the scheduler already ran successfully
-    during collection (the common case), the item list already contains the
-    correct bridges and this call is effectively a no-op — the re-scheduling
-    simply rebuilds the same plan.
-    """
-    reinjected_count = _schedule_items(session.config, session.items)
-    if reinjected_count:
-        session.testscollected += reinjected_count
-    return (yield)
-
-
-def _count_reinjected_items(before: list[pytest.Item], after: list[pytest.Item]) -> int:
-    """Return how many item objects were added to *after* that were not in *before*.
-
-    Uses identity-based multiset comparison so duplicate objects are handled
-    correctly if an item appears multiple times in an execution plan.
-    """
-    before_counts = Counter(id(item) for item in before)
-    added = 0
-    for item in after:
-        item_id = id(item)
-        if before_counts[item_id] > 0:
-            before_counts[item_id] -= 1
-        else:
-            added += 1
-    return added
-
-
-def _schedule_items(config: pytest.Config, items: list[pytest.Item]) -> int:
-    """Core scheduling logic shared by collection and pre-run hooks."""
-    original_items = items[:]
-
     raw_state: str = config.getoption("--current-state")
     try:
         current_state = State(raw_state)
@@ -440,7 +255,7 @@ def _schedule_items(config: pytest.Config, items: list[pytest.Item]) -> int:
 
     if not selected_marked:
         # Nothing state-marked in the selection; leave items untouched.
-        return 0
+        return
 
     # ------------------------------------------------------------------
     # 3. From the selected items, build destination clusters.
@@ -484,7 +299,6 @@ def _schedule_items(config: pytest.Config, items: list[pytest.Item]) -> int:
     # 5. Commit new order: scheduled items first, then any unmarked items.
     # ------------------------------------------------------------------
     items[:] = ordered + unmarked
-    return _count_reinjected_items(original_items, items)
 
 
 # ---------------------------------------------------------------------------
