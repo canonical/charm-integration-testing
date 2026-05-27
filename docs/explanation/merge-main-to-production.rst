@@ -59,11 +59,3 @@ The ``--ff-only`` merge strategy ensures the operation is idempotent: if
 ``main`` and ``production`` are already at the same commit, the merge is
 a no-op.
 
-Secret handling
----------------
-
-The ``run-all-tests`` job uses ``secrets: inherit`` to forward all
-repository secrets to the reusable workflow.  The reusable workflow in
-turn passes ``STG_TEST_OBSERVER_TOKEN`` to the downstream
-``charm-testing-integration-test-assert-pass.yaml`` workflow, which uses
-it to create and assert Test Observer executions against the staging API.

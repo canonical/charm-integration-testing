@@ -44,7 +44,6 @@ jobs:
       actions: write
     with:
       full_test_suite: true
-    secrets: inherit
   merge-main-to-production:
     runs-on: self-hosted
     needs: run-all-tests
