@@ -221,9 +221,13 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int | pytest.ExitC
     # pytest-testmon may legitimately deselect every test in incremental CI
     # runs. In that case pytest returns NO_TESTS_COLLECTED (5), which should
     # be treated as a successful no-op run.
+    #
+    # Important: testmon may be auto-loaded when installed, even when this
+    # run did not enable it. We only rewrite the exit status when testmon is
+    # explicitly active for this invocation.
     if (
         session.exitstatus == pytest.ExitCode.NO_TESTS_COLLECTED
-        and session.config.pluginmanager.has_plugin("testmon")
+        and _is_testmon_enabled(session.config)
         and _all_collected
     ):
         logger.info("No tests selected after testmon deselection; treating session as successful no-op.")
@@ -233,6 +237,14 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int | pytest.ExitC
     _injected_item_ids.clear()
     _failed_state_test = None
     _collection_reinjected_count = 0
+
+
+def _is_testmon_enabled(config: pytest.Config) -> bool:
+    """Return True when pytest-testmon is enabled for the current run."""
+    try:
+        return bool(config.getoption("testmon"))
+    except (ValueError, AttributeError):
+        return False
 
 
 def pytest_runtest_setup(item: pytest.Item) -> None:
