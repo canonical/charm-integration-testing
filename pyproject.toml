@@ -16,6 +16,7 @@ validators-runner = { path = "./validators/runner", develop = true }
 validators-postgresql-client = { path = "./validators/postgresql_client", develop = true, extras = ["dev", "deep", "uat"] }
 validators-mongodb-client = { path = "./validators/mongodb_client", develop = true }
 validators-tracing = { path = "./validators/tracing", develop = true, extras = ["dev", "deep", "uat"] }
+validators-s3 = { path = "./validators/s3", develop = true }
 
 
 [build-system]
@@ -71,3 +72,7 @@ warn_unused_ignores = true
 warn_no_return = true
 show_error_codes = true
 disable_error_code = ["untyped-decorator", "method-assign", "call-arg"]
+
+[[tool.mypy.overrides]]
+module = ["boto3", "boto3.*", "botocore", "botocore.*"]
+ignore_missing_imports = true

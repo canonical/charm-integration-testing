@@ -1,0 +1,291 @@
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+from typing import cast
+from unittest.mock import MagicMock, patch
+
+import ops
+from botocore.exceptions import ClientError
+
+from validators.s3.validator import S3Validator
+
+# ---------------------------------------------------------------------------
+# Stubs
+# ---------------------------------------------------------------------------
+
+
+class AppStub:
+    """Minimal stand-in for ops.Application. Must be hashable (dict key)."""
+
+
+class RelationStub:
+    def __init__(self, app: AppStub | None, databag: dict[str, str], name: str = "s3", id: int = 0) -> None:
+        self.app = app
+        self.name = name
+        self.id = id
+        self.data: dict[AppStub | None, dict[str, str]] = {app: databag}
+
+
+class RelationMetaStub:
+    def __init__(self, interface_name: str) -> None:
+        self.interface_name = interface_name
+
+
+class CharmMetaStub:
+    def __init__(self, endpoint: str, interface_name: str) -> None:
+        self.relations = {endpoint: RelationMetaStub(interface_name)}
+
+
+class CharmStub:
+    def __init__(self, endpoint: str = "s3", interface_name: str = "s3") -> None:
+        self.meta = CharmMetaStub(endpoint, interface_name)
+
+
+def _make_validator(databag: dict[str, str], endpoint: str = "s3") -> S3Validator:
+    app = AppStub()
+    relation = RelationStub(app=app, databag=databag, name=endpoint)
+    charm = cast(ops.CharmBase, CharmStub(endpoint=endpoint))
+    return S3Validator(charm, cast(ops.Relation, relation))
+
+
+def _client_error(code: str) -> ClientError:
+    return ClientError({"Error": {"Code": code, "Message": "error"}}, "HeadBucket")
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+VALID_DATABAG: dict[str, str] = {
+    "bucket": "my-bucket",
+    "access-key": "test-access-key",
+    "secret-key": "test-secret-key",
+    "endpoint": "http://s3.example.com",
+    "region": "us-east-1",
+}
+
+# ---------------------------------------------------------------------------
+# Tests: simple level
+# ---------------------------------------------------------------------------
+
+
+class TestS3ValidatorSimple:
+    def test_returns_skipped_for_uat_level(self) -> None:
+        # GIVEN
+        validator = _make_validator(VALID_DATABAG)
+
+        # WHEN
+        result = validator.validate(level="uat")
+
+        # THEN
+        assert result.status == "SKIPPED"
+        assert result.error is not None
+        assert "not supported" in result.error
+
+    def test_returns_error_when_relation_app_is_none(self) -> None:
+        # GIVEN a relation whose remote app is not yet known
+        relation = RelationStub(app=None, databag={})
+        validator = S3Validator(cast(ops.CharmBase, CharmStub(endpoint=relation.name)), cast(ops.Relation, relation))
+
+        # WHEN
+        result = validator.validate(level="simple")
+
+        # THEN
+        assert result.status == "ERROR"
+
+    def test_fails_schema_check_when_required_fields_missing(self) -> None:
+        # GIVEN a databag missing secret-key
+        validator = _make_validator({"bucket": "my-bucket", "access-key": "AKIA"})
+
+        # WHEN
+        result = validator.validate(level="simple")
+
+        # THEN
+        assert result.status == "FAIL"
+        schema_check = next(c for c in result.checks if c.name == "schema")
+        assert not schema_check.passed
+        assert "secret-key" in schema_check.message
+
+    def test_passes_when_bucket_is_accessible(self) -> None:
+        # GIVEN a valid databag and a mock S3 client that succeeds head_bucket
+        validator = _make_validator(VALID_DATABAG)
+        mock_client = MagicMock()
+        mock_client.head_bucket.return_value = {}
+
+        with patch("validators.s3.validator.boto3.client", return_value=mock_client):
+            result = validator.validate(level="simple")
+
+        # THEN
+        assert result.status == "PASS"
+        bucket_check = next(c for c in result.checks if c.name == "bucket_accessible")
+        assert bucket_check.passed
+
+    def test_fails_when_bucket_not_found(self) -> None:
+        # GIVEN head_bucket raises a 404 ClientError
+        validator = _make_validator(VALID_DATABAG)
+        mock_client = MagicMock()
+        mock_client.head_bucket.side_effect = _client_error("404")
+
+        with patch("validators.s3.validator.boto3.client", return_value=mock_client):
+            result = validator.validate(level="simple")
+
+        # THEN
+        assert result.status == "FAIL"
+        bucket_check = next(c for c in result.checks if c.name == "bucket_accessible")
+        assert not bucket_check.passed
+        assert "404" in bucket_check.message
+
+    def test_fails_when_bucket_access_denied(self) -> None:
+        # GIVEN head_bucket raises a 403 ClientError
+        validator = _make_validator(VALID_DATABAG)
+        mock_client = MagicMock()
+        mock_client.head_bucket.side_effect = _client_error("403")
+
+        with patch("validators.s3.validator.boto3.client", return_value=mock_client):
+            result = validator.validate(level="simple")
+
+        # THEN
+        assert result.status == "FAIL"
+        bucket_check = next(c for c in result.checks if c.name == "bucket_accessible")
+        assert not bucket_check.passed
+
+    def test_sets_endpoint_and_interface_on_result(self) -> None:
+        # GIVEN
+        validator = _make_validator(VALID_DATABAG, endpoint="my-s3")
+        mock_client = MagicMock()
+        mock_client.head_bucket.return_value = {}
+
+        with patch("validators.s3.validator.boto3.client", return_value=mock_client):
+            result = validator.validate(level="simple")
+
+        # THEN
+        assert result.endpoint == "my-s3"
+        assert result.interface == "s3"
+
+    def test_uses_path_addressing_style_by_default(self) -> None:
+        # GIVEN no s3-uri-style in databag
+        validator = _make_validator(VALID_DATABAG)
+        mock_client = MagicMock()
+        mock_client.head_bucket.return_value = {}
+
+        with patch("validators.s3.validator.boto3.client", return_value=mock_client) as mock_boto:
+            validator.validate(level="simple")
+
+        call_kwargs = mock_boto.call_args.kwargs
+        assert call_kwargs["config"].s3["addressing_style"] == "path"
+
+
+# ---------------------------------------------------------------------------
+# Tests: deep level
+# ---------------------------------------------------------------------------
+
+
+class TestS3ValidatorDeep:
+    def test_deep_passes_on_successful_write_read_delete(self) -> None:
+        # GIVEN a complete databag and mock client that succeeds all operations
+        validator = _make_validator(VALID_DATABAG)
+        mock_client = MagicMock()
+        mock_client.head_bucket.return_value = {}
+        mock_client.put_object.return_value = {}
+        mock_client.get_object.return_value = {"Body": MagicMock(read=lambda: b"s3-validator-canary")}
+        mock_client.delete_object.return_value = {}
+
+        with patch("validators.s3.validator.boto3.client", return_value=mock_client):
+            result = validator.validate(level="deep")
+
+        # THEN
+        assert result.status == "PASS"
+        assert result.level == "deep"
+        assert next(c for c in result.checks if c.name == "write").passed
+        assert next(c for c in result.checks if c.name == "read_verify").passed
+        assert next(c for c in result.checks if c.name == "cleanup").passed
+
+    def test_deep_fails_when_write_fails(self) -> None:
+        # GIVEN put_object raises an error
+        validator = _make_validator(VALID_DATABAG)
+        mock_client = MagicMock()
+        mock_client.head_bucket.return_value = {}
+        mock_client.put_object.side_effect = _client_error("AccessDenied")
+
+        with patch("validators.s3.validator.boto3.client", return_value=mock_client):
+            result = validator.validate(level="deep")
+
+        # THEN
+        assert result.status == "FAIL"
+        write_check = next(c for c in result.checks if c.name == "write")
+        assert not write_check.passed
+
+    def test_deep_fails_when_read_body_mismatches(self) -> None:
+        # GIVEN get_object returns wrong body
+        validator = _make_validator(VALID_DATABAG)
+        mock_client = MagicMock()
+        mock_client.head_bucket.return_value = {}
+        mock_client.put_object.return_value = {}
+        mock_client.get_object.return_value = {"Body": MagicMock(read=lambda: b"wrong-body")}
+        mock_client.delete_object.return_value = {}
+
+        with patch("validators.s3.validator.boto3.client", return_value=mock_client):
+            result = validator.validate(level="deep")
+
+        # THEN
+        assert result.status == "FAIL"
+        read_check = next(c for c in result.checks if c.name == "read_verify")
+        assert not read_check.passed
+        assert "mismatch" in read_check.message
+
+    def test_deep_fails_when_bucket_not_accessible(self) -> None:
+        # GIVEN head_bucket returns 403
+        validator = _make_validator(VALID_DATABAG)
+        mock_client = MagicMock()
+        mock_client.head_bucket.side_effect = _client_error("403")
+
+        with patch("validators.s3.validator.boto3.client", return_value=mock_client):
+            result = validator.validate(level="deep")
+
+        # THEN
+        assert result.status == "FAIL"
+        bucket_check = next(c for c in result.checks if c.name == "bucket_accessible")
+        assert not bucket_check.passed
+
+    def test_deep_returns_skipped_for_uat(self) -> None:
+        # GIVEN
+        validator = _make_validator(VALID_DATABAG)
+
+        # WHEN
+        result = validator.validate(level="uat")
+
+        # THEN
+        assert result.status == "SKIPPED"
+
+    def test_deep_cleanup_still_runs_after_read_failure(self) -> None:
+        # GIVEN get_object raises an error
+        validator = _make_validator(VALID_DATABAG)
+        mock_client = MagicMock()
+        mock_client.head_bucket.return_value = {}
+        mock_client.put_object.return_value = {}
+        mock_client.get_object.side_effect = _client_error("InternalError")
+        mock_client.delete_object.return_value = {}
+
+        with patch("validators.s3.validator.boto3.client", return_value=mock_client):
+            result = validator.validate(level="deep")
+
+        # THEN cleanup still ran
+        mock_client.delete_object.assert_called_once()
+        cleanup_check = next(c for c in result.checks if c.name == "cleanup")
+        assert cleanup_check.passed
+
+    def test_deep_uses_path_prefix_for_canary_key(self) -> None:
+        # GIVEN databag includes a path prefix
+        databag = {**VALID_DATABAG, "path": "data/backups"}
+        validator = _make_validator(databag)
+        mock_client = MagicMock()
+        mock_client.head_bucket.return_value = {}
+        mock_client.put_object.return_value = {}
+        mock_client.get_object.return_value = {"Body": MagicMock(read=lambda: b"s3-validator-canary")}
+        mock_client.delete_object.return_value = {}
+
+        with patch("validators.s3.validator.boto3.client", return_value=mock_client):
+            validator.validate(level="deep")
+
+        put_call_kwargs = mock_client.put_object.call_args.kwargs
+        assert put_call_kwargs["Key"].startswith("data/backups/")
