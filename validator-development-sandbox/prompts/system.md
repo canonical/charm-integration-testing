@@ -335,7 +335,9 @@ def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
   - `./scripts/lint.sh`
   If either fails, fix and re-run until both exit 0.
 - For merge evidence, run `/project/validator-development-sandbox/bin/verify-validator.sh`
-  with model, requirer app, provider app, and validator name. Completion requires
+  with model, requirer app, provider app, and validator name. Always pass
+  `--output-dir /project/validator-development-sandbox/reports/<name>-$(date +%Y%m%d-%H%M%S)`
+  so the report persists on the host (the directory is git-ignored). Completion requires
   evidence of workload-up pass and workload-down detection in the generated bundle.
 - **Workload-down for non-Juju backends**: the default `verify-validator.sh` workload-down
   step scales the provider Juju application to 0 units. If the actual backend is a raw
@@ -346,6 +348,7 @@ def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
   ```bash
   verify-validator.sh \
     --model s3-test --app parca-k8s --provider s3-integrator --validator s3 \
+    --output-dir /project/validator-development-sandbox/reports/s3-$(date +%Y%m%d-%H%M%S) \
     --down-cmd "sudo k8s kubectl scale deployment minio -n s3-test --replicas=0 && sleep 5" \
     --restore-cmd "sudo k8s kubectl scale deployment minio -n s3-test --replicas=1 && sleep 15"
   ```

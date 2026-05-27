@@ -97,7 +97,8 @@ under `validators/<name>/` with passing `dev-validate` output.
       --model <interface>-test \
       --app <requirer> \
       --provider <provider> \
-      --validator <name>
+      --validator <name> \
+      --output-dir /project/validator-development-sandbox/reports/<name>-$(date +%Y%m%d-%H%M%S)
     ```
     If the backend is a raw Kubernetes deployment (not a Juju app — e.g. MinIO for `s3`),
     the default `juju scale-application` down step won't break connectivity because the
@@ -109,10 +110,13 @@ under `validators/<name>/` with passing `dev-validate` output.
       --app <requirer> \
       --provider <provider> \
       --validator <name> \
+      --output-dir /project/validator-development-sandbox/reports/<name>-$(date +%Y%m%d-%H%M%S) \
       --down-cmd "sudo k8s kubectl scale deployment <backend> -n <interface>-test --replicas=0 && sleep 5" \
       --restore-cmd "sudo k8s kubectl scale deployment <backend> -n <interface>-test --replicas=1 && sleep 15"
     ```
-    Include `summary.txt` and `report.json` paths from the output bundle in your report.
+    The report is written to the `--output-dir` and persists on the host at
+    `validator-development-sandbox/reports/`. Include the `summary.txt` and `report.json`
+    paths in your completion summary.
 
 12. When done, destroy the dedicated model:
    ```
