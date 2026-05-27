@@ -34,6 +34,9 @@ under `validators/<name>/` with passing `dev-validate` output.
    - `validators/<name>/__init__.py`
    - `validators/<name>/validator.py`  (class extending `BaseValidator`)
    - `validators/<name>/pyproject.toml`  (with correct entry point)
+   - `validators/<name>/tests/__init__.py`
+   - `validators/<name>/tests/unit/__init__.py`
+   - `validators/<name>/tests/unit/test_validator.py`
 
 7. Wire the new validator package into project dependencies:
    - Add `validators-<name>` to `validators/runner/pyproject.toml` dependencies.
