@@ -3,5 +3,5 @@
 listed: true
 overrides:
   - provides:
-      provide-cmr-mesh:
+      service-mesh:
         optional: true

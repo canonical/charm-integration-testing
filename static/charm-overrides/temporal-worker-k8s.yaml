@@ -1,13 +1,18 @@
 ---
 # Remove after: https://github.com/canonical/temporal-worker-k8s-operator/pull/88
+listed: true
 overrides:
   - provides:
       metrics-endpoint:
         optional: true
       grafana-dashboard:
         optional: true
+      temporal-worker-info:
+        optional: true
     requires:
       logging:
+        optional: true
+      temporal-host-info:
         optional: true
     configs:
       host: [charmqa.canonical.com]

@@ -3,6 +3,6 @@
 overrides:
   - provides:
       k8s-service-info:
-        features: [katib-service]
+        features: [katib-service, kfp-api]
     constraints:
-      - '"katib-service" in features(endpoint[k8s-service-info])'
+      - '"katib-service" in features(endpoint[k8s-service-info]) or "kfp-api" in features(endpoint[k8s-service-info])'

@@ -3,6 +3,8 @@
 overrides:
   - provides:
       grpc:
-        features: [mlmd-grpc]
+        features: [mlmd-grpc, kfp-api]
+      velero-backup-config:
+        optional: true
     constraints:
-      - '"mlmd-grpc" in features(endpoint[grpc])'
+      - '"mlmd-grpc" in features(endpoint[grpc]) or "kfp-api" in features(endpoint[grpc])'

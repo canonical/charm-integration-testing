@@ -1,0 +1,8 @@
+---
+# Allow isolated endpoint smoke tests without full Kubeflow substrate.
+overrides:
+  - requires:
+      pod-defaults:
+        optional: true
+      secrets:
+        optional: true

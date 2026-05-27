@@ -1,0 +1,17 @@
+overrides:
+  - requires:
+      catalogue-item:
+        optional: true
+      ingress:
+        optional: true
+      require-cmr-mesh:
+        optional: true
+      service-mesh:
+        optional: true
+      tracing:
+        optional: true
+    provides:
+      catalogue:
+        optional: true
+      provide-cmr-mesh:
+        optional: true

@@ -1,5 +1,6 @@
 ---
 # Remove after: https://github.com/canonical/temporal-k8s-operator/pull/117
+listed: true
 overrides:
   - requires:
       frontend-certificates:
@@ -16,7 +17,7 @@ overrides:
         limit: 1
       # https://github.com/canonical/temporal-k8s-operator/issues/120
       admin:
-        optional: false
+        optional: true
         features: [admin]
       ui:
         optional: true

@@ -1,0 +1,6 @@
+---
+# Admission webhook can be paired in isolated smoke tests without pod-defaults.
+overrides:
+  - provides:
+      pod-defaults:
+        optional: true

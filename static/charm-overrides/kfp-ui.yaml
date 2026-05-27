@@ -3,6 +3,7 @@
 overrides:
   - provides:
       kfp-ui:
+        optional: true
         features: [kfp-ui]
     requires:
       kfp-api:
