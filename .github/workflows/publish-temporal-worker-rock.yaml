@@ -8,6 +8,9 @@ permissions: {}
 on:
   push:
     branches: [main]
+    paths:
+      - 'static/temporal-worker-test-image/**'
+      - '.github/workflows/publish-temporal-worker-rock.yaml'
   pull_request:
 jobs:
   build-and-publish:
@@ -30,7 +33,7 @@ jobs:
       - name: Push rock to GHCR
         # if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
-          IMAGE_REPO: ghcr.io/${{ github.repository }}/temporal-worker-test-image
+          IMAGE_REPO: ghcr.io/${{ github.repository_owner }}/temporal-worker-test-image
           GHCR_CREDS: ${{ github.repository_owner }}:${{ secrets.GITHUB_TOKEN }}
         run: |-
           set -euo pipefail
