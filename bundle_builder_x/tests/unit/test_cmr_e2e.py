@@ -129,7 +129,7 @@ class TestCMREndToEnd:
         assert remote_ep.model == ModelRef(name="machine-model", controller="lxd-controller")
         assert remote_ep.application == "postgresql"
         assert cmr_int.offer_name == "postgresql-db-offer"
-        assert cmr_int.url == "lxd-controller:admin/machine-model.postgresql-db-offer"
+        assert cmr_int.url is None  # URL synthesis happens in extract.py once endpoint role is known
 
         # machine-model has one external CMR: produces one integration constraint
         integrations_m = classify_integrations(
