@@ -72,7 +72,9 @@ def classify_integrations(
         remote_model_key = integration.remote_model_key or remote_model
         offer_name = integration.resolved_offer_name()
 
-        # Determine URL: explicit for external CMRs, auto-generated for in-spec CMRs
+        # Keep the user-supplied URL if provided; otherwise leave as None.
+        # extract.py synthesizes the correct URL once it knows the endpoint role
+        # (PROVIDES vs REQUIRES), which is only available after charm metadata is resolved.
         url = integration.url
         # Resolve the remote ModelRef: the spec may use a plain-name alias, but the
         # domain is keyed by model_spec.key (which may be controller/name).
@@ -83,11 +85,6 @@ def classify_integrations(
             remote_spec = all_models[remote_model_key]
             if remote_spec.name is not None:
                 remote_ref = ModelRef(name=remote_spec.name, controller=remote_spec.controller)
-            if url is None:
-                controller = remote_spec.controller
-                admin = remote_spec.admin
-                bare_name = remote_spec.name or remote_model_key
-                url = f"{controller}:{admin}/{bare_name}.{offer_name}"
 
         local_ep = DomainApplicationEndpoint(
             application=integration.application,
@@ -151,6 +148,7 @@ class DomainBuilder:
                 arch=model_spec.arch,
                 platform=model_spec.platform,
                 juju_version=self._resolve_juju_version(model_spec.juju),
+                admin=model_spec.admin,
                 ref=model_ref,
                 applications=applications,
                 application_integrations=integration_constraints,
