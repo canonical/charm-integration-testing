@@ -1,0 +1,71 @@
+---
+# cloud-config
+# Validator development substrate: Canonical k8s + Juju controller.
+#
+# Launch with:
+#   multipass launch 24.04 \
+#     --name validator-k8s --cpus 4 --memory 8G --disk 40G \
+#     --cloud-init validator-development-sandbox/validator-substrate.yaml
+#
+# Wait for provisioning to finish (k8s + juju bootstrap takes ~5 min):
+#   multipass exec validator-k8s -- cloud-init status --wait
+#
+# Mount the project and open a shell:
+#   multipass mount . validator-k8s:/project
+#   multipass shell validator-k8s
+#
+# Inside the VM, install the Python dev packages:
+#   cd /project && poetry install
+package_update: true
+packages:
+  - python3-pip
+  - python3-venv
+write_files:
+  - path: /etc/profile.d/k8s-aliases.sh
+    permissions: '0644'
+    owner: root:root
+    content: |
+      # Canonical k8s uses 'sudo k8s kubectl'; alias kubectl for convenience.
+      alias kubectl='sudo k8s kubectl'
+  - path: /usr/local/bin/bootstrap-validator-substrate.sh
+    permissions: '0755'
+    owner: root:root
+    content: |
+      #!/bin/bash
+      set -euo pipefail
+
+      # Bootstrap Canonical k8s.
+      k8s bootstrap
+      k8s status --wait-ready --timeout 10m
+      k8s enable local-storage
+
+      # Write kubeconfig for the ubuntu user.
+      k8s config > /home/ubuntu/k8s.yaml
+      chown ubuntu:ubuntu /home/ubuntu/k8s.yaml
+
+      # Register the k8s cloud with Juju and bootstrap a controller.
+      # Runs as the ubuntu user so credentials land in ~ubuntu.
+      sudo -u ubuntu bash -c '
+        set -euo pipefail
+        export KUBECONFIG=/home/ubuntu/k8s.yaml
+        juju add-k8s local-k8s --client
+        juju bootstrap local-k8s validator-ctrl
+        juju add-model testing
+      '
+      rm /home/ubuntu/k8s.yaml
+runcmd:
+  # Wait for snapd to finish seeding before installing snaps.
+  - snap wait system seed.loaded
+  # k8s 1.32-classic is a classic snap; juju 3+ is strict (no --classic).
+  - snap install --classic --channel=1.32-classic/stable k8s
+  - snap install --channel=3/stable juju
+  - /usr/local/bin/bootstrap-validator-substrate.sh
+  - mkdir -p /project
+  - chown ubuntu:ubuntu /project
+final_message: |-
+  Validator substrate ready.
+  Controller:  validator-ctrl
+  Model:       testing
+  From the host:
+    multipass mount . validator-k8s:/project
+    multipass shell validator-k8s
