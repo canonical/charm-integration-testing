@@ -95,7 +95,7 @@ class TestS3ValidatorSimple:
 
     def test_fails_schema_check_when_required_fields_missing(self) -> None:
         # GIVEN a databag missing secret-key
-        validator = _make_validator({"bucket": "my-bucket", "access-key": "AKIA"})
+        validator = _make_validator({"bucket": "my-bucket", "access-key": "test-access-key"})
 
         # WHEN
         result = validator.validate(level="simple")

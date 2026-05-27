@@ -55,7 +55,12 @@ class S3Validator(BaseValidator):
         if not schema_check.passed:
             return self._build_result("simple", checks)
 
-        client = self._build_client(creds)
+        try:
+            client = self._build_client(creds)
+        except Exception as exc:
+            checks.append(ValidationCheck(name="client_init", passed=False, message=str(exc)))
+            return self._build_result("simple", checks)
+
         try:
             bucket = (self.databag | creds)["bucket"]
             head_check = self._head_bucket(client, bucket)
@@ -79,7 +84,12 @@ class S3Validator(BaseValidator):
         if not schema_check.passed:
             return self._build_result("deep", checks)
 
-        client = self._build_client(creds)
+        try:
+            client = self._build_client(creds)
+        except Exception as exc:
+            checks.append(ValidationCheck(name="client_init", passed=False, message=str(exc)))
+            return self._build_result("deep", checks)
+
         try:
             bucket = (self.databag | creds)["bucket"]
             path_prefix = self.databag.get("path", "").strip("/")
