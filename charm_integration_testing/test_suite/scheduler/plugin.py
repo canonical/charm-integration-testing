@@ -177,8 +177,7 @@ def pytest_ignore_collect(collection_path: pathlib.Path, config: pytest.Config) 
     """
     resolved_path = collection_path.resolve()
     if resolved_path == _TEST_SUITE_DIR or (
-        resolved_path.is_relative_to(_TEST_SUITE_DIR)
-        and (resolved_path.is_dir() or resolved_path.suffix == ".py")
+        resolved_path.is_relative_to(_TEST_SUITE_DIR) and (resolved_path.is_dir() or resolved_path.suffix == ".py")
     ):
         return False
     return None
