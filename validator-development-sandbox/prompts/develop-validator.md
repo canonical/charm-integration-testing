@@ -91,13 +91,16 @@ under `validators/<name>/` with passing `dev-validate` output.
       level SKIPPED.
     - All external I/O is mocked with `unittest.mock.patch`.
 
-11. Produce verification evidence (workload-up and workload-down):
+11. Produce verification evidence (workload-up and workload-down). Run at the
+    **highest level the validator supports** (check `validate()` in `validator.py`
+    -- use `deep` if implemented, otherwise `simple`):
     ```
     /project/validator-development-sandbox/bin/verify-validator.sh \
       --model <interface>-test \
       --app <requirer> \
       --provider <provider> \
       --validator <name> \
+      --level <highest-supported-level> \
       --output-dir /project/validator-development-sandbox/reports/<name>-$(date +%Y%m%d-%H%M%S)
     ```
     If the backend is a raw Kubernetes deployment (not a Juju app — e.g. MinIO for `s3`),
@@ -110,6 +113,7 @@ under `validators/<name>/` with passing `dev-validate` output.
       --app <requirer> \
       --provider <provider> \
       --validator <name> \
+      --level <highest-supported-level> \
       --output-dir /project/validator-development-sandbox/reports/<name>-$(date +%Y%m%d-%H%M%S) \
       --down-cmd "sudo k8s kubectl scale deployment <backend> -n <interface>-test --replicas=0 && sleep 5" \
       --restore-cmd "sudo k8s kubectl scale deployment <backend> -n <interface>-test --replicas=1 && sleep 15"
@@ -125,7 +129,7 @@ under `validators/<name>/` with passing `dev-validate` output.
 
 ## Acceptance criteria
 
-- `dev-validate` exits 0 with all checks PASS for at least the `simple` level.
+- `dev-validate` exits 0 with all checks PASS at the highest supported level.
 - The validator package has correct `pyproject.toml` with entry point.
 - `validators/runner/pyproject.toml` includes `validators-<name>`.
 - Root `/project/pyproject.toml` includes `validators-<name>` as a Poetry develop dependency.

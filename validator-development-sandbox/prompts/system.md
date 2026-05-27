@@ -335,7 +335,9 @@ def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
   - `./scripts/lint.sh`
   If either fails, fix and re-run until both exit 0.
 - For merge evidence, run `/project/validator-development-sandbox/bin/verify-validator.sh`
-  with model, requirer app, provider app, and validator name. Always pass
+  with model, requirer app, provider app, and validator name. Always use
+  `--level <highest-supported-level>` (check `validate()` -- use `deep` if implemented,
+  otherwise `simple`) and pass
   `--output-dir /project/validator-development-sandbox/reports/<name>-$(date +%Y%m%d-%H%M%S)`
   so the report persists on the host (the directory is git-ignored). Completion requires
   evidence of workload-up pass and workload-down detection in the generated bundle.
