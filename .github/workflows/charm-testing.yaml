@@ -93,7 +93,7 @@ on:
         options: [DEBUG, INFO, WARNING, ERROR]
         default: INFO
       full_test_suite:
-        description: Whether to run the full test suite regardless of testmon results.
+        description: Whether to run the full test suite instead of only base + affected tests.
         required: false
         type: boolean
         default: true
@@ -216,22 +216,22 @@ jobs:
           echo "| \`downgrade_revision\` | \`${downgrade_revision}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| \`channel\` | \`${channel}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| \`series\` | \`${series}\` |" >> $GITHUB_STEP_SUMMARY
-      - name: Get Testmon cached result
-        id: testmon_cache
-        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5.0.5
-        if: ${{ !inputs.full_test_suite }}
-        with:
-          path: .testmondata
-          key: testmon-${{ github.ref_name }}-${{ github.run_id }}
-          restore-keys: |
-            testmon-${{ github.ref_name }}-
-      - name: Testmon args
-        id: testmon_args
+      - name: Select tests for PR
+        id: select_tests
         if: ${{ !inputs.full_test_suite }}
         shell: bash
         run: |
-          # Add testmon parameter if full test suite was not requested
-          echo "testmon_args=--testmon" >> "$GITHUB_OUTPUT"
+          LEAF_PATTERN='^test_(deploy|scale_in_and_scale_out_charm|teardown|build_bundle|bootstrap_controller|create_model|upgrade_charm|downgrade_charm|pod_deletion|controller_restart|idempotent_redeploy|remove_and_restore_integration|logs_privacy_check|model_controller_migration|upgrade_controller|deploy_target_old_revision)$'
+          K_EXPR=$(python scripts/select_tests.py \
+            --base-ref "origin/${{ github.base_ref || 'main' }}" \
+            --leaf-pattern "$LEAF_PATTERN")
+          if [[ -n "$K_EXPR" ]]; then
+            echo "select_args=-k \"$K_EXPR\"" >> "$GITHUB_OUTPUT"
+            echo "### Selected tests" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "$K_EXPR" | sed 's/ or /\n/g' >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
       - name: Report Test Execution Start To Test Observer
         if: ${{ !cancelled() && env.TEST_OBSERVER_API != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/patch-test-execution
@@ -418,7 +418,7 @@ jobs:
           neighbor_metadata_source: ${{ steps.neighbor_env_info.outputs.metadata-source }}
           neighbor_platform: ${{ steps.neighbor_env_info.outputs.platform }}
           run_id: ${{ github.run_id }}
-          testmon_args: ${{ steps.testmon_args.outputs.testmon_args }}
+          select_args: ${{ steps.select_tests.outputs.select_args }}
         run: |
           echo "junit_xml=$(realpath junit.xml)" >> $GITHUB_OUTPUT
           ./scripts/run-tests.sh \
@@ -461,7 +461,7 @@ jobs:
             --log-dir "./test-logs" \
             --prefix "charmqa-${run_id}" \
             --junit-xml=junit.xml \
-            ${testmon_args}
+            ${select_args}
       - name: Run charm tests
         id: run_tests
         if: ${{ inputs.neighbor_environment == '' }}
@@ -484,7 +484,7 @@ jobs:
           bootstrap_constraints: ${{ steps.target_env_info.outputs.bootstrap-constraints }}
           model_config: ${{ steps.target_env_info.outputs.model-config }}
           metadata_source: ${{ steps.target_env_info.outputs.metadata-source }}
-          testmon_args: ${{ steps.testmon_args.outputs.testmon_args }}
+          select_args: ${{ steps.select_tests.outputs.select_args }}
         run: |
           echo "junit_xml=$(realpath junit.xml)" >> $GITHUB_OUTPUT
           ./scripts/run-tests.sh \
@@ -518,7 +518,7 @@ jobs:
             --log-dir "./test-logs" \
             --prefix "charmqa-${{ github.run_id }}" \
             --junit-xml=junit.xml \
-            ${testmon_args}
+            ${select_args}
       - name: Post 'test_end' event
         if: ${{ env.TEST_OBSERVER_API != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-events
@@ -528,12 +528,6 @@ jobs:
           test_execution_id: ${{ inputs.execution_id }}
           event_name: test_end
           detail: Tests finished.
-      - name: Cache testmon data
-        if: ${{ !cancelled() && !inputs.full_test_suite }}
-        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5.0.5
-        with:
-          path: .testmondata
-          key: testmon-${{ github.ref_name }}-${{ github.run_id }}
       - name: Post bundles to github
         shell: bash
         continue-on-error: true

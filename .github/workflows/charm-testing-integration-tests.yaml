@@ -6,14 +6,14 @@ on:
   workflow_dispatch:
     inputs:
       full_test_suite:
-        description: 'Whether to run the full test suite or just a subset of tests.'
+        description: 'Whether to run the full test suite or only base + affected tests.'
         required: false
         default: false
         type: boolean
   workflow_call:
     inputs:
       full_test_suite:
-        description: 'Whether to run the full test suite or just a subset of tests.'
+        description: 'Whether to run the full test suite or only base + affected tests.'
         required: false
         default: false
         type: boolean
