@@ -22,8 +22,8 @@ from test_suite.scheduler.plugin import (
     _UnreachableStateError,
     pytest_ignore_collect,
     pytest_runtest_setup,
-    pytest_sessionstart,
     pytest_sessionfinish,
+    pytest_sessionstart,
 )
 from test_suite.scheduler.states import State
 
