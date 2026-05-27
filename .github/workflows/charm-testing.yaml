@@ -230,7 +230,7 @@ jobs:
         if: ${{ !inputs.full_test_suite }}
         shell: bash
         run: |
-          # Add testmon parameter if full testsuite was not requested
+          # Add testmon parameter if full test suite was not requested
           echo "testmon_args=--testmon" >> "$GITHUB_OUTPUT"
       - name: Report Test Execution Start To Test Observer
         if: ${{ !cancelled() && env.TEST_OBSERVER_API != '' && inputs.execution_id != '' }}
