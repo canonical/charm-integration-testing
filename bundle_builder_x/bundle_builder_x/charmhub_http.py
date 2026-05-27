@@ -14,6 +14,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import logging
+import os
 from functools import cache
 from typing import Any
 
@@ -22,6 +23,8 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+
+from .charm import EndpointScope
 
 
 class UnparsableCharmException(Exception):
@@ -69,12 +72,14 @@ class CharmMetadata(BaseModel):
         interface: str
         optional: bool | None = None
         limit: int | None = None
+        scope: EndpointScope | None = None
 
     class Resource(BaseModel):
         model_config = ConfigDict(frozen=True)
 
         type: str
 
+    subordinate: bool = False
     peers: dict[str, Endpoint] = Field(default_factory=dict)
     requires: dict[str, Endpoint] = Field(default_factory=dict)
     provides: dict[str, Endpoint] = Field(default_factory=dict)
@@ -190,24 +195,32 @@ class InfoResponse(BaseModel):
     result: Result = Field(default_factory=Result)
 
 
-CHARM_REFRESH_ENDPOINT = "https://api.charmhub.io/v2/charms/refresh"
-CHARM_FIND_ENDPOINT = "https://api.charmhub.io/v2/charms/find"
-CHARM_INFO_ENDPOINT = "https://api.charmhub.io/v2/charms/info/{charm}"
+DEFAULT_CHARMHUB_API_URL = "https://api.charmhub.io"
+CHARMHUB_API_URL_ENV = "CHARMHUB_API_URL"
 
 
 class CharmhubHttpClient:
     session: requests.Session
     logger: logging.Logger
     timeout: int
+    _refresh_endpoint: str
+    _find_endpoint: str
+    _info_endpoint: str
 
     def __init__(
         self,
         logger: logging.Logger = logging.getLogger(__name__),
         session: requests.Session | None = None,
         timeout: int = 180,
+        base_url: str | None = None,
     ) -> None:
         self.logger = logger
         self.timeout = timeout
+        resolved_url = base_url or os.environ.get(CHARMHUB_API_URL_ENV, DEFAULT_CHARMHUB_API_URL)
+        base = resolved_url.rstrip("/")
+        self._refresh_endpoint = base + "/v2/charms/refresh"
+        self._find_endpoint = base + "/v2/charms/find"
+        self._info_endpoint = base + "/v2/charms/info/{charm}"
 
         # Setup requests session with retries
         retry_strategy = Retry(
@@ -226,7 +239,7 @@ class CharmhubHttpClient:
         self.logger.debug(f"Calling find with provides {provides} and requires {requires}")
 
         # Formulate request
-        request_url = CHARM_FIND_ENDPOINT
+        request_url = self._find_endpoint
         request_headers = {"Content-Type": "application/json"}
         request_params = {
             "q": "",
@@ -262,7 +275,7 @@ class CharmhubHttpClient:
         self.logger.debug(f"Calling refresh for charm {action.charm_name} ({print_properties})")
 
         # Formulate request
-        request_url = CHARM_REFRESH_ENDPOINT
+        request_url = self._refresh_endpoint
         request_headers = {"Content-Type": "application/json"}
         action_dict: dict[str, Any] = {"name": action.charm_name}
         if action.charm_revision is not None:
@@ -294,7 +307,7 @@ class CharmhubHttpClient:
         self.logger.debug(f"Calling info for charm {charm}")
 
         # Formulate request
-        request_url = CHARM_INFO_ENDPOINT.format(charm=charm)
+        request_url = self._info_endpoint.format(charm=charm)
         request_headers = {"Content-Type": "application/json"}
         fields = [
             "result.deployable-on",

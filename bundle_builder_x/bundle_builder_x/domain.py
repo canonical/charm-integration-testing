@@ -16,7 +16,7 @@
 import z3  # type: ignore[import-untyped]
 from pydantic import BaseModel, ConfigDict, Field
 
-from .charm import Charm, CharmChannel, CharmConfigValue, CharmResourceValue, EndpointType
+from .charm import Charm, CharmChannel, CharmConfigValue, CharmResourceValue, EndpointScope, EndpointType
 from .juju_version import JujuVersion
 
 
@@ -57,7 +57,9 @@ class DomainApplicationIntegration(BaseModel):
     """Represents an integration between two application endpoints.
 
     Endpoints are unordered since we don't know which is requires/provides until charms are resolved.
-    For cross-model integrations, ``offer_name`` and ``url`` carry the user-specified offer metadata.
+    For cross-model integrations, ``offer_name`` carries the offer name and ``url`` carries the
+    user-supplied offer URL when one was explicitly provided in the spec.  When ``url`` is None,
+    extract.py synthesizes the correct URL based on the resolved endpoint role.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -94,6 +96,7 @@ class DomainModel(BaseModel):
     arch: str
     platform: str
     juju_version: JujuVersion
+    admin: str = "admin"
     ref: ModelRef = Field(default_factory=ModelRef)
     applications: dict[str, DomainApplication] = Field(default_factory=dict)
     application_integrations: list[DomainApplicationIntegration] = Field(default_factory=list)
@@ -318,6 +321,17 @@ def add_charm_to_domain(charm: Charm, domain: Domain, model_ref: ModelRef | None
                     req_model_ref, prov_model_ref = other_model, model_ref
                 else:
                     continue
+
+                # Skip container-scoped integrations on non-machine models and across models.
+                # Container-scoped (subordinate) relations must be co-located with their principal;
+                # cross-model and kubernetes subordinate relations are not supported by Juju.
+                if endpoint.scope == EndpointScope.CONTAINER or other_endpoint.scope == EndpointScope.CONTAINER:
+                    if not same_model:
+                        continue
+                    req_platform = domain.models[req_model_ref].platform if req_model_ref in domain.models else None
+                    prov_platform = domain.models[prov_model_ref].platform if prov_model_ref in domain.models else None
+                    if req_platform != "machine" or prov_platform != "machine":
+                        continue
 
                 if same_model:
                     domain.charm_integrations.append(

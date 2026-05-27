@@ -14,6 +14,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import logging
+import os
 from datetime import timedelta
 from functools import cache
 
@@ -50,22 +51,27 @@ class SnapInfoResponse(BaseModel):
     channel_map: list[SnapChannelMapEntry] = Field(default_factory=list, alias="channel-map")
 
 
-SNAP_INFO_ENDPOINT = "https://api.snapcraft.io/v2/snaps/info/{snap_name}"
+DEFAULT_SNAPCRAFT_API_URL = "https://api.snapcraft.io"
+SNAPCRAFT_API_URL_ENV = "SNAPCRAFT_API_URL"
 
 
 class SnapstoreHttpClient:
     session: requests.Session
     logger: logging.Logger
     timeout: timedelta
+    _info_endpoint: str
 
     def __init__(
         self,
         logger: logging.Logger = logging.getLogger(__name__),
         session: requests.Session | None = None,
         timeout: timedelta = timedelta(seconds=30),
+        base_url: str | None = None,
     ) -> None:
         self.logger = logger
         self.timeout = timeout
+        resolved_url = base_url or os.environ.get(SNAPCRAFT_API_URL_ENV, DEFAULT_SNAPCRAFT_API_URL)
+        self._info_endpoint = resolved_url.rstrip("/") + "/v2/snaps/info/{snap_name}"
 
         retry_strategy = Retry(
             total=10,
@@ -82,7 +88,7 @@ class SnapstoreHttpClient:
     def snap_info(self, snap_name: str) -> SnapInfoResponse:
         self.logger.debug(f"Calling snap info for snap {snap_name}")
 
-        request_url = SNAP_INFO_ENDPOINT.format(snap_name=snap_name)
+        request_url = self._info_endpoint.format(snap_name=snap_name)
         request_headers = {"Snap-Device-Series": "16"}
         response = self.session.get(url=request_url, headers=request_headers, timeout=self.timeout.total_seconds())
         response.raise_for_status()

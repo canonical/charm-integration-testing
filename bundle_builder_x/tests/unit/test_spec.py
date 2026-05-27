@@ -513,7 +513,7 @@ class TestClassifyIntegrations:
         assert ic.endpoint_1.application == "app-a"
         assert ic.endpoint_1.endpoint == "ep-a"
 
-    def test_in_spec_cmr_generates_url(self) -> None:
+    def test_in_spec_cmr_url_not_synthesized(self) -> None:
         # GIVEN two models in spec with a CMR between them
         model_a = ModelSpec(
             controller="lxd",
@@ -531,7 +531,6 @@ class TestClassifyIntegrations:
         )
         model_b = ModelSpec(
             controller="lxd",
-            admin="admin",
             platform="machine",
             applications={"postgresql": AppSpec(charm="postgresql")},
         )
@@ -544,7 +543,7 @@ class TestClassifyIntegrations:
         assert len(local) == 1
         cmr_int = next(iter(local))
         assert cmr_int.offer_name == "postgresql-offer"
-        assert cmr_int.url == "lxd:admin/model-b.postgresql-offer"
+        assert cmr_int.url is None  # URL synthesis happens in extract.py once endpoint role is known
 
     def test_external_cmr_uses_provided_url(self) -> None:
         # GIVEN a model with an external CMR
@@ -762,10 +761,11 @@ class TestSpecFileEdgeCases:
                 ),
             ]
         )
+        # THEN the explicit URL is preserved as-is (no controller needed for in-spec CMRs with explicit URL)
         assert spec.models_by_name["m-a"].integrations[0].url == "my-ctrl:admin/m-b.rapp-offer"
 
-    def test_in_spec_cmr_explicit_url_wins_over_auto_generate(self) -> None:
-        # GIVEN an in-spec CMR with both a remote model that has a controller AND an explicit url
+    def test_in_spec_cmr_explicit_url_preserved(self) -> None:
+        # GIVEN an in-spec CMR with an explicit url provided alongside a resolvable remote model
         model_a = ModelSpec(
             controller="lxd",
             applications={"app": AppSpec(charm="c")},
@@ -782,7 +782,7 @@ class TestSpecFileEdgeCases:
         )
         model_b = ModelSpec(controller="other-ctrl", applications={"rapp": AppSpec(charm="rc")})
         result = classify_integrations(model_a, {"m-a": model_a, "m-b": model_b})
-        # THEN the explicit url is used, not the auto-generated one
+        # THEN the explicit url is used unchanged
         cmr_ints = [i for i in result if i.url is not None]
         assert len(cmr_ints) == 1
         assert cmr_ints[0].url == "EXPLICIT_URL"

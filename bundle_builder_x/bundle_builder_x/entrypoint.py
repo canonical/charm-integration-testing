@@ -19,7 +19,10 @@ from pathlib import Path
 
 from .bundle_builder import BundleBuilder, UncompletableBundleError
 from .charmhub import CharmhubClient
+from .charmhub_http import CharmhubHttpClient
 from .overrides import OverridesClient
+from .snapstore import SnapstoreClient
+from .snapstore_http import SnapstoreHttpClient
 from .spec import SpecFile
 from .timing import Timeline
 
@@ -78,6 +81,24 @@ def add_args_to_parser(parser: argparse.ArgumentParser) -> None:
         choices=["INFO", "DEBUG", "WARNING", "ERROR", "CRITICAL"],
         default="INFO",
     )
+    parser.add_argument(
+        "--charmhub-url",
+        type=str,
+        help=(
+            "Base URL for the Charmhub API. "
+            "Defaults to the CHARMHUB_API_URL environment variable, or the Charmhub production API."
+        ),
+        default=None,
+    )
+    parser.add_argument(
+        "--snapcraft-url",
+        type=str,
+        help=(
+            "Base URL for the Snapcraft API. "
+            "Defaults to the SNAPCRAFT_API_URL environment variable, or the Snapcraft production API."
+        ),
+        default=None,
+    )
 
 
 def write_to_file(filename: str | Path, content: str, logger: logging.Logger) -> None:
@@ -117,11 +138,25 @@ def main() -> None:
         timeline=timeline,
     )
 
+    # Create HTTP clients
+    charmhub_http = CharmhubHttpClient(logger=logger.getChild("charmhub"), base_url=args.charmhub_url)
+    snapstore_http = SnapstoreHttpClient(logger=logger, base_url=args.snapcraft_url)
+
     # Create Charmhub client
-    charmhub_client = CharmhubClient(logger=logger, overrides_client=overrides_client, timeline=timeline)
+    charmhub_client = CharmhubClient(
+        http_client=charmhub_http,
+        logger=logger,
+        overrides_client=overrides_client,
+        timeline=timeline,
+    )
 
     # Create Bundle Builder
-    bundle_builder = BundleBuilder(charmhub_client=charmhub_client, logger=logger, timeline=timeline)
+    bundle_builder = BundleBuilder(
+        charmhub_client=charmhub_client,
+        snapstore_client=SnapstoreClient(http_client=snapstore_http, logger=logger),
+        logger=logger,
+        timeline=timeline,
+    )
 
     # Build all models simultaneously
     try:

@@ -17,6 +17,7 @@
 
 import logging
 
+import yaml
 import z3  # type: ignore[import-untyped]
 
 from bundle_builder_x.charm import Charm, CharmChannel, CharmEndpoint, EndpointType
@@ -266,6 +267,94 @@ class TestExtractSingleModel:
         provides_cmrs = [c for c in provider_bundle.cross_model_integrations if c.local_role == EndpointType.PROVIDES]
         assert len(provides_cmrs) == 1
         assert provides_cmrs[0].local.application == "pg"
+
+    def test_user_cmr_defined_on_provider_side_mirrors_to_consumer(self) -> None:
+        # GIVEN a domain where the CMR is defined in the providing model's spec
+        # (the providing model lists the remote requiring endpoint, not the other way around)
+        from bundle_builder_x.domain import add_charm_to_domain
+
+        provider = _make_charm(
+            "prometheus-k8s",
+            endpoints={
+                "self-metrics-endpoint": CharmEndpoint(
+                    type=EndpointType.PROVIDES, interface="prometheus_scrape", optional=True
+                ),
+            },
+        )
+        requirer = _make_charm(
+            "prometheus-k8s",
+            endpoints={
+                "metrics-endpoint": CharmEndpoint(
+                    type=EndpointType.REQUIRES, interface="prometheus_scrape", optional=True
+                ),
+            },
+        )
+        # The integration constraint lives in the providing model (target-model),
+        # pointing at the requiring model (neighbor-model) as the remote.
+        # url=None simulates the common case where no explicit URL was provided in the spec.
+        cmr_integration = DomainApplicationIntegration(
+            endpoint_1=DomainApplicationEndpoint(application="target", endpoint="self-metrics-endpoint"),
+            endpoint_2=DomainApplicationEndpoint(
+                application="neighbor",
+                endpoint="metrics-endpoint",
+                model=ModelRef(name="neighbor-model", controller="neighbor-controller"),
+            ),
+            offer_name="neighbor-offer",
+            url=None,
+        )
+        domain = _make_domain(
+            {
+                ModelRef(name="target-model", controller="target-controller"): DomainModel(
+                    arch="amd64",
+                    platform="kubernetes",
+                    juju_version=_JUJU,
+                    ref=ModelRef(name="target-model", controller="target-controller"),
+                    applications={"target": DomainApplication(charm="prometheus-k8s")},
+                    application_integrations=[cmr_integration],
+                ),
+                ModelRef(name="neighbor-model", controller="neighbor-controller"): DomainModel(
+                    arch="amd64",
+                    platform="kubernetes",
+                    juju_version=_JUJU,
+                    ref=ModelRef(name="neighbor-model", controller="neighbor-controller"),
+                    applications={"neighbor": DomainApplication(charm="prometheus-k8s")},
+                ),
+            }
+        )
+        add_charm_to_domain(provider, domain, ModelRef(name="target-model", controller="target-controller"))
+        add_charm_to_domain(requirer, domain, ModelRef(name="neighbor-model", controller="neighbor-controller"))
+
+        # WHEN extracting
+        model = _solve(domain)
+        solution = extract_solution(model, domain, logger=_LOGGER)
+
+        # THEN the providing (target) bundle has a PROVIDES CMR
+        target_bundle = next(b for b in solution.bundles if "target-model" in (b.model or ""))
+        target_cmrs = [c for c in target_bundle.cross_model_integrations if c.local_role == EndpointType.PROVIDES]
+        assert len(target_cmrs) == 1
+        assert target_cmrs[0].local.application == "target"
+        assert target_cmrs[0].local.endpoint == "self-metrics-endpoint"
+
+        # AND the requiring (neighbor) bundle gets a mirrored REQUIRES CMR
+        neighbor_bundle = next(b for b in solution.bundles if "neighbor-model" in (b.model or ""))
+        requires_cmrs = [c for c in neighbor_bundle.cross_model_integrations if c.local_role == EndpointType.REQUIRES]
+        assert len(requires_cmrs) == 1
+        cmr = requires_cmrs[0]
+        assert cmr.local.application == "neighbor"
+        assert cmr.local.endpoint == "metrics-endpoint"
+        assert cmr.offer_name == "neighbor-offer"
+        # URL must point to the providing model's offer, not the requiring model
+        assert cmr.url == "target-controller:admin/target-model.neighbor-offer"
+
+        # AND the neighbor bundle exports a saas section and a CMR relation
+        neighbor_yaml = yaml.safe_load(neighbor_bundle.export())
+        assert "saas" in neighbor_yaml
+        assert "neighbor-offer" in neighbor_yaml["saas"]
+        assert neighbor_yaml["saas"]["neighbor-offer"]["url"] == "target-controller:admin/target-model.neighbor-offer"
+        assert any(
+            "neighbor-offer:self-metrics-endpoint" in r and "neighbor:metrics-endpoint" in r
+            for r in neighbor_yaml["relations"]
+        )
 
     def test_config_values_extracted_correctly(self) -> None:
         # GIVEN a charm with a fixed config value

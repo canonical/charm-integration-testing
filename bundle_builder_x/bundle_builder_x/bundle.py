@@ -98,6 +98,7 @@ class CrossModelIntegration(BaseModel):
 class Bundle(BaseModel):
     model: str | None = None
     controller: str | None = None
+    admin: str = "admin"
     applications: dict[str, Application]
     integrations: set[Integration]
     cross_model_integrations: list[CrossModelIntegration] = Field(default_factory=list)
