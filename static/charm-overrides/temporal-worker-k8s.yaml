@@ -18,9 +18,7 @@ overrides:
       queue: [test-queue]
       db-name: [temporal, null]
     resources:
-      # Note: This test image does not currently work
-      # https://github.com/canonical/temporal-worker-k8s-operator/pull/99
-      temporal-worker-image: [ghcr.io/canonical/temporal-worker-test:a37855c9a8806b9358515bb2126dcefc69a6e592-_1.0_amd64]
+      temporal-worker-image: [ghcr.io/canonical/temporal-worker-test-image:ff40479cc5b401d9a3f4c92c95f7099d83de2095]
     constraints:
       # The namespace and queue must always be set
       - 'set(config[namespace]) and set(config[queue])'
