@@ -17,9 +17,12 @@ from test_suite.scheduler.graph import StateGraph, StateTransition
 from test_suite.scheduler.plugin import (
     _build_execution_plan,
     _mark_as_injected,
+    _prune_testmon_deselected_state_files,
+    _state_test_files_relative_to_root,
     _UnreachableStateError,
     pytest_ignore_collect,
     pytest_runtest_setup,
+    pytest_sessionstart,
     pytest_sessionfinish,
 )
 from test_suite.scheduler.states import State
@@ -901,14 +904,8 @@ class TestPytestRuntestSetup:
 class TestPytestSessionFinish:
     @staticmethod
     def _make_session(exitstatus: pytest.ExitCode | int, *, testmon_enabled: bool) -> SimpleNamespace:
-        config = SimpleNamespace(option=SimpleNamespace(testmon=testmon_enabled))
-
-        def _getoption(name: str) -> bool:
-            if name == "testmon":
-                return testmon_enabled
-            raise ValueError(name)
-
-        config.getoption = _getoption
+        pluginmanager = SimpleNamespace(has_plugin=lambda name: testmon_enabled and name == "testmon")
+        config = SimpleNamespace(pluginmanager=pluginmanager)
         return SimpleNamespace(config=config, exitstatus=exitstatus)
 
     def test_clears_all_collected(self, make_item: Callable[..., pytest.Item]) -> None:
@@ -986,3 +983,69 @@ class TestPytestIgnoreCollect:
 
         # THEN the hook leaves the decision to other plugins
         assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Tests for testmon compatibility helpers
+# ---------------------------------------------------------------------------
+
+
+class TestTestmonStateFilePruning:
+    def test_state_file_paths_are_discovered_relative_to_root(
+        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        suite_dir = tmp_path / "charm_integration_testing" / "test_suite"
+        suite_dir.mkdir(parents=True)
+        state_file = suite_dir / "test_stateful.py"
+        state_file.write_text("import pytest\n@pytest.mark.state(requires='deployed')\ndef test_x():\n    pass\n")
+        non_state_file = suite_dir / "test_plain.py"
+        non_state_file.write_text("def test_plain():\n    pass\n")
+
+        monkeypatch.setattr(_plugin_module, "_TEST_SUITE_DIR", suite_dir)
+        config = SimpleNamespace(rootpath=tmp_path)
+
+        discovered = _state_test_files_relative_to_root(config)  # type: ignore[arg-type]
+
+        assert discovered == {"charm_integration_testing/test_suite/test_stateful.py"}
+
+    def test_prunes_testmon_deselected_files_for_state_tests(
+        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        suite_dir = tmp_path / "charm_integration_testing" / "test_suite"
+        suite_dir.mkdir(parents=True)
+        state_file = suite_dir / "test_stateful.py"
+        state_file.write_text("import pytest\n@pytest.mark.state(requires='deployed')\ndef test_x():\n    pass\n")
+
+        monkeypatch.setattr(_plugin_module, "_TEST_SUITE_DIR", suite_dir)
+
+        selector = SimpleNamespace(
+            deselected_files=[
+                "charm_integration_testing/test_suite/test_stateful.py",
+                "charm_integration_testing/test_suite/test_other.py",
+            ]
+        )
+        pluginmanager = SimpleNamespace(get_plugin=lambda name: selector if name == "TestmonSelect" else None)
+        config = SimpleNamespace(rootpath=tmp_path, pluginmanager=pluginmanager)
+
+        _prune_testmon_deselected_state_files(config)  # type: ignore[arg-type]
+
+        assert selector.deselected_files == ["charm_integration_testing/test_suite/test_other.py"]
+
+    def test_sessionstart_applies_testmon_state_file_pruning(
+        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        suite_dir = tmp_path / "charm_integration_testing" / "test_suite"
+        suite_dir.mkdir(parents=True)
+        state_file = suite_dir / "test_stateful.py"
+        state_file.write_text("import pytest\n@pytest.mark.state(requires='deployed')\ndef test_x():\n    pass\n")
+
+        monkeypatch.setattr(_plugin_module, "_TEST_SUITE_DIR", suite_dir)
+
+        selector = SimpleNamespace(deselected_files=["charm_integration_testing/test_suite/test_stateful.py"])
+        pluginmanager = SimpleNamespace(get_plugin=lambda name: selector if name == "TestmonSelect" else None)
+        config = SimpleNamespace(rootpath=tmp_path, pluginmanager=pluginmanager)
+        session = SimpleNamespace(config=config)
+
+        pytest_sessionstart(session)  # type: ignore[arg-type]
+
+        assert selector.deselected_files == []

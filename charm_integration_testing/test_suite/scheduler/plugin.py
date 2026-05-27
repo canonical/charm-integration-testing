@@ -94,6 +94,58 @@ _failed_state_test: pytest.Item | None = None
 _collection_reinjected_count = 0
 
 
+def _state_test_files_relative_to_root(config: pytest.Config) -> set[str]:
+    """Return test-suite files that declare scheduler state markers.
+
+    testmon tracks deselected files by repository-relative path strings.
+    This helper computes the same representation for every test file in the
+    suite that contains a ``pytest.mark.state`` marker.
+    """
+    root = pathlib.Path(str(config.rootpath)).resolve()
+    state_files: set[str] = set()
+    for path in _TEST_SUITE_DIR.glob("test_*.py"):
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if "pytest.mark.state(" not in text:
+            continue
+        try:
+            rel = path.resolve().relative_to(root)
+        except ValueError:
+            # Path lies outside the configured root (unexpected in this repo).
+            continue
+        state_files.add(rel.as_posix())
+    return state_files
+
+
+def _prune_testmon_deselected_state_files(config: pytest.Config) -> None:
+    """Keep state-test files collectable even when testmon marks them stable.
+
+    The scheduler requires these files to be collected so bridging transition
+    tests are available for path-finding and injection.
+    """
+    testmon_selector = config.pluginmanager.get_plugin("TestmonSelect")
+    if testmon_selector is None:
+        return
+    deselected_files = getattr(testmon_selector, "deselected_files", None)
+    if not isinstance(deselected_files, list):
+        return
+
+    required_state_files = _state_test_files_relative_to_root(config)
+    if not required_state_files:
+        return
+
+    before = len(deselected_files)
+    testmon_selector.deselected_files = [path for path in deselected_files if path not in required_state_files]
+    removed = before - len(testmon_selector.deselected_files)
+    if removed:
+        logger.info(
+            "Scheduler kept %d state-test files from testmon file-level deselection.",
+            removed,
+        )
+
+
 # ---------------------------------------------------------------------------
 # Plugin hooks
 # ---------------------------------------------------------------------------
@@ -151,6 +203,11 @@ def pytest_addoption(parser: pytest.Parser) -> None:
             f"Valid values: {valid_states}."
         ),
     )
+
+
+def pytest_sessionstart(session: pytest.Session) -> None:
+    """Ensure testmon does not suppress collection of scheduler-critical files."""
+    _prune_testmon_deselected_state_files(session.config)
 
 
 def pytest_itemcollected(item: pytest.Item) -> None:
