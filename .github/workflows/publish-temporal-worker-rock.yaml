@@ -12,6 +12,9 @@ on:
       - 'static/temporal-worker-test-image/**'
       - '.github/workflows/publish-temporal-worker-rock.yaml'
   pull_request:
+    paths:
+      - 'static/temporal-worker-test-image/**'
+      - '.github/workflows/publish-temporal-worker-rock.yaml'
 jobs:
   build-and-publish:
     name: Build Rock and publish on main
@@ -31,7 +34,7 @@ jobs:
           path: static/temporal-worker-test-image
           verbosity: verbose
       - name: Push rock to GHCR
-        # if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           IMAGE_REPO: ghcr.io/${{ github.repository_owner }}/temporal-worker-test-image
           GHCR_CREDS: ${{ github.repository_owner }}:${{ secrets.GITHUB_TOKEN }}
