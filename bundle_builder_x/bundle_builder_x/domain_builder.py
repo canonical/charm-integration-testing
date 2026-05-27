@@ -44,10 +44,9 @@ def classify_integrations(
 
     For local integrations, endpoints carry ``model=None``.
     For cross-model integrations, the remote endpoint carries a ``model`` field,
-    and the integration carries ``offer_name`` and ``url``.
-
-    For in-spec CMRs (remote_model is in all_models), the URL is auto-generated
-    from the remote model's controller/admin fields.
+    and the integration carries ``offer_name`` and ``url`` (the latter only when
+    the user explicitly provided a URL in the spec; otherwise ``url`` is None and
+    extract.py synthesizes the correct URL once the endpoint role is known).
     """
     result: list[DomainApplicationIntegration] = []
 
