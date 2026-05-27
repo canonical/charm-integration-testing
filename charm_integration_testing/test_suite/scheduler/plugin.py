@@ -160,7 +160,7 @@ def pytest_itemcollected(item: pytest.Item) -> None:
 
 @pytest.hookimpl(tryfirst=True)
 def pytest_ignore_collect(collection_path: pathlib.Path, config: pytest.Config) -> bool | None:
-    """Force collection of test-suite files so the state graph is complete.
+    """Force collection of the test-suite tree so the state graph is complete.
 
     pytest-testmon's ``pytest_ignore_collect`` skips unchanged files
     entirely, which prevents ``pytest_itemcollected`` from capturing
@@ -169,10 +169,17 @@ def pytest_ignore_collect(collection_path: pathlib.Path, config: pytest.Config) 
 
     Returning ``False`` with ``tryfirst=True`` short-circuits the
     ``firstresult`` hook chain and guarantees the items are collected.
+    This must apply to the test-suite directory itself as well as leaf
+    ``.py`` files, otherwise an ignore decision on a parent path can still
+    prune unchanged transition tests before pytest ever visits the files.
     testmon can still deselect them during ``pytest_collection_modifyitems``;
     the scheduler will re-inject any that are needed as bridges.
     """
-    if collection_path.suffix == ".py" and collection_path.resolve().is_relative_to(_TEST_SUITE_DIR):
+    resolved_path = collection_path.resolve()
+    if resolved_path == _TEST_SUITE_DIR or (
+        resolved_path.is_relative_to(_TEST_SUITE_DIR)
+        and (resolved_path.is_dir() or resolved_path.suffix == ".py")
+    ):
         return False
     return None
 

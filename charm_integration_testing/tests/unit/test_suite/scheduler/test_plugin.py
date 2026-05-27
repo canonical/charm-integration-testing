@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import pathlib
 from collections import defaultdict
 from collections.abc import Callable, Generator
 from types import SimpleNamespace
@@ -17,6 +18,7 @@ from test_suite.scheduler.plugin import (
     _build_execution_plan,
     _mark_as_injected,
     _UnreachableStateError,
+    pytest_ignore_collect,
     pytest_runtest_setup,
     pytest_sessionfinish,
 )
@@ -946,3 +948,41 @@ class TestPytestSessionFinish:
         pytest_sessionfinish(session=session, exitstatus=pytest.ExitCode.NO_TESTS_COLLECTED)  # type: ignore[arg-type]
 
         assert session.exitstatus == pytest.ExitCode.NO_TESTS_COLLECTED
+
+
+# ---------------------------------------------------------------------------
+# Tests for pytest_ignore_collect
+# ---------------------------------------------------------------------------
+
+
+class TestPytestIgnoreCollect:
+    def test_forces_collection_for_test_suite_directory(self) -> None:
+        # GIVEN pytest is considering the test suite directory itself
+        test_suite_dir = _plugin_module._TEST_SUITE_DIR
+
+        # WHEN the scheduler's ignore hook runs
+        result = pytest_ignore_collect(test_suite_dir, config=cast(pytest.Config, SimpleNamespace()))
+
+        # THEN the directory is never ignored, so unchanged bridge tests remain visible
+        assert result is False
+
+    def test_forces_collection_for_test_suite_python_file(self) -> None:
+        # GIVEN pytest is considering a Python test file inside the suite
+        test_file = _plugin_module._TEST_SUITE_DIR / "test_bootstrap_controller.py"
+
+        # WHEN the scheduler's ignore hook runs
+        result = pytest_ignore_collect(test_file, config=cast(pytest.Config, SimpleNamespace()))
+
+        # THEN the file is never ignored, so its transition stays in the graph
+        assert result is False
+
+    def test_does_not_override_paths_outside_test_suite(self, tmp_path: pathlib.Path) -> None:
+        # GIVEN pytest is considering a Python file outside the integration test suite
+        outside_file = tmp_path / "test_outside.py"
+        outside_file.write_text("def test_placeholder():\n    pass\n")
+
+        # WHEN the scheduler's ignore hook runs
+        result = pytest_ignore_collect(outside_file, config=cast(pytest.Config, SimpleNamespace()))
+
+        # THEN the hook leaves the decision to other plugins
+        assert result is None
