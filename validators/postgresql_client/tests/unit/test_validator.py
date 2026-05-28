@@ -19,7 +19,7 @@ from unittest.mock import patch
 
 import ops
 import psycopg2
-from test_utils.stubs import AppStub, CharmStub, RelationStub  # type: ignore[import-not-found]
+from test_utils.stubs import ApplicationStub, CharmBaseStub, RelationStub  # type: ignore[import-not-found]
 
 from validators.postgresql_client.validator import PostgreSQLClientValidator
 
@@ -29,9 +29,9 @@ from validators.postgresql_client.validator import PostgreSQLClientValidator
 
 
 def _make_validator(databag: dict[str, str], endpoint: str = "db") -> PostgreSQLClientValidator:
-    app = AppStub()
+    app = ApplicationStub()
     relation = RelationStub(app=app, data={app: databag}, name=endpoint)
-    charm = cast(ops.CharmBase, CharmStub(relation_name=endpoint, interface_name="postgresql_client"))
+    charm = cast(ops.CharmBase, CharmBaseStub(relation_name=endpoint, interface_name="postgresql_client"))
     return PostgreSQLClientValidator(charm, cast(ops.Relation, relation))
 
 
@@ -97,7 +97,7 @@ class TestPostgreSQLClientValidatorSimple:
         # GIVEN a relation whose remote app is not yet known
         relation = RelationStub(name="test-relation", app=None, data={})
         validator = PostgreSQLClientValidator(
-            cast(ops.CharmBase, CharmStub(relation_name=relation.name)), cast(ops.Relation, relation)
+            cast(ops.CharmBase, CharmBaseStub(relation_name=relation.name)), cast(ops.Relation, relation)
         )
 
         # WHEN

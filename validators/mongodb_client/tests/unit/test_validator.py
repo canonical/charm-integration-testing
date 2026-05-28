@@ -20,7 +20,7 @@ from unittest.mock import patch
 import ops
 import pymongo
 from pymongo.errors import WriteError
-from test_utils.stubs import AppStub, CharmStub, RelationStub  # type: ignore[import-not-found]
+from test_utils.stubs import make_charm_from_relation, ApplicationStub, CharmBaseStub, RelationStub  # type: ignore[import-not-found]
 
 from validators.mongodb_client.validator import MongoDBClientValidator
 
@@ -30,9 +30,9 @@ from validators.mongodb_client.validator import MongoDBClientValidator
 
 
 def _make_validator(databag: dict[str, str], endpoint: str = "db") -> MongoDBClientValidator:
-    app = AppStub()
+    app = ApplicationStub()
     relation = RelationStub(app=app, data={app: databag}, name=endpoint, id=0)
-    charm = cast(ops.CharmBase, CharmStub(relation_name=endpoint, interface_name="mongodb_client"))
+    charm = make_charm_from_relation(relation)
     return MongoDBClientValidator(charm, cast(ops.Relation, relation))
 
 
@@ -141,9 +141,10 @@ class TestMongoDBClientValidatorSimple:
 
     def test_returns_error_when_relation_app_is_none(self) -> None:
         # GIVEN a relation whose remote app is not yet known
-        relation = RelationStub(app=None, data={}, id=0, name="db")
+        relation = RelationStub(id=0, name="db")
+        charm = make_charm_from_relation(relation)
         validator = MongoDBClientValidator(
-            cast(ops.CharmBase, CharmStub(relation_name=relation.name, interface_name=relation.name)),
+            cast(ops.CharmBase, charm),
             cast(ops.Relation, relation),
         )
 

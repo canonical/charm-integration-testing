@@ -101,7 +101,7 @@ class BaseValidator(ABC):
         pass
 
     def relation_exists(self) -> bool:
-        return self.relation.app is not None
+        return len(self.relation.data[self.relation.app]) != 0
 
     def resolve_secret(self, uri_key: str, *fields: str) -> dict[str, str]:
         if uri := self.databag.get(uri_key):

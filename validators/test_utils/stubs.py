@@ -15,70 +15,97 @@
 
 from dataclasses import dataclass, field
 
-from validators.base import ValidationRole
-
-
-class AppStub:
-    """Minimal stand-in for ops.Application.  Must be hashable (dict key)."""
-
-
-@dataclass
-class RelationRoleStub:
-    """Stub for relation role, commonly used across validator tests."""
-
-    name: ValidationRole
-
-
-@dataclass
-class RelationStub:
-    name: str
-    app: AppStub | None = None
-    data: dict[AppStub | None, dict[str, str]] = field(default_factory=dict)
-    id: int = 0
-
-
-@dataclass
-class RelationMetaStub:
-    interface_name: str | None = None
-    role: RelationRoleStub = field(default_factory=lambda: RelationRoleStub(name="requires"))
+from enum import Enum
 
 
 @dataclass
 class SecretStub:
-    content: dict[str, str]
+    """Stub for ops.Secret"""
+    _content: dict[str, str]
 
     def get_content(self) -> dict[str, str]:
-        return self.content
+        return self._content
+
+
+class ApplicationStub:
+    """Stub for ops.Application"""
+
+
+@dataclass
+class RelationStub:
+    """Stub for ops.Relation"""
+    name: str
+    id: int
+    app: ApplicationStub = field(default_factory=ApplicationStub)
+    data: dict[ApplicationStub, dict[str, str]] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.app not in self.data:
+            self.data[self.app] = {}
 
 
 @dataclass
 class ModelStub:
-    secrets: dict[str, dict[str, str]] = field(default_factory=dict)
+    """Stub for ops.Model.
+
+    secrets are kept as a field in this class so that we do not have to implement a backend"""
+    _secrets: dict[str, dict[str, str]] = field(default_factory=dict)
     requested_ids: list[str] = field(default_factory=list)
+    relations: dict[str, list[RelationStub]] = field(default_factory=dict)
 
     def get_secret(self, id: str) -> SecretStub:  # noqa: A002
         self.requested_ids.append(id)
-        return SecretStub(content=self.secrets[id])
+        return SecretStub(_content=self._secrets[id])
+
+
+class RelationRoleStub(Enum):
+    """Stub for ops.RelationRole"""
+    peer = 'peer'
+    requires = 'requires'
+    provides = 'provides'
+
+    def is_peer(self) -> bool: return self is RelationRoleStub.peer
+
+
+@dataclass
+class RelationMetaStub:
+    """Stub for ops.RelationMeta"""
+    relation_name: str
+    interface_name: str | None = None
+    role: RelationRoleStub = field(default_factory=lambda: RelationRoleStub.requires)
 
 
 @dataclass
 class CharmMetaStub:
+    """Stub for ops.CharmMeta"""
     relations: dict[str, RelationMetaStub] = field(default_factory=dict)
 
 
 @dataclass
-class CharmStub:
-    relation_name: str = "test-relation"
+class CharmBaseStub:
+    """Stub for ops.CharmBase"""
     meta: CharmMetaStub = field(default_factory=CharmMetaStub)
-    interface_name: str = "test-interface"
-    secrets: dict[str, dict[str, str]] = field(default_factory=dict)
+    model: ModelStub = field(default_factory=ModelStub)
 
-    def __post_init__(self) -> None:
-        self.model = ModelStub(secrets=self.secrets)
-        self.meta = CharmMetaStub(
+    @property
+    def requested_ids(self) -> list[str]:
+        return self.model._requested_ids
+
+
+def make_charm_from_relation(relation: RelationStub, role: RelationRoleStub = RelationRoleStub.requires) -> CharmBaseStub:
+    return CharmBaseStub(
+        meta=CharmMetaStub(
             relations={
-                self.relation_name: RelationMetaStub(
-                    interface_name=self.interface_name, role=RelationRoleStub("requires")
+                relation.name: RelationMetaStub(
+                    relation_name=relation.name,
+                    role=role,
                 )
             }
         )
+    )
+
+
+def make_charm_from_relation_and_secrets(relation: RelationStub, secrets: dict[str, dict[str, str]], role: RelationRoleStub = RelationRoleStub.requires) -> CharmBaseStub:
+    charm = make_charm_from_relation(relation, role)
+    charm.model._secrets = secrets
+    return charm

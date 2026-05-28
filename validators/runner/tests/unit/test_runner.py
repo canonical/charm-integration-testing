@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 from unittest.mock import patch
 
-from test_utils.stubs import RelationRoleStub, RelationStub  # type: ignore[import-not-found]
+from test_utils.stubs import RelationRoleStub, RelationStub, CharmBaseStub  # type: ignore[import-not-found]
 
 from validators.base import BaseValidator, ValidationLevel, ValidationResult
 from validators.runner.runner import ValidatorRunner, ValidatorRunnerResults
@@ -78,28 +78,6 @@ class SkippingValidator(BaseValidator):
 
 
 @dataclass
-class EndpointMetadataStub:
-    interface_name: Optional[str]
-    role: RelationRoleStub
-
-
-@dataclass
-class ModelStub:
-    relations: dict[str, list[RelationStub]]
-
-
-@dataclass
-class MetaStub:
-    relations: dict[str, EndpointMetadataStub] = field(default_factory=dict)
-
-
-@dataclass
-class CharmStub:
-    meta: MetaStub
-    model: ModelStub
-
-
-@dataclass
 class EntryPointStub:
     name: str
     _load_result: type = field(default=PassingValidator)
@@ -114,8 +92,8 @@ class EntryPointStub:
 def _make_charm(
     relations: dict[str, tuple[Optional[str], str]] | None = None,
     integrations_count_override: dict[str, int] | None = None,
-) -> CharmStub:
-    """Make a CharmStub with the given relations.
+) -> CharmBaseStub:
+    """Make a CharmBaseStub with the given relations.
 
     `relations` is a mapping of endpoint name to a tuple of interface name and role
     `integrations_count_override` is the number of integrations per endpoint (any endpoint not provided will default to 1)
@@ -132,7 +110,7 @@ def _make_charm(
         endpoint_metadata = {}
         integrations_count = {}
 
-    return CharmStub(
+    return CharmBaseStub(
         meta=MetaStub(relations=endpoint_metadata),
         model=ModelStub(
             relations={ep: [RelationStub(name=ep, id=i) for i in range(n)] for ep, n in integrations_count.items()}

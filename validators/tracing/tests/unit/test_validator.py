@@ -20,7 +20,7 @@ from unittest.mock import patch
 
 import ops
 import pytest
-from test_utils.stubs import AppStub, CharmStub, RelationStub  # type: ignore[import-not-found]
+from test_utils.stubs import ApplicationStub, CharmBaseStub, RelationMetaStub, RelationRoleStub, RelationStub  # type: ignore[import-not-found]
 
 from validators.tracing.validator import TracingValidator
 
@@ -29,10 +29,16 @@ from validators.tracing.validator import TracingValidator
 # ---------------------------------------------------------------------------
 
 
-def _make_validator(databag: dict[str, str], endpoint: str = "tracing") -> TracingValidator:
-    app = AppStub()
+def _make_validator(
+    databag: dict[str, str], endpoint: str = "tracing", role: str = "requires"
+) -> TracingValidator:
+    app = ApplicationStub()
     relation = RelationStub(app=app, data={app: databag}, name=endpoint)
-    charm = cast(ops.CharmBase, CharmStub(relation_name=endpoint, interface_name="tracing"))
+    charm = cast(ops.CharmBase, CharmBaseStub(relation_name=endpoint, interface_name="tracing"))
+    if role != "requires":
+        charm.meta.relations[endpoint] = RelationMetaStub(  # type: ignore[attr-defined]
+            interface_name="tracing", role=RelationRoleStub(name=role)  # type: ignore[arg-type]
+        )
     return TracingValidator(charm, cast(ops.Relation, relation))
 
 
@@ -69,10 +75,24 @@ class TestTracingValidatorSimple:
         assert result.status == "SKIPPED"
         assert result.error is not None
 
+    @pytest.mark.parametrize("role", ["provides", "peer"])
+    def test_returns_skipped_for_non_requires_role(self, role: str) -> None:
+        # GIVEN a validator whose endpoint is on the non-requires side of the relation
+        validator = _make_validator(VALID_DATABAG, role=role)
+
+        # WHEN
+        result = validator.validate(level="simple")
+
+        # THEN
+        assert result.status == "SKIPPED"
+        assert result.error is not None
+        assert role in result.error
+        assert "TracingValidator" in result.error
+
     def test_returns_error_when_relation_app_is_none(self) -> None:
         # GIVEN a relation whose remote app is not yet known
         relation = RelationStub(name="test-relation", app=None, data={})
-        validator = TracingValidator(cast(ops.CharmBase, CharmStub()), cast(ops.Relation, relation))
+        validator = TracingValidator(cast(ops.CharmBase, CharmBaseStub()), cast(ops.Relation, relation))
 
         # WHEN
         result = validator.validate(level="simple")

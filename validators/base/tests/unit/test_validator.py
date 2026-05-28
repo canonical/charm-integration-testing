@@ -15,10 +15,13 @@
 
 import pytest
 from test_utils.stubs import (  # type: ignore[import-not-found]
-    CharmStub,
+    CharmBaseStub,
     RelationMetaStub,
+    ApplicationStub,
     RelationRoleStub,
     RelationStub,
+    make_charm_from_relation,
+    make_charm_from_relation_and_secrets,
 )
 
 from validators.base import BaseValidator, ValidationCheck, ValidationLevel, ValidationResult
@@ -63,21 +66,9 @@ class TestValidationResult:
 class TestBaseValidator:
     def test_role_property_returns_set_value(self) -> None:
         # GIVEN
-        validator = ConcreteValidator(CharmStub(relation_name="my-db"), RelationStub(name="my-db", id=0))
+        relation = RelationStub(name="my-db", id=0)
+        validator = ConcreteValidator(make_charm_from_relation(relation, RelationRoleStub.provides), relation=relation)
         charm = validator.charm
-        charm.meta = type(  # type: ignore[misc]
-            "MetaStub",
-            (),
-            {
-                "relations": {
-                    **charm.meta.relations,
-                    charm.relation_name: RelationMetaStub(  # type: ignore[attr-defined]
-                        interface_name=charm.interface_name,  # type: ignore[attr-defined]
-                        role=RelationRoleStub("provides"),
-                    ),
-                }
-            },
-        )()
 
         # WHEN
         role = validator.role
@@ -87,7 +78,8 @@ class TestBaseValidator:
 
     def test_validate_returns_result(self) -> None:
         # GIVEN
-        validator = ConcreteValidator(CharmStub(relation_name="my-db"), RelationStub(name="my-db", id=0))
+        relation = RelationStub(name="my-db", id=0)
+        validator = ConcreteValidator(make_charm_from_relation(relation), relation)
 
         # WHEN
         result = validator.validate(level="simple")
@@ -104,26 +96,25 @@ class TestBaseValidator:
 
     def test_databag_is_empty_when_relation_has_no_app(self) -> None:
         # GIVEN
-        relation = RelationStub(name="my-db", id=1, app=None, data={})
-        validator = ConcreteValidator(CharmStub(relation_name="my-db"), relation)
+        relation = RelationStub(name="my-db", id=1)
+        validator = ConcreteValidator(make_charm_from_relation(relation), relation)
 
         # WHEN / THEN
         assert validator.databag == {}
 
     def test_databag_reads_relation_app_databag(self) -> None:
         # GIVEN
-        app = object()
-        relation_data = {"username": "admin", "password": "secret"}
-        relation = RelationStub(name="my-db", id=1, app=app, data={app: relation_data})
-        validator = ConcreteValidator(CharmStub(relation_name="my-db"), relation)
+        app = ApplicationStub()
+        databag = {"username": "admin", "password": "secret"}
+        relation = RelationStub(name="my-db", id=1, app=app, data={app: databag})
+        validator = ConcreteValidator(make_charm_from_relation(relation), relation)
 
         # WHEN
-        databag = validator.databag
-        databag["username"] = "changed"
+        validator.databag["username"] = "changed"
 
         # THEN
-        assert validator.databag == relation_data
-        assert relation_data["username"] == "admin"
+        assert validator.databag == databag
+        assert databag["username"] == "admin"
 
     @pytest.mark.parametrize(
         "app,exists",
@@ -132,10 +123,12 @@ class TestBaseValidator:
             (object(), True),
         ],
     )
-    def test_relation_exists_reflects_presence_of_relation_app(self, app: object | None, exists: bool) -> None:
+    def test_relation_exists_reflects_presence_of_relation_app(self, app: ApplicationStub | None, exists: bool) -> None:
         # GIVEN
-        relation = RelationStub(name="my-db", id=1, app=app, data={})
-        validator = ConcreteValidator(CharmStub(relation_name="my-db"), relation)
+        if app is None:
+            app = ApplicationStub()
+        relation = RelationStub(name="my-db", id=1, app=app, data={app: {} if not exists else {"key": "value"}})
+        validator = ConcreteValidator(make_charm_from_relation(relation), relation)
 
         # WHEN / THEN
         assert validator.relation_exists() is exists
@@ -149,9 +142,8 @@ class TestBaseValidator:
             app=app,
             data={app: {"secret-uri": "secret:db-creds", "username": "plain-user"}},
         )
-        charm = CharmStub(
-            relation_name="my-db", secrets={"secret:db-creds": {"username": "secret-user", "password": "pw"}}
-        )
+        secrets = {"secret:db-creds": {"username": "secret-user", "password": "pw"}}
+        charm = make_charm_from_relation_and_secrets(relation, secrets)
         validator = ConcreteValidator(charm, relation)
 
         # WHEN
@@ -170,7 +162,7 @@ class TestBaseValidator:
             app=app,
             data={app: {"username": "plain-user", "password": "plain-pw", "extra": "x"}},
         )
-        charm = CharmStub(relation_name="my-db")
+        charm = make_charm_from_relation(relation)
         validator = ConcreteValidator(charm, relation)
 
         # WHEN
@@ -189,7 +181,7 @@ class TestBaseValidator:
             app=app,
             data={app: {"host": "10.0.0.10", "port": ""}},
         )
-        validator = ConcreteValidator(CharmStub(relation_name="my-db"), relation)
+        validator = ConcreteValidator(make_charm_from_relation(relation), relation)
 
         # WHEN
         check = validator.validate_schema(["host", "port", "user"])
@@ -202,7 +194,7 @@ class TestBaseValidator:
         # GIVEN
         app = object()
         relation = RelationStub(name="my-db", id=1, app=app, data={app: {"host": "10.0.0.10"}})
-        validator = ConcreteValidator(CharmStub(relation_name="my-db"), relation)
+        validator = ConcreteValidator(make_charm_from_relation(relation), relation)
 
         # WHEN
         check = validator.validate_schema(
