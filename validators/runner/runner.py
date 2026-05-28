@@ -68,6 +68,7 @@ class ValidatorRunner:
             if (role := str_to_validation_role(metadata.role.name)) == "peer":
                 continue
             interface_name = metadata.interface_name or relation
+
             for integration in charm.model.relations[relation]:
                 results += self._run_for_integration(charm, interface_name, integration, level, role)
         return ValidatorRunnerResults(results=results)

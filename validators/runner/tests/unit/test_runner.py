@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 from unittest.mock import patch
 
-from test_utils.stubs import RelationRoleStub  # type: ignore[import-not-found]
+from test_utils.stubs import RelationRoleStub, RelationStub  # type: ignore[import-not-found]
 
 from validators.base import BaseValidator, ValidationLevel, ValidationResult
 from validators.runner.runner import ValidatorRunner, ValidatorRunnerResults
@@ -84,24 +84,13 @@ class EndpointMetadataStub:
 
 
 @dataclass
-class IntegrationStub:
-    name: str
-    id: int = 0
-
-
-@dataclass
 class ModelStub:
-    relations: dict[str, list[IntegrationStub]]
+    relations: dict[str, list[RelationStub]]
 
 
 @dataclass
 class MetaStub:
-    requires: dict[str, EndpointMetadataStub]
-
-    def __post_init__(self) -> None:
-        # charm.meta.relations is the merged view of all relations; in tests
-        # we only have requires, so alias it so the interface property works.
-        self.relations = self.requires
+    relations: dict[str, EndpointMetadataStub] = field(default_factory=dict)
 
 
 @dataclass
@@ -122,22 +111,27 @@ class EntryPointStub:
         return self._load_result
 
 
-def _make_charm(requires: dict[str, Optional[str]], relations: dict[str, int]) -> CharmStub:
-    """Build a CharmStub.
+def _make_charm(
+    relations: dict[str, tuple[Optional[str], str]] | None = None,
+    integrations_count_override: dict[str, int] | None = None,
+) -> CharmStub:
+    """Make a CharmStub with the given relations.
 
-    Args:
-        requires: mapping of endpoint name -> interface name (or None for fallback test).
-        relations: mapping of endpoint name -> number of integrations.
+    `relations` is a mapping of endpoint name to a tuple of interface name and role
+    `integrations_count_override` is the number of integrations per endpoint (any endpoint not provided will default to 1)
     """
+    endpoint_metadata = {
+        ep: EndpointMetadataStub(interface_name=iface, role=RelationRoleStub(role))
+        for ep, (iface, role) in relations.items()
+    }
+
+    integrations_count = {ep: 1 for ep in relations.keys()}
+    integrations_count.update(integrations_count_override or {})
+
     return CharmStub(
-        meta=MetaStub(
-            requires={
-                ep: EndpointMetadataStub(interface_name=iface, role=RelationRoleStub("requires"))
-                for ep, iface in requires.items()
-            }
-        ),
+        meta=MetaStub(relations=endpoint_metadata),
         model=ModelStub(
-            relations={ep: [IntegrationStub(name=ep, id=i) for i in range(n)] for ep, n in relations.items()}
+            relations={ep: [RelationStub(name=ep, id=i) for i in range(n)] for ep, n in integrations_count.items()}
         ),
     )
 
@@ -202,7 +196,20 @@ class TestValidatorRunnerRun:
     def test_returns_pass_result(self) -> None:
         # GIVEN
         runner = self._runner_with("test-interface", PassingValidator)
-        charm = _make_charm(requires={"db": "test-interface"}, relations={"db": 1})
+        charm = _make_charm(relations={"db": ("test-interface", "requires")})
+
+        # WHEN
+        results = runner.run(charm, level="simple")  # type: ignore[arg-type]
+
+        # THEN
+        assert isinstance(results, ValidatorRunnerResults)
+        assert len(results.results) == 1
+        assert results.results[0].status == "PASS"
+
+    def test_returns_pass_result_with_provides(self) -> None:
+        # GIVEN
+        runner = self._runner_with("test-interface", PassingValidator)
+        charm = _make_charm(relations={"api": ("test-interface", "provides")})
 
         # WHEN
         results = runner.run(charm, level="simple")  # type: ignore[arg-type]
@@ -215,7 +222,7 @@ class TestValidatorRunnerRun:
     def test_returns_fail_result(self) -> None:
         # GIVEN
         runner = self._runner_with("test-interface", FailingValidator)
-        charm = _make_charm(requires={"db": "test-interface"}, relations={"db": 1})
+        charm = _make_charm(relations={"db": ("test-interface", "requires")})
 
         # WHEN
         results = runner.run(charm, level="simple")  # type: ignore[arg-type]
@@ -226,7 +233,7 @@ class TestValidatorRunnerRun:
     def test_captures_validator_exception_as_error(self) -> None:
         # GIVEN
         runner = self._runner_with("test-interface", ExplodingValidator)
-        charm = _make_charm(requires={"db": "test-interface"}, relations={"db": 1})
+        charm = _make_charm(relations={"db": ("test-interface", "requires")})
 
         # WHEN
         results = runner.run(charm, level="simple")  # type: ignore[arg-type]
@@ -239,7 +246,7 @@ class TestValidatorRunnerRun:
         # GIVEN a runner with no validators for the endpoint's interface
         runner = ValidatorRunner.__new__(ValidatorRunner)
         runner.validators = {}
-        charm = _make_charm(requires={"db": "test-interface"}, relations={"db": 1})
+        charm = _make_charm(relations={"db": ("test-interface", "requires")})
 
         # WHEN
         results = runner.run(charm, level="simple")  # type: ignore[arg-type]
@@ -250,7 +257,7 @@ class TestValidatorRunnerRun:
     def test_uses_endpoint_name_as_fallback_when_interface_is_none(self) -> None:
         # GIVEN an endpoint whose interface_name is None
         runner = self._runner_with("db", PassingValidator)
-        charm = _make_charm(requires={"db": None}, relations={"db": 1})
+        charm = _make_charm(relations={"db": (None, "requires")})
 
         # WHEN
         results = runner.run(charm, level="simple")  # type: ignore[arg-type]
@@ -261,7 +268,7 @@ class TestValidatorRunnerRun:
     def test_passes_level_to_validator(self) -> None:
         # GIVEN
         runner = self._runner_with("test-interface", PassingValidator)
-        charm = _make_charm(requires={"db": "test-interface"}, relations={"db": 1})
+        charm = _make_charm(relations={"db": ("test-interface", "requires")})
 
         # WHEN
         results = runner.run(charm, level="deep")  # type: ignore[arg-type]
@@ -272,7 +279,7 @@ class TestValidatorRunnerRun:
     def test_runs_across_multiple_integrations(self) -> None:
         # GIVEN two integrations on the same endpoint
         runner = self._runner_with("test-interface", PassingValidator)
-        charm = _make_charm(requires={"db": "test-interface"}, relations={"db": 2})
+        charm = _make_charm(relations={"db": ("test-interface", "requires")}, integrations_count_override={"db": 2})
 
         # WHEN
         results = runner.run(charm, level="simple")  # type: ignore[arg-type]
@@ -283,7 +290,7 @@ class TestValidatorRunnerRun:
     def test_falls_back_to_simple_when_deep_is_skipped(self) -> None:
         # GIVEN a validator that only supports simple
         runner = self._runner_with("test-interface", SkippingValidator)
-        charm = _make_charm(requires={"db": "test-interface"}, relations={"db": 1})
+        charm = _make_charm(relations={"db": ("test-interface", "requires")})
 
         # WHEN the runner is asked for deep
         results = runner.run(charm, level="deep")  # type: ignore[arg-type]
@@ -295,7 +302,7 @@ class TestValidatorRunnerRun:
     def test_falls_back_through_two_levels(self) -> None:
         # GIVEN a validator that only supports simple, but uat is requested
         runner = self._runner_with("test-interface", SkippingValidator)
-        charm = _make_charm(requires={"db": "test-interface"}, relations={"db": 1})
+        charm = _make_charm(relations={"db": ("test-interface", "requires")})
 
         # WHEN the runner is asked for uat
         results = runner.run(charm, level="uat")  # type: ignore[arg-type]
@@ -311,7 +318,7 @@ class TestValidatorRunnerRun:
                 return self._skipped_result_due_to_level(level)
 
         runner = self._runner_with("test-interface", AlwaysSkippingValidator)
-        charm = _make_charm(requires={"db": "test-interface"}, relations={"db": 2})
+        charm = _make_charm(relations={"db": ("test-interface", "requires")}, integrations_count_override={"db": 2})
 
         # WHEN
         results = runner.run(charm, level="simple")  # type: ignore[arg-type]
