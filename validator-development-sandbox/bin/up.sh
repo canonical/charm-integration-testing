@@ -86,6 +86,10 @@ multipass exec "$VM_NAME" -- bash -lc "
         echo '==> @github/copilot: found.'
     fi
 
+    echo '==> Linking project skills to ~/.agents/skills...'
+    mkdir -p ~/.agents
+    ln -sfn /project/validator-development-sandbox/prompts ~/.agents/skills
+
     if ! command -v markdownlint-cli2 &>/dev/null; then
         echo '==> Installing markdownlint-cli2...'
         sudo npm install -g markdownlint-cli2
