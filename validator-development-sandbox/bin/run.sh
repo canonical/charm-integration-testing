@@ -112,7 +112,7 @@ if [ "$INTERACTIVE" = "true" ]; then
         cd /project
         COPILOT_GITHUB_TOKEN='$_copilot_token' GH_TOKEN='$_gh_cli_token' GITHUB_TOKEN='$_gh_cli_token' \
         COPILOT_MODEL='$COPILOT_MODEL' copilot --yolo \
-            -i "$CONTEXT_MSG"
+            -i \"$CONTEXT_MSG\"
         rm -f $PROMPT_FILE
     "
 else
