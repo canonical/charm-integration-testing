@@ -1,4 +1,7 @@
 ---
+# For some reason temporal k8s isn't listed as a provider of `temporal-host-info`
+# https://github.com/canonical/temporal-k8s-operator/issues/139
+listed: true
 # Remove after: https://github.com/canonical/temporal-k8s-operator/pull/117
 overrides:
   - requires:

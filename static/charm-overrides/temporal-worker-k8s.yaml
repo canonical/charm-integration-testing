@@ -6,10 +6,23 @@ overrides:
         optional: true
       grafana-dashboard:
         optional: true
+      temporal-worker-info:
+        optional: true
     requires:
       logging:
         optional: true
+      temporal-host-info:
+        optional: false
     configs:
-      host: [charmqa.canonical.com]
       namespace: [charm-test]
       queue: [test-queue]
+      db-name: [temporal, null]
+    resources:
+      temporal-worker-image: [ghcr.io/canonical/temporal-worker-test-image:ff40479cc5b401d9a3f4c92c95f7099d83de2095]
+    constraints:
+      # The namespace and queue must always be set
+      - 'set(config[namespace]) and set(config[queue])'
+      # If the database endpoint is integrated, then the db-name config must be set
+      - 'bool(endpoint[database]) => set(config[db-name])'
+      # The temporal worker image resource must always be set
+      - 'set(resource[temporal-worker-image])'
