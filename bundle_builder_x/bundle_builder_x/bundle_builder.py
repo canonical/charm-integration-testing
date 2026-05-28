@@ -29,9 +29,10 @@ from .assertion_tags import (
     CharmEndpointNonOptionalTag,
     EndpointCountMatchesIntegrationsTag,
     PeerChannelMismatchTag,
+    SubordinateBaseMismatchTag,
 )
 from .bundle import Solution
-from .charm import Charm, CharmChannel, EndpointType
+from .charm import Charm, CharmChannel, EndpointScope, EndpointType
 from .charmhub import CharmhubClient
 from .charmhub_http import CharmReleaseNotFoundException
 from .constraints import add_constraints
@@ -54,6 +55,7 @@ _EXPANSION_PRIORITY: dict[Assertions, int] = {
     Assertions.CHARM_ENDPOINT_NON_OPTIONAL: 2,
     Assertions.ENDPOINT_COUNT_MATCHES_INTEGRATIONS: 3,
     Assertions.PEER_CHANNEL_MISMATCH: 4,
+    Assertions.SUBORDINATE_BASE_MISMATCH: 5,
 }
 
 
@@ -218,6 +220,10 @@ class BundleBuilder:
             mismatch = cast(PeerChannelMismatchTag, tag)
             return self._handle_peer_channel_mismatch(mismatch, domain)
 
+        elif tag.kind == Assertions.SUBORDINATE_BASE_MISMATCH:
+            base_mismatch = cast(SubordinateBaseMismatchTag, tag)
+            return self._handle_subordinate_base_mismatch(base_mismatch, domain)
+
         return False
 
     def _expand_for_endpoint(
@@ -308,6 +314,62 @@ class BundleBuilder:
 
         return expanded
 
+    def _handle_subordinate_base_mismatch(
+        self,
+        tag: SubordinateBaseMismatchTag,
+        domain: Domain,
+    ) -> bool:
+        """Expand the domain by fetching charm variants to resolve a subordinate/principal base mismatch.
+
+        Attempts both directions: fetching the subordinate at the principal's base, and
+        fetching the principal at the subordinate's base.
+        """
+        # Subordinate and principal must be in the same model (container-scoped
+        # relations are cross-model-incompatible), so one model_ref covers both.
+        model_ref = domain.charms[tag.subordinate_charm_id].model
+        model = domain.models[model_ref]
+        sub_charm_spec = domain.charms[tag.subordinate_charm_id].spec
+        principal_base = tag.principal_base
+        expanded = False
+
+        # Try fetching the subordinate charm at the principal's base.
+        try:
+            sub_charm = self.charmhub_client.charm_from_store(
+                charm_name=tag.subordinate_charm_name,
+                ubuntu_arch=model.arch,
+                juju_version=model.juju_version,
+                platform=model.platform,
+                charm_track=sub_charm_spec.channel.track or None,
+                charm_risk=sub_charm_spec.channel.risk or None,
+                ubuntu_version=principal_base,
+            )
+            expanded |= self._add_charm_for_charm_id(sub_charm, tag.subordinate_charm_id, domain, model_ref)
+        except CharmReleaseNotFoundException:
+            self.logger.debug(
+                f"No release found for subordinate {tag.subordinate_charm_name} " f"on base {principal_base}"
+            )
+
+        # Also try fetching the principal at the subordinate's base, in case
+        # the principal has a variant that matches.
+        try:
+            principal_spec = domain.charms[tag.principal_charm_id].spec
+            principal_charm = self.charmhub_client.charm_from_store(
+                charm_name=tag.principal_charm_name,
+                ubuntu_arch=model.arch,
+                juju_version=model.juju_version,
+                platform=model.platform,
+                charm_track=principal_spec.channel.track or None,
+                charm_risk=principal_spec.channel.risk or None,
+                ubuntu_version=tag.subordinate_base,
+            )
+            expanded |= self._add_charm_for_charm_id(principal_charm, tag.principal_charm_id, domain, model_ref)
+        except CharmReleaseNotFoundException:
+            self.logger.debug(
+                f"No release found for principal {tag.principal_charm_name} " f"on base {tag.subordinate_base}"
+            )
+
+        return expanded
+
     def _get_charm_for_application(self, application: str, domain: Domain, model_ref: ModelRef) -> Charm:
         # Get the charm matching the application constraints
         model = domain.models[model_ref]
@@ -334,11 +396,21 @@ class BundleBuilder:
         model = domain.models[target_model]
         endpoint = domain.charms[charm_id].spec.endpoints[endpoint_name]
 
+        # Container-scoped endpoints are machine-only; subordinates can't span models
+        # or run on non-machine platforms, so skip querying Charmhub immediately.
+        if endpoint.scope == EndpointScope.CONTAINER and model.platform != "machine":
+            return []
+
         fulfilling_charms: set[str] = set()
         if endpoint.type == EndpointType.REQUIRES:
             fulfilling_charms = self.charmhub_client.find_charms(provides=endpoint.interface, platform=model.platform)
         elif endpoint.type == EndpointType.PROVIDES:
             fulfilling_charms = self.charmhub_client.find_charms(requires=endpoint.interface, platform=model.platform)
+
+        # For container-scoped endpoints the other charm must share the same base
+        ubuntu_version: str | None = None
+        if endpoint.scope == EndpointScope.CONTAINER:
+            ubuntu_version = domain.charms[charm_id].spec.ubuntu_version
 
         results: list[Charm] = []
         for charm_name in fulfilling_charms:
@@ -349,6 +421,7 @@ class BundleBuilder:
                         ubuntu_arch=model.arch,
                         juju_version=model.juju_version,
                         platform=model.platform,
+                        ubuntu_version=ubuntu_version,
                     )
                 )
             except CharmReleaseNotFoundException:
