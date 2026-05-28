@@ -1136,29 +1136,79 @@ class TestJubilantBackend:
             def cli(self, *args: str) -> None:
                 self.args = list(args)
 
-        def test_k8s_model(self) -> None:
+        def test_k8s_model(self, tmp_path: Path) -> None:
             # GIVEN
+            stub = self.ScpStub()
+            stub.model = self.ModelStub(type="kubernetes")
+            client = JubilantClientStub(client=stub)
+            source = tmp_path / "a"
+            source.write_text("")
+
+            # WHEN
+            with patch("pathlib.Path.home", return_value=tmp_path):
+                JubilantBackend(client).scp("test-model", source=str(source), destination="b")
+
+            # THEN
+            assert stub.args == ["scp", str(source), "b"]
+
+        def test_non_k8s_model_specifies_recursive(self, tmp_path: Path) -> None:
+            # GIVEN
+            stub = self.ScpStub()
+            stub.model = self.ModelStub(type="not-kubernetes")
+            client = JubilantClientStub(client=stub)
+            source = tmp_path / "a"
+            source.write_text("")
+
+            # WHEN
+            with patch("pathlib.Path.home", return_value=tmp_path):
+                JubilantBackend(client).scp("test-model", source=str(source), destination="b")
+
+            # THEN
+            assert stub.args == ["scp", "--", "-r", str(source), "b"]
+
+        def test_out_of_home_file_is_staged(self, tmp_path: Path) -> None:
+            # GIVEN a source file outside $HOME (e.g. /project/validator.py)
+            home_dir = tmp_path / "home"
+            home_dir.mkdir()
+            source_file = tmp_path / "project" / "validator.py"
+            source_file.parent.mkdir()
+            source_file.write_text("# content")
+
             stub = self.ScpStub()
             stub.model = self.ModelStub(type="kubernetes")
             client = JubilantClientStub(client=stub)
 
             # WHEN
-            JubilantBackend(client).scp("test-model", source="a", destination="b")
+            with patch("pathlib.Path.home", return_value=home_dir):
+                JubilantBackend(client).scp("test-model", source=str(source_file), destination="unit/0:/tmp/")
 
-            # THEN
-            assert stub.args == ["scp", "a", "b"]
+            # THEN scp was called with a staged copy inside home_dir with the same filename
+            assert stub.args[0] == "scp"
+            staged_source = Path(stub.args[-2])
+            assert staged_source.is_relative_to(home_dir)
+            assert staged_source.name == source_file.name
 
-        def test_non_k8s_model_specifies_recursive(self) -> None:
-            # GIVEN
+        def test_out_of_home_directory_is_staged(self, tmp_path: Path) -> None:
+            # GIVEN a source directory outside $HOME (e.g. /project/mypackage/)
+            home_dir = tmp_path / "home"
+            home_dir.mkdir()
+            source_dir = tmp_path / "project" / "mypackage"
+            source_dir.mkdir(parents=True)
+            (source_dir / "file.py").write_text("# content")
+
             stub = self.ScpStub()
-            stub.model = self.ModelStub(type="not-kubernetes")
+            stub.model = self.ModelStub(type="kubernetes")
             client = JubilantClientStub(client=stub)
 
             # WHEN
-            JubilantBackend(client).scp("test-model", source="a", destination="b")
+            with patch("pathlib.Path.home", return_value=home_dir):
+                JubilantBackend(client).scp("test-model", source=str(source_dir), destination="unit/0:/tmp/")
 
-            # THEN
-            assert stub.args == ["scp", "--", "-r", "a", "b"]
+            # THEN scp was called with a staged copy inside home_dir with the same directory name
+            assert stub.args[0] == "scp"
+            staged_source = Path(stub.args[-2])
+            assert staged_source.is_relative_to(home_dir)
+            assert staged_source.name == source_dir.name
 
     class TestSsh:
         @dataclass
