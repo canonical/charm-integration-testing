@@ -136,10 +136,11 @@ class Bundle(BaseModel):
                 "channel": str(info.charm.channel),
                 "revision": info.charm.revision,
                 "base": f"ubuntu@{info.charm.ubuntu_version}",
-                scale_key: 1,
                 "trust": True,
                 "options": {key: value for key, value in info.config.items() if value is not None},
             }
+            if not info.charm.subordinate:
+                app_dict[scale_key] = 1
             if len(info.resources) > 0:
                 app_dict["resources"] = info.resources
             applications_dict[application] = app_dict
