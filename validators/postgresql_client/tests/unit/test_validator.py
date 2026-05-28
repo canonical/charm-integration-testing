@@ -169,6 +169,40 @@ class TestPostgreSQLClientValidatorSimple:
         assert result.status == "PASS"
         schema_check = next(c for c in result.checks if c.name == "schema")
         assert schema_check.passed
+        db_check = next(c for c in result.checks if c.name == "database_consistency")
+        assert db_check.passed
+
+    def test_fails_database_consistency_when_uri_db_differs(self) -> None:
+        # GIVEN a databag where `database` does not match the database in the URI
+        databag = {**VALID_DATABAG, "database": "other_db"}
+        validator = _make_validator(databag)
+
+        # WHEN (no connect mock needed — should fail before connecting)
+        result = validator.validate(level="simple")
+
+        # THEN
+        assert result.status == "FAIL"
+        db_check = next(c for c in result.checks if c.name == "database_consistency")
+        assert not db_check.passed
+        assert "mydb" in db_check.message
+        assert "other_db" in db_check.message
+
+    def test_passes_database_consistency_when_uri_db_is_percent_encoded(self) -> None:
+        # GIVEN a URI with a percent-encoded database name that matches the decoded databag field
+        databag = {
+            "uris": "postgresql://myuser:mypassword@10.1.2.3:5432/my%20db",
+            "database": "my db",
+            "username": "myuser",
+            "password": "mypassword",
+        }
+        validator = _make_validator(databag)
+
+        with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=ConnStub()):
+            result = validator.validate(level="simple")
+
+        assert result.status == "PASS"
+        db_check = next(c for c in result.checks if c.name == "database_consistency")
+        assert db_check.passed
 
     def test_fails_connect_check_when_db_unreachable(self) -> None:
         # GIVEN a complete databag but a DB that refuses connections
@@ -306,6 +340,21 @@ class TestPostgreSQLClientValidatorDeep:
         connect_check = next(c for c in result.checks if c.name == "connect")
         assert not connect_check.passed
         assert "Connection refused" in connect_check.message
+
+    def test_deep_fails_database_consistency_when_uri_db_differs(self) -> None:
+        # GIVEN a databag where `database` does not match the database in the URI
+        databag = {**VALID_DATABAG, "database": "other_db"}
+        validator = _make_validator(databag)
+
+        # WHEN (no connect mock needed — should fail before connecting)
+        result = validator.validate(level="deep")
+
+        # THEN
+        assert result.status == "FAIL"
+        db_check = next(c for c in result.checks if c.name == "database_consistency")
+        assert not db_check.passed
+        assert "mydb" in db_check.message
+        assert "other_db" in db_check.message
 
     def test_deep_passes_on_successful_write_read_verify(self) -> None:
         # GIVEN a complete databag and a connection where INSERT returns an ID

@@ -14,6 +14,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import time
+import urllib.parse
 import uuid
 
 import psycopg2
@@ -51,8 +52,15 @@ class PostgreSQLClientValidator(BaseValidator):
         if not schema_check.passed:
             return self._build_result("simple", checks)
 
-        # --- 4. Connect ---
-        uri = creds["uris"].split(",")[0].strip()
+        # --- 4. Database consistency check ---
+        data = self.databag | creds
+        uri = data["uris"].split(",")[0].strip()
+        db_check = self._check_database_consistency(uri, data["database"])
+        checks.append(db_check)
+        if not db_check.passed:
+            return self._build_result("simple", checks)
+
+        # --- 5. Connect ---
         try:
             conn = self._connect(uri)
             checks.append(
@@ -62,7 +70,7 @@ class PostgreSQLClientValidator(BaseValidator):
             checks.append(ValidationCheck(name="connect", passed=False, message=str(exc)))
             return self._build_result("simple", checks)
 
-        # --- 5. Canary read-only query ---
+        # --- 6. Canary read-only query ---
         try:
             with conn.cursor() as cur:
                 cur.execute("SELECT 1")
@@ -70,7 +78,7 @@ class PostgreSQLClientValidator(BaseValidator):
         except Exception as exc:
             checks.append(ValidationCheck(name="query", passed=False, message=str(exc)))
         else:
-            # --- 6. Optional extensions check (only when query succeeded) ---
+            # --- 7. Optional extensions check (only when query succeeded) ---
             try:
                 with conn.cursor() as cur:
                     ext_check = self._check_extensions(cur)
@@ -103,8 +111,15 @@ class PostgreSQLClientValidator(BaseValidator):
         if not schema_check.passed:
             return self._build_result("deep", checks)
 
-        # --- 4. Connect ---
-        uri = creds["uris"].split(",")[0].strip()
+        # --- 4. Database consistency check ---
+        data = self.databag | creds
+        uri = data["uris"].split(",")[0].strip()
+        db_check = self._check_database_consistency(uri, data["database"])
+        checks.append(db_check)
+        if not db_check.passed:
+            return self._build_result("deep", checks)
+
+        # --- 5. Connect ---
         try:
             conn = self._connect(uri)
             checks.append(
@@ -114,7 +129,7 @@ class PostgreSQLClientValidator(BaseValidator):
             checks.append(ValidationCheck(name="connect", passed=False, message=str(exc)))
             return self._build_result("deep", checks)
 
-        # --- 5. Create canary table, write, read-verify, cleanup ---
+        # --- 6. Create canary table, write, read-verify, cleanup ---
         canary_table = f"__canary_{uuid.uuid4().hex[:8]}"
         try:
             conn.autocommit = True
@@ -164,7 +179,7 @@ class PostgreSQLClientValidator(BaseValidator):
                 )
             )
 
-        # --- 6. Cleanup: drop canary table ---
+        # --- 7. Cleanup: drop canary table ---
         cleanup_passed = False
         cleanup_message = ""
         try:
@@ -179,7 +194,7 @@ class PostgreSQLClientValidator(BaseValidator):
 
         checks.append(ValidationCheck(name="cleanup", passed=cleanup_passed, message=cleanup_message))
 
-        # --- 7. Latency check ---
+        # --- 8. Latency check ---
         elapsed = time.time() - start_time
         if elapsed > timeout_secs:
             checks.append(
@@ -199,6 +214,25 @@ class PostgreSQLClientValidator(BaseValidator):
             )
 
         return self._build_result("deep", checks)
+
+    def _check_database_consistency(self, uri: str, expected_db: str) -> ValidationCheck:
+        """Verify the database in the URI matches the `database` field in the databag."""
+        try:
+            parsed = urllib.parse.urlparse(uri)
+            uri_db = urllib.parse.unquote(parsed.path.lstrip("/"))
+        except Exception as exc:
+            return ValidationCheck(name="database_consistency", passed=False, message=f"Could not parse URI: {exc}")
+        if uri_db == expected_db:
+            return ValidationCheck(
+                name="database_consistency",
+                passed=True,
+                message=f"URI database '{uri_db}' matches databag 'database' field.",
+            )
+        return ValidationCheck(
+            name="database_consistency",
+            passed=False,
+            message=f"URI database '{uri_db}' does not match databag 'database' field '{expected_db}'.",
+        )
 
     def _check_relation_exists(self, level: ValidationLevel) -> ValidationResult | None:
         """Return an ERROR result if the remote app is absent, else None."""
