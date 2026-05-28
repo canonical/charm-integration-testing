@@ -5,6 +5,8 @@
 import dataclasses
 import pathlib
 import re
+import shutil
+import tempfile
 import time
 import warnings
 from datetime import datetime, timedelta
@@ -379,6 +381,22 @@ class JubilantBackend(JujuCmdBackend):
         # Furthermore, machine charms need to specify -r if source is a directory
         #   we'll always specify -r to be safe
         options = () if self.is_k8s_model(model) else ("--", "-r")
+
+        # The Juju snap can only access files under $HOME.  Stage any source
+        # that lives outside the home directory into a temporary directory
+        # before handing it to juju scp.
+        home = pathlib.Path.home()
+        source_path = pathlib.Path(source).resolve()
+        if not source_path.is_relative_to(home):
+            with tempfile.TemporaryDirectory(dir=home) as staging:
+                staged = pathlib.Path(staging) / source_path.name
+                if source_path.is_dir():
+                    shutil.copytree(source_path, staged)
+                else:
+                    shutil.copy2(source_path, staged)
+                self.client.model(model).cli("scp", *options, str(staged), destination)
+            return
+
         self.client.model(model).cli("scp", *options, source, destination)
 
     def ssh(self, model: str, application: str, command: str) -> None:
