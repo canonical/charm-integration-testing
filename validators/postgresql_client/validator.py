@@ -96,7 +96,7 @@ class PostgreSQLClientValidator(BaseValidator):
 
     def _validate_deep(self) -> ValidationResult:
         """L2: Read/Write capability with canary table (create, write, read-verify, cleanup)."""
-        start_time = time.time()
+        start_time = time.monotonic()
         timeout_secs = 10
         checks: list[ValidationCheck] = []
 
@@ -132,13 +132,32 @@ class PostgreSQLClientValidator(BaseValidator):
             checks.append(ValidationCheck(name="connect", passed=False, message=str(exc)))
             return self._build_result("deep", checks)
 
-        # --- 6. Create canary table, write, read-verify, cleanup ---
+        # --- 6. Canary read-only query ---
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1")
+                checks.append(ValidationCheck(name="query", passed=True, message="SELECT 1 OK."))
+        except Exception as exc:
+            checks.append(ValidationCheck(name="query", passed=False, message=str(exc)))
+            conn.close()
+            return self._build_result("deep", checks)
+
+        # --- 7. Optional extensions check ---
+        try:
+            with conn.cursor() as cur:
+                ext_check = self._check_extensions(cur)
+                if ext_check is not None:
+                    checks.append(ext_check)
+        except Exception as exc:
+            checks.append(ValidationCheck(name="extensions", passed=False, message=str(exc)))
+
+        # --- 8. Create canary table, write, read-verify, cleanup ---
         canary_table = f"__canary_{uuid.uuid4().hex[:8]}"
         try:
             conn.autocommit = True
             with conn.cursor() as cur:
                 # Create
-                cur.execute(f"CREATE TABLE {canary_table} (id SERIAL PRIMARY KEY, marker TEXT NOT NULL)")
+                cur.execute(f"CREATE TABLE {canary_table} (id SERIAL PRIMARY KEY, marker TEXT NOT NULL)")  # nosec B608 - table name is UUID-generated
 
                 # Write
                 cur.execute(f"INSERT INTO {canary_table} (marker) VALUES (%s) RETURNING id", ("validator-probe",))  # nosec B608 - table name is UUID-generated
@@ -182,12 +201,12 @@ class PostgreSQLClientValidator(BaseValidator):
                 )
             )
 
-        # --- 7. Cleanup: drop canary table ---
+        # --- 9. Cleanup: drop canary table ---
         cleanup_passed = False
         cleanup_message = ""
         try:
             with conn.cursor() as cur:
-                cur.execute(f"DROP TABLE IF EXISTS {canary_table}")
+                cur.execute(f"DROP TABLE IF EXISTS {canary_table}")  # nosec B608 - table name is UUID-generated
             cleanup_passed = True
             cleanup_message = "Dropped canary table."
         except Exception as exc:  # nosec B110 - best-effort cleanup
@@ -197,8 +216,8 @@ class PostgreSQLClientValidator(BaseValidator):
 
         checks.append(ValidationCheck(name="cleanup", passed=cleanup_passed, message=cleanup_message))
 
-        # --- 8. Latency check ---
-        elapsed = time.time() - start_time
+        # --- 10. Latency check ---
+        elapsed = time.monotonic() - start_time
         if elapsed > timeout_secs:
             checks.append(
                 ValidationCheck(

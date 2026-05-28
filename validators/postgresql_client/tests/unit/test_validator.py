@@ -46,16 +46,20 @@ class CursorStub:
     execute_error: Exception | None = None
     # Rows returned by fetchone() for each successive call.
     fetchone_rows: list[tuple[Any, ...]] = field(default_factory=list)
-    _call_count: int = field(default=0, init=False, repr=False)
+    # Number of execute() calls to allow before raising execute_error.
+    execute_succeed_count: int = 0
+    _fetch_count: int = field(default=0, init=False, repr=False)
+    _execute_count: int = field(default=0, init=False, repr=False)
 
     def execute(self, query: str, params: Any = None) -> None:
-        if self.execute_error:
+        if self.execute_error and self._execute_count >= self.execute_succeed_count:
             raise self.execute_error
+        self._execute_count += 1
 
     def fetchone(self) -> tuple[Any, ...] | None:
-        if self._call_count < len(self.fetchone_rows):
-            row = self.fetchone_rows[self._call_count]
-            self._call_count += 1
+        if self._fetch_count < len(self.fetchone_rows):
+            row = self.fetchone_rows[self._fetch_count]
+            self._fetch_count += 1
             return row
         return None
 
@@ -326,6 +330,8 @@ class TestPostgreSQLClientValidatorDeep:
         # THEN
         assert result.status == "PASS"
         assert result.level == "deep"
+        query_check = next(c for c in result.checks if c.name == "query")
+        assert query_check.passed
         write_check = next(c for c in result.checks if c.name == "write_read_verify")
         assert write_check.passed
         cleanup_check = next(c for c in result.checks if c.name == "cleanup")
@@ -333,10 +339,28 @@ class TestPostgreSQLClientValidatorDeep:
         latency_check = next(c for c in result.checks if c.name == "latency")
         assert latency_check.passed
 
-    def test_deep_fails_when_insert_raises(self) -> None:
-        # GIVEN a connection that fails on INSERT
+    def test_deep_fails_when_query_raises(self) -> None:
+        # GIVEN a connection that raises on SELECT 1 (before write block)
         validator = _make_validator(VALID_DATABAG)
-        cursor = CursorStub(execute_error=psycopg2.DatabaseError("write error"))
+        cursor = CursorStub(execute_error=psycopg2.DatabaseError("query error"))
+        conn = ConnStub(cursor_stub=cursor)
+
+        with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn):
+            # WHEN
+            result = validator.validate(level="deep")
+
+        # THEN
+        assert result.status == "FAIL"
+        query_check = next(c for c in result.checks if c.name == "query")
+        assert not query_check.passed
+        assert "query error" in query_check.message
+        # Should stop before attempting write
+        assert not any(c.name == "write_read_verify" for c in result.checks)
+
+    def test_deep_fails_when_canary_write_raises(self) -> None:
+        # GIVEN SELECT 1 succeeds but an error occurs in the canary write block
+        validator = _make_validator(VALID_DATABAG)
+        cursor = CursorStub(execute_error=psycopg2.DatabaseError("write error"), execute_succeed_count=1)
         conn = ConnStub(cursor_stub=cursor)
 
         with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn):
