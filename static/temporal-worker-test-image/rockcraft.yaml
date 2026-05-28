@@ -1,0 +1,25 @@
+---
+name: temporal-worker-test-image
+base: ubuntu@24.04
+version: '1.0'
+summary: Rock used for testing the temporal worker, does nothing but busy wait
+description: |
+  This rock is used for testing the temporal worker, it does nothing but busy wait. It is used in the temporal-worker-test charm.
+platforms:
+  amd64:
+services:
+  temporal-worker:
+    description: Service for temporal worker that busy waits
+    command: app/scripts/start-worker.sh
+    override: replace
+    startup: enabled
+    user: ubuntu
+parts:
+  entrypoint-script:
+    plugin: dump
+    source: .
+    source-type: local
+    organize:
+      start-worker.sh: app/scripts/start-worker.sh
+    stage:
+      - app/scripts/start-worker.sh
