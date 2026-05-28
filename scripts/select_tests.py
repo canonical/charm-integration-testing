@@ -29,19 +29,21 @@ from collections import defaultdict, deque
 from pathlib import Path
 
 # Directories excluded from the source walk.
-_EXCLUDED_DIRS = frozenset({
-    ".venv",
-    "__pycache__",
-    ".git",
-    "build",
-    "dist",
-    ".tox",
-    ".mypy_cache",
-    ".pytest_cache",
-    ".ruff_cache",
-    "node_modules",
-    ".eggs",
-})
+_EXCLUDED_DIRS = frozenset(
+    {
+        ".venv",
+        "__pycache__",
+        ".git",
+        "build",
+        "dist",
+        ".tox",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".ruff_cache",
+        "node_modules",
+        ".eggs",
+    }
+)
 
 _MAX_TRAVERSAL_DEPTH = 50
 
@@ -49,14 +51,16 @@ _MAX_TRAVERSAL_DEPTH = 50
 # (bootstrap_controller, create_model) are included because the scheduler
 # injects them as prerequisites for test_deploy, but listing them here
 # ensures they are selected even if the scheduler graph changes.
-_BASE_SUITE = frozenset({
-    "charm_integration_testing/test_suite/test_build_bundle.py::test_build_bundle",
-    "charm_integration_testing/test_suite/test_bootstrap_controller.py::test_bootstrap_controller",
-    "charm_integration_testing/test_suite/test_create_model.py::test_create_model",
-    "charm_integration_testing/test_suite/test_deploy.py::test_deploy",
-    "charm_integration_testing/test_suite/test_scale_in_and_scale_out.py::test_scale_in_and_scale_out_charm",
-    "charm_integration_testing/test_suite/test_teardown.py::test_teardown",
-})
+_BASE_SUITE = frozenset(
+    {
+        "charm_integration_testing/test_suite/test_build_bundle.py::test_build_bundle",
+        "charm_integration_testing/test_suite/test_bootstrap_controller.py::test_bootstrap_controller",
+        "charm_integration_testing/test_suite/test_create_model.py::test_create_model",
+        "charm_integration_testing/test_suite/test_deploy.py::test_deploy",
+        "charm_integration_testing/test_suite/test_scale_in_and_scale_out.py::test_scale_in_and_scale_out_charm",
+        "charm_integration_testing/test_suite/test_teardown.py::test_teardown",
+    }
+)
 
 # If any changed file matches these globs, all leaves are selected
 # (skip AST analysis).  fnmatch patterns matched against repo-relative paths.

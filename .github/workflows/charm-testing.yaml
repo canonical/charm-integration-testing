@@ -93,7 +93,8 @@ on:
         options: [DEBUG, INFO, WARNING, ERROR]
         default: INFO
       full_test_suite:
-        description: Whether to run the full test suite instead of only base + affected tests.
+        description: Whether to run the full test suite instead of only base + affected
+          tests.
         required: false
         type: boolean
         default: true
