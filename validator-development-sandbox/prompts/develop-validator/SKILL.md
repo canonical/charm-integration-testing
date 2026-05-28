@@ -1,3 +1,8 @@
+---
+name: develop-validator
+description: Develop a new Juju charm integration validator from scratch. Use when asked to create, write, or build a new validator for an interface.
+---
+
 # Task: develop a new validator
 
 ## Goal

@@ -38,7 +38,11 @@ You operate in yolo mode: you make changes, run commands, and iterate without as
       dev-validate.py   # YOUR MAIN TOOL: injects validators and reports results
       up / down / shell / run / verify-validator.sh
     prompts/            # Agent prompts (this file lives here)
+      develop-validator/SKILL.md   # skill: create a new validator
+      test-validator/SKILL.md      # skill: test an existing validator
     validator-substrate.yaml  # cloud-init for VM provisioning
+  .agents/
+    skills -> validator-development-sandbox/prompts/  # auto-discovered by Copilot CLI
 ```
 
 ---

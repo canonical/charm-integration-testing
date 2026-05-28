@@ -12,10 +12,14 @@
 # No credentials are written inside the VM.
 #
 # Usage:
-#   validator-development-sandbox/bin/run.sh 'your task here'          # autonomous mode
-#   validator-development-sandbox/bin/run.sh --interactive             # interactive mode
-#   validator-development-sandbox/bin/run.sh --task develop <name>     # develop a new validator
-#   validator-development-sandbox/bin/run.sh --task test <name>        # test an existing validator
+#   validator-development-sandbox/bin/run.sh 'your task here'   # autonomous mode
+#   validator-development-sandbox/bin/run.sh --interactive       # interactive mode
+#
+# Inside an interactive session use skill slash commands:
+#   /develop-validator   -- develop a new validator
+#   /test-validator      -- test an existing validator
+#
+# Skills are auto-discovered from .agents/skills/ (symlinked to prompts/).
 #
 # Environment:
 #   VALIDATOR_VM     VM name override (default: validator-k8s)
@@ -37,36 +41,17 @@ if [ -z "$_gh_token" ]; then
 fi
 
 INTERACTIVE=false
-TASK_TYPE=""
-TASK_VALIDATOR=""
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --interactive)
             INTERACTIVE=true
             shift
             ;;
-        --task)
-            TASK_TYPE="${2:-}"
-            TASK_VALIDATOR="${3:-}"
-            if [ -z "$TASK_TYPE" ] || [ -z "$TASK_VALIDATOR" ]; then
-                echo "Usage: bin/run.sh --task <develop|test> <validator-name>" >&2
-                exit 1
-            fi
-            case "$TASK_TYPE" in
-                develop|test) ;;
-                *) echo "Unknown task type: $TASK_TYPE (use 'develop' or 'test')" >&2; exit 1 ;;
-            esac
-            shift 3
-            ;;
         -h|--help)
             cat <<'EOF'
 Usage:
-  bin/run.sh 'task description'                    autonomous mode
-  bin/run.sh --interactive                         interactive mode
-  bin/run.sh --task develop <name>                 develop a new validator (autonomous)
-  bin/run.sh --task test <name>                    test an existing validator (autonomous)
-  bin/run.sh --task develop <name> --interactive   develop step-by-step with check-ins
-  bin/run.sh --task test <name> --interactive      test step-by-step with check-ins
+  bin/run.sh 'task description'   autonomous mode
+  bin/run.sh --interactive        interactive mode (use /develop-validator, /test-validator)
 EOF
             exit 0
             ;;
@@ -85,12 +70,7 @@ EOF
     esac
 done
 
-if [ -n "$TASK_TYPE" ]; then
-    TASK_PROMPT=$(cat "$DEV_DIR/prompts/${TASK_TYPE}-validator.md")
-    TASK="${TASK_PROMPT}"$'\n\n'"Validator name: ${TASK_VALIDATOR}"
-else
-    TASK="${*:-}"
-fi
+TASK="${*:-}"
 
 # Build the full prompt from system.md + task
 PROMPT_FILE=$(multipass exec "$VM_NAME" -- bash -c "mktemp /tmp/copilot-prompt-XXXXXX")
@@ -103,11 +83,7 @@ PROMPT_FILE=$(multipass exec "$VM_NAME" -- bash -c "mktemp /tmp/copilot-prompt-X
 } | multipass exec "$VM_NAME" -- bash -c "cat > $PROMPT_FILE"
 
 if [ "$INTERACTIVE" = "true" ]; then
-    if [ -n "$TASK_TYPE" ]; then
-        CONTEXT_MSG="Please read $PROMPT_FILE for your task instructions. Work through the task step by step. After completing each major step, briefly summarize what you did and what comes next, then pause and wait for confirmation or redirection before continuing."
-    else
-        CONTEXT_MSG="Please read $PROMPT_FILE for project context, then await my instructions."
-    fi
+    CONTEXT_MSG="Please read $PROMPT_FILE for project context, then await my instructions."
     multipass exec "$VM_NAME" -- bash -lc "
         cd /project
         GH_TOKEN='$_gh_token' GITHUB_TOKEN='$_gh_token' \

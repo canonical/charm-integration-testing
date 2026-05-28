@@ -1,3 +1,8 @@
+---
+name: test-validator
+description: Test an existing Juju charm integration validator against a deployed charm. Use when asked to test, verify, or run an existing validator.
+---
+
 # Task: test an existing validator
 
 ## Goal
@@ -22,9 +27,13 @@ it passes at the requested level. Report any failures with diagnostic detail.
    juju wait-for application <requirer> -m <interface>-test --timeout 10m
    ```
 
-4. Run the validator:
+4. Run the validator at the **highest level the validator supports** (check
+   `validate()` in `validator.py` -- use `deep` if implemented, otherwise `simple`):
    ```
-   /project/validator-development-sandbox/bin/dev-validate.py --model <interface>-test --app <requirer> --level <level>
+   /project/validator-development-sandbox/bin/dev-validate.py \
+     --model <interface>-test \
+     --app <requirer> \
+     --level <highest-supported-level>
    ```
 
 5. Run automated verification evidence:
@@ -33,7 +42,9 @@ it passes at the requested level. Report any failures with diagnostic detail.
      --model <interface>-test \
      --app <requirer> \
      --provider <provider> \
-     --validator <name>
+     --validator <name> \
+     --level <highest-supported-level> \
+     --output-dir /project/validator-development-sandbox/reports/<name>-$(date +%Y%m%d-%H%M%S)
    ```
    If the backend is a raw Kubernetes deployment (not a Juju app — e.g. MinIO for `s3`),
    the default `juju scale-application` down step won't break connectivity because the
@@ -45,10 +56,13 @@ it passes at the requested level. Report any failures with diagnostic detail.
      --app <requirer> \
      --provider <provider> \
      --validator <name> \
+     --level <highest-supported-level> \
+     --output-dir /project/validator-development-sandbox/reports/<name>-$(date +%Y%m%d-%H%M%S) \
      --down-cmd "sudo k8s kubectl scale deployment <backend> -n <interface>-test --replicas=0 && sleep 5" \
      --restore-cmd "sudo k8s kubectl scale deployment <backend> -n <interface>-test --replicas=1 && sleep 15"
    ```
-   This must capture workload-up and workload-down behavior.
+   This must capture workload-up and workload-down behavior. The report persists on
+   the host at `validator-development-sandbox/reports/`.
 
 6. Report results. If any check fails:
    - Show the full JSON output.
