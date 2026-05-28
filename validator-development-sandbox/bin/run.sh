@@ -8,8 +8,13 @@
 # VM responsibility:
 # - Run Copilot, install deps, and modify the mounted project
 #
-# Authentication uses the host's GitHub token via 'gh auth token' (system keyring).
-# No credentials are written inside the VM.
+# Authentication:
+#   COPILOT_GITHUB_TOKEN  Full host token - used exclusively by the Copilot binary.
+#   GH_TOKEN / GITHUB_TOKEN  Token for the gh CLI. Set GH_RESTRICTED_TOKEN in
+#                            validator-development-sandbox/.env to use a fine-grained
+#                            PAT (contents:read + pull_requests:write) here, keeping
+#                            the full token isolated to Copilot AI auth only.
+#   No credentials are written inside the VM.
 #
 # Usage:
 #   validator-development-sandbox/bin/run.sh 'your task here'   # autonomous mode
@@ -21,9 +26,11 @@
 #
 # Skills are auto-discovered from .agents/skills/ (symlinked to prompts/).
 #
-# Environment:
-#   VALIDATOR_VM     VM name override (default: validator-k8s)
-#   COPILOT_MODEL    Model override (default: sonnet-4.6)
+# Environment / .env:
+#   VALIDATOR_VM          VM name override (default: validator-k8s)
+#   COPILOT_MODEL         Model override (default: sonnet-4.6)
+#   COPILOT_GITHUB_TOKEN  Override for Copilot AI auth token (default: gh auth token)
+#   GITHUB_TOKEN          Fine-grained PAT for gh CLI (default: gh auth token)
 
 set -euo pipefail
 
@@ -32,13 +39,30 @@ DEV_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 VM_NAME="${VALIDATOR_VM:-validator-k8s}"
 COPILOT_MODEL="${COPILOT_MODEL:-sonnet-4.6}"
 
-# Fetch GitHub token from the host's system keyring via gh CLI.
-# Injected inline into the bash command so no token is written to disk in the VM.
+# Fetch the full GitHub token from the host keyring BEFORE sourcing .env,
+# so that GITHUB_TOKEN in .env does not affect this lookup.
 _gh_token=$(gh auth token 2>/dev/null || true)
 if [ -z "$_gh_token" ]; then
     echo "Warning: 'gh auth token' returned nothing."
     echo "Run: gh auth login   on this machine first."
 fi
+
+# Load optional .env (gitignored) for GITHUB_TOKEN, COPILOT_GITHUB_TOKEN etc.
+if [ -f "$DEV_DIR/.env" ]; then
+    set -a
+    # shellcheck source=/dev/null
+    source "$DEV_DIR/.env"
+    set +a
+fi
+
+# COPILOT_GITHUB_TOKEN: full token for Copilot AI auth.
+#   Defaults to the host keyring token; set in .env to override.
+_copilot_token="${COPILOT_GITHUB_TOKEN:-$_gh_token}"
+
+# GITHUB_TOKEN: token for gh CLI inside the VM.
+#   Set to a fine-grained PAT in .env to restrict gh CLI access.
+#   Falls back to the full host token if not set.
+_gh_cli_token="${GITHUB_TOKEN:-$_gh_token}"
 
 INTERACTIVE=false
 while [ "$#" -gt 0 ]; do
@@ -86,16 +110,16 @@ if [ "$INTERACTIVE" = "true" ]; then
     CONTEXT_MSG="Please read $PROMPT_FILE for project context, then await my instructions."
     multipass exec "$VM_NAME" -- bash -lc "
         cd /project
-        GH_TOKEN='$_gh_token' GITHUB_TOKEN='$_gh_token' \
+        COPILOT_GITHUB_TOKEN='$_copilot_token' GH_TOKEN='$_gh_cli_token' GITHUB_TOKEN='$_gh_cli_token' \
         COPILOT_MODEL='$COPILOT_MODEL' copilot --yolo \
-            -i \"$CONTEXT_MSG\"
+            -i "$CONTEXT_MSG"
         rm -f $PROMPT_FILE
     "
 else
     [ -n "$TASK" ] || { echo "Usage: validator-development-sandbox/bin/run.sh 'task description'"; exit 1; }
     multipass exec "$VM_NAME" -- bash -lc "
         cd /project
-        GH_TOKEN='$_gh_token' GITHUB_TOKEN='$_gh_token' \
+        COPILOT_GITHUB_TOKEN='$_copilot_token' GH_TOKEN='$_gh_cli_token' GITHUB_TOKEN='$_gh_cli_token' \
         COPILOT_MODEL='$COPILOT_MODEL' copilot --yolo \
             -p \"\$(cat $PROMPT_FILE)\"
         rm -f $PROMPT_FILE
