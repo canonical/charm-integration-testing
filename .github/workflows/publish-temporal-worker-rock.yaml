@@ -9,12 +9,10 @@ on:
   push:
     branches: [main]
     paths:
-      - 'static/temporal-worker-test-image/**'
       - 'static/temporal-worker-test-image/*'
       - '.github/workflows/publish-temporal-worker-rock.yaml'
   pull_request:
     paths:
-      - 'static/temporal-worker-test-image/**'
       - 'static/temporal-worker-test-image/*'
       - '.github/workflows/publish-temporal-worker-rock.yaml'
 jobs:
