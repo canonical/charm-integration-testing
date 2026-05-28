@@ -13,7 +13,7 @@ charm-integration-testing = { path = "./charm_integration_testing", develop = tr
 bundle-builder-x = { path = "./bundle_builder_x", develop = true }
 validators-base = { path = "./validators/base", develop = true }
 validators-runner = { path = "./validators/runner", develop = true }
-validators-postgresql-client = { path = "./validators/postgresql_client", develop = true, extras = ["dev", "deep", "uat"] }
+validators-postgresql_client = { path = "./validators/postgresql_client", develop = true }
 validators-mongodb-client = { path = "./validators/mongodb_client", develop = true }
 validators-tracing = { path = "./validators/tracing", develop = true, extras = ["dev", "deep", "uat"] }
 
@@ -29,6 +29,7 @@ pytest-cov = "^6.2.1"
 mypy = "^1.19.0"
 types-pyyaml = "^6.0.12.20250915"
 types-requests = "^2.32.4.20250913"
+types-psycopg2 = ">=2.9.0"
 yamlfix = ">=1.8.0,<2.0.0"
 
 [tool.ruff]
