@@ -195,7 +195,7 @@ successful run.  The cached database (``.testmondata``) is stored per branch
 in the GitHub Actions cache.
 
 During **pull-request checks**, testmon is enabled (``--testmon``) so only
-tests affected by the PR's changes are executed.  During the
+tests affected by the pull request changes are executed.  During the
 **merge-main-to-production** workflow, ``full_test_suite`` is set to
 ``true``, which disables testmon and forces every test to run.
 
