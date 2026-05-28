@@ -170,6 +170,24 @@ def _extract_single_model(
         remote_model_ref = remote_ep.model
         if remote_model_ref is None:
             continue  # shouldn't happen, but defensive
+        # For REQUIRES: synthesize the saas URL pointing at the remote (providing) model.
+        # For PROVIDES: always None; the mirror pass synthesizes the URL when creating
+        # the REQUIRES entry.
+        url: str | None
+        if charm_ep.type == EndpointType.REQUIRES:
+            if app_int.url is not None:
+                url = app_int.url
+            else:
+                remote_mc = domain.models.get(remote_model_ref)
+                url = (
+                    f"{remote_mc.ref.controller}:{remote_mc.admin}/{remote_model_ref.name}.{app_int.offer_name}"
+                    if remote_mc is not None
+                    and remote_mc.ref.controller is not None
+                    and remote_model_ref.name is not None
+                    else None
+                )
+        else:
+            url = None
         cross_model_integrations.append(
             CrossModelIntegration(
                 local=ApplicationEndpoint(
@@ -181,13 +199,14 @@ def _extract_single_model(
                 remote_application=remote_ep.application,
                 remote_endpoint=remote_ep.endpoint,
                 offer_name=app_int.offer_name,
-                url=app_int.url,
+                url=url,
             )
         )
 
     bundle = Bundle(
         model=model_ref.key,
         controller=mc.ref.controller,
+        admin=mc.admin,
         applications=applications,
         integrations=integrations,
         cross_model_integrations=cross_model_integrations,
@@ -197,6 +216,64 @@ def _extract_single_model(
     )
 
     return bundle, charm_id_to_app_name
+
+
+def _mirror_cmr_entries(
+    bundles: dict[ModelRef, Bundle],
+    bundles_by_key: dict[str, Bundle],
+    from_role: EndpointType,
+    to_role: EndpointType,
+) -> None:
+    """Add mirrored CMR entries to the remote bundle for all CMRs with ``from_role``.
+
+    For PROVIDES→REQUIRES mirrors: synthesizes the saas URL from the source bundle's
+    controller/admin/model.
+    For REQUIRES→PROVIDES mirrors: URL is always None (PROVIDES entries are never exported).
+    """
+    for model_ref, bundle in list(bundles.items()):
+        model_name = model_ref.key
+        for cmr in bundle.cross_model_integrations:
+            if cmr.local_role != from_role:
+                continue
+            if cmr.remote_model not in bundles_by_key:
+                continue
+            remote_bundle = bundles_by_key[cmr.remote_model]
+            already_present = any(
+                c.local_role == to_role
+                and c.local.application == cmr.remote_application
+                and c.local.endpoint == cmr.remote_endpoint
+                and c.remote_model == model_name
+                and c.remote_application == cmr.local.application
+                and c.remote_endpoint == cmr.local.endpoint
+                and c.offer_name == cmr.offer_name
+                for c in remote_bundle.cross_model_integrations
+            )
+            if already_present:
+                continue
+            if remote_bundle.applications.get(cmr.remote_application) is None:
+                continue
+            if to_role == EndpointType.REQUIRES:
+                url = (
+                    f"{bundle.controller}:{bundle.admin}/{model_ref.name}.{cmr.offer_name}"
+                    if bundle.controller is not None and model_ref.name is not None
+                    else None
+                )
+            else:
+                url = None
+            remote_bundle.cross_model_integrations.append(
+                CrossModelIntegration(
+                    local=ApplicationEndpoint(
+                        application=cmr.remote_application,
+                        endpoint=cmr.remote_endpoint,
+                    ),
+                    local_role=to_role,
+                    remote_model=model_name,
+                    remote_application=cmr.local.application,
+                    remote_endpoint=cmr.local.endpoint,
+                    offer_name=cmr.offer_name,
+                    url=url,
+                )
+            )
 
 
 def extract_solution(
@@ -261,11 +338,11 @@ def extract_solution(
             f"(interface: {interface})"
         )
 
-        # Synthesize URL for discovered CMRs from the providing model's controller info
+        # Synthesize URL for discovered CMRs (REQUIRES side only)
         url: str | None = None
         prov_mc = domain.models.get(prov_model_ref)
         if prov_mc is not None and prov_mc.ref.controller is not None:
-            url = f"{prov_mc.ref.controller}:admin/{prov_mc.ref.name}.{offer_name}"
+            url = f"{prov_mc.ref.controller}:{prov_mc.admin}/{prov_mc.ref.name}.{offer_name}"
 
         # Add REQUIRES side to the requiring model's bundle
         if req_model_ref in bundles:
@@ -281,7 +358,7 @@ def extract_solution(
                 )
             )
 
-        # Add PROVIDES side to the providing model's bundle
+        # Add PROVIDES side to the providing model's bundle (no URL; never exported)
         if prov_model_ref in bundles:
             bundles[prov_model_ref].cross_model_integrations.append(
                 CrossModelIntegration(
@@ -291,49 +368,16 @@ def extract_solution(
                     remote_application=req_app,
                     remote_endpoint=integration.requires_endpoint,
                     offer_name=offer_name,
-                    url=url,
+                    url=None,
                 )
             )
 
-    # Mirror user-specified CMRs to the providing model so export_mermaid can draw edges.
+    # Mirror user-specified CMRs so both models in a pair always have a CMR entry:
+    #   REQUIRES-side bundles gain a mirrored PROVIDES entry (for export_mermaid edges).
+    #   PROVIDES-side bundles gain a mirrored REQUIRES entry (for the saas section).
     # Only applies to in-spec CMRs where the remote model is also in this solution.
-    # Build a string-key index for reverse lookups from CrossModelIntegration.remote_model (str).
     bundles_by_key: dict[str, Bundle] = {ref.key: b for ref, b in bundles.items()}
-    for model_ref, bundle in list(bundles.items()):
-        model_name = model_ref.key
-        for cmr in bundle.cross_model_integrations:
-            if cmr.local_role != EndpointType.REQUIRES:
-                continue
-            if cmr.remote_model not in bundles_by_key:
-                continue
-            remote_bundle = bundles_by_key[cmr.remote_model]
-            # Skip if a PROVIDES entry already exists (e.g. added by discovered CMR logic).
-            already_present = any(
-                c.local_role == EndpointType.PROVIDES
-                and c.local.application == cmr.remote_application
-                and c.local.endpoint == cmr.remote_endpoint
-                and c.remote_model == model_name
-                and c.remote_application == cmr.local.application
-                for c in remote_bundle.cross_model_integrations
-            )
-            if already_present:
-                continue
-            remote_app = remote_bundle.applications.get(cmr.remote_application)
-            if remote_app is None:
-                continue
-            remote_bundle.cross_model_integrations.append(
-                CrossModelIntegration(
-                    local=ApplicationEndpoint(
-                        application=cmr.remote_application,
-                        endpoint=cmr.remote_endpoint,
-                    ),
-                    local_role=EndpointType.PROVIDES,
-                    remote_model=model_name,
-                    remote_application=cmr.local.application,
-                    remote_endpoint=cmr.local.endpoint,
-                    offer_name=cmr.offer_name,
-                    url=cmr.url,
-                )
-            )
+    _mirror_cmr_entries(bundles, bundles_by_key, from_role=EndpointType.REQUIRES, to_role=EndpointType.PROVIDES)
+    _mirror_cmr_entries(bundles, bundles_by_key, from_role=EndpointType.PROVIDES, to_role=EndpointType.REQUIRES)
 
     return Solution(bundles=list(bundles.values()))

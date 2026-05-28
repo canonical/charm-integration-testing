@@ -1,0 +1,37 @@
+---
+# Source: https://github.com/canonical/mysql-operators (machines/)
+# 8.0 upstream has all provides optional=None; all marked optional here so the solver
+# can choose the access interface. Legacy interfaces (db-router, mysql, shared-db)
+# were removed in 8.4.
+overrides:
+  - criteria:
+      - track: "8.0"
+    provides:
+      cos-agent:
+        optional: true
+      database:
+        optional: true
+      db-router:
+        optional: true
+      mysql:
+        optional: true
+      replication-offer:
+        optional: true
+      shared-db:
+        optional: true
+    constraints:
+      # Mutually exclusive access interfaces; exactly one must be connected.
+      - len(endpoint[database]) + len(endpoint[mysql]) + len(endpoint[db-router])
+        + len(endpoint[shared-db]) == 1
+      - 'bool(endpoint[replication]) => risks(charms(endpoint[replication])) == risks({self})
+        and tracks(charms(endpoint[replication])) == tracks({self})'
+
+    # Default block: covers 8.4 and any future tracks.
+    # cos-agent and replication-offer are already optional upstream in 8.4.
+  - provides:
+      database:
+        optional: true
+    constraints:
+      - len(endpoint[database]) == 1
+      - 'bool(endpoint[replication]) => risks(charms(endpoint[replication])) == risks({self})
+        and tracks(charms(endpoint[replication])) == tracks({self})'
