@@ -1,0 +1,47 @@
+---
+# GitHub Actions workflow to build and publish the temporal-worker-test-image rock
+# - Publishes to GHCR on push to main
+# - Runs build/check on PRs for validation
+# - Temporary workflow: remove after the initial PR push for this variant.
+name: Build and Publish Temporal Worker Rock
+permissions: {}
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'static/temporal-worker-test-image/**'
+      - '.github/workflows/publish-temporal-worker-rock.yaml'
+  pull_request:
+    paths:
+      - 'static/temporal-worker-test-image/**'
+      - '.github/workflows/publish-temporal-worker-rock.yaml'
+jobs:
+  build-and-publish:
+    name: Build Rock and publish on main
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Build rock
+        id: rockcraft
+        uses: canonical/craft-actions/rockcraft-pack@210d55fa6cb7a1ab39e3194315d6a03249af3d34
+        with:
+          path: static/temporal-worker-test-image
+          verbosity: verbose
+      - name: Push rock to GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          IMAGE_REPO: ghcr.io/${{ github.repository_owner }}/temporal-worker-test-image
+          GHCR_CREDS: ${{ github.repository_owner }}:${{ secrets.GITHUB_TOKEN }}
+        run: |-
+          set -euo pipefail
+          ROCK_FILE="$(find static/temporal-worker-test-image -maxdepth 1 -name '*.rock' -type f | head -n 1)"
+          test -n "$ROCK_FILE"
+          ROCK_FILE="$(realpath "$ROCK_FILE")"
+          /snap/rockcraft/current/bin/skopeo --insecure-policy copy "oci-archive:${ROCK_FILE}" "docker://${IMAGE_REPO}:${GITHUB_SHA}" --dest-creds "$GHCR_CREDS"
+          /snap/rockcraft/current/bin/skopeo --insecure-policy copy "oci-archive:${ROCK_FILE}" "docker://${IMAGE_REPO}:latest" --dest-creds "$GHCR_CREDS"
