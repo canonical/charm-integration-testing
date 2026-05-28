@@ -36,15 +36,32 @@ class CharmMetaStub:
         self.relations = {endpoint: RelationMetaStub(interface_name)}
 
 
+class SecretStub:
+    def __init__(self, content: dict[str, str]) -> None:
+        self._content = content
+
+    def get_content(self) -> dict[str, str]:
+        return self._content
+
+
+class ModelStub:
+    def __init__(self, secrets: dict[str, dict[str, str]] | None = None) -> None:
+        self._secrets = secrets or {}
+
+    def get_secret(self, id: str) -> SecretStub:
+        return SecretStub(self._secrets[id])
+
+
 class CharmStub:
-    def __init__(self, endpoint: str = "s3", interface_name: str = "s3") -> None:
+    def __init__(self, endpoint: str = "s3", interface_name: str = "s3", model: ModelStub | None = None) -> None:
         self.meta = CharmMetaStub(endpoint, interface_name)
+        self.model = model or ModelStub()
 
 
-def _make_validator(databag: dict[str, str], endpoint: str = "s3") -> S3Validator:
+def _make_validator(databag: dict[str, str], endpoint: str = "s3", model: ModelStub | None = None) -> S3Validator:
     app = AppStub()
     relation = RelationStub(app=app, databag=databag, name=endpoint)
-    charm = cast(ops.CharmBase, CharmStub(endpoint=endpoint))
+    charm = cast(ops.CharmBase, CharmStub(endpoint=endpoint, model=model))
     return S3Validator(charm, cast(ops.Relation, relation))
 
 
@@ -173,6 +190,29 @@ class TestS3ValidatorSimple:
 
         call_kwargs = mock_boto.call_args.kwargs
         assert call_kwargs["config"].s3["addressing_style"] == "path"
+
+    def test_passes_with_secret_backed_credentials(self) -> None:
+        # GIVEN a databag whose credentials are behind a Juju secret URI
+        secret_uri = "secret:abc123"
+        secret_content = {"access-key": "test-access-key", "secret-key": "test-secret-key"}
+        model = ModelStub(secrets={secret_uri: secret_content})
+        secret_databag = {
+            "bucket": "my-bucket",
+            "endpoint": "http://s3.example.com",
+            "region": "us-east-1",
+            "s3-credentials": secret_uri,
+        }
+        validator = _make_validator(secret_databag, model=model)
+        mock_client = MagicMock()
+        mock_client.head_bucket.return_value = {}
+
+        with patch("validators.s3.validator.boto3.client", return_value=mock_client):
+            result = validator.validate(level="simple")
+
+        # THEN credentials are resolved from the secret and validation passes
+        assert result.status == "PASS"
+        schema_check = next(c for c in result.checks if c.name == "schema")
+        assert schema_check.passed
 
 
 # ---------------------------------------------------------------------------

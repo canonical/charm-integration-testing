@@ -66,7 +66,7 @@ class S3Validator(BaseValidator):
             head_check = self._head_bucket(client, bucket)
             checks.append(head_check)
         finally:
-            self._cleanup_client()
+            self._cleanup_client(client)
 
         return self._build_result("simple", checks)
 
@@ -117,7 +117,7 @@ class S3Validator(BaseValidator):
             delete_check = self._delete_object(client, bucket, canary_key)
             checks.append(delete_check)
         finally:
-            self._cleanup_client()
+            self._cleanup_client(client)
 
         return self._build_result("deep", checks)
 
@@ -219,7 +219,9 @@ class S3Validator(BaseValidator):
             self._remove_ca_file()
             raise
 
-    def _cleanup_client(self) -> None:
+    def _cleanup_client(self, client: Any) -> None:
+        if hasattr(client, "close"):
+            client.close()
         self._remove_ca_file()
 
     def _write_ca_file(self, ca_content: str) -> None:
