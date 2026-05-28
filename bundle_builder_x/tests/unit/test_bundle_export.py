@@ -30,7 +30,7 @@ from bundle_builder_x.juju_version import JujuVersion
 _JUJU = JujuVersion(major=3, minor=6, patch=0)
 
 
-def _make_charm(name: str, endpoints: dict[str, CharmEndpoint] | None = None) -> Charm:
+def _make_charm(name: str, endpoints: dict[str, CharmEndpoint] | None = None, subordinate: bool = False) -> Charm:
     return Charm(
         name=name,
         channel=CharmChannel(track="1", risk="stable", branch=""),
@@ -38,6 +38,7 @@ def _make_charm(name: str, endpoints: dict[str, CharmEndpoint] | None = None) ->
         ubuntu_version="22.04",
         ubuntu_arch="amd64",
         endpoints=endpoints or {},
+        subordinate=subordinate,
     )
 
 
@@ -168,18 +169,9 @@ class TestBundleExport:
 
     def test_subordinate_charm_omits_scale_key_on_kubernetes(self) -> None:
         # GIVEN a kubernetes bundle containing a subordinate charm
-        charm = Charm(
-            name="kata",
-            channel=CharmChannel(track="1", risk="stable", branch=""),
-            revision=7,
-            ubuntu_version="22.04",
-            ubuntu_arch="amd64",
-            endpoints={},
-            subordinate=True,
-        )
         bundle = _make_bundle(
             platform="kubernetes",
-            applications={"kata": Application(charm=charm)},
+            applications={"kata": Application(charm=_make_charm("kata", subordinate=True))},
         )
 
         # WHEN exporting
@@ -191,18 +183,9 @@ class TestBundleExport:
 
     def test_subordinate_charm_omits_num_units_key_on_machine(self) -> None:
         # GIVEN a machine bundle containing a subordinate charm
-        charm = Charm(
-            name="kata",
-            channel=CharmChannel(track="1", risk="stable", branch=""),
-            revision=7,
-            ubuntu_version="22.04",
-            ubuntu_arch="amd64",
-            endpoints={},
-            subordinate=True,
-        )
         bundle = _make_bundle(
             platform="machine",
-            applications={"kata": Application(charm=charm)},
+            applications={"kata": Application(charm=_make_charm("kata", subordinate=True))},
         )
 
         # WHEN exporting
