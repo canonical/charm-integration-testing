@@ -14,5 +14,5 @@ overrides:
     constraints:
       # ui endpoint must use ui feature
       - 'bool(endpoint[ui]) => features(endpoint[ui]) == {"ui"}'
-      # temporal-host-info must be provided by a charm that also provides an ui endpoint
+      # temporal-host-info must be provided by a charm that also provides a UI endpoint
       - 'charms(endpoint[temporal-host-info]) == charms(endpoint[ui])'
