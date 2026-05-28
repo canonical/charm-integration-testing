@@ -98,8 +98,8 @@ is gated behind `if relation` / `if is_ready` / `@when("endpoint.X.joined")`.
 5. Write the YAML following the schema in `bundle_builder_x/bundle_builder_x/overrides.py`.
 6. Add evidence comments citing source file + function.
 7. Run self-validation checklist.
-6. For endpoints that qualify for Meaning 1: prepare upstream PR diff (metadata.yaml / charmcraft.yaml).
-7. Open PR (with user permission).
+8. For endpoints that qualify for Meaning 1: prepare upstream PR diff (metadata.yaml / charmcraft.yaml).
+9. Open PR (with user permission).
 
 ### update_existing_override
 
