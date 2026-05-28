@@ -3,6 +3,7 @@
 
 import logging
 import time
+import warnings
 from abc import ABC
 from datetime import timedelta
 from typing import Any
@@ -29,7 +30,18 @@ class TemporalExtension(JujuExtension, ABC):
     BOOTSTRAP_MAX_RETRIES = 10
     BOOTSTRAP_RETRY_INTERVAL = 10  # seconds
 
+    _deprecation_warning_emitted = False
+
     def __init__(self, juju: JujuBackend, logger: logging.Logger):
+        if not self.__class__._deprecation_warning_emitted:
+            warnings.warn(
+                "charm_integration_testing.extensions.temporal is deprecated and will be removed in a future release. "
+                "temporal-worker-k8s now connects to Temporal via an explicit relation; "
+                "TemporalExtension is no longer needed.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            self.__class__._deprecation_warning_emitted = True
         self.juju = juju
         self.logger = logger
 
