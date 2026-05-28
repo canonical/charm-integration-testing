@@ -148,6 +148,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
+          fetch-depth: 0
       - name: Enable Debug Session
         if: ${{ inputs.debug_sleep_after != 'none' && !cancelled() && needs.determine-runner.outputs.debug-mode == 'ssh' }}
         shell: bash
@@ -221,7 +222,6 @@ jobs:
         if: ${{ !inputs.full_test_suite }}
         shell: bash
         run: |
-          git fetch --depth=1 origin "${{ github.base_ref || 'main' }}"
           LEAF_PATTERN='^test_(deploy|scale_in_and_scale_out_charm|teardown|build_bundle|bootstrap_controller|create_model|upgrade_charm|downgrade_charm|pod_deletion|controller_restart|idempotent_redeploy|remove_and_restore_integration|logs_privacy_check|model_controller_migration|upgrade_controller|deploy_target_old_revision)$'
           K_EXPR=$(python scripts/select_tests.py \
             --base-ref "origin/${{ github.base_ref || 'main' }}" \
