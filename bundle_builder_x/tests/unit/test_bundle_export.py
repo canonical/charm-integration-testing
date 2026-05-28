@@ -166,6 +166,78 @@ class TestBundleExport:
         # THEN no resources key is present
         assert "resources" not in exported["applications"]["app"]
 
+    def test_subordinate_charm_omits_scale_key_on_kubernetes(self) -> None:
+        # GIVEN a kubernetes bundle containing a subordinate charm
+        charm = Charm(
+            name="kata",
+            channel=CharmChannel(track="1", risk="stable", branch=""),
+            revision=7,
+            ubuntu_version="22.04",
+            ubuntu_arch="amd64",
+            endpoints={},
+            subordinate=True,
+        )
+        bundle = _make_bundle(
+            platform="kubernetes",
+            applications={"kata": Application(charm=charm)},
+        )
+
+        # WHEN exporting
+        exported = yaml.safe_load(bundle.export())
+
+        # THEN neither scale nor num_units is present for the subordinate
+        assert "scale" not in exported["applications"]["kata"]
+        assert "num_units" not in exported["applications"]["kata"]
+
+    def test_subordinate_charm_omits_num_units_key_on_machine(self) -> None:
+        # GIVEN a machine bundle containing a subordinate charm
+        charm = Charm(
+            name="kata",
+            channel=CharmChannel(track="1", risk="stable", branch=""),
+            revision=7,
+            ubuntu_version="22.04",
+            ubuntu_arch="amd64",
+            endpoints={},
+            subordinate=True,
+        )
+        bundle = _make_bundle(
+            platform="machine",
+            applications={"kata": Application(charm=charm)},
+        )
+
+        # WHEN exporting
+        exported = yaml.safe_load(bundle.export())
+
+        # THEN neither num_units nor scale is present for the subordinate
+        assert "num_units" not in exported["applications"]["kata"]
+        assert "scale" not in exported["applications"]["kata"]
+
+    def test_non_subordinate_charm_includes_scale_key_on_kubernetes(self) -> None:
+        # GIVEN a kubernetes bundle containing a non-subordinate charm
+        bundle = _make_bundle(
+            platform="kubernetes",
+            applications={"app": Application(charm=_make_charm("app"))},
+        )
+
+        # WHEN exporting
+        exported = yaml.safe_load(bundle.export())
+
+        # THEN scale is set to 1
+        assert exported["applications"]["app"]["scale"] == 1
+
+    def test_non_subordinate_charm_includes_num_units_key_on_machine(self) -> None:
+        # GIVEN a machine bundle containing a non-subordinate charm
+        bundle = _make_bundle(
+            platform="machine",
+            applications={"app": Application(charm=_make_charm("app"))},
+        )
+
+        # WHEN exporting
+        exported = yaml.safe_load(bundle.export())
+
+        # THEN num_units is set to 1
+        assert exported["applications"]["app"]["num_units"] == 1
+
     def test_local_relations_sorted(self) -> None:
         # GIVEN a bundle with two local integrations
         provider = _make_charm(
