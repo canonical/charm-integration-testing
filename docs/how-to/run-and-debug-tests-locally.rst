@@ -235,4 +235,4 @@ or pass ``--forcerun``:
    # Option 2: force-run everything
    ./scripts/run-tests.sh \
      ... \
-     -- --forcerun
+     --forcerun

@@ -529,7 +529,7 @@ jobs:
           event_name: test_end
           detail: Tests finished.
       - name: Cache testmon data
-        if: ${{ !cancelled() && !inputs.full_test_suite }}
+        if: ${{ success() && !inputs.full_test_suite }}
         uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5.0.5
         with:
           path: .testmondata
