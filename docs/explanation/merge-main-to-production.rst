@@ -18,9 +18,8 @@ The workflow has three sequential jobs:
 
 2. **run-all-tests** — calls the reusable
    ``charm-testing-integration-tests.yaml`` workflow with
-   ``full_test_suite: true``.  This runs the full integration test matrix
-   with testmon disabled, ensuring every test is exercised before code
-   reaches production.
+   ``full_test_suite: true``.  This runs the full integration test matrix,
+   ensuring every test is exercised before code reaches production.
 
 3. **merge-main-to-production** — fast-forward merges ``main`` into
    ``production``.  The merge is ``--ff-only``, so it will fail if
@@ -30,11 +29,12 @@ The workflow has three sequential jobs:
 Why ``full_test_suite`` matters
 -------------------------------
 
-During pull-request checks, testmon is enabled so only tests affected by
-the changed code run.  This keeps PR feedback fast.
+During pull-request checks, AST-based static analysis
+(``scripts/select_tests.py``) selects only the leaf tests transitively
+affected by changed files.  This keeps PR feedback fast.
 
 The merge workflow intentionally sets ``full_test_suite: true``, which
-disables testmon and forces every test to execute.  This catches
+skips test selection and forces every test to execute.  This catches
 cross-test interactions and environment-dependent regressions that
 incremental runs might miss, providing a final safety net before
 production promotion.

@@ -186,53 +186,43 @@ The ``--juju-model-config`` file is optional. If omitted, tests create the model
 without extra configuration; if provided, pass a JSON object of string keys and values
 matching Juju model configuration options.
 
-Testmon and re-running tests
-----------------------------
 
-The CI pipeline uses `pytest-testmon <https://testmon.org/>`_ to skip tests
-whose code (and transitive dependencies) has not changed since the last
-successful run.  The cached database (``.testmondata``) is stored per branch
-in the GitHub Actions cache.
+PR test selection
+~~~~~~~~~~~~~~~~~~
 
-During **pull-request checks**, testmon is enabled (``--testmon``) so only
-tests affected by the pull request changes are executed.  During the
-**merge-main-to-production** workflow, ``full_test_suite`` is set to
-``true``, which disables testmon and forces every test to run.
+During **pull-request checks**, the CI runs ``select_tests.py`` to determine
+which leaf tests are transitively affected by the changed Python files.  It
+builds a reverse-import graph of the repository via ``ast`` and performs a BFS
+from the changed files to find all affected test modules.  The result is a
+``-k`` expression passed to pytest so only relevant tests execute.
+
+A set of **base-suite** tests (build, bootstrap, deploy, scale, teardown)
+always runs regardless of what changed.  If a changed file matches a
+**force-full glob** (e.g. ``pyproject.toml``, ``**/conftest.py``), all leaf tests are selected.
+
+During the **merge-main-to-production** workflow, ``full_test_suite`` is set
+to ``true``, which skips test selection entirely and runs every test.
 
 Interaction with the state scheduler
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The state-driven scheduler overrides ``pytest_ignore_collect`` so that
-**every** ``.py`` file under the test suite is always collected, even when
-testmon would skip it.  This ensures the scheduler can build the complete
-state graph and find bridging transitions via Dijkstra.
-
-Testmon still participates later: during ``pytest_collection_modifyitems``
-it deselects unchanged tests from the ``items`` list.  The scheduler treats
-whatever remains as destinations and re-injects any bridge tests needed to
-reach them.
+The ``-k`` expression produced by ``select_tests.py`` filters which leaf
+tests are selected.  The state-driven scheduler then inspects the remaining
+items and re-injects any bridge tests needed to reach the required states
+via Dijkstra.
 
 In practice this means:
 
-- Testmon decides **which tests to run** (deselection).
+- ``select_tests.py`` decides **which leaf tests to run** (via ``-k``).
 - The scheduler decides **what order** they run in and **which setup
   transitions** must be injected to reach the required states.
-- ``--ignore`` / ``--ignore-glob`` have no effect on files inside the test
-  suite directory because the scheduler forces collection.  Use ``-k`` to
-  select or exclude specific tests instead.
 
 Forcing a full re-run locally
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-To bypass testmon and run every test locally, either delete the cache file
-or pass ``--forcerun``:
+To run every test locally, simply omit the ``-k`` flag:
 
 .. code:: bash
 
-   # Option 1: delete the cache
-   rm -f .testmondata
-
-   # Option 2: force-run everything
    ./scripts/run-tests.sh \
-     ... \
-     -- --forcerun
+     ... 
