@@ -120,13 +120,17 @@ def _make_charm(
     `relations` is a mapping of endpoint name to a tuple of interface name and role
     `integrations_count_override` is the number of integrations per endpoint (any endpoint not provided will default to 1)
     """
-    endpoint_metadata = {
-        ep: EndpointMetadataStub(interface_name=iface, role=RelationRoleStub(role))
-        for ep, (iface, role) in relations.items()
-    }
+    if relations is not None:
+        endpoint_metadata = {
+            ep: EndpointMetadataStub(interface_name=iface, role=RelationRoleStub(role))
+            for ep, (iface, role) in relations.items()
+        }
 
-    integrations_count = {ep: 1 for ep in relations.keys()}
-    integrations_count.update(integrations_count_override or {})
+        integrations_count = {ep: 1 for ep in relations.keys()}
+        integrations_count.update(integrations_count_override or {})
+    else:
+        endpoint_metadata = {}
+        integrations_count = {}
 
     return CharmStub(
         meta=MetaStub(relations=endpoint_metadata),

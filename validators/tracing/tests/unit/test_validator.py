@@ -20,7 +20,7 @@ from unittest.mock import patch
 
 import ops
 import pytest
-from test_utils.stubs import AppStub, CharmStub, RelationStub
+from test_utils.stubs import AppStub, CharmStub, RelationStub  # type: ignore[import-not-found]
 
 from validators.tracing.validator import TracingValidator
 
