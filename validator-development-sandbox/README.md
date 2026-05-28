@@ -31,11 +31,9 @@ Run these inside the VM after entering it with `bin/shell.sh` or by the agent.
 
 ## Typical flow
 
-1. Run `bin/up.sh` to provision or resume the VM. Run `bin/run.sh --interactive` to start a session, then use `/develop-validator` or `/test-validator` skill commands. For a fully autonomous one-shot run, pass a prompt directly: `bin/run.sh 'Use the /develop-validator skill to develop the s3 validator.'`.
-2. Enter the VM with `bin/shell.sh` (or use the agent) and run `bin/verify-validator.sh --model <model> --app <requirer> --provider <provider> --validator <name>`.
-3. Review `summary.txt`, `report.json`, and the per-command `*.out` files in
-   `validator-development-sandbox/reports/<name>-<timestamp>/` (git-ignored, persists on host).
-4. Clean up with `juju destroy-model <model> --destroy-storage --no-prompt`.
+1. Run `bin/up.sh` to provision or resume the VM.
+2. Run `bin/run.sh --interactive`, then use `/develop-validator` or `/test-validator` to develop and verify a validator. The skills handle the full workflow including deploying charms and running quality gates.
+3. Review results in `validator-development-sandbox/reports/<name>-<timestamp>/` (gitignored, persists on the host).
 
 ## Token setup
 
