@@ -135,3 +135,15 @@ virtualenv
 Testmon
 testmon
 idempotency
+CLI
+deselectable
+deselected
+deselects
+deselection
+enum
+hookwrapper
+memoization
+modifyitems
+nodeid
+reordering
+testmon's

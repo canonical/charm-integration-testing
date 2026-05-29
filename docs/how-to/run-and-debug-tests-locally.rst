@@ -199,27 +199,71 @@ tests affected by the pull request changes are executed.  During the
 **merge-main-to-production** workflow, ``full_test_suite`` is set to
 ``true``, which disables testmon and forces every test to run.
 
+The core/leaf model
+~~~~~~~~~~~~~~~~~~~~
+
+The test suite is a *linear dependency chain* against live infrastructure:
+running a downstream test requires its upstream tests to have run **in the
+same session** to build the live state (a bootstrapped controller, a created
+model, a deployed bundle).  testmon treats tests as independent and freely
+deselectable, which conflicts with that model.
+
+The scheduler reconciles this by splitting the suite into two classes:
+
+- **Core (spine) tests** — tagged ``@pytest.mark.core``.  These form the
+  mandatory base chain that must run every time to establish state (e.g.
+  ``test_build_bundle``, ``test_bootstrap_controller``, ``test_create_model``,
+  ``test_scale_in_and_scale_out``, ``test_teardown``).  They are **never**
+  deselected by testmon.
+- **Leaf tests** — everything else.  testmon owns selection of these: if
+  their code is unchanged, testmon deselects them and they don't run.  This
+  is where testmon's speedup applies.
+
 Interaction with the state scheduler
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The state-driven scheduler overrides ``pytest_ignore_collect`` so that
-**every** ``.py`` file under the test suite is always collected, even when
-testmon would skip it.  This ensures the scheduler can build the complete
-state graph and find bridging transitions via Dijkstra.
+The scheduler uses a ``hookwrapper`` around ``pytest_collection_modifyitems``
+to enforce the core/leaf split:
 
-Testmon still participates later: during ``pytest_collection_modifyitems``
-it deselects unchanged tests from the ``items`` list.  The scheduler treats
-whatever remains as destinations and re-injects any bridge tests needed to
-reach them.
+1. **Before yield**: core items are pulled out of ``items`` so testmon only
+   sees leaf tests during its deselection pass.
+2. **During yield**: testmon (and any other ``modifyitems`` hooks) run,
+   deselecting unchanged leaves.
+3. **After yield**: the core items are restored in front of the
+   testmon-selected leaves and the scheduler orders the combined set into a
+   valid state chain, injecting bridging transitions as needed.
+
+Additionally, ``pytest_ignore_collect`` (``tryfirst=True``) forces collection
+of every ``.py`` file inside the test-suite package, even when testmon would
+otherwise skip files entirely.  This ensures the scheduler always has the
+complete state graph available for Dijkstra pathfinding.
 
 In practice this means:
 
-- Testmon decides **which tests to run** (deselection).
-- The scheduler decides **what order** they run in and **which setup
-  transitions** must be injected to reach the required states.
+- Core tests **always run** — testmon never deselects them.
+- Testmon decides **which leaf tests to run** (deselection).
+- The scheduler decides **what order** everything runs in and **which
+  bridging transitions** must be injected to reach required states.
 - ``--ignore`` / ``--ignore-glob`` have no effect on files inside the test
   suite directory because the scheduler forces collection.  Use ``-k`` to
   select or exclude specific tests instead.
+
+.. important::
+
+   Do **not** combine ``--testmon`` with ``-k`` or ``-m`` selection
+   arguments: this forces testmon into no-select mode and defeats the
+   core/leaf split.  Use ``--testmon`` on its own.
+
+Injected bridge labelling
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+When the scheduler injects a bridging transition test that the user did not
+explicitly select, it labels the item via ``user_properties`` and the
+``injected`` pytest marker — **without** mutating the item's ``nodeid``.
+This is critical because testmon keys its stored fingerprints on the nodeid;
+a mutated nodeid would never match testmon's database, causing the bridge to
+be re-selected on every run.  The ``[injected]`` label is rendered through
+``pytest_report_teststatus`` instead.
 
 Forcing a full re-run locally
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
