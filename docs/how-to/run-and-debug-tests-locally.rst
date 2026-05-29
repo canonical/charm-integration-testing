@@ -202,7 +202,7 @@ tests affected by the pull request changes are executed.  During the
 The core/leaf model
 ~~~~~~~~~~~~~~~~~~~~
 
-The test suite is a *linear dependency chain* against live infrastructure:
+The test suite is a *DAG* against live infrastructure:
 running a downstream test requires its upstream tests to have run **in the
 same session** to build the live state (a bootstrapped controller, a created
 model, a deployed bundle).  testmon treats tests as independent and freely
@@ -247,12 +247,6 @@ In practice this means:
 - ``--ignore`` / ``--ignore-glob`` have no effect on files inside the test
   suite directory because the scheduler forces collection.  Use ``-k`` to
   select or exclude specific tests instead.
-
-.. important::
-
-   Do **not** combine ``--testmon`` with ``-k`` or ``-m`` selection
-   arguments: this forces testmon into no-select mode and defeats the
-   core/leaf split.  Use ``--testmon`` on its own.
 
 Injected bridge labelling
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
