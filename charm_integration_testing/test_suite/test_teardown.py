@@ -10,6 +10,7 @@ from juju import JujuClient
 from .scheduler.states import State
 
 
+@pytest.mark.core
 @pytest.mark.state(requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
 def test_teardown(juju_client: JujuClient, model: str, target_application: str) -> None:
     # Remove all requested applications

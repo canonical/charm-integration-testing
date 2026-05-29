@@ -20,6 +20,7 @@ from bundle_builder_x import (
 from .scheduler.states import State
 
 
+@pytest.mark.core
 @pytest.mark.state(requires=State.NO_BUNDLE, provides=State.NO_CONTROLLER)
 def test_build_bundle(
     bundle_mermaid_output: Path,
