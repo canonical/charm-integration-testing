@@ -64,4 +64,20 @@ jobs:
           git fetch origin main production
           git checkout -B production origin/production
           git merge --ff-only origin/main
-          git push origin production
+          delay=1
+          for attempt in 1 2 3 4 5; do
+            if git push origin production; then
+              echo "Push succeeded on attempt $attempt"
+              break
+            fi
+            if [ "$attempt" -eq 5 ]; then
+              echo "Push failed after 5 attempts"
+              exit 1
+            fi
+            echo "Push failed (attempt $attempt), retrying in ${delay}s..."
+            sleep "$delay"
+            delay=$((delay * 2))
+            if [ "$delay" -gt 30 ]; then
+              delay=30
+            fi
+          done
