@@ -16,6 +16,7 @@ from test_suite.scheduler.graph import StateGraph, StateTransition
 from test_suite.scheduler.plugin import (
     _build_execution_plan,
     _mark_as_injected,
+    _schedule_items,
     _UnreachableStateError,
     pytest_runtest_setup,
     pytest_sessionfinish,
@@ -899,8 +900,9 @@ class TestPytestRuntestSetup:
 class TestPytestSessionFinish:
     @staticmethod
     def _make_session(exitstatus: pytest.ExitCode | int, *, has_testmon: bool) -> SimpleNamespace:
-        pluginmanager = SimpleNamespace(has_plugin=lambda name: has_testmon and name == "testmon")
-        config = SimpleNamespace(pluginmanager=pluginmanager)
+        config = SimpleNamespace(
+            getoption=lambda name, default=None: has_testmon if name == "testmon" else default,
+        )
         return SimpleNamespace(config=config, exitstatus=exitstatus)
 
     def test_clears_all_collected(self, make_item: Callable[..., pytest.Item]) -> None:

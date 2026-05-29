@@ -223,7 +223,7 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int | pytest.ExitC
     # be treated as a successful no-op run.
     if (
         session.exitstatus == pytest.ExitCode.NO_TESTS_COLLECTED
-        and session.config.pluginmanager.has_plugin("testmon")
+        and session.config.getoption("testmon", default=False)
         and _all_collected
     ):
         logger.info("No tests selected after testmon deselection; treating session as successful no-op.")
@@ -373,22 +373,7 @@ def _schedule_items(config: pytest.Config, items: list[pytest.Item]) -> int:
     #    - selected_transitions: StateTransition → [selected transition items]
     #      Multiple tests may share the same edge; all must run.
     # ------------------------------------------------------------------
-    pure_clusters: dict[State, list[pytest.Item]] = defaultdict(list)
-    selected_transitions: dict[StateTransition, list[pytest.Item]] = defaultdict(list)
-
-    for item, marker in selected_marked:
-        if marker.bridge_only:
-            logger.debug(
-                "Item %r is bridge_only: ignoring as a destination even though it was selected.",
-                item.nodeid,
-            )
-            continue
-        if marker.is_transition:
-            for req_state in marker.requires:
-                selected_transitions[StateTransition(from_state=req_state, to_state=marker.provides)].append(item)
-        else:
-            for req_state in marker.requires:
-                pure_clusters[req_state].append(item)
+    pure_clusters, selected_transitions = _partition_destinations(selected_marked)
 
     # ------------------------------------------------------------------
     # 4. Compute the ordered execution plan.
@@ -402,8 +387,31 @@ def _schedule_items(config: pytest.Config, items: list[pytest.Item]) -> int:
             full_graph=full_graph,
         )
     except _UnreachableStateError as exc:
-        logger.error("Scheduler cannot build an execution plan: %s", exc)
-        pytest.exit(str(exc), returncode=3)
+        if not config.getoption("testmon", default=False):
+            logger.error("Scheduler cannot build an execution plan: %s", exc)
+            pytest.exit(str(exc), returncode=3)
+
+        # Testmon deselected tests that broke the plan.  Rebuild using the
+        # full suite to verify the graph itself is valid, and if so, use
+        # that plan instead.
+        full_marked = _read_all_markers(_all_collected)
+        full_pure, full_trans = _partition_destinations(full_marked)
+        try:
+            ordered = _build_execution_plan(
+                current_state=current_state,
+                pure_clusters=full_pure,
+                selected_transitions=full_trans,
+                all_transitions=all_transitions,
+                full_graph=full_graph,
+            )
+        except _UnreachableStateError:
+            logger.error("Scheduler cannot build an execution plan: %s", exc)
+            pytest.exit(str(exc), returncode=3)
+
+        logger.info(
+            "testmon deselected tests that the scheduler needs; "
+            "rebuilt execution plan from the full suite."
+        )
 
     # ------------------------------------------------------------------
     # 5. Commit new order: scheduled items first, then any unmarked items.
@@ -438,6 +446,43 @@ def _mark_as_injected(item: pytest.Item) -> None:
     # backing attribute for the read-only ``nodeid`` property.  This is a
     # known limitation: revisit if pytest removes or renames _nodeid.
     item._nodeid = f"[injected] {original_name}"
+
+
+def _read_all_markers(
+    items: list[pytest.Item],
+) -> list[tuple[pytest.Item, StateMarker]]:
+    """Return ``(item, marker)`` pairs for every state-marked item, skipping unmarked ones."""
+    result: list[tuple[pytest.Item, StateMarker]] = []
+    for item in items:
+        try:
+            marker = read_state_marker(item)
+        except ValueError:
+            marker = None
+        if marker is not None:
+            result.append((item, marker))
+    return result
+
+
+def _partition_destinations(
+    marked_items: list[tuple[pytest.Item, StateMarker]],
+) -> tuple[dict[State, list[pytest.Item]], dict[StateTransition, list[pytest.Item]]]:
+    """Split marked items into pure-state clusters and transition edges."""
+    pure_clusters: dict[State, list[pytest.Item]] = defaultdict(list)
+    selected_transitions: dict[StateTransition, list[pytest.Item]] = defaultdict(list)
+    for item, marker in marked_items:
+        if marker.bridge_only:
+            logger.debug(
+                "Item %r is bridge_only: ignoring as a destination even though it was selected.",
+                item.nodeid,
+            )
+            continue
+        if marker.is_transition:
+            for req_state in marker.requires:
+                selected_transitions[StateTransition(from_state=req_state, to_state=marker.provides)].append(item)
+        else:
+            for req_state in marker.requires:
+                pure_clusters[req_state].append(item)
+    return pure_clusters, selected_transitions
 
 
 def _build_execution_plan(
