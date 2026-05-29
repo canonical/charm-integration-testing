@@ -7,56 +7,74 @@ This plugin implements ``pytest_collection_modifyitems`` to reorder the
 user's selected tests and automatically inject any bridging transition tests
 needed to reach the required states.
 
+testmon integration: the core/leaf model
+-----------------------------------------
+This suite is a *linear dependency chain* against live infrastructure, not a
+set of independent tests.  Running a downstream test requires its upstream
+tests to have run **in the same session** to build the live state (a
+bootstrapped controller, a created model, a deployed bundle).  testmon's model
+- "this file's coverage is unchanged, so skip it" - is the opposite
+assumption: it treats tests as independent and freely deselectable.  Unchanged
+*code* says nothing about whether the live *infrastructure* that an upstream
+test produces is present.
+
+We reconcile this by splitting the suite into two classes:
+
+* **Core (spine) tests** - the mandatory base suite that must run every time
+  to establish state.  Tagged ``@pytest.mark.core``.  These are NEVER subject
+  to testmon deselection.
+* **Leaf tests** - the optional extended tests.  testmon owns selection of
+  these: if their code is unchanged, testmon deselects them and they don't
+  run.  This is where testmon's speedup applies, and where it is real, since
+  each leaf is an expensive operation against live infra.
+
+The mechanism (see ``pytest_collection_modifyitems`` below) relies on hook
+ordering.  A ``hookwrapper`` removes the core items from ``items`` *before*
+testmon's own deselection runs, so testmon only ever sees leaves.  testmon
+deselects among the leaves (clean collected/deselected/selected arithmetic,
+no underflow), then the wrapper restores the full core set and runs the
+scheduler on ``core + selected_leaves``.  Because core items never pass
+through testmon's deselection they are never in its deselected tally, so
+re-adding them cannot corrupt the count.
+
+Run it as plain ``--testmon`` with NO ``-k``/``-m`` selection args::
+
+    pytest --testmon --current-state no_bundle
+
+Do NOT use ``--testmon-noselect`` (disables deselection entirely) and do NOT
+combine ``--testmon`` with ``-k`` (which forces testmon into no-select mode).
+
+Critically, the scheduler must NOT mutate item ``nodeid`` values, because
+testmon keys its stored fingerprints on ``nodeid``; a mutated nodeid (e.g. an
+``[injected]`` prefix) would never match testmon's database and the bridged
+test would be re-selected forever.  Injected bridges are therefore labelled via
+``user_properties`` and rendered through ``pytest_report_teststatus`` instead.
+
 How it works
 ------------
 0. ``pytest_ignore_collect`` (``tryfirst=True``) forces collection of every
-   ``.py`` file inside the test-suite package.  This prevents pytest-testmon
-   from skipping unchanged files entirely, which would starve the scheduler
-   of the transition tests it needs to build the full state graph.
+   ``.py`` file inside the test-suite package, so the full state graph is
+   available even when testmon would otherwise skip files.
 
 1. ``pytest_itemcollected`` captures *every* test item as it is collected,
-   before any ``-k`` / ``-m`` filtering is applied.  This gives the scheduler
-   a complete view of all available transitions in the suite.
+   before any filtering, into ``_all_collected``.  The full state graph is
+   built from this.
 
-2. ``pytest_collection_modifyitems`` (``trylast=True``) runs after pytest's
-   own deselection (and testmon's deselection), so ``items`` contains only
-   what the user explicitly selected.  The scheduler treats these as
-   **destinations**: tests that must run, in an order that respects their
-   ``requires`` states.
+2. ``pytest_collection_modifyitems`` (``hookwrapper``) hides core items from
+   testmon, lets testmon deselect leaves during ``yield``, restores the core
+   items, then runs the scheduler on the combined set.
 
-3. The **full** state graph is built from all items captured in step 1.
-   This means Dijkstra can find bridging paths even when the transition
-   tests that form those paths were filtered out by ``-k``.
-
-4. For each destination, the scheduler uses Dijkstra to find the shortest
-   path from the current state.  Any bridging transition tests along that
-   path are injected into the plan automatically (re-added from the full
-   collection even if ``-k`` excluded them).
-
-5. Tests *without* the ``@pytest.mark.state`` marker are left in their
-   original relative order and appended after all scheduled tests.
-
-Example
--------
-Running::
-
-    pytest -k test_teardown --current-state empty_model
-
-The scheduler sees:
-
-* **Full graph** (from all collected items): ``empty_model → deployed``,
-  ``deployed → neighbor_only``, ``neighbor_only → deployed``.
-* **User selection** (``items``): ``[test_teardown]``  (requires ``deployed``)
-* **Plan**: navigate ``empty_model → deployed`` (inject ``test_deploy``),
-  then run ``test_teardown``.
-* **Result**: ``[test_deploy, test_teardown]``
+3. The scheduler treats core tests and any testmon-selected leaves as
+   destinations, and injects bridging transitions (from the full collection)
+   needed to reach them - even bridges that testmon deselected.  Injected
+   bridges do not affect testmon's count because they were never selected.
 """
 
 from __future__ import annotations
 
 import logging
 import pathlib
-from collections import Counter, defaultdict
+from collections import defaultdict
 
 import pytest
 
@@ -67,31 +85,25 @@ from .states import State
 logger = logging.getLogger(__name__)
 
 # Absolute path to the test_suite package directory.
-# Used by pytest_ignore_collect to force-collect test files that testmon
-# would otherwise skip entirely.
 _TEST_SUITE_DIR = pathlib.Path(__file__).resolve().parent.parent
 
 #: State assumed when no ``--current-state`` flag is given.
 _DEFAULT_CURRENT_STATE = State.NO_BUNDLE
 
+# Key used in item.user_properties to flag scheduler-injected bridges.
+_INJECTED_PROP = "scheduler_injected"
+
 # All items collected by pytest before any -k/-m filtering.
-# Populated by pytest_itemcollected; used by modifyitems to build the full graph.
 _all_collected: list[pytest.Item] = []
 
-# Tracks item object IDs that have already been labelled as injected, so that
-# re-injecting the same bridge item a second time does not double-prefix its name.
+# Item object IDs already labelled as injected, so labelling is idempotent.
 _injected_item_ids: set[int] = set()
 
-# Set to the first transition item that fails at call-time.  Once non-None,
+# Set to the first state-marked item that fails at call-time.  Once non-None,
 # all subsequent state-marked tests are skipped because the environment state
-# is unknown. Pure test failures do NOT set this: they leave the state intact.
+# is unknown. Pure test failures still set this: any state-marked failure
+# leaves the environment indeterminate.
 _failed_state_test: pytest.Item | None = None
-
-# Number of bridge items re-injected during collection-time scheduling.
-# This is added to session.testscollected in pytest_collection_finish so
-# pytest's final "collected / deselected / selected" bookkeeping stays
-# consistent when bridges are re-added after testmon deselection.
-_collection_reinjected_count = 0
 
 
 # ---------------------------------------------------------------------------
@@ -100,7 +112,7 @@ _collection_reinjected_count = 0
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    """Register the ``state`` and ``injected`` markers."""
+    """Register the ``state``, ``injected`` and ``core`` markers."""
     config.addinivalue_line(
         "markers",
         (
@@ -129,9 +141,13 @@ def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line(
         "markers",
         (
-            "core: Marks a test as part of the core state-transition chain.  "
-            "Use with --testmon-forceselect -m 'core' to ensure these tests "
-            "are always collected and selected even when testmon considers them unchanged."
+            "core: Marks a test as part of the mandatory base (spine) suite.  "
+            "Core tests always run and are never deselected by testmon: the "
+            "scheduler hides them from testmon's deselection and restores them "
+            "afterward.  Tag the base-suite chain (e.g. build_bundle, "
+            "bootstrap_controller, create_model, deploy, scale, teardown) with "
+            "this marker.  Everything else is a leaf that testmon may deselect "
+            "when unchanged."
         ),
     )
 
@@ -147,7 +163,7 @@ def pytest_addoption(parser: pytest.Parser) -> None:
             f"Current environment state before any tests run "
             f"(default: '{_DEFAULT_CURRENT_STATE.value}'). "
             "Use this when resuming a partial run or iterating locally against a "
-            f"live model so the scheduler does not re-run expensive setup transitions. "
+            "live model so the scheduler does not re-run expensive setup transitions. "
             f"Valid values: {valid_states}."
         ),
     )
@@ -162,15 +178,14 @@ def pytest_itemcollected(item: pytest.Item) -> None:
 def pytest_ignore_collect(collection_path: pathlib.Path, config: pytest.Config) -> bool | None:
     """Force collection of test-suite files so the state graph is complete.
 
-    pytest-testmon's ``pytest_ignore_collect`` skips unchanged files
-    entirely, which prevents ``pytest_itemcollected`` from capturing
-    them.  The state scheduler *requires* visibility of every transition
-    test to build the full graph.
+    ``pytest_ignore_collect`` is a ``firstresult`` hook: the first non-None
+    result wins.  Running ``tryfirst=True`` and returning ``False`` guarantees
+    the file is collected before testmon's own ignore hook can veto it.
 
-    Returning ``False`` with ``tryfirst=True`` short-circuits the
-    ``firstresult`` hook chain and guarantees the items are collected.
-    testmon can still deselect them during ``pytest_collection_modifyitems``;
-    the scheduler will re-inject any that are needed as bridges.
+    Note: this only guarantees collection for files reachable by pytest's
+    collection walk.  When testmon runs in its default selecting mode it may
+    still skip collecting unchanged files at a layer this hook cannot reach.
+    For a complete graph, run testmon in ``--testmon-noselect`` mode.
     """
     if collection_path.suffix == ".py" and collection_path.resolve().is_relative_to(_TEST_SUITE_DIR):
         return False
@@ -182,17 +197,14 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) ->
     """Detect failed state-marked tests and halt the state machine.
 
     When any state-marked test fails at setup, call, or teardown time the
-    environment state is no longer known: a setup failure may leave the
-    environment partially configured, and a teardown failure may leave it in
-    an indeterminate state.  All subsequent state-marked tests are skipped to
-    prevent them from running against a broken or indeterminate environment.
-
-    Unmarked tests are never affected.
+    environment state is no longer known.  All subsequent state-marked tests
+    are skipped to prevent them running against a broken environment.  Unmarked
+    tests are never affected.
     """
     global _failed_state_test
     outcome = yield
     if _failed_state_test is not None:
-        return  # Already halted; no need to re-check.
+        return
     report = outcome.get_result()
     if report.failed:
         try:
@@ -208,19 +220,33 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) ->
             )
 
 
-def pytest_sessionfinish(session: pytest.Session, exitstatus: int | pytest.ExitCode) -> None:
-    """Reset module-level state so re-running pytest in the same process starts fresh.
+def pytest_report_teststatus(report: pytest.TestReport, config: pytest.Config) -> tuple[str, str, str] | None:
+    """Render a visible '[injected]' label without mutating the nodeid.
 
-    The three globals below are populated during a session and must be cleared
-    when the session ends; otherwise a second ``pytest.main()`` call in the
-    same Python process (e.g. from a test harness) would see stale data from
-    the previous run.
+    The nodeid must stay intact so testmon can key its stored fingerprints on
+    it.  We instead surface the injected status through the report's word
+    output during the call phase, leaving collection/setup/teardown untouched.
     """
-    global _all_collected, _injected_item_ids, _failed_state_test, _collection_reinjected_count
+    if report.when != "call":
+        return None
+    is_injected = any(name == _INJECTED_PROP and value for name, value in report.user_properties)
+    if not is_injected:
+        return None
+    if report.passed:
+        return "passed", ".", ("PASSED [injected]", {"green": True})
+    if report.failed:
+        return "failed", "F", ("FAILED [injected]", {"red": True})
+    return None
 
-    # pytest-testmon may legitimately deselect every test in incremental CI
-    # runs. In that case pytest returns NO_TESTS_COLLECTED (5), which should
-    # be treated as a successful no-op run.
+
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int | pytest.ExitCode) -> None:
+    """Reset module-level state so re-running pytest in the same process starts fresh."""
+    global _all_collected, _injected_item_ids, _failed_state_test
+
+    # With the core/leaf split the spine always runs, so a no-tests session
+    # should not normally happen.  Guard anyway: if testmon deselected every
+    # leaf and no core tests exist, treat the empty run as a successful no-op
+    # rather than a failure.
     if (
         session.exitstatus == pytest.ExitCode.NO_TESTS_COLLECTED
         and session.config.getoption("testmon", default=False)
@@ -232,16 +258,10 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int | pytest.ExitC
     _all_collected.clear()
     _injected_item_ids.clear()
     _failed_state_test = None
-    _collection_reinjected_count = 0
 
 
 def pytest_runtest_setup(item: pytest.Item) -> None:
-    """Skip state-marked tests after a transition failure.
-
-    Called before each test's setup phase.  If a previous transition test
-    has failed, this hook raises ``pytest.skip`` for every state-marked test
-    that follows, leaving unmarked tests unaffected.
-    """
+    """Skip state-marked tests after a transition failure."""
     if _failed_state_test is None:
         return
     if item is _failed_state_test:
@@ -254,67 +274,60 @@ def pytest_runtest_setup(item: pytest.Item) -> None:
         pytest.skip(f"Skipped: state-marked test {_failed_state_test.nodeid!r} failed: environment state is unknown.")
 
 
-@pytest.hookimpl(trylast=True)
-def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
-    """Reorder and augment the user's selected tests.
+def _is_core(item: pytest.Item) -> bool:
+    """Return True if *item* is part of the mandatory base (spine) suite.
 
-    ``items`` at this point contains only the user's ``-k``/``-m`` selection.
-    The scheduler treats these as destinations, builds the full state graph
-    from ``_all_collected``, and injects any bridging transitions needed to
-    reach those destinations.
+    Core tests are tagged ``@pytest.mark.core`` and must run on every session
+    to establish live infrastructure state.  They are hidden from testmon so it
+    can never deselect them.
     """
-    global _collection_reinjected_count
-    _collection_reinjected_count += _schedule_items(config, items)
+    return item.get_closest_marker("core") is not None
 
 
-def pytest_collection_finish(session: pytest.Session) -> None:
-    """Adjust collected-count bookkeeping for collection-time bridge injection."""
-    if _collection_reinjected_count:
-        session.testscollected += _collection_reinjected_count
+@pytest.hookimpl(hookwrapper=True)
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> object:
+    """Hide core tests from testmon, then restore and schedule.
 
+    With ``--testmon`` active this wrapper enforces the core/leaf split:
 
-@pytest.hookimpl(wrapper=True)
-def pytest_runtestloop(session: pytest.Session) -> object:
-    """Re-schedule session items just before execution begins.
+    1. Before ``yield``: pull the core (spine) items out of ``items`` so
+       testmon's deselection - which runs during ``yield`` - only ever sees
+       leaf tests.  This keeps testmon's collected/deselected/selected
+       arithmetic consistent and prevents the negative-selected underflow that
+       occurs when deselected items are re-added after the fact.
+    2. During ``yield``: testmon (and any other ``modifyitems`` hooks) run,
+       deselecting unchanged leaves.
+    3. After ``yield``: ``items`` is now the testmon-selected leaves.  Restore
+       the full core set in front of them and run the scheduler on the combined
+       list to order everything into a valid state chain, injecting bridges as
+       needed.
 
-    pytest-testmon may re-add previously-failed tests to ``session.items``
-    *after* all ``pytest_collection_modifyitems`` hooks have finished.  When
-    that happens the scheduler never sees them as destinations, so bridge
-    tests are not injected and the state machine breaks.
-
-    This hook acts as a safety net: it re-runs the scheduling logic on the
-    final ``session.items`` list.  If the scheduler already ran successfully
-    during collection (the common case), the item list already contains the
-    correct bridges and this call is effectively a no-op — the re-scheduling
-    simply rebuilds the same plan.
+    Without ``--testmon`` there is nothing to hide; we simply yield and then
+    schedule the full selection.
     """
-    reinjected_count = _schedule_items(session.config, session.items)
-    if reinjected_count:
-        session.testscollected += reinjected_count
-    return (yield)
+    if not config.getoption("testmon", default=False):
+        yield
+        _schedule_items(config, items)
+        return
+
+    core_items = [it for it in items if _is_core(it)]
+    leaf_items = [it for it in items if not _is_core(it)]
+
+    # Hand testmon only the leaves; it deselects among these during yield.
+    items[:] = leaf_items
+    yield
+    # items is now testmon-selected leaves. Restore core in front, then schedule.
+    items[:] = core_items + items
+    _schedule_items(config, items)
 
 
-def _count_reinjected_items(before: list[pytest.Item], after: list[pytest.Item]) -> int:
-    """Return how many item objects were added to *after* that were not in *before*.
+def _schedule_items(config: pytest.Config, items: list[pytest.Item]) -> None:
+    """Core scheduling logic: order items into a valid state chain.
 
-    Uses identity-based multiset comparison so duplicate objects are handled
-    correctly if an item appears multiple times in an execution plan.
+    ``items`` arrives as the final run set (core + selected leaves).  The
+    function reorders it in place so that state prerequisites are satisfied,
+    injecting bridging transition tests from the full collection where needed.
     """
-    before_counts = Counter(id(item) for item in before)
-    added = 0
-    for item in after:
-        item_id = id(item)
-        if before_counts[item_id] > 0:
-            before_counts[item_id] -= 1
-        else:
-            added += 1
-    return added
-
-
-def _schedule_items(config: pytest.Config, items: list[pytest.Item]) -> int:
-    """Core scheduling logic shared by collection and pre-run hooks."""
-    original_items = items[:]
-
     raw_state: str = config.getoption("--current-state")
     try:
         current_state = State(raw_state)
@@ -327,12 +340,8 @@ def _schedule_items(config: pytest.Config, items: list[pytest.Item]) -> int:
 
     # ------------------------------------------------------------------
     # 1. Build the full state graph from ALL collected items (pre-filter).
-    #    This allows Dijkstra to find bridging paths even when the bridging
-    #    transition tests were excluded by -k.
     # ------------------------------------------------------------------
     full_graph = StateGraph()
-    # StateTransition -> [items], built from the complete collection.
-    # Multiple tests may cover the same edge; all are recorded.
     all_transitions: dict[StateTransition, list[pytest.Item]] = defaultdict(list)
 
     for item in _all_collected:
@@ -347,8 +356,7 @@ def _schedule_items(config: pytest.Config, items: list[pytest.Item]) -> int:
                 all_transitions[t].append(item)
 
     # ------------------------------------------------------------------
-    # 2. Partition the USER-SELECTED items (post -k filter) into marked
-    #    and unmarked.  These are the destinations the scheduler must reach.
+    # 2. Partition the USER-SELECTED items into marked and unmarked.
     # ------------------------------------------------------------------
     selected_marked: list[tuple[pytest.Item, StateMarker]] = []
     unmarked: list[pytest.Item] = []
@@ -365,13 +373,10 @@ def _schedule_items(config: pytest.Config, items: list[pytest.Item]) -> int:
 
     if not selected_marked:
         # Nothing state-marked in the selection; leave items untouched.
-        return 0
+        return
 
     # ------------------------------------------------------------------
-    # 3. From the selected items, build destination clusters.
-    #    - pure_clusters: state → [selected pure tests]
-    #    - selected_transitions: StateTransition → [selected transition items]
-    #      Multiple tests may share the same edge; all must run.
+    # 3. Build destination clusters from the selected items.
     # ------------------------------------------------------------------
     pure_clusters, selected_transitions = _partition_destinations(selected_marked)
 
@@ -391,9 +396,8 @@ def _schedule_items(config: pytest.Config, items: list[pytest.Item]) -> int:
             logger.error("Scheduler cannot build an execution plan: %s", exc)
             pytest.exit(str(exc), returncode=3)
 
-        # Testmon deselected tests that broke the plan.  Rebuild using the
-        # full suite to verify the graph itself is valid, and if so, use
-        # that plan instead.
+        # Testmon deselected tests that broke the plan.  Rebuild using the full
+        # suite to verify the graph itself is valid, and if so, use that plan.
         full_marked = _read_all_markers(_all_collected)
         full_pure, full_trans = _partition_destinations(full_marked)
         try:
@@ -405,7 +409,13 @@ def _schedule_items(config: pytest.Config, items: list[pytest.Item]) -> int:
                 full_graph=full_graph,
             )
         except _UnreachableStateError:
-            logger.error("Scheduler cannot build an execution plan: %s", exc)
+            logger.error(
+                "Scheduler cannot build an execution plan even from the full suite: %s.  "
+                "The state graph itself has no path to a required state - check that a "
+                "transition test exists for the missing edge and that --current-state is "
+                "correct.",
+                exc,
+            )
             pytest.exit(str(exc), returncode=3)
 
         logger.info("testmon deselected tests that the scheduler needs; " "rebuilt execution plan from the full suite.")
@@ -414,7 +424,6 @@ def _schedule_items(config: pytest.Config, items: list[pytest.Item]) -> int:
     # 5. Commit new order: scheduled items first, then any unmarked items.
     # ------------------------------------------------------------------
     items[:] = ordered + unmarked
-    return _count_reinjected_items(original_items, items)
 
 
 # ---------------------------------------------------------------------------
@@ -429,20 +438,20 @@ class _UnreachableStateError(RuntimeError):
 def _mark_as_injected(item: pytest.Item) -> None:
     """Label *item* as a scheduler-injected bridge (idempotent).
 
-    Adds the ``injected`` marker and prefixes the item's display name and
-    node ID with ``[injected]`` so it is visually distinct in ``pytest -v``
-    output.  Calling this function more than once on the same item is safe.
+    Adds the ``injected`` marker and records a ``user_properties`` flag so the
+    status can be rendered as ``[injected]`` by ``pytest_report_teststatus``.
+
+    Crucially this does NOT mutate ``item.name`` or ``item._nodeid``: testmon
+    keys its stored fingerprints on the nodeid, and a mutated nodeid would
+    never match testmon's database, causing the bridge to be re-selected on
+    every run.
     """
     if id(item) in _injected_item_ids:
         return
     _injected_item_ids.add(id(item))
     item.add_marker(pytest.mark.injected)
-    original_name = item.name
-    item.name = f"[injected] {original_name}"
-    # pytest exposes no public API to override the node ID; _nodeid is the
-    # backing attribute for the read-only ``nodeid`` property.  This is a
-    # known limitation: revisit if pytest removes or renames _nodeid.
-    item._nodeid = f"[injected] {original_name}"
+    # Surface the injected status without touching the nodeid.
+    item.user_properties.append((_INJECTED_PROP, True))
 
 
 def _read_all_markers(
@@ -491,72 +500,23 @@ def _build_execution_plan(
 ) -> list[pytest.Item]:
     r"""Build an ordered item list using backtracking with memoization and cycle detection.
 
-    **Algorithm Overview**
-
-    The scheduler uses exhaustive backtracking to reorder user-selected tests
-    and automatically inject bridging transitions needed to satisfy state constraints.
-
-    **Phase 1: Early Exits (O(states))**
-    - Check for unconnected nodes: LogWarning if any states are unreachable from current state.
-    - Run any pure tests already reachable at the current state (free destinations).
-    - Mark those tests as scheduled so they won't be reordered.
-
-    **Phase 2: Backtracking Search (O(destinations^destinations) worst-case)**
-    - Recursively explore different orderings of remaining destinations.
-    - For each remaining destination state:
-      * Use Dijkstra to find the shortest path from current state (O(edges log nodes)).
-      * If reachable: create a branch, inject bridging tests, execute tests at that destination.
-      * Recurse with new state and updated scheduled set.
-      * If recursion succeeds: return the complete plan.
-      * If recursion fails (returns None): backtrack and try the next destination.
-    - If all orderings fail: raise _UnreachableStateError.
-
-        **Optimization: Dead-End Memoization & Cycle Detection**
-        - Memo key: (current_state, frozenset(remaining_destinations)).
-        - Dead-end memoization caches only unsatisfiable branches, so repeated visits
-            can be pruned immediately.
-        - Cycle detection uses an in-flight ``visiting`` set for the same key shape.
-            If we re-enter a key that is currently being explored, we return ``None``
-            to break recursion loops.
-        - Combined effect: guarantees termination even when the graph contains cycles
-            and at least one destination is unreachable.
-
-        **Cycle & Connectivity Detection**
-    - ``full_graph.unreachable_states(current_state)``: Returns states with no path from current_state.
-    - Logged as a warning; if a destination is in that set, _UnreachableStateError is raised.
-        - Cycle detection via ``visiting``: if (state, remaining) is re-entered while
-            still in progress, that branch returns ``None``.
-
-    **Destination Ordering**
-    - Tries destinations in sorted order for determinism.
-    - Backtracking ensures the first valid ordering is returned.
-    - Multiple user-selected tests on the same edge (multiple item variants) all run,
-      with bridging re-navigation between them.
-
-    **Edge Cases**
-    - Empty selection: returns empty plan.
-    - Already at required state: runs tests immediately without bridges.
-    - Isolated graph components: _UnreachableStateError raised before backtracking starts.
-    - Cyclic paths: dead-end memoization + cycle detection ensures recursive search terminates.
+    See module docstring for the integration contract.  The algorithm uses
+    exhaustive backtracking to reorder user-selected tests and inject bridging
+    transitions, with dead-end memoization and an in-flight cycle guard to
+    guarantee termination on cyclic graphs.
 
     Args:
         current_state: Environment state before any tests run.
-        pure_clusters: Mapping from state to user-selected pure tests that
-            run inside that state without changing it.
-        selected_transitions: User-selected transition tests, keyed by
-            :class:`StateTransition`, with all items for that edge.
-        all_transitions: Every transition test in the full suite, keyed by
-            :class:`StateTransition`.  Used for bridging only.
+        pure_clusters: Mapping from state to user-selected pure tests.
+        selected_transitions: User-selected transition tests, keyed by edge.
+        all_transitions: Every transition test in the full suite (bridging only).
         full_graph: State graph built from all collected transition tests.
 
     Returns:
-        Ordered list of pytest items forming a valid execution plan that
-        satisfies all state constraints encountered along the chosen path.
+        Ordered list of pytest items forming a valid execution plan.
 
     Raises:
-        _UnreachableStateError: If no ordering of destinations can be found
-            that bridges all gaps from *current_state* using available transitions,
-            or if a required state is unreachable from *current_state*.
+        _UnreachableStateError: If no ordering of destinations bridges all gaps.
     """
 
     def _all_selected_at(s: State) -> list[pytest.Item]:
@@ -573,18 +533,7 @@ def _build_execution_plan(
         return {s for s in all_destinations if any(it not in scheduled for it in _all_selected_at(s))}
 
     def _run_selected_at(s: State, plan: list[pytest.Item], scheduled: set[pytest.Item]) -> State:
-        """Schedule all unscheduled pure tests at state *s*, then one transition.
-
-        Pure tests are appended first: they don't change state so all of them
-        can run in one visit.  For transitions, only the first unscheduled item
-        is run before returning.  This lets the outer loop re-navigate back to
-        *s* (via a bridging redeploy, etc.) before running the next transition
-        test on the same edge, ensuring each one starts from a freshly prepared
-        environment.
-
-        Returns the resulting state: unchanged if only pure tests ran, or the
-        ``to_state`` of the transition that was executed.
-        """
+        """Schedule all unscheduled pure tests at state *s*, then one transition."""
         for item in pure_clusters.get(s, []):
             if item not in scheduled:
                 plan.append(item)
@@ -604,47 +553,21 @@ def _build_execution_plan(
         scheduled: set[pytest.Item],
         injected_ids: set[int],
     ) -> None:
-        """Inject one bridging transition item per edge along *path*.
-
-        For each edge, always use a bridge-only transition from the full
-        suite rather than consuming any user-selected transition tests.
-        This ensures that selected transition tests are only scheduled via
-        ``_run_selected_at`` when their destination state is being targeted,
-        so that all pure tests at intermediate states can run before any
-        selected transition out of those states.
-        Bridge-only transitions are NOT added to ``scheduled``, so the same
-        bridging test can be injected again if the scheduler needs to cross
-        the same edge multiple times (e.g. when two selected tests share an
-        edge and each needs a fresh environment).
-
-        Injected item IDs are recorded in *injected_ids* rather than applied
-        immediately. ``_mark_as_injected`` must only be called after the
-        backtracking search has committed to a final plan; calling it inside
-        a speculative branch permanently mutates the pytest item even if that
-        branch is later abandoned.
-        """
+        """Inject one bridging transition item per edge along *path*."""
         for transition, _graph_item in path:
             selected = selected_transitions.get(transition)
             unscheduled = next((it for it in selected if it not in scheduled), None) if selected else None
             if unscheduled is not None:
-                # Prefer an unscheduled selected item; it will be added to
-                # scheduled inside _run_selected_at when it executes.
                 plan.append(unscheduled)
                 scheduled.add(unscheduled)
             else:
-                # No unscheduled selected item (either none exist, or all were
-                # already pre-injected on a prior traversal of this edge).
-                # Fall back to a pure bridge so the environment actually
-                # transitions - silently skipping would leave it in the wrong state.
                 candidates = all_transitions.get(transition)
                 if candidates:
                     bridge_item = candidates[0]
                     injected_ids.add(id(bridge_item))
                     plan.append(bridge_item)
 
-    # Keys are (current_state, remaining_destinations). We only memoize dead ends.
     dead_end_memo: set[tuple[State, frozenset[State]]] = set()
-    # Keys currently on the recursion stack; used to break in-flight cycles.
     visiting: set[tuple[State, frozenset[State]]] = set()
 
     def _backtrack_search(
@@ -653,30 +576,16 @@ def _build_execution_plan(
         scheduled: set[pytest.Item],
         injected_ids: set[int],
     ) -> tuple[list[pytest.Item], set[int]] | None:
-        """Recursively search for a valid ordering of destinations using backtracking.
-
-        Tries each reachable remaining destination. If a path leads to an
-        unreachable state, backtracks and tries a different destination.
-
-        Uses dead-end memoization to prune known-unsatisfiable branches and an
-        in-flight cycle guard (``visiting``) to prevent infinite recursion.
-
-        Returns ``(plan, injected_ids)`` when a valid plan is found, or ``None``
-        if this branch is a dead end.  ``injected_ids`` is a per-branch copy so
-        that abandoned branches cannot permanently mark pytest items as injected.
-        """
+        """Recursively search for a valid ordering of destinations using backtracking."""
         remaining_destinations = _unscheduled_destinations(scheduled)
         if not remaining_destinations:
-            # All destinations have been scheduled; return the plan.
             return current_plan, injected_ids
 
         memo_key = (current_state, frozenset(remaining_destinations))
 
-        # Already determined this branch is a dead end.
         if memo_key in dead_end_memo:
             return None
 
-        # Detect cycles: if we're currently visiting this key, we're in a loop.
         if memo_key in visiting:
             logger.debug(
                 f"Cycle detected at state '{current_state}' with remaining "
@@ -687,36 +596,22 @@ def _build_execution_plan(
         visiting.add(memo_key)
 
         try:
-            # Try each remaining destination.
             for target_state in sorted(remaining_destinations):
                 raw_path = full_graph.shortest_path(current_state, target_state)
                 if raw_path is None:
-                    # Can't reach this destination from the current state; try another.
                     continue
 
-                # Create a copy of the plan, scheduled set, and injected-IDs set for
-                # this branch. injected_ids must be copied so that a failed branch
-                # cannot permanently label items via _mark_as_injected.
                 branch_plan = current_plan[:]
                 branch_scheduled = scheduled.copy()
                 branch_injected = injected_ids.copy()
 
-                # Inject bridging transitions to reach the target.
                 _inject_bridge(raw_path, branch_plan, branch_scheduled, branch_injected)
-
-                # Run the user-selected items at this destination.
                 new_state = _run_selected_at(target_state, branch_plan, branch_scheduled)
-
-                # Recurse; remaining destinations are recomputed from unscheduled items.
                 result = _backtrack_search(new_state, branch_plan, branch_scheduled, branch_injected)
 
                 if result is not None:
-                    # Found a valid complete path on this branch.
                     return result
 
-                # This branch led to a dead end; backtrack and try the next destination.
-
-            # No valid ordering found from this state.
             dead_end_memo.add(memo_key)
             return None
         finally:
@@ -749,8 +644,6 @@ def _build_execution_plan(
             )
         plan, final_injected_ids = backtrack_result
         # Apply injected labels only now, after the final plan is committed.
-        # Doing this inside speculative backtracking branches would permanently
-        # mutate pytest items even when those branches are later abandoned.
         for item in plan:
             if id(item) in final_injected_ids:
                 _mark_as_injected(item)
