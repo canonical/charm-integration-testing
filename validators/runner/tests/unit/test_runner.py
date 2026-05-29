@@ -18,11 +18,11 @@ from typing import Optional, cast
 from unittest.mock import patch
 
 import ops
+from test_utils.helpers import make_charm_from_relation  # type: ignore[import-not-found]
 from test_utils.stubs import (  # type: ignore[import-not-found]
     RelationRoleStub,
     RelationStub,
 )
-from test_utils.helpers import make_charm_from_relation
 
 from validators.base import BaseValidator, ValidationLevel, ValidationResult
 from validators.runner.runner import ValidatorRunner, ValidatorRunnerResults

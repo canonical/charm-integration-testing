@@ -20,11 +20,11 @@ from unittest.mock import patch
 import ops
 import pymongo
 from pymongo.errors import WriteError
+from test_utils.helpers import make_charm_from_relation  # type: ignore[import-not-found]
 from test_utils.stubs import (  # type: ignore[import-not-found]
     ApplicationStub,
     RelationStub,
 )
-from test_utils.helpers import make_charm_from_relation
 
 from validators.mongodb_client.validator import MongoDBClientValidator
 
