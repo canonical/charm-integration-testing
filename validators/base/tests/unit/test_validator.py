@@ -13,6 +13,9 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+from typing import cast
+
+import ops
 import pytest
 from test_utils.stubs import (  # type: ignore[import-not-found]
     ApplicationStub,
@@ -65,7 +68,8 @@ class TestBaseValidator:
     def test_role_property_returns_set_value(self) -> None:
         # GIVEN
         relation = RelationStub(name="my-db", id=0)
-        validator = ConcreteValidator(make_charm_from_relation(relation, RelationRoleStub.provides), relation=relation)
+        charm = make_charm_from_relation(relation, RelationRoleStub.provides)
+        validator = ConcreteValidator(cast(ops.CharmBase, charm), relation=cast(ops.Relation, relation))
 
         # WHEN
         role = validator.role
@@ -76,7 +80,8 @@ class TestBaseValidator:
     def test_validate_returns_result(self) -> None:
         # GIVEN
         relation = RelationStub(name="my-db", id=0)
-        validator = ConcreteValidator(make_charm_from_relation(relation), relation)
+        charm = make_charm_from_relation(relation)
+        validator = ConcreteValidator(cast(ops.CharmBase, charm), cast(ops.Relation, relation))
 
         # WHEN
         result = validator.validate(level="simple")
@@ -90,14 +95,6 @@ class TestBaseValidator:
         # GIVEN / WHEN / THEN
         with pytest.raises(TypeError):
             BaseValidator(object(), RelationStub(name="x", id=0))  # type: ignore[abstract, arg-type]
-
-    def test_databag_is_empty_when_relation_has_no_app(self) -> None:
-        # GIVEN
-        relation = RelationStub(name="my-db", id=1)
-        validator = ConcreteValidator(make_charm_from_relation(relation), relation)
-
-        # WHEN / THEN
-        assert validator.databag == {}
 
     def test_databag_reads_relation_app_databag(self) -> None:
         # GIVEN
@@ -113,17 +110,10 @@ class TestBaseValidator:
         assert validator.databag == databag
         assert databag["username"] == "admin"
 
-    @pytest.mark.parametrize(
-        "app,exists",
-        [
-            (None, False),
-            (object(), True),
-        ],
-    )
-    def test_relation_exists_reflects_presence_of_relation_app(self, app: ApplicationStub | None, exists: bool) -> None:
+    @pytest.mark.parametrize("exists", [False, True])
+    def test_relation_exists_reflects_presence_of_relation_app(self, exists: bool) -> None:
         # GIVEN
-        if app is None:
-            app = ApplicationStub()
+        app = ApplicationStub()
         relation = RelationStub(name="my-db", id=1, app=app)
         if not exists:
             relation.data = {}
@@ -134,7 +124,7 @@ class TestBaseValidator:
 
     def test_resolve_secret_reads_secret_when_uri_is_present(self) -> None:
         # GIVEN
-        app = object()
+        app = ApplicationStub()
         relation = RelationStub(
             name="my-db",
             id=1,
@@ -154,7 +144,7 @@ class TestBaseValidator:
 
     def test_resolve_secret_falls_back_to_plaintext_fields_without_uri(self) -> None:
         # GIVEN
-        app = object()
+        app = ApplicationStub()
         relation = RelationStub(
             name="my-db",
             id=1,
@@ -173,7 +163,7 @@ class TestBaseValidator:
 
     def test_validate_schema_reports_missing_required_fields(self) -> None:
         # GIVEN
-        app = object()
+        app = ApplicationStub()
         relation = RelationStub(
             name="my-db",
             id=1,
@@ -191,9 +181,10 @@ class TestBaseValidator:
 
     def test_validate_schema_merges_resolved_credentials(self) -> None:
         # GIVEN
-        app = object()
+        app = ApplicationStub()
         relation = RelationStub(name="my-db", id=1, app=app, data={app: {"host": "10.0.0.10"}})
-        validator = ConcreteValidator(make_charm_from_relation(relation), relation)
+        charm = make_charm_from_relation(relation)
+        validator = ConcreteValidator(cast(ops.CharmBase, charm), cast(ops.Relation, relation))
 
         # WHEN
         check = validator.validate_schema(

@@ -42,7 +42,7 @@ def _make_validator(
 ) -> TracingValidator:
     app = ApplicationStub()
     relation = RelationStub(app=app, data={app: databag}, name=endpoint, id=0)
-    charm = make_charm_from_relation(relation, interface_name="tracing")
+    charm = make_charm_from_relation(relation, interface_name="tracing", role=role)
     charm = cast(ops.CharmBase, charm)
     if role != RelationRoleStub.requires:
         charm.meta.relations[endpoint] = RelationMetaStub(
