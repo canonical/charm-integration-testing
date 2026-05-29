@@ -26,12 +26,8 @@ def make_charm_from_relation(
         relations_list = [relation]
     else:
         relations_list = [
-            RelationStub(
-                relation.name,
-                idx,
-                relation.app,
-                {relation.app: relation.data.get(relation.app, {})}
-            ) for idx in range(integrations_count)
+            RelationStub(relation.name, idx, relation.app, {relation.app: relation.data.get(relation.app, {})})
+            for idx in range(integrations_count)
         ]
 
     model = ModelStub(relations={relation.name: relations_list})
