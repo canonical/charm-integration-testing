@@ -22,8 +22,8 @@ import psycopg2
 from test_utils.stubs import (  # type: ignore[import-not-found]
     ApplicationStub,
     RelationStub,
-    make_charm_from_relation,
 )
+from test_utils.helpers import make_charm_from_relation
 
 from validators.postgresql_client.validator import PostgreSQLClientValidator
 

@@ -21,8 +21,8 @@ import ops
 from test_utils.stubs import (  # type: ignore[import-not-found]
     RelationRoleStub,
     RelationStub,
-    make_charm_from_relation,
 )
+from test_utils.helpers import make_charm_from_relation
 
 from validators.base import BaseValidator, ValidationLevel, ValidationResult
 from validators.runner.runner import ValidatorRunner, ValidatorRunnerResults
