@@ -16,7 +16,6 @@ from test_suite.scheduler.graph import StateGraph, StateTransition
 from test_suite.scheduler.plugin import (
     _build_execution_plan,
     _mark_as_injected,
-    _schedule_items,
     _UnreachableStateError,
     pytest_runtest_setup,
     pytest_sessionfinish,

@@ -408,10 +408,7 @@ def _schedule_items(config: pytest.Config, items: list[pytest.Item]) -> int:
             logger.error("Scheduler cannot build an execution plan: %s", exc)
             pytest.exit(str(exc), returncode=3)
 
-        logger.info(
-            "testmon deselected tests that the scheduler needs; "
-            "rebuilt execution plan from the full suite."
-        )
+        logger.info("testmon deselected tests that the scheduler needs; " "rebuilt execution plan from the full suite.")
 
     # ------------------------------------------------------------------
     # 5. Commit new order: scheduled items first, then any unmarked items.
