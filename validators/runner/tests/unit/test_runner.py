@@ -280,7 +280,7 @@ class TestValidatorRunnerRun:
         )
 
         # WHEN
-        results = runner.run(charm, level="simple")
+        results = runner.run(cast(ops.CharmBase, charm), level="simple")
 
         # THEN both integrations produce independent SKIPPED results
         assert results.results[0].status == "SKIPPED"

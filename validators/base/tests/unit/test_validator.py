@@ -103,7 +103,8 @@ class TestBaseValidator:
         app = ApplicationStub()
         databag = {"username": "admin", "password": "secret"}
         relation = RelationStub(name="my-db", id=1, app=app, data={app: databag})
-        validator = ConcreteValidator(make_charm_from_relation(relation), relation)
+        charm = make_charm_from_relation(relation)
+        validator = ConcreteValidator(cast(ops.CharmBase, charm), cast(ops.Relation, relation))
 
         # WHEN
         validator.databag["username"] = "changed"
@@ -119,7 +120,8 @@ class TestBaseValidator:
         relation = RelationStub(name="my-db", id=1, app=app)
         if not exists:
             relation.data = {}
-        validator = ConcreteValidator(make_charm_from_relation(relation), relation)
+        charm = make_charm_from_relation(relation)
+        validator = ConcreteValidator(cast(ops.CharmBase, charm), cast(ops.Relation, relation))
 
         # WHEN / THEN
         assert validator.relation_exists() is exists
@@ -135,7 +137,7 @@ class TestBaseValidator:
         )
         secrets = {"secret:db-creds": {"username": "secret-user", "password": "pw"}}
         charm = make_charm_from_relation_and_secrets(relation, secrets)
-        validator = ConcreteValidator(charm, relation)
+        validator = ConcreteValidator(cast(ops.CharmBase, charm), cast(ops.Relation, relation))
 
         # WHEN
         resolved = validator.resolve_secret("secret-uri", "username", "password")
@@ -154,7 +156,7 @@ class TestBaseValidator:
             data={app: {"username": "plain-user", "password": "plain-pw", "extra": "x"}},
         )
         charm = make_charm_from_relation(relation)
-        validator = ConcreteValidator(charm, relation)
+        validator = ConcreteValidator(cast(ops.CharmBase, charm), cast(ops.Relation, relation))
 
         # WHEN
         resolved = validator.resolve_secret("secret-uri", "username", "password", "missing")
@@ -172,7 +174,8 @@ class TestBaseValidator:
             app=app,
             data={app: {"host": "10.0.0.10", "port": ""}},
         )
-        validator = ConcreteValidator(make_charm_from_relation(relation), relation)
+        charm = make_charm_from_relation(relation)
+        validator = ConcreteValidator(cast(ops.CharmBase, charm), cast(ops.Relation, relation))
 
         # WHEN
         check = validator.validate_schema(["host", "port", "user"])
