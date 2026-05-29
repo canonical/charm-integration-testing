@@ -2277,7 +2277,7 @@ develop = true
 ops = ">=3.3.0,<4.0.0"
 pydantic = ">=2.0.0"
 validators-base = "*"
-validators-postgresql_client = "*"
+validators-postgresql-client = "*"
 validators-tracing = {version = "*", extras = ["deep"]}
 
 [package.source]
@@ -2398,4 +2398,4 @@ type = ["pytest-mypy"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<4.0"
-content-hash = "362482167c9ae429b57b86df9a04c0396eca75d4cd110a660106d6f8a1b232f7"
+content-hash = "c801ac00eb3f3f2eeb7a50dc38cd4347182cfbb9352c689fb77fa0b1cd0cb400"

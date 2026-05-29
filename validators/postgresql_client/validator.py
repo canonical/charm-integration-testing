@@ -148,8 +148,13 @@ class PostgreSQLClientValidator(BaseValidator):
                 ext_check = self._check_extensions(cur)
                 if ext_check is not None:
                     checks.append(ext_check)
+                    if not ext_check.passed:
+                        conn.close()
+                        return self._build_result("deep", checks)
         except Exception as exc:
             checks.append(ValidationCheck(name="extensions", passed=False, message=str(exc)))
+            conn.close()
+            return self._build_result("deep", checks)
 
         # --- 8. Create canary table, write, read-verify, cleanup ---
         canary_table = f"__canary_{uuid.uuid4().hex[:8]}"

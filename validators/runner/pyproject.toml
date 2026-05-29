@@ -26,7 +26,7 @@ dependencies = [
     "ops>=3.3.0,<4.0.0",
     "pydantic>=2.0.0",
     "validators-base",
-    "validators-postgresql_client",
+    "validators-postgresql-client",
     "validators-tracing[deep]",
 ]
 
