@@ -20,13 +20,13 @@ from unittest.mock import patch
 
 import ops
 import pytest
-from test_utils.stubs import (
+from test_utils.stubs import (  # type: ignore[import-not-found]
     ApplicationStub,
     RelationMetaStub,
     RelationRoleStub,
     RelationStub,
     make_charm_from_relation,
-)  # type: ignore[import-not-found]
+)
 
 from validators.tracing.validator import TracingValidator
 
@@ -45,10 +45,10 @@ def _make_validator(
     charm = make_charm_from_relation(relation, interface_name="tracing")
     charm = cast(ops.CharmBase, charm)
     if role != RelationRoleStub.requires:
-        charm.meta.relations[endpoint] = RelationMetaStub(  # type: ignore[attr-defined]
+        charm.meta.relations[endpoint] = RelationMetaStub(
             relation_name=endpoint,
             interface_name="tracing",
-            role=role,  # type: ignore[arg-type]
+            role=role,
         )
     return TracingValidator(charm, cast(ops.Relation, relation))
 
@@ -87,7 +87,7 @@ class TestTracingValidatorSimple:
         assert result.error is not None
 
     @pytest.mark.parametrize("role", [RelationRoleStub.provides, RelationRoleStub.peer])
-    def test_returns_skipped_for_non_requires_role(self, role: str) -> None:
+    def test_returns_skipped_for_non_requires_role(self, role: RelationRoleStub) -> None:
         # GIVEN a validator whose endpoint is on the non-requires side of the relation
         validator = _make_validator(VALID_DATABAG, role=role)
 

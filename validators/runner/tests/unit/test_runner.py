@@ -157,7 +157,7 @@ class TestValidatorRunnerRun:
         charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
 
         # WHEN
-        results = runner.run(charm, level="simple")  # type: ignore[arg-type]
+        results = runner.run(charm, level="simple")
 
         # THEN
         assert isinstance(results, ValidatorRunnerResults)
@@ -171,7 +171,7 @@ class TestValidatorRunnerRun:
         charm = make_charm_from_relation(relation, role=RelationRoleStub.provides, interface_name="test-interface")
 
         # WHEN
-        results = runner.run(charm, level="simple")  # type: ignore[arg-type]
+        results = runner.run(charm, level="simple")
 
         # THEN
         assert isinstance(results, ValidatorRunnerResults)
@@ -185,7 +185,7 @@ class TestValidatorRunnerRun:
         charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
 
         # WHEN
-        results = runner.run(charm, level="simple")  # type: ignore[arg-type]
+        results = runner.run(charm, level="simple")
 
         # THEN
         assert results.results[0].status == "FAIL"
@@ -197,7 +197,7 @@ class TestValidatorRunnerRun:
         charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
 
         # WHEN
-        results = runner.run(charm, level="simple")  # type: ignore[arg-type]
+        results = runner.run(charm, level="simple")
 
         # THEN
         assert results.results[0].status == "ERROR"
@@ -211,7 +211,7 @@ class TestValidatorRunnerRun:
         charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
 
         # WHEN
-        results = runner.run(charm, level="simple")  # type: ignore[arg-type]
+        results = runner.run(charm, level="simple")
 
         # THEN
         assert results.results == []
@@ -223,7 +223,7 @@ class TestValidatorRunnerRun:
         charm = make_charm_from_relation(relation, role=RelationRoleStub.requires, interface_name=None)
 
         # WHEN
-        results = runner.run(charm, level="simple")  # type: ignore[arg-type]
+        results = runner.run(charm, level="simple")
 
         # THEN
         assert results.results[0].status == "PASS"
@@ -235,7 +235,7 @@ class TestValidatorRunnerRun:
         charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
 
         # WHEN
-        results = runner.run(charm, level="deep")  # type: ignore[arg-type]
+        results = runner.run(charm, level="deep")
 
         # THEN
         assert results.results[0].level == "deep"
@@ -249,7 +249,7 @@ class TestValidatorRunnerRun:
         )
 
         # WHEN
-        results = runner.run(charm, level="simple")  # type: ignore[arg-type]
+        results = runner.run(charm, level="simple")
 
         # THEN
         assert len(results.results) == 2
@@ -261,7 +261,7 @@ class TestValidatorRunnerRun:
         charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
 
         # WHEN the runner is asked for deep
-        results = runner.run(charm, level="deep")  # type: ignore[arg-type]
+        results = runner.run(charm, level="deep")
 
         # THEN it fell back and got a real result at simple
         assert results.results[0].status == "PASS"
@@ -274,7 +274,7 @@ class TestValidatorRunnerRun:
         charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
 
         # WHEN the runner is asked for uat
-        results = runner.run(charm, level="uat")  # type: ignore[arg-type]
+        results = runner.run(charm, level="uat")
 
         # THEN it fell back through deep → simple and got a real result
         assert results.results[0].status == "PASS"
@@ -293,7 +293,7 @@ class TestValidatorRunnerRun:
         )
 
         # WHEN
-        results = runner.run(charm, level="simple")  # type: ignore[arg-type]
+        results = runner.run(charm, level="simple")
 
         # THEN both integrations produce independent SKIPPED results
         assert results.results[0].status == "SKIPPED"
