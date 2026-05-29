@@ -24,6 +24,7 @@ class FakeItem:
         self._nodeid = f"fake_tests/{name}.py::{name}"
         # Markers added via add_marker, keyed by name for fast lookup.
         self._added_marks: dict[str, Any] = {}
+        self.user_properties: list[tuple[str, object]] = []
         # Build a real pytest Mark so read_state_marker sees genuine kwargs.
         self._state_mark = pytest.mark.state(**state_marker_kwargs).mark if state_marker_kwargs else None
 

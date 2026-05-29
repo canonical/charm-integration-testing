@@ -69,33 +69,33 @@ class TestMarkAsInjected:
         # WHEN marked as injected
         _mark_as_injected(item)
 
-        # THEN the name is prefixed
-        assert item.name == f"[injected] {original_name}"
+        # THEN the name is unchanged (nodeid stability for testmon)
+        assert item.name == original_name
+        # AND the injected status is surfaced via user_properties
+        assert ("scheduler_injected", True) in item.user_properties
 
     def test_sets_nodeid_to_injected_name(self, make_item: Callable[..., pytest.Item]) -> None:
         # GIVEN an item with a known name
         item = make_item("test_foo")
+        original_nodeid = item.nodeid
 
         # WHEN marked as injected
         _mark_as_injected(item)
 
-        # THEN the node ID is the bare function name prefixed with [injected],
-        # not the full file path, so JUnit XML renders it as a short name
-        assert item.nodeid == "[injected] test_foo"
+        # THEN the nodeid is unchanged (testmon keys on nodeid)
+        assert item.nodeid == original_nodeid
 
     def test_idempotent_second_call_is_noop(self, make_item: Callable[..., pytest.Item]) -> None:
         # GIVEN an item that has already been marked as injected
         item = make_item("test_foo")
         _mark_as_injected(item)
-        name_after_first = item.name
-        nodeid_after_first = item.nodeid
+        props_after_first = list(item.user_properties)
 
         # WHEN marked as injected a second time
         _mark_as_injected(item)
 
-        # THEN neither the name nor the nodeid changes (prefix not doubled)
-        assert item.name == name_after_first
-        assert item.nodeid == nodeid_after_first
+        # THEN user_properties is not duplicated
+        assert item.user_properties == props_after_first
 
 
 # ---------------------------------------------------------------------------
@@ -165,8 +165,7 @@ class TestBuildExecutionPlan:
 
         # THEN the bridge item is labelled as injected
         assert deploy.get_closest_marker("injected") is not None
-        assert deploy.name.startswith("[injected]")
-        assert deploy.nodeid.startswith("[injected]")
+        assert ("scheduler_injected", True) in deploy.user_properties
 
     def test_selected_transition_not_labelled_as_injected(self, make_item: Callable[..., pytest.Item]) -> None:
         # GIVEN deploy is explicitly user-selected (present in selected_transitions)
@@ -237,7 +236,7 @@ class TestBuildExecutionPlan:
 
         # AND deploy is NOT marked injected (it was user-selected, not a bridge)
         assert deploy.get_closest_marker("injected") is None
-        assert not deploy.name.startswith("[injected]")
+        assert ("scheduler_injected", True) not in deploy.user_properties
 
         # AND only the true bridge is marked injected
         assert bridge_to_empty.get_closest_marker("injected") is not None
