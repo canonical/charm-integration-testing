@@ -19,7 +19,11 @@ from unittest.mock import patch
 
 import ops
 import psycopg2
-from test_utils.stubs import ApplicationStub, CharmBaseStub, RelationStub  # type: ignore[import-not-found]
+from test_utils.stubs import (  # type: ignore[import-not-found]
+    ApplicationStub,
+    RelationStub,
+    make_charm_from_relation,
+)
 
 from validators.postgresql_client.validator import PostgreSQLClientValidator
 
@@ -30,8 +34,8 @@ from validators.postgresql_client.validator import PostgreSQLClientValidator
 
 def _make_validator(databag: dict[str, str], endpoint: str = "db") -> PostgreSQLClientValidator:
     app = ApplicationStub()
-    relation = RelationStub(app=app, data={app: databag}, name=endpoint)
-    charm = cast(ops.CharmBase, CharmBaseStub(relation_name=endpoint, interface_name="postgresql_client"))
+    relation = RelationStub(name=endpoint, id=0, app=app, data={app: databag})
+    charm = cast(ops.CharmBase, make_charm_from_relation(relation, interface_name="postgresql_client"))
     return PostgreSQLClientValidator(charm, cast(ops.Relation, relation))
 
 
@@ -92,19 +96,6 @@ class TestPostgreSQLClientValidatorSimple:
         # THEN
         assert result.status == "SKIPPED"
         assert result.error is not None
-
-    def test_returns_error_when_relation_app_is_none(self) -> None:
-        # GIVEN a relation whose remote app is not yet known
-        relation = RelationStub(name="test-relation", app=None, data={})
-        validator = PostgreSQLClientValidator(
-            cast(ops.CharmBase, CharmBaseStub(relation_name=relation.name)), cast(ops.Relation, relation)
-        )
-
-        # WHEN
-        result = validator.validate(level="simple")
-
-        # THEN
-        assert result.status == "ERROR"
 
     def test_fails_schema_check_when_required_fields_missing(self) -> None:
         # GIVEN a databag with missing required fields

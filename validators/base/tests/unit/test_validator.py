@@ -15,8 +15,6 @@
 
 import pytest
 from test_utils.stubs import (  # type: ignore[import-not-found]
-    CharmBaseStub,
-    RelationMetaStub,
     ApplicationStub,
     RelationRoleStub,
     RelationStub,
@@ -68,7 +66,6 @@ class TestBaseValidator:
         # GIVEN
         relation = RelationStub(name="my-db", id=0)
         validator = ConcreteValidator(make_charm_from_relation(relation, RelationRoleStub.provides), relation=relation)
-        charm = validator.charm
 
         # WHEN
         role = validator.role
@@ -127,7 +124,9 @@ class TestBaseValidator:
         # GIVEN
         if app is None:
             app = ApplicationStub()
-        relation = RelationStub(name="my-db", id=1, app=app, data={app: {} if not exists else {"key": "value"}})
+        relation = RelationStub(name="my-db", id=1, app=app)
+        if not exists:
+            relation.data = {}
         validator = ConcreteValidator(make_charm_from_relation(relation), relation)
 
         # WHEN / THEN

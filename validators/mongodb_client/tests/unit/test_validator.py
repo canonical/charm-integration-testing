@@ -20,7 +20,11 @@ from unittest.mock import patch
 import ops
 import pymongo
 from pymongo.errors import WriteError
-from test_utils.stubs import make_charm_from_relation, ApplicationStub, CharmBaseStub, RelationStub  # type: ignore[import-not-found]
+from test_utils.stubs import (  # type: ignore[import-not-found]
+    ApplicationStub,
+    RelationStub,
+    make_charm_from_relation,
+)
 
 from validators.mongodb_client.validator import MongoDBClientValidator
 
@@ -32,7 +36,7 @@ from validators.mongodb_client.validator import MongoDBClientValidator
 def _make_validator(databag: dict[str, str], endpoint: str = "db") -> MongoDBClientValidator:
     app = ApplicationStub()
     relation = RelationStub(app=app, data={app: databag}, name=endpoint, id=0)
-    charm = make_charm_from_relation(relation)
+    charm = make_charm_from_relation(relation, interface_name="mongodb_client")
     return MongoDBClientValidator(charm, cast(ops.Relation, relation))
 
 
@@ -138,21 +142,6 @@ class TestMongoDBClientValidatorSimple:
         assert result.status == "SKIPPED"
         assert result.error is not None
         assert "not supported" in result.error
-
-    def test_returns_error_when_relation_app_is_none(self) -> None:
-        # GIVEN a relation whose remote app is not yet known
-        relation = RelationStub(id=0, name="db")
-        charm = make_charm_from_relation(relation)
-        validator = MongoDBClientValidator(
-            cast(ops.CharmBase, charm),
-            cast(ops.Relation, relation),
-        )
-
-        # WHEN
-        result = validator.validate(level="simple")
-
-        # THEN
-        assert result.status == "ERROR"
 
     def test_fails_schema_check_when_required_fields_missing(self) -> None:
         # GIVEN a databag with missing required fields

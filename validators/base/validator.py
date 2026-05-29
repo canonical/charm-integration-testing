@@ -58,7 +58,7 @@ class BaseValidator(ABC):
     @property
     def role(self) -> ValidationRole:
         relation = self.charm.meta.relations[self.relation.name]
-        return str_to_validation_role(relation.role.name)
+        return str_to_validation_role(relation.role.value)
 
     @property
     def endpoint(self) -> str:
@@ -101,7 +101,7 @@ class BaseValidator(ABC):
         pass
 
     def relation_exists(self) -> bool:
-        return len(self.relation.data[self.relation.app]) != 0
+        return self.relation.app in self.relation.data
 
     def resolve_secret(self, uri_key: str, *fields: str) -> dict[str, str]:
         if uri := self.databag.get(uri_key):
