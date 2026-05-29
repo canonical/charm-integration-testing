@@ -37,7 +37,7 @@ def _make_validator(databag: dict[str, str], endpoint: str = "db") -> MongoDBCli
     app = ApplicationStub()
     relation = RelationStub(app=app, data={app: databag}, name=endpoint, id=0)
     charm = make_charm_from_relation(relation, interface_name="mongodb_client")
-    return MongoDBClientValidator(charm, cast(ops.Relation, relation))
+    return MongoDBClientValidator(cast(ops.CharmBase, charm), cast(ops.Relation, relation))
 
 
 @dataclass

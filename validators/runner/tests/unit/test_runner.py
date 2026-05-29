@@ -14,9 +14,10 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, cast
 from unittest.mock import patch
 
+import ops
 from test_utils.stubs import (  # type: ignore[import-not-found]
     RelationRoleStub,
     RelationStub,
@@ -157,7 +158,7 @@ class TestValidatorRunnerRun:
         charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
 
         # WHEN
-        results = runner.run(charm, level="simple")
+        results = runner.run(cast(ops.CharmBase, charm), level="simple")
 
         # THEN
         assert isinstance(results, ValidatorRunnerResults)
@@ -171,7 +172,7 @@ class TestValidatorRunnerRun:
         charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
 
         # WHEN
-        results = runner.run(charm, level="simple")
+        results = runner.run(cast(ops.CharmBase, charm), level="simple")
 
         # THEN
         assert results.results[0].status == "FAIL"
@@ -183,7 +184,7 @@ class TestValidatorRunnerRun:
         charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
 
         # WHEN
-        results = runner.run(charm, level="simple")
+        results = runner.run(cast(ops.CharmBase, charm), level="simple")
 
         # THEN
         assert results.results[0].status == "ERROR"
@@ -197,7 +198,7 @@ class TestValidatorRunnerRun:
         charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
 
         # WHEN
-        results = runner.run(charm, level="simple")
+        results = runner.run(cast(ops.CharmBase, charm), level="simple")
 
         # THEN
         assert results.results == []
@@ -209,7 +210,7 @@ class TestValidatorRunnerRun:
         charm = make_charm_from_relation(relation, role=RelationRoleStub.requires, interface_name=None)
 
         # WHEN
-        results = runner.run(charm, level="simple")
+        results = runner.run(cast(ops.CharmBase, charm), level="simple")
 
         # THEN
         assert results.results[0].status == "PASS"
@@ -221,7 +222,7 @@ class TestValidatorRunnerRun:
         charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
 
         # WHEN
-        results = runner.run(charm, level="deep")
+        results = runner.run(cast(ops.CharmBase, charm), level="deep")
 
         # THEN
         assert results.results[0].level == "deep"
@@ -235,7 +236,7 @@ class TestValidatorRunnerRun:
         )
 
         # WHEN
-        results = runner.run(charm, level="simple")
+        results = runner.run(cast(ops.CharmBase, charm), level="simple")
 
         # THEN
         assert len(results.results) == 2
@@ -247,7 +248,7 @@ class TestValidatorRunnerRun:
         charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
 
         # WHEN the runner is asked for deep
-        results = runner.run(charm, level="deep")
+        results = runner.run(cast(ops.CharmBase, charm), level="deep")
 
         # THEN it fell back and got a real result at simple
         assert results.results[0].status == "PASS"
@@ -260,7 +261,7 @@ class TestValidatorRunnerRun:
         charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
 
         # WHEN the runner is asked for uat
-        results = runner.run(charm, level="uat")
+        results = runner.run(cast(ops.CharmBase, charm), level="uat")
 
         # THEN it fell back through deep → simple and got a real result
         assert results.results[0].status == "PASS"
