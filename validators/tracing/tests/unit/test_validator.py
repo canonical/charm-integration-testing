@@ -20,8 +20,8 @@ from unittest.mock import patch
 
 import ops
 import pytest
-from test_utils.helpers import make_charm_from_relation  # type: ignore[import-not-found]
-from test_utils.stubs import (  # type: ignore[import-not-found]
+from validators.test_utils.helpers import make_charm_from_relation
+from validators.test_utils.stubs import (
     ApplicationStub,
     RelationRoleStub,
     RelationStub,

@@ -17,11 +17,11 @@ from typing import cast
 
 import ops
 import pytest
-from test_utils.helpers import (  # type: ignore[import-not-found]
+from validators.test_utils.helpers import (
     make_charm_from_relation,
     make_charm_from_relation_and_secrets,
 )
-from test_utils.stubs import (  # type: ignore[import-not-found]
+from validators.test_utils.stubs import (
     ApplicationStub,
     RelationRoleStub,
     RelationStub,
