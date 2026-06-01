@@ -106,16 +106,16 @@ class S3Validator(BaseValidator):
             # Write
             write_check = self._put_object(client, bucket, canary_key, canary_body)
             checks.append(write_check)
-            if not write_check.passed:
-                return self._build_result("deep", checks)
 
-            # Read back and verify
-            read_check = self._get_and_verify_object(client, bucket, canary_key, canary_body)
-            checks.append(read_check)
-
-            # Delete canary regardless of read result
-            delete_check = self._delete_object(client, bucket, canary_key)
-            checks.append(delete_check)
+            # Always attempt canary cleanup to avoid leaking objects on partial server-side writes.
+            try:
+                if write_check.passed:
+                    # Read back and verify only if write succeeded
+                    read_check = self._get_and_verify_object(client, bucket, canary_key, canary_body)
+                    checks.append(read_check)
+            finally:
+                delete_check = self._delete_object(client, bucket, canary_key)
+                checks.append(delete_check)
         finally:
             self._cleanup_client(client)
 
@@ -130,7 +130,7 @@ class S3Validator(BaseValidator):
             client.head_bucket(Bucket=bucket)
             return ValidationCheck(name="bucket_accessible", passed=True, message=f"Bucket '{bucket}' is accessible.")
         except ClientError as exc:
-            code = exc.response["Error"]["Code"]
+            code = exc.response.get("Error", {}).get("Code", "Unknown")
             return ValidationCheck(
                 name="bucket_accessible",
                 passed=False,
@@ -225,6 +225,7 @@ class S3Validator(BaseValidator):
         self._remove_ca_file()
 
     def _write_ca_file(self, ca_content: str) -> None:
+        self._remove_ca_file()
         with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".pem") as f:
             f.write(ca_content)
             self._ca_file_path = f.name

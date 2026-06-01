@@ -191,6 +191,35 @@ class TestS3ValidatorSimple:
         call_kwargs = mock_boto.call_args.kwargs
         assert call_kwargs["config"].s3["addressing_style"] == "path"
 
+    def test_tls_ca_chain_written_and_cleaned_up(self) -> None:
+        # GIVEN a databag with tls-ca-chain set
+        import os
+
+        ca_databag = {
+            **VALID_DATABAG,
+            "tls-ca-chain": "-----BEGIN CERTIFICATE-----\nfake-ca\n-----END CERTIFICATE-----\n",
+        }
+        validator = _make_validator(ca_databag)
+        mock_client = MagicMock()
+        mock_client.head_bucket.return_value = {}
+
+        written_path: list[str] = []
+
+        def capture_verify(*args: object, **kwargs: object) -> MagicMock:
+            written_path.append(str(kwargs.get("verify", "")))
+            return mock_client
+
+        with patch("validators.s3.validator.boto3.client", side_effect=capture_verify):
+            result = validator.validate(level="simple")
+
+        # THEN boto3.client was called with verify= pointing to a temp .pem file
+        assert result.status == "PASS"
+        assert len(written_path) == 1
+        assert written_path[0].endswith(".pem")
+
+        # AND the temp file has been cleaned up after validation
+        assert not os.path.exists(written_path[0])
+
     def test_passes_with_secret_backed_credentials(self) -> None:
         # GIVEN a databag whose credentials are behind a Juju secret URI
         secret_uri = "secret:abc123"
