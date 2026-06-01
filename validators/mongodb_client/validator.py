@@ -22,10 +22,16 @@ from urllib.parse import quote_plus
 
 from pymongo import MongoClient
 
-from validators.base import BaseValidator, ValidationCheck, ValidationLevel, ValidationResult, ValidationResultStatus
+from validators.base import (  # type: ignore[import-not-found]
+    BaseValidator,
+    ValidationCheck,
+    ValidationLevel,
+    ValidationResult,
+    ValidationResultStatus,
+)
 
 
-class MongoDBClientValidator(BaseValidator):
+class MongoDBClientValidator(BaseValidator):  # type: ignore[misc]
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.ca_file_path: str | None = None

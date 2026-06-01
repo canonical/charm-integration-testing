@@ -20,14 +20,14 @@ from unittest.mock import patch
 
 import ops
 import pytest
-from validators.test_utils.helpers import make_charm_from_relation
-from validators.test_utils.stubs import (
+
+from validators.test_utils.helpers import make_charm_from_relation  # type: ignore[import-not-found]
+from validators.test_utils.stubs import (  # type: ignore[import-not-found]
     ApplicationStub,
     RelationRoleStub,
     RelationStub,
 )
-
-from validators.tracing.validator import TracingValidator
+from validators.tracing.validator import TracingValidator  # type: ignore[import-not-found]
 
 # ---------------------------------------------------------------------------
 # Stubs
@@ -379,7 +379,7 @@ class TestTracingValidatorDeep:
             def force_flush(self, timeout_millis: int = 30_000) -> bool:
                 return True
 
-        import validators.tracing.validator as vmod
+        import validators.tracing.validator as vmod  # type: ignore[import-not-found]
 
         with (
             patch.object(vmod, "_emit_test_span", wraps=vmod._emit_test_span),

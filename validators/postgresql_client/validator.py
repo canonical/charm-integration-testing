@@ -15,10 +15,16 @@
 
 import psycopg2
 
-from validators.base import BaseValidator, ValidationCheck, ValidationLevel, ValidationResult, ValidationResultStatus
+from validators.base import (  # type: ignore[import-not-found]
+    BaseValidator,
+    ValidationCheck,
+    ValidationLevel,
+    ValidationResult,
+    ValidationResultStatus,
+)
 
 
-class PostgreSQLClientValidator(BaseValidator):
+class PostgreSQLClientValidator(BaseValidator):  # type: ignore[misc]
     def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
         if level != "simple":
             return self._skipped_result_due_to_level(level)
@@ -38,7 +44,7 @@ class PostgreSQLClientValidator(BaseValidator):
         # --- 2. Resolve credentials (plain fields or Juju secrets) ---
         def resolve_secret(uri_key: str, *fields: str) -> dict[str, str]:
             if uri := databag.get(uri_key):
-                return self.charm.model.get_secret(id=uri).get_content()
+                return self.charm.model.get_secret(id=uri).get_content()  # type: ignore[no-any-return]
             return {f: databag[f] for f in fields if f in databag}
 
         creds = {

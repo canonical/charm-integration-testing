@@ -18,21 +18,21 @@ from typing import Optional, cast
 from unittest.mock import patch
 
 import ops
-from validators.test_utils.helpers import make_charm_from_relation
-from validators.test_utils.stubs import (
+
+from validators.base import BaseValidator, ValidationLevel, ValidationResult  # type: ignore
+from validators.runner.runner import ValidatorRunner, ValidatorRunnerResults  # type: ignore[import-not-found]
+from validators.test_utils.helpers import make_charm_from_relation  # type: ignore[import-not-found]
+from validators.test_utils.stubs import (  # type: ignore[import-not-found]
     RelationRoleStub,
     RelationStub,
 )
-
-from validators.base import BaseValidator, ValidationLevel, ValidationResult
-from validators.runner.runner import ValidatorRunner, ValidatorRunnerResults
 
 # ---------------------------------------------------------------------------
 # Validator stubs
 # ---------------------------------------------------------------------------
 
 
-class PassingValidator(BaseValidator):
+class PassingValidator(BaseValidator):  # type: ignore[misc]
     def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
         return ValidationResult(
             status="PASS",
@@ -44,7 +44,7 @@ class PassingValidator(BaseValidator):
         )
 
 
-class FailingValidator(BaseValidator):
+class FailingValidator(BaseValidator):  # type: ignore[misc]
     def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
         return ValidationResult(
             status="FAIL",
@@ -56,12 +56,12 @@ class FailingValidator(BaseValidator):
         )
 
 
-class ExplodingValidator(BaseValidator):
+class ExplodingValidator(BaseValidator):  # type: ignore[misc]
     def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
         raise RuntimeError("something went wrong")
 
 
-class SkippingValidator(BaseValidator):
+class SkippingValidator(BaseValidator):  # type: ignore[misc]
     """Validator that only supports 'simple'; returns SKIPPED for anything else."""
 
     def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
@@ -269,7 +269,7 @@ class TestValidatorRunnerRun:
 
     def test_surfaces_skipped_when_even_simple_is_not_supported(self) -> None:
         # GIVEN a validator that skips every level
-        class AlwaysSkippingValidator(BaseValidator):
+        class AlwaysSkippingValidator(BaseValidator):  # type: ignore[misc]
             def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
                 return self._skipped_result_due_to_level(level)
 

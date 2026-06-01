@@ -27,7 +27,13 @@ from ops.model import Relation, _ModelBackend
 from ops.storage import SQLiteStorage
 from pydantic import BaseModel
 
-from validators.base import BaseValidator, ValidationLevel, ValidationResult, ValidationRole, str_to_validation_role
+from validators.base import (  # type: ignore[import-not-found]
+    BaseValidator,
+    ValidationLevel,
+    ValidationResult,
+    ValidationRole,
+    str_to_validation_role,
+)
 
 # Ordered from highest to lowest; each level falls back to the next entry.
 _LEVEL_FALLBACK: dict[ValidationLevel, ValidationLevel | None] = {

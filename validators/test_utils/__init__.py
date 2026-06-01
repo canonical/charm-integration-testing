@@ -13,12 +13,27 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from .helpers import (
-    make_charm_from_relation, make_charm_from_relation_and_secrets
+from .helpers import make_charm_from_relation, make_charm_from_relation_and_secrets
+from .stubs import (
+    ApplicationStub,
+    CharmBaseStub,
+    CharmMetaStub,
+    ModelStub,
+    RelationMetaStub,
+    RelationRoleStub,
+    RelationStub,
+    SecretStub,
 )
-from .stubs import SecretStub, ApplicationStub, RelationStub, ModelStub, RelationRoleStub, RelationMetaStub, CharmMetaStub, CharmBaseStub
 
 __all__ = [
-    "make_charm_from_relation", "make_charm_from_relation_and_secrets",
-    "SecretStub", "ApplicationStub", "RelationStub", "ModelStub", "RelationRoleStub", "RelationMetaStub", "CharmMetaStub", "CharmBaseStub",
+    "make_charm_from_relation",
+    "make_charm_from_relation_and_secrets",
+    "SecretStub",
+    "ApplicationStub",
+    "RelationStub",
+    "ModelStub",
+    "RelationRoleStub",
+    "RelationMetaStub",
+    "CharmMetaStub",
+    "CharmBaseStub",
 ]

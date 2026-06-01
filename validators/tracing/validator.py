@@ -18,10 +18,15 @@ import socket
 from typing import Any, Literal
 from urllib.parse import urlparse
 
-from validators.base import BaseValidator, ValidationCheck, ValidationLevel, ValidationResult
+from validators.base import (  # type: ignore[import-not-found]
+    BaseValidator,
+    ValidationCheck,
+    ValidationLevel,
+    ValidationResult,
+)
 
 
-class TracingValidator(BaseValidator):
+class TracingValidator(BaseValidator):  # type: ignore[misc]
     def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
         if level not in ("simple", "deep"):
             return self._skipped_result_due_to_level(level)

@@ -37,7 +37,7 @@ class ValidationCheck(BaseModel):
 
 
 class ValidationResult(BaseModel):
-    status: Literal["PASS", "FAIL", "ERROR", "SKIPPED"]
+    status: ValidationResultStatus
     endpoint: str
     interface: str
     role: ValidationRole
