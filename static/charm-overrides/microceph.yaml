@@ -1,0 +1,48 @@
+---
+# Override for microceph
+# Source: https://github.com/canonical/charm-microceph
+# Upstream PR: https://github.com/canonical/charm-microceph/pull/298
+#
+# Two endpoint generations across stable tracks:
+#   latest/reef (rev 59): ceph, radosgw, mds
+#   squid (rev 242+):     adds cos-agent (#154), ceph-nfs (#190),
+#                         remote-provider, ceph-rgw-ready (Nov 2025)
+#
+# ceph (provides) - REQUIRED: primary purpose; charm exists to serve a Ceph
+#   cluster to consumers. Not blocking in code, but required by design.
+#
+# All other provides: optional - none cause BlockedStatus when absent.
+#   ceph-nfs/ceph-rgw-ready have real handlers but only block when a consumer
+#   is connected AND provisioning fails, not from absence.
+# All requires: already optional: true upstream; no override needed.
+overrides:
+
+  # -- latest, reef tracks -----------------------------------------------------
+  # Rev 59 (latest/stable, reef/stable) has only three provides endpoints:
+  # ceph (required), radosgw, mds.
+  - criteria:
+      - any_of:
+          - track: 'latest'
+          - track: 'reef'
+    provides:
+      mds:
+        optional: true
+      radosgw:
+        optional: true
+
+  # -- squid and newer (default) -----------------------------------------------
+  # Full endpoint set. Adds cos-agent, ceph-nfs, remote-provider, ceph-rgw-ready.
+  # ceph remains required (not listed here).
+  - provides:
+      ceph-nfs:
+        optional: true
+      ceph-rgw-ready:
+        optional: true
+      cos-agent:
+        optional: true
+      mds:
+        optional: true
+      radosgw:
+        optional: true
+      remote-provider:
+        optional: true
