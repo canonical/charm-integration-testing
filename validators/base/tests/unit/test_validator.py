@@ -18,24 +18,24 @@ from typing import cast
 import ops
 import pytest
 
-from validators.base import (  # type: ignore[import-not-found]
+from validators.base import (
     BaseValidator,
     ValidationCheck,
     ValidationLevel,
     ValidationResult,
 )
-from validators.test_utils.helpers import (  # type: ignore[import-not-found]
+from validators.test_utils.helpers import (
     make_charm_from_relation,
     make_charm_from_relation_and_secrets,
 )
-from validators.test_utils.stubs import (  # type: ignore[import-not-found]
+from validators.test_utils.stubs import (
     ApplicationStub,
     RelationRoleStub,
     RelationStub,
 )
 
 
-class ConcreteValidator(BaseValidator):  # type: ignore[misc]
+class ConcreteValidator(BaseValidator):
     """Minimal concrete implementation for testing BaseValidator."""
 
     def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
@@ -101,7 +101,9 @@ class TestBaseValidator:
     def test_cannot_instantiate_abstract_class(self) -> None:
         # GIVEN / WHEN / THEN
         with pytest.raises(TypeError):
-            BaseValidator(object(), RelationStub(name="x", id=0))
+            relation = RelationStub(name="x", id=0)
+            charm = make_charm_from_relation(relation)
+            BaseValidator(cast(ops.CharmBase, charm), cast(ops.Relation, relation))  # type: ignore[abstract]
 
     def test_databag_reads_relation_app_databag(self) -> None:
         # GIVEN

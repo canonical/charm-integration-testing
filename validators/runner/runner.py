@@ -27,7 +27,7 @@ from ops.model import Relation, _ModelBackend
 from ops.storage import SQLiteStorage
 from pydantic import BaseModel
 
-from validators.base import (  # type: ignore[import-not-found]
+from validators.base import (
     BaseValidator,
     ValidationLevel,
     ValidationResult,

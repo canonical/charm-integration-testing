@@ -22,7 +22,7 @@ from urllib.parse import quote_plus
 
 from pymongo import MongoClient
 
-from validators.base import (  # type: ignore[import-not-found]
+from validators.base import (
     BaseValidator,
     ValidationCheck,
     ValidationLevel,
@@ -31,7 +31,7 @@ from validators.base import (  # type: ignore[import-not-found]
 )
 
 
-class MongoDBClientValidator(BaseValidator):  # type: ignore[misc]
+class MongoDBClientValidator(BaseValidator):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.ca_file_path: str | None = None
