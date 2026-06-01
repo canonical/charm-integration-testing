@@ -49,7 +49,7 @@ class RelationStub:
 class ModelStub:
     """Stub for ops.Model.
 
-    secrets are kept as a field in this class so that we do not have to implement a backend"""
+    Secrets are kept as a field in this class so that we do not have to implement a backend."""
 
     _secrets: dict[str, dict[str, str]] = field(default_factory=dict)
     requested_ids: list[str] = field(default_factory=list)
