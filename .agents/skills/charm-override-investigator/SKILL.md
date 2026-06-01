@@ -64,9 +64,22 @@ behavior: it signals that the spec is incomplete without them.
 
 ### Finding the source repository
 
-- `https://github.com/canonical/<charm-name>-operator` (ops framework)
-- `https://github.com/charmed-kubernetes/<charm-name>` (CK charms)
-- GitHub search: `org:canonical <charm-name>` or `org:charmed-kubernetes <charm-name>`
+There is no naming standardization. Common patterns to try (where `<name>` is the Charmhub slug):
+
+- `github.com/canonical/<name>-operator` (ops framework)
+- `github.com/canonical/charm-<name>-operator`
+- `github.com/canonical/charm-<name>`
+- `github.com/canonical/<name>`
+- `github.com/charmed-kubernetes/<name>` (CK charms)
+- `github.com/openstack/charm-<name>` (OpenStack charms - **mirror only**, upstream is Gerrit at `opendev.org/openstack/charm-<name>`)
+
+If direct URL guessing fails, use GitHub search:
+- `org:canonical <name>` (scoped)
+- `<name> charm` (broader, catches other orgs)
+
+Note: a single repo may contain multiple charms (e.g. `kfp-operators` contains
+several KFP component charms). Check for a `charms/` or `operators/` subdirectory
+and locate the specific charm's `metadata.yaml` or `charmcraft.yaml` within it.
 
 ### Files to inspect
 
