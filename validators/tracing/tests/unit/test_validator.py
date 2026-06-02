@@ -20,14 +20,13 @@ from unittest.mock import patch
 
 import ops
 import pytest
-from test_utils.stubs import (  # type: ignore[import-not-found]
+
+from validators.test_utils.helpers import make_charm_from_relation
+from validators.test_utils.stubs import (
     ApplicationStub,
-    RelationMetaStub,
     RelationRoleStub,
     RelationStub,
-    make_charm_from_relation,
 )
-
 from validators.tracing.validator import TracingValidator
 
 # ---------------------------------------------------------------------------
@@ -43,14 +42,7 @@ def _make_validator(
     app = ApplicationStub()
     relation = RelationStub(app=app, data={app: databag}, name=endpoint, id=0)
     charm = make_charm_from_relation(relation, interface_name="tracing", role=role)
-    charm = cast(ops.CharmBase, charm)
-    if role != RelationRoleStub.requires:
-        charm.meta.relations[endpoint] = RelationMetaStub(
-            relation_name=endpoint,
-            interface_name="tracing",
-            role=role,
-        )
-    return TracingValidator(charm, cast(ops.Relation, relation))
+    return TracingValidator(cast(ops.CharmBase, charm), cast(ops.Relation, relation))
 
 
 # ---------------------------------------------------------------------------

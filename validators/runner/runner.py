@@ -27,7 +27,13 @@ from ops.model import Relation, _ModelBackend
 from ops.storage import SQLiteStorage
 from pydantic import BaseModel
 
-from validators.base import BaseValidator, ValidationLevel, ValidationResult, ValidationRole, str_to_validation_role
+from validators.base import (
+    BaseValidator,
+    ValidationLevel,
+    ValidationResult,
+    ValidationRole,
+    str_to_validation_role,
+)
 
 # Ordered from highest to lowest; each level falls back to the next entry.
 _LEVEL_FALLBACK: dict[ValidationLevel, ValidationLevel | None] = {
@@ -69,6 +75,19 @@ class ValidatorRunner:
                 continue
             interface_name = metadata.interface_name or relation
 
+            if relation not in charm.model.relations:
+                results.append(
+                    ValidationResult(
+                        status="ERROR",
+                        endpoint=relation,
+                        interface=interface_name,
+                        role=role,
+                        level=level,
+                        relation_id=None,
+                        error=f"Relation '{relation}' defined in metadata but not found in model.",
+                    )
+                )
+                continue
             for integration in charm.model.relations[relation]:
                 results += self._run_for_integration(charm, interface_name, integration, level, role)
         return ValidatorRunnerResults(results=results)

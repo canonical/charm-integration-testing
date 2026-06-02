@@ -17,15 +17,22 @@ from typing import cast
 
 import ops
 import pytest
-from test_utils.stubs import (  # type: ignore[import-not-found]
-    ApplicationStub,
-    RelationRoleStub,
-    RelationStub,
+
+from validators.base import (
+    BaseValidator,
+    ValidationCheck,
+    ValidationLevel,
+    ValidationResult,
+)
+from validators.test_utils.helpers import (
     make_charm_from_relation,
     make_charm_from_relation_and_secrets,
 )
-
-from validators.base import BaseValidator, ValidationCheck, ValidationLevel, ValidationResult
+from validators.test_utils.stubs import (
+    ApplicationStub,
+    RelationRoleStub,
+    RelationStub,
+)
 
 
 class ConcreteValidator(BaseValidator):
@@ -94,14 +101,17 @@ class TestBaseValidator:
     def test_cannot_instantiate_abstract_class(self) -> None:
         # GIVEN / WHEN / THEN
         with pytest.raises(TypeError):
-            BaseValidator(object(), RelationStub(name="x", id=0))  # type: ignore[abstract, arg-type]
+            relation = RelationStub(name="x", id=0)
+            charm = make_charm_from_relation(relation)
+            BaseValidator(cast(ops.CharmBase, charm), cast(ops.Relation, relation))  # type: ignore[abstract]
 
     def test_databag_reads_relation_app_databag(self) -> None:
         # GIVEN
         app = ApplicationStub()
         databag = {"username": "admin", "password": "secret"}
         relation = RelationStub(name="my-db", id=1, app=app, data={app: databag})
-        validator = ConcreteValidator(make_charm_from_relation(relation), relation)
+        charm = make_charm_from_relation(relation)
+        validator = ConcreteValidator(cast(ops.CharmBase, charm), cast(ops.Relation, relation))
 
         # WHEN
         validator.databag["username"] = "changed"
@@ -117,7 +127,8 @@ class TestBaseValidator:
         relation = RelationStub(name="my-db", id=1, app=app)
         if not exists:
             relation.data = {}
-        validator = ConcreteValidator(make_charm_from_relation(relation), relation)
+        charm = make_charm_from_relation(relation)
+        validator = ConcreteValidator(cast(ops.CharmBase, charm), cast(ops.Relation, relation))
 
         # WHEN / THEN
         assert validator.relation_exists() is exists
@@ -133,7 +144,7 @@ class TestBaseValidator:
         )
         secrets = {"secret:db-creds": {"username": "secret-user", "password": "pw"}}
         charm = make_charm_from_relation_and_secrets(relation, secrets)
-        validator = ConcreteValidator(charm, relation)
+        validator = ConcreteValidator(cast(ops.CharmBase, charm), cast(ops.Relation, relation))
 
         # WHEN
         resolved = validator.resolve_secret("secret-uri", "username", "password")
@@ -152,7 +163,7 @@ class TestBaseValidator:
             data={app: {"username": "plain-user", "password": "plain-pw", "extra": "x"}},
         )
         charm = make_charm_from_relation(relation)
-        validator = ConcreteValidator(charm, relation)
+        validator = ConcreteValidator(cast(ops.CharmBase, charm), cast(ops.Relation, relation))
 
         # WHEN
         resolved = validator.resolve_secret("secret-uri", "username", "password", "missing")
@@ -170,7 +181,8 @@ class TestBaseValidator:
             app=app,
             data={app: {"host": "10.0.0.10", "port": ""}},
         )
-        validator = ConcreteValidator(make_charm_from_relation(relation), relation)
+        charm = make_charm_from_relation(relation)
+        validator = ConcreteValidator(cast(ops.CharmBase, charm), cast(ops.Relation, relation))
 
         # WHEN
         check = validator.validate_schema(["host", "port", "user"])

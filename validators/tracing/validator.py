@@ -18,7 +18,12 @@ import socket
 from typing import Any, Literal
 from urllib.parse import urlparse
 
-from validators.base import BaseValidator, ValidationCheck, ValidationLevel, ValidationResult
+from validators.base import (
+    BaseValidator,
+    ValidationCheck,
+    ValidationLevel,
+    ValidationResult,
+)
 
 
 class TracingValidator(BaseValidator):

@@ -22,7 +22,13 @@ from urllib.parse import quote_plus
 
 from pymongo import MongoClient
 
-from validators.base import BaseValidator, ValidationCheck, ValidationLevel, ValidationResult, ValidationResultStatus
+from validators.base import (
+    BaseValidator,
+    ValidationCheck,
+    ValidationLevel,
+    ValidationResult,
+    ValidationResultStatus,
+)
 
 
 class MongoDBClientValidator(BaseValidator):

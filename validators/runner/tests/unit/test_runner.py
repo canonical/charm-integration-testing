@@ -18,14 +18,15 @@ from typing import Optional, cast
 from unittest.mock import patch
 
 import ops
-from test_utils.stubs import (  # type: ignore[import-not-found]
-    RelationRoleStub,
-    RelationStub,
-    make_charm_from_relation,
-)
+import pytest
 
 from validators.base import BaseValidator, ValidationLevel, ValidationResult
 from validators.runner.runner import ValidatorRunner, ValidatorRunnerResults
+from validators.test_utils.helpers import make_charm_from_relation
+from validators.test_utils.stubs import (
+    RelationRoleStub,
+    RelationStub,
+)
 
 # ---------------------------------------------------------------------------
 # Validator stubs
@@ -38,7 +39,7 @@ class PassingValidator(BaseValidator):
             status="PASS",
             endpoint=self.endpoint,
             interface="test-interface",
-            role="requires",
+            role=self.role,
             level=level,
             relation_id=self.relation_id,
         )
@@ -50,7 +51,7 @@ class FailingValidator(BaseValidator):
             status="FAIL",
             endpoint=self.endpoint,
             interface="test-interface",
-            role="requires",
+            role=self.role,
             level=level,
             relation_id=self.relation_id,
         )
@@ -71,7 +72,7 @@ class SkippingValidator(BaseValidator):
             status="PASS",
             endpoint=self.endpoint,
             interface="test-interface",
-            role="requires",
+            role=self.role,
             level=level,
             relation_id=self.relation_id,
         )
@@ -294,9 +295,31 @@ class TestValidatorRunnerRun:
         )
 
         # WHEN
-        results = runner.run(charm, level="simple")
+        results = runner.run(cast(ops.CharmBase, charm), level="simple")
 
         # THEN both integrations produce independent SKIPPED results
         assert results.results[0].status == "SKIPPED"
         assert results.results[1].status == "SKIPPED"
         assert results.results[0].relation_id != results.results[1].relation_id
+
+    @pytest.mark.parametrize(
+        "role,ignore_validator",
+        [(RelationRoleStub.peer, True), (RelationRoleStub.provides, False), (RelationRoleStub.requires, False)],
+    )
+    def test_skips_based_on_relation(self, role: RelationRoleStub, ignore_validator: bool) -> None:
+        # GIVEN a runner with a validator registered for the interface with the given role
+        runner = self._runner_with("test-interface", PassingValidator)
+        relation = RelationStub(name="cluster", id=0)
+        charm = make_charm_from_relation(relation, interface_name="test-interface", role=role)
+
+        # WHEN
+        results = runner.run(cast(ops.CharmBase, charm), level="simple")
+
+        if ignore_validator:
+            # THEN the validator is ignored
+            assert results.results == []
+        else:
+            # THEN the relation is processed and results are returned
+            assert len(results.results) == 1
+            assert results.results[0].status == "PASS"
+            assert results.results[0].role == role.value
