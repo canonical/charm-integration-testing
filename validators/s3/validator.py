@@ -39,7 +39,7 @@ class S3Validator(BaseValidator):
             return self._validate_simple()
         if level == "deep":
             return self._validate_deep()
-        return self._skipped_result(level)
+        return self._skipped_result_due_to_level(level)
 
     # ------------------------------------------------------------------
     # Simple (L1): schema + bucket accessibility
@@ -115,7 +115,8 @@ class S3Validator(BaseValidator):
                     checks.append(read_check)
             finally:
                 delete_check = self._delete_object(client, bucket, canary_key)
-                checks.append(delete_check)
+                if write_check.passed:
+                    checks.append(delete_check)
         finally:
             self._cleanup_client(client)
 
