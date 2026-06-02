@@ -2286,6 +2286,24 @@ type = "directory"
 url = "validators/runner"
 
 [[package]]
+name = "validators-test-utils"
+version = "0.1.0"
+description = "Test utils for Interface Validators Framework (SQ096)"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+ops = ">=2.0.0"
+pydantic = ">=2.0.0"
+
+[package.source]
+type = "directory"
+url = "validators/test_utils"
+
+[[package]]
 name = "validators-tracing"
 version = "0.1.0"
 description = "Validator for tracing interface (v2)"
@@ -2399,4 +2417,4 @@ type = ["pytest-mypy"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<4.0"
-content-hash = "fabc41a8ce382f44b84a29a187c236352d9bd88d6b128a900010077daa48d893"
+content-hash = "ef04eda2d277803b6e3b8469e680de9a58a14bf2b04d4888751148da7bf65c75"
