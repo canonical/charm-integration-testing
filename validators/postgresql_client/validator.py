@@ -66,9 +66,8 @@ class PostgreSQLClientValidator(BaseValidator):
         # --- 5. Connect ---
         try:
             conn = self._connect(uri)
-            checks.append(
-                ValidationCheck(name="connect", passed=True, message=f"Connected to {uri.rsplit('@', 1)[-1]}.")
-            )
+            safe_target = self._safe_uri_string(uri)
+            checks.append(ValidationCheck(name="connect", passed=True, message=f"Connected to {safe_target}."))
         except Exception as exc:
             checks.append(ValidationCheck(name="connect", passed=False, message=str(exc)))
             return self._build_result("simple", checks)
@@ -125,9 +124,8 @@ class PostgreSQLClientValidator(BaseValidator):
         # --- 5. Connect ---
         try:
             conn = self._connect(uri)
-            checks.append(
-                ValidationCheck(name="connect", passed=True, message=f"Connected to {uri.rsplit('@', 1)[-1]}.")
-            )
+            safe_target = self._safe_uri_string(uri)
+            checks.append(ValidationCheck(name="connect", passed=True, message=f"Connected to {safe_target}."))
         except Exception as exc:
             checks.append(ValidationCheck(name="connect", passed=False, message=str(exc)))
             return self._build_result("deep", checks)
@@ -308,3 +306,10 @@ class PostgreSQLClientValidator(BaseValidator):
             level=level,
             checks=checks,
         )
+
+    def _safe_uri_string(self, uri: str) -> str:
+        parsed = urllib.parse.urlsplit(uri)
+        host = parsed.hostname or ""
+        port = f":{parsed.port}" if parsed.port else ""
+        safe_target = f"{host}{port}{parsed.path or ''}"
+        return safe_target
