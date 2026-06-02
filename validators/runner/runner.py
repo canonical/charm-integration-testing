@@ -27,7 +27,13 @@ from ops.model import Relation, _ModelBackend
 from ops.storage import SQLiteStorage
 from pydantic import BaseModel
 
-from validators.base import BaseValidator, ValidationLevel, ValidationResult
+from validators.base import (
+    BaseValidator,
+    ValidationLevel,
+    ValidationResult,
+    ValidationRole,
+    str_to_validation_role,
+)
 
 # Ordered from highest to lowest; each level falls back to the next entry.
 _LEVEL_FALLBACK: dict[ValidationLevel, ValidationLevel | None] = {
@@ -62,16 +68,37 @@ class ValidatorRunner:
         return validators
 
     def run(self, charm: CharmBase, level: ValidationLevel) -> ValidatorRunnerResults:
-        # Get the list of requires endpoints
+        # Get the list of endpoints
         results = []
-        for required_endpoint, endpoint_metadata in charm.meta.requires.items():
-            interface_name = endpoint_metadata.interface_name or required_endpoint
-            for integration in charm.model.relations[required_endpoint]:
-                results += self._run_for_integration(charm, interface_name, integration, level)
+        for relation, metadata in charm.meta.relations.items():
+            if (role := str_to_validation_role(metadata.role.name)) == "peer":
+                continue
+            interface_name = metadata.interface_name or relation
+
+            if relation not in charm.model.relations:
+                results.append(
+                    ValidationResult(
+                        status="ERROR",
+                        endpoint=relation,
+                        interface=interface_name,
+                        role=role,
+                        level=level,
+                        relation_id=None,
+                        error=f"Relation '{relation}' defined in metadata but not found in model.",
+                    )
+                )
+                continue
+            for integration in charm.model.relations[relation]:
+                results += self._run_for_integration(charm, interface_name, integration, level, role)
         return ValidatorRunnerResults(results=results)
 
     def _run_for_integration(
-        self, charm: CharmBase, interface_name: str, integration: Relation, level: ValidationLevel
+        self,
+        charm: CharmBase,
+        interface_name: str,
+        integration: Relation,
+        level: ValidationLevel,
+        role: ValidationRole,
     ) -> list[ValidationResult]:
         results: list[ValidationResult] = []
         for validator_cls in self.validators.get(interface_name, []):
@@ -93,6 +120,7 @@ class ValidatorRunner:
                         status="ERROR",
                         endpoint=integration.name,
                         interface=interface_name,
+                        role=role,
                         level=level,
                         relation_id=integration.id,
                         error=f"Validator '{validator_cls.__name__}' raised an exception: {exc}",

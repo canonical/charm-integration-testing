@@ -13,22 +13,26 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from .validator import (
-    BaseValidator,
-    ValidationCheck,
-    ValidationLevel,
-    ValidationResult,
-    ValidationResultStatus,
-    ValidationRole,
-    str_to_validation_role,
-)
-
-__all__ = [
-    "BaseValidator",
-    "ValidationCheck",
-    "ValidationLevel",
-    "ValidationRole",
-    "ValidationResult",
-    "ValidationResultStatus",
-    "str_to_validation_role",
+[project]
+name = "validators-test-utils"
+version = "0.1.0"
+description = "Test utils for Interface Validators Framework (SQ096)"
+authors = [
+    {name = "SQA Team", email = "solutionsqa@canonical.com"}
 ]
+
+requires-python = ">=3.10"
+dependencies = [
+    "ops>=2.0.0",
+    "pydantic>=2.0.0",
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["validators.test_utils"]
+
+[tool.setuptools.package-dir]
+"validators.test_utils" = "."
