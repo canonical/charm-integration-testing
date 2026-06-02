@@ -8,61 +8,25 @@ import ops
 from botocore.exceptions import ClientError
 
 from validators.s3.validator import S3Validator
+from validators.test_utils.helpers import make_charm_from_relation
+from validators.test_utils.stubs import ApplicationStub, RelationStub
 
 # ---------------------------------------------------------------------------
-# Stubs
+# Helpers
 # ---------------------------------------------------------------------------
 
 
-class AppStub:
-    """Minimal stand-in for ops.Application. Must be hashable (dict key)."""
-
-
-class RelationStub:
-    def __init__(self, app: AppStub | None, databag: dict[str, str], name: str = "s3", id: int = 0) -> None:
-        self.app = app
-        self.name = name
-        self.id = id
-        self.data: dict[AppStub | None, dict[str, str]] = {app: databag}
-
-
-class RelationMetaStub:
-    def __init__(self, interface_name: str) -> None:
-        self.interface_name = interface_name
-
-
-class CharmMetaStub:
-    def __init__(self, endpoint: str, interface_name: str) -> None:
-        self.relations = {endpoint: RelationMetaStub(interface_name)}
-
-
-class SecretStub:
-    def __init__(self, content: dict[str, str]) -> None:
-        self._content = content
-
-    def get_content(self) -> dict[str, str]:
-        return self._content
-
-
-class ModelStub:
-    def __init__(self, secrets: dict[str, dict[str, str]] | None = None) -> None:
-        self._secrets = secrets or {}
-
-    def get_secret(self, id: str) -> SecretStub:
-        return SecretStub(self._secrets[id])
-
-
-class CharmStub:
-    def __init__(self, endpoint: str = "s3", interface_name: str = "s3", model: ModelStub | None = None) -> None:
-        self.meta = CharmMetaStub(endpoint, interface_name)
-        self.model = model or ModelStub()
-
-
-def _make_validator(databag: dict[str, str], endpoint: str = "s3", model: ModelStub | None = None) -> S3Validator:
-    app = AppStub()
-    relation = RelationStub(app=app, databag=databag, name=endpoint)
-    charm = cast(ops.CharmBase, CharmStub(endpoint=endpoint, model=model))
-    return S3Validator(charm, cast(ops.Relation, relation))
+def _make_validator(
+    databag: dict[str, str],
+    endpoint: str = "s3",
+    secrets: dict[str, dict[str, str]] | None = None,
+) -> S3Validator:
+    app = ApplicationStub()
+    relation = RelationStub(name=endpoint, id=0, app=app, data={app: databag})
+    charm = make_charm_from_relation(relation, interface_name="s3")
+    if secrets:
+        charm.model._secrets = secrets
+    return S3Validator(cast(ops.CharmBase, charm), cast(ops.Relation, relation))
 
 
 def _client_error(code: str) -> ClientError:
@@ -100,9 +64,12 @@ class TestS3ValidatorSimple:
         assert "not supported" in result.error
 
     def test_returns_error_when_relation_app_is_none(self) -> None:
-        # GIVEN a relation whose remote app is not yet known
-        relation = RelationStub(app=None, databag={})
-        validator = S3Validator(cast(ops.CharmBase, CharmStub(endpoint=relation.name)), cast(ops.Relation, relation))
+        # GIVEN a relation whose remote app is not yet in scope
+        app = ApplicationStub()
+        relation = RelationStub(name="s3", id=0, app=app)
+        relation.data = {}  # override __post_init__ to simulate app not in scope
+        charm = cast(ops.CharmBase, make_charm_from_relation(relation, interface_name="s3"))
+        validator = S3Validator(charm, cast(ops.Relation, relation))
 
         # WHEN
         result = validator.validate(level="simple")
@@ -224,14 +191,13 @@ class TestS3ValidatorSimple:
         # GIVEN a databag whose credentials are behind a Juju secret URI
         secret_uri = "secret:abc123"
         secret_content = {"access-key": "test-access-key", "secret-key": "test-secret-key"}
-        model = ModelStub(secrets={secret_uri: secret_content})
         secret_databag = {
             "bucket": "my-bucket",
             "endpoint": "http://s3.example.com",
             "region": "us-east-1",
             "s3-credentials": secret_uri,
         }
-        validator = _make_validator(secret_databag, model=model)
+        validator = _make_validator(secret_databag, secrets={secret_uri: secret_content})
         mock_client = MagicMock()
         mock_client.head_bucket.return_value = {}
 

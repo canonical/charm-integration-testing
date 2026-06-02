@@ -31,7 +31,7 @@ class S3Validator(BaseValidator):
 
     def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
         if level == "uat":
-            return self._skipped_result(level)
+            return self._skipped_result_due_to_level(level)
         error_result = self._check_relation_exists(level)
         if error_result:
             return error_result
@@ -176,14 +176,7 @@ class S3Validator(BaseValidator):
 
     def _check_relation_exists(self, level: ValidationLevel) -> ValidationResult | None:
         if not self.relation_exists():
-            return ValidationResult(
-                status="ERROR",
-                endpoint=self.endpoint,
-                interface=self.interface,
-                level=level,
-                relation_id=self.relation_id,
-                error=f"No remote application on relation '{self.endpoint}'.",
-            )
+            return self._error_result(level, f"No remote application on relation '{self.endpoint}'.")
         return None
 
     def _resolve_credentials(self) -> dict[str, str]:
@@ -236,12 +229,8 @@ class S3Validator(BaseValidator):
             self._ca_file_path = None
 
     def _build_result(self, level: ValidationLevel, checks: list[ValidationCheck]) -> ValidationResult:
-        status = "PASS" if all(c.passed for c in checks) else "FAIL"
-        return ValidationResult(
-            status=status,
-            endpoint=self.endpoint,
-            interface=self.interface,
-            level=level,
-            relation_id=self.relation_id,
-            checks=checks,
+        return self._make_result(
+            "PASS" if all(c.passed for c in checks) else "FAIL",
+            level,
+            checks,
         )
