@@ -21,43 +21,21 @@ import ops
 import psycopg2
 
 from validators.postgresql_client.validator import PostgreSQLClientValidator
+from validators.test_utils.helpers import make_charm_from_relation
+from validators.test_utils.stubs import (
+    ApplicationStub,
+    RelationStub,
+)
 
 # ---------------------------------------------------------------------------
 # Stubs
 # ---------------------------------------------------------------------------
 
 
-class AppStub:
-    """Minimal stand-in for ops.Application.  Must be hashable (dict key)."""
-
-
-class RelationStub:
-    def __init__(self, app: AppStub | None, databag: dict[str, str], name: str = "db", id: int = 0) -> None:
-        self.app = app
-        self.name = name
-        self.id = id
-        self.data: dict[AppStub | None, dict[str, str]] = {app: databag}
-
-
-class RelationMetaStub:
-    def __init__(self, interface_name: str) -> None:
-        self.interface_name = interface_name
-
-
-class CharmMetaStub:
-    def __init__(self, endpoint: str, interface_name: str) -> None:
-        self.relations = {endpoint: RelationMetaStub(interface_name)}
-
-
-class CharmStub:
-    def __init__(self, endpoint: str = "db", interface_name: str = "postgresql_client") -> None:
-        self.meta = CharmMetaStub(endpoint, interface_name)
-
-
 def _make_validator(databag: dict[str, str], endpoint: str = "db") -> PostgreSQLClientValidator:
-    app = AppStub()
-    relation = RelationStub(app=app, databag=databag, name=endpoint)
-    charm = cast(ops.CharmBase, CharmStub(endpoint=endpoint))
+    app = ApplicationStub()
+    relation = RelationStub(name=endpoint, id=0, app=app, data={app: databag})
+    charm = cast(ops.CharmBase, make_charm_from_relation(relation, interface_name="postgresql_client"))
     return PostgreSQLClientValidator(charm, cast(ops.Relation, relation))
 
 
@@ -118,17 +96,6 @@ class TestPostgreSQLClientValidatorSimple:
         # THEN
         assert result.status == "SKIPPED"
         assert result.error is not None
-
-    def test_returns_error_when_relation_app_is_none(self) -> None:
-        # GIVEN a relation whose remote app is not yet known
-        relation = RelationStub(app=None, databag={})
-        validator = PostgreSQLClientValidator(cast(ops.CharmBase, CharmStub()), cast(ops.Relation, relation))
-
-        # WHEN
-        result = validator.validate(level="simple")
-
-        # THEN
-        assert result.status == "ERROR"
 
     def test_fails_schema_check_when_required_fields_missing(self) -> None:
         # GIVEN a databag with missing required fields

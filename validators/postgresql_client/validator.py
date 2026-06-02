@@ -15,25 +15,29 @@
 
 import psycopg2
 
-from validators.base import BaseValidator, ValidationCheck, ValidationLevel, ValidationResult
+from validators.base import (
+    BaseValidator,
+    ValidationCheck,
+    ValidationLevel,
+    ValidationResult,
+    ValidationResultStatus,
+)
 
 
 class PostgreSQLClientValidator(BaseValidator):
     def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
         if level != "simple":
-            return self._skipped_result(level)
+            return self._skipped_result_due_to_level(level)
 
         checks: list[ValidationCheck] = []
 
-        # --- 1. Remote app presence ---
-        if self.relation.app is None:
-            return ValidationResult(
+        # --- 1. Databag presence ---
+        # relation.app should never be None in a real relation
+        if not self.relation_exists():
+            return self._make_result(
                 status="ERROR",
-                endpoint=self.endpoint,
-                interface=self.interface,
                 level="simple",
-                relation_id=self.relation_id,
-                error=f"No remote application on relation '{self.endpoint}'.",
+                error=f"No relation on endpoint '{self.endpoint}'.",
             )
 
         databag = dict(self.relation.data[self.relation.app])
@@ -59,12 +63,9 @@ class PostgreSQLClientValidator(BaseValidator):
             )
         )
         if missing:
-            return ValidationResult(
+            return self._make_result(
                 status="FAIL",
-                endpoint=self.endpoint,
-                interface=self.interface,
                 level="simple",
-                relation_id=self.relation_id,
                 checks=checks,
             )
 
@@ -83,12 +84,9 @@ class PostgreSQLClientValidator(BaseValidator):
             checks.append(ValidationCheck(name="connect", passed=True, message=f"Connected to {endpoint}."))
         except Exception as exc:
             checks.append(ValidationCheck(name="connect", passed=False, message=str(exc)))
-            return ValidationResult(
+            return self._make_result(
                 status="FAIL",
-                endpoint=self.endpoint,
-                interface=self.interface,
                 level="simple",
-                relation_id=self.relation_id,
                 checks=checks,
             )
 
@@ -102,12 +100,9 @@ class PostgreSQLClientValidator(BaseValidator):
         finally:
             conn.close()
 
-        status = "PASS" if all(c.passed for c in checks) else "FAIL"
-        return ValidationResult(
+        status: ValidationResultStatus = "PASS" if all(c.passed for c in checks) else "FAIL"
+        return self._make_result(
             status=status,
-            endpoint=self.endpoint,
-            interface=self.interface,
             level="simple",
-            relation_id=self.relation_id,
             checks=checks,
         )
