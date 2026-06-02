@@ -1,6 +1,7 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import os
 from typing import cast
 from unittest.mock import MagicMock, patch
 
@@ -8,7 +9,7 @@ import ops
 from botocore.exceptions import ClientError
 
 from validators.s3.validator import S3Validator
-from validators.test_utils.helpers import make_charm_from_relation
+from validators.test_utils.helpers import make_charm_from_relation, make_charm_from_relation_and_secrets
 from validators.test_utils.stubs import ApplicationStub, RelationStub
 
 # ---------------------------------------------------------------------------
@@ -16,16 +17,10 @@ from validators.test_utils.stubs import ApplicationStub, RelationStub
 # ---------------------------------------------------------------------------
 
 
-def _make_validator(
-    databag: dict[str, str],
-    endpoint: str = "s3",
-    secrets: dict[str, dict[str, str]] | None = None,
-) -> S3Validator:
+def _make_validator(databag: dict[str, str], endpoint: str = "s3") -> S3Validator:
     app = ApplicationStub()
     relation = RelationStub(name=endpoint, id=0, app=app, data={app: databag})
     charm = make_charm_from_relation(relation, interface_name="s3")
-    if secrets:
-        charm.model._secrets = secrets
     return S3Validator(cast(ops.CharmBase, charm), cast(ops.Relation, relation))
 
 
@@ -63,13 +58,13 @@ class TestS3ValidatorSimple:
         assert result.error is not None
         assert "not supported" in result.error
 
-    def test_returns_error_when_relation_app_is_none(self) -> None:
-        # GIVEN a relation whose remote app is not yet in scope
+    def test_returns_error_when_relation_app_not_in_scope(self) -> None:
+        # GIVEN a relation whose remote app has not yet joined
         app = ApplicationStub()
         relation = RelationStub(name="s3", id=0, app=app)
-        relation.data = {}  # override __post_init__ to simulate app not in scope
-        charm = cast(ops.CharmBase, make_charm_from_relation(relation, interface_name="s3"))
-        validator = S3Validator(charm, cast(ops.Relation, relation))
+        relation.data = {}  # remove app added by __post_init__ to simulate not-in-scope
+        charm = make_charm_from_relation(relation, interface_name="s3")
+        validator = S3Validator(cast(ops.CharmBase, charm), cast(ops.Relation, relation))
 
         # WHEN
         result = validator.validate(level="simple")
@@ -160,8 +155,6 @@ class TestS3ValidatorSimple:
 
     def test_tls_ca_chain_written_and_cleaned_up(self) -> None:
         # GIVEN a databag with tls-ca-chain set
-        import os
-
         ca_databag = {
             **VALID_DATABAG,
             "tls-ca-chain": "-----BEGIN CERTIFICATE-----\nfake-ca\n-----END CERTIFICATE-----\n",
@@ -191,13 +184,16 @@ class TestS3ValidatorSimple:
         # GIVEN a databag whose credentials are behind a Juju secret URI
         secret_uri = "secret:abc123"
         secret_content = {"access-key": "test-access-key", "secret-key": "test-secret-key"}
-        secret_databag = {
+        databag = {
             "bucket": "my-bucket",
             "endpoint": "http://s3.example.com",
             "region": "us-east-1",
             "s3-credentials": secret_uri,
         }
-        validator = _make_validator(secret_databag, secrets={secret_uri: secret_content})
+        app = ApplicationStub()
+        relation = RelationStub(name="s3", id=0, app=app, data={app: databag})
+        charm = make_charm_from_relation_and_secrets(relation, {secret_uri: secret_content})
+        validator = S3Validator(cast(ops.CharmBase, charm), cast(ops.Relation, relation))
         mock_client = MagicMock()
         mock_client.head_bucket.return_value = {}
 
