@@ -115,8 +115,7 @@ class S3Validator(BaseValidator):
                     checks.append(read_check)
             finally:
                 delete_check = self._delete_object(client, bucket, canary_key)
-                if write_check.passed:
-                    checks.append(delete_check)
+                checks.append(delete_check)
         finally:
             self._cleanup_client(client)
 
@@ -225,8 +224,9 @@ class S3Validator(BaseValidator):
             self._ca_file_path = f.name
 
     def _remove_ca_file(self) -> None:
-        if self._ca_file_path and os.path.exists(self._ca_file_path):
-            os.remove(self._ca_file_path)
+        if self._ca_file_path:
+            if os.path.exists(self._ca_file_path):
+                os.remove(self._ca_file_path)
             self._ca_file_path = None
 
     def _build_result(self, level: ValidationLevel, checks: list[ValidationCheck]) -> ValidationResult:

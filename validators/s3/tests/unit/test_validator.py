@@ -245,6 +245,10 @@ class TestS3ValidatorDeep:
         assert result.status == "FAIL"
         write_check = next(c for c in result.checks if c.name == "write")
         assert not write_check.passed
+        # AND cleanup was still attempted even though write failed
+        mock_client.delete_object.assert_called_once()
+        cleanup_check = next(c for c in result.checks if c.name == "cleanup")
+        assert cleanup_check.passed
 
     def test_deep_fails_when_read_body_mismatches(self) -> None:
         # GIVEN get_object returns wrong body
