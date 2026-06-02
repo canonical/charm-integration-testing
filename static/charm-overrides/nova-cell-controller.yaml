@@ -11,14 +11,19 @@
 # nrpe-external-master (provides) - OPTIONAL: monitoring subordinate; convention.
 #
 # shared-db, amqp (requires) - REQUIRED: in required_relations (all releases).
-# identity-credentials (requires) - REQUIRED for Train+; OPTIONAL on older releases.
+# identity-credentials (requires) - REQUIRED for Train+; optional on Rocky/Stein.
 # cloud-compute (requires) - OPTIONAL: nova-compute connects here; optional if no
 #   compute nodes in this cell yet.
 # ha (requires, scope: container) - OPTIONAL: hacluster subordinate.
 # certificates (requires) - OPTIONAL: TLS.
 # nova-cell-compute (requires) - OPTIONAL: for cell registration.
 overrides:
-  - provides:
+  # Rocky, Stein: identity-credentials not yet in required_relations.
+  - criteria:
+      - any_of:
+          - track: 'rocky'
+          - track: 'stein'
+    provides:
       cloud-controller:
         optional: true
       nrpe-external-master:
@@ -31,6 +36,21 @@ overrides:
       certificates:
         optional: true
       identity-credentials:
+        optional: true
+      nova-cell-compute:
+        optional: true
+  # Default (Train+): identity-credentials is in required_relations; not optional.
+  - provides:
+      cloud-controller:
+        optional: true
+      nrpe-external-master:
+        optional: true
+    requires:
+      cloud-compute:
+        optional: true
+      ha:
+        optional: true
+      certificates:
         optional: true
       nova-cell-compute:
         optional: true
