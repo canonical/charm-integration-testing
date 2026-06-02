@@ -37,30 +37,11 @@ Run these inside the VM after entering it with `bin/shell.sh` or by the agent.
 
 ## Token setup
 
-By default `run.sh` uses your full host `gh auth` token for both Copilot AI features
-and `gh` CLI calls inside the VM. That token can push code.
+All tokens are optional. Set them in `validator-development-sandbox/.env`
+(gitignored, copy from `.env.sample`).
 
-To restrict `gh` CLI to read-only + PR comment access, create a fine-grained PAT and
-add it to `validator-development-sandbox/.env` (gitignored):
-
-```sh
-# validator-development-sandbox/.env
-GITHUB_TOKEN=github_pat_...
-```
-
-Fine-grained PAT permissions required:
-
-| Permission | Level | Reason |
-|---|---|---|
-| Contents | Read | Read repo source files |
-| Pull requests | Read and write | Read and reply to Copilot review comments |
-
-Set "Repository access" to "All repositories" to cover every repo you can access.
-
-`run.sh` passes your full host token as `COPILOT_GITHUB_TOKEN` (Copilot AI auth only)
-and the fine-grained PAT as `GH_TOKEN`/`GITHUB_TOKEN` (used by `gh` CLI). The Copilot
-binary reads `COPILOT_GITHUB_TOKEN` first and ignores `GH_TOKEN`, so the two tokens
-are fully isolated.
+- `GITHUB_TOKEN`: fine-grained PAT passed to `gh` CLI inside the VM. If not set, `gh` CLI uses whatever auth is already present in the VM. Recommended permissions: Contents (read), Pull requests (read and write); Repository access: All repositories.
+- `COPILOT_GITHUB_TOKEN`: Copilot AI auth token. Defaults to `gh auth token` on the host.
 
 ## Notes
 

@@ -14,33 +14,25 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 [project]
-name = "validators-postgresql-client"
+name = "validators-test-utils"
 version = "0.1.0"
-description = "Validator for postgresql_client interface"
+description = "Test utils for Interface Validators Framework (SQ096)"
 authors = [
     {name = "SQA Team", email = "solutionsqa@canonical.com"}
 ]
 
 requires-python = ">=3.10"
 dependencies = [
-    "psycopg2-binary>=2.9.0",
-    "validators-base",
+    "ops>=2.0.0",
+    "pydantic>=2.0.0",
 ]
-
-[project.optional-dependencies]
-dev = [
-    "types-psycopg2>=2.9.21.20260422,<3"
-]
-
-[project.entry-points."endpoint_validators"]
-postgresql_client = "validators.postgresql_client:PostgreSQLClientValidator"
 
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["validators.postgresql_client"]
+packages = ["validators.test_utils"]
 
 [tool.setuptools.package-dir]
-"validators.postgresql_client" = "."
+"validators.test_utils" = "."

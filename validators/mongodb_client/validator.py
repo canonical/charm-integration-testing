@@ -22,7 +22,13 @@ from urllib.parse import quote_plus
 
 from pymongo import MongoClient
 
-from validators.base import BaseValidator, ValidationCheck, ValidationLevel, ValidationResult
+from validators.base import (
+    BaseValidator,
+    ValidationCheck,
+    ValidationLevel,
+    ValidationResult,
+    ValidationResultStatus,
+)
 
 
 class MongoDBClientValidator(BaseValidator):
@@ -32,14 +38,14 @@ class MongoDBClientValidator(BaseValidator):
 
     def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
         if level == "uat":
-            return self._skipped_result(level)
+            return self._skipped_result_due_to_level(level)
 
         if level == "simple":
             return self._validate_simple()
         elif level == "deep":
             return self._validate_deep()
         else:
-            return self._skipped_result(level)
+            return self._skipped_result_due_to_level(level)
 
     def _validate_simple(self) -> ValidationResult:
         """L1: Connectivity & Auth with read-only canary query."""
@@ -208,12 +214,9 @@ class MongoDBClientValidator(BaseValidator):
     def _check_relation_exists(self, level: ValidationLevel) -> ValidationResult | None:
         """Check if remote app exists on relation. Returns error result if missing, else None."""
         if not self.relation_exists():
-            return ValidationResult(
+            return self._make_result(
                 status="ERROR",
-                endpoint=self.endpoint,
-                interface=self.interface,
                 level=level,
-                relation_id=self.relation_id,
                 error=f"No remote application on relation '{self.endpoint}'.",
             )
         return None
@@ -260,13 +263,10 @@ class MongoDBClientValidator(BaseValidator):
 
     def _build_result(self, level: ValidationLevel, checks: list[ValidationCheck]) -> ValidationResult:
         """Build a ValidationResult from checks list."""
-        status = "PASS" if all(c.passed for c in checks) else "FAIL"
-        return ValidationResult(
+        status: ValidationResultStatus = "PASS" if all(c.passed for c in checks) else "FAIL"
+        return self._make_result(
             status=status,
-            endpoint=self.endpoint,
-            interface=self.interface,
             level=level,
-            relation_id=self.relation_id,
             checks=checks,
         )
 
