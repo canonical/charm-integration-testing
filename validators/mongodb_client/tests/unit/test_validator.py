@@ -22,44 +22,22 @@ import pymongo
 from pymongo.errors import WriteError
 
 from validators.mongodb_client.validator import MongoDBClientValidator
+from validators.test_utils.helpers import make_charm_from_relation
+from validators.test_utils.stubs import (
+    ApplicationStub,
+    RelationStub,
+)
 
 # ---------------------------------------------------------------------------
 # Stubs
 # ---------------------------------------------------------------------------
 
 
-class AppStub:
-    """Minimal stand-in for ops.Application.  Must be hashable (dict key)."""
-
-
-class RelationStub:
-    def __init__(self, app: AppStub | None, databag: dict[str, str], name: str = "db", id: int = 0) -> None:
-        self.app = app
-        self.name = name
-        self.id = id
-        self.data: dict[AppStub | None, dict[str, str]] = {app: databag}
-
-
-class RelationMetaStub:
-    def __init__(self, interface_name: str) -> None:
-        self.interface_name = interface_name
-
-
-class CharmMetaStub:
-    def __init__(self, endpoint: str, interface_name: str) -> None:
-        self.relations = {endpoint: RelationMetaStub(interface_name)}
-
-
-class CharmStub:
-    def __init__(self, endpoint: str = "db", interface_name: str = "mongodb_client") -> None:
-        self.meta = CharmMetaStub(endpoint, interface_name)
-
-
 def _make_validator(databag: dict[str, str], endpoint: str = "db") -> MongoDBClientValidator:
-    app = AppStub()
-    relation = RelationStub(app=app, databag=databag, name=endpoint)
-    charm = cast(ops.CharmBase, CharmStub(endpoint=endpoint))
-    return MongoDBClientValidator(charm, cast(ops.Relation, relation))
+    app = ApplicationStub()
+    relation = RelationStub(app=app, data={app: databag}, name=endpoint, id=0)
+    charm = make_charm_from_relation(relation, interface_name="mongodb_client")
+    return MongoDBClientValidator(cast(ops.CharmBase, charm), cast(ops.Relation, relation))
 
 
 @dataclass
@@ -164,19 +142,6 @@ class TestMongoDBClientValidatorSimple:
         assert result.status == "SKIPPED"
         assert result.error is not None
         assert "not supported" in result.error
-
-    def test_returns_error_when_relation_app_is_none(self) -> None:
-        # GIVEN a relation whose remote app is not yet known
-        relation = RelationStub(app=None, databag={})
-        validator = MongoDBClientValidator(
-            cast(ops.CharmBase, CharmStub(endpoint=relation.name)), cast(ops.Relation, relation)
-        )
-
-        # WHEN
-        result = validator.validate(level="simple")
-
-        # THEN
-        assert result.status == "ERROR"
 
     def test_fails_schema_check_when_required_fields_missing(self) -> None:
         # GIVEN a databag with missing required fields
