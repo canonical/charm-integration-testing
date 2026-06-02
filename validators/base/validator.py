@@ -70,7 +70,7 @@ class BaseValidator(ABC):
 
     @property
     def databag(self) -> dict[str, str]:
-        if self.relation.app is None:
+        if self.relation.app not in self.relation.data:
             return {}
         return dict(self.relation.data[self.relation.app])
 

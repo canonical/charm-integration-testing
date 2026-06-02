@@ -31,12 +31,13 @@ class PostgreSQLClientValidator(BaseValidator):
 
         checks: list[ValidationCheck] = []
 
-        # --- 1. Remote app presence ---
-        if self.relation.app is None:
+        # --- 1. Databag presence ---
+        # relation.app should never be None in a real relation
+        if not self.relation_exists():
             return self._make_result(
                 status="ERROR",
                 level="simple",
-                error=f"No remote application on relation '{self.endpoint}'.",
+                error=f"No relation on endpoint '{self.endpoint}'.",
             )
 
         databag = dict(self.relation.data[self.relation.app])
