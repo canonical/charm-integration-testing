@@ -15,6 +15,11 @@ dependencies = [
     "validators-base",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "validators-test-utils",
+]
+
 [project.entry-points."endpoint_validators"]
 s3 = "validators.s3:S3Validator"
 
