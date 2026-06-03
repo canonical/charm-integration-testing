@@ -1,0 +1,30 @@
+---
+# Override for rabbitmq-server
+# Source: https://github.com/openstack/charm-rabbitmq-server
+#
+# Classic charm. No REQUIRED_INTERFACES in hooks/rabbit_utils.py
+# (rabbitmq-server is the upstream service; it has no required peer relations).
+#
+# amqp (provides) - REQUIRED: primary purpose; all OpenStack services connect here.
+# dashboards (provides) - OPTIONAL: Grafana dashboard integration.
+# nrpe-external-master (provides) - OPTIONAL: monitoring subordinate; convention.
+# prometheus-rules (provides) - OPTIONAL: Prometheus alerting rules.
+# scrape (provides) - OPTIONAL: Prometheus metrics scraping.
+#
+# certificates (requires) - OPTIONAL: TLS; not required for functionality.
+# ha (requires) - OPTIONAL: hacluster subordinate for HA deployments.
+overrides:
+  - provides:
+      dashboards:
+        optional: true
+      nrpe-external-master:
+        optional: true
+      prometheus-rules:
+        optional: true
+      scrape:
+        optional: true
+    requires:
+      certificates:
+        optional: true
+      ha:
+        optional: true
