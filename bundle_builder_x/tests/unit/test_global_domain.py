@@ -9,6 +9,7 @@ from bundle_builder_x.domain import (
     DomainApplication,
     DomainApplicationEndpoint,
     DomainApplicationIntegration,
+    DomainCharmIntegration,
     DomainModel,
     ModelRef,
     add_charm_to_domain,
@@ -519,3 +520,71 @@ class TestAddCharmToDomainContainerScopeGating:
 
         juju_info = [i for i in domain.charm_integrations if domain.integration_interface(i) == "juju-info"]
         assert len(juju_info) == 0
+
+
+class TestIntegrationOfferName:
+    """Unit tests for Domain.integration_offer_name."""
+
+    def _make_two_model_domain(
+        self,
+        provider_charm: Charm,
+        requirer_charm: Charm,
+    ) -> tuple[Domain, DomainCharmIntegration]:
+        domain = _make_domain(
+            {
+                ModelRef(name="provider-model"): DomainModel(
+                    arch="amd64",
+                    platform="kubernetes",
+                    juju_version=_JUJU,
+                    applications={"provider-app": DomainApplication(charm=provider_charm.name)},
+                ),
+                ModelRef(name="consumer-model"): DomainModel(
+                    arch="amd64",
+                    platform="kubernetes",
+                    juju_version=_JUJU,
+                    applications={"consumer-app": DomainApplication(charm=requirer_charm.name)},
+                ),
+            }
+        )
+        add_charm_to_domain(provider_charm, domain, ModelRef(name="provider-model"))
+        add_charm_to_domain(requirer_charm, domain, ModelRef(name="consumer-model"))
+        integration = domain.charm_integrations[0]
+        return domain, integration
+
+    def test_offer_name_without_underscores(self) -> None:
+        # GIVEN charms with an interface name that contains no underscores
+        provider = _make_charm(
+            "loki-k8s",
+            {"logging": CharmEndpoint(type=EndpointType.PROVIDES, interface="loki-push-api")},
+        )
+        requirer = _make_charm(
+            "tempo-k8s",
+            {"logging": CharmEndpoint(type=EndpointType.REQUIRES, interface="loki-push-api")},
+        )
+        domain, integration = self._make_two_model_domain(provider, requirer)
+
+        # WHEN generating the offer name
+        offer_name = domain.integration_offer_name(integration)
+
+        # THEN the name contains no underscores and follows the expected pattern
+        assert "_" not in offer_name
+        assert offer_name == "loki-k8s-logging-loki-push-api-offer"
+
+    def test_offer_name_replaces_underscores_in_interface(self) -> None:
+        # GIVEN charms whose interface name contains underscores (e.g. grafana_dashboard)
+        provider = _make_charm(
+            "opentelemetry-collector",
+            {"grafana-dashboards-provider": CharmEndpoint(type=EndpointType.PROVIDES, interface="grafana_dashboard")},
+        )
+        requirer = _make_charm(
+            "loki-k8s",
+            {"grafana-dashboard": CharmEndpoint(type=EndpointType.REQUIRES, interface="grafana_dashboard")},
+        )
+        domain, integration = self._make_two_model_domain(provider, requirer)
+
+        # WHEN generating the offer name
+        offer_name = domain.integration_offer_name(integration)
+
+        # THEN underscores from the interface are replaced with hyphens
+        assert "_" not in offer_name
+        assert offer_name == "opentelemetry-collector-grafana-dashboards-provider-grafana-dashboard-offer"
