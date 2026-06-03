@@ -1,0 +1,74 @@
+---
+# Override for nova-cell-controller
+# Source: https://github.com/openstack/charm-nova-cell-controller
+#
+# Reactive charm (Rocky+). Used for Nova cells feature only.
+# required_relations from src/lib/charm/openstack/nova_cell_controller.py:
+#   base: ['shared-db', 'amqp']; Train+: ['shared-db', 'amqp', 'identity-credentials'].
+#
+# cloud-controller (provides) - OPTIONAL: consumed by nova super-conductor in
+#   multi-cell deployments only; not needed in standard single-cell deployments.
+# nrpe-external-master (provides) - OPTIONAL: monitoring subordinate; convention.
+#
+# shared-db, amqp (requires) - REQUIRED: in required_relations (all releases).
+# identity-credentials (requires) - REQUIRED for Train+; optional on Rocky/Stein.
+# cloud-compute (requires) - OPTIONAL: nova-compute connects here; optional if no
+#   compute nodes in this cell yet.
+# ha (requires, scope: container) - OPTIONAL: hacluster subordinate.
+# certificates (requires) - OPTIONAL: TLS.
+# nova-cell-compute (requires) - OPTIONAL: for cell registration.
+overrides:
+  # Rocky, Stein: identity-credentials not yet in required_relations.
+  - criteria:
+      - any_of:
+          - track: 'rocky'
+          - track: 'stein'
+    provides:
+      cloud-controller:
+        optional: true
+      nrpe-external-master:
+        optional: true
+    requires:
+      cloud-compute:
+        optional: true
+      ha:
+        optional: true
+      certificates:
+        optional: true
+      identity-credentials:
+        optional: true
+      nova-cell-compute:
+        optional: true
+    constraints:
+      # Connected OpenStack service charms must be on the same release track.
+      - 'bool(endpoint[identity-credentials]) => tracks(charms(endpoint[identity-credentials]))
+        == tracks({self})'
+      - 'bool(endpoint[identity-credentials]) => risks(charms(endpoint[identity-credentials]))
+        == risks({self})'
+      - 'bool(endpoint[cloud-compute]) => tracks(charms(endpoint[cloud-compute]))
+        == tracks({self})'
+      - 'bool(endpoint[cloud-compute]) => risks(charms(endpoint[cloud-compute])) ==
+        risks({self})'
+  # Default (Train+): identity-credentials is in required_relations; not optional.
+  - provides:
+      cloud-controller:
+        optional: true
+      nrpe-external-master:
+        optional: true
+    requires:
+      cloud-compute:
+        optional: true
+      ha:
+        optional: true
+      certificates:
+        optional: true
+      nova-cell-compute:
+        optional: true
+    constraints:
+      # Connected OpenStack service charms must be on the same release track.
+      - 'tracks(charms(endpoint[identity-credentials])) == tracks({self})'
+      - 'risks(charms(endpoint[identity-credentials])) == risks({self})'
+      - 'bool(endpoint[cloud-compute]) => tracks(charms(endpoint[cloud-compute]))
+        == tracks({self})'
+      - 'bool(endpoint[cloud-compute]) => risks(charms(endpoint[cloud-compute])) ==
+        risks({self})'

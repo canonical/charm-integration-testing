@@ -1,0 +1,42 @@
+---
+# Override for keystone
+# Source: https://github.com/openstack/charm-keystone
+#
+# Classic charm. REQUIRED_INTERFACES from hooks/keystone_utils.py:
+#   database (shared-db) only.
+# get_optional_interfaces() returns ha (via cluster) only when HA is present.
+#
+# identity-service (provides) - REQUIRED: primary purpose; all OpenStack services connect here.
+# identity-admin, identity-notifications, identity-credentials (provides) - OPTIONAL:
+#   secondary service endpoints consumed only by specific integrations.
+# nrpe-external-master (provides) - OPTIONAL: monitoring subordinate; convention.
+#
+# shared-db (requires) - REQUIRED: in REQUIRED_INTERFACES.
+# All other requires: optional - not in REQUIRED_INTERFACES; no BlockedStatus when absent.
+overrides:
+  - provides:
+      nrpe-external-master:
+        optional: true
+      identity-admin:
+        optional: true
+      identity-notifications:
+        optional: true
+      identity-credentials:
+        optional: true
+    requires:
+      ha:
+        optional: true
+      domain-backend:
+        optional: true
+      keystone-fid-service-provider:
+        optional: true
+      websso-trusted-dashboard:
+        optional: true
+      certificates:
+        optional: true
+      keystone-middleware:
+        optional: true
+    constraints:
+      # All connected OpenStack service charms must be on the same release track.
+      - 'tracks(charms(endpoint[identity-service])) == tracks({self})'
+      - 'risks(charms(endpoint[identity-service])) == risks({self})'
