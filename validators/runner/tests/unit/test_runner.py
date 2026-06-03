@@ -166,6 +166,20 @@ class TestValidatorRunnerRun:
         assert len(results.results) == 1
         assert results.results[0].status == "PASS"
 
+    def test_returns_pass_result_with_provides(self) -> None:
+        # GIVEN
+        runner = self._runner_with("test-interface", PassingValidator)
+        relation = RelationStub(name="api", id=0)
+        charm = make_charm_from_relation(relation, role=RelationRoleStub.provides, interface_name="test-interface")
+
+        # WHEN
+        results = runner.run(cast(ops.CharmBase, charm), level="simple")
+
+        # THEN
+        assert isinstance(results, ValidatorRunnerResults)
+        assert len(results.results) == 1
+        assert results.results[0].status == "PASS"
+
     def test_returns_fail_result(self) -> None:
         # GIVEN
         runner = self._runner_with("test-interface", FailingValidator)
