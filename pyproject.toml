@@ -17,6 +17,7 @@ validators-runner = { path = "./validators/runner", develop = true }
 validators-postgresql-client = { path = "./validators/postgresql_client", develop = true, extras = ["dev", "deep", "uat"] }
 validators-mongodb-client = { path = "./validators/mongodb_client", develop = true }
 validators-tracing = { path = "./validators/tracing", develop = true, extras = ["dev", "deep", "uat"] }
+validators-prometheus-scrape = { path = "./validators/prometheus_scrape", develop = true }
 
 
 [build-system]
