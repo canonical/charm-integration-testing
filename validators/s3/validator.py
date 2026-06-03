@@ -30,6 +30,8 @@ class S3Validator(BaseValidator):
         self._ca_file_path: str | None = None
 
     def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
+        if self.role != "requires":
+            return self._skipped_result_due_to_role(level, self.role)
         if level == "uat":
             return self._skipped_result_due_to_level(level)
         error_result = self._check_relation_exists(level)

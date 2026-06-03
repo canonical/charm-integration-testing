@@ -6,21 +6,24 @@ from typing import cast
 from unittest.mock import MagicMock, patch
 
 import ops
+import pytest
 from botocore.exceptions import ClientError
 
 from validators.s3.validator import S3Validator
 from validators.test_utils.helpers import make_charm_from_relation, make_charm_from_relation_and_secrets
-from validators.test_utils.stubs import ApplicationStub, RelationStub
+from validators.test_utils.stubs import ApplicationStub, RelationRoleStub, RelationStub
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 
-def _make_validator(databag: dict[str, str], endpoint: str = "s3") -> S3Validator:
+def _make_validator(
+    databag: dict[str, str], endpoint: str = "s3", role: RelationRoleStub = RelationRoleStub.requires
+) -> S3Validator:
     app = ApplicationStub()
     relation = RelationStub(name=endpoint, id=0, app=app, data={app: databag})
-    charm = make_charm_from_relation(relation, interface_name="s3")
+    charm = make_charm_from_relation(relation, interface_name="s3", role=role)
     return S3Validator(cast(ops.CharmBase, charm), cast(ops.Relation, relation))
 
 
@@ -46,6 +49,20 @@ VALID_DATABAG: dict[str, str] = {
 
 
 class TestS3ValidatorSimple:
+    @pytest.mark.parametrize(
+        "role,should_skip",
+        [(RelationRoleStub.requires, False), (RelationRoleStub.provides, True), (RelationRoleStub.peer, True)],
+    )
+    def test_returns_skipped_based_on_role(self, role: RelationRoleStub, should_skip: bool) -> None:
+        # GIVEN
+        validator = _make_validator(VALID_DATABAG, role=role)
+
+        # WHEN
+        result = validator.validate(level="simple")
+
+        # THEN
+        assert (result.status == "SKIPPED") == should_skip
+
     def test_returns_skipped_for_uat_level(self) -> None:
         # GIVEN
         validator = _make_validator(VALID_DATABAG)
