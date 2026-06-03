@@ -19,11 +19,13 @@ from unittest.mock import patch
 
 import ops
 import psycopg2
+import pytest
 
 from validators.postgresql_client.validator import PostgreSQLClientValidator
 from validators.test_utils.helpers import make_charm_from_relation
 from validators.test_utils.stubs import (
     ApplicationStub,
+    RelationRoleStub,
     RelationStub,
 )
 
@@ -32,10 +34,12 @@ from validators.test_utils.stubs import (
 # ---------------------------------------------------------------------------
 
 
-def _make_validator(databag: dict[str, str], endpoint: str = "db") -> PostgreSQLClientValidator:
+def _make_validator(
+    databag: dict[str, str], endpoint: str = "db", role: RelationRoleStub = RelationRoleStub.requires
+) -> PostgreSQLClientValidator:
     app = ApplicationStub()
     relation = RelationStub(name=endpoint, id=0, app=app, data={app: databag})
-    charm = cast(ops.CharmBase, make_charm_from_relation(relation, interface_name="postgresql_client"))
+    charm = cast(ops.CharmBase, make_charm_from_relation(relation, interface_name="postgresql_client", role=role))
     return PostgreSQLClientValidator(charm, cast(ops.Relation, relation))
 
 
@@ -111,6 +115,20 @@ class TestPostgreSQLClientValidatorSimple:
         # THEN
         assert result.status == "SKIPPED"
         assert result.error is not None
+
+    @pytest.mark.parametrize(
+        "role,should_skip",
+        [(RelationRoleStub.requires, False), (RelationRoleStub.provides, True), (RelationRoleStub.peer, True)],
+    )
+    def test_skips_based_on_role(self, role: RelationRoleStub, should_skip: bool) -> None:
+        # GIVEN a validator with a non-requires role
+        validator = _make_validator(VALID_DATABAG, role=role)
+
+        # WHEN
+        result = validator.validate(level="simple")
+
+        # THEN
+        assert (result.status == "SKIPPED") == should_skip
 
     def test_fails_schema_check_when_required_fields_missing(self) -> None:
         # GIVEN a databag with all required fields absent
