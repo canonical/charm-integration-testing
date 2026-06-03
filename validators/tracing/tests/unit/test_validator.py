@@ -78,6 +78,20 @@ class TestTracingValidatorSimple:
         assert result.status == "SKIPPED"
         assert result.error is not None
 
+    @pytest.mark.parametrize("role", [RelationRoleStub.provides, RelationRoleStub.peer])
+    def test_returns_skipped_for_non_requires_role(self, role: RelationRoleStub) -> None:
+        # GIVEN a validator whose endpoint is on the non-requires side of the relation
+        validator = _make_validator(VALID_DATABAG, role=role)
+
+        # WHEN
+        result = validator.validate(level="simple")
+
+        # THEN
+        assert result.status == "SKIPPED"
+        assert result.error is not None
+        assert role.value in result.error
+        assert "TracingValidator" in result.error
+
     def test_fails_schema_check_when_receivers_field_missing(self) -> None:
         # GIVEN a databag with no 'receivers' key
         validator = _make_validator({})
