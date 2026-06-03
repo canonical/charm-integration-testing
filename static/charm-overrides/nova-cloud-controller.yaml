@@ -11,16 +11,15 @@
 # nrpe-external-master (provides) - OPTIONAL: monitoring subordinate; convention.
 #
 # shared-db, amqp, identity-service, image-service, cloud-compute (requires) - REQUIRED.
-# placement (requires) - REQUIRED for Train+; not in REQUIRED_INTERFACES for older releases.
+# placement (requires) - REQUIRED for Train+; not present in metadata on queens/rocky/stein.
 # All other requires: optional - not in REQUIRED_INTERFACES; checked only when present.
 overrides:
-  # Old tracks (queens through train): dashboard endpoint not present in all channel revisions.
+  # queens, rocky, stein: placement endpoint not present in charm metadata.
   - criteria:
       - any_of:
           - track: queens
           - track: rocky
           - track: stein
-          - track: train
     provides:
       nrpe-external-master:
         optional: true
@@ -55,10 +54,46 @@ overrides:
       - 'risks(charms(endpoint[image-service])) == risks({self})'
       - 'tracks(charms(endpoint[cloud-compute])) == tracks({self})'
       - 'risks(charms(endpoint[cloud-compute])) == risks({self})'
-      # placement is only present on Train+ channels
-      - 'bool(endpoint[placement]) => tracks(charms(endpoint[placement])) == tracks({self})'
-      - 'bool(endpoint[placement]) => risks(charms(endpoint[placement])) == risks({self})'
-  # Default (ussuri and later): dashboard endpoint is present in charm metadata.
+  # train: placement endpoint present in metadata and required; dashboard not yet present.
+  - criteria:
+      - track: train
+    provides:
+      nrpe-external-master:
+        optional: true
+      cloud-controller:
+        optional: true
+      nova-cell-api:
+        optional: true
+    requires:
+      cinder-volume-service:
+        optional: true
+      quantum-network-service:
+        optional: true
+      neutron-api:
+        optional: true
+      ha:
+        optional: true
+      nova-vmware:
+        optional: true
+      memcache:
+        optional: true
+      certificates:
+        optional: true
+      shared-db-cell:
+        optional: true
+      amqp-cell:
+        optional: true
+    constraints:
+      # All connected OpenStack service charms must be on the same release track.
+      - 'tracks(charms(endpoint[identity-service])) == tracks({self})'
+      - 'risks(charms(endpoint[identity-service])) == risks({self})'
+      - 'tracks(charms(endpoint[image-service])) == tracks({self})'
+      - 'risks(charms(endpoint[image-service])) == risks({self})'
+      - 'tracks(charms(endpoint[cloud-compute])) == tracks({self})'
+      - 'risks(charms(endpoint[cloud-compute])) == risks({self})'
+      - 'tracks(charms(endpoint[placement])) == tracks({self})'
+      - 'risks(charms(endpoint[placement])) == risks({self})'
+  # Default (ussuri and later): placement required; dashboard endpoint also present.
   - provides:
       nrpe-external-master:
         optional: true
@@ -95,6 +130,5 @@ overrides:
       - 'risks(charms(endpoint[image-service])) == risks({self})'
       - 'tracks(charms(endpoint[cloud-compute])) == tracks({self})'
       - 'risks(charms(endpoint[cloud-compute])) == risks({self})'
-      # placement is only present on Train+ channels
-      - 'bool(endpoint[placement]) => tracks(charms(endpoint[placement])) == tracks({self})'
-      - 'bool(endpoint[placement]) => risks(charms(endpoint[placement])) == risks({self})'
+      - 'tracks(charms(endpoint[placement])) == tracks({self})'
+      - 'risks(charms(endpoint[placement])) == risks({self})'
