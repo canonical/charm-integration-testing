@@ -2369,7 +2369,6 @@ develop = true
 [package.dependencies]
 boto3 = ">=1.26.0"
 validators-base = "*"
-validators-test-utils = {version = "*", optional = true}
 
 [package.extras]
 dev = ["validators-test-utils"]
@@ -2381,7 +2380,7 @@ url = "validators/s3"
 [[package]]
 name = "validators-test-utils"
 version = "0.1.0"
-description = "Test utils for Interface Validators Framework (SQ096)"
+description = "Test utilities and stubs for Interface Validators Framework (SQ096)"
 optional = false
 python-versions = ">=3.10"
 groups = ["main"]
@@ -2391,6 +2390,7 @@ develop = true
 [package.dependencies]
 ops = ">=2.0.0"
 pydantic = ">=2.0.0"
+validators-base = "*"
 
 [package.source]
 type = "directory"
@@ -2510,4 +2510,4 @@ type = ["pytest-mypy"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<4.0"
-content-hash = "c6d2d265dcbe7ce00f83fedcfb86ab25ef6b1f6136ef0c51cd3d0d1950e916bb"
+content-hash = "9d8c5a0eb94e9bb8919e0a1bef263ef52bab44794a2277a698105ae9b5fc5e65"
