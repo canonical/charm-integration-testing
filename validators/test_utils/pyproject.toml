@@ -16,13 +16,14 @@
 [project]
 name = "validators-test-utils"
 version = "0.1.0"
-description = "Test utils for Interface Validators Framework (SQ096)"
+description = "Test utilities and stubs for Interface Validators Framework (SQ096)"
 authors = [
     {name = "SQA Team", email = "solutionsqa@canonical.com"}
 ]
 
 requires-python = ">=3.10"
 dependencies = [
+    "validators-base",
     "ops>=2.0.0",
     "pydantic>=2.0.0",
 ]
