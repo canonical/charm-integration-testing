@@ -39,6 +39,16 @@ overrides:
         optional: true
       nova-cell-compute:
         optional: true
+    constraints:
+      # Connected OpenStack service charms must be on the same release track.
+      - 'bool(endpoint[identity-credentials]) => tracks(charms(endpoint[identity-credentials]))
+        == tracks({self})'
+      - 'bool(endpoint[identity-credentials]) => risks(charms(endpoint[identity-credentials]))
+        == risks({self})'
+      - 'bool(endpoint[cloud-compute]) => tracks(charms(endpoint[cloud-compute]))
+        == tracks({self})'
+      - 'bool(endpoint[cloud-compute]) => risks(charms(endpoint[cloud-compute])) ==
+        risks({self})'
   # Default (Train+): identity-credentials is in required_relations; not optional.
   - provides:
       cloud-controller:
@@ -54,3 +64,11 @@ overrides:
         optional: true
       nova-cell-compute:
         optional: true
+    constraints:
+      # Connected OpenStack service charms must be on the same release track.
+      - 'tracks(charms(endpoint[identity-credentials])) == tracks({self})'
+      - 'risks(charms(endpoint[identity-credentials])) == risks({self})'
+      - 'bool(endpoint[cloud-compute]) => tracks(charms(endpoint[cloud-compute]))
+        == tracks({self})'
+      - 'bool(endpoint[cloud-compute]) => risks(charms(endpoint[cloud-compute])) ==
+        risks({self})'

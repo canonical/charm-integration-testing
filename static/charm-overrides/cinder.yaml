@@ -37,6 +37,16 @@ overrides:
         optional: true
       certificates:
         optional: true
+    constraints:
+      # Connected OpenStack service charms must be on the same release track.
+      - 'bool(endpoint[identity-service]) => tracks(charms(endpoint[identity-service]))
+        == tracks({self})'
+      - 'bool(endpoint[identity-service]) => risks(charms(endpoint[identity-service]))
+        == risks({self})'
+      - 'bool(endpoint[image-service]) => tracks(charms(endpoint[image-service]))
+        == tracks({self})'
+      - 'bool(endpoint[image-service]) => risks(charms(endpoint[image-service])) ==
+        risks({self})'
 
   # ── ussuri and later ─────────────────────────────────────────────────────────
   # identity-credentials (requires) added in ussuri.
@@ -70,3 +80,17 @@ overrides:
         optional: true
       identity-credentials:
         optional: true
+    constraints:
+      # Connected OpenStack service charms must be on the same release track.
+      - 'bool(endpoint[identity-service]) => tracks(charms(endpoint[identity-service]))
+        == tracks({self})'
+      - 'bool(endpoint[identity-service]) => risks(charms(endpoint[identity-service]))
+        == risks({self})'
+      - 'bool(endpoint[image-service]) => tracks(charms(endpoint[image-service]))
+        == tracks({self})'
+      - 'bool(endpoint[image-service]) => risks(charms(endpoint[image-service])) ==
+        risks({self})'
+      - 'bool(endpoint[identity-credentials]) => tracks(charms(endpoint[identity-credentials]))
+        == tracks({self})'
+      - 'bool(endpoint[identity-credentials]) => risks(charms(endpoint[identity-credentials]))
+        == risks({self})'
