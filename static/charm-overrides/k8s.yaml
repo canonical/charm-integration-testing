@@ -1,0 +1,111 @@
+---
+# Override for k8s
+# Source: https://github.com/canonical/k8s-operator
+#
+# Three endpoint generations (verified against live Charmhub metadata):
+#   1.30: minimal  - provides cos-agent, cos-worker-tokens, k8s-cluster
+#                    requires etcd, external-cloud-provider
+#   1.31: extended - adds ceph-k8s-info, containerd, kube-control to provides
+#                    adds aws, azure, gcp to requires (no external-load-balancer yet)
+#   1.32+: full    - adds external-load-balancer to requires
+#
+# Provides endpoints - OPTIONAL:
+#   cos-agent (provides)           - _apply_cos_requirements returns early if no cos-agent relation
+#   cos-worker-tokens (provides)   - secondary COS worker token distribution
+#   containerd (provides)          - secondary containerd socket sharing to consumers (1.31+)
+#   ceph-k8s-info (provides)       - secondary Ceph kubernetes-info integration (1.31+)
+#   k8s-cluster (provides)         - worker attachment; standalone single-node cluster is valid
+#   kube-control (provides)        - external CNI/storage; built-in CNI handles default (1.31+)
+#
+# Requires endpoints - OPTIONAL:
+#   etcd (requires)                - WaitingStatus only when bootstrap-datastore=etcd is set
+#   external-cloud-provider (req)  - get_cloud_name() returns "" when no relation
+#   aws (requires)                 - cloud_integration.py: if not cloud.relation: return None (1.31+)
+#   azure (requires)               - same gating as aws (1.31+)
+#   gcp (requires)                 - same gating as aws/azure (1.31+)
+#   external-load-balancer (req)   - external_load_balancer_address returns "" if absent (1.32+)
+overrides:
+  # -- 1.30 track (minimal endpoint set) ---------------------------------------
+  # No ceph-k8s-info, containerd, kube-control in provides.
+  # No aws, azure, gcp, or external-load-balancer in requires.
+  - criteria:
+      - track: '1.30'
+    provides:
+      cos-agent:
+        optional: true
+      cos-worker-tokens:
+        optional: true
+      k8s-cluster:
+        optional: true
+    requires:
+      etcd:
+        optional: true
+      external-cloud-provider:
+        optional: true
+    constraints:
+      # k8s-worker must be on the same Kubernetes version track (when related).
+      - 'bool(endpoint[k8s-cluster]) => tracks(charms(endpoint[k8s-cluster])) == tracks({self})'
+
+  # -- 1.31 track (extended endpoint set; no external-load-balancer) -----------
+  # Full provides set. Requires adds aws, azure, gcp but not external-load-balancer.
+  - criteria:
+      - track: '1.31'
+    provides:
+      ceph-k8s-info:
+        optional: true
+      containerd:
+        optional: true
+      cos-agent:
+        optional: true
+      cos-worker-tokens:
+        optional: true
+      k8s-cluster:
+        optional: true
+      kube-control:
+        optional: true
+    requires:
+      aws:
+        optional: true
+      azure:
+        optional: true
+      etcd:
+        optional: true
+      external-cloud-provider:
+        optional: true
+      gcp:
+        optional: true
+    constraints:
+      # k8s-worker must be on the same Kubernetes version track (when related).
+      - 'bool(endpoint[k8s-cluster]) => tracks(charms(endpoint[k8s-cluster])) == tracks({self})'
+
+  # -- 1.32+ tracks (full endpoint set; default block) -------------------------
+  # Adds external-load-balancer to requires.
+  - provides:
+      ceph-k8s-info:
+        optional: true
+      containerd:
+        optional: true
+      cos-agent:
+        optional: true
+      cos-worker-tokens:
+        optional: true
+      k8s-cluster:
+        optional: true
+      kube-control:
+        optional: true
+    requires:
+      aws:
+        optional: true
+      azure:
+        optional: true
+      etcd:
+        optional: true
+      external-cloud-provider:
+        optional: true
+      external-load-balancer:
+        optional: true
+      gcp:
+        optional: true
+    constraints:
+      # k8s-worker must be on the same Kubernetes version track (when related).
+      - 'bool(endpoint[k8s-cluster]) => tracks(charms(endpoint[k8s-cluster])) == tracks({self})'
