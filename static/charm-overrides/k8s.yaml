@@ -43,8 +43,8 @@ overrides:
       external-cloud-provider:
         optional: true
     constraints:
-      # k8s-worker must be on the same Kubernetes version track.
-      - 'tracks(charms(endpoint[k8s-cluster])) == tracks({self})'
+      # k8s-worker must be on the same Kubernetes version track (when related).
+      - 'bool(endpoint[k8s-cluster]) => tracks(charms(endpoint[k8s-cluster])) == tracks({self})'
 
   # -- 1.31 track (extended endpoint set; no external-load-balancer) -----------
   # Full provides set. Requires adds aws, azure, gcp but not external-load-balancer.
@@ -75,8 +75,8 @@ overrides:
       gcp:
         optional: true
     constraints:
-      # k8s-worker must be on the same Kubernetes version track.
-      - 'tracks(charms(endpoint[k8s-cluster])) == tracks({self})'
+      # k8s-worker must be on the same Kubernetes version track (when related).
+      - 'bool(endpoint[k8s-cluster]) => tracks(charms(endpoint[k8s-cluster])) == tracks({self})'
 
   # -- 1.32+ tracks (full endpoint set; default block) -------------------------
   # Adds external-load-balancer to requires.
@@ -107,5 +107,5 @@ overrides:
       gcp:
         optional: true
     constraints:
-      # k8s-worker must be on the same Kubernetes version track.
-      - 'tracks(charms(endpoint[k8s-cluster])) == tracks({self})'
+      # k8s-worker must be on the same Kubernetes version track (when related).
+      - 'bool(endpoint[k8s-cluster]) => tracks(charms(endpoint[k8s-cluster])) == tracks({self})'
