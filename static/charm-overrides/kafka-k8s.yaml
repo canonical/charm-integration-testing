@@ -1,5 +1,4 @@
 ---
-# Remove after: https://github.com/canonical/kafka-k8s-operator/pull/189
 # When client-cas or oauth is integrated, certificates is also required.
 # When zookeeper is integrated (pre-track-4 only), certificates is also required.
 # Track 4 is KRaft mode - the zookeeper endpoint no longer exists.
@@ -7,15 +6,6 @@
 overrides:
   - criteria:
       - track: '4'
-    provides: &kafka_provides
-      kafka-client:
-        optional: true
-      metrics-endpoint:
-        optional: true
-      grafana-dashboard:
-        optional: true
-      peer-cluster-orchestrator:
-        optional: true
     requires:
       certificates:
         optional: true
@@ -29,7 +19,18 @@ overrides:
       - 'not bool(endpoint[peer-cluster]) => config[roles] == "broker,controller"'
 
   # Pre-track-4: zookeeper endpoint exists and also requires certificates when integrated
-  - provides: *kafka_provides
+  # provides endpoints are not yet optional upstream in published track 3 revisions
+  - criteria:
+      - track: '3'
+    provides:
+      kafka-client:
+        optional: true
+      metrics-endpoint:
+        optional: true
+      grafana-dashboard:
+        optional: true
+      peer-cluster-orchestrator:
+        optional: true
     requires:
       certificates:
         optional: true
