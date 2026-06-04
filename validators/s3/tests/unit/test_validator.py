@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import ops
 import pytest
-from botocore.exceptions import ClientError
+from botocore.exceptions import ClientError  # type: ignore[import-untyped]
 
 from validators.s3.validator import S3Validator
 from validators.test_utils.helpers import make_charm_from_relation, make_charm_from_relation_and_secrets

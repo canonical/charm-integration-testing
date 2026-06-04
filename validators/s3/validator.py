@@ -6,9 +6,9 @@ import tempfile
 import uuid
 from typing import Any
 
-import boto3
-from botocore.config import Config
-from botocore.exceptions import BotoCoreError, ClientError
+import boto3  # type: ignore[import-untyped]
+from botocore.config import Config  # type: ignore[import-untyped]
+from botocore.exceptions import BotoCoreError, ClientError  # type: ignore[import-untyped]
 
 from validators.base import BaseValidator, ValidationCheck, ValidationLevel, ValidationResult
 
