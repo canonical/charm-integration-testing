@@ -1,0 +1,20 @@
+---
+# Override for hacluster
+# Source: https://github.com/openstack/charm-hacluster
+#
+# Subordinate charm. No REQUIRED_INTERFACES in hooks/utils.py
+# (hacluster is a subordinate that provides HA to its principal charm).
+#
+# ha (provides, scope: container) - REQUIRED: primary purpose; principal charms use this.
+# nrpe-external-master (provides, scope: container) - OPTIONAL: monitoring subordinate.
+#
+# juju-info, peer-availability (requires, scope: container) - subordinate attachment
+#   points; auto-satisfied by Juju when co-located with principal; not overridden.
+# pacemaker-remote (requires) - OPTIONAL: pacemaker-remote deployments only.
+overrides:
+  - provides:
+      nrpe-external-master:
+        optional: true
+    requires:
+      pacemaker-remote:
+        optional: true

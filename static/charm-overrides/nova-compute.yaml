@@ -1,0 +1,84 @@
+---
+# Override for nova-compute
+# Source: https://github.com/openstack/charm-nova-compute
+#
+# Classic charm. REQUIRED_INTERFACES from hooks/nova_compute_utils.py:
+#   messaging (amqp), image (image-service).
+# cloud-compute (provides) is the primary endpoint; nova-cloud-controller requires it.
+#
+# cloud-compute (provides) - REQUIRED: primary purpose; nova-cloud-controller must connect.
+# nrpe-external-master (provides) - OPTIONAL: monitoring subordinate; convention.
+#
+# amqp, image-service (requires) - REQUIRED: in REQUIRED_INTERFACES.
+# All other requires: optional - not in REQUIRED_INTERFACES; no BlockedStatus when absent.
+overrides:
+  # Old tracks (queens through xena): nova-vgpu endpoint does not exist in charm metadata.
+  - criteria:
+      - any_of:
+          - track: queens
+          - track: rocky
+          - track: stein
+          - track: train
+          - track: ussuri
+          - track: victoria
+          - track: wallaby
+          - track: xena
+    provides:
+      nrpe-external-master:
+        optional: true
+    requires:
+      ceph:
+        optional: true
+      lxd:
+        optional: true
+      nova-ceilometer:
+        optional: true
+      neutron-plugin:
+        optional: true
+      ephemeral-backend:
+        optional: true
+      ceph-access:
+        optional: true
+      cloud-credentials:
+        optional: true
+      secrets-storage:
+        optional: true
+      ironic-api:
+        optional: true
+    constraints:
+      # All connected OpenStack service charms must be on the same release track.
+      - 'tracks(charms(endpoint[cloud-compute])) == tracks({self})'
+      - 'risks(charms(endpoint[cloud-compute])) == risks({self})'
+      - 'tracks(charms(endpoint[image-service])) == tracks({self})'
+      - 'risks(charms(endpoint[image-service])) == risks({self})'
+  # Default (yoga and later): nova-vgpu endpoint is present in charm metadata.
+  - provides:
+      nrpe-external-master:
+        optional: true
+    requires:
+      ceph:
+        optional: true
+      lxd:
+        optional: true
+      nova-ceilometer:
+        optional: true
+      nova-vgpu:
+        optional: true
+      neutron-plugin:
+        optional: true
+      ephemeral-backend:
+        optional: true
+      ceph-access:
+        optional: true
+      cloud-credentials:
+        optional: true
+      secrets-storage:
+        optional: true
+      ironic-api:
+        optional: true
+    constraints:
+      # All connected OpenStack service charms must be on the same release track.
+      - 'tracks(charms(endpoint[cloud-compute])) == tracks({self})'
+      - 'risks(charms(endpoint[cloud-compute])) == risks({self})'
+      - 'tracks(charms(endpoint[image-service])) == tracks({self})'
+      - 'risks(charms(endpoint[image-service])) == risks({self})'
