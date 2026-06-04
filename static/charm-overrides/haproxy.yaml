@@ -1,0 +1,46 @@
+---
+# Override for haproxy
+# Source: https://github.com/canonical/haproxy-operator
+# Upstream PR: https://github.com/canonical/haproxy-operator/pull/536
+#
+# Multi-mode reverse proxy. The five proxy-mode endpoints are mutually exclusive
+# alternatives; at-least-one constraint enforces the bundle contains something useful.
+#
+# ingress, ingress-per-unit, haproxy-route, haproxy-route-tcp (provides) - at-least-one proxy modes
+# reverseproxy (requires) - at-least-one proxy modes
+# ha (requires) - OPTIONAL locally: HA recommended but not forced by solver
+# certificates (requires) - OPTIONAL locally: TLS recommended but charm reaches active without it
+# receive-ca-certs, spoe-auth, ddos-protection, haproxy-route-policy (requires) - OPTIONAL: additive features
+# cos-agent, website (provides) - OPTIONAL: secondary/additive
+overrides:
+  - requires:
+      certificates:
+        optional: true
+      reverseproxy:
+        optional: true
+      ha:
+        optional: true
+      receive-ca-certs:
+        optional: true  # Remove after: PR#536 merged and published
+      spoe-auth:
+        optional: true  # Remove after: PR#536 merged and published
+      ddos-protection:
+        optional: true  # Remove after: PR#536 merged and published
+      haproxy-route-policy:
+        optional: true  # Remove after: PR#536 merged and published
+    provides:
+      ingress:
+        optional: true
+      ingress-per-unit:
+        optional: true
+      cos-agent:
+        optional: true  # Remove after: PR#536 merged and published
+      website:
+        optional: true  # Remove after: PR#536 merged and published
+      haproxy-route:
+        optional: true
+      haproxy-route-tcp:
+        optional: true
+    constraints:
+      - 'bool(endpoint[ingress]) or bool(endpoint[ingress-per-unit]) or bool(endpoint[reverseproxy])
+        or bool(endpoint[haproxy-route]) or bool(endpoint[haproxy-route-tcp])'
