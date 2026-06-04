@@ -1,0 +1,59 @@
+---
+# Override for vault (machine charm)
+# Source: https://github.com/canonical/vault-operator
+# Upstream PR: pending
+#
+# All provides endpoints lack optional: true upstream. Criteria blocks required
+# because: old tracks (1.5-1.8, latest) predate cos-agent, send-ca-cert, and
+# vault-autounseal-provides; tracks 1.18+ renamed common_name to pki_ca_common_name.
+#
+# vault-kv (provides)                  - OPTIONAL: _sync_vault_kv runs only when relations exist
+# vault-pki (provides)                 - OPTIONAL: only blocks when tls-certificates-pki connected without common_name
+# vault-autounseal-provides (provides) - OPTIONAL: _sync_vault_autounseal runs only when relations exist (absent pre-1.16)
+# cos-agent (provides)                 - OPTIONAL: COSAgentProvider hook, not in _on_collect_status (absent pre-1.16)
+# send-ca-cert (provides)              - OPTIONAL: passive CA cert distribution (absent pre-1.16)
+#
+# All requires endpoints: already optional: true upstream in charmcraft.yaml.
+#
+# Upstream PR candidates (all five provides; evidence: src/charm.py _on_collect_status
+# does not block on any of them): cos-agent, send-ca-cert, vault-autounseal-provides,
+# vault-kv, vault-pki
+overrides:
+  # Tracks 1.18+ renamed common_name to pki_ca_common_name; all 5 provides present
+  - criteria:
+      - any_of:
+          - track: '1.18'
+          - track: '1.19'
+          - track: '2.0'
+    provides: &vault_provides
+      vault-autounseal-provides:
+        optional: true
+      vault-kv:
+        optional: true
+      vault-pki:
+        optional: true
+      cos-agent:
+        optional: true
+      send-ca-cert:
+        optional: true
+    configs:
+      pki_ca_common_name: [charmqa, null]
+    constraints:
+      - 'bool(endpoint[vault-pki]) => bool(endpoint[tls-certificates-pki])'
+      - 'bool(endpoint[vault-pki]) or bool(endpoint[tls-certificates-pki]) => set(config[pki_ca_common_name])'
+  # Old reactive tracks (1.5-1.8, latest): different charm architecture, endpoint names incompatible
+  - criteria:
+      - any_of:
+          - track: '1.5'
+          - track: '1.6'
+          - track: '1.7'
+          - track: '1.8'
+          - track: 'latest'
+    provides: {}
+  # Fallback (1.16, 1.17, ...): all 5 provides present, common_name
+  - provides: *vault_provides
+    configs:
+      common_name: [charmqa, null]
+    constraints:
+      - 'bool(endpoint[vault-pki]) => bool(endpoint[tls-certificates-pki])'
+      - 'bool(endpoint[vault-pki]) or bool(endpoint[tls-certificates-pki]) => set(config[common_name])'
