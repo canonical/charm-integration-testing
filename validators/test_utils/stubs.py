@@ -31,17 +31,28 @@ class ApplicationStub:
     """Stub for ops.Application"""
 
 
+class UnitStub:
+    """Stub for ops.Unit.
+
+    A plain class (not dataclass) so that instances are hashable by identity,
+    matching the behaviour of real ops.Unit objects used as relation.data keys."""
+
+    def __init__(self, name: str = "unit/0") -> None:
+        self.name = name
+
+
 @dataclass
 class RelationStub:
     """Stub for ops.Relation"""
 
     name: str
     id: int
-    app: ApplicationStub = field(default_factory=ApplicationStub)
-    data: dict[ApplicationStub, dict[str, str]] = field(default_factory=dict)
+    app: ApplicationStub | None = field(default_factory=ApplicationStub)
+    data: dict[ApplicationStub | UnitStub | None, dict[str, str]] = field(default_factory=dict)
+    units: frozenset[UnitStub] = field(default_factory=frozenset)
 
     def __post_init__(self) -> None:
-        if self.app not in self.data:
+        if self.app is not None and self.app not in self.data:
             self.data[self.app] = {}
 
 
