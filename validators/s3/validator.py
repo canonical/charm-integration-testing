@@ -215,9 +215,11 @@ class S3Validator(BaseValidator):
             raise
 
     def _cleanup_client(self, client: Any) -> None:
-        if hasattr(client, "close"):
-            client.close()
-        self._remove_ca_file()
+        try:
+            if hasattr(client, "close"):
+                client.close()
+        finally:
+            self._remove_ca_file()
 
     def _write_ca_file(self, ca_content: str) -> None:
         self._remove_ca_file()

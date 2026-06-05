@@ -197,6 +197,31 @@ class TestS3ValidatorSimple:
         # AND the temp file has been cleaned up after validation
         assert not os.path.exists(written_path[0])
 
+    def test_ca_file_cleaned_up_even_when_close_raises(self) -> None:
+        # GIVEN a databag with tls-ca-chain and a client whose close() raises
+        ca_databag = {
+            **VALID_DATABAG,
+            "tls-ca-chain": "-----BEGIN CERTIFICATE-----\nfake-ca\n-----END CERTIFICATE-----\n",
+        }
+        validator = _make_validator(ca_databag)
+        mock_client = MagicMock()
+        mock_client.head_bucket.return_value = {}
+        mock_client.close.side_effect = RuntimeError("close failed")
+
+        written_path: list[str] = []
+
+        def capture_verify(*args: object, **kwargs: object) -> MagicMock:
+            written_path.append(str(kwargs.get("verify", "")))
+            return mock_client
+
+        with patch("validators.s3.validator.boto3.client", side_effect=capture_verify):
+            with pytest.raises(RuntimeError, match="close failed"):
+                validator.validate(level="simple")
+
+        # THEN the CA file is cleaned up despite close() raising
+        assert len(written_path) == 1
+        assert not os.path.exists(written_path[0])
+
     def test_passes_with_secret_backed_credentials(self) -> None:
         # GIVEN a databag whose credentials are behind a Juju secret URI
         secret_uri = "secret:abc123"
