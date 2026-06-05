@@ -2295,6 +2295,23 @@ type = "directory"
 url = "validators/base"
 
 [[package]]
+name = "validators-loki-push-api"
+version = "0.1.0"
+description = "Validator for loki_push_api interface"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+validators-base = "*"
+
+[package.source]
+type = "directory"
+url = "validators/loki_push_api"
+
+[[package]]
 name = "validators-mongodb-client"
 version = "0.1.0"
 description = "Validator for mongodb_client interface"
@@ -2348,6 +2365,7 @@ develop = true
 ops = ">=3.3.0,<4.0.0"
 pydantic = ">=2.0.0"
 validators-base = "*"
+validators-loki-push-api = "*"
 validators-postgresql-client = "*"
 validators-s3 = "*"
 validators-tracing = {version = "*", extras = ["deep"]}
@@ -2510,4 +2528,4 @@ type = ["pytest-mypy"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<4.0"
-content-hash = "9d8c5a0eb94e9bb8919e0a1bef263ef52bab44794a2277a698105ae9b5fc5e65"
+content-hash = "7d00293b55bf034d501aa4077698c1d0dc2f11e3275032bd3acfc9d7f76ded40"
