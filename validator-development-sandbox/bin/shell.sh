@@ -18,4 +18,4 @@ if [ -f "$DEV_DIR/.env" ]; then
 fi
 
 VM_NAME="${VALIDATOR_VM:-validator-k8s}"
-exec multipass exec "$VM_NAME" -- bash -l
+exec multipass exec "$VM_NAME" -- bash -lc "cd /project && exec bash -l"
