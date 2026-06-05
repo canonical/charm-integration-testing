@@ -13,7 +13,9 @@
 # cos-agent (provides)                 - OPTIONAL: COSAgentProvider hook, not in _on_collect_status (absent pre-1.16)
 # send-ca-cert (provides)              - OPTIONAL: passive CA cert distribution (absent pre-1.16)
 #
-# All requires endpoints: already optional: true upstream in charmcraft.yaml.
+# requires (1.16+): already optional: true upstream in charmcraft.yaml (includes ingress added in 1.16).
+# requires (1.15): optional=None upstream; all four are inactive without their feature being used;
+#   override block below adds optional: true for the solver.
 #
 # Upstream PR candidates (all five provides; evidence: src/charm.py _on_collect_status
 # does not block on any of them): cos-agent, send-ca-cert, vault-autounseal-provides,
@@ -50,7 +52,25 @@ overrides:
           - track: '1.8'
           - track: 'latest'
     provides: {}
-  # Fallback (1.16, 1.17, ...): all 5 provides present, common_name
+  # Track 1.15: requires not marked optional upstream; override needed
+  - criteria:
+      - track: '1.15'
+    provides: *vault_provides
+    requires:
+      vault-autounseal-requires:
+        optional: true
+      tls-certificates-access:
+        optional: true
+      tls-certificates-pki:
+        optional: true
+      s3-parameters:
+        optional: true
+    configs:
+      common_name: [charmqa, null]
+    constraints:
+      - 'bool(endpoint[vault-pki]) => bool(endpoint[tls-certificates-pki])'
+      - 'bool(endpoint[vault-pki]) or bool(endpoint[tls-certificates-pki]) => set(config[common_name])'
+  # Fallback (1.16, 1.17, ...): all 5 provides present, common_name; requires already optional upstream
   - provides: *vault_provides
     configs:
       common_name: [charmqa, null]
