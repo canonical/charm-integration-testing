@@ -1,7 +1,10 @@
 ---
-# Remove after: https://github.com/canonical/istio-beacon-k8s-operator/pull/163
 listed: true
 overrides:
-  - provides:
+  # provide-cmr-mesh only exists from track 2 onwards.
+  - criteria:
+      - track: '2'
+      - track: dev
+    provides:
       provide-cmr-mesh:
         optional: true
