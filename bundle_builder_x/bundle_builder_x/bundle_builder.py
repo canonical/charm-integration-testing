@@ -598,7 +598,12 @@ class BundleBuilder:
         initial_model: z3.ModelRef | None,
         extra_constraints: list[z3.BoolRef] | None,
     ) -> z3.ModelRef:
-        """Minimize cost via two-phase SAT descent (charm cost, then integration count)."""
+        """Minimize cost via two-phase SAT descent (charm cost, then integration count).
+
+        Each step gets the full optimize_timeout because each check is independently
+        hard; a tight per-step budget would cause premature timeouts before the solver
+        can prove the bound is tight (unsat).
+        """
         step_ms = int(self.optimize_timeout.total_seconds() * 1000)
 
         def eval_charm_cost(m: z3.ModelRef) -> int:
