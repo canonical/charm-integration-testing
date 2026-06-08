@@ -417,7 +417,6 @@ class TestIterativeDescent:
             domain,
             charm_cost_expr,
             integration_cost_expr,
-            timeout_ms=60_000,
             initial_model=None,
             extra_constraints=None,
         )
@@ -443,7 +442,6 @@ class TestIterativeDescent:
             domain,
             charm_cost_expr,
             integration_cost_expr,
-            timeout_ms=60_000,
             initial_model=initial,
             extra_constraints=None,
         )
@@ -526,7 +524,7 @@ class TestMergeMismatchTags:
 
         # THEN non-mismatch tags appear in their original positions and pair A is merged
         assert result[0] is non_mismatch
-        assert result[1] is result[1]  # pair A merged at position 1
+        assert result[1] is not tag_a  # pair A was replaced with a merged copy
         assert isinstance(result[1], PeerChannelMismatchTag)
         assert result[1].required_track == "zed"
         assert result[1].required_risk == "edge"

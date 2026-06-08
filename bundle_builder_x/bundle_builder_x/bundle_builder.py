@@ -564,9 +564,7 @@ class BundleBuilder:
             return model
 
         self.logger.warning("z3.Optimize timed out; falling back to iterative descent")
-        return self._iterative_descent(
-            domain, charm_cost_expr, integration_cost_expr, timeout_ms, initial_model, extra_constraints
-        )
+        return self._iterative_descent(domain, charm_cost_expr, integration_cost_expr, initial_model, extra_constraints)
 
     def _try_z3_optimize(
         self,
@@ -597,13 +595,11 @@ class BundleBuilder:
         domain: Domain,
         charm_cost_expr: z3.ExprRef,
         integration_cost_expr: z3.ExprRef,
-        timeout_ms: int,
         initial_model: z3.ModelRef | None,
         extra_constraints: list[z3.BoolRef] | None,
     ) -> z3.ModelRef:
         """Minimize cost via two-phase SAT descent (charm cost, then integration count)."""
-        # Cap per-query timeout so no single descent step exhausts the full budget.
-        per_query_ms = max(10_000, timeout_ms // 20)
+        step_ms = int(self.optimize_timeout.total_seconds() * 1000)
 
         def eval_charm_cost(m: z3.ModelRef) -> int:
             return sum(
@@ -621,7 +617,7 @@ class BundleBuilder:
 
         # Build the solver once; push/pop bound constraints on top each step.
         solver = z3.Solver()
-        solver.set("timeout", per_query_ms)
+        solver.set("timeout", step_ms)
         add_constraints(solver, domain)
         for c in extra_constraints or []:
             solver.add(c)
@@ -630,8 +626,11 @@ class BundleBuilder:
         if initial_model is not None:
             model = initial_model
         else:
-            if solver.check() != z3.sat:
+            result = solver.check()
+            if result == z3.unsat:
                 raise UncompletableBundleError("Optimization failed - problem became unsatisfiable")
+            if result != z3.sat:
+                raise UncompletableBundleError("Optimization failed - initial solve timed out")
             model = solver.model()
 
         # Phase 1: minimize charm cost.
