@@ -47,7 +47,10 @@ from .snapstore import SnapstoreClient
 from .spec import SpecFile
 from .timing import NullTimeline, Timeline
 
-_DEFAULT_OPTIMIZE_TIMEOUT = timedelta(minutes=3)
+_DEFAULT_OPTIMIZE_TIMEOUT = timedelta(minutes=1)
+
+_COST_SCALE = 1_000_000
+_COST_EPSILON = 1e-6
 
 _EXPANSION_PRIORITY: dict[Assertions, int] = {
     Assertions.APPLICATION_EXISTS: 0,
@@ -151,13 +154,12 @@ class BundleBuilder:
             if result == z3.sat:
                 self.logger.info("Problem is satisfiable")
                 model = solver.model()
+                self.logger.info("Re-solving with optimization to minimize applications and integrations")
+                t_opt = self.timeline.on(f"iter{iteration}/optimize")
                 try:
-                    self.logger.info("Re-solving with optimization to minimize applications and integrations")
-                    t_opt = self.timeline.on(f"iter{iteration}/optimize")
-                    model = self._optimize_solution(domain)
+                    model = self._optimize_solution(domain, initial_model=model)
+                finally:
                     self.timeline.off(t_opt)
-                except TimeoutError:
-                    self.logger.warning("Optimization timed out; using unoptimized solution")
                 return model
 
             elif result == z3.unsat:
@@ -168,25 +170,57 @@ class BundleBuilder:
                     self.logger.warning("Solver returned unsat but unsat core was empty")
                     raise UncompletableBundleError("Solver returned unsat but unsat core was empty")
 
-                decoded_core: list[AssertionTag] = sorted(
-                    [AssertionTag.decode(str(assertion)) for assertion in unsat_core],
-                    key=lambda a: (_EXPANSION_PRIORITY.get(a.kind, len(_EXPANSION_PRIORITY)), str(a)),
-                )
-
-                domain_modified = False
-                for tag in decoded_core:
-                    self.logger.debug(f"Unsat core item: {tag}")
-                    domain_modified = self._handle_failed_assertion(tag, domain)
-                    if domain_modified:
-                        self.logger.info(f"Expanded domain to handle failed assertion tag: {tag}")
-                        break
-
-                if not domain_modified:
-                    raise UncompletableBundleError(unsat_core=decoded_core)
+                self._handle_unsat_core(unsat_core, domain)
             else:
                 raise UncompletableBundleError("Solver returned unknown")
 
         raise UncompletableBundleError(f"Could not satisfy constraints after {max_iterations} iterations")
+
+    def _handle_unsat_core(self, unsat_core: z3.AstVector, domain: Domain) -> None:
+        tags: list[AssertionTag] = sorted(
+            self._merge_mismatch_tags([AssertionTag.decode(str(a)) for a in unsat_core]),
+            key=lambda a: (_EXPANSION_PRIORITY.get(a.kind, len(_EXPANSION_PRIORITY)), str(a)),
+        )
+        expanded = False
+        for tag in tags:
+            self.logger.debug(f"Unsat core item: {tag}")
+            if self._handle_failed_assertion(tag, domain):
+                self.logger.info(f"Expanded domain to handle failed assertion tag: {tag}")
+                expanded = True
+        if not expanded:
+            raise UncompletableBundleError(unsat_core=tags)
+
+    @staticmethod
+    def _merge_mismatch_tags(tags: list[AssertionTag]) -> list[AssertionTag]:
+        """Merge PeerChannelMismatchTag pairs with the same (anchor, peer) into one tag.
+
+        Track and risk constraints emit separate tags per dimension.  Merging them
+        ensures _handle_peer_channel_mismatch resolves both in a single CEGIS step,
+        avoiding a wrong intermediate channel on the first pass.
+        """
+        seen: dict[tuple[int, int], int] = {}
+        merged: list[AssertionTag] = []
+        for tag in tags:
+            if isinstance(tag, PeerChannelMismatchTag):
+                pair = (tag.charm.charm_id, tag.peer_charm_id)
+                if pair in seen:
+                    existing = cast(PeerChannelMismatchTag, merged[seen[pair]])
+                    merged[seen[pair]] = PeerChannelMismatchTag(
+                        charm=existing.charm,
+                        endpoint=existing.endpoint,
+                        peer_charm_name=existing.peer_charm_name,
+                        peer_charm_id=existing.peer_charm_id,
+                        required_track=existing.required_track or tag.required_track,
+                        required_risk=existing.required_risk or tag.required_risk,
+                        required_channel=existing.required_channel or tag.required_channel,
+                        required_revision=existing.required_revision or tag.required_revision,
+                    )
+                else:
+                    seen[pair] = len(merged)
+                    merged.append(tag)
+            else:
+                merged.append(tag)
+        return merged
 
     def _handle_failed_assertion(
         self,
@@ -495,15 +529,14 @@ class BundleBuilder:
         parent_charm.charms_added.append(new_charm_id)
         return True
 
-    def _optimize_solution(self, domain: Domain) -> z3.ModelRef:
-        scale = 1_000_000
-        epsilon = 1e-6
-
+    @staticmethod
+    def _build_cost_exprs(domain: Domain) -> tuple[z3.ExprRef, z3.ExprRef]:
+        """Build the charm cost and integration cost z3 expressions for a domain."""
         charm_cost_expr = z3.Sum(
             [
                 z3.If(
                     charm.exists,
-                    z3.IntVal(int(scale / max(charm.spec.priority, epsilon))),
+                    z3.IntVal(int(_COST_SCALE / max(charm.spec.priority, _COST_EPSILON))),
                     z3.IntVal(0),
                 )
                 for charm in domain.charms
@@ -514,12 +547,41 @@ class BundleBuilder:
             [z3.If(i.exists, 2 if domain.is_cross_model(i) else 1, 0) for i in domain.charm_integrations]
             + [z3.IntVal(0)]
         )
+        return charm_cost_expr, integration_cost_expr
 
+    def _optimize_solution(
+        self,
+        domain: Domain,
+        initial_model: z3.ModelRef | None = None,
+        extra_constraints: list[z3.BoolRef] | None = None,
+    ) -> z3.ModelRef:
+        """Find the minimum cost model; tries z3.Optimize, falls back to iterative descent."""
         timeout_ms = int(self.optimize_timeout.total_seconds() * 1000)
+        charm_cost_expr, integration_cost_expr = self._build_cost_exprs(domain)
 
+        model = self._try_z3_optimize(domain, charm_cost_expr, integration_cost_expr, timeout_ms, extra_constraints)
+        if model is not None:
+            return model
+
+        self.logger.warning("z3.Optimize timed out; falling back to iterative descent")
+        return self._iterative_descent(
+            domain, charm_cost_expr, integration_cost_expr, timeout_ms, initial_model, extra_constraints
+        )
+
+    def _try_z3_optimize(
+        self,
+        domain: Domain,
+        charm_cost_expr: z3.ExprRef,
+        integration_cost_expr: z3.ExprRef,
+        timeout_ms: int,
+        extra_constraints: list[z3.BoolRef] | None,
+    ) -> z3.ModelRef | None:
+        """Run z3.Optimize; return the model on sat, None on timeout, raise on unsat."""
         opt = z3.Optimize()
         opt.set("timeout", timeout_ms)
         add_constraints(opt, domain)
+        for c in extra_constraints or []:
+            opt.add(c)
         opt.minimize(charm_cost_expr)
         opt.minimize(integration_cost_expr)
         result = opt.check()
@@ -528,4 +590,94 @@ class BundleBuilder:
             return opt.model()
         if result == z3.unsat:
             raise UncompletableBundleError("Optimization failed - problem became unsatisfiable")
-        raise TimeoutError("Optimization timed out")
+        return None
+
+    def _iterative_descent(
+        self,
+        domain: Domain,
+        charm_cost_expr: z3.ExprRef,
+        integration_cost_expr: z3.ExprRef,
+        timeout_ms: int,
+        initial_model: z3.ModelRef | None,
+        extra_constraints: list[z3.BoolRef] | None,
+    ) -> z3.ModelRef:
+        """Minimize cost via two-phase SAT descent (charm cost, then integration count)."""
+        # Cap per-query timeout so no single descent step exhausts the full budget.
+        per_query_ms = max(10_000, timeout_ms // 20)
+
+        def eval_charm_cost(m: z3.ModelRef) -> int:
+            return sum(
+                int(_COST_SCALE / max(c.spec.priority, _COST_EPSILON))
+                for c in domain.charms
+                if z3.is_true(m.eval(c.exists, model_completion=True))
+            )
+
+        def eval_integration_cost(m: z3.ModelRef) -> int:
+            return sum(
+                (2 if domain.is_cross_model(i) else 1)
+                for i in domain.charm_integrations
+                if z3.is_true(m.eval(i.exists, model_completion=True))
+            )
+
+        # Build the solver once; push/pop bound constraints on top each step.
+        solver = z3.Solver()
+        solver.set("timeout", per_query_ms)
+        add_constraints(solver, domain)
+        for c in extra_constraints or []:
+            solver.add(c)
+
+        # Seed from the caller's model to skip a redundant SAT solve.
+        if initial_model is not None:
+            model = initial_model
+        else:
+            if solver.check() != z3.sat:
+                raise UncompletableBundleError("Optimization failed - problem became unsatisfiable")
+            model = solver.model()
+
+        # Phase 1: minimize charm cost.
+        iterations = 0
+        while True:
+            current_cost = eval_charm_cost(model)
+            solver.push()
+            solver.add(charm_cost_expr < z3.IntVal(current_cost))
+            result = solver.check()
+            if result == z3.sat:
+                model = solver.model()
+                solver.pop()
+                iterations += 1
+                self.logger.debug(f"Optimize step {iterations}: charm cost {current_cost} -> {eval_charm_cost(model)}")
+            elif result == z3.unsat:
+                solver.pop()
+                self.logger.info(f"Optimal charm cost found: {current_cost} ({iterations} descent step(s))")
+                break
+            else:
+                solver.pop()
+                self.logger.warning("Optimizer timed out during charm cost minimization; result may not be optimal")
+                break
+
+        # Phase 2: fix charm cost, minimize integration count.
+        final_charm_cost = eval_charm_cost(model)
+        iterations = 0
+        while True:
+            current_int_cost = eval_integration_cost(model)
+            solver.push()
+            solver.add(charm_cost_expr == z3.IntVal(final_charm_cost))
+            solver.add(integration_cost_expr < z3.IntVal(current_int_cost))
+            result = solver.check()
+            if result == z3.sat:
+                model = solver.model()
+                solver.pop()
+                iterations += 1
+                self.logger.debug(
+                    f"Optimize step {iterations}: integration cost {current_int_cost} -> {eval_integration_cost(model)}"
+                )
+            elif result == z3.unsat:
+                solver.pop()
+                self.logger.info(f"Optimal integration cost found: {current_int_cost} ({iterations} descent step(s))")
+                break
+            else:
+                solver.pop()
+                self.logger.warning("Optimizer timed out during integration cost minimization; charm count is optimal")
+                break
+
+        return model
