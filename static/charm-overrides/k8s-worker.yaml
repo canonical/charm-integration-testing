@@ -1,0 +1,53 @@
+---
+# Override for k8s-worker
+# Source: https://github.com/canonical/k8s-operator (charms/worker/)
+#
+# Two endpoint generations (verified against live Charmhub metadata):
+#   1.30: minimal  - provides cos-agent
+#                    requires cluster, cos-tokens
+#   1.31+: full    - adds aws, azure, containerd, gcp to requires
+#
+# Provides endpoints - OPTIONAL:
+#   cos-agent (provides)           - _configure_cos_integration returns early if no cos-agent relation
+#
+# Requires endpoints:
+#   cluster (requires)             - REQUIRED: _join_cluster raises BlockedStatus if missing
+#   cos-tokens (requires)          - _configure_cos_integration returns early if no cos-agent; optional
+#   aws (requires, 1.31+)          - cloud_integration.py: if not cloud.relation: return None
+#   azure (requires, 1.31+)        - same gating as aws
+#   containerd (requires, 1.31+)   - containerd.recover() returns [] if no relation
+#   gcp (requires, 1.31+)          - same gating as aws/azure
+overrides:
+  # -- 1.30 track (minimal endpoint set) ---------------------------------------
+  # No aws, azure, containerd, or gcp in requires.
+  - criteria:
+      - track: '1.30'
+    provides:
+      cos-agent:
+        optional: true
+    requires:
+      cos-tokens:
+        optional: true
+    constraints:
+      # k8s control plane must be on the same Kubernetes version track.
+      - 'tracks(charms(endpoint[cluster])) == tracks({self})'
+
+  # -- 1.31+ tracks (full endpoint set; default block) -------------------------
+  # Adds aws, azure, containerd, gcp to requires.
+  - provides:
+      cos-agent:
+        optional: true
+    requires:
+      aws:
+        optional: true
+      azure:
+        optional: true
+      containerd:
+        optional: true
+      cos-tokens:
+        optional: true
+      gcp:
+        optional: true
+    constraints:
+      # k8s control plane must be on the same Kubernetes version track.
+      - 'tracks(charms(endpoint[cluster])) == tracks({self})'

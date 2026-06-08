@@ -1,11 +1,12 @@
 ---
 # Remove after: https://github.com/canonical/vault-k8s-operator/pull/659
 overrides:
-  # Track 1.18+ renamed common_name to pki_ca_common_name
+  # Tracks 1.18+ renamed common_name to pki_ca_common_name; 2.0 follows same schema
   - criteria:
       - any_of:
           - track: '1.18'
           - track: '1.19'
+          - track: '2.0'
     provides: &vault_provides
       vault-autounseal-provides:
         optional: true
@@ -31,7 +32,34 @@ overrides:
     constraints:
       - 'bool(endpoint[vault-pki]) => bool(endpoint[tls-certificates-pki])'
       - 'bool(endpoint[vault-pki]) or bool(endpoint[tls-certificates-pki]) => set(config[pki_ca_common_name])'
-  # All other tracks (1.15, 1.16, 1.17, ...)
+  # 1.15 track: no ingress-per-unit endpoint
+  - criteria:
+      - track: '1.15'
+    provides: *vault_provides
+    requires:
+      ingress:
+        optional: true
+      tls-certificates-pki:
+        optional: true
+    configs:
+      common_name: [charmqa, null]
+    constraints:
+      - 'bool(endpoint[vault-pki]) => bool(endpoint[tls-certificates-pki])'
+      - 'bool(endpoint[vault-pki]) or bool(endpoint[tls-certificates-pki]) => set(config[common_name])'
+  # latest track: old vault-k8s; vault-autounseal-provides, vault-pki, and grafana-dashboard absent
+  - criteria:
+      - track: 'latest'
+    provides:
+      vault-kv:
+        optional: true
+      metrics-endpoint:
+        optional: true
+      send-ca-cert:
+        optional: true
+    requires:
+      ingress:
+        optional: true
+  # Fallback (1.16, 1.17, ...)
   - provides: *vault_provides
     requires: *vault_requires
     configs:
