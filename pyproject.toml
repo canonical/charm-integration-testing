@@ -18,7 +18,8 @@ validators-postgresql-client = { path = "./validators/postgresql_client", develo
 validators-mongodb-client = { path = "./validators/mongodb_client", develop = true }
 validators-tracing = { path = "./validators/tracing", develop = true, extras = ["dev", "deep", "uat"] }
 validators-prometheus-scrape = { path = "./validators/prometheus_scrape", develop = true }
-
+validators-s3 = { path = "./validators/s3", develop = true }
+validators-loki-push-api = { path = "./validators/loki_push_api", develop = true }
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]

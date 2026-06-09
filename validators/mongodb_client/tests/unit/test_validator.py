@@ -19,12 +19,14 @@ from unittest.mock import patch
 
 import ops
 import pymongo
+import pytest
 from pymongo.errors import WriteError
 
 from validators.mongodb_client.validator import MongoDBClientValidator
 from validators.test_utils.helpers import make_charm_from_relation
 from validators.test_utils.stubs import (
     ApplicationStub,
+    RelationRoleStub,
     RelationStub,
 )
 
@@ -33,10 +35,12 @@ from validators.test_utils.stubs import (
 # ---------------------------------------------------------------------------
 
 
-def _make_validator(databag: dict[str, str], endpoint: str = "db") -> MongoDBClientValidator:
+def _make_validator(
+    databag: dict[str, str], endpoint: str = "db", role: RelationRoleStub = RelationRoleStub.requires
+) -> MongoDBClientValidator:
     app = ApplicationStub()
     relation = RelationStub(app=app, data={app: databag}, name=endpoint, id=0)
-    charm = make_charm_from_relation(relation, interface_name="mongodb_client")
+    charm = make_charm_from_relation(relation, interface_name="mongodb_client", role=role)
     return MongoDBClientValidator(cast(ops.CharmBase, charm), cast(ops.Relation, relation))
 
 
@@ -131,6 +135,20 @@ VALID_DATABAG: dict[str, str] = {
 
 
 class TestMongoDBClientValidatorSimple:
+    @pytest.mark.parametrize(
+        "role,should_skip",
+        [(RelationRoleStub.requires, False), (RelationRoleStub.provides, True), (RelationRoleStub.peer, True)],
+    )
+    def test_returns_skipped_based_on_role(self, role: RelationRoleStub, should_skip: bool) -> None:
+        # GIVEN
+        validator = _make_validator(VALID_DATABAG, role=role)
+
+        # WHEN
+        result = validator.validate(level="simple")
+
+        # THEN
+        assert (result.status == "SKIPPED") == should_skip
+
     def test_returns_skipped_for_unsupported_level(self) -> None:
         # GIVEN
         validator = _make_validator(VALID_DATABAG)

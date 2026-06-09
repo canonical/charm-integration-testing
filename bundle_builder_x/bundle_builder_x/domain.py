@@ -205,7 +205,7 @@ class Domain(BaseModel):
     def integration_offer_name(self, integration: DomainCharmIntegration) -> str:
         prov_charm = self.charms[integration.provides_charm_id]
         interface = self.integration_interface(integration)
-        return f"{prov_charm.spec.name}-{integration.provides_endpoint}-{interface}-offer"
+        return f"{prov_charm.spec.name}-{integration.provides_endpoint}-{interface}-offer".replace("_", "-")
 
 
 def add_charm_to_domain(charm: Charm, domain: Domain, model_ref: ModelRef | None = None) -> int:

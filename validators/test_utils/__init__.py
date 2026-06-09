@@ -23,6 +23,7 @@ from .stubs import (
     RelationRoleStub,
     RelationStub,
     SecretStub,
+    UnitStub,
 )
 
 __all__ = [
@@ -30,6 +31,7 @@ __all__ = [
     "make_charm_from_relation_and_secrets",
     "SecretStub",
     "ApplicationStub",
+    "UnitStub",
     "RelationStub",
     "ModelStub",
     "RelationRoleStub",

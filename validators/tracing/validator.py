@@ -28,6 +28,8 @@ from validators.base import (
 
 class TracingValidator(BaseValidator):
     def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
+        if self.role != "requires":
+            return self._skipped_result_due_to_role(level, self.role)
         if level not in ("simple", "deep"):
             return self._skipped_result_due_to_level(level)
 
