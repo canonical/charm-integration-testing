@@ -156,6 +156,13 @@ class TestObjectStorageValidatorSchema:
         result = validator.validate(level="simple")
         assert result.status == "FAIL"
 
+    def test_fails_when_sdi_data_is_invalid_yaml(self) -> None:
+        validator = _make_validator({"_supported_versions": "- v1\n", "data": "[invalid"})
+        result = validator.validate(level="simple")
+        assert result.status == "FAIL"
+        schema_check = next(c for c in result.checks if c.name == "schema")
+        assert not schema_check.passed
+
 
 # ---------------------------------------------------------------------------
 # Tests: simple level
