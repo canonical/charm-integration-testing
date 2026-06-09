@@ -129,10 +129,12 @@ class ObjectStorageValidator(BaseValidator):
         if not data_str:
             return {}
         try:
-            parsed = yaml.safe_load(data_str)
+            parsed: object = yaml.safe_load(data_str)
         except yaml.YAMLError:
             return {}
-        return parsed if isinstance(parsed, dict) else {}
+        if not isinstance(parsed, dict):
+            return {}
+        return {str(k): ("" if v is None else str(v)) for k, v in parsed.items()}
 
     def _parse_and_check_schema(self) -> tuple[dict[str, str], ValidationCheck]:
         sdi_data = self._parse_sdi_data()
@@ -199,8 +201,8 @@ class ObjectStorageValidator(BaseValidator):
 
     def _build_client(self, sdi_data: dict[str, str]) -> Any:
         scheme = "https" if str(sdi_data.get("secure", "false")).lower() == "true" else "http"
-        endpoint_url = f"{scheme}://{sdi_data['service']}.{sdi_data['namespace']}.svc.cluster.local:{sdi_data['port']}"
-
+        host = f"{sdi_data['service']}.{sdi_data['namespace']}.svc.cluster.local"
+        endpoint_url = f"{scheme}://{host}:{sdi_data['port']}"
         return boto3.client(
             "s3",
             aws_access_key_id=sdi_data["access-key"],

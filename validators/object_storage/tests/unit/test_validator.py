@@ -99,9 +99,14 @@ class TestObjectStorageValidatorGating:
         ],
     )
     def test_returns_skipped_based_on_role(self, role: RelationRoleStub, should_skip: bool) -> None:
+        # GIVEN
         validator = _make_validator(VALID_DATABAG, role=role)
+
+        # WHEN
         with patch("validators.object_storage.validator.boto3.client", return_value=_mock_client()):
             result = validator.validate(level="simple")
+
+        # THEN
         assert (result.status == "SKIPPED") == should_skip
 
     def test_returns_skipped_for_uat_level(self) -> None:
