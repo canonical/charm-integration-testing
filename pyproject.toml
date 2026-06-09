@@ -19,6 +19,7 @@ validators-mongodb-client = { path = "./validators/mongodb_client", develop = tr
 validators-tracing = { path = "./validators/tracing", develop = true, extras = ["dev", "deep", "uat"] }
 validators-s3 = { path = "./validators/s3", develop = true }
 validators-loki-push-api = { path = "./validators/loki_push_api", develop = true }
+validators-object-storage = { path = "./validators/object_storage", develop = true }
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
