@@ -1,0 +1,156 @@
+---
+# Override for kratos
+# Source: https://github.com/canonical/kratos-operator
+#
+# Tracks 0.1-0.3 and istio do not mark endpoints optional in upstream metadata;
+# all non-database endpoints need to be explicitly marked optional here.
+# Tracks 0.4+ already mark all endpoints correctly in upstream charmcraft.yaml.
+#
+# A constraint is added for all tracks: if kratos-external-idp is wired, the
+# public ingress endpoint must also be wired, because the charm needs a public
+# URL to register redirect URIs for each external OIDC provider.
+# Evidence: src/utils.py public_route_is_ready(), src/charm.py _on_client_config_changed()
+#
+# pg-database (requires) - REQUIRED: charm emits BlockedStatus without a database
+# public-ingress/public-route (requires) - OPTIONAL: only required when kratos-external-idp is wired
+# All other non-database endpoints: optional - charm reaches active without them
+overrides:
+  # Track 0.1: old ingress API; provides kratos-endpoint-info only (kratos-info absent)
+  - criteria:
+      - track: '0.1'
+    requires:
+      public-ingress:
+        optional: true
+      admin-ingress:
+        optional: true
+      kratos-external-idp:
+        optional: true
+      hydra-endpoint-info:
+        optional: true
+      ui-endpoint-info:
+        optional: true
+      logging:
+        optional: true
+      tracing:
+        optional: true
+    provides:
+      kratos-endpoint-info:
+        optional: true
+      metrics-endpoint:
+        optional: true
+      grafana-dashboard:
+        optional: true
+    constraints:
+      - 'bool(endpoint[kratos-external-idp]) => bool(endpoint[public-ingress])'
+
+  # Track 0.2: same as 0.1 but kratos-info appears alongside kratos-endpoint-info
+  - criteria:
+      - track: '0.2'
+    requires:
+      public-ingress:
+        optional: true
+      admin-ingress:
+        optional: true
+      kratos-external-idp:
+        optional: true
+      hydra-endpoint-info:
+        optional: true
+      ui-endpoint-info:
+        optional: true
+      logging:
+        optional: true
+      tracing:
+        optional: true
+    provides:
+      kratos-endpoint-info:
+        optional: true
+      kratos-info:
+        optional: true
+      metrics-endpoint:
+        optional: true
+      grafana-dashboard:
+        optional: true
+    constraints:
+      - 'bool(endpoint[kratos-external-idp]) => bool(endpoint[public-ingress])'
+
+  # Track 0.3: adds internal-ingress (traefik_route for cross-cluster communication)
+  - criteria:
+      - track: '0.3'
+    requires:
+      public-ingress:
+        optional: true
+      admin-ingress:
+        optional: true
+      internal-ingress:
+        optional: true
+      kratos-external-idp:
+        optional: true
+      hydra-endpoint-info:
+        optional: true
+      ui-endpoint-info:
+        optional: true
+      logging:
+        optional: true
+      tracing:
+        optional: true
+    provides:
+      kratos-endpoint-info:
+        optional: true
+      kratos-info:
+        optional: true
+      metrics-endpoint:
+        optional: true
+      grafana-dashboard:
+        optional: true
+    constraints:
+      - 'bool(endpoint[kratos-external-idp]) => bool(endpoint[public-ingress])'
+
+  # istio track: Istio service mesh variant with CMR mesh endpoints
+  - criteria:
+      - track: istio
+    requires:
+      admin-ingress:
+        optional: true
+      hydra-endpoint-info:
+        optional: true
+      kratos-external-idp:
+        optional: true
+      logging:
+        optional: true
+      public-ingress:
+        optional: true
+      receive-ca-cert:
+        optional: true
+      require-cmr-mesh:
+        optional: true
+      service-mesh:
+        optional: true
+      smtp:
+        optional: true
+      tracing:
+        optional: true
+      ui-endpoint-info:
+        optional: true
+    provides:
+      grafana-dashboard:
+        optional: true
+      kratos-info:
+        optional: true
+      metrics-endpoint:
+        optional: true
+      provide-cmr-mesh:
+        optional: true
+    constraints:
+      - 'bool(endpoint[kratos-external-idp]) => bool(endpoint[public-ingress])'
+
+  # Track 0.4: upstream already marks all non-database endpoints optional;
+  # uses public-ingress (old traefik API)
+  - criteria:
+      - track: '0.4'
+    constraints:
+      - 'bool(endpoint[kratos-external-idp]) => bool(endpoint[public-ingress])'
+
+  # Tracks 0.5 and latest: upstream already marks all non-database endpoints optional;
+  # uses public-route (new traefik API)
+  - constraints:
+      - 'bool(endpoint[kratos-external-idp]) => bool(endpoint[public-route])'
