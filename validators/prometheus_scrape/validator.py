@@ -132,8 +132,15 @@ def _validate_scrape_jobs(scrape_jobs: list[dict[str, Any]]) -> ValidationCheck:
             invalid.append(f"[{i}].static_configs must be a non-empty list")
             continue
         for j, sc in enumerate(static_configs):
-            if not isinstance(sc, dict) or not sc.get("targets"):
-                invalid.append(f"[{i}].static_configs[{j}].targets missing or empty")
+            if not isinstance(sc, dict):
+                invalid.append(f"[{i}].static_configs[{j}] must be a dict")
+                continue
+            targets = sc.get("targets")
+            if not isinstance(targets, list) or not targets:
+                invalid.append(f"[{i}].static_configs[{j}].targets must be a non-empty list")
+                continue
+            if not all(isinstance(t, str) and t for t in targets):
+                invalid.append(f"[{i}].static_configs[{j}].targets must contain only non-empty strings")
 
     if invalid:
         return ValidationCheck(name="scrape_jobs", passed=False, message=f"Invalid scrape jobs: {'; '.join(invalid)}")
@@ -163,13 +170,14 @@ def _parse_target(target: str, scheme: str = "http") -> tuple[str, int]:
     host = parsed.hostname or target
     if parsed.port is not None:
         return host, parsed.port
-    return host, 443 if scheme in ("https",) else 80
+    effective_scheme = parsed.scheme or scheme
+    return host, 443 if effective_scheme in ("https",) else 80
 
 
 def _connectivity_check(targets: list[tuple[str, str, int]]) -> ValidationCheck:
     """TCP-ping every scrape target; return a single pass/fail check."""
     if not targets:
-        return ValidationCheck(name="connect", passed=False, message="No scrape targets found to test.")
+        return ValidationCheck(name="connect", passed=False, message="No parseable scrape targets found to test.")
 
     errors: list[str] = []
     for raw_target, host, port in targets:

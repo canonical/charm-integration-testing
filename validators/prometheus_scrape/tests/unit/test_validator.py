@@ -263,6 +263,8 @@ class TestPrometheusScrapeValidatorSimple:
         # THEN
         assert result.status == "SKIPPED"
         assert result.checks == []
+
+    def test_result_contains_endpoint_and_interface(self) -> None:
         # GIVEN
         validator = _make_validator(VALID_DATABAG, endpoint="my-endpoint")
 
