@@ -47,6 +47,8 @@ overrides:
         == tracks({self})'
       - 'bool(endpoint[image-service]) => risks(charms(endpoint[image-service])) ==
         risks({self})'
+      - 'tracks(charms(endpoint[cinder-volume-service])) == tracks({self})'
+      - 'risks(charms(endpoint[cinder-volume-service])) == risks({self})'
 
   # ── ussuri and later ─────────────────────────────────────────────────────────
   # identity-credentials (requires) added in ussuri.
@@ -94,3 +96,5 @@ overrides:
         == tracks({self})'
       - 'bool(endpoint[identity-credentials]) => risks(charms(endpoint[identity-credentials]))
         == risks({self})'
+      - 'tracks(charms(endpoint[cinder-volume-service])) == tracks({self})'
+      - 'risks(charms(endpoint[cinder-volume-service])) == risks({self})'
