@@ -6,11 +6,14 @@
 from itertools import repeat
 from typing import Iterator
 
-from bundle_builder_x.assertion_tags import SubordinateBaseMismatchTag
+import z3  # type: ignore[import-untyped]
+
+from bundle_builder_x.assertion_tags import CharmPayload, PeerChannelMismatchTag, SubordinateBaseMismatchTag
 from bundle_builder_x.bundle_builder import BundleBuilder
 from bundle_builder_x.charm import Charm, CharmChannel, CharmEndpoint, EndpointScope, EndpointType
 from bundle_builder_x.charmhub import CharmhubClient
 from bundle_builder_x.charmhub_http import CharmReleaseNotFoundException
+from bundle_builder_x.constraints import add_constraints
 from bundle_builder_x.domain import (
     Domain,
     DomainApplication,
@@ -322,3 +325,209 @@ class TestGetCharmsForEndpoint:
         # THEN no results are returned and no Charmhub queries were made
         assert results == []
         assert fake.charm_from_store_calls == []
+
+
+def _make_charm_variant(revision: int, priority: float) -> Charm:
+    return Charm(
+        name="myapp",
+        channel=_CHANNEL,
+        revision=revision,
+        ubuntu_version="22.04",
+        ubuntu_arch="amd64",
+        endpoints={},
+        priority=priority,
+    )
+
+
+def _domain_with_two_alternatives(
+    priority_a: float = 1.0,
+    priority_b: float = 2.0,
+) -> tuple[Domain, int, int]:
+    domain = Domain()
+    model_ref = ModelRef(name="m")
+    domain.models[model_ref] = DomainModel(
+        arch="amd64",
+        platform="kubernetes",
+        juju_version=_JUJU,
+        applications={"myapp": DomainApplication(charm="myapp")},
+    )
+    id_a = add_charm_to_domain(_make_charm_variant(revision=1, priority=priority_a), domain, model_ref)
+    id_b = add_charm_to_domain(_make_charm_variant(revision=2, priority=priority_b), domain, model_ref)
+    return domain, id_a, id_b
+
+
+class TestOptimizeSolution:
+    """BundleBuilder._optimize_solution."""
+
+    def test_extra_constraints_are_applied_as_hard_constraints(self) -> None:
+        # GIVEN a domain with two alternatives and an extra constraint forcing charm A out
+        domain, id_a, id_b = _domain_with_two_alternatives()
+        builder = BundleBuilder(charmhub_client=_FakeCharmhubClient())
+        extra = [z3.Not(domain.charms[id_a].exists)]
+
+        # WHEN optimize is called with the extra constraint
+        model = builder._optimize_solution(domain, extra_constraints=extra)
+
+        # THEN charm A is absent from the solution
+        assert not z3.is_true(model.eval(domain.charms[id_a].exists, model_completion=True))
+        # AND charm B covers the application
+        assert z3.is_true(model.eval(domain.charms[id_b].exists, model_completion=True))
+
+    def test_selects_higher_priority_charm(self) -> None:
+        # GIVEN charm B has higher priority (lower optimizer cost) than charm A
+        domain, id_a, id_b = _domain_with_two_alternatives(priority_a=1.0, priority_b=2.0)
+        builder = BundleBuilder(charmhub_client=_FakeCharmhubClient())
+
+        # WHEN optimize is called without extra constraints
+        model = builder._optimize_solution(domain)
+
+        # THEN the optimizer selects charm B (lower cost = preferred)
+        assert z3.is_true(model.eval(domain.charms[id_b].exists, model_completion=True))
+        assert not z3.is_true(model.eval(domain.charms[id_a].exists, model_completion=True))
+
+
+class TestSolve:
+    """BundleBuilder._solve."""
+
+    def test_returns_valid_solution(self) -> None:
+        # GIVEN a domain with two charm alternatives
+        domain, id_a, id_b = _domain_with_two_alternatives()
+        builder = BundleBuilder(charmhub_client=_FakeCharmhubClient())
+
+        # WHEN _solve runs
+        model = builder._solve(domain)
+
+        # THEN the application is covered by exactly one charm variant
+        app = domain.models[ModelRef(name="m")].applications["myapp"]
+        mapped_count = sum(1 for v in app.charm_ids.values() if z3.is_true(model.eval(v, model_completion=True)))
+        assert mapped_count == 1
+
+
+class TestIterativeDescent:
+    """BundleBuilder._iterative_descent."""
+
+    def test_selects_higher_priority_charm(self) -> None:
+        # GIVEN a domain where charm B has higher priority
+        domain, id_a, id_b = _domain_with_two_alternatives(priority_a=1.0, priority_b=2.0)
+        builder = BundleBuilder(charmhub_client=_FakeCharmhubClient())
+        charm_cost_expr, integration_cost_expr = BundleBuilder._build_cost_exprs(domain)
+
+        # WHEN _iterative_descent runs directly (bypassing z3.Optimize)
+        model = builder._iterative_descent(
+            domain,
+            charm_cost_expr,
+            integration_cost_expr,
+            initial_model=None,
+            extra_constraints=None,
+        )
+
+        # THEN it selects charm B (higher priority)
+        assert z3.is_true(model.eval(domain.charms[id_b].exists, model_completion=True))
+        assert not z3.is_true(model.eval(domain.charms[id_a].exists, model_completion=True))
+
+    def test_initial_model_is_used_as_seed(self) -> None:
+        # GIVEN a domain and an initial SAT model already pinning charm A
+        domain, id_a, id_b = _domain_with_two_alternatives(priority_a=1.0, priority_b=2.0)
+        builder = BundleBuilder(charmhub_client=_FakeCharmhubClient())
+        charm_cost_expr, integration_cost_expr = BundleBuilder._build_cost_exprs(domain)
+
+        # Obtain an initial model from a plain solver
+        solver = z3.Solver()
+        add_constraints(solver, domain)
+        assert solver.check() == z3.sat
+        initial = solver.model()
+
+        # WHEN _iterative_descent is seeded with that model
+        model = builder._iterative_descent(
+            domain,
+            charm_cost_expr,
+            integration_cost_expr,
+            initial_model=initial,
+            extra_constraints=None,
+        )
+
+        # THEN it still converges to the optimal (charm B) from the seed
+        assert z3.is_true(model.eval(domain.charms[id_b].exists, model_completion=True))
+
+
+def _mismatch(
+    anchor_id: int, peer_id: int, track: str | None = None, risk: str | None = None
+) -> PeerChannelMismatchTag:
+    return PeerChannelMismatchTag(
+        charm=CharmPayload(charm_name="anchor", charm_id=anchor_id),
+        endpoint="ep",
+        peer_charm_name="peer",
+        peer_charm_id=peer_id,
+        required_track=track,
+        required_risk=risk,
+    )
+
+
+class TestMergeMismatchTags:
+    """BundleBuilder._merge_mismatch_tags."""
+
+    def test_non_mismatch_tags_pass_through(self) -> None:
+        # GIVEN a list containing only a non-mismatch tag
+        tag = _mismatch_tag()
+
+        # WHEN merged
+        result = BundleBuilder._merge_mismatch_tags([tag])
+
+        # THEN it is returned unchanged
+        assert result == [tag]
+
+    def test_single_mismatch_tag_passes_through(self) -> None:
+        # GIVEN a single PeerChannelMismatchTag
+        tag = _mismatch(anchor_id=0, peer_id=1, track="zed")
+
+        # WHEN merged
+        result = BundleBuilder._merge_mismatch_tags([tag])
+
+        # THEN it is returned as-is
+        assert result == [tag]
+
+    def test_same_pair_track_and_risk_combined(self) -> None:
+        # GIVEN two mismatch tags for the same (anchor, peer) pair - one carries track, one carries risk
+        track_tag = _mismatch(anchor_id=0, peer_id=1, track="zed")
+        risk_tag = _mismatch(anchor_id=0, peer_id=1, risk="edge")
+
+        # WHEN merged
+        result = BundleBuilder._merge_mismatch_tags([track_tag, risk_tag])
+
+        # THEN they collapse to one tag with both fields set
+        assert len(result) == 1
+        merged = result[0]
+        assert isinstance(merged, PeerChannelMismatchTag)
+        assert merged.required_track == "zed"
+        assert merged.required_risk == "edge"
+
+    def test_different_pairs_kept_separate(self) -> None:
+        # GIVEN mismatch tags for two different (anchor, peer) pairs
+        tag_a = _mismatch(anchor_id=0, peer_id=1, track="zed")
+        tag_b = _mismatch(anchor_id=0, peer_id=2, track="antelope")
+
+        # WHEN merged
+        result = BundleBuilder._merge_mismatch_tags([tag_a, tag_b])
+
+        # THEN both are kept
+        assert len(result) == 2
+
+    def test_insertion_order_preserved(self) -> None:
+        # GIVEN a mix: non-mismatch, mismatch pair A, non-mismatch, mismatch pair B
+        non_mismatch = _mismatch_tag()
+        tag_a = _mismatch(anchor_id=0, peer_id=1, track="zed")
+        tag_a2 = _mismatch(anchor_id=0, peer_id=1, risk="edge")
+        tag_b = _mismatch(anchor_id=0, peer_id=2, track="antelope")
+
+        # WHEN merged
+        result = BundleBuilder._merge_mismatch_tags([non_mismatch, tag_a, non_mismatch, tag_b, tag_a2])
+
+        # THEN non-mismatch tags appear in their original positions and pair A is merged
+        assert result[0] is non_mismatch
+        assert result[1] is not tag_a  # pair A was replaced with a merged copy
+        assert isinstance(result[1], PeerChannelMismatchTag)
+        assert result[1].required_track == "zed"
+        assert result[1].required_risk == "edge"
+        assert result[2] is non_mismatch
+        assert isinstance(result[3], PeerChannelMismatchTag)
+        assert result[3].required_track == "antelope"

@@ -67,8 +67,10 @@ The build loop has three phases that repeat until the problem is satisfiable:
 Domain expansion
 ~~~~~~~~~~~~~~~~
 
-When the solver returns ``unsat``, the builder inspects the unsat core and
-acts on the highest-priority tag:
+When the solver returns ``unsat``, the builder decodes every tag in the unsat
+core and attempts to expand the domain for each one in the same iteration.
+Tags are processed in priority order, but all tags are acted on (not just the
+first):
 
 - ``APPLICATION_EXISTS`` -- the spec references an application whose charm is
   not yet in the domain. Fetch it from Charmhub.
@@ -79,6 +81,10 @@ acts on the highest-priority tag:
   provides or requires the matching interface and add it.
 - ``ENDPOINT_COUNT_MATCHES_INTEGRATIONS`` / ``PEER_CHANNEL_MISMATCH`` --
   structural mismatches that indicate a constraint conflict.
+
+Pairs of ``PEER_CHANNEL_MISMATCH`` tags for the same (anchor, peer) charm
+pair are merged before processing so that track and risk constraints are
+resolved together in a single step, rather than one dimension at a time.
 
 This loop is bounded (default 100 iterations). If the domain cannot be
 expanded further and the problem is still unsatisfiable, the builder raises
@@ -91,7 +97,11 @@ Key properties
   than embedded implicitly in scoring or edge expansion.
 - **Multi-model** -- all models in a spec are solved simultaneously.
 - **Cross-model relations** -- both in-spec and external CMRs are supported.
-- **Optimization pass** -- after a satisfying assignment is found, a
-  ``z3.Optimize`` pass minimizes the number of applications and integrations.
+- **Optimization pass** -- after a satisfying assignment is found, the builder
+  first attempts a ``z3.Optimize`` pass (configurable timeout, default 1 minute)
+  to find a globally optimal solution in one shot. If that times out, it falls
+  back to iterative descent: a ``z3.Solver`` loop that minimizes charm cost first
+  (phase 1), then integration count with charm cost fixed (phase 2), each step
+  issuing a single SAT query with a tighter bound.
 - **Failure diagnostics** -- when the problem is unsatisfiable, the unsat core is
   decoded into specific constraint tags so callers know exactly what went wrong.

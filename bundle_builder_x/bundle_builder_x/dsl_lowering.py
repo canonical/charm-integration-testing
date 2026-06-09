@@ -557,6 +557,15 @@ def _emit_channel_mismatch_hints(
             _emit_cross(r_lowered, l_lowered)
 
 
+def _is_self_channel_expr(expr: AnyExpr) -> bool:
+    """Return True if expr is a channel accessor (tracks/risks/channels/revisions) on {self}.
+
+    Used to eliminate redundant IsSubset array-theory formulas for == comparisons,
+    which is critical for z3.Optimize tractability on production domains.
+    """
+    return isinstance(expr, (TracksExpr, RisksExpr, ChannelsExpr, RevisionsExpr)) and isinstance(expr.arg, SelfExpr)
+
+
 def _lower_compare(
     op: str,
     left: AnyExpr,
@@ -575,6 +584,11 @@ def _lower_compare(
 
     # Emit sub-assertions for channel set comparisons before producing the Z3 expression.
     _emit_channel_mismatch_hints(op, l_lowered, r_lowered, ctx)
+
+    # For == with {self}, the mismatch hints fully cover the constraint; the IsSubset
+    # array formula is redundant.  Dropping it is critical for z3.Optimize tractability.
+    if op == "==" and (_is_self_channel_expr(left) or _is_self_channel_expr(right)):
+        return z3.BoolVal(True)
 
     # Unwrap _ChannelSet to z3.ExprRef for the actual Z3 comparison.
     if isinstance(l_lowered, _ChannelSet):
