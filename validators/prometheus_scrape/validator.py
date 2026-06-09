@@ -103,6 +103,13 @@ def _validate_schema(databag: dict[str, str]) -> ValidationCheck:
     except json.JSONDecodeError as exc:
         return ValidationCheck(name="schema", passed=False, message=f"'scrape_metadata' is not valid JSON: {exc}")
 
+    if not isinstance(metadata, dict):
+        return ValidationCheck(
+            name="schema",
+            passed=False,
+            message=f"'scrape_metadata' must be a JSON object, got {type(metadata).__name__}",
+        )
+
     missing_meta = [k for k in _SCRAPE_METADATA_REQUIRED_KEYS if not metadata.get(k)]
     if missing_meta:
         return ValidationCheck(

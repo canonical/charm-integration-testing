@@ -139,6 +139,19 @@ class TestPrometheusScrapeValidatorSimple:
         assert not schema_check.passed
         assert "scrape_metadata" in schema_check.message
 
+    def test_fails_when_scrape_metadata_not_a_dict(self) -> None:
+        # GIVEN scrape_metadata that is valid JSON but not a dict (e.g. a list)
+        validator = _make_validator({"scrape_metadata": "[]", "scrape_jobs": VALID_SCRAPE_JOBS})
+
+        # WHEN
+        result = validator.validate(level="simple")
+
+        # THEN
+        assert result.status == "FAIL"
+        schema_check = next(c for c in result.checks if c.name == "schema")
+        assert not schema_check.passed
+        assert "must be a JSON object" in schema_check.message
+
     def test_fails_when_scrape_metadata_missing_required_keys(self) -> None:
         # GIVEN scrape_metadata that is valid JSON but missing 'model' and 'application'
         partial_meta = json.dumps({"model_uuid": "abc", "unit": "app/0"})
