@@ -1,5 +1,20 @@
 ---
 overrides:
+  # queens-xena: application-dashboard not yet available
+  - criteria:
+      - any_of:
+          - track: 'queens'
+          - track: 'rocky'
+          - track: 'stein'
+          - track: 'train'
+          - track: 'ussuri'
+          - track: 'victoria'
+          - track: 'wallaby'
+          - track: 'xena'
+    provides:
+      nrpe-external-master:
+        optional: true
+  # default (yoga, zed, 2023.1+, latest, and future tracks): nrpe + application-dashboard
   - provides:
       nrpe-external-master:
         optional: true

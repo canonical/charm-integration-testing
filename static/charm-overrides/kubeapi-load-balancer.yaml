@@ -1,7 +1,23 @@
 ---
 overrides:
-  - requires:
+  # 1.23-1.27 and 1.28 non-edge: ha only (cos-agent not yet available)
+  - criteria:
+      - any_of:
+          - track: '1.23'
+          - track: '1.24'
+          - track: '1.25'
+          - track: '1.26'
+          - track: '1.27'
+          - track: '1.28'
+            none_of:
+              - risk: 'edge'
+    requires:
+      ha:
+        optional: true
+  # default (1.28/edge, 1.29+, and future tracks): cos-agent + ha
+  - provides:
       cos-agent:
         optional: true
+    requires:
       ha:
         optional: true

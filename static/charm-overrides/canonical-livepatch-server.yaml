@@ -1,5 +1,9 @@
 ---
 overrides:
-  - requires:
+  # latest track lacks cos-agent
+  - criteria:
+      - track: 'latest'
+  # default (ops1.x and future tracks): cos-agent
+  - provides:
       cos-agent:
         optional: true

@@ -1,5 +1,14 @@
 ---
 overrides:
+  # ussuri-yoga: nrpe-external-master not yet available
+  - criteria:
+      - any_of:
+          - track: 'ussuri'
+          - track: 'victoria'
+          - track: 'wallaby'
+          - track: 'xena'
+          - track: 'yoga'
+  # default (zed, 2023.1+, latest, and future tracks): nrpe-external-master
   - provides:
       nrpe-external-master:
         optional: true

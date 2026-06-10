@@ -1,5 +1,22 @@
 ---
 overrides:
+  # tracks before 1.25 lack charm-tracing
+  - criteria:
+      - any_of:
+          - track: '1.14'
+          - track: '1.15'
+          - track: '1.16'
+          - track: '1.17'
+          - track: '1.18'
+          - track: '1.19'
+          - track: '1.20'
+          - track: '1.21'
+          - track: '1.22'
+          - track: '1.23'
+          - track: '1.24'
+          - track: '1.24-ops'
+          - track: 'latest'
+  # default (1.25+): charm-tracing added
   - requires:
       charm-tracing:
         optional: true
