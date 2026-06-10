@@ -1,0 +1,8 @@
+---
+overrides:
+  - provides:
+      nrpe-external-master:
+        optional: true
+    requires:
+      application-dashboard:
+        optional: true
