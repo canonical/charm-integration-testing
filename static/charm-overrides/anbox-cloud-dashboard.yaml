@@ -1,0 +1,15 @@
+---
+# anbox-cloud-dashboard has many non-optional requires endpoints.
+# Make non-core endpoints optional for isolated smoke tests.
+overrides:
+  - requires:
+      ams:
+        optional: true
+      certificates:
+        optional: true
+      charm-tracing:
+        optional: true
+      gateway:
+        optional: true
+      oauth:
+        optional: true

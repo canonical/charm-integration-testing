@@ -1,0 +1,9 @@
+---
+# tigera-secure-ee requires etcd and cni which may cascade unsatisfiable deps.
+# Make optional for isolated endpoint smoke tests.
+overrides:
+  - requires:
+      etcd:
+        optional: true
+      cni:
+        optional: true

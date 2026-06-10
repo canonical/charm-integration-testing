@@ -1,0 +1,10 @@
+---
+# ams-load-balancer monitoring provides + infrastructure requires.
+# Make optional for isolated endpoint smoke tests.
+overrides:
+  - provides:
+      nrpe-external-master:
+        optional: true
+    requires:
+      ams:
+        optional: true

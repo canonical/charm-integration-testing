@@ -1,0 +1,9 @@
+---
+# influxdb monitoring/observability provides endpoints.
+# Make optional for isolated endpoint smoke tests.
+overrides:
+  - provides:
+      grafana-source:
+        optional: true
+      nrpe-external-master:
+        optional: true

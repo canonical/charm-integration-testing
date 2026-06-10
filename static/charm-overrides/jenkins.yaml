@@ -1,0 +1,7 @@
+---
+# jenkins:nrpe-external-master is a provides endpoint.
+# Make optional for isolated endpoint smoke tests.
+overrides:
+  - provides:
+      nrpe-external-master:
+        optional: true

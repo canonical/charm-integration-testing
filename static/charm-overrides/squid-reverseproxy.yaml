@@ -1,0 +1,8 @@
+---
+# Make monitoring provides endpoints optional for smoke tests.
+overrides:
+  - provides:
+      local-monitors:
+        optional: true
+      nrpe-external-master:
+        optional: true

@@ -1,0 +1,7 @@
+---
+# ssl-termination-fqdn:ssl-termination has no provider on the machine platform.
+# Make optional for isolated endpoint smoke tests.
+overrides:
+  - requires:
+      ssl-termination:
+        optional: true

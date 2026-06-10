@@ -1,0 +1,12 @@
+---
+# Make monitoring/observability provides endpoints optional for smoke tests.
+overrides:
+  - provides:
+      local-monitors:
+        optional: true
+      munin:
+        optional: true
+      nrpe-external-master:
+        optional: true
+      statistics:
+        optional: true

@@ -1,0 +1,7 @@
+---
+# kibana:rest requires elasticsearch interface; no machine-platform charm provides it.
+# Make optional for isolated endpoint smoke tests.
+overrides:
+  - requires:
+      rest:
+        optional: true

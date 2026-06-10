@@ -23,6 +23,13 @@ overrides:
       db-admin:
         limit: 1
         features: [tls]
+      cos-agent:
+        optional: true
+    requires:
+      certificates:
+        optional: true
+      tracing:
+        optional: true
     constraints:
       # database, db, and db-admin are mutually exclusive (at most one can be used at a time)
       - len(endpoint[database]) + len(endpoint[db]) + len(endpoint[db-admin]) <= 1

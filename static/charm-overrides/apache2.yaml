@@ -1,0 +1,24 @@
+---
+# apache2 has many non-optional provides and requires endpoints.
+# Make all non-core endpoints optional for isolated smoke tests.
+overrides:
+  - provides:
+      apache-website:
+        optional: true
+      local-monitors:
+        optional: true
+      logs:
+        optional: true
+      nrpe-external-master:
+        optional: true
+    requires:
+      balancer:
+        optional: true
+      logging:
+        optional: true
+      reverseproxy:
+        optional: true
+      vhost-config:
+        optional: true
+      website-cache:
+        optional: true

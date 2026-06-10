@@ -1,0 +1,9 @@
+---
+# Allow isolated endpoint smoke tests without subordinate wiring.
+overrides:
+  - requires:
+      juju-info:
+        optional: true
+    provides:
+      loadbalancer:
+        optional: true

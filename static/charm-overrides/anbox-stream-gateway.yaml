@@ -1,0 +1,20 @@
+---
+# anbox-stream-gateway has many non-optional provides and requires endpoints.
+# Make monitoring/observability/infrastructure endpoints optional for smoke tests.
+overrides:
+  - provides:
+      grafana:
+        optional: true
+      cos-agent:
+        optional: true
+      prometheus:
+        optional: true
+      prometheus-manual:
+        optional: true
+    requires:
+      certificates:
+        optional: true
+      charm-tracing:
+        optional: true
+      nats:
+        optional: true
