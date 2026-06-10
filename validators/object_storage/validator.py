@@ -123,21 +123,23 @@ class ObjectStorageValidator(BaseValidator):
     # SDI parsing
     # ------------------------------------------------------------------
 
-    def _parse_sdi_data(self) -> dict[str, str]:
-        """Return the provider data decoded from the SDI 'data' YAML field."""
+    def _parse_sdi_data(self) -> tuple[dict[str, str], str | None]:
+        """Return *(data, error)* decoded from the SDI 'data' YAML field."""
         data_str = self.databag.get("data", "")
         if not data_str:
-            return {}
+            return {}, "Missing 'data' field in provider databag."
         try:
             parsed: object = yaml.safe_load(data_str)
-        except yaml.YAMLError:
-            return {}
+        except yaml.YAMLError as exc:
+            return {}, f"'data' is not valid YAML: {exc}"
         if not isinstance(parsed, dict):
-            return {}
-        return {str(k): ("" if v is None else str(v)) for k, v in parsed.items()}
+            return {}, "'data' must decode to a mapping/object."
+        return {str(k): ("" if v is None else str(v)) for k, v in parsed.items()}, None
 
     def _parse_and_check_schema(self) -> tuple[dict[str, str], ValidationCheck]:
-        sdi_data = self._parse_sdi_data()
+        sdi_data, error = self._parse_sdi_data()
+        if error:
+            return sdi_data, ValidationCheck(name="schema", passed=False, message=error)
         missing = [f for f in _REQUIRED_SDI_FIELDS if not sdi_data.get(f)]
         check = ValidationCheck(
             name="schema",
