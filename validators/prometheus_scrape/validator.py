@@ -1,22 +1,12 @@
-# Copyright (C) 2026 Canonical Ltd
-
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
 
 import json
-import socket
+import re
+from dataclasses import dataclass, field
 from typing import Any, Literal
 from urllib.parse import urlparse
+from urllib.request import urlopen
 
 from validators.base import (
     BaseValidator,
@@ -26,6 +16,19 @@ from validators.base import (
 )
 
 _SCRAPE_METADATA_REQUIRED_KEYS = ("model", "model_uuid", "application", "unit")
+_LABEL_NAME_RE = re.compile(r"^[a-zA-Z_:][a-zA-Z0-9_:]*$")
+
+
+@dataclass
+class _ScrapeTarget:
+    """A single resolved scrape target extracted from a scrape job."""
+
+    raw: str
+    scheme: str
+    host: str
+    port: int
+    metrics_path: str
+    labels: dict[str, str] = field(default_factory=dict)
 
 
 class PrometheusScrapeValidator(BaseValidator):
@@ -34,18 +37,12 @@ class PrometheusScrapeValidator(BaseValidator):
             return self._skipped_result_due_to_level(level)
 
         if self.role != "requires":
-            return self._make_result(
-                status="SKIPPED",
-                level=level,
-                error=f"Role '{self.role}' is not supported by {self.__class__.__name__}; only 'requires' is validated.",
-            )
+            return self._skipped_result_due_to_role(level, self.role)
 
         if not self.relation_exists():
             return self._error_result(level, f"No remote application on relation '{self.endpoint}'.")
 
-        databag = self.databag
-
-        schema_check, scrape_jobs = _parse_databag(databag)
+        schema_check, scrape_jobs = _parse_databag(self.databag)
         checks: list[ValidationCheck] = [schema_check]
         if not schema_check.passed:
             return self._fail_result(level, checks)
@@ -55,16 +52,26 @@ class PrometheusScrapeValidator(BaseValidator):
         if not jobs_check.passed:
             return self._fail_result(level, checks)
 
+        targets = _extract_targets(scrape_jobs)
+
+        # L1: HTTP GET the metrics endpoint on the first target; verify 200 OK.
+        http_check = _http_probe_check(targets[:1])
+        checks.append(http_check)
+        if not http_check.passed:
+            return self._fail_result(level, checks)
+
         if level == "deep":
-            targets = _extract_targets(scrape_jobs)
-            checks.append(_connectivity_check(targets))
+            # L2: scrape all targets, parse Prometheus text exposition format.
+            checks.extend(_scrape_and_parse_checks(targets))
+            # L2: verify static labels are valid Prometheus label name/value pairs.
+            checks.append(_static_labels_check(scrape_jobs))
 
         status: Literal["PASS", "FAIL"] = "PASS" if all(c.passed for c in checks) else "FAIL"
         return self._make_result(status, level, checks)
 
 
 # ---------------------------------------------------------------------------
-# Pure helpers
+# Pure helpers — databag parsing
 # ---------------------------------------------------------------------------
 
 
@@ -154,16 +161,38 @@ def _validate_scrape_jobs(scrape_jobs: list[dict[str, Any]]) -> ValidationCheck:
     return ValidationCheck(name="scrape_jobs", passed=True, message=f"OK ({len(scrape_jobs)} job(s))")
 
 
-def _extract_targets(scrape_jobs: list[dict[str, Any]]) -> list[tuple[str, str, int]]:
-    """Return a list of (target_str, host, port) tuples from all scrape jobs."""
-    targets: list[tuple[str, str, int]] = []
+# ---------------------------------------------------------------------------
+# Pure helpers — target extraction
+# ---------------------------------------------------------------------------
+
+
+def _extract_targets(scrape_jobs: list[dict[str, Any]]) -> list[_ScrapeTarget]:
+    """Return deduplicated scrape targets from all jobs, skipping unparseable entries."""
+    targets: list[_ScrapeTarget] = []
+    seen: set[str] = set()
     for job in scrape_jobs:
         scheme = job.get("scheme", "http")
+        metrics_path = job.get("metrics_path", "/metrics")
         for sc in job.get("static_configs", []):
+            sc_labels: dict[str, str] = sc.get("labels") or {}
+            if not isinstance(sc_labels, dict):
+                sc_labels = {}
             for raw_target in sc.get("targets", []):
+                if raw_target in seen:
+                    continue
+                seen.add(raw_target)
                 try:
                     host, port = _parse_target(raw_target, scheme)
-                    targets.append((raw_target, host, port))
+                    targets.append(
+                        _ScrapeTarget(
+                            raw=raw_target,
+                            scheme=scheme,
+                            host=host,
+                            port=port,
+                            metrics_path=metrics_path,
+                            labels=dict(sc_labels),
+                        )
+                    )
                 except Exception:  # nosec B110 - best-effort: skip unparseable targets
                     pass
     return targets
@@ -178,27 +207,109 @@ def _parse_target(target: str, scheme: str = "http") -> tuple[str, int]:
     if parsed.port is not None:
         return host, parsed.port
     effective_scheme = parsed.scheme or scheme
-    return host, 443 if effective_scheme in ("https",) else 80
+    return host, 443 if effective_scheme == "https" else 80
 
 
-def _connectivity_check(targets: list[tuple[str, str, int]]) -> ValidationCheck:
-    """TCP-ping every scrape target; return a single pass/fail check."""
+# ---------------------------------------------------------------------------
+# Pure helpers — L1: HTTP probe
+# ---------------------------------------------------------------------------
+
+
+def _http_probe_check(targets: list[_ScrapeTarget]) -> ValidationCheck:
+    """HTTP GET the metrics endpoint on the given targets; verify 200 OK response."""
     if not targets:
-        return ValidationCheck(name="connect", passed=False, message="No parseable scrape targets found to test.")
+        return ValidationCheck(name="http_probe", passed=False, message="No parseable scrape targets found to probe.")
 
     errors: list[str] = []
-    for raw_target, host, port in targets:
+    for t in targets:
+        url = f"{t.scheme}://{t.raw}{t.metrics_path}"
         try:
-            _tcp_ping(host, port)
+            with urlopen(url, timeout=5) as resp:  # nosec B310
+                if resp.status != 200:
+                    errors.append(f"{url}: HTTP {resp.status}")
         except Exception as exc:
-            errors.append(f"{raw_target}: {exc}")
+            errors.append(f"{url}: {exc}")
 
     if errors:
-        return ValidationCheck(name="connect", passed=False, message="; ".join(errors))
-    return ValidationCheck(name="connect", passed=True, message=f"Reached {len(targets)} target(s).")
+        return ValidationCheck(name="http_probe", passed=False, message="; ".join(errors))
+    return ValidationCheck(name="http_probe", passed=True, message=f"HTTP 200 OK from {targets[0].raw}.")
 
 
-def _tcp_ping(host: str, port: int, timeout: float = 5.0) -> None:
-    """Open a TCP connection to host:port and immediately close it."""
-    with socket.create_connection((host, port), timeout=timeout):
-        pass
+# ---------------------------------------------------------------------------
+# Pure helpers — L2: scrape and parse
+# ---------------------------------------------------------------------------
+
+
+def _scrape_and_parse_checks(targets: list[_ScrapeTarget]) -> list[ValidationCheck]:
+    """HTTP GET each target's metrics endpoint and parse Prometheus text exposition format.
+
+    Returns one check per target; each check passes only when the response is 200 OK and
+    contains at least one metric family.
+    """
+    checks: list[ValidationCheck] = []
+    for t in targets:
+        url = f"{t.scheme}://{t.raw}{t.metrics_path}"
+        check_name = f"scrape[{t.raw}]"
+        try:
+            with urlopen(url, timeout=10) as resp:  # nosec B310
+                body = resp.read().decode("utf-8", errors="replace")
+            if resp.status != 200:
+                checks.append(
+                    ValidationCheck(name=check_name, passed=False, message=f"HTTP {resp.status} from {t.raw}.")
+                )
+                continue
+            has_metrics, family_count = _parse_prometheus_text(body)
+            if has_metrics:
+                checks.append(
+                    ValidationCheck(
+                        name=check_name,
+                        passed=True,
+                        message=f"Scraped {family_count} metric family(ies) from {t.raw}.",
+                    )
+                )
+            else:
+                checks.append(
+                    ValidationCheck(
+                        name=check_name,
+                        passed=False,
+                        message=f"No metric families found in response from {t.raw}.",
+                    )
+                )
+        except Exception as exc:
+            checks.append(ValidationCheck(name=check_name, passed=False, message=f"Scrape failed: {exc}"))
+    return checks
+
+
+def _parse_prometheus_text(text: str) -> tuple[bool, int]:
+    """Parse Prometheus text exposition format; return (has_metrics, family_count).
+
+    A metric family is identified by a ``# HELP`` line.  When no ``# HELP``
+    lines are found (minimal exporters that omit them), non-comment, non-empty
+    lines are counted instead so that bare metric values are not rejected.
+    """
+    family_count = sum(1 for line in text.splitlines() if line.startswith("# HELP "))
+    if family_count == 0:
+        family_count = sum(1 for line in text.splitlines() if line and not line.startswith("#"))
+    return family_count > 0, family_count
+
+
+def _static_labels_check(scrape_jobs: list[dict[str, Any]]) -> ValidationCheck:
+    """Verify that static labels in scrape jobs have valid Prometheus label names and string values."""
+    errors: list[str] = []
+    for i, job in enumerate(scrape_jobs):
+        for j, sc in enumerate(job.get("static_configs", [])):
+            labels = sc.get("labels")
+            if labels is None:
+                continue
+            if not isinstance(labels, dict):
+                errors.append(f"job[{i}].static_configs[{j}].labels must be a JSON object")
+                continue
+            for k, v in labels.items():
+                if not isinstance(k, str) or not _LABEL_NAME_RE.match(k):
+                    errors.append(f"job[{i}].static_configs[{j}]: invalid label name {k!r}")
+                if not isinstance(v, str):
+                    errors.append(f"job[{i}].static_configs[{j}]: value for label {k!r} must be a string")
+
+    if errors:
+        return ValidationCheck(name="labels", passed=False, message="; ".join(errors))
+    return ValidationCheck(name="labels", passed=True, message="Static labels are valid.")
