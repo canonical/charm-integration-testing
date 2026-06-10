@@ -16,7 +16,7 @@ from validators.base import (
 )
 
 _SCRAPE_METADATA_REQUIRED_KEYS = ("model", "model_uuid", "application", "unit")
-_LABEL_NAME_RE = re.compile(r"^[a-zA-Z_:][a-zA-Z0-9_:]*$")
+_LABEL_NAME_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 
 
 @dataclass
@@ -52,7 +52,20 @@ class PrometheusScrapeValidator(BaseValidator):
         if not jobs_check.passed:
             return self._fail_result(level, checks)
 
-        targets = _extract_targets(scrape_jobs)
+        targets, parse_errors = _extract_targets(scrape_jobs)
+        
+        # Report any target parsing errors
+        if parse_errors:
+            parse_check = ValidationCheck(
+                name="target_parsing",
+                passed=False,
+                message=f"Failed to parse {len(parse_errors)} target(s): {'; '.join(parse_errors[:3])}"
+                + (f" (and {len(parse_errors) - 3} more)" if len(parse_errors) > 3 else ""),
+            )
+            checks.append(parse_check)
+            if not targets:
+                # If we have no valid targets at all, fail early
+                return self._fail_result(level, checks)
 
         # L1: HTTP GET the metrics endpoint on the first target; verify 200 OK.
         http_check = _http_probe_check(targets[:1])
@@ -166,9 +179,14 @@ def _validate_scrape_jobs(scrape_jobs: list[dict[str, Any]]) -> ValidationCheck:
 # ---------------------------------------------------------------------------
 
 
-def _extract_targets(scrape_jobs: list[dict[str, Any]]) -> list[_ScrapeTarget]:
-    """Return deduplicated scrape targets from all jobs, skipping unparseable entries."""
+def _extract_targets(scrape_jobs: list[dict[str, Any]]) -> tuple[list[_ScrapeTarget], list[str]]:
+    """Return deduplicated scrape targets from all jobs and any parse errors.
+    
+    Returns:
+        tuple: (targets, parse_errors) where parse_errors is a list of error messages.
+    """
     targets: list[_ScrapeTarget] = []
+    parse_errors: list[str] = []
     seen: set[str] = set()
     for job in scrape_jobs:
         scheme = job.get("scheme", "http")
@@ -193,9 +211,9 @@ def _extract_targets(scrape_jobs: list[dict[str, Any]]) -> list[_ScrapeTarget]:
                             labels=dict(sc_labels),
                         )
                     )
-                except Exception:  # nosec B110 - best-effort: skip unparseable targets
-                    pass
-    return targets
+                except Exception as exc:
+                    parse_errors.append(f"'{raw_target}': {exc}")
+    return targets, parse_errors
 
 
 def _parse_target(target: str, scheme: str = "http") -> tuple[str, int]:
@@ -222,7 +240,7 @@ def _http_probe_check(targets: list[_ScrapeTarget]) -> ValidationCheck:
 
     errors: list[str] = []
     for t in targets:
-        url = f"{t.scheme}://{t.raw}{t.metrics_path}"
+        url = f"{t.scheme}://{t.host}:{t.port}{t.metrics_path}"
         try:
             with urlopen(url, timeout=5) as resp:  # nosec B310
                 if resp.status != 200:
@@ -232,7 +250,7 @@ def _http_probe_check(targets: list[_ScrapeTarget]) -> ValidationCheck:
 
     if errors:
         return ValidationCheck(name="http_probe", passed=False, message="; ".join(errors))
-    return ValidationCheck(name="http_probe", passed=True, message=f"HTTP 200 OK from {targets[0].raw}.")
+    return ValidationCheck(name="http_probe", passed=True, message=f"HTTP 200 OK from {targets[0].host}:{targets[0].port}.")
 
 
 # ---------------------------------------------------------------------------
@@ -248,14 +266,15 @@ def _scrape_and_parse_checks(targets: list[_ScrapeTarget]) -> list[ValidationChe
     """
     checks: list[ValidationCheck] = []
     for t in targets:
-        url = f"{t.scheme}://{t.raw}{t.metrics_path}"
-        check_name = f"scrape[{t.raw}]"
+        target_id = f"{t.host}:{t.port}"
+        url = f"{t.scheme}://{target_id}{t.metrics_path}"
+        check_name = f"scrape[{target_id}]"
         try:
             with urlopen(url, timeout=10) as resp:  # nosec B310
                 body = resp.read().decode("utf-8", errors="replace")
             if resp.status != 200:
                 checks.append(
-                    ValidationCheck(name=check_name, passed=False, message=f"HTTP {resp.status} from {t.raw}.")
+                    ValidationCheck(name=check_name, passed=False, message=f"HTTP {resp.status} from {target_id}.")
                 )
                 continue
             has_metrics, family_count = _parse_prometheus_text(body)
@@ -264,7 +283,7 @@ def _scrape_and_parse_checks(targets: list[_ScrapeTarget]) -> list[ValidationChe
                     ValidationCheck(
                         name=check_name,
                         passed=True,
-                        message=f"Scraped {family_count} metric family(ies) from {t.raw}.",
+                        message=f"Scraped {family_count} metric family(ies) from {target_id}.",
                     )
                 )
             else:
@@ -272,7 +291,7 @@ def _scrape_and_parse_checks(targets: list[_ScrapeTarget]) -> list[ValidationChe
                     ValidationCheck(
                         name=check_name,
                         passed=False,
-                        message=f"No metric families found in response from {t.raw}.",
+                        message=f"No metric families found in response from {target_id}.",
                     )
                 )
         except Exception as exc:
