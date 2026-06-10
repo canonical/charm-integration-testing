@@ -53,7 +53,7 @@ class PrometheusScrapeValidator(BaseValidator):
             return self._fail_result(level, checks)
 
         targets, parse_errors = _extract_targets(scrape_jobs)
-        
+
         # Report any target parsing errors
         if parse_errors:
             parse_check = ValidationCheck(
@@ -151,6 +151,17 @@ def _validate_scrape_jobs(scrape_jobs: list[dict[str, Any]]) -> ValidationCheck:
         if not isinstance(job, dict):
             invalid.append(f"[{i}] is not an object")
             continue
+
+        # Validate scheme (only http/https allowed)
+        scheme = job.get("scheme", "http")
+        if not isinstance(scheme, str) or scheme not in ("http", "https"):
+            invalid.append(f"[{i}].scheme must be 'http' or 'https', got {scheme!r}")
+
+        # Validate metrics_path (must start with /)
+        metrics_path = job.get("metrics_path", "/metrics")
+        if not isinstance(metrics_path, str) or not metrics_path.startswith("/"):
+            invalid.append(f"[{i}].metrics_path must be a string starting with '/', got {metrics_path!r}")
+
         if "static_configs" not in job:
             invalid.append(f"[{i}].static_configs missing")
             continue
@@ -181,30 +192,38 @@ def _validate_scrape_jobs(scrape_jobs: list[dict[str, Any]]) -> ValidationCheck:
 
 def _extract_targets(scrape_jobs: list[dict[str, Any]]) -> tuple[list[_ScrapeTarget], list[str]]:
     """Return deduplicated scrape targets from all jobs and any parse errors.
-    
+
+    Deduplication is based on the fully resolved scrape URL (scheme+host+port+metrics_path).
+    This ensures targets with different schemes or metrics paths are treated as distinct.
+
     Returns:
         tuple: (targets, parse_errors) where parse_errors is a list of error messages.
     """
     targets: list[_ScrapeTarget] = []
     parse_errors: list[str] = []
-    seen: set[str] = set()
+    seen: set[str] = set()  # Set of fully resolved URLs for deduplication
     for job in scrape_jobs:
-        scheme = job.get("scheme", "http")
+        job_scheme = job.get("scheme", "http")
         metrics_path = job.get("metrics_path", "/metrics")
         for sc in job.get("static_configs", []):
             sc_labels: dict[str, str] = sc.get("labels") or {}
             if not isinstance(sc_labels, dict):
                 sc_labels = {}
             for raw_target in sc.get("targets", []):
-                if raw_target in seen:
-                    continue
-                seen.add(raw_target)
                 try:
-                    host, port = _parse_target(raw_target, scheme)
+                    # Parse target to get effective scheme, host, and port
+                    effective_scheme, host, port = _parse_target(raw_target, job_scheme)
+
+                    # Deduplicate on the full scrape URL
+                    scrape_url = f"{effective_scheme}://{host}:{port}{metrics_path}"
+                    if scrape_url in seen:
+                        continue
+                    seen.add(scrape_url)
+
                     targets.append(
                         _ScrapeTarget(
                             raw=raw_target,
-                            scheme=scheme,
+                            scheme=effective_scheme,  # Use the effective scheme, not job scheme
                             host=host,
                             port=port,
                             metrics_path=metrics_path,
@@ -216,16 +235,24 @@ def _extract_targets(scrape_jobs: list[dict[str, Any]]) -> tuple[list[_ScrapeTar
     return targets, parse_errors
 
 
-def _parse_target(target: str, scheme: str = "http") -> tuple[str, int]:
-    """Parse a scrape target ``host:port`` or ``scheme://host:port`` into (host, port)."""
+def _parse_target(target: str, scheme: str = "http") -> tuple[str, str, int]:
+    """Parse a scrape target into (scheme, host, port).
+
+    Target can be:
+    - host:port (uses provided scheme)
+    - scheme://host:port (uses target's scheme)
+
+    Returns:
+        tuple: (effective_scheme, host, port)
+    """
     if "://" not in target:
         target = f"{scheme}://{target}"
     parsed = urlparse(target)
     host = parsed.hostname or target
-    if parsed.port is not None:
-        return host, parsed.port
     effective_scheme = parsed.scheme or scheme
-    return host, 443 if effective_scheme == "https" else 80
+    if parsed.port is not None:
+        return effective_scheme, host, parsed.port
+    return effective_scheme, host, 443 if effective_scheme == "https" else 80
 
 
 # ---------------------------------------------------------------------------
@@ -250,7 +277,9 @@ def _http_probe_check(targets: list[_ScrapeTarget]) -> ValidationCheck:
 
     if errors:
         return ValidationCheck(name="http_probe", passed=False, message="; ".join(errors))
-    return ValidationCheck(name="http_probe", passed=True, message=f"HTTP 200 OK from {targets[0].host}:{targets[0].port}.")
+    return ValidationCheck(
+        name="http_probe", passed=True, message=f"HTTP 200 OK from {targets[0].host}:{targets[0].port}."
+    )
 
 
 # ---------------------------------------------------------------------------
