@@ -115,8 +115,7 @@ overrides:
 
   # -- 1.29 track (ops rewrite; azure/gcp absent in this generation) ---------
   # Major rewrite dropped the old reactive cloud endpoints and kube-api-endpoint.
-  # tokens added for COS monitoring.  azure and gcp are not present in this
-  # track's charmcraft.yaml metadata.
+  # azure and gcp are not present in this track's charmcraft.yaml metadata.
   - criteria:
       - track: '1.29'
     requires:
