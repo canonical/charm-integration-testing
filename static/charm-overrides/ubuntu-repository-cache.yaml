@@ -1,0 +1,8 @@
+---
+overrides:
+  - provides:
+      # Both nrpe charm integrations
+      local-monitors:
+        optional: true
+      nrpe-external-master:
+        optional: true
