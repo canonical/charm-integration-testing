@@ -122,10 +122,6 @@ overrides:
     requires:
       aws:
         optional: true
-      tokens:
-        optional: true
-        # COS monitoring token; _check_tokens_integration() returns True
-        # immediately when no relation is present - never blocks
     provides:
       cos-agent:
         optional: true
@@ -145,8 +141,6 @@ overrides:
       azure:
         optional: true
       gcp:
-        optional: true
-      tokens:
         optional: true
     provides:
       cos-agent:
