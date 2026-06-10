@@ -28,7 +28,7 @@ overrides:
         optional: true
       statistics:
         optional: true
-        
+
   # 2.8+: additional endpoints added by upstream PR#536
   - criteria:
       - track: '2.8'

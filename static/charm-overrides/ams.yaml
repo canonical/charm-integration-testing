@@ -1,7 +1,7 @@
 ---
 overrides:
   - requires:
-      lxd-cluster: # reached out to ams team, this should be a peer relation.
+      lxd-cluster:  # reached out to ams team, this should be a peer relation.
         optional: true
       openfga:
         optional: true

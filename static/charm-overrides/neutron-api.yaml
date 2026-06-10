@@ -1,7 +1,7 @@
 ---
 overrides:
   - requires:
-      infoblox-neutron: # Charm that offers it has been deleted https://github.com/openstack-charmers/charm-infoblox
+      infoblox-neutron:  # Charm that offers it has been deleted https://github.com/openstack-charmers/charm-infoblox
         optional: true
-      midonet: # Charm that offers it has been deleted
+      midonet:  # Charm that offers it has been deleted
         optional: true
