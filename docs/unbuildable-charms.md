@@ -1,8 +1,6 @@
 # Charms that cannot build a bundle
 
-Some charms work assume the existence of a k8s model hosting some required service. In such a case, where the relation is
-non-optional and it's multiplatform. I decided to not mark them as optional (as that would only cause deployment to fail),
-and instead document the reasoning here.
+Some charms assume the existence of a k8s model hosting some required service. In such a case, where the relation is non-optional and it's multiplatform. I decided to not mark them as optional (as that would only cause deployment to fail), and instead document the reasoning here.
 
 ### jenkins
 
