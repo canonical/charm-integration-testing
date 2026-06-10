@@ -1,0 +1,7 @@
+---
+overrides:
+  - provides:
+      grafana-source:
+        optional: true
+      nrpe-external-master:
+        optional: true

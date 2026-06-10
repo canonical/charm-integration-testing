@@ -1,0 +1,5 @@
+---
+overrides:
+  - requires:
+      charm-tracing:
+        optional: true
