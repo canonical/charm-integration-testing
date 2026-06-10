@@ -44,7 +44,7 @@ class ObjectStorageValidator(BaseValidator):
         return self._skipped_result_due_to_level(level)
 
     # ------------------------------------------------------------------
-    # Simple (L1): schema + create / verify / delete a transient bucket
+    # Simple (L1): schema + create / delete a transient bucket
     # ------------------------------------------------------------------
 
     def _validate_simple(self) -> ValidationResult:
