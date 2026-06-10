@@ -16,7 +16,9 @@
 # cos-agent, website (provides) - OPTIONAL: secondary/additive
 overrides:
   # latest/stable: classic reactive charm - only reverseproxy (requires) and website (provides) matter
-  - requires:
+  - criteria:
+      - track: 'latest'
+    requires:
       reverseproxy:
         optional: true
     provides:
