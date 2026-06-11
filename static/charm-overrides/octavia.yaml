@@ -1,0 +1,5 @@
+---
+overrides:
+  - provides:
+      nrpe-external-master:
+        optional: true

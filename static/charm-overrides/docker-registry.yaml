@@ -1,0 +1,5 @@
+---
+overrides:
+  - provides:
+      dockerhost:
+        optional: true

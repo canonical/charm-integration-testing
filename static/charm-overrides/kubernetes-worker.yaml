@@ -115,17 +115,12 @@ overrides:
 
   # -- 1.29 track (ops rewrite; azure/gcp absent in this generation) ---------
   # Major rewrite dropped the old reactive cloud endpoints and kube-api-endpoint.
-  # tokens added for COS monitoring.  azure and gcp are not present in this
-  # track's charmcraft.yaml metadata.
+  # azure and gcp are not present in this track's charmcraft.yaml metadata.
   - criteria:
       - track: '1.29'
     requires:
       aws:
         optional: true
-      tokens:
-        optional: true
-        # COS monitoring token; _check_tokens_integration() returns True
-        # immediately when no relation is present - never blocks
     provides:
       cos-agent:
         optional: true
@@ -145,8 +140,6 @@ overrides:
       azure:
         optional: true
       gcp:
-        optional: true
-      tokens:
         optional: true
     provides:
       cos-agent:

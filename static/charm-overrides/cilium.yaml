@@ -1,0 +1,5 @@
+---
+overrides:
+  - requires:
+      send-remote-write:
+        optional: true

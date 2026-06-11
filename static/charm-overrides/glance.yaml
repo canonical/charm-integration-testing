@@ -34,3 +34,5 @@ overrides:
       # All connected OpenStack service charms must be on the same release track.
       - 'tracks(charms(endpoint[identity-service])) == tracks({self})'
       - 'risks(charms(endpoint[identity-service])) == risks({self})'
+      - 'tracks(charms(endpoint[image-service])) == tracks({self})'
+      - 'risks(charms(endpoint[image-service])) == risks({self})'
