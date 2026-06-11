@@ -4,17 +4,24 @@
 # Criteria blocks required because old/legacy tracks predate several endpoints:
 #   - public-route added Oct 6 2025 (commit 52bd694); absent in tracks istio, 0.2, 0.1, 0.999
 #   - kratos-info, receive-ca-cert absent in very old tracks 0.1 (rev 78), 0.999 (rev 47)
+#   - kratos-endpoint-info is the OLD name for kratos-info in tracks 0.1, 0.999, 0.2
 #
-# provides (ui-endpoint-info, metrics-endpoint, grafana-dashboard):
-#   optional: true added upstream in https://github.com/canonical/identity-platform-login-ui-operator/pull/282 (merged Jul 1 2025)
-#   Still needed in override for old tracks that predate the publish of that fix.
+# ui-endpoint-info (provides): cyclic: true because hydra and kratos both require
+#   ui-endpoint-info from login-ui while login-ui requires hydra-endpoint-info and
+#   kratos-info from them. This mutual dependency is intentional - the three charms
+#   form the identity platform stack. Also optional: true for old tracks predating
+#   upstream PR 282 (merged Jul 1 2025).
 #
-# requires: all marked optional: true upstream in charmcraft.yaml for latest/0.3+ tracks.
-#   Override blocks needed for old tracks where upstream optional flag is absent.
+# kratos-info / hydra-endpoint-info (requires): optional: true in source (charm
+#   reaches active without them), but a deployment with neither provides no useful
+#   login/consent/registration flows. Constraint enforces that at least one of the
+#   two identity backend endpoints is connected.
+#
+# logging, tracing, receive-ca-cert, metrics-endpoint, grafana-dashboard: optional.
 overrides:
-  # 0.1/edge (rev 78), 0.999/edge (rev 47), 0.2 (rev 90): old revisions
-  # predating kratos-info (renamed from kratos-endpoint-info), receive-ca-cert,
-  # and public-route. Only hydra-endpoint-info, logging, tracing are present.
+  # Tracks 0.1 (rev 78 on /edge), 0.999 (rev 47 on /edge), 0.2 (rev 90 on /edge):
+  # old revisions predating kratos-info (renamed from kratos-endpoint-info), receive-ca-cert,
+  # and public-route.
   - criteria:
       - any_of:
           - track: '0.1'
@@ -22,22 +29,26 @@ overrides:
           - track: '0.2'
     provides:
       ui-endpoint-info:
+        cyclic: true
         optional: true
       metrics-endpoint:
         optional: true
       grafana-dashboard:
         optional: true
     requires:
+      kratos-endpoint-info:
+        optional: true  # old name for kratos-info
       hydra-endpoint-info:
         optional: true
       logging:
         optional: true
       tracing:
         optional: true
+    constraints:
+      - 'bool(endpoint[kratos-endpoint-info]) or bool(endpoint[hydra-endpoint-info])'
 
-  # istio/edge (rev 150), 0.3 (rev 190), 0.4 (rev 193):
-  # these track branches have not had public-route backported (added Oct 6 2025
-  # to main only). All other requires endpoints are present.
+  # Tracks istio (rev 150 on /edge), 0.3 (rev 190 on /edge), 0.4 (rev 193 on /edge):
+  # no public-route backported. All other requires endpoints present.
   - criteria:
       - any_of:
           - track: istio
@@ -45,6 +56,7 @@ overrides:
           - track: '0.4'
     provides:
       ui-endpoint-info:
+        cyclic: true
         optional: true
       metrics-endpoint:
         optional: true
@@ -61,12 +73,13 @@ overrides:
         optional: true
       receive-ca-cert:
         optional: true
+    constraints:
+      - 'bool(endpoint[kratos-info]) or bool(endpoint[hydra-endpoint-info])'
 
-  # Fallback: latest, 0.5, and newer tracks. All endpoints are present
-  # and already marked optional: true upstream; override block still needed for
-  # provides endpoints on any revision predating PR #282.
+  # Fallback: latest, 0.5+, and any future tracks.
   - provides:
       ui-endpoint-info:
+        cyclic: true
         optional: true
       metrics-endpoint:
         optional: true
@@ -85,3 +98,5 @@ overrides:
         optional: true
       public-route:
         optional: true
+    constraints:
+      - 'bool(endpoint[kratos-info]) or bool(endpoint[hydra-endpoint-info])'
