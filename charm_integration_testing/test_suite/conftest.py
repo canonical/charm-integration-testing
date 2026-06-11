@@ -764,11 +764,11 @@ def record_charm_info_execution_metadata_instantaneous(
         execution_metadata(f"charm:{application_info.charm}:revision", str(application_info.revision))
         # Save channel info if available
         if application_info.channel:
-            # Save the track
-            execution_metadata(f"charm:{application_info.charm}:track", application_info.channel.track)
-            # Save the risk if not empty
-            if application_info.channel.risk:
-                execution_metadata(f"charm:{application_info.charm}:risk", application_info.channel.risk)
+            # Save the track if explicitly set
+            if application_info.channel.track:
+                execution_metadata(f"charm:{application_info.charm}:track", application_info.channel.track)
+            # Risk is always present in a valid channel string
+            execution_metadata(f"charm:{application_info.charm}:risk", application_info.channel.risk)
 
     consumed_offers = juju_client.list_consumed_offers(model=model).keys()
 

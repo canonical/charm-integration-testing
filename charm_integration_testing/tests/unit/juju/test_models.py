@@ -12,7 +12,7 @@ class TestCharmChannel:
         @dataclass
         class Params:
             label: str
-            input: str | dict
+            input: str | dict[str, str]
             expected_track: str
             expected_risk: str
             expected_branch: str
