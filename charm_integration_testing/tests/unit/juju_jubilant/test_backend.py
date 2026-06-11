@@ -217,7 +217,7 @@ class StatusStub:
 
         return status
 
-    def deploy(self, charm: Any = None, app: str | None = None, config: Any = None, trust: bool = False) -> None:
+    def deploy(self, charm: Any = None, app: str | None = None, config: Any = None, trust: bool = False, force: bool = False) -> None:
         pass
 
 
@@ -1078,7 +1078,7 @@ class TestJubilantBackend:
             charm: str | None = None
             app: str | None = None
 
-            def deploy(self, charm: str, app: str | None = None, config: Any = None, trust: bool = False) -> None:
+            def deploy(self, charm: str, app: str | None = None, config: Any = None, trust: bool = False, force: bool = False) -> None:
                 self.charm = charm
                 self.app = app
                 self.config = config

@@ -66,7 +66,7 @@ class NullJujuBackend(JujuBackend):
     ) -> None:
         raise NotImplementedError
 
-    def deploy_bundle_file(self, model: str, bundle: str) -> None:
+    def deploy_bundle_file(self, model: str, bundle: str, trust: bool = False, force: bool = False) -> None:
         raise NotImplementedError
 
     def refresh_application(
@@ -127,6 +127,7 @@ class NullJujuBackend(JujuBackend):
         application: str | None = None,
         config: dict[str, Any] | None = None,
         trust: bool = False,
+        force: bool = False,
     ) -> None:
         raise NotImplementedError
 
@@ -270,6 +271,7 @@ class JujuStub(NullJujuBackend):
         application: str | None = None,
         config: dict[str, Any] | None = None,
         trust: bool = False,
+        force: bool = False,
     ) -> None:
         """Mock deploying an application (captures call for verification)"""
         self.deployed.append((model, charm, application))  # Ignoring config and trust for simplicity
