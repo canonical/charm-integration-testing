@@ -13,8 +13,20 @@
 #
 # certificates (requires) - OPTIONAL: TLS; not required for functionality.
 # ha (requires) - OPTIONAL: hacluster subordinate for HA deployments.
+#
+# Tracks 3.6, 3.8, 3.10, 3.11, 3.12 have no provides/requires in metadata
+# (charm metadata is empty at those channels), so no override needed there.
+# Only latest and 3.9 tracks have the endpoints listed below.
 overrides:
-  - provides:
+  # ── latest and 3.9 tracks ───────────────────────────────────────────────────
+  # These tracks have the full endpoint set in metadata.
+  # Other tracks (3.6, 3.8, 3.10, 3.11, 3.12) have empty metadata,
+  # so no override needed there.
+  - criteria:
+      - any_of:
+          - track: latest
+          - track: "3.9"
+    provides:
       dashboards:
         optional: true
       nrpe-external-master:
