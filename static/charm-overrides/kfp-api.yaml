@@ -1,7 +1,38 @@
 ---
-# Remove after: https://github.com/canonical/charm-integration-testing/issues/282
 overrides:
-  - provides:
+  - criteria:
+      - track: '2.16'
+    provides:
+      kfp-api:
+        features: [kfp-api]
+      kfp-api-grpc:
+        optional: true
+      metrics-endpoint:
+        optional: true
+      grafana-dashboard:
+        optional: true
+      provide-cmr-mesh:
+        optional: true
+    requires:
+      kfp-viz:
+        features: [kfp-viz]
+      mysql:
+        optional: true
+      relational-db:
+        optional: true
+      service-mesh:
+        optional: true
+      require-cmr-mesh:
+        optional: true
+    constraints:
+      - '"kfp-api" in features(endpoint[kfp-api])'
+      - '"kfp-viz" in features(endpoint[kfp-viz])'
+      - 'len(endpoint[mysql]) + len(endpoint[relational-db]) == 1'
+  # 2.0/beta predates relational-db.
+  - criteria:
+      - track: '2.0'
+      - risk: beta
+    provides:
       kfp-api:
         features: [kfp-api]
       metrics-endpoint:
@@ -14,3 +45,21 @@ overrides:
     constraints:
       - '"kfp-api" in features(endpoint[kfp-api])'
       - '"kfp-viz" in features(endpoint[kfp-viz])'
+  - provides:
+      kfp-api:
+        features: [kfp-api]
+      metrics-endpoint:
+        optional: true
+      grafana-dashboard:
+        optional: true
+    requires:
+      kfp-viz:
+        features: [kfp-viz]
+      mysql:
+        optional: true
+      relational-db:
+        optional: true
+    constraints:
+      - '"kfp-api" in features(endpoint[kfp-api])'
+      - '"kfp-viz" in features(endpoint[kfp-viz])'
+      - 'len(endpoint[mysql]) + len(endpoint[relational-db]) == 1'

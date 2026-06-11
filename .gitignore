@@ -133,3 +133,6 @@ dmypy.json
 
 # uv binary
 /uv
+
+# macos specific files
+.DS_Store
