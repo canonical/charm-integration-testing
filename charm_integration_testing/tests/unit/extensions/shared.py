@@ -276,7 +276,7 @@ class JujuStub(NullJujuBackend):
         force: bool = False,
     ) -> None:
         """Mock deploying an application (captures call for verification)"""
-        self.deployed.append((model, charm, application))  # Ignoring config and trust for simplicity
+        self.deployed.append((model, charm, application))  # Ignoring config, trust, and force for simplicity
 
     def configure_application(self, model: str, application: str, values: dict[str, Any]) -> None:
         """Mock configuring an application (captures call for verification)"""

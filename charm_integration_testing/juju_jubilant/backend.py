@@ -294,7 +294,12 @@ class JubilantBackend(JujuCmdBackend):
         )
 
     def deploy_bundle_file(
-        self, model: str, bundle: str, timeout: timedelta | None = None, trust: bool = False, force: bool = False
+        self,
+        model: str,
+        bundle: str,
+        timeout: timedelta | None = None,
+        trust: bool = False,
+        force: bool = False,
     ) -> None:
         if not pathlib.Path(bundle).is_file():
             raise ValueError(f"Bundle file '{bundle}' not found.")
