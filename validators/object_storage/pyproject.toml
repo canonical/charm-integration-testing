@@ -1,0 +1,36 @@
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+
+[project]
+name = "validators-object-storage"
+version = "0.1.0"
+description = "Validator for object-storage interface"
+authors = [
+    {name = "SQA Team", email = "solutionsqa@canonical.com"}
+]
+
+requires-python = ">=3.10"
+dependencies = [
+    "boto3>=1.26.0",
+    "pyyaml>=6.0",
+    "validators-base",
+]
+
+[project.optional-dependencies]
+dev = [
+    "validators-test-utils",
+]
+
+[project.entry-points."endpoint_validators"]
+object-storage = "validators.object_storage:ObjectStorageValidator"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["validators.object_storage"]
+
+[tool.setuptools.package-dir]
+"validators.object_storage" = "."
