@@ -1,0 +1,98 @@
+# Copyright (C) 2026 Canonical Ltd
+
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+import asyncio
+
+from temporalio.api.workflowservice.v1 import GetSystemInfoRequest
+from temporalio.client import Client
+
+from validators.base import (
+    BaseValidator,
+    ValidationCheck,
+    ValidationLevel,
+    ValidationResult,
+    ValidationResultStatus,
+)
+
+_REQUIRED_FIELDS = ["host", "port"]
+
+
+class TemporalHostInfoValidator(BaseValidator):
+    def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
+        if self.role != "requires":
+            return self._skipped_result_due_to_role(level, self.role)
+        if level in ("deep", "uat"):
+            return self._skipped_result_due_to_level(level)
+        if not self.relation_exists():
+            return self._error_result(level, f"No remote application on relation '{self.endpoint}'.")
+        if level == "simple":
+            return self._validate_simple()
+        return self._skipped_result_due_to_level(level)
+
+    def _validate_simple(self) -> ValidationResult:
+        """L1: Schema, port format, and Temporal GetSystemInfo RPC."""
+        checks: list[ValidationCheck] = []
+
+        schema_check = self.validate_schema(_REQUIRED_FIELDS)
+        checks.append(schema_check)
+        if not schema_check.passed:
+            return self._build_result("simple", checks)
+
+        port_check = self._check_port_is_integer(self.databag["port"])
+        checks.append(port_check)
+        if not port_check.passed:
+            return self._build_result("simple", checks)
+
+        host = self.databag["host"]
+        port = int(self.databag["port"])
+        checks.append(self._check_get_system_info(host, port))
+
+        return self._build_result("simple", checks)
+
+    def _check_port_is_integer(self, port_value: str) -> ValidationCheck:
+        """Verify the port field is a valid positive integer."""
+        try:
+            port = int(port_value)
+            if port <= 0 or port > 65535:
+                raise ValueError(f"Port {port} out of valid range 1-65535.")
+            return ValidationCheck(name="port_format", passed=True, message=f"Port {port} is valid.")
+        except ValueError as exc:
+            return ValidationCheck(name="port_format", passed=False, message=str(exc))
+
+    def _check_get_system_info(self, host: str, port: int) -> ValidationCheck:
+        """Call Temporal's GetSystemInfo RPC to confirm the frontend is serving."""
+        try:
+            asyncio.run(self._probe_system_info(host, port))
+            return ValidationCheck(
+                name="get_system_info",
+                passed=True,
+                message=f"Temporal frontend at {host}:{port} responded to GetSystemInfo.",
+            )
+        except Exception as exc:
+            return ValidationCheck(
+                name="get_system_info",
+                passed=False,
+                message=f"GetSystemInfo failed: {exc}",
+            )
+
+    @staticmethod
+    async def _probe_system_info(host: str, port: int) -> None:
+        """Connect to the Temporal frontend and issue a GetSystemInfo request."""
+        client = await Client.connect(f"{host}:{port}", tls=False)
+        await client.service_client.workflow_service.get_system_info(GetSystemInfoRequest())
+
+    def _build_result(self, level: ValidationLevel, checks: list[ValidationCheck]) -> ValidationResult:
+        status: ValidationResultStatus = "PASS" if all(c.passed for c in checks) else "FAIL"
+        return self._make_result(status=status, level=level, checks=checks)

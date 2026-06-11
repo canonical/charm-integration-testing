@@ -19,6 +19,7 @@ dependencies = [
     "validators-tracing[deep]",
     "validators-loki-push-api",
     "validators-prometheus-scrape",
+    "validators-temporal-host-info",
 ]
 
 [build-system]
