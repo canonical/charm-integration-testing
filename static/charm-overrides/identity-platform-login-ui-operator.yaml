@@ -62,9 +62,9 @@ overrides:
       receive-ca-cert:
         optional: true
 
-  # Fallback: latest, 0.3, 0.4, 0.5, and newer tracks. All endpoints present
+  # Fallback: latest, 0.5, and newer tracks. All endpoints are present
   # and already marked optional: true upstream; override block still needed for
-  # provides endpoints on any revision predating PR  # 282.
+  # provides endpoints on any revision predating PR #282.
   - provides:
       ui-endpoint-info:
         optional: true
