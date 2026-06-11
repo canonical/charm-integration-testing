@@ -232,13 +232,14 @@ class TestTemporalHostInfoValidatorSimple:
 
 class TestTemporalHostInfoValidatorDeep:
     def test_skipped_for_deep_level(self) -> None:
-        # GIVEN a valid databag — deep is not implemented; runner falls back to simple
+        # GIVEN a valid databag — deep is not implemented by this validator
         validator = _make_validator(VALID_DATABAG)
 
-        # WHEN
+        # WHEN validate() is called directly at deep level
         result = validator.validate(level="deep")
 
-        # THEN
+        # THEN the validator itself returns SKIPPED (the runner's level-fallback
+        # logic is a separate concern and is not exercised here)
         assert result.status == "SKIPPED"
         assert result.error is not None
 

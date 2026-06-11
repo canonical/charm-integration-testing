@@ -89,9 +89,18 @@ class TemporalHostInfoValidator(BaseValidator):
 
     @staticmethod
     async def _probe_system_info(host: str, port: int) -> None:
-        """Connect to the Temporal frontend and issue a GetSystemInfo request."""
+        """Connect to the Temporal frontend and issue a GetSystemInfo request.
+
+        The temporalio SDK does not expose an explicit close method on Client or
+        ServiceClient. Using ``del`` drops the reference immediately so CPython's
+        reference counting releases the underlying gRPC channel without waiting
+        for the next GC cycle.
+        """
         client = await Client.connect(f"{host}:{port}", tls=False)
-        await client.service_client.workflow_service.get_system_info(GetSystemInfoRequest())
+        try:
+            await client.service_client.workflow_service.get_system_info(GetSystemInfoRequest())
+        finally:
+            del client  # release gRPC channel; SDK has no explicit close()
 
     def _build_result(self, level: ValidationLevel, checks: list[ValidationCheck]) -> ValidationResult:
         status: ValidationResultStatus = "PASS" if all(c.passed for c in checks) else "FAIL"
