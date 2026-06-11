@@ -1,0 +1,5 @@
+---
+overrides:
+  - provides:
+      cos-agent:
+        optional: true
