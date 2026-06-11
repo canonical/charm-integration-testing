@@ -17,7 +17,7 @@
 # websso-fid-service-provider (requires) - OPTIONAL: WebSSO FID; not in REQUIRED_INTERFACES.
 # application-dashboard (requires) - OPTIONAL: not in REQUIRED_INTERFACES (yoga+).
 overrides:
-  # queens-train: dashboard provides endpoint not yet present in metadata
+  # queens-train: dashboard endpoint not yet present in `provides` metadata
   - criteria:
       - any_of:
           - track: 'queens'
