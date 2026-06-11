@@ -3,8 +3,9 @@ listed: true
 overrides:
   # provide-cmr-mesh only exists from track 2 onwards.
   - criteria:
-      - track: '2'
-      - track: dev
+      - any_of:
+          - track: '2'
+          - track: dev
     provides:
       provide-cmr-mesh:
         optional: true
