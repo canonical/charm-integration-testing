@@ -1,6 +1,70 @@
 ---
-# Remove after: https://github.com/canonical/identity-platform-login-ui-operator/pull/282
+# Source: https://github.com/canonical/identity-platform-login-ui-operator
+#
+# Criteria blocks required because old/legacy tracks predate several endpoints:
+#   - public-route added Oct 6 2025 (commit 52bd694); absent in tracks istio, 0.2, 0.1, 0.999
+#   - kratos-info, receive-ca-cert absent in very old tracks 0.1 (rev 78), 0.999 (rev 47)
+#
+# provides (ui-endpoint-info, metrics-endpoint, grafana-dashboard):
+#   optional: true added upstream in https://github.com/canonical/identity-platform-login-ui-operator/pull/282 (merged Jul 1 2025)
+#   Still needed in override for old tracks that predate the publish of that fix.
+#
+# requires: all marked optional: true upstream in charmcraft.yaml for latest/0.3+ tracks.
+#   Override blocks needed for old tracks where upstream optional flag is absent.
 overrides:
+  # 0.1/edge (rev 78), 0.999/edge (rev 47), 0.2 (rev 90): old revisions
+  # predating kratos-info (renamed from kratos-endpoint-info), receive-ca-cert,
+  # and public-route. Only hydra-endpoint-info, logging, tracing are present.
+  - criteria:
+      - any_of:
+          - track: '0.1'
+          - track: '0.999'
+          - track: '0.2'
+    provides:
+      ui-endpoint-info:
+        optional: true
+      metrics-endpoint:
+        optional: true
+      grafana-dashboard:
+        optional: true
+    requires:
+      hydra-endpoint-info:
+        optional: true
+      logging:
+        optional: true
+      tracing:
+        optional: true
+
+  # istio/edge (rev 150), 0.3 (rev 190), 0.4 (rev 193):
+  # these track branches have not had public-route backported (added Oct 6 2025
+  # to main only). All other requires endpoints are present.
+  - criteria:
+      - any_of:
+          - track: istio
+          - track: '0.3'
+          - track: '0.4'
+    provides:
+      ui-endpoint-info:
+        optional: true
+      metrics-endpoint:
+        optional: true
+      grafana-dashboard:
+        optional: true
+    requires:
+      kratos-info:
+        optional: true
+      hydra-endpoint-info:
+        optional: true
+      logging:
+        optional: true
+      tracing:
+        optional: true
+      receive-ca-cert:
+        optional: true
+
+  # Fallback: latest, 0.3, 0.4, 0.5, and newer tracks. All endpoints present
+  # and already marked optional: true upstream; override block still needed for
+  # provides endpoints on any revision predating PR  # 282.
   - provides:
       ui-endpoint-info:
         optional: true
