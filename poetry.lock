@@ -2357,6 +2357,28 @@ type = "directory"
 url = "validators/mongodb_client"
 
 [[package]]
+name = "validators-object-storage"
+version = "0.1.0"
+description = "Validator for object-storage interface"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+boto3 = ">=1.26.0"
+pyyaml = ">=6.0"
+validators-base = "*"
+
+[package.extras]
+dev = ["validators-test-utils"]
+
+[package.source]
+type = "directory"
+url = "validators/object_storage"
+
+[[package]]
 name = "validators-postgresql-client"
 version = "0.1.0"
 description = "Validator for postgresql_client interface"
@@ -2410,6 +2432,7 @@ ops = ">=3.3.0,<4.0.0"
 pydantic = ">=2.0.0"
 validators-base = "*"
 validators-loki-push-api = "*"
+validators-object-storage = "*"
 validators-postgresql-client = "*"
 validators-prometheus-scrape = "*"
 validators-s3 = "*"
@@ -2572,4 +2595,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<4.0"
-content-hash = "4977494824916622fc500aa6f4515ad5302ff854f2dbc7a551d0c46f35db0d5c"
+content-hash = "6325a7c42129eea56ad861f0f09edd52349f77c30837c3d82975007eb4b4d520"

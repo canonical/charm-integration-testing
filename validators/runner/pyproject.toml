@@ -18,6 +18,7 @@ dependencies = [
     "validators-postgresql-client",
     "validators-tracing[deep]",
     "validators-loki-push-api",
+    "validators-object-storage",
     "validators-prometheus-scrape",
     "validators-temporal-host-info",
 ]
