@@ -3,17 +3,38 @@
 # Source: https://github.com/canonical/haproxy-operator
 # Upstream PR: https://github.com/canonical/haproxy-operator/pull/536
 #
-# Multi-mode reverse proxy. The five proxy-mode endpoints are mutually exclusive
-# alternatives; at-least-one constraint enforces the bundle contains something useful.
+# latest/stable is the classic reactive charm with a minimal endpoint set:
+#   provides: local-monitors, munin, nrpe-external-master, statistics, website
+#   requires: reverseproxy
+# Only website (provides) is fulfillable on Charmhub.
 #
+# 2.8+ is the ops rewrite (PR#536) which adds:
 # ingress, ingress-per-unit, haproxy-route, haproxy-route-tcp (provides) - at-least-one proxy modes
-# reverseproxy (requires) - at-least-one proxy modes
 # ha (requires) - OPTIONAL locally: HA recommended but not forced by solver
 # certificates (requires) - OPTIONAL locally: TLS recommended but charm reaches active without it
 # receive-ca-certs, spoe-auth, ddos-protection, haproxy-route-policy (requires) - OPTIONAL: additive features
 # cos-agent, website (provides) - OPTIONAL: secondary/additive
 overrides:
-  - requires:
+  # latest/stable: classic reactive charm - only reverseproxy (requires) and website (provides) matter
+  - criteria:
+      - track: 'latest'
+    requires:
+      reverseproxy:
+        optional: true
+    provides:
+      local-monitors:
+        optional: true
+      munin:
+        optional: true
+      nrpe-external-master:
+        optional: true
+      statistics:
+        optional: true
+
+  # 2.8+: additional endpoints added by upstream PR#536
+  - criteria:
+      - track: '2.8'
+    requires:
       certificates:
         optional: true
       reverseproxy:
