@@ -1,0 +1,50 @@
+---
+# slurmd: SLURM compute node daemon.
+# The solver requires consumers for provides endpoints; marking them optional
+# prevents sprawl. Interface mismatch note (all tracks): slurmctld requires
+# 'slurmd' interface but slurmd provides endpoint named 'slurmctld' (not
+# 'slurmd'). The Charmhub solver cannot connect them regardless.
+#
+# Endpoint sets vary by track:
+#   25.11/: requires [], provides [metrics-endpoint, slurmctld]
+#   23.11/: requires [], provides [cos-agent, slurmctld]
+#   latest/edge: requires [], provides [slurmctld]
+#   latest/stable, latest/candidate: requires [fluentbit], provides [slurmd]
+overrides:
+  # 25.11/: mark both provides endpoints optional
+  - criteria:
+      - track: "25.11"
+    provides:
+      slurmctld:
+        optional: true
+      metrics-endpoint:
+        optional: true
+  # 23.11/: cos-agent (observability) and slurmctld provides
+  - criteria:
+      - track: "23.11"
+    provides:
+      slurmctld:
+        optional: true
+      cos-agent:
+        optional: true
+  # latest/edge: only slurmctld provides
+  - criteria:
+      - track: latest
+        risk: edge
+    provides:
+      slurmctld:
+        optional: true
+  # latest/stable and latest/candidate: fluentbit (log shipping) optional;
+  # slurmd provides is the old interface name for the slurmctld connection
+  - criteria:
+      - any_of:
+          - track: latest
+            risk: stable
+          - track: latest
+            risk: candidate
+    requires:
+      fluentbit:
+        optional: true
+    provides:
+      slurmd:
+        optional: true

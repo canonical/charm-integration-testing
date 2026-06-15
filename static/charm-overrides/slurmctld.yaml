@@ -1,0 +1,101 @@
+---
+# slurmctld: SLURM controller daemon.
+# Interface mismatch (all tracks): slurmctld requires 'slurmd', 'slurmdbd',
+# 'slurmrestd' interfaces, but those charms provide endpoints using different
+# names. The Charmhub solver cannot connect them. Marking all as optional.
+# login-node: no provider exists on Charmhub.
+# All other auxiliary endpoints (influxdb, oci-runtime, smtp, etc.) are optional.
+#
+# Endpoint sets vary by track:
+#   25.11/ and 23.11/: requires [influxdb, login-node, oci-runtime, slurmd,
+#     slurmdbd, slurmrestd, smtp]; provides [cos-agent, mount]
+#   latest/stable, latest/candidate: requires [elasticsearch, fluentbit,
+#     influxdb-api, slurmd, slurmdbd, slurmrestd]; provides [grafana-source,
+#     prolog-epilog, user-group]
+#   latest/edge: requires [slurmd, slurmdbd, slurmrestd]; provides [cos-agent]
+overrides:
+  # 25.11/: smtp added in this track
+  - criteria:
+      - track: "25.11"
+    requires:
+      slurmd:
+        optional: true
+      slurmdbd:
+        optional: true
+      slurmrestd:
+        optional: true
+      login-node:
+        optional: true
+      influxdb:
+        optional: true
+      oci-runtime:
+        optional: true
+      smtp:
+        optional: true
+    provides:
+      cos-agent:
+        optional: true
+      mount:
+        optional: true
+  # 23.11/: same as 25.11/ minus smtp
+  - criteria:
+      - track: "23.11"
+    requires:
+      slurmd:
+        optional: true
+      slurmdbd:
+        optional: true
+      slurmrestd:
+        optional: true
+      login-node:
+        optional: true
+      influxdb:
+        optional: true
+      oci-runtime:
+        optional: true
+    provides:
+      cos-agent:
+        optional: true
+      mount:
+        optional: true
+  # latest/stable and latest/candidate: older endpoint names
+  - criteria:
+      - any_of:
+          - track: latest
+            risk: stable
+          - track: latest
+            risk: candidate
+    requires:
+      slurmd:
+        optional: true
+      slurmdbd:
+        optional: true
+      slurmrestd:
+        optional: true
+      elasticsearch:
+        optional: true
+      fluentbit:
+        optional: true
+      influxdb-api:
+        optional: true
+    provides:
+      grafana-source:
+        optional: true
+      prolog-epilog:
+        optional: true
+      user-group:
+        optional: true
+  # latest/edge: minimal set
+  - criteria:
+      - track: latest
+        risk: edge
+    requires:
+      slurmd:
+        optional: true
+      slurmdbd:
+        optional: true
+      slurmrestd:
+        optional: true
+    provides:
+      cos-agent:
+        optional: true
