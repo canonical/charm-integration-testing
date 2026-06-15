@@ -1,6 +1,7 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import asyncio
 from typing import cast
 from unittest.mock import AsyncMock, patch
 
@@ -96,13 +97,17 @@ class TestTemporalHostInfoValidatorSimple:
         assert "connection refused" in gsi_check.message
 
     def test_fails_when_temporal_probe_times_out(self) -> None:
-        # GIVEN a complete databag but the Temporal frontend black-holes the connection
+        # GIVEN a complete databag but the Temporal frontend black-holes the connection.
+        # Trigger a real asyncio.TimeoutError by patching the timeout constant to near-zero
+        # and making the probe sleep longer — this exercises the actual except branch.
         validator = _make_validator(VALID_DATABAG)
 
-        with patch.object(
-            TemporalHostInfoValidator,
-            "_probe_system_info",
-            new=AsyncMock(side_effect=TimeoutError("probe timed out")),
+        async def _slow_probe(host: str, port: int) -> None:
+            await asyncio.sleep(10)
+
+        with (
+            patch.object(TemporalHostInfoValidator, "_probe_system_info", new=staticmethod(_slow_probe)),
+            patch("validators.temporal_host_info.validator._PROBE_TIMEOUT_SECS", 0.01),
         ):
             # WHEN
             result = validator.validate(level="simple")
@@ -112,6 +117,7 @@ class TestTemporalHostInfoValidatorSimple:
         gsi_check = next(c for c in result.checks if c.name == "get_system_info")
         assert not gsi_check.passed
         assert "timed out" in gsi_check.message
+        assert "0.01" in gsi_check.message
 
     def test_fails_when_host_missing(self) -> None:
         # GIVEN databag is missing host

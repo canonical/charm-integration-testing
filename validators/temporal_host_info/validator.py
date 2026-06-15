@@ -69,6 +69,12 @@ class TemporalHostInfoValidator(BaseValidator):
                 passed=True,
                 message=f"Temporal frontend at {host}:{port} responded to GetSystemInfo.",
             )
+        except asyncio.TimeoutError:
+            return ValidationCheck(
+                name="get_system_info",
+                passed=False,
+                message=f"GetSystemInfo timed out after {_PROBE_TIMEOUT_SECS}s ({host}:{port}).",
+            )
         except Exception as exc:
             return ValidationCheck(
                 name="get_system_info",
