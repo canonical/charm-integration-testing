@@ -1,0 +1,61 @@
+---
+# Monitoring/observability endpoint history across tracks:
+#   latest + 1.14-1.24: provides grafana, nrpe-external-master, prometheus,
+#                        prometheus-manual (legacy monitoring stack; no charm-tracing)
+#   1.24-ops:            provides only api, client (minimal ops variant)
+#   1.25+:               nrpe-external-master removed, cos-agent added to provides;
+#                        charm-tracing added to requires (modern COS stack)
+#
+# All monitoring/observability endpoints are marked optional because:
+# - grafana (grafana-dashboard): no machine-platform consumer discoverable via Charmhub search
+# - nrpe-external-master (container-scoped): nrpe charm not discoverable via search
+# - prometheus, prometheus-manual: prometheus2 not discoverable (interface not indexed)
+# - cos-agent (cos_agent): COS integration not discoverable via Charmhub search
+# - charm-tracing (tracing): Juju observability tracing; not discoverable in general bundles
+overrides:
+  # 1.24-ops: provides only api+client; empty block prevents fallback from applying.
+  - criteria:
+      - any_of:
+          - track: '1.24-ops'
+
+  # latest + 1.14-1.24: legacy monitoring endpoints (prometheus, prometheus-manual,
+  # grafana, nrpe-external-master) in provides; charm-tracing not yet in requires.
+  - criteria:
+      - any_of:
+          - track: 'latest'
+          - track: '1.14'
+          - track: '1.15'
+          - track: '1.16'
+          - track: '1.17'
+          - track: '1.18'
+          - track: '1.19'
+          - track: '1.20'
+          - track: '1.21'
+          - track: '1.22'
+          - track: '1.23'
+          - track: '1.24'
+    provides:
+      grafana:
+        optional: true
+      nrpe-external-master:
+        optional: true
+      prometheus:
+        optional: true
+      prometheus-manual:
+        optional: true
+
+  # Fallback (1.25+, incl. 1.25-ops): charm-tracing added to requires;
+  # nrpe-external-master replaced by cos-agent in provides;
+  # prometheus and prometheus-manual still present.
+  - requires:
+      charm-tracing:
+        optional: true
+    provides:
+      grafana:
+        optional: true
+      cos-agent:
+        optional: true
+      prometheus:
+        optional: true
+      prometheus-manual:
+        optional: true
