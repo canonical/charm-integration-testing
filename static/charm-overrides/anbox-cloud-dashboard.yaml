@@ -1,0 +1,51 @@
+---
+# Three endpoint generations across tracks:
+#   1.14-1.21 + latest:  requires: ams, certificates, gateway only
+#   1.22-1.24:           oauth added to requires
+#   1.25+:               charm-tracing added to requires; nrpe-external-master
+#                        removed from provides
+#
+# oauth and charm-tracing are optional integrations (OIDC SSO and Juju
+# observability tracing respectively). The solver cannot fulfill them
+# in general test bundles, so they must be declared optional.
+#
+# nrpe-external-master: container-scoped subordinate endpoint (tracks latest,
+# 1.14-1.24 only; removed in 1.25). The nrpe charm provides this but is not
+# discoverable via the Charmhub search index, so the solver cannot auto-discover
+# it. Mark optional to allow standalone bundle construction.
+overrides:
+  # 1.14-1.21 and latest lack oauth.
+  - criteria:
+      - any_of:
+          - track: 'latest'
+          - track: '1.14'
+          - track: '1.15'
+          - track: '1.16'
+          - track: '1.17'
+          - track: '1.18'
+          - track: '1.19'
+          - track: '1.20'
+          - track: '1.21'
+    provides:
+      nrpe-external-master:
+        optional: true
+
+  # 1.22-1.24: oauth added; nrpe-external-master still present.
+  - criteria:
+      - any_of:
+          - track: '1.22'
+          - track: '1.23'
+          - track: '1.24'
+    requires:
+      oauth:
+        optional: true
+    provides:
+      nrpe-external-master:
+        optional: true
+
+  # Fallback (1.25+): charm-tracing added, nrpe-external-master removed.
+  - requires:
+      oauth:
+        optional: true
+      charm-tracing:
+        optional: true
