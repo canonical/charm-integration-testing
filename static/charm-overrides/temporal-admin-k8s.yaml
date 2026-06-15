@@ -1,5 +1,28 @@
 ---
+# temporal-admin-k8s: administrative tool for the Temporal workflow engine (k8s).
+#
+# NOTE: latest/ is the OLD reactive version (no temporal-host-info).
+#       1.23/ is the current versioned track that added temporal-host-info.
+#       Newer tracks (1.24+, etc.) are expected to also have temporal-host-info.
+#
+# temporal-host-info (requires, 1.23+ only): provided by temporal-k8s on the
+#   same track. cyclic: true because temporal-admin-k8s <-> temporal-k8s is
+#   a cycle. Constraint: the same temporal-k8s charm provides both.
+#
+# latest/: old reactive version, no temporal-host-info endpoint.
 overrides:
+  # latest/ track: old reactive version, no temporal-host-info
+  - criteria:
+      - track: latest
+    provides:
+      admin:
+        limit: 1
+        optional: false
+        features: [admin]
+    constraints:
+      - bool(endpoint[admin]) => features(endpoint[admin]) == {"admin"}
+
+  # 1.23/ and future versioned tracks: temporal-host-info required
   - provides:
       admin:
         limit: 1
@@ -9,7 +32,5 @@ overrides:
       temporal-host-info:
         cyclic: true
     constraints:
-      # admin endpoint must use admin feature
       - bool(endpoint[admin]) => features(endpoint[admin]) == {"admin"}
-      # temporal-host-info must be provided by a charm that also provides an admin endpoint
-      - 'charms(endpoint[temporal-host-info]) == charms(endpoint[admin])'
+      - charms(endpoint[temporal-host-info]) == charms(endpoint[admin])
