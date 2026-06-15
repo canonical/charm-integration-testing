@@ -15,6 +15,7 @@ from validators.base import (
 )
 
 _REQUIRED_FIELDS = ["host", "port"]
+_PROBE_TIMEOUT_SECS = 10
 
 
 class TemporalHostInfoValidator(BaseValidator):
@@ -62,7 +63,7 @@ class TemporalHostInfoValidator(BaseValidator):
     def _check_get_system_info(self, host: str, port: int) -> ValidationCheck:
         """Call Temporal's GetSystemInfo RPC to confirm the frontend is serving."""
         try:
-            asyncio.run(self._probe_system_info(host, port))
+            asyncio.run(asyncio.wait_for(self._probe_system_info(host, port), timeout=_PROBE_TIMEOUT_SECS))
             return ValidationCheck(
                 name="get_system_info",
                 passed=True,

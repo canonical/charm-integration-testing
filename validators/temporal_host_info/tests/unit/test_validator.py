@@ -95,6 +95,24 @@ class TestTemporalHostInfoValidatorSimple:
         assert not gsi_check.passed
         assert "connection refused" in gsi_check.message
 
+    def test_fails_when_temporal_probe_times_out(self) -> None:
+        # GIVEN a complete databag but the Temporal frontend black-holes the connection
+        validator = _make_validator(VALID_DATABAG)
+
+        with patch.object(
+            TemporalHostInfoValidator,
+            "_probe_system_info",
+            new=AsyncMock(side_effect=TimeoutError("probe timed out")),
+        ):
+            # WHEN
+            result = validator.validate(level="simple")
+
+        # THEN
+        assert result.status == "FAIL"
+        gsi_check = next(c for c in result.checks if c.name == "get_system_info")
+        assert not gsi_check.passed
+        assert "timed out" in gsi_check.message
+
     def test_fails_when_host_missing(self) -> None:
         # GIVEN databag is missing host
         validator = _make_validator({"port": "7233"})
