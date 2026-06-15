@@ -1,0 +1,18 @@
+---
+# aws-iam: integrates AWS IAM webhook authentication with Charmed Kubernetes.
+# Source: https://github.com/charmed-kubernetes/aws-iam
+#
+# aws-iam (requires): connects to kubernetes-control-plane's aws-iam provides
+#   endpoint. kubernetes-control-plane >= 1.29 dropped the aws-iam provides
+#   endpoint (see kubernetes-control-plane.yaml, 1.29+ block comment:
+#   "Dropped from provides: aws-iam, grafana, kube-api-endpoint, ...").
+#   No charm currently provides the aws-iam interface in its recommended channel.
+#   Marked optional so the solver can build a testable bundle.
+#
+# certificates (requires): TLS; satisfied by easyrsa. Kept required.
+overrides:
+  - requires:
+      aws-iam:
+        optional: true
+        # kubernetes-control-plane >= 1.29 dropped aws-iam from its provides.
+        # No current provider available in recommended channels.
