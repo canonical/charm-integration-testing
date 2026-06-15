@@ -1,0 +1,26 @@
+---
+# Override for heat
+# Source: https://github.com/openstack/charm-heat
+#
+# heat is an OpenStack orchestration service. It genuinely requires amqp,
+# identity-service (keystone), shared-db (mysql), and certificates for
+# basic operation.
+#
+# heat-plugin-subordinate (requires, heat-plugin-subordinate): for loading
+#   OpenStack plugin subordinate charms (e.g. heat-tempest-plugin). These are
+#   optional extensions; heat runs without any plugins connected.
+#
+# ha (requires, hacluster): hacluster subordinate for HA deployments.
+#   Optional: single-unit deployments do not need HA coordination.
+#
+# nrpe-external-master (provides, nrpe-external-master): monitoring subordinate.
+#   Optional: monitoring is not required for heat to function.
+overrides:
+  - requires:
+      ha:
+        optional: true
+      heat-plugin-subordinate:
+        optional: true
+    provides:
+      nrpe-external-master:
+        optional: true
