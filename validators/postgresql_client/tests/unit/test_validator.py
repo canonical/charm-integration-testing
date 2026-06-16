@@ -369,7 +369,7 @@ class TestPostgreSQLClientValidatorDeep:
 
             _autocommit: bool = False
 
-            @property  # type: ignore[override]
+            @property
             def autocommit(self) -> bool:
                 return self._autocommit
 
