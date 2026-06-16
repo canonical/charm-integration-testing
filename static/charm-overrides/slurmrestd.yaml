@@ -1,0 +1,6 @@
+---
+# slurmrestd 25.11/beta is unlisted on Charmhub; 'find?provides=<interface>'
+# returns 0 results. listed: true forces it into solver search so slurmctld
+# can find it as a provider.
+# Tracked under https://github.com/canonical/charm-integration-testing/issues/642
+listed: true

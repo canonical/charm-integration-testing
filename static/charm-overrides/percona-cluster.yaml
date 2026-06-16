@@ -1,0 +1,23 @@
+---
+# Override for percona-cluster
+# Source: https://github.com/openstack/charm-percona-cluster
+#
+# percona-cluster is a MySQL-compatible database charm (Percona XtraDB Cluster).
+# Primary purpose: provides db, db-admin, shared-db to application charms.
+#
+# slave (requires) - OPTIONAL: used for MySQL replication to a replica instance.
+#   A standalone single-instance deployment does not need a slave.
+# master (provides) - OPTIONAL: counterpart to slave; provided to a replica unit.
+# ha (requires) - OPTIONAL: connects to hacluster for HA; not needed standalone.
+# nrpe-external-master (provides) - OPTIONAL: NRPE monitoring subordinate hook.
+overrides:
+  - provides:
+      master:
+        optional: true
+      nrpe-external-master:
+        optional: true
+    requires:
+      ha:
+        optional: true
+      slave:
+        optional: true
