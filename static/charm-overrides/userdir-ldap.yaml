@@ -1,0 +1,16 @@
+---
+# userdir-ldap is a subordinate charm that attaches to principal machines via
+# general-info (juju-info interface). It syncs user accounts from
+# userdb.internal on each machine it is deployed to.
+#
+# udprovide/udconsume use interface 'udldap-userdata' for an optional cascade
+# topology: one userdir-ldap "server" unit rsyncs userdata to "client" units.
+# The charm reaches active via general-info alone; the cascade is not required.
+# README: https://github.com/canonical/charm-userdir-ldap#readme
+overrides:
+  - requires:
+      udconsume:
+        optional: true
+    provides:
+      udprovide:
+        optional: true
