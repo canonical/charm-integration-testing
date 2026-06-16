@@ -241,6 +241,19 @@ class TestOpenSearchClientValidatorSimple:
 
         assert (result.status == "SKIPPED") == should_skip
 
+    def test_fails_when_build_client_raises(self) -> None:
+        # GIVEN _build_client() raises (e.g. bad TLS config)
+        validator = _make_validator(VALID_DATABAG)
+
+        with patch.object(OpenSearchClientValidator, "_build_client", side_effect=Exception("TLS init failed")):
+            result = validator.validate(level="simple")
+
+        # THEN the result is FAIL with a connect check — not an unhandled ERROR
+        assert result.status == "FAIL"
+        connect_check = next(c for c in result.checks if c.name == "connect")
+        assert not connect_check.passed
+        assert "TLS init failed" in connect_check.message
+
 
 # ---------------------------------------------------------------------------
 # Deep (L2) tests
@@ -265,6 +278,19 @@ class TestOpenSearchClientValidatorDeep:
         assert any(c.name == "index_document" and c.passed for c in result.checks)
         assert any(c.name == "document_get" and c.passed for c in result.checks)
         assert any(c.name == "document_delete" and c.passed for c in result.checks)
+
+    def test_fails_when_build_client_raises(self) -> None:
+        # GIVEN _build_client() raises (e.g. bad TLS config)
+        validator = _make_validator(VALID_DATABAG)
+
+        with patch.object(OpenSearchClientValidator, "_build_client", side_effect=Exception("TLS init failed")):
+            result = validator.validate(level="deep")
+
+        # THEN the result is FAIL with a connect check — not an unhandled ERROR
+        assert result.status == "FAIL"
+        connect_check = next(c for c in result.checks if c.name == "connect")
+        assert not connect_check.passed
+        assert "TLS init failed" in connect_check.message
 
     def test_fails_when_index_missing_from_databag(self) -> None:
         # GIVEN databag has no 'index' key

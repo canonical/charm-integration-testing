@@ -7,8 +7,6 @@ import uuid
 from typing import Any
 
 from opensearchpy import OpenSearch, RequestsHttpConnection
-from opensearchpy.exceptions import ConnectionError as OSConnectionError
-from opensearchpy.exceptions import OpenSearchException
 
 from validators.base import (
     BaseValidator,
@@ -52,7 +50,12 @@ class OpenSearchClientValidator(BaseValidator):
         if not schema_check.passed:
             return self._build_result("simple", checks)
 
-        client = self._build_client(creds)
+        try:
+            client = self._build_client(creds)
+        except Exception as exc:
+            checks.append(ValidationCheck(name="connect", passed=False, message=str(exc)))
+            return self._build_result("simple", checks)
+
         try:
             health_check = self._check_cluster_health(client)
             checks.append(health_check)
@@ -75,7 +78,12 @@ class OpenSearchClientValidator(BaseValidator):
         if not schema_check.passed:
             return self._build_result("deep", checks)
 
-        client = self._build_client(creds)
+        try:
+            client = self._build_client(creds)
+        except Exception as exc:
+            checks.append(ValidationCheck(name="connect", passed=False, message=str(exc)))
+            return self._build_result("deep", checks)
+
         try:
             health_check = self._check_cluster_health(client)
             checks.append(health_check)
@@ -108,7 +116,7 @@ class OpenSearchClientValidator(BaseValidator):
                 passed=False,
                 message=f"Cluster health is '{status}'; expected green or yellow.",
             )
-        except (OSConnectionError, OpenSearchException, Exception) as exc:
+        except Exception as exc:
             return ValidationCheck(name="cluster_health", passed=False, message=str(exc))
 
     def _check_canary_index(self, client: OpenSearch) -> list[ValidationCheck]:
@@ -124,7 +132,7 @@ class OpenSearchClientValidator(BaseValidator):
         try:
             client.index(index=index_name, id=doc_id, body=doc_body, request_timeout=_REQUEST_TIMEOUT)
             checks.append(ValidationCheck(name="index_document", passed=True, message="Document indexed."))
-        except (OpenSearchException, Exception) as exc:
+        except Exception as exc:
             checks.append(ValidationCheck(name="index_document", passed=False, message=str(exc)))
             return checks
 
@@ -145,14 +153,14 @@ class OpenSearchClientValidator(BaseValidator):
                             message=f"Retrieved document does not match: {retrieved}",
                         )
                     )
-            except (OpenSearchException, Exception) as exc:
+            except Exception as exc:
                 checks.append(ValidationCheck(name="document_get", passed=False, message=str(exc)))
         finally:
             # 3. Delete canary document (always clean up)
             try:
                 client.delete(index=index_name, id=doc_id, request_timeout=_REQUEST_TIMEOUT)
                 checks.append(ValidationCheck(name="document_delete", passed=True, message="Canary document deleted."))
-            except (OpenSearchException, Exception) as exc:
+            except Exception as exc:
                 checks.append(ValidationCheck(name="document_delete", passed=False, message=str(exc)))
 
         return checks
@@ -181,7 +189,7 @@ class OpenSearchClientValidator(BaseValidator):
                 try:
                     hosts.append({"host": host, "port": int(port_str)})
                 except ValueError:
-                    hosts.append({"host": ep, "port": 9200})
+                    hosts.append({"host": host, "port": 9200})
             else:
                 hosts.append({"host": ep, "port": 9200})
 
