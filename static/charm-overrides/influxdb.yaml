@@ -1,7 +1,11 @@
 ---
 overrides:
   - provides:
+      admin:
+        optional: true
       grafana-source:
         optional: true
       nrpe-external-master:
+        optional: true
+      query:
         optional: true

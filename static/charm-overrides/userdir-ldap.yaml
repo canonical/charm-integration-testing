@@ -1,0 +1,5 @@
+---
+# Canonical BootStack internal charm. Requires 'udconsume' and 'general-info'
+# interfaces that have no public providers on Charmhub. Cannot be tested via
+# public Charmhub solver.
+listed: false

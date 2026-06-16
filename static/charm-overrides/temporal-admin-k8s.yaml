@@ -1,15 +1,26 @@
 ---
 overrides:
-  - provides:
+  # In 1.23, temporal-k8s requires admin (from temporal-admin-k8s) rather than
+  # providing temporal-host-info. No provider of temporal-host-info exists; it
+  # is optional for temporal-admin-k8s to function.
+  - criteria:
+      - track: '1.23'
+    provides:
       admin:
         limit: 1
         optional: false
         features: [admin]
     requires:
       temporal-host-info:
-        cyclic: true
+        optional: true
+    constraints:
+      - bool(endpoint[admin]) => features(endpoint[admin]) == {"admin"}
+  # All other tracks: temporal-host-info not present in metadata
+  - provides:
+      admin:
+        limit: 1
+        optional: false
+        features: [admin]
     constraints:
       # admin endpoint must use admin feature
       - bool(endpoint[admin]) => features(endpoint[admin]) == {"admin"}
-      # temporal-host-info must be provided by a charm that also provides an admin endpoint
-      - 'charms(endpoint[temporal-host-info]) == charms(endpoint[admin])'
