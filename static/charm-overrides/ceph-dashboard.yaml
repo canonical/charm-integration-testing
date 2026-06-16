@@ -1,0 +1,37 @@
+---
+# Endpoint metadata is consistent across all tracks (luminous through tentacle).
+#
+# Required (keep): certificates (tls-certificates), dashboard (ceph-dashboard -
+# primary connection to ceph-mgr for the dashboard interface).
+#
+# Optional requires:
+#   alertmanager-service (http): alertmanager integration via plain HTTP.
+#     Not required for basic dashboard operation; alertmanager is not discoverable
+#     via the Charmhub search API. Leaving non-optional causes haproxy to be added.
+#   iscsi-dashboard (ceph-iscsi-admin-access): iSCSI gateway integration -
+#     optional, only relevant when iSCSI is deployed.
+#   loadbalancer (openstack-loadbalancer): OpenStack LB integration - optional,
+#     environment-specific.
+#   prometheus (http): Prometheus scrape connection via plain HTTP - monitoring
+#     integration, not required for basic operation. Prometheus charm not
+#     discoverable; leaving non-optional causes haproxy to be added.
+#   radosgw-dashboard (radosgw-user): Ceph RadosGW integration - optional.
+#
+# Optional provides:
+#   grafana-dashboard (grafana-dashboard): Grafana not discoverable on machine
+#     platform via Charmhub search API.
+overrides:
+  - requires:
+      alertmanager-service:
+        optional: true
+      iscsi-dashboard:
+        optional: true
+      loadbalancer:
+        optional: true
+      prometheus:
+        optional: true
+      radosgw-dashboard:
+        optional: true
+    provides:
+      grafana-dashboard:
+        optional: true

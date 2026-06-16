@@ -1,0 +1,33 @@
+---
+# juju-dashboard: web UI for the Juju controller.
+# Source: https://github.com/canonical/juju-dashboard-charm
+#
+# controller (requires): the primary purpose - the dashboard must connect to a
+#   Juju controller. Not optional.
+#
+# haproxy-route (requires, 0.15/ only): optional reverse-proxy routing via
+#   haproxy. juju-dashboard can be accessed directly or via nginx without it.
+#
+# nginx-route (requires, 0.15/ + latest/stable + latest/edge + 0.14/beta):
+#   optional reverse-proxy routing via nginx-ingress. Not present on latest/beta.
+overrides:
+  # 0.15/ track: has both haproxy-route and nginx-route
+  - criteria:
+      - track: "0.15"
+    requires:
+      haproxy-route:
+        optional: true
+      nginx-route:
+        optional: true
+
+  # latest/ (stable + edge) and 0.14/ tracks: nginx-route only (no haproxy-route)
+  - criteria:
+      - any_of:
+          - track: latest
+            risk: stable
+          - track: latest
+            risk: edge
+          - track: "0.14"
+    requires:
+      nginx-route:
+        optional: true

@@ -1,0 +1,47 @@
+---
+# Override for mysql-innodb-cluster
+# Source: https://github.com/canonical/mysql-innodb-cluster-operator
+#
+# mysql-innodb-cluster is a standalone MySQL InnoDB Cluster service.
+# The primary purpose is to provide shared-db (mysql-shared) and db-router
+# (mysql-router) to consumers. No monitoring or db-monitor consumers are
+# discoverable via the Charmhub search API.
+#
+# db-monitor (provides, mysql-monitor): monitoring hook for MySQL Monitor.
+#   No charm on Charmhub consumes the mysql-monitor interface.
+#   Optional: the cluster operates fully without a monitor connected.
+#
+# prometheus (provides, http): Prometheus scrape endpoint exposed as http.
+#   No charm on Charmhub consumes this specific http interface.
+#   Optional: monitoring is not required for cluster operation.
+#
+# certificates (requires, tls-certificates): Meaning 1 optional - the cluster
+#   forms and operates without TLS. Source: all handlers in
+#   mysql_innodb_cluster_handlers.py use @reactive.when('certificates.available');
+#   no @reactive.when_not or BlockedStatus triggered without the relation.
+overrides:
+  # ── 8.0 and 8.0.19 tracks: no prometheus endpoint ──────────────────────────
+  - criteria:
+      - any_of:
+          - track: '8.0'
+          - track: '8.0.19'
+    requires:
+      certificates:
+        optional: true
+    provides:
+      db-monitor:
+        optional: true
+
+  # ── latest and newer tracks: adds prometheus endpoint ──────────────────────
+  - criteria:
+      - none_of:
+          - track: '8.0'
+          - track: '8.0.19'
+    requires:
+      certificates:
+        optional: true
+    provides:
+      db-monitor:
+        optional: true
+      prometheus:
+        optional: true
