@@ -1,0 +1,85 @@
+---
+# Endpoint evolution across track generations:
+#   luminous, mimic, nautilus, octopus, pacific (ubuntu/20.04):
+#     requires: certificates, ha, identity-service, mon, slave
+#     provides: gateway, master, nrpe-external-master, object-store, radosgw-user
+#   quincy (ubuntu/22.04):
+#     requires: + secondary (radosgw-multisite zone replication added)
+#     provides: + primary
+#   reef+ (ubuntu/22.04+):
+#     provides: + s3
+#
+# Required (keep): mon (primary connection to ceph-mon).
+#
+# Optional requires:
+#   certificates (tls-certificates): Meaning 1 optional - charm falls back to
+#     plain HTTP (port 80) without TLS. Source: REQUIRED_INTERFACES = {'mon': ['mon']}
+#     in hooks.py; ready_for_service() has no TLS check.
+#   ha (hacluster): HA clustering, optional for standalone deployments.
+#   identity-service (keystone): Keystone auth, optional integration.
+#   secondary (radosgw-multisite): zone replication secondary role, quincy+.
+#   slave (radosgw-multisite): same as secondary, older interface name.
+#
+# Optional provides:
+#   gateway (http): S3/Swift HTTP API - Meaning 1 optional (charm serves the API
+#     without a consumer relation; leaving required causes haproxy chain).
+#   master, primary (radosgw-multisite): multisite orchestration roles.
+#   nrpe-external-master: monitoring subordinate, not discoverable via search.
+#   object-store (swift-proxy): Swift object store interface; Meaning 1 optional
+#     (consumed by OpenStack Glance for image storage). Leaving non-optional
+#     causes solver to add glance -> keystone -> full OpenStack stack.
+#   radosgw-user, s3: credential/access interfaces - charm runs without consumers.
+overrides:
+  # luminous, mimic, nautilus, octopus, pacific: no secondary, no primary, no s3
+  - criteria:
+      - any_of:
+          - track: 'luminous'
+          - track: 'mimic'
+          - track: 'nautilus'
+          - track: 'octopus'
+          - track: 'pacific'
+    requires: &common_req
+      certificates:
+        optional: true
+      ha:
+        optional: true
+      identity-service:
+        optional: true
+      slave:
+        optional: true
+    provides: &pre_quincy_prov
+      gateway:
+        optional: true
+      master:
+        optional: true
+      nrpe-external-master:
+        optional: true
+      object-store:
+        optional: true
+      radosgw-user:
+        optional: true
+
+  # quincy: secondary added to requires; primary added to provides
+  - criteria:
+      - any_of:
+          - track: 'quincy'
+    requires:
+      <<: *common_req
+      secondary:
+        optional: true
+    provides:
+      <<: *pre_quincy_prov
+      primary:
+        optional: true
+
+  # Fallback (reef+): s3 added to provides
+  - requires:
+      <<: *common_req
+      secondary:
+        optional: true
+    provides:
+      <<: *pre_quincy_prov
+      primary:
+        optional: true
+      s3:
+        optional: true
