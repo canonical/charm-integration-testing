@@ -1,0 +1,61 @@
+---
+# mlflow-server: MLflow model tracking and serving (k8s charm).
+#
+# Endpoint availability by track:
+#   1.13/, 1.13.1/, latest/candidate: db, ingress, object-storage, pod-defaults
+#   2.1/:   dashboard-links, ingress, object-storage, relational-db
+#   2.15/, 2.22/, latest/stable, latest/beta, latest/edge:
+#           dashboard-links, ingress, logging, object-storage, pod-defaults, relational-db, secrets
+#
+# All optional endpoints:
+#   pod-defaults:    admission webhook injecting env vars; provided by mlflow-controller
+#                    which is NOT published on Charmhub. mlflow runs without it.
+#   dashboard-links: kubeflow dashboard integration; kubeflow not required.
+#   logging:         observability log sink; mlflow runs without log forwarding.
+#   secrets:         external secrets backend; mlflow has built-in secrets management.
+platforms: [kubernetes]
+overrides:
+  # 1.13/ and 1.13.1/: only pod-defaults is optional here
+  - criteria:
+      - any_of:
+          - track: "1.13"
+          - track: "1.13.1"
+    requires:
+      pod-defaults:
+        optional: true
+
+  # latest/candidate: same endpoint set as 1.13/ (db, ingress, object-storage, pod-defaults)
+  - criteria:
+      - track: latest
+        risk: candidate
+    requires:
+      pod-defaults:
+        optional: true
+
+  # 2.1/: has dashboard-links but no pod-defaults, logging, or secrets
+  - criteria:
+      - track: "2.1"
+    requires:
+      dashboard-links:
+        optional: true
+
+  # 2.15/, 2.22/, latest/stable, latest/beta, latest/edge: full optional set
+  - criteria:
+      - any_of:
+          - track: "2.15"
+          - track: "2.22"
+          - track: latest
+            risk: stable
+          - track: latest
+            risk: beta
+          - track: latest
+            risk: edge
+    requires:
+      pod-defaults:
+        optional: true
+      dashboard-links:
+        optional: true
+      logging:
+        optional: true
+      secrets:
+        optional: true
