@@ -1,6 +1,11 @@
 ---
 # Remove after: https://github.com/canonical/zookeeper-k8s-operator/pull/136
 overrides:
+  # latest/stable (ubuntu/20.04) provides only ['zookeeper'] and latest/beta
+  # provides only ['client'] - no common provides across all latest risk levels.
+  # Declare nothing for latest so no UnparsableCharmException is raised.
+  - criteria:
+      - track: 'latest'
   - provides:
       zookeeper:
         optional: true
