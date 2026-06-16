@@ -1,0 +1,58 @@
+---
+# mongodb is an operator for MongoDB databases (machine charm).
+# Primary purpose: provides 'database' connectivity to application charms.
+#
+# s3-credentials (requires) - OPTIONAL: S3 backup/restore storage; the charm
+#   operates without a backup destination configured.
+# sharding (requires) - OPTIONAL: MongoDB sharding via a config-server; not
+#   needed for standalone deployments.
+# ldap (requires) - OPTIONAL: LDAP authentication integration.
+# ldap-certificate-transfer (requires) - OPTIONAL: TLS certs for LDAP; only
+#   relevant when ldap is configured.
+# gcs-credentials (requires) - OPTIONAL: GCS backup storage (8-transition track; only /edge published).
+# etcd (requires) - OPTIONAL: etcd integration (8/edge only).
+# vault-kv (requires) - OPTIONAL: Vault KV secrets backend (8/edge only).
+overrides:
+  # 8/edge: adds gcs-credentials, etcd, vault-kv
+  - criteria:
+      - track: '8'
+        risk: 'edge'
+    requires:
+      s3-credentials:
+        optional: true
+      sharding:
+        optional: true
+      ldap:
+        optional: true
+      ldap-certificate-transfer:
+        optional: true
+      gcs-credentials:
+        optional: true
+      etcd:
+        optional: true
+      vault-kv:
+        optional: true
+  # 8-transition track: adds gcs-credentials (only /edge is published)
+  - criteria:
+      - track: '8-transition'
+    requires:
+      s3-credentials:
+        optional: true
+      sharding:
+        optional: true
+      ldap:
+        optional: true
+      ldap-certificate-transfer:
+        optional: true
+      gcs-credentials:
+        optional: true
+  # all other channels (6/*, 8/stable, 8/candidate, 8/beta)
+  - requires:
+      s3-credentials:
+        optional: true
+      sharding:
+        optional: true
+      ldap:
+        optional: true
+      ldap-certificate-transfer:
+        optional: true

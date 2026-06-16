@@ -1,0 +1,29 @@
+---
+# All channels (2/stable through dev/edge) have consistent endpoint sets.
+#
+# opentelemetry-collector acts as a dashboard proxy: it receives dashboard
+# definitions from upstream charms via grafana-dashboards-consumer (requires),
+# then forwards them to Grafana via grafana-dashboards-provider (provides).
+#
+# grafana-dashboards-provider (provides, grafana_dashboard): Grafana is not
+# discoverable via the Charmhub search API for machine-platform bundles,
+# so the solver cannot fulfill this endpoint.
+#
+# grafana-dashboards-consumer (requires, grafana_dashboard): same interface,
+# same discoverability issue; the upstream dashboard source is not discoverable.
+#
+# Most other requires (cloud-config, cos-agent, metrics-endpoint, receive-ca-cert,
+# receive-server-cert, send-charm-traces, send-loki-logs, send-profiles,
+# send-remote-write, send-traces) are already optional=True in upstream metadata.
+#
+# juju-info (requires): kept non-optional. opentelemetry-collector is a subordinate
+# charm; juju-info is its principal attachment point. Without a principal in the
+# bundle the subordinate has no machine to run on and the deployment is invalid.
+# The solver will discover an appropriate principal automatically.
+overrides:
+  - requires:
+      grafana-dashboards-consumer:
+        optional: true
+    provides:
+      grafana-dashboards-provider:
+        optional: true
