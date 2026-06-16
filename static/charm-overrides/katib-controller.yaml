@@ -1,6 +1,18 @@
 ---
 # Remove after: https://github.com/canonical/charm-integration-testing/issues/282
 overrides:
+    # Tracks 0.15 and 0.16 do not have k8s-service-info in requires metadata;
+    # it was added in track 0.17.
+  - criteria:
+      - any_of:
+          - track: '0.15'
+          - track: '0.16'
+    provides:
+      metrics-endpoint:
+        optional: true
+      grafana-dashboard:
+        optional: true
+    # Track 0.17 and later have k8s-service-info in requires.
   - provides:
       metrics-endpoint:
         optional: true
