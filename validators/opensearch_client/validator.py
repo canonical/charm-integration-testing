@@ -1,21 +1,10 @@
-# Copyright (C) 2026 Canonical Ltd
-
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
 
 import os
 import tempfile
 import uuid
+from typing import Any
 
 from opensearchpy import OpenSearch, RequestsHttpConnection
 from opensearchpy.exceptions import ConnectionError as OSConnectionError
@@ -77,7 +66,7 @@ class OpenSearchClientValidator(BaseValidator):
     # ------------------------------------------------------------------
 
     def _validate_deep(self) -> ValidationResult:
-        """L2: All L1 checks, then create a canary index, write and retrieve a document."""
+        """L2: All L1 checks, then write a canary document into the granted index, retrieve it, and delete it."""
         checks: list[ValidationCheck] = []
         creds = self._resolve_credentials()
 
@@ -229,7 +218,7 @@ class OpenSearchClientValidator(BaseValidator):
     # CA certificate helpers
     # ------------------------------------------------------------------
 
-    def __init__(self, *args, **kwargs) -> None:  # type: ignore[no-untyped-def]
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._ca_file_path: str | None = None
 
