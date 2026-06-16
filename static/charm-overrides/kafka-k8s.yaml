@@ -1,6 +1,6 @@
 ---
 # When client-cas or oauth is integrated, certificates is also required.
-# When zookeeper is integrated (pre-track-4 only), certificates is also required.
+# When zookeeper is integrated (pre-track-4 and latest/* non-stable), certificates is also required.
 # Track 4 is KRaft mode - the zookeeper endpoint no longer exists.
 # See: https://github.com/canonical/charm-integration-testing/issues/408
 overrides:
@@ -17,6 +17,46 @@ overrides:
       - 'bool(endpoint[client-cas]) or bool(endpoint[oauth]) => bool(endpoint[certificates])'
       - 'bool(endpoint[peer-cluster]) => config[roles] == "broker"'
       - 'not bool(endpoint[peer-cluster]) => config[roles] == "broker,controller"'
+
+  # latest/stable is on ubuntu/20.04 (EOL April 2025). It uses the old 'kafka'
+  # interface name (renamed to 'kafka-client' in track 3). No public Charmhub
+  # charm still requires the old 'kafka' interface, so mark it optional.
+  - criteria:
+      - track: 'latest'
+        risk: 'stable'
+    provides:
+      kafka:
+        optional: true
+      metrics-endpoint:
+        optional: true
+      grafana-dashboard:
+        optional: true
+    requires:
+      zookeeper:
+        optional: false
+
+  # latest/* (except stable): has kafka-client interface (like track 3) but fewer endpoints.
+  # ubuntu/22.04, simpler endpoint set than track 3.
+  - criteria:
+      - track: 'latest'
+    provides:
+      kafka-client:
+        optional: true
+      metrics-endpoint:
+        optional: true
+      grafana-dashboard:
+        optional: true
+    requires:
+      certificates:
+        optional: true
+      zookeeper:
+        features: [tls]
+    constraints:
+      # When zookeeper is serving kafka (zookeeper endpoint is integrated), TLS
+      # must be enabled on both kafka and zookeeper for secure operation.
+      # See: https://github.com/canonical/charm-integration-testing/issues/309
+      - "bool(endpoint[zookeeper]) => bool(endpoint[certificates])"
+      - 'bool(endpoint[certificates]) == ("tls" in features(endpoint[zookeeper]))'
 
   # Pre-track-4: zookeeper endpoint exists and also requires certificates when integrated
   # provides endpoints are not yet optional upstream in published track 3 revisions
