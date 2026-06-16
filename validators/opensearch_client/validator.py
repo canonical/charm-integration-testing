@@ -199,15 +199,19 @@ class OpenSearchClientValidator(BaseValidator):
         ca_certs = self._write_ca_file(creds.get("tls-ca"))
         use_ssl = ca_certs is not None
 
-        return OpenSearch(
-            hosts=hosts,
-            http_auth=(creds.get("username", ""), creds.get("password", "")),
-            use_ssl=use_ssl,
-            verify_certs=use_ssl,
-            ca_certs=ca_certs,
-            connection_class=RequestsHttpConnection,
-            timeout=_CONNECT_TIMEOUT,
-        )
+        try:
+            return OpenSearch(
+                hosts=hosts,
+                http_auth=(creds.get("username", ""), creds.get("password", "")),
+                use_ssl=use_ssl,
+                verify_certs=use_ssl,
+                ca_certs=ca_certs,
+                connection_class=RequestsHttpConnection,
+                timeout=_CONNECT_TIMEOUT,
+            )
+        except Exception:
+            self._remove_ca_file()
+            raise
 
     def _close_client(self, client: OpenSearch) -> None:
         """Close the OpenSearch client transport."""
