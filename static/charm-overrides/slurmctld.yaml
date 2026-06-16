@@ -1,0 +1,28 @@
+---
+# slurmctld 25.11/beta is unlisted on Charmhub; 'find?requires=<interface>'
+# returns 0 results. listed: true forces it into solver search so slurmd and
+# slurmdbd can find it as a consumer.
+# Tracked under https://github.com/canonical/charm-integration-testing/issues/642
+listed: true
+overrides:
+  - criteria:
+      - track: '25.11'
+    requires:
+      # No charm on Charmhub provides login-node interface
+      login-node:
+        optional: true
+      # No charm on Charmhub provides oci-runtime interface
+      oci-runtime:
+        optional: true
+      # influxdb and smtp are supplementary integrations (not primary purpose)
+      influxdb:
+        optional: true
+      smtp:
+        optional: true
+    provides:
+      # cos-agent is observability integration - supplementary
+      cos-agent:
+        optional: true
+      # mount provides filesystem mounts; no charm on Charmhub consumes this
+      mount:
+        optional: true
