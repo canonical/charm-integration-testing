@@ -1,6 +1,28 @@
 ---
 # Remove after: https://github.com/canonical/temporal-worker-k8s-operator/pull/88
 overrides:
+  # latest track is obsolete: no temporal-host-info or temporal-worker-info endpoints
+  - criteria:
+      - track: 'latest'
+    provides:
+      metrics-endpoint:
+        optional: true
+      grafana-dashboard:
+        optional: true
+    requires:
+      logging:
+        optional: true
+    configs:
+      namespace: [charm-test]
+      queue: [test-queue]
+      db-name: [temporal, null]
+    resources:
+      temporal-worker-image: [ghcr.io/canonical/temporal-worker-test-image:ff40479cc5b401d9a3f4c92c95f7099d83de2095]
+    constraints:
+      - 'set(config[namespace]) and set(config[queue])'
+      - 'bool(endpoint[database]) => set(config[db-name])'
+      - 'set(resource[temporal-worker-image])'
+  # 1.0/2.0+ tracks: temporal-host-info is required
   - provides:
       metrics-endpoint:
         optional: true
