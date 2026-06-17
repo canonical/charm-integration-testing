@@ -1525,10 +1525,6 @@ class TestJubilantBackend:
 
         def test_with_channel(self) -> None:
             # GIVEN
-            class StatusStubClientWithChannel:
-                def status(self) -> "TestJubilantBackend.TestListApplications.ModelStatus":
-                    return TestJubilantBackend.TestListApplications.ModelStatus("my-charm", 1)
-
             class ModelStatusWithChannel:
                 def __init__(self) -> None:
                     self.apps = {
