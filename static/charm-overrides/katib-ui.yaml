@@ -9,7 +9,7 @@
 #   0.16-0.18: requires dashboard-links, ingress (and logging on 0.17+).
 #     Solver naturally adds kubeflow-dashboard (provides dashboard-links) and
 #     kubeflow-profiles (required by kubeflow-dashboard). No override needed.
-#   0.19+: requires dashboard-links, ingress, istio-ingress-route, logging,
+#   0.19: requires dashboard-links, ingress, istio-ingress-route, logging,
 #     require-cmr-mesh, service-mesh; provides provide-cmr-mesh.
 #     istio-ingress-route, require-cmr-mesh, service-mesh are Istio-specific
 #     alternatives; the charm also has ingress (traefik) so these are optional
@@ -35,11 +35,12 @@ overrides:
     provides:
       sidebar:
         optional: true
-  # 0.19+ (default block): istio-ingress-route, service-mesh, require-cmr-mesh
-  # are Istio-specific endpoints. In non-Istio deployments the charm uses ingress
+  # 0.19: istio-ingress-route, service-mesh, require-cmr-mesh are Istio-
+  # specific endpoints. In non-Istio deployments the charm uses ingress
   # (traefik-k8s) as the primary routing, so the Istio endpoints are optional.
-  # Also a no-op for 0.16-0.18 where these endpoints do not exist.
-  - requires:
+  - criteria:
+      - track: '0.19'
+    requires:
       istio-ingress-route:
         optional: true
       require-cmr-mesh:
