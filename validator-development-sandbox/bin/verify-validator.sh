@@ -223,7 +223,7 @@ run_step unit_tests "$TEST_CMD"
 # the expected package name from the validator directory name.
 VALIDATOR_PKG="${VALIDATOR//_/-}"
 run_step wiring_runner "grep -q '\"validators-$VALIDATOR_PKG\"' validators/runner/pyproject.toml"
-run_step wiring_root "grep -q '^validators-$VALIDATOR_PKG = { path = \"./validators/$VALIDATOR\", develop = true }' pyproject.toml"
+run_step wiring_root "grep -q '^validators-$VALIDATOR_PKG = { path = \"./validators/$VALIDATOR\", develop = true' pyproject.toml"
 run_step entrypoint "cd /project && poetry run python3 -c \"from importlib.metadata import entry_points; import sys; names=[e.name for e in entry_points(group='endpoint_validators')]; sys.exit(0 if '$INTERFACE' in names else 1)\""
 
 run_step validate_up "/project/validator-development-sandbox/bin/dev-validate.py --model $MODEL --app $APP --level $LEVEL --reinstall"

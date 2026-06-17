@@ -121,7 +121,7 @@ class JujuClient:
         model: str = "default",
     ) -> None:
         self.logger.info(f"Deploying bundle file: '{bundle}'")
-        self.backend.deploy_bundle_file(model, bundle)
+        self.backend.deploy_bundle_file(model, bundle, trust=True, force=True)
 
         # Call extensions
         for extension in self.extensions:
