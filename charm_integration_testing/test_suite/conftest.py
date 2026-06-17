@@ -608,12 +608,6 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[Any]) -> 
     assert result is not None
     report = result.get_result()
 
-    if call.excinfo is not None:
-        exception_type = call.excinfo.type
-        # Don't interfere with pytest's built-in exceptions (skip, xfail, etc.)
-        if exception_type.__name__ in ("Skipped", "XFailed", "Exit"):
-            pass
-
     # Save failure message
     if report.failed:
         # Adapted from https://docs.pytest.org/en/stable/_modules/_pytest/junitxml.html
@@ -665,7 +659,7 @@ def print_setup_and_teardown_info(
 
     yield
 
-    # Log error
+    # Log outcome
     if failure_message in request.node.stash:
         logger.error(f"Failure in {request.node.name}: {request.node.stash[failure_message]}")
     elif skipped_message in request.node.stash:
