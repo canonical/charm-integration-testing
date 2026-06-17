@@ -36,8 +36,9 @@ overrides:
       grafana-dashboard:
         optional: true
     requires:
+      # old name for kratos-info
       kratos-endpoint-info:
-        optional: true  # old name for kratos-info
+        optional: true
       hydra-endpoint-info:
         optional: true
       logging:
