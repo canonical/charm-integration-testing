@@ -1538,13 +1538,13 @@ class TestJubilantBackend:
                         )
                     }
 
-            class StatusStubClientWithChannel2:
+            class StatusStubClientWithChannel:
                 def status(self) -> ModelStatusWithChannel:
                     return ModelStatusWithChannel()
 
             class ModelStubWithChannel:
                 def __init__(self) -> None:
-                    self.client = StatusStubClientWithChannel2()
+                    self.client = StatusStubClientWithChannel()
 
                 def status(self) -> ModelStatusWithChannel:
                     return self.client.status()

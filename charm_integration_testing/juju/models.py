@@ -27,6 +27,13 @@ class CharmChannel:
                     return cls(track=parts[0], risk=parts[1], branch=parts[2])
                 case _:
                     raise ValueError(f"Invalid channel string: {value}")
+        expected = {"track", "risk", "branch"}
+        extra = set(value.keys()) - expected
+        missing = expected - set(value.keys())
+        if extra or missing:
+            raise ValueError(
+                f"Invalid channel dict: unexpected keys {extra}, missing keys {missing}"
+            )
         return cls(**value)
 
     def __str__(self) -> str:
@@ -36,7 +43,9 @@ class CharmChannel:
     def explicit_track(self) -> str:
         return self.track if self.track != "" else "latest"
 
-    def __lt__(self, other: "CharmChannel") -> bool:
+    def __lt__(self, other: object) -> bool:
+        if not isinstance(other, CharmChannel):
+            return NotImplemented
         return (self.explicit_track, _RISK_ORDER.get(self.risk, 99), self.branch) < (
             other.explicit_track,
             _RISK_ORDER.get(other.risk, 99),
