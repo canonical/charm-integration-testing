@@ -1,13 +1,48 @@
 ---
 overrides:
-    # Remove after: https://github.com/canonical/hydra-operator/pull/358
-    # Older tracks use public-ingress (legacy traefik API)
+  # Remove after: https://github.com/canonical/hydra-operator/pull/358
+  # Tracks 0.1 and 0.2 use public-ingress (legacy traefik API) but lack internal-ingress.
+  # internal-ingress was only added to tracks 0.3 and istio.
+  - criteria:
+      - any_of:
+          - track: '0.2'
+          - track: '0.1'
+    provides:
+      hydra-endpoint-info:
+        optional: true
+      oauth:
+        optional: true
+        features: [tls]
+      metrics-endpoint:
+        optional: true
+      grafana-dashboard:
+        optional: true
+    requires:
+      public-ingress:
+        optional: false
+        features: [tls]
+      admin-ingress:
+        optional: true
+        features: [tls]
+      tracing:
+        optional: true
+      logging:
+        optional: true
+    proxies:
+      - interface: certificates
+        requires: public-ingress
+        provides: oauth
+    constraints:
+      # public-ingress and oauth must agree on tls
+      - '("tls" in features(endpoint[public-ingress])) == ("tls" in features(endpoint[oauth]))'
+      # if not in dev mode, ingress must use tls
+      - not config[dev] => "tls" in features(endpoint[public-ingress])
+
+  # Tracks 0.3 and istio use public-ingress and also expose internal-ingress.
   - criteria:
       - any_of:
           - track: istio
           - track: '0.3'
-          - track: '0.2'
-          - track: '0.1'
     provides:
       hydra-endpoint-info:
         optional: true
@@ -34,14 +69,15 @@ overrides:
         optional: true
     proxies:
       - interface: certificates
-        provides: public-ingress
-        requires: oauth
+        requires: public-ingress
+        provides: oauth
     constraints:
       # public-ingress and oauth must agree on tls
       - '("tls" in features(endpoint[public-ingress])) == ("tls" in features(endpoint[oauth]))'
       # if not in dev mode, ingress must use tls
       - not config[dev] => "tls" in features(endpoint[public-ingress])
-    # Newer tracks use public-route (new traefik API)
+
+  # Newer tracks use public-route (new traefik API)
   - provides:
       hydra-endpoint-info:
         optional: true

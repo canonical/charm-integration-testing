@@ -10,7 +10,7 @@ from unittest.mock import patch
 import jubilant
 import pytest
 import yaml
-from juju import JujuConsumedOfferInfo, JujuIntegrationApplication, JujuWaitState, JujuWaitTimeoutError
+from juju import CharmChannel, JujuConsumedOfferInfo, JujuIntegrationApplication, JujuWaitState, JujuWaitTimeoutError
 from juju.version import JujuVersion
 from juju_jubilant.backend import JubilantBackend
 from juju_jubilant.client import JubilantClient
@@ -217,7 +217,14 @@ class StatusStub:
 
         return status
 
-    def deploy(self, charm: Any = None, app: str | None = None, config: Any = None, trust: bool = False) -> None:
+    def deploy(
+        self,
+        charm: Any = None,
+        app: str | None = None,
+        config: Any = None,
+        trust: bool = False,
+        force: bool = False,
+    ) -> None:
         pass
 
 
@@ -1078,7 +1085,14 @@ class TestJubilantBackend:
             charm: str | None = None
             app: str | None = None
 
-            def deploy(self, charm: str, app: str | None = None, config: Any = None, trust: bool = False) -> None:
+            def deploy(
+                self,
+                charm: str,
+                app: str | None = None,
+                config: Any = None,
+                trust: bool = False,
+                force: bool = False,
+            ) -> None:
                 self.charm = charm
                 self.app = app
                 self.config = config
@@ -1521,6 +1535,45 @@ class TestJubilantBackend:
             app_info = applications["my-app"]
             assert app_info.charm == "my-charm"
             assert app_info.revision == 1
+            assert app_info.channel is None
+
+        def test_with_channel(self) -> None:
+            # GIVEN
+            class ModelStatusWithChannel:
+                def __init__(self) -> None:
+                    self.apps = {
+                        "my-app": jubilant.statustypes.AppStatus(
+                            charm="my-charm",
+                            charm_origin="charmhub",
+                            charm_name="my-charm",
+                            charm_rev=1,
+                            charm_channel="1.0/stable",
+                            exposed=False,
+                        )
+                    }
+
+            class StatusStubClientWithChannel:
+                def status(self) -> ModelStatusWithChannel:
+                    return ModelStatusWithChannel()
+
+            class ModelStubWithChannel:
+                def __init__(self) -> None:
+                    self.client = StatusStubClientWithChannel()
+
+                def status(self) -> ModelStatusWithChannel:
+                    return self.client.status()
+
+            client = JubilantClientStub(client=ModelStubWithChannel())
+
+            # WHEN
+            applications = JubilantBackend(client).list_applications("test-model")
+
+            # THEN
+            assert len(applications) == 1
+            app_info = applications["my-app"]
+            assert app_info.charm == "my-charm"
+            assert app_info.revision == 1
+            assert app_info.channel == CharmChannel(track="1.0", risk="stable", branch="")
 
     class TestListConsumedOffers:
         class Client(JubilantClientStub):

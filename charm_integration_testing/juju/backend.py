@@ -212,7 +212,9 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def deploy_bundle_file(self, model: str, bundle: str) -> None:
+    def deploy_bundle_file(
+        self, model: str, bundle: str, timeout: timedelta | None = None, trust: bool = False, force: bool = False
+    ) -> None:
         raise NotImplementedError
 
     @abstractmethod
@@ -291,6 +293,7 @@ class JujuBackend(ABC):
         application: str | None = None,
         config: dict[str, Any] | None = None,
         trust: bool = False,
+        force: bool = False,
     ) -> None:
         raise NotImplementedError
 
