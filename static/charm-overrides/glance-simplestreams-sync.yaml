@@ -1,0 +1,19 @@
+---
+# glance-simplestreams-sync syncs Simplestreams image metadata into Glance.
+# Primary purpose: fetches images from Simplestreams and registers them in
+# Glance via identity-service (Keystone) and certificates (TLS).
+#
+# image-modifier (provides) - OPTIONAL: interface for other charms to hook in
+#   as image modifiers during sync. The charm syncs images without any modifier
+#   connected; e.g. glance-image-modifier charms use this optionally.
+# nrpe-external-master (provides) - OPTIONAL: NRPE monitoring subordinate hook.
+# simplestreams-image-service (provides) - OPTIONAL: exposes the service to
+#   consumers; charm operates standalone.
+overrides:
+  - provides:
+      image-modifier:
+        optional: true
+      nrpe-external-master:
+        optional: true
+      simplestreams-image-service:
+        optional: true
