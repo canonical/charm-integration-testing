@@ -341,7 +341,7 @@ EOF
         CONTEXT_MSG="Please read $PROMPT_FILE for project context, then await my instructions."
         multipass exec "$VM_NAME" -- bash -lc "
             cd /project
-            GH_TOKEN='${GITHUB_TOKEN:-}' GITHUB_TOKEN='${GITHUB_TOKEN:-}' COPILOT_GITHUB_TOKEN='$_copilot_token' \
+            ${GITHUB_TOKEN:+GH_TOKEN=$GITHUB_TOKEN GITHUB_TOKEN=$GITHUB_TOKEN} COPILOT_GITHUB_TOKEN='$_copilot_token' \
             COPILOT_MODEL='$COPILOT_MODEL' copilot --yolo \
                 -i \"$CONTEXT_MSG\"
             rm -f $PROMPT_FILE
@@ -350,7 +350,7 @@ EOF
         [ -n "$TASK" ] || { echo "Usage: scripts/sandbox.sh run 'task description'"; exit 1; }
         multipass exec "$VM_NAME" -- bash -lc "
             cd /project
-            GH_TOKEN='${GITHUB_TOKEN:-}' GITHUB_TOKEN='${GITHUB_TOKEN:-}' COPILOT_GITHUB_TOKEN='$_copilot_token' \
+            ${GITHUB_TOKEN:+GH_TOKEN=$GITHUB_TOKEN GITHUB_TOKEN=$GITHUB_TOKEN} COPILOT_GITHUB_TOKEN='$_copilot_token' \
             COPILOT_MODEL='$COPILOT_MODEL' copilot --yolo \
                 -p \"\$(cat $PROMPT_FILE)\"
             rm -f $PROMPT_FILE
