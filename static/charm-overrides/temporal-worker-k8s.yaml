@@ -1,5 +1,4 @@
 ---
-# Remove after: https://github.com/canonical/temporal-worker-k8s-operator/pull/88
 overrides:
   # latest track is obsolete: no temporal-host-info or temporal-worker-info endpoints
   - criteria:
