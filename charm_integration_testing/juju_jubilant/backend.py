@@ -294,10 +294,17 @@ class JubilantBackend(JujuCmdBackend):
             name_or_id,
         )
 
-    def deploy_bundle_file(self, model: str, bundle: str, timeout: timedelta | None = None) -> None:
+    def deploy_bundle_file(
+        self,
+        model: str,
+        bundle: str,
+        timeout: timedelta | None = None,
+        trust: bool = False,
+        force: bool = False,
+    ) -> None:
         if not pathlib.Path(bundle).is_file():
             raise ValueError(f"Bundle file '{bundle}' not found.")
-        self.client.model(model).deploy(charm=pathlib.Path(bundle).resolve(), trust=True)
+        self.client.model(model).deploy(charm=pathlib.Path(bundle).resolve(), trust=trust, force=force)
 
         self.wait(model, lambda status: bundle_applications_integrations_exist(status, bundle), timeout=timeout)
 
@@ -308,12 +315,14 @@ class JubilantBackend(JujuCmdBackend):
         application: str | None = None,
         config: dict[str, Any] | None = None,
         trust: bool = False,
+        force: bool = False,
     ) -> None:
         self.client.model(model).deploy(
             charm=charm,
             app=application,
             config=config,
             trust=trust,
+            force=force,
         )
 
     def configure_application(self, model: str, application: str, values: dict[str, str]) -> None:

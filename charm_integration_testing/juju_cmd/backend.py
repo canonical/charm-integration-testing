@@ -3,7 +3,6 @@
 
 
 import json
-import os
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -230,15 +229,10 @@ class JujuCmdBackend(JujuBackend):
             CmdArg(value=str(target_2)),
         )
 
-    def deploy_bundle_file(self, model: str, bundle: str) -> None:
-        if not os.path.isfile(bundle):
-            raise ValueError(f"Bundle file '{bundle}' not found.")
-        self._call_juju(
-            CmdArg(value="deploy"),
-            CmdArg(name="model", value=model),
-            CmdArg(name="trust"),
-            CmdArg(value=bundle),
-        )
+    def deploy_bundle_file(
+        self, model: str, bundle: str, timeout: timedelta | None = None, trust: bool = False, force: bool = False
+    ) -> None:
+        raise NotImplementedError
 
     def remove_applications(self, model: str, *applications: str) -> None:
         self._call_juju(
