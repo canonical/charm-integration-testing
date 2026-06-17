@@ -2,9 +2,9 @@
 # Source: https://github.com/canonical/identity-platform-login-ui-operator
 #
 # Criteria blocks required because old/legacy tracks predate several endpoints:
-#   - public-route added Oct 6 2025 (commit 52bd694); absent in tracks istio, 0.2, 0.1, 0.999
-#   - kratos-info, receive-ca-cert absent in very old tracks 0.1 (rev 78), 0.999 (rev 47)
-#   - kratos-endpoint-info is the OLD name for kratos-info in tracks 0.1, 0.999, 0.2
+#   - public-route added Oct 6 2025 (commit 52bd694); absent in tracks istio, 0.4, 0.3, 0.2, 0.1, 0.999
+#   - kratos-info absent in tracks 0.2, 0.1, 0.999; receive-ca-cert absent in tracks 0.2, 0.1, 0.999
+#   - kratos-endpoint-info is the OLD name for kratos-info in tracks 0.2, 0.1, 0.999
 #
 # ui-endpoint-info (provides): cyclic: true because hydra and kratos both require
 #   ui-endpoint-info from login-ui while login-ui requires hydra-endpoint-info and
