@@ -144,7 +144,7 @@ There is no naming standardization. Common patterns (where `<name>` is the Charm
 - `github.com/charmed-kubernetes/<name>` (CK charms)
 - `github.com/openstack/charm-<name>` (OpenStack charms - mirror only; upstream is Gerrit at `opendev.org/openstack/charm-<name>`)
 
-If direct URL guessing fails, use: `gh search repos "<name>" --owner canonical`
+If direct URL guessing fails, search GitHub for `org:canonical <name>` (via browser or any available GitHub tool/API).
 
 A single repo may contain multiple charms (e.g. `kfp-operators`, `cos-charms`). Check for a `charms/` subdirectory.
 
@@ -201,7 +201,7 @@ A single repo may contain multiple charms (e.g. `kfp-operators`, `cos-charms`). 
 Run the self-validation checklist, then run the overrides pytest suite to validate all criteria blocks against real published channels:
 
 ```bash
-poetry run pytest bundle_builder_x/tests/ -k <charm-name> --all-channels -v
+poetry run pytest bundle_builder_x/tests/ -k <charm-name> --all-channels --overrides ./static/charm-overrides/ -v
 ```
 
 `--all-channels` tests every channel that matches each criteria block, catching track-specific mistakes (wrong endpoint names, missing criteria coverage) that a single solver run would miss.
@@ -402,9 +402,6 @@ Some charms are genuinely standalone - LXD, for example, needs no relations to b
 For most charms, a lone-charm bundle is a red flag. If the charm needs a database, identity provider, or ingress to serve its purpose, and the bundle contains none of those, the required endpoints were probably incorrectly marked optional and the solver found a trivially minimal solution.
 
 If the bundle pulls in something unexpected, check whether that endpoint should be `optional: true` - and if so, whether that is Meaning 1 or Meaning 2.
-
-If the solver pulls in something unexpected, check whether an endpoint should be `optional: true`
-(and whether that is Meaning 1 or Meaning 2).
 
 ---
 
