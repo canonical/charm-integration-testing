@@ -31,9 +31,7 @@ class CharmChannel:
         extra = set(value.keys()) - expected
         missing = expected - set(value.keys())
         if extra or missing:
-            raise ValueError(
-                f"Invalid channel dict: unexpected keys {extra}, missing keys {missing}"
-            )
+            raise ValueError(f"Invalid channel dict: unexpected keys {extra}, missing keys {missing}")
         return cls(**value)
 
     def __str__(self) -> str:
