@@ -34,19 +34,19 @@ overrides:
     provides:
       sidebar:
         optional: true
+  # No overrides needed for 0.16-0.18 or latest
+  - criteria:
+      - any_of:
+          - track: '0.16'
+          - track: '0.17'
+          - track: '0.18'
+          - track: 'latest'
   # 0.19+ (default block): istio-ingress-route, service-mesh, require-cmr-mesh
   # are Istio-specific endpoints added in 0.19. In non-Istio deployments the
   # charm uses ingress (traefik-k8s), so the Istio endpoints are optional.
   # Excludes pre-0.19 tracks explicitly so future tracks (0.20, etc.) are
   # covered without enumeration.
-  - criteria:
-      - none_of:
-          - track: '0.15'
-          - track: '0.16'
-          - track: '0.17'
-          - track: '0.18'
-          - track: 'latest'
-    requires:
+  - requires:
       istio-ingress-route:
         optional: true
       require-cmr-mesh:
