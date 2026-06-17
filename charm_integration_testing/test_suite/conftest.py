@@ -47,12 +47,6 @@ pytest_plugins = [
     "test_suite.fixtures.controller_spec",
 ]
 
-KNOWN_FAILURE_EXCEPTIONS = (
-    JujuWaitTimeoutError,
-    JujuValidationError,
-    AssertionError,
-)
-
 
 @pytest.fixture
 def test_observer_api() -> str:
@@ -603,7 +597,6 @@ def ubuntu_pro_token() -> str | None:
 
 
 failure_message: StashKey[str] = StashKey()
-error_message: StashKey[str] = StashKey()
 skipped_message: StashKey[str] = StashKey()
 failure_exception: StashKey[BaseException] = StashKey()
 
@@ -615,17 +608,6 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[Any]) -> 
     assert result is not None
     report = result.get_result()
 
-    unexpected_error = False
-
-    if call.excinfo is not None:
-        exception_type = call.excinfo.type
-        # Don't interfere with pytest's built-in exceptions (skip, xfail, etc.)
-        if exception_type.__name__ in ("Skipped", "XFailed", "Exit"):
-            pass
-        elif exception_type not in KNOWN_FAILURE_EXCEPTIONS:
-            # Unexpected errors: set flag to modify message
-            unexpected_error = True
-
     # Save failure message
     if report.failed:
         # Adapted from https://docs.pytest.org/en/stable/_modules/_pytest/junitxml.html
@@ -634,8 +616,7 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[Any]) -> 
             item.stash[failure_message] = reprcrash.message
         else:
             item.stash[failure_message] = str(report.longrepr)
-        if unexpected_error:
-            item.stash[error_message] = item.stash[failure_message]
+
     # Save skip message
     if report.skipped:
         # Adapted from https://docs.pytest.org/en/stable/_modules/_pytest/junitxml.html
@@ -678,10 +659,8 @@ def print_setup_and_teardown_info(
 
     yield
 
-    # Log error
-    if error_message in request.node.stash:
-        logger.error(f"Error in {request.node.name}: {request.node.stash[error_message]}")
-    elif failure_message in request.node.stash:
+    # Log outcome
+    if failure_message in request.node.stash:
         logger.error(f"Failure in {request.node.name}: {request.node.stash[failure_message]}")
     elif skipped_message in request.node.stash:
         logger.info(f"Skipped {request.node.name}: {request.node.stash[skipped_message]}")
@@ -883,12 +862,6 @@ def record_failure_execution_metadata(
                 execution_metadata("failure:build_bundle:unfulfilled_endpoint", f"{info.charm_name}:{info.endpoint}")
                 if info.interface:
                     execution_metadata("failure:build_bundle:unfulfilled_interface", info.interface)
-
-        if error_message in request.node.stash:
-            # toggle expected failure flag
-            execution_metadata("failure:expected", "false")
-        else:
-            execution_metadata("failure:expected", "true")
 
 
 @pytest.fixture
