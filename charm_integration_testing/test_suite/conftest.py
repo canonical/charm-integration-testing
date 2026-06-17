@@ -753,7 +753,7 @@ def record_warning_execution_metadata(execution_metadata: Callable[[str, str | i
 
 
 def record_charm_info_execution_metadata_instantaneous(
-    juju_client: JujuClient, model: str, execution_metadata: Callable[[str, str | int], None]
+    juju_client: JujuClient, model: str, execution_metadata: Callable[[str, str], None]
 ) -> None:
     # Get all charm version information
     applications = juju_client.list_applications(model=model)
@@ -800,7 +800,7 @@ def record_charm_info_execution_metadata_instantaneous(
 def record_charm_info_execution_metadata(
     juju_client: JujuClient,
     session_resource_registry: ResourceRegistry,
-    execution_metadata: Callable[[str, str | int], None],
+    execution_metadata: Callable[[str, str], None],
     require_temp_juju_controller_alive: None,
 ) -> Iterator[None]:
     def _record_all() -> None:
