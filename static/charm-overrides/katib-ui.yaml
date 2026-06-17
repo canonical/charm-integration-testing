@@ -14,6 +14,7 @@
 #     istio-ingress-route, require-cmr-mesh, service-mesh are Istio-specific
 #     alternatives; the charm also has ingress (traefik) so these are optional
 #     in non-Istio deployments. Meaning 1: charm reaches active via ingress.
+#     Default block: also harmless no-op for 0.16-0.18 (endpoints absent).
 #
 # 0.15/* provides sidebar/katib-ui: Meaning 1 optional - kubeflow-dashboard
 #   sidebar integration is additive, not primary purpose. No discoverable
@@ -34,12 +35,11 @@ overrides:
     provides:
       sidebar:
         optional: true
-  # 0.19+: istio-ingress-route, service-mesh, require-cmr-mesh are Istio-
-  # specific endpoints. In non-Istio deployments the charm uses ingress
+  # 0.19+ (default block): istio-ingress-route, service-mesh, require-cmr-mesh
+  # are Istio-specific endpoints. In non-Istio deployments the charm uses ingress
   # (traefik-k8s) as the primary routing, so the Istio endpoints are optional.
-  - criteria:
-      - track: '0.19'
-    requires:
+  # Also a no-op for 0.16-0.18 where these endpoints do not exist.
+  - requires:
       istio-ingress-route:
         optional: true
       require-cmr-mesh:
