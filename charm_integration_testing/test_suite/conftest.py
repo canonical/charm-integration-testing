@@ -700,7 +700,7 @@ def record_execution_metadata(
     record_warning_execution_metadata: None,
     record_failure_execution_metadata: None,
     record_juju_execution_metadata: None,
-    record_charms_and_revisions_execution_metadata: None,
+    record_charm_info_execution_metadata: None,
     record_pipeline_version_execution_metadata: None,
 ) -> None:
     pass
@@ -731,16 +731,23 @@ def record_warning_execution_metadata(execution_metadata: Callable[[str, str | i
         )
 
 
-def record_charms_and_revisions_execution_metadata_instantaneous(
-    juju_client: JujuClient, model: str, execution_metadata: Callable[[str, str | int], None]
+def record_charm_info_execution_metadata_instantaneous(
+    juju_client: JujuClient, model: str, execution_metadata: Callable[[str, str], None]
 ) -> None:
-    # Get all charm revisions
+    # Get all charm version information
     applications = juju_client.list_applications(model=model)
     for application_info in applications.values():
         # Save the charm
         execution_metadata("charm", application_info.charm)
         # Save the revision
         execution_metadata(f"charm:{application_info.charm}:revision", str(application_info.revision))
+        # Save channel info if available
+        if application_info.channel:
+            # Save the track if explicitly set
+            if application_info.channel.track:
+                execution_metadata(f"charm:{application_info.charm}:track", application_info.channel.track)
+            # Risk is always present in a valid channel string
+            execution_metadata(f"charm:{application_info.charm}:risk", application_info.channel.risk)
 
     consumed_offers = juju_client.list_consumed_offers(model=model).keys()
 
@@ -769,16 +776,16 @@ def record_charms_and_revisions_execution_metadata_instantaneous(
 
 
 @pytest.fixture
-def record_charms_and_revisions_execution_metadata(
+def record_charm_info_execution_metadata(
     juju_client: JujuClient,
     session_resource_registry: ResourceRegistry,
-    execution_metadata: Callable[[str, str | int], None],
+    execution_metadata: Callable[[str, str], None],
     require_temp_juju_controller_alive: None,
 ) -> Iterator[None]:
     def _record_all() -> None:
         for handle in session_resource_registry.registered_handles():
             if isinstance(handle, JujuModelHandle):
-                record_charms_and_revisions_execution_metadata_instantaneous(
+                record_charm_info_execution_metadata_instantaneous(
                     juju_client, f"{handle.controller}:{handle.model}", execution_metadata
                 )
 

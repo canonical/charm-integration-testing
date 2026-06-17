@@ -15,6 +15,7 @@ from typing import Any, Callable
 import jubilant
 import yaml
 from juju import (
+    CharmChannel,
     JujuApplicationInfo,
     JujuConsumedOfferInfo,
     JujuExecOutput,
@@ -415,7 +416,11 @@ class JubilantBackend(JujuCmdBackend):
 
     def list_applications(self, model: str) -> dict[str, JujuApplicationInfo]:
         return {
-            app_name: JujuApplicationInfo(charm=app_info.charm, revision=app_info.charm_rev)
+            app_name: JujuApplicationInfo(
+                charm=app_info.charm,
+                revision=app_info.charm_rev,
+                channel=CharmChannel.parse(app_info.charm_channel) if app_info.charm_channel else None,
+            )
             for app_name, app_info in self.status(model).apps.items()
         }
 

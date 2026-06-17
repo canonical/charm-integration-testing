@@ -75,6 +75,14 @@ Charm Information
      - Revision number for a specific charm. Dynamic category based on charm name (e.g., ``charm:postgresql:revision``). Collected at start and end of test.
      - No
      - ``123``
+   * - ``charm:<name>:track``
+     - Channel track for a specific charm (e.g., ``charm:postgresql:track``). Only collected when channel information is available from Juju status and the channel has an explicit track set.
+     - No
+     - ``14``
+   * - ``charm:<name>:risk``
+     - Channel risk for a specific charm (e.g., ``charm:postgresql:risk``). Only collected when channel information is available from Juju status.
+     - No
+     - ``stable``
 
 Integration Information
 ~~~~~~~~~~~~~~~~~~~~~~~
