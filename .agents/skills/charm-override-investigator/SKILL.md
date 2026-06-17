@@ -173,12 +173,17 @@ A single repo may contain multiple charms (e.g. `kfp-operators`, `cos-charms`). 
 ### write_new_override
 
 1. Confirm the exact Charmhub slug and find the source repository.
-2. Query `https://api.charmhub.io/v2/charms/info/<charm-name>` or run `inspect-charm.py` for all published channels and their endpoint lists.
+2. Query Charmhub for all published channels and their endpoint lists:
+   ```bash
+   curl -s 'https://api.charmhub.io/v2/charms/info/<charm-name>?fields=channel-map' | \
+     python3 -c "import json,sys; m=json.load(sys.stdin)['channel-map']; [print(e['channel']['track']+'/'+e['channel']['risk'], sorted(e['revision']['metadata'].get('requires',{}).keys()), sorted(e['revision']['metadata'].get('provides',{}).keys())) for e in m]"
+   ```
+   Group the output by distinct endpoint sets to determine how many criteria blocks are needed.
 3. Group tracks by endpoint set: identify which tracks have the same endpoints (one criteria block per distinct generation).
 4. For each endpoint in each generation, check source code and classify as Required, Optional, or Meaning-2-optional.
 5. Identify any constraints needed: at-least-one patterns, TLS implications, version-track matching, cyclic dependencies.
 6. Write the YAML following the schema in `bundle_builder_x/bundle_builder_x/overrides.py`.
-7. Add evidence comments citing source file + function for every `optional: false` decision.
+7. Add evidence comments for every non-obvious `optional: false` AND `optional: true` decision. The stated rule is that both directions require justification; the comment only needs to be one line but must cite source code, docs, or a domain expert statement.
 8. Run self-validation checklist.
 9. Run the solver against a minimal single-charm spec and verify the bundle is realistic.
 10. For endpoints that qualify for Meaning 1: prepare upstream PR diff (with user permission).
@@ -193,13 +198,21 @@ A single repo may contain multiple charms (e.g. `kfp-operators`, `cos-charms`). 
 
 ### validate_override
 
-Run the self-validation checklist, then:
+Run the self-validation checklist, then run the overrides pytest suite to validate all criteria blocks against real published channels:
 
 ```bash
-bundle-builder-x --spec /tmp/test.yaml --overrides ./static/charm-overrides/ --output-mermaid /tmp/result.md
+poetry run pytest bundle_builder_x/tests/ -k <charm-name> --all-channels -v
 ```
 
-Inspect the diagram: does the bundle contain the apps you would expect for a real deployment of this charm? If the bundle is a lone island with no dependencies, check whether required endpoints are correctly marked.
+`--all-channels` tests every channel that matches each criteria block, catching track-specific mistakes (wrong endpoint names, missing criteria coverage) that a single solver run would miss.
+
+Also run the solver against a minimal single-charm spec and evaluate the output:
+
+```bash
+poetry run bundle-builder-x --spec /tmp/test.yaml --overrides ./static/charm-overrides/ --output-mermaid /tmp/result.md
+```
+
+Inspect the diagram: does the bundle contain the apps you would expect for a real deployment of this charm?
 
 ---
 
@@ -363,7 +376,7 @@ models:
 Run:
 
 ```bash
-bundle-builder-x --spec /tmp/test.yaml --overrides ./static/charm-overrides/ --output-mermaid /tmp/result.md
+poetry run bundle-builder-x --spec /tmp/test.yaml --overrides ./static/charm-overrides/ --output-mermaid /tmp/result.md
 ```
 
 **Important:** You do not need to add the charm's known dependencies to the spec. If an
