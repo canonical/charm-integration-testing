@@ -126,6 +126,7 @@ class PostgreSQLClientValidator(BaseValidator):
         # --- 5. Connect ---
         try:
             conn = self._connect(uri)
+            conn.autocommit = True
             safe_target = self._safe_uri_string(uri)
             checks.append(ValidationCheck(name="connect", passed=True, message=f"Connected to {safe_target}."))
         except Exception as exc:
@@ -159,7 +160,6 @@ class PostgreSQLClientValidator(BaseValidator):
         # --- 8. Create canary table, write, read-verify, cleanup ---
         canary_table = f"__canary_{uuid.uuid4().hex[:8]}"
         try:
-            conn.autocommit = True
             with conn.cursor() as cur:
                 # Create
                 cur.execute(f"CREATE TABLE {canary_table} (id SERIAL PRIMARY KEY, marker TEXT NOT NULL)")  # nosec B608 - table name is UUID-generated

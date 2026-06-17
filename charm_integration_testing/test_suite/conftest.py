@@ -47,12 +47,6 @@ pytest_plugins = [
     "test_suite.fixtures.controller_spec",
 ]
 
-KNOWN_FAILURE_EXCEPTIONS = (
-    JujuWaitTimeoutError,
-    JujuValidationError,
-    AssertionError,
-)
-
 
 @pytest.fixture
 def test_observer_api() -> str:
@@ -603,7 +597,6 @@ def ubuntu_pro_token() -> str | None:
 
 
 failure_message: StashKey[str] = StashKey()
-error_message: StashKey[str] = StashKey()
 skipped_message: StashKey[str] = StashKey()
 failure_exception: StashKey[BaseException] = StashKey()
 
@@ -615,17 +608,6 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[Any]) -> 
     assert result is not None
     report = result.get_result()
 
-    unexpected_error = False
-
-    if call.excinfo is not None:
-        exception_type = call.excinfo.type
-        # Don't interfere with pytest's built-in exceptions (skip, xfail, etc.)
-        if exception_type.__name__ in ("Skipped", "XFailed", "Exit"):
-            pass
-        elif exception_type not in KNOWN_FAILURE_EXCEPTIONS:
-            # Unexpected errors: set flag to modify message
-            unexpected_error = True
-
     # Save failure message
     if report.failed:
         # Adapted from https://docs.pytest.org/en/stable/_modules/_pytest/junitxml.html
@@ -634,8 +616,7 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[Any]) -> 
             item.stash[failure_message] = reprcrash.message
         else:
             item.stash[failure_message] = str(report.longrepr)
-        if unexpected_error:
-            item.stash[error_message] = item.stash[failure_message]
+
     # Save skip message
     if report.skipped:
         # Adapted from https://docs.pytest.org/en/stable/_modules/_pytest/junitxml.html
@@ -678,10 +659,8 @@ def print_setup_and_teardown_info(
 
     yield
 
-    # Log error
-    if error_message in request.node.stash:
-        logger.error(f"Error in {request.node.name}: {request.node.stash[error_message]}")
-    elif failure_message in request.node.stash:
+    # Log outcome
+    if failure_message in request.node.stash:
         logger.error(f"Failure in {request.node.name}: {request.node.stash[failure_message]}")
     elif skipped_message in request.node.stash:
         logger.info(f"Skipped {request.node.name}: {request.node.stash[skipped_message]}")
@@ -721,7 +700,7 @@ def record_execution_metadata(
     record_warning_execution_metadata: None,
     record_failure_execution_metadata: None,
     record_juju_execution_metadata: None,
-    record_charms_and_revisions_execution_metadata: None,
+    record_charm_info_execution_metadata: None,
     record_pipeline_version_execution_metadata: None,
 ) -> None:
     pass
@@ -752,16 +731,23 @@ def record_warning_execution_metadata(execution_metadata: Callable[[str, str | i
         )
 
 
-def record_charms_and_revisions_execution_metadata_instantaneous(
-    juju_client: JujuClient, model: str, execution_metadata: Callable[[str, str | int], None]
+def record_charm_info_execution_metadata_instantaneous(
+    juju_client: JujuClient, model: str, execution_metadata: Callable[[str, str], None]
 ) -> None:
-    # Get all charm revisions
+    # Get all charm version information
     applications = juju_client.list_applications(model=model)
     for application_info in applications.values():
         # Save the charm
         execution_metadata("charm", application_info.charm)
         # Save the revision
         execution_metadata(f"charm:{application_info.charm}:revision", str(application_info.revision))
+        # Save channel info if available
+        if application_info.channel:
+            # Save the track if explicitly set
+            if application_info.channel.track:
+                execution_metadata(f"charm:{application_info.charm}:track", application_info.channel.track)
+            # Risk is always present in a valid channel string
+            execution_metadata(f"charm:{application_info.charm}:risk", application_info.channel.risk)
 
     consumed_offers = juju_client.list_consumed_offers(model=model).keys()
 
@@ -790,16 +776,16 @@ def record_charms_and_revisions_execution_metadata_instantaneous(
 
 
 @pytest.fixture
-def record_charms_and_revisions_execution_metadata(
+def record_charm_info_execution_metadata(
     juju_client: JujuClient,
     session_resource_registry: ResourceRegistry,
-    execution_metadata: Callable[[str, str | int], None],
+    execution_metadata: Callable[[str, str], None],
     require_temp_juju_controller_alive: None,
 ) -> Iterator[None]:
     def _record_all() -> None:
         for handle in session_resource_registry.registered_handles():
             if isinstance(handle, JujuModelHandle):
-                record_charms_and_revisions_execution_metadata_instantaneous(
+                record_charm_info_execution_metadata_instantaneous(
                     juju_client, f"{handle.controller}:{handle.model}", execution_metadata
                 )
 
@@ -883,12 +869,6 @@ def record_failure_execution_metadata(
                 execution_metadata("failure:build_bundle:unfulfilled_endpoint", f"{info.charm_name}:{info.endpoint}")
                 if info.interface:
                     execution_metadata("failure:build_bundle:unfulfilled_interface", info.interface)
-
-        if error_message in request.node.stash:
-            # toggle expected failure flag
-            execution_metadata("failure:expected", "false")
-        else:
-            execution_metadata("failure:expected", "true")
 
 
 @pytest.fixture

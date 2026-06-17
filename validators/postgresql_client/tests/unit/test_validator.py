@@ -357,6 +357,42 @@ class TestPostgreSQLClientValidatorDeep:
         latency_check = next(c for c in result.checks if c.name == "latency")
         assert latency_check.passed
 
+    def test_deep_sets_autocommit_before_any_cursor(self) -> None:
+        # Regression test for: "set_session cannot be used inside a transaction"
+        # GIVEN a connection that raises ProgrammingError if autocommit is set
+        # after a cursor has already been opened (i.e., inside a transaction).
+        validator = _make_validator(VALID_DATABAG)
+        cursor_opened: list[bool] = []
+
+        class AutocommitGuardConn(ConnStub):
+            """Raises if autocommit is set after any cursor has been opened."""
+
+            _autocommit: bool = False
+
+            @property
+            def autocommit(self) -> bool:
+                return self._autocommit
+
+            @autocommit.setter
+            def autocommit(self, value: bool) -> None:
+                if cursor_opened:
+                    raise psycopg2.ProgrammingError("set_session cannot be used inside a transaction")
+                self._autocommit = value
+
+            def cursor(self) -> CursorStub:
+                cursor_opened.append(True)
+                return self.cursor_stub
+
+        conn = AutocommitGuardConn(cursor_stub=CursorStub(fetchone_rows=[(42,), ("validator-probe",)]))
+
+        with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn):
+            result = validator.validate(level="deep")
+
+        # THEN autocommit was set before any cursor was opened — no ProgrammingError
+        assert result.status == "PASS"
+        write_check = next(c for c in result.checks if c.name == "write_read_verify")
+        assert write_check.passed
+
     def test_deep_fails_when_query_raises(self) -> None:
         # GIVEN a connection that raises on SELECT 1 (before write block)
         validator = _make_validator(VALID_DATABAG)
