@@ -1,6 +1,20 @@
 ---
-# Remove after: https://github.com/canonical/openfga-operator/pull/265
 overrides:
+    # Tracks 1.0 and 2.0/stable do not have send-ca-cert in provides; omit it
+    # to avoid UnparsableCharmException. send-ca-cert was added in 2.0/edge and
+    # later tracks. Remove after: https://github.com/canonical/openfga-operator/pull/265
+  - criteria:
+      - any_of:
+          - track: '1.0'
+          - track: '2.0'
+            risk: stable
+    provides:
+      grafana-dashboard:
+        optional: true
+      metrics-endpoint:
+        optional: true
+    # Newer tracks (2.0/edge+, latest) have send-ca-cert in provides.
+    # Remove after: https://github.com/canonical/openfga-operator/pull/265
   - provides:
       grafana-dashboard:
         optional: true

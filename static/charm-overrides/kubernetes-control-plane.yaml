@@ -8,10 +8,11 @@
 # Evidence gathered from src/charm.py, src/cloud_integration.py,
 # src/encryption_at_rest.py (main branch, 2026-05-20).
 #
-# Three criteria blocks cover the three distinct endpoint generations:
+# Four criteria blocks cover the four distinct endpoint generations:
 #   1.23:       legacy reactive charm, no external-cloud-provider
 #   1.24-1.28:  legacy reactive charm, adds external-cloud-provider
-#   1.29+:      ops-based rewrite; dropped ceph-storage, loadbalancer, vsphere
+#   1.29:       ops-based rewrite; stripped azure/gcp/keystone/openstack/vault-kv/ceph-client (landed in /edge, will reach /stable)
+#   1.30+:      ops-based rewrite; full endpoint set as landed in /stable
 #
 # Truly required in 1.29+ (DO NOT mark optional):
 #   certificates  - assert self.certificates.relation in request_certificates()
@@ -157,7 +158,41 @@ overrides:
       # etcd peer must be on the same track.
       - 'tracks(charms(endpoint[etcd])) <= tracks({self})'
 
-  # ── 1.29+ tracks (ops-based rewrite; default block) ────────────────────────
+  # ── 1.29 track (ops-based; deprecated endpoints stripped) ─────────────────
+  # azure, ceph-client, gcp, keystone-credentials, openstack, vault-kv were
+  # removed in 1.29/edge and will propagate to beta/stable. Apply the minimal
+  # endpoint set to all 1.29/* channels now rather than blocking on /stable.
+  - criteria:
+      - track: '1.29'
+    requires:
+      aws:
+        optional: true
+      dns-provider:
+        optional: true
+      external-cloud-provider:
+        optional: true
+      ha:
+        optional: true
+      loadbalancer-external:
+        optional: true
+      loadbalancer-internal:
+        optional: true
+    provides:
+      cos-agent:
+        optional: true
+      kube-control:
+        optional: true
+      tokens:
+        optional: true
+    constraints:
+      # Container-runtime subordinate must be on the same track as this charm.
+      - 'tracks(charms(endpoint[container-runtime])) <= tracks({self})'
+      # CNI plugin subordinate must be on the same track.
+      - 'tracks(charms(endpoint[cni])) <= tracks({self})'
+      # etcd peer must be on the same track.
+      - 'tracks(charms(endpoint[etcd])) <= tracks({self})'
+
+  # ── 1.30+ tracks (ops-based rewrite; default block) ────────────────────────
   # Dropped: ceph-storage, loadbalancer (old), vsphere.
   # Added in provides: cos-agent, tokens.
   # Dropped from provides: aws-iam, grafana, kube-api-endpoint,
