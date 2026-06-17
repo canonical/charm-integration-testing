@@ -5,6 +5,9 @@ from dataclasses import dataclass
 from functools import total_ordering
 
 
+_RISK_ORDER = {"stable": 0, "candidate": 1, "beta": 2, "edge": 3}
+
+
 @total_ordering
 @dataclass(frozen=True)
 class CharmChannel:
@@ -35,10 +38,9 @@ class CharmChannel:
         return self.track if self.track != "" else "latest"
 
     def __lt__(self, other: "CharmChannel") -> bool:
-        _risk_order = {"stable": 0, "candidate": 1, "beta": 2, "edge": 3}
-        return (self.explicit_track, _risk_order.get(self.risk, 99), self.branch) < (
+        return (self.explicit_track, _RISK_ORDER.get(self.risk, 99), self.branch) < (
             other.explicit_track,
-            _risk_order.get(other.risk, 99),
+            _RISK_ORDER.get(other.risk, 99),
             other.branch,
         )
 
