@@ -4,7 +4,6 @@
 from dataclasses import dataclass
 from functools import total_ordering
 
-
 _RISK_ORDER = {"stable": 0, "candidate": 1, "beta": 2, "edge": 3}
 
 
