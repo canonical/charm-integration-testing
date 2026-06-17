@@ -148,7 +148,7 @@ Failure Information
      - Yes
      - ``AssertionError: Expected 'active'``
    * - ``failure:charm:<name>:status``
-     - Status information for a specific charm when a test times out waiting for Juju. Format: ``application:<status>:<message>`` or ``unit:<status>:<message>``. The message portion is normalized.
+     - Status information for a specific charm when a test times out waiting for Juju. Format: ``application:<status>:<message>``, ``unit:<status>:<message>``, or ``unit_agent:<status>:<message>``. The message portion is normalized.
      - Partial
      - ``application:blocked:Init failed``
    * - ``failure:cli:cmd``
