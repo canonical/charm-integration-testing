@@ -11,7 +11,7 @@
 # Four criteria blocks cover the four distinct endpoint generations:
 #   1.23:       legacy reactive charm, no external-cloud-provider
 #   1.24-1.28:  legacy reactive charm, adds external-cloud-provider
-#   1.29:       ops-based rewrite; stripped azure/gcp/keystone/openstack/vault-kv/ceph-client on /edge
+#   1.29:       ops-based rewrite; stripped azure/gcp/keystone/openstack/vault-kv/ceph-client (landed in /edge, will reach /stable)
 #   1.30+:      ops-based rewrite; full endpoint set as landed in /stable
 #
 # Truly required in 1.29+ (DO NOT mark optional):
@@ -158,10 +158,10 @@ overrides:
       # etcd peer must be on the same track.
       - 'tracks(charms(endpoint[etcd])) <= tracks({self})'
 
-  # ── 1.29 track (ops-based; deprecated endpoints removed in edge) ───────────
-  # 1.29/edge has stripped: azure, ceph-client, gcp, keystone-credentials,
-  # openstack, vault-kv. Declaring only the minimal endpoint set that exists
-  # across all 1.29 risk levels (edge is the most restrictive).
+  # ── 1.29 track (ops-based; deprecated endpoints stripped) ─────────────────
+  # azure, ceph-client, gcp, keystone-credentials, openstack, vault-kv were
+  # removed in 1.29/edge and will propagate to beta/stable. Apply the minimal
+  # endpoint set to all 1.29/* channels now rather than blocking on /stable.
   - criteria:
       - track: '1.29'
     requires:
