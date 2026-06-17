@@ -39,6 +39,8 @@ overrides:
   # ubuntu/22.04, simpler endpoint set than track 3.
   - criteria:
       - track: 'latest'
+        none_of:
+          - risk: stable
     provides:
       kafka-client:
         optional: true
