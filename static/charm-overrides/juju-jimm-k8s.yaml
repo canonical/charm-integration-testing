@@ -32,7 +32,6 @@ overrides:
   - criteria:
       - track: '2'
     requires:
-      openfga: {}
       ingress:
         optional: true
       nginx-route:
