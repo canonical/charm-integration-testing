@@ -5,19 +5,19 @@ from dataclasses import field
 from typing import Any
 
 import yaml
-from pydantic import field_validator
+from pydantic import ConfigDict, field_validator
 from pydantic.dataclasses import dataclass
 
 
-@dataclass
+@dataclass(config=ConfigDict(frozen=True))
 class _OfferSpec:
     """Parsed offer entry from a bundle overlay document."""
 
     app: str
-    endpoints: list[str] = field(default_factory=list)
+    endpoints: tuple[str, ...] = ()
 
 
-@dataclass
+@dataclass(config=ConfigDict(frozen=True))
 class _AppSpec:
     """Parsed application entry from a bundle base document."""
 
@@ -44,14 +44,14 @@ class _AppSpec:
         return v or {}
 
 
-@dataclass
+@dataclass(config=ConfigDict(frozen=True))
 class _BundleSpec:
     """Parsed representation of a multi-document Juju bundle YAML."""
 
     apps: dict[str, _AppSpec] = field(default_factory=dict)
     offers: dict[str, _OfferSpec] = field(default_factory=dict)
     saas: dict[str, str] = field(default_factory=dict)
-    relations: list[tuple[str, str]] = field(default_factory=list)
+    relations: tuple[tuple[str, str], ...] = ()
 
 
 def _parse_bundle_spec(bundle_path: str) -> _BundleSpec:
@@ -63,7 +63,13 @@ def _parse_bundle_spec(bundle_path: str) -> _BundleSpec:
         raise ValueError(f"Bundle file '{bundle_path}' must contain at least one YAML mapping document.")
 
     base = documents[0]
-    overlay = documents[1] if len(documents) > 1 else None
+    raw_overlay = documents[1] if len(documents) > 1 else None
+    if raw_overlay is not None and not isinstance(raw_overlay, dict):
+        raise ValueError(
+            f"Bundle file '{bundle_path}': second YAML document (overlay) must be a mapping, "
+            f"got {type(raw_overlay).__name__}."
+        )
+    overlay: dict | None = raw_overlay
 
     apps: dict[str, _AppSpec] = {}
     for app_name, raw in (base.get("applications") or {}).items():
@@ -74,8 +80,8 @@ def _parse_bundle_spec(bundle_path: str) -> _BundleSpec:
             revision=raw.get("revision"),
             base=raw.get("base"),
             trust=bool(raw.get("trust", False)),
-            options=raw.get("options"),
-            resources=raw.get("resources"),
+            options=raw.get("options") or {},
+            resources=raw.get("resources") or {},
             scale=raw.get("scale"),
             num_units=raw.get("num_units"),
         )
@@ -86,17 +92,18 @@ def _parse_bundle_spec(bundle_path: str) -> _BundleSpec:
             for offer_name, offer_config in ((app_data or {}).get("offers") or {}).items():
                 offers[offer_name] = _OfferSpec(
                     app=app_name,
-                    endpoints=(offer_config or {}).get("endpoints") or [],
+                    endpoints=tuple((offer_config or {}).get("endpoints") or []),
                 )
 
     saas: dict[str, str] = {
         alias: cfg["url"] for alias, cfg in (base.get("saas") or {}).items() if cfg and cfg.get("url")
     }
 
-    relations: list[tuple[str, str]] = []
-    for rel in base.get("relations") or []:
-        endpoints = [r[0] if isinstance(r, list) else r for r in rel]
-        if len(endpoints) == 2:
-            relations.append((endpoints[0], endpoints[1]))
+    relations: tuple[tuple[str, str], ...] = tuple(
+        (endpoints[0], endpoints[1])
+        for rel in (base.get("relations") or [])
+        for endpoints in [[r[0] if isinstance(r, list) else r for r in rel]]
+        if len(endpoints) == 2
+    )
 
     return _BundleSpec(apps=apps, offers=offers, saas=saas, relations=relations)
