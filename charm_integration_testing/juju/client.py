@@ -147,7 +147,7 @@ class JujuClient:
 
             for app_name, app_spec in spec.apps.items():
                 if app_name not in current_apps:
-                    num_units = app_spec.scale if app_spec.scale is not None else (app_spec.num_units or 1)
+                    num_units = app_spec.scale if app_spec.scale is not None else app_spec.num_units
                     self.backend.deploy_application(
                         model,
                         app_spec.charm,
@@ -156,7 +156,7 @@ class JujuClient:
                         revision=app_spec.revision,
                         base=app_spec.base,
                         config=app_spec.options or None,
-                        trust=True or app_spec.trust,
+                        trust=app_spec.trust,
                         force=True,
                         resources=app_spec.resources or None,
                         num_units=num_units,

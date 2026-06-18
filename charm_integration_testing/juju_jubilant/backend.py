@@ -339,7 +339,7 @@ class JubilantBackend(JujuCmdBackend):
             trust=trust,
             force=force,
             resources=resources,
-            num_units=num_units if num_units is not None else 1,
+            **({} if num_units is None else {"num_units": num_units}),
         )
 
     def configure_application(self, model: str, application: str, values: dict[str, str]) -> None:

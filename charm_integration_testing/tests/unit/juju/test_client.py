@@ -890,7 +890,7 @@ class DeployBundlesBackendStub(NullJujuBackend):
         resources: dict[str, str] | None = None,
         num_units: int | None = None,
     ) -> None:
-        self.ops.append(f"deploy:{application or charm}")
+        self.ops.append(f"deploy:{application or charm}:trust={trust}:num_units={num_units}")
 
     def configure_application(self, model: str, application: str, values: dict[str, Any]) -> None:
         self.ops.append(f"configure:{application}")
@@ -937,7 +937,7 @@ class TestJujuClientDeployBundles:
 
         self._client(stub).deploy_bundles({"ctrl:model": bundle})
 
-        assert "deploy:myapp" in stub.ops
+        assert any(op.startswith("deploy:myapp") for op in stub.ops)
 
     def test_existing_app_not_redeployed(self, tmp_path: Any) -> None:
         # GIVEN the app is already present
@@ -946,7 +946,7 @@ class TestJujuClientDeployBundles:
 
         self._client(stub).deploy_bundles({"ctrl:model": bundle})
 
-        assert "deploy:myapp" not in stub.ops
+        assert not any(op.startswith("deploy:myapp") for op in stub.ops)
 
     def test_existing_app_with_options_configures(self, tmp_path: Any) -> None:
         # GIVEN the app exists but has options in the bundle
@@ -956,7 +956,7 @@ class TestJujuClientDeployBundles:
         self._client(stub).deploy_bundles({"ctrl:model": bundle})
 
         assert "configure:myapp" in stub.ops
-        assert "deploy:myapp" not in stub.ops
+        assert not any(op.startswith("deploy:myapp") for op in stub.ops)
 
     def test_fresh_offer_is_created(self, tmp_path: Any) -> None:
         # GIVEN a bundle with an overlay defining an offer not yet in the model
@@ -1126,6 +1126,65 @@ class TestJujuClientDeployBundles:
         stub = DeployBundlesBackendStub()
         with pytest.raises(ValueError, match="2-item"):
             self._client(stub).deploy_bundles({"ctrl:model": bundle})
+
+    def test_deploy_passes_trust_from_bundle(self, tmp_path: Any) -> None:
+        bundle = _write_bundle(tmp_path, {"applications": {"myapp": {"charm": "myapp", "trust": True}}})
+        stub = DeployBundlesBackendStub()
+
+        self._client(stub).deploy_bundles({"ctrl:model": bundle})
+
+        assert any("trust=True" in op for op in stub.ops)
+
+    def test_deploy_without_trust_passes_false(self, tmp_path: Any) -> None:
+        bundle = _write_bundle(tmp_path, {"applications": {"myapp": {"charm": "myapp"}}})
+        stub = DeployBundlesBackendStub()
+
+        self._client(stub).deploy_bundles({"ctrl:model": bundle})
+
+        assert any("trust=False" in op for op in stub.ops)
+
+    def test_deploy_passes_num_units_from_bundle(self, tmp_path: Any) -> None:
+        bundle = _write_bundle(tmp_path, {"applications": {"myapp": {"charm": "myapp", "num_units": 3}}})
+        stub = DeployBundlesBackendStub()
+
+        self._client(stub).deploy_bundles({"ctrl:model": bundle})
+
+        assert any("num_units=3" in op for op in stub.ops)
+
+    def test_deploy_omits_num_units_when_not_in_bundle(self, tmp_path: Any) -> None:
+        bundle = _write_bundle(tmp_path, {"applications": {"myapp": {"charm": "myapp"}}})
+        stub = DeployBundlesBackendStub()
+
+        self._client(stub).deploy_bundles({"ctrl:model": bundle})
+
+        assert any("num_units=None" in op for op in stub.ops)
+
+    def test_non_mapping_applications_raises(self, tmp_path: Any) -> None:
+        import yaml
+
+        bundle_file = tmp_path / "bundle.yaml"
+        bundle_file.write_text(yaml.dump({"applications": ["app1", "app2"]}))
+        stub = DeployBundlesBackendStub()
+        with pytest.raises(ValueError, match="applications"):
+            self._client(stub).deploy_bundles({"ctrl:model": str(bundle_file)})
+
+    def test_non_mapping_saas_block_raises(self, tmp_path: Any) -> None:
+        import yaml
+
+        bundle_file = tmp_path / "bundle.yaml"
+        bundle_file.write_text(yaml.dump({"applications": {}, "saas": ["remote"]}))
+        stub = DeployBundlesBackendStub()
+        with pytest.raises(ValueError, match="saas"):
+            self._client(stub).deploy_bundles({"ctrl:model": str(bundle_file)})
+
+    def test_non_mapping_options_raises(self, tmp_path: Any) -> None:
+        import yaml
+
+        bundle_file = tmp_path / "bundle.yaml"
+        bundle_file.write_text(yaml.dump({"applications": {"myapp": {"charm": "myapp", "options": ["bad"]}}}))
+        stub = DeployBundlesBackendStub()
+        with pytest.raises(ValueError, match="options"):
+            self._client(stub).deploy_bundles({"ctrl:model": str(bundle_file)})
 
     def test_post_deploy_extension_called_for_each_model(self, tmp_path: Any) -> None:
         # GIVEN two bundles and an extension

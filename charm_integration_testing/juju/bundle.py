@@ -36,6 +36,8 @@ class _AppSpec:
     def _drop_none_options(cls, v: Any) -> dict[str, Any]:
         if not v:
             return {}
+        if not isinstance(v, dict):
+            raise ValueError(f"'options' must be a mapping, got {type(v).__name__}.")
         return {k: val for k, val in v.items() if val is not None}
 
     @field_validator("resources", mode="before")
@@ -72,7 +74,12 @@ def _parse_bundle_spec(bundle_path: str) -> _BundleSpec:
     overlay: dict[str, Any] | None = raw_overlay
 
     apps: dict[str, _AppSpec] = {}
-    for app_name, raw in (base.get("applications") or {}).items():
+    raw_apps = base.get("applications")
+    if raw_apps is not None and not isinstance(raw_apps, dict):
+        raise ValueError(
+            f"Bundle file '{bundle_path}': 'applications' must be a mapping, got {type(raw_apps).__name__}."
+        )
+    for app_name, raw in (raw_apps or {}).items():
         raw = raw or {}
         apps[app_name] = _AppSpec(
             charm=raw.get("charm", app_name),
@@ -102,8 +109,11 @@ def _parse_bundle_spec(bundle_path: str) -> _BundleSpec:
                     )
                 offers[offer_name] = _OfferSpec(app=app_name, endpoints=tuple(raw_endpoints))
 
+    raw_saas = base.get("saas")
+    if raw_saas is not None and not isinstance(raw_saas, dict):
+        raise ValueError(f"Bundle file '{bundle_path}': 'saas' must be a mapping, got {type(raw_saas).__name__}.")
     saas: dict[str, str] = {}
-    for alias, cfg in (base.get("saas") or {}).items():
+    for alias, cfg in (raw_saas or {}).items():
         if not isinstance(cfg, dict):
             raise ValueError(
                 f"Bundle file '{bundle_path}': saas entry '{alias}' must be a mapping, " f"got {type(cfg).__name__}."
