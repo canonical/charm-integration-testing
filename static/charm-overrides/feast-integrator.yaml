@@ -1,0 +1,27 @@
+---
+# Source: https://github.com/canonical/feast-operators
+listed: true
+platforms:
+  - kubernetes
+#
+# Unlisted on Charmhub; listed: true required so the solver can discover this
+# charm as the provider of the feast-configuration interface for feast-ui.
+#
+# offline-store, online-store, registry (requires): REQUIRED - all three are
+#   dependencies of StoreConfigurationSenderComponent which provides feast-configuration;
+#   charm cannot serve its purpose without any one of them
+# pod-defaults (requires): optional - creates PodDefault resources for Kubeflow
+#   notebook access to Feast; secondary to core feast-configuration provision
+# secrets (requires): optional - creates K8s secrets for notebook pods;
+#   secondary to core feast-configuration provision
+# feast-configuration (provides): optional - charm reaches active once DB
+#   relations are ready, regardless of whether any consumer is connected
+overrides:
+  - requires:
+      pod-defaults:
+        optional: true
+      secrets:
+        optional: true
+    provides:
+      feast-configuration:
+        optional: true

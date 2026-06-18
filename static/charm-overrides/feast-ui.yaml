@@ -1,5 +1,6 @@
 ---
 # Source: https://github.com/canonical/feast-operators
+listed: true
 #
 # Track 0.49/stable and 0.49/candidate/beta have no provides endpoints and no
 # overrides are needed: feast-configuration (required; pebble service depends
