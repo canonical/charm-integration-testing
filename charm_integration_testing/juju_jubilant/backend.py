@@ -48,6 +48,84 @@ from .wait import (
 )
 
 
+@dataclasses.dataclass
+class _OfferSpec:
+    """Parsed offer entry from a bundle overlay document."""
+
+    app: str
+    endpoints: list[str]
+
+
+@dataclasses.dataclass
+class _AppSpec:
+    """Parsed application entry from a bundle base document."""
+
+    charm: str
+    channel: str | None = None
+    revision: int | None = None
+    base: str | None = None
+    trust: bool = False
+    options: dict[str, Any] = dataclasses.field(default_factory=dict)
+    resources: dict[str, str] = dataclasses.field(default_factory=dict)
+    scale: int | None = None
+    num_units: int | None = None
+
+
+@dataclasses.dataclass
+class _BundleSpec:
+    """Parsed representation of a multi-document Juju bundle YAML."""
+
+    apps: dict[str, _AppSpec]
+    offers: dict[str, _OfferSpec]
+    saas: dict[str, str]  # alias → url
+    relations: list[tuple[str, str]]
+
+
+def _parse_bundle_spec(bundle_path: str) -> _BundleSpec:
+    """Parse a bundle YAML file (base document + optional overlay) into a _BundleSpec."""
+    with open(bundle_path) as f:
+        documents = list(yaml.safe_load_all(f))
+
+    base = documents[0]
+    overlay = documents[1] if len(documents) > 1 else None
+
+    apps: dict[str, _AppSpec] = {}
+    for app_name, raw in (base.get("applications") or {}).items():
+        raw = raw or {}
+        apps[app_name] = _AppSpec(
+            charm=raw.get("charm", app_name),
+            channel=raw.get("channel"),
+            revision=raw.get("revision"),
+            base=raw.get("base"),
+            trust=bool(raw.get("trust", False)),
+            options={k: v for k, v in (raw.get("options") or {}).items() if v is not None},
+            resources=raw.get("resources") or {},
+            scale=raw.get("scale"),
+            num_units=raw.get("num_units"),
+        )
+
+    offers: dict[str, _OfferSpec] = {}
+    if overlay:
+        for app_name, app_data in (overlay.get("applications") or {}).items():
+            for offer_name, offer_config in ((app_data or {}).get("offers") or {}).items():
+                offers[offer_name] = _OfferSpec(
+                    app=app_name,
+                    endpoints=(offer_config or {}).get("endpoints") or [],
+                )
+
+    saas: dict[str, str] = {
+        alias: cfg["url"] for alias, cfg in (base.get("saas") or {}).items() if cfg and cfg.get("url")
+    }
+
+    relations: list[tuple[str, str]] = []
+    for rel in base.get("relations") or []:
+        endpoints = [r[0] if isinstance(r, list) else r for r in rel]
+        if len(endpoints) == 2:
+            relations.append((endpoints[0], endpoints[1]))
+
+    return _BundleSpec(apps=apps, offers=offers, saas=saas, relations=relations)
+
+
 class JubilantBackend(JujuCmdBackend):
     client: JubilantClient
     _kubernetes_client: KubernetesClient | None
@@ -294,6 +372,94 @@ class JubilantBackend(JujuCmdBackend):
             name_or_id,
         )
 
+    def deploy_bundles(
+        self,
+        bundles: dict[str, str],
+        timeout: timedelta | None = None,
+        trust: bool = False,
+        force: bool = False,
+    ) -> None:
+        """Deploy one or more bundles across models with CMR-aware two-phase ordering.
+
+        Phase 1 (all models): deploy new applications, converge config for existing
+        applications, and create any missing offers.  No SAAS consumption or integrations
+        are established in this phase so that all offers exist before they are referenced.
+
+        Phase 2 (all models): consume remote offers (SAAS) and create integrations —
+        both local and cross-model.  Each operation is idempotent: already-consumed
+        SAAS aliases and already-present integrations are silently skipped.
+
+        After phase 2, each model is waited on until its bundle applications and
+        integrations are present in Juju status.
+
+        Args:
+            bundles: Mapping of model URI (e.g. ``"controller:admin/model"``) to the
+                path of the bundle YAML file to deploy into that model.
+            timeout: Per-model wait timeout forwarded to :meth:`wait`.
+            trust: Whether to grant cloud-credential trust to deployed applications.
+            force: Whether to bypass charm compatibility checks on deploy.
+        """
+        for bundle_path in bundles.values():
+            if not pathlib.Path(bundle_path).is_file():
+                raise ValueError(f"Bundle file '{bundle_path}' not found.")
+
+        bundle_specs: dict[str, _BundleSpec] = {
+            model: _parse_bundle_spec(bundle_path) for model, bundle_path in bundles.items()
+        }
+
+        # Phase 1: deploy apps + offers for every model.
+        for model, spec in bundle_specs.items():
+            juju = self.client.model(model)
+            current_status = self.status(model)
+
+            for app_name, app_spec in spec.apps.items():
+                if app_name not in current_status.apps:
+                    num_units = app_spec.scale if app_spec.scale is not None else (app_spec.num_units or 1)
+                    juju.deploy(
+                        charm=app_spec.charm,
+                        app=app_name,
+                        channel=app_spec.channel,
+                        revision=app_spec.revision,
+                        base=app_spec.base,
+                        config=app_spec.options or None,
+                        trust=trust or app_spec.trust,
+                        force=force,
+                        resources=app_spec.resources or None,
+                        num_units=num_units,
+                    )
+                elif app_spec.options:
+                    # App already exists — converge its configuration.
+                    self.configure_application(model, app_name, app_spec.options)
+
+            for offer_name, offer_spec in spec.offers.items():
+                if offer_name not in current_status.offers:
+                    for endpoint in offer_spec.endpoints:
+                        juju.offer(offer_spec.app, endpoint=endpoint, name=offer_name)
+
+        # Phase 2: consume SAAS and create integrations for every model.
+        for model, spec in bundle_specs.items():
+            juju = self.client.model(model)
+            current_status = self.status(model)
+            existing_integrations = self.list_integrations(model)
+            existing_integration_pairs = [{i.provider, i.requirer} for i in existing_integrations]
+
+            for saas_alias, saas_url in spec.saas.items():
+                if saas_alias not in current_status.app_endpoints:
+                    juju.consume(saas_url, alias=saas_alias)
+
+            for ep1, ep2 in spec.relations:
+                ia1 = JujuIntegrationApplication.from_str(ep1)
+                ia2 = JujuIntegrationApplication.from_str(ep2)
+                if {ia1, ia2} not in existing_integration_pairs:
+                    juju.integrate(ep1, ep2)
+
+        for model, bundle_path in bundles.items():
+
+            def _ready(status: jubilant.Status, bp: str = bundle_path) -> tuple[bool, JujuWaitState]:
+                return bundle_applications_integrations_exist(status, bp)
+
+            self.wait(model, _ready, timeout=timeout)
+
     def deploy_bundle_file(
         self,
         model: str,
@@ -302,11 +468,7 @@ class JubilantBackend(JujuCmdBackend):
         trust: bool = False,
         force: bool = False,
     ) -> None:
-        if not pathlib.Path(bundle).is_file():
-            raise ValueError(f"Bundle file '{bundle}' not found.")
-        self.client.model(model).deploy(charm=pathlib.Path(bundle).resolve(), trust=trust, force=force)
-
-        self.wait(model, lambda status: bundle_applications_integrations_exist(status, bundle), timeout=timeout)
+        self.deploy_bundles({model: bundle}, timeout=timeout, trust=trust, force=force)
 
     def deploy_application(
         self,

@@ -66,6 +66,11 @@ class NullJujuBackend(JujuBackend):
     ) -> None:
         raise NotImplementedError
 
+    def deploy_bundles(
+        self, bundles: dict[str, str], timeout: timedelta | None = None, trust: bool = False, force: bool = False
+    ) -> None:
+        raise NotImplementedError
+
     def deploy_bundle_file(
         self, model: str, bundle: str, timeout: timedelta | None = None, trust: bool = False, force: bool = False
     ) -> None:

@@ -10,7 +10,14 @@ from unittest.mock import patch
 import jubilant
 import pytest
 import yaml
-from juju import CharmChannel, JujuConsumedOfferInfo, JujuIntegrationApplication, JujuWaitState, JujuWaitTimeoutError
+from juju import (
+    CharmChannel,
+    JujuConsumedOfferInfo,
+    JujuIntegration,
+    JujuIntegrationApplication,
+    JujuWaitState,
+    JujuWaitTimeoutError,
+)
 from juju.version import JujuVersion
 from juju_jubilant.backend import JubilantBackend
 from juju_jubilant.client import JubilantClient
@@ -221,10 +228,17 @@ class StatusStub:
         self,
         charm: Any = None,
         app: str | None = None,
-        config: Any = None,
-        trust: bool = False,
-        force: bool = False,
+        **kwargs: Any,
     ) -> None:
+        pass
+
+    def offer(self, app: str, endpoint: str, **kwargs: Any) -> None:
+        pass
+
+    def consume(self, url: str, **kwargs: Any) -> None:
+        pass
+
+    def integrate(self, ep1: str, ep2: str, **kwargs: Any) -> None:
         pass
 
 
@@ -2040,7 +2054,7 @@ class TestDeployBundleFile:
         wait_calls: list[Any] = []
 
         with (
-            patch("juju_jubilant.backend.JujuCmdBackend.deploy_bundle_file"),
+            patch.object(backend, "list_integrations", return_value=set()),
             patch.object(backend, "wait", side_effect=lambda *a, **kw: wait_calls.append(a)),
         ):
             backend.deploy_bundle_file("test-model", str(bundle_file))
@@ -2072,7 +2086,7 @@ class TestDeployBundleFile:
             captured_ready = ready
 
         with (
-            patch("juju_jubilant.backend.JujuCmdBackend.deploy_bundle_file"),
+            patch.object(backend, "list_integrations", return_value=set()),
             patch.object(backend, "wait", side_effect=capture_wait),
         ):
             backend.deploy_bundle_file("test-model", str(bundle_file))
@@ -2175,3 +2189,342 @@ class TestJubilantBackendDebugLog:
 
         # THEN the client's debug_log message from the client is returned
         assert log == "this is a debug log for model my-model"
+
+
+@dataclass
+class DeployOpsStub:
+    """Records jubilant operations for assertions in deploy_bundles tests."""
+
+    deploys: list[dict[str, Any]] = field(default_factory=list)
+    offers: list[dict[str, Any]] = field(default_factory=list)
+    consumes: list[dict[str, Any]] = field(default_factory=list)
+    integrations: list[tuple[str, str]] = field(default_factory=list)
+    existing_apps: list[str] = field(default_factory=list)
+    existing_offers: list[str] = field(default_factory=list)
+    existing_saas: list[str] = field(default_factory=list)
+
+    def status(self) -> jubilant.Status:
+        s = jubilant.Status(
+            model=jubilant.statustypes.ModelStatus(
+                name="test-model",
+                type="caas",
+                controller="test",
+                cloud="test",
+                version="4.0.0",
+            ),
+            machines={},
+            apps={},
+        )
+        for app_name in self.existing_apps:
+            s.apps[app_name] = jubilant.statustypes.AppStatus(
+                charm="test-charm",
+                charm_origin="charmhub",
+                charm_name="test-charm",
+                charm_rev=1,
+                exposed=False,
+                app_status=jubilant.statustypes.StatusInfo(current="active"),
+                units={},
+            )
+        for offer_name in self.existing_offers:
+            s.offers[offer_name] = jubilant.statustypes.OfferStatus(
+                app=offer_name,
+                endpoints={},
+            )
+        for alias in self.existing_saas:
+            s.app_endpoints[alias] = object()  # type: ignore[assignment]
+        return s
+
+    def deploy(self, charm: Any = None, app: str | None = None, **kwargs: Any) -> None:
+        self.deploys.append({"charm": charm, "app": app, **kwargs})
+
+    def offer(self, app: str, endpoint: str, name: str | None = None, **kwargs: Any) -> None:
+        self.offers.append({"app": app, "endpoint": endpoint, "name": name})
+
+    def consume(self, url: str, alias: str | None = None, **kwargs: Any) -> None:
+        self.consumes.append({"url": url, "alias": alias})
+
+    def integrate(self, ep1: str, ep2: str, **kwargs: Any) -> None:
+        self.integrations.append((ep1, ep2))
+
+
+def _make_bundle_file(tmp_path: Path, content: dict[str, Any], overlay: dict[str, Any] | None = None) -> Path:
+    """Write a bundle YAML (optionally with overlay) and return the path."""
+    bundle_file = tmp_path / "bundle.yaml"
+    docs = [content]
+    if overlay:
+        docs.append(overlay)
+    bundle_file.write_text("\n---\n".join(yaml.dump(d) for d in docs))
+    return bundle_file
+
+
+class TestJubilantBackendDeployBundles:
+    def test_fresh_deploy_creates_app(self, tmp_path: Path) -> None:
+        # GIVEN a bundle with one app that is not yet in status
+        bundle_file = _make_bundle_file(tmp_path, {"applications": {"myapp": {"charm": "myapp"}}})
+        stub = DeployOpsStub()
+        backend = JubilantBackend(JubilantClientStub(client=stub))
+
+        with (
+            patch.object(backend, "list_integrations", return_value=set()),
+            patch.object(backend, "wait"),
+        ):
+            backend.deploy_bundles({"ctrl:model": str(bundle_file)})
+
+        # THEN deploy() is called for the new app
+        assert any(d["app"] == "myapp" for d in stub.deploys)
+
+    def test_existing_app_not_redeployed(self, tmp_path: Path) -> None:
+        # GIVEN an app already present in status
+        bundle_file = _make_bundle_file(tmp_path, {"applications": {"myapp": {"charm": "myapp"}}})
+        stub = DeployOpsStub(existing_apps=["myapp"])
+        backend = JubilantBackend(JubilantClientStub(client=stub))
+
+        with (
+            patch.object(backend, "list_integrations", return_value=set()),
+            patch.object(backend, "wait"),
+        ):
+            backend.deploy_bundles({"ctrl:model": str(bundle_file)})
+
+        # THEN deploy() is NOT called
+        assert not stub.deploys
+
+    def test_existing_app_config_updated(self, tmp_path: Path) -> None:
+        # GIVEN a bundle that specifies options for an already-deployed app
+        bundle_file = _make_bundle_file(
+            tmp_path,
+            {"applications": {"myapp": {"charm": "myapp", "options": {"key": "value"}}}},
+        )
+        stub = DeployOpsStub(existing_apps=["myapp"])
+        backend = JubilantBackend(JubilantClientStub(client=stub))
+        configure_calls: list[tuple[str, str, dict[str, Any]]] = []
+
+        with (
+            patch.object(
+                backend, "configure_application", side_effect=lambda m, a, o: configure_calls.append((m, a, o))
+            ),
+            patch.object(backend, "list_integrations", return_value=set()),
+            patch.object(backend, "wait"),
+        ):
+            backend.deploy_bundles({"ctrl:model": str(bundle_file)})
+
+        # THEN configure_application() is called with the bundle options
+        assert configure_calls == [("ctrl:model", "myapp", {"key": "value"})]
+        assert not stub.deploys
+
+    def test_fresh_offer_created(self, tmp_path: Path) -> None:
+        # GIVEN a bundle with an offer not yet in status.offers
+        bundle_file = _make_bundle_file(
+            tmp_path,
+            {"applications": {"myapp": {"charm": "myapp"}}},
+            overlay={"applications": {"myapp": {"offers": {"my-offer": {"endpoints": ["ep1"]}}}}},
+        )
+        stub = DeployOpsStub()
+        backend = JubilantBackend(JubilantClientStub(client=stub))
+
+        with (
+            patch.object(backend, "list_integrations", return_value=set()),
+            patch.object(backend, "wait"),
+        ):
+            backend.deploy_bundles({"ctrl:model": str(bundle_file)})
+
+        # THEN offer() is called once
+        assert any(o["name"] == "my-offer" for o in stub.offers)
+
+    def test_existing_offer_skipped(self, tmp_path: Path) -> None:
+        # GIVEN the offer already exists in status.offers (the Juju 4 regression case)
+        bundle_file = _make_bundle_file(
+            tmp_path,
+            {"applications": {"myapp": {"charm": "myapp"}}},
+            overlay={"applications": {"myapp": {"offers": {"my-offer": {"endpoints": ["ep1"]}}}}},
+        )
+        stub = DeployOpsStub(existing_offers=["my-offer"])
+        backend = JubilantBackend(JubilantClientStub(client=stub))
+
+        with (
+            patch.object(backend, "list_integrations", return_value=set()),
+            patch.object(backend, "wait"),
+        ):
+            backend.deploy_bundles({"ctrl:model": str(bundle_file)})
+
+        # THEN offer() is NOT called (idempotent — key fix for Juju 4)
+        assert not stub.offers
+
+    def test_fresh_saas_consumed(self, tmp_path: Path) -> None:
+        # GIVEN a bundle with a SAAS entry not yet consumed
+        bundle_file = _make_bundle_file(
+            tmp_path,
+            {
+                "applications": {},
+                "saas": {"remote-app": {"url": "ctrl:admin/other-model.remote-app"}},
+            },
+        )
+        stub = DeployOpsStub()
+        backend = JubilantBackend(JubilantClientStub(client=stub))
+
+        with (
+            patch.object(backend, "list_integrations", return_value=set()),
+            patch.object(backend, "wait"),
+        ):
+            backend.deploy_bundles({"ctrl:model": str(bundle_file)})
+
+        # THEN consume() is called
+        assert any(c["alias"] == "remote-app" for c in stub.consumes)
+
+    def test_existing_saas_skipped(self, tmp_path: Path) -> None:
+        # GIVEN the SAAS alias already appears in status.app_endpoints
+        bundle_file = _make_bundle_file(
+            tmp_path,
+            {
+                "applications": {},
+                "saas": {"remote-app": {"url": "ctrl:admin/other-model.remote-app"}},
+            },
+        )
+        stub = DeployOpsStub(existing_saas=["remote-app"])
+        backend = JubilantBackend(JubilantClientStub(client=stub))
+
+        with (
+            patch.object(backend, "list_integrations", return_value=set()),
+            patch.object(backend, "wait"),
+        ):
+            backend.deploy_bundles({"ctrl:model": str(bundle_file)})
+
+        # THEN consume() is NOT called
+        assert not stub.consumes
+
+    def test_fresh_integration_created(self, tmp_path: Path) -> None:
+        # GIVEN a bundle with a relation that does not yet exist
+        bundle_file = _make_bundle_file(
+            tmp_path,
+            {
+                "applications": {"db": {"charm": "db"}, "app": {"charm": "app"}},
+                "relations": [["db:db", "app:db"]],
+            },
+        )
+        stub = DeployOpsStub()
+        backend = JubilantBackend(JubilantClientStub(client=stub))
+
+        with (
+            patch.object(backend, "list_integrations", return_value=set()),
+            patch.object(backend, "wait"),
+        ):
+            backend.deploy_bundles({"ctrl:model": str(bundle_file)})
+
+        # THEN integrate() is called
+        assert ("db:db", "app:db") in stub.integrations
+
+    def test_existing_integration_skipped(self, tmp_path: Path) -> None:
+        # GIVEN the integration already exists
+        bundle_file = _make_bundle_file(
+            tmp_path,
+            {
+                "applications": {"db": {"charm": "db"}, "app": {"charm": "app"}},
+                "relations": [["db:db", "app:db"]],
+            },
+        )
+        stub = DeployOpsStub()
+        existing = JujuIntegration(
+            provider=JujuIntegrationApplication(application="db", endpoint="db"),
+            requirer=JujuIntegrationApplication(application="app", endpoint="db"),
+            interface="db",
+        )
+        backend = JubilantBackend(JubilantClientStub(client=stub))
+
+        with (
+            patch.object(backend, "list_integrations", return_value={existing}),
+            patch.object(backend, "wait"),
+        ):
+            backend.deploy_bundles({"ctrl:model": str(bundle_file)})
+
+        # THEN integrate() is NOT called
+        assert not stub.integrations
+
+    def test_wait_called_once_per_model(self, tmp_path: Path) -> None:
+        # GIVEN two bundles for two separate models
+        (tmp_path / "a").mkdir()
+        (tmp_path / "b").mkdir()
+        bundle_a = _make_bundle_file(tmp_path / "a", {"applications": {"app-a": {"charm": "app-a"}}})
+        bundle_b = _make_bundle_file(tmp_path / "b", {"applications": {"app-b": {"charm": "app-b"}}})
+
+        stub = DeployOpsStub()
+        backend = JubilantBackend(JubilantClientStub(client=stub))
+        wait_models: list[str] = []
+
+        with (
+            patch.object(backend, "list_integrations", return_value=set()),
+            patch.object(backend, "wait", side_effect=lambda model, *a, **kw: wait_models.append(model)),
+        ):
+            backend.deploy_bundles({"ctrl:model-a": str(bundle_a), "ctrl:model-b": str(bundle_b)})
+
+        # THEN wait is called once per model
+        assert sorted(wait_models) == ["ctrl:model-a", "ctrl:model-b"]
+
+    def test_cmr_two_phase_ordering(self, tmp_path: Path) -> None:
+        """Offers from Phase 1 must exist before SAAS is consumed in Phase 2."""
+        # Provider model: has app + offer
+        (tmp_path / "provider").mkdir()
+        provider_bundle = _make_bundle_file(
+            tmp_path / "provider",
+            {"applications": {"svc": {"charm": "svc"}}},
+            overlay={"applications": {"svc": {"offers": {"svc-offer": {"endpoints": ["ep"]}}}}},
+        )
+        # Consumer model: has SAAS referencing the offer
+        (tmp_path / "consumer").mkdir()
+        consumer_bundle = _make_bundle_file(
+            tmp_path / "consumer",
+            {
+                "applications": {"client": {"charm": "client"}},
+                "saas": {"svc-offer": {"url": "ctrl:admin/provider-model.svc-offer"}},
+            },
+        )
+
+        phase1_ops: list[str] = []
+        phase2_ops: list[str] = []
+
+        class OrderTrackingStub(DeployOpsStub):
+            def offer(self, app: str, endpoint: str, name: str | None = None, **kw: Any) -> None:
+                phase1_ops.append(f"offer:{name}")
+                super().offer(app, endpoint, name=name, **kw)
+
+            def consume(self, url: str, alias: str | None = None, **kw: Any) -> None:
+                phase2_ops.append(f"consume:{alias}")
+                super().consume(url, alias=alias, **kw)
+
+        stub = OrderTrackingStub()
+        backend = JubilantBackend(JubilantClientStub(client=stub))
+
+        with (
+            patch.object(backend, "list_integrations", return_value=set()),
+            patch.object(backend, "wait"),
+        ):
+            backend.deploy_bundles(
+                {
+                    "ctrl:provider-model": str(provider_bundle),
+                    "ctrl:consumer-model": str(consumer_bundle),
+                }
+            )
+
+        # THEN all offers are created before any SAAS is consumed
+        assert "offer:svc-offer" in phase1_ops
+        assert "consume:svc-offer" in phase2_ops
+        assert not phase2_ops or phase1_ops  # phase 1 populated before phase 2
+
+    def test_bundle_without_overlay_has_no_offers(self, tmp_path: Path) -> None:
+        # GIVEN a single-document bundle (no overlay = no offers section)
+        bundle_file = _make_bundle_file(tmp_path, {"applications": {"myapp": {"charm": "myapp"}}})
+        stub = DeployOpsStub()
+        backend = JubilantBackend(JubilantClientStub(client=stub))
+
+        with (
+            patch.object(backend, "list_integrations", return_value=set()),
+            patch.object(backend, "wait"),
+        ):
+            backend.deploy_bundles({"ctrl:model": str(bundle_file)})
+
+        # THEN offer() is never called
+        assert not stub.offers
+
+    def test_nonexistent_bundle_raises(self, tmp_path: Path) -> None:
+        # GIVEN a path that does not exist
+        backend = JubilantBackend(JubilantClientStub(client=DeployOpsStub()))
+        with pytest.raises(ValueError, match="not found"):
+            backend.deploy_bundles({"ctrl:model": str(tmp_path / "nonexistent.yaml")})

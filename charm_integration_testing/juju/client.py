@@ -115,17 +115,31 @@ class JujuClient:
         self.logger.info(f"Removing integration between {target_1} and {target_2}.")
         self.backend.remove_integration(model, target_1, target_2)
 
+    def deploy_bundles(
+        self,
+        bundles: dict[str, str],
+    ) -> None:
+        """Deploy multiple bundles across models with CMR-aware two-phase ordering.
+
+        Phase 1 (all models): deploys apps, converges config, creates offers.
+        Phase 2 (all models): consumes remote offers (SAAS) and creates integrations.
+
+        This ensures all offers exist before any model attempts to consume them,
+        handling all CMR topologies correctly.
+        """
+        self.logger.info(f"Deploying bundles for {len(bundles)} model(s): {list(bundles.keys())}")
+        self.backend.deploy_bundles(bundles, trust=True, force=True)
+        for model in bundles:
+            for extension in self.extensions:
+                extension.post_deploy(model)
+
     def deploy_bundle_file(
         self,
         bundle: str,
         model: str = "default",
     ) -> None:
         self.logger.info(f"Deploying bundle file: '{bundle}'")
-        self.backend.deploy_bundle_file(model, bundle, trust=True, force=True)
-
-        # Call extensions
-        for extension in self.extensions:
-            extension.post_deploy(model)
+        self.deploy_bundles({model: bundle})
 
     def refresh_application(
         self,
