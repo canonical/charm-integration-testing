@@ -12,8 +12,11 @@ on:
       environment:
         description: Environment to clean.
         type: choice
-        default: staging
-        options: [staging, production]
+        default: ps6-sqa-stg_charm_qa_kubernetes
+        options: 
+          - ps6-sqa-stg_charm_qa_kubernetes
+          - ps6-sqa-prod_charm_qa_kubernetes
+          - ps7-sqa-prod_charm_qa_kubernetes
       age_threshold:
         description: Age threshold in minutes (resources older than this will be deleted)
         type: number
@@ -33,6 +36,8 @@ on:
         required: true
       STG_SQA_KUBECONFIG:
         required: true
+      PROD_PS7_KUBECONFIG:
+        required: true
 jobs:
   cleanup-k8s:
     name: Clean up any leftover K8s artifacts from old Charm QA environments
@@ -44,23 +49,31 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
+      - name: Get environment info
+        id: env_info
+        uses: ./.github/actions/get-environment-info
+        with:
+          environment_name: ${{ inputs.environment }}
+      - name: Setup kube config
+        id: creds
+        shell: bash
+        env:
+          KUBECONFIG_SECRET_NAME: ${{ steps.env_info.outputs.kubeconfig-secret }}
+          PROD_SQA_KUBECONFIG: ${{ secrets.PROD_SQA_KUBECONFIG }}
+          STG_SQA_KUBECONFIG: ${{ secrets.STG_SQA_KUBECONFIG }}
+          PROD_PS7_KUBECONFIG: ${{ secrets.PROD_PS7_KUBECONFIG }}
+        run: |
+          if [[ -n "${KUBECONFIG_SECRET_NAME}" ]]; then
+            echo "${!KUBECONFIG_SECRET_NAME}" > "kubeconfig"
+            echo "KUBECONFIG=$(realpath kubeconfig)" >> $GITHUB_ENV
+          else
+            echo "No kubeconfig secret found for this environment"
+            exit 1
+          fi
       - name: Install kubectl
         uses: ./.github/actions/install-with-retry
         with:
           command: sudo snap install kubectl --classic
-      - name: Setup kube config
-        shell: bash
-        env:
-          environment: ${{ inputs.environment }}
-          production_kubeconfig: ${{ secrets.PROD_SQA_KUBECONFIG }}
-          staging_kubeconfig: ${{ secrets.STG_SQA_KUBECONFIG }}
-        run: |
-          case "$environment" in
-            "production") echo "$production_kubeconfig" > "kubeconfig" ;;
-            "staging") echo "$staging_kubeconfig" > "kubeconfig" ;;
-            *) echo "Unknown environment '$environment'"; exit 1 ;;
-          esac
-          echo "KUBECONFIG=$(realpath kubeconfig)" >> $GITHUB_ENV
       - name: Remove orphaned rawfile PV directories from nodes
         shell: bash
         run: |

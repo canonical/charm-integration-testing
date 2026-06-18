@@ -10,10 +10,14 @@ jobs:
   cleanup-k8s-schedule:
     strategy:
       matrix:
-        environment: [production, staging]
+        environment: 
+          - ps6-sqa-stg_charm_qa_kubernetes
+          - ps6-sqa-prod_charm_qa_kubernetes
+          - ps7-sqa-prod_charm_qa_kubernetes
     uses: ./.github/workflows/cleanup-k8s.yaml
     with:
       environment: ${{ matrix.environment }}
     secrets:
       PROD_SQA_KUBECONFIG: ${{ secrets.PROD_SQA_KUBECONFIG }}
       STG_SQA_KUBECONFIG: ${{ secrets.STG_SQA_KUBECONFIG }}
+      PROD_PS7_KUBECONFIG: ${{ secrets.PROD_PS7_KUBECONFIG }}
