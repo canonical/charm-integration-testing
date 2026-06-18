@@ -19,11 +19,8 @@ listed: true
 # provide-cmr-mesh (provides): optional - CMR mesh consumer hook, secondary
 overrides:
   - criteria:
-      - any_of:
-          - track: '0.49'
-            risk: edge
-          - track: latest
-            risk: edge
+      - track: latest
+        risk: edge
     requires:
       istio-ingress-route:
         optional: true

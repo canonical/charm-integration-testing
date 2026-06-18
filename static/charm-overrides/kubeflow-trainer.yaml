@@ -16,8 +16,6 @@
 overrides:
   - criteria:
       - any_of:
-          - track: '2.0'
-            risk: edge
           - track: '2.1'
             risk: edge
           - track: latest
