@@ -28,7 +28,7 @@ Run these inside the VM after entering with `scripts/sandbox.sh shell` or by the
 | Command | Purpose |
 |---|---|
 | `bin/setup-k8s.sh` | Install Canonical k8s and register as Juju cloud |
-| `bin/setup-lxd.sh` | Initialize LXD and register as Juju cloud |
+| `bin/setup-lxd.sh` | Install/initialize LXD for Juju's built-in `localhost` cloud |
 | `bin/verify-validator.sh` | Run quality gates and workload-up/down evidence |
 | `bin/dev-validate.py` | Inject validators into a unit and report results |
 
