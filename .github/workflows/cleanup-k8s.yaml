@@ -273,71 +273,65 @@ jobs:
         if: ${{ !cancelled() && steps.creds.outputs.openstack == 'true' }}
         shell: bash
         run: |
-          set -euo pipefail
-          openstack server list --format json | jq --raw-output --argjson age "$AGE_THRESHOLD" '
-            .[] |
-            select((now - (.Created | fromdateiso8601)) > ($age * 60)) |
-            .ID
-          ' | while read -r server_id; do
-            echo "Deleting server: $server_id"
-            openstack server delete "$server_id" || true
+          openstack server list --format json | jq --raw-output '.[].ID' | while read -r server_id; do
+            created=$(openstack server show "$server_id" --format json | jq -r '.created')
+            age_minutes=$(( ($(date +%s) - $(date -d "$created" +%s)) / 60 ))
+            if [[ $age_minutes -gt $AGE_THRESHOLD ]]; then
+              echo "Deleting server: $server_id (age: $age_minutes minutes)"
+              openstack server delete "$server_id" || true
+            fi
           done
       - name: Find and delete security groups older than age threshold
         if: ${{ !cancelled() && steps.creds.outputs.openstack == 'true' }}
         shell: bash
         run: |
-          set -euo pipefail
-          openstack security group list --format json | jq --raw-output --argjson age "$AGE_THRESHOLD" '
-            .[] |
-            select(.Name != "default") |
-            select((now - (.Created | fromdateiso8601)) > ($age * 60)) |
-            .ID
-          ' | while read -r sg_id; do
-            echo "Deleting security group: $sg_id"
-            openstack security group delete "$sg_id" || true
+          openstack security group list --format json | jq --raw-output '.[] | select(.Name != "default") | .ID' | while read -r sg_id; do
+            created=$(openstack security group show "$sg_id" --format json | jq -r '.created_at')
+            age_minutes=$(( ($(date +%s) - $(date -d "$created" +%s)) / 60 ))
+            if [[ $age_minutes -gt $AGE_THRESHOLD ]]; then
+              echo "Deleting security group: $sg_id (age: $age_minutes minutes)"
+              openstack security group delete "$sg_id" || true
+            fi
           done
       - name: Find and delete load balancers older than age threshold
         if: ${{ !cancelled() && steps.creds.outputs.openstack == 'true' }}
         shell: bash
         run: |
-          set -euo pipefail
-          openstack loadbalancer list --format json | jq --raw-output --argjson age "$AGE_THRESHOLD" '
-            .[] |
-            select((now - (.created_at | fromdateiso8601)) > ($age * 60)) |
-            .id
-          ' | while read -r lb_id; do
-            echo "Deleting load balancer: $lb_id"
-            # Delete pools first
-            openstack loadbalancer pool list --loadbalancer "$lb_id" --format json | jq --raw-output '.[].id' | while read -r pool_id; do
-              echo "  Deleting pool: $pool_id"
-              openstack loadbalancer pool delete "$pool_id" || true
-            done
-            # Then delete the load balancer
-            openstack loadbalancer delete "$lb_id" || true
+          openstack loadbalancer list --format json | jq --raw-output '.[].id' | while read -r lb_id; do
+            created=$(openstack loadbalancer show "$lb_id" --format json | jq -r '.created_at')
+            age_minutes=$(( ($(date +%s) - $(date -d "$created" +%s)) / 60 ))
+            if [[ $age_minutes -gt $AGE_THRESHOLD ]]; then
+              echo "Deleting load balancer: $lb_id (age: $age_minutes minutes)"
+              # Delete pools first
+              openstack loadbalancer pool list --loadbalancer "$lb_id" --format json | jq --raw-output '.[].id' | while read -r pool_id; do
+                echo "  Deleting pool: $pool_id"
+                openstack loadbalancer pool delete "$pool_id" || true
+              done
+              # Then delete the load balancer
+              openstack loadbalancer delete "$lb_id" || true
+            fi
           done
       - name: Find and delete volumes older than age threshold
         if: ${{ !cancelled() && steps.creds.outputs.openstack == 'true' }}
         shell: bash
         run: |
-          set -euo pipefail
-          openstack volume list --format json | jq --raw-output --argjson age "$AGE_THRESHOLD" '
-            .[] |
-            select((now - (.Created | fromdateiso8601)) > ($age * 60)) |
-            .ID
-          ' | while read -r volume_id; do
-            echo "Deleting volume: $volume_id"
-            openstack volume delete "$volume_id" || true
+          openstack volume list --format json | jq --raw-output '.[].ID' | while read -r volume_id; do
+            created=$(openstack volume show "$volume_id" --format json | jq -r '.created_at')
+            age_minutes=$(( ($(date +%s) - $(date -d "$created" +%s)) / 60 ))
+            if [[ $age_minutes -gt $AGE_THRESHOLD ]]; then
+              echo "Deleting volume: $volume_id (age: $age_minutes minutes)"
+              openstack volume delete "$volume_id" || true
+            fi
           done
       - name: Find and delete floating IPs older than age threshold
         if: ${{ !cancelled() && steps.creds.outputs.openstack == 'true' }}
         shell: bash
         run: |-
-          set -euo pipefail
-          openstack floating ip list --format json | jq --raw-output --argjson age "$AGE_THRESHOLD" '
-            .[] |
-            select((now - (.Created | fromdateiso8601)) > ($age * 60)) |
-            .ID
-          ' | while read -r fip_id; do
-            echo "Deleting floating IP: $fip_id"
-            openstack floating ip delete "$fip_id" || true
+          openstack floating ip list --format json | jq --raw-output '.[].ID' | while read -r fip_id; do
+            created=$(openstack floating ip show "$fip_id" --format json | jq -r '.created_at')
+            age_minutes=$(( ($(date +%s) - $(date -d "$created" +%s)) / 60 ))
+            if [[ $age_minutes -gt $AGE_THRESHOLD ]]; then
+              echo "Deleting floating IP: $fip_id (age: $age_minutes minutes)"
+              openstack floating ip delete "$fip_id" || true
+            fi
           done
