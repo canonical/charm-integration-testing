@@ -90,27 +90,37 @@ def _parse_bundle_spec(bundle_path: str) -> _BundleSpec:
     if overlay:
         for app_name, app_data in (overlay.get("applications") or {}).items():
             for offer_name, offer_config in ((app_data or {}).get("offers") or {}).items():
-                raw_endpoints = (offer_config or {}).get("endpoints") or []
-                if isinstance(raw_endpoints, str) or not all(isinstance(e, str) for e in raw_endpoints):
+                raw_endpoints = (offer_config or {}).get("endpoints")
+                if (
+                    not raw_endpoints
+                    or isinstance(raw_endpoints, str)
+                    or not all(isinstance(e, str) for e in raw_endpoints)
+                ):
                     raise ValueError(
-                        f"Bundle file '{bundle_path}': offer '{offer_name}' endpoints must be a list of strings, "
-                        f"got {raw_endpoints!r}."
+                        f"Bundle file '{bundle_path}': offer '{offer_name}' endpoints must be a non-empty "
+                        f"list of strings, got {raw_endpoints!r}."
                     )
                 offers[offer_name] = _OfferSpec(app=app_name, endpoints=tuple(raw_endpoints))
 
-    saas: dict[str, str] = {
-        alias: cfg["url"] for alias, cfg in (base.get("saas") or {}).items() if cfg and cfg.get("url")
-    }
+    saas: dict[str, str] = {}
+    for alias, cfg in (base.get("saas") or {}).items():
+        if not isinstance(cfg, dict):
+            raise ValueError(
+                f"Bundle file '{bundle_path}': saas entry '{alias}' must be a mapping, "
+                f"got {type(cfg).__name__}."
+            )
+        url = cfg.get("url")
+        if url:
+            saas[alias] = url
 
     raw_relations: list[tuple[str, str]] = []
     for i, rel in enumerate(base.get("relations") or []):
-        endpoints = [r[0] if isinstance(r, list) else r for r in rel]
-        if len(endpoints) != 2 or not all(isinstance(e, str) for e in endpoints):
+        if not isinstance(rel, list) or len(rel) != 2 or not all(isinstance(e, str) for e in rel):
             raise ValueError(
                 f"Bundle file '{bundle_path}': relation at index {i} must be a 2-item list of endpoint strings, "
                 f"got {rel!r}."
             )
-        raw_relations.append((endpoints[0], endpoints[1]))
+        raw_relations.append((rel[0], rel[1]))
     relations: tuple[tuple[str, str], ...] = tuple(raw_relations)
 
     return _BundleSpec(apps=apps, offers=offers, saas=saas, relations=relations)

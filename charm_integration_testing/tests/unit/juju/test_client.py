@@ -1089,6 +1089,44 @@ class TestJujuClientDeployBundles:
         with pytest.raises(ValueError, match="not found"):
             self._client(stub).deploy_bundles({"ctrl:model": str(tmp_path / "nonexistent.yaml")})
 
+    def test_empty_offer_endpoints_raises(self, tmp_path: Any) -> None:
+        bundle = _write_bundle(
+            tmp_path,
+            {"applications": {"svc": {"charm": "svc"}}},
+            overlay={"applications": {"svc": {"offers": {"svc-offer": {"endpoints": []}}}}},
+        )
+        stub = DeployBundlesBackendStub()
+        with pytest.raises(ValueError, match="non-empty"):
+            self._client(stub).deploy_bundles({"ctrl:model": bundle})
+
+    def test_scalar_offer_endpoints_raises(self, tmp_path: Any) -> None:
+        bundle = _write_bundle(
+            tmp_path,
+            {"applications": {"svc": {"charm": "svc"}}},
+            overlay={"applications": {"svc": {"offers": {"svc-offer": {"endpoints": "ep"}}}}},
+        )
+        stub = DeployBundlesBackendStub()
+        with pytest.raises(ValueError, match="non-empty"):
+            self._client(stub).deploy_bundles({"ctrl:model": bundle})
+
+    def test_non_mapping_saas_entry_raises(self, tmp_path: Any) -> None:
+        bundle = _write_bundle(
+            tmp_path,
+            {"applications": {}, "saas": {"remote": "bad-scalar-value"}},
+        )
+        stub = DeployBundlesBackendStub()
+        with pytest.raises(ValueError, match="mapping"):
+            self._client(stub).deploy_bundles({"ctrl:model": bundle})
+
+    def test_malformed_relation_raises(self, tmp_path: Any) -> None:
+        bundle = _write_bundle(
+            tmp_path,
+            {"applications": {}, "relations": [["a:ep", "b:ep", "extra"]]},
+        )
+        stub = DeployBundlesBackendStub()
+        with pytest.raises(ValueError, match="2-item"):
+            self._client(stub).deploy_bundles({"ctrl:model": bundle})
+
     def test_post_deploy_extension_called_for_each_model(self, tmp_path: Any) -> None:
         # GIVEN two bundles and an extension
         (tmp_path / "m1").mkdir()
