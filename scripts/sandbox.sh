@@ -1,6 +1,7 @@
 #!/bin/bash
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
 # Host-side entry point for the charm-integration-testing development sandbox.
-#
 # Usage:
 #   scripts/sandbox.sh up            Create or resume the VM and install deps
 #   scripts/sandbox.sh down          Stop the VM (preserves state)
