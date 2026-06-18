@@ -1,6 +1,6 @@
 ---
-name: Clean up K8s environments
-run-name: Cleaning up ${{ inputs.environment }} K8s environment
+name: Cleaning up environment
+run-name: Cleaning up ${{ inputs.environment }} environment
 concurrency:
   group: ${{ github.workflow }}-${{ inputs.environment }}
   cancel-in-progress: true
@@ -42,8 +42,8 @@ on:
       PROD_PS7_NOVARC:
         required: true
 jobs:
-  cleanup-k8s:
-    name: Clean up any leftover K8s artifacts from old Charm QA environments
+  cleanup-environment:
+    name: Clean up any leftover artifacts from old Charm QA environments
     runs-on: [self-hosted-linux-amd64-noble-private-endpoint-small]
     env:
       AGE_THRESHOLD: ${{ inputs.age_threshold }}
