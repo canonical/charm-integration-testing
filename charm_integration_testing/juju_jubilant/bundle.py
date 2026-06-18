@@ -56,8 +56,11 @@ class _BundleSpec:
 
 def _parse_bundle_spec(bundle_path: str) -> _BundleSpec:
     """Parse a bundle YAML file (base document + optional overlay) into a _BundleSpec."""
-    with open(bundle_path) as f:
+    with open(bundle_path, encoding="utf-8") as f:
         documents = list(yaml.safe_load_all(f))
+
+    if not documents or not isinstance(documents[0], dict):
+        raise ValueError(f"Bundle file '{bundle_path}' must contain at least one YAML mapping document.")
 
     base = documents[0]
     overlay = documents[1] if len(documents) > 1 else None

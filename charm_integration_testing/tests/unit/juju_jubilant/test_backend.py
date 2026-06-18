@@ -2477,16 +2477,16 @@ class TestJubilantBackendDeployBundles:
             },
         )
 
-        phase1_ops: list[str] = []
-        phase2_ops: list[str] = []
+        # Record all operations in a single ordered list so we can assert index ordering.
+        all_ops: list[str] = []
 
         class OrderTrackingStub(DeployOpsStub):
-            def offer(self, app: str, endpoint: str, name: str | None = None, **kw: Any) -> None:
-                phase1_ops.append(f"offer:{name}")
+            def offer(self, app: str, endpoint: Any, name: str | None = None, **kw: Any) -> None:
+                all_ops.append(f"offer:{name}")
                 super().offer(app, endpoint, name=name, **kw)
 
             def consume(self, url: str, alias: str | None = None, **kw: Any) -> None:
-                phase2_ops.append(f"consume:{alias}")
+                all_ops.append(f"consume:{alias}")
                 super().consume(url, alias=alias, **kw)
 
         stub = OrderTrackingStub()
@@ -2503,10 +2503,10 @@ class TestJubilantBackendDeployBundles:
                 }
             )
 
-        # THEN all offers are created before any SAAS is consumed
-        assert "offer:svc-offer" in phase1_ops
-        assert "consume:svc-offer" in phase2_ops
-        assert not phase2_ops or phase1_ops  # phase 1 populated before phase 2
+        # THEN the offer is created before the SAAS is consumed (phase 1 < phase 2)
+        assert "offer:svc-offer" in all_ops
+        assert "consume:svc-offer" in all_ops
+        assert all_ops.index("offer:svc-offer") < all_ops.index("consume:svc-offer")
 
     def test_bundle_without_overlay_has_no_offers(self, tmp_path: Path) -> None:
         # GIVEN a single-document bundle (no overlay = no offers section)

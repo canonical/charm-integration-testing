@@ -356,15 +356,14 @@ class JubilantBackend(JujuCmdBackend):
 
             for offer_name, offer_spec in spec.offers.items():
                 if offer_name not in current_status.offers:
-                    for endpoint in offer_spec.endpoints:
-                        juju.offer(offer_spec.app, endpoint=endpoint, name=offer_name)
+                    juju.offer(offer_spec.app, endpoint=offer_spec.endpoints, name=offer_name)
 
         # Phase 2: consume SAAS and create integrations for every model.
         for model, spec in bundle_specs.items():
             juju = self.client.model(model)
             current_status = self.status(model)
             existing_integrations = self.list_integrations(model)
-            existing_integration_pairs = [{i.provider, i.requirer} for i in existing_integrations]
+            existing_integration_pairs = {frozenset({i.provider, i.requirer}) for i in existing_integrations}
 
             for saas_alias, saas_url in spec.saas.items():
                 if saas_alias not in current_status.app_endpoints:
@@ -373,7 +372,7 @@ class JubilantBackend(JujuCmdBackend):
             for ep1, ep2 in spec.relations:
                 ia1 = JujuIntegrationApplication.from_str(ep1)
                 ia2 = JujuIntegrationApplication.from_str(ep2)
-                if {ia1, ia2} not in existing_integration_pairs:
+                if frozenset({ia1, ia2}) not in existing_integration_pairs:
                     juju.integrate(ep1, ep2)
 
         for model, bundle_path in bundles.items():
