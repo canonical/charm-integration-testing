@@ -9,6 +9,7 @@ on:
 jobs:
   cleanup-schedule:
     strategy:
+      fail-fast: false
       matrix:
         environment:
           - ps6-sqa-stg_charm_qa_kubernetes-1
