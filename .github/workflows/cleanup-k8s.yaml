@@ -97,12 +97,12 @@ jobs:
       # |_|\_\\____/|____/|______|_|  \_\_| \_|______|  |_|  |______|_____/ 
       #
       - name: Install kubectl
-        if: ${{ !cancelled() && steps.env_info.outputs.kubernetes == 'true' }}
+        if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
         uses: ./.github/actions/install-with-retry
         with:
           command: sudo snap install kubectl --classic
       - name: Remove orphaned rawfile PV directories from nodes
-        if: ${{ !cancelled() && steps.env_info.outputs.kubernetes == 'true' }}
+        if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -175,7 +175,7 @@ jobs:
             kubectl delete "pod/$pod_name" --ignore-not-found=true --timeout=2m
           done <<< "$NODES"
       - name: Find all model and controller namespaces older than an hour
-        if: ${{ !cancelled() && steps.env_info.outputs.kubernetes == 'true' }}
+        if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
         shell: bash
         run: |
           kubectl get namespaces --output json | jq --raw-output --argjson age "$AGE_THRESHOLD" '
@@ -185,7 +185,7 @@ jobs:
             .kind + "/" + .metadata.name
           ' >> resources_to_remove.txt
       - name: Find all webhook configurations older than an hour
-        if: ${{ !cancelled() && steps.env_info.outputs.kubernetes == 'true' }}
+        if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
         shell: bash
         run: |
           kubectl get validatingwebhookconfigurations,mutatingwebhookconfigurations --output json | jq --raw-output --argjson age "$AGE_THRESHOLD" '
@@ -194,7 +194,7 @@ jobs:
             .kind + "/" + .metadata.name
           ' >> resources_to_remove.txt
       - name: Find all juju-credential service accounts older than an hour
-        if: ${{ !cancelled() && steps.env_info.outputs.kubernetes == 'true' }}
+        if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
         shell: bash
         run: |
           kubectl get serviceaccounts --all-namespaces --output json | jq --raw-output --argjson age "$AGE_THRESHOLD" '
@@ -204,7 +204,7 @@ jobs:
             .metadata.namespace + ":" + .kind + "/" + .metadata.name
           ' >> resources_to_remove.txt
       - name: Find all juju-credential secrets older than an hour
-        if: ${{ !cancelled() && steps.env_info.outputs.kubernetes == 'true' }}
+        if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
         shell: bash
         run: |
           kubectl get secrets --all-namespaces --output json | jq --raw-output --argjson age "$AGE_THRESHOLD" '
@@ -215,7 +215,7 @@ jobs:
             .metadata.namespace + ":" + .kind + "/" + .metadata.name
           ' >> resources_to_remove.txt
       - name: Find Released rawfile PersistentVolumes
-        if: ${{ !cancelled() && steps.env_info.outputs.kubernetes == 'true' }}
+        if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
         shell: bash
         run: |
           # Released rawfile PVs should be cleaned up by the CSI driver automatically, but
@@ -230,7 +230,7 @@ jobs:
           ' >> resources_to_remove.txt
       - name: Remove all resources
         shell: bash
-        if: ${{ !cancelled() && steps.env_info.outputs.kubernetes == 'true' }}
+        if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
         run: |-
           # Group resources by namespace
           declare -A namespaced_resources
@@ -265,12 +265,12 @@ jobs:
       #  \____/|_|    |______|_| \_|_____/   |_/_/    \_\_____|_|\_\
       #
       - name: Install openstack client
-        if: ${{ !cancelled() && steps.env_info.outputs.openstack == 'true' }}
+        if: ${{ !cancelled() && steps.creds.outputs.openstack == 'true' }}
         uses: ./.github/actions/install-with-retry
         with:
           command: sudo snap install openstackclients
       - name: Find and delete servers older than age threshold
-        if: ${{ !cancelled() && steps.env_info.outputs.openstack == 'true' }}
+        if: ${{ !cancelled() && steps.creds.outputs.openstack == 'true' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -283,7 +283,7 @@ jobs:
             openstack server delete "$server_id" || true
           done
       - name: Find and delete security groups older than age threshold
-        if: ${{ !cancelled() && steps.env_info.outputs.openstack == 'true' }}
+        if: ${{ !cancelled() && steps.creds.outputs.openstack == 'true' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -297,7 +297,7 @@ jobs:
             openstack security group delete "$sg_id" || true
           done
       - name: Find and delete load balancers older than age threshold
-        if: ${{ !cancelled() && steps.env_info.outputs.openstack == 'true' }}
+        if: ${{ !cancelled() && steps.creds.outputs.openstack == 'true' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -316,7 +316,7 @@ jobs:
             openstack loadbalancer delete "$lb_id" || true
           done
       - name: Find and delete volumes older than age threshold
-        if: ${{ !cancelled() && steps.env_info.outputs.openstack == 'true' }}
+        if: ${{ !cancelled() && steps.creds.outputs.openstack == 'true' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -329,7 +329,7 @@ jobs:
             openstack volume delete "$volume_id" || true
           done
       - name: Find and delete floating IPs older than age threshold
-        if: ${{ !cancelled() && steps.env_info.outputs.openstack == 'true' }}
+        if: ${{ !cancelled() && steps.creds.outputs.openstack == 'true' }}
         shell: bash
         run: |-
           set -euo pipefail
