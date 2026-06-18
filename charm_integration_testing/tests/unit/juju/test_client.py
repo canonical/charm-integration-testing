@@ -915,13 +915,16 @@ class DeployBundlesBackendStub(NullJujuBackend):
         pass
 
 
-def _write_bundle(tmp_path: Any, content: dict[str, Any], overlay: dict[str, Any] | None = None) -> str:
+def _write_bundle(
+    tmp_path: Any, content: dict[str, Any], overlay: dict[str, Any] | None = None, *extra_overlays: dict[str, Any]
+) -> str:
     import yaml
 
     bundle_file = tmp_path / "bundle.yaml"
     docs = [content]
     if overlay:
         docs.append(overlay)
+    docs.extend(extra_overlays)
     bundle_file.write_text("\n---\n".join(yaml.dump(d) for d in docs))
     return str(bundle_file)
 
@@ -1083,6 +1086,21 @@ class TestJujuClientDeployBundles:
         self._client(stub).deploy_bundles({"ctrl:model": bundle})
 
         assert not any("offer" in op for op in stub.ops)
+
+    def test_multiple_overlays_all_offers_created(self, tmp_path: Any) -> None:
+        # GIVEN a bundle with two overlay documents each defining a different offer
+        bundle = _write_bundle(
+            tmp_path,
+            {"applications": {"svc1": {}, "svc2": {}}},
+            {"applications": {"svc1": {"offers": {"offer-1": {"endpoints": ["ep1"]}}}}},
+            {"applications": {"svc2": {"offers": {"offer-2": {"endpoints": ["ep2"]}}}}},
+        )
+        stub = DeployBundlesBackendStub()
+
+        self._client(stub).deploy_bundles({"ctrl:model": bundle})
+
+        assert "offer:offer-1" in stub.ops
+        assert "offer:offer-2" in stub.ops
 
     def test_nonexistent_bundle_raises(self, tmp_path: Any) -> None:
         stub = DeployBundlesBackendStub()

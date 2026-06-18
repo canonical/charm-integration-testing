@@ -57,7 +57,11 @@ class _BundleSpec:
 
 
 def _parse_bundle_spec(bundle_path: str) -> _BundleSpec:
-    """Parse a bundle YAML file (base document + optional overlay) into a _BundleSpec."""
+    """Parse a bundle YAML file (base + zero or more overlay documents) into a _BundleSpec.
+
+    The first YAML document is the base; all subsequent documents are overlays applied
+    in order.  Later overlays win on conflicting offer names.
+    """
     with open(bundle_path, encoding="utf-8") as f:
         documents = list(yaml.safe_load_all(f))
 
@@ -65,13 +69,14 @@ def _parse_bundle_spec(bundle_path: str) -> _BundleSpec:
         raise ValueError(f"Bundle file '{bundle_path}' must contain at least one YAML mapping document.")
 
     base = documents[0]
-    raw_overlay = documents[1] if len(documents) > 1 else None
-    if raw_overlay is not None and not isinstance(raw_overlay, dict):
-        raise ValueError(
-            f"Bundle file '{bundle_path}': second YAML document (overlay) must be a mapping, "
-            f"got {type(raw_overlay).__name__}."
-        )
-    overlay: dict[str, Any] | None = raw_overlay
+    overlay_docs = documents[1:]
+
+    for i, raw_overlay in enumerate(overlay_docs, start=1):
+        if not isinstance(raw_overlay, dict):
+            raise ValueError(
+                f"Bundle file '{bundle_path}': YAML document {i} (overlay) must be a mapping, "
+                f"got {type(raw_overlay).__name__}."
+            )
 
     apps: dict[str, _AppSpec] = {}
     raw_apps = base.get("applications")
@@ -99,7 +104,7 @@ def _parse_bundle_spec(bundle_path: str) -> _BundleSpec:
         )
 
     offers: dict[str, _OfferSpec] = {}
-    if overlay:
+    for overlay in overlay_docs:
         raw_overlay_apps = overlay.get("applications")
         if raw_overlay_apps is not None and not isinstance(raw_overlay_apps, dict):
             raise ValueError(
