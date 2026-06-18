@@ -82,7 +82,7 @@ def _parse_bundle_spec(bundle_path: str) -> _BundleSpec:
     for app_name, raw in (raw_apps or {}).items():
         raw = raw or {}
         apps[app_name] = _AppSpec(
-            charm=raw.get("charm", app_name),
+            charm=str(raw.get("charm") or app_name),
             channel=raw.get("channel"),
             revision=raw.get("revision"),
             base=raw.get("base"),

@@ -329,18 +329,31 @@ class JubilantBackend(JujuCmdBackend):
         resources: dict[str, str] | None = None,
         num_units: int | None = None,
     ) -> None:
-        self.client.model(model).deploy(
-            charm=charm,
-            app=application,
-            channel=channel,
-            revision=revision,
-            base=base,
-            config=config,
-            trust=trust,
-            force=force,
-            resources=resources,
-            **({} if num_units is None else {"num_units": num_units}),
-        )
+        if num_units is None:
+            self.client.model(model).deploy(
+                charm=charm,
+                app=application,
+                channel=channel,
+                revision=revision,
+                base=base,
+                config=config,
+                trust=trust,
+                force=force,
+                resources=resources,
+            )
+        else:
+            self.client.model(model).deploy(
+                charm=charm,
+                app=application,
+                channel=channel,
+                revision=revision,
+                base=base,
+                config=config,
+                trust=trust,
+                force=force,
+                resources=resources,
+                num_units=num_units,
+            )
 
     def configure_application(self, model: str, application: str, values: dict[str, str]) -> None:
         self.client.model(model).config(
