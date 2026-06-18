@@ -106,8 +106,7 @@ def _parse_bundle_spec(bundle_path: str) -> _BundleSpec:
     for alias, cfg in (base.get("saas") or {}).items():
         if not isinstance(cfg, dict):
             raise ValueError(
-                f"Bundle file '{bundle_path}': saas entry '{alias}' must be a mapping, "
-                f"got {type(cfg).__name__}."
+                f"Bundle file '{bundle_path}': saas entry '{alias}' must be a mapping, " f"got {type(cfg).__name__}."
             )
         url = cfg.get("url")
         if url:
