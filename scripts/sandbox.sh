@@ -205,7 +205,7 @@ JSON
     # Build the gitconfig: propagate host identity, strip signing config,
     # then append VM-specific signing settings.
     {
-        git -C "$PROJECT_DIR" config --global --list \
+        git -C "$PROJECT_DIR" config --list \
             | grep -v '^includeif\.' \
             | grep -v '^\(user\.signingkey\|gpg\.\|commit\.gpgsign\|tag\.gpgsign\)=' \
             | awk '
