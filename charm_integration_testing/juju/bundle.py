@@ -80,6 +80,11 @@ def _parse_bundle_spec(bundle_path: str) -> _BundleSpec:
             f"Bundle file '{bundle_path}': 'applications' must be a mapping, got {type(raw_apps).__name__}."
         )
     for app_name, raw in (raw_apps or {}).items():
+        if raw is not None and not isinstance(raw, dict):
+            raise ValueError(
+                f"Bundle file '{bundle_path}': application '{app_name}' entry must be a mapping, "
+                f"got {type(raw).__name__}."
+            )
         raw = raw or {}
         apps[app_name] = _AppSpec(
             charm=str(raw.get("charm") or app_name),
@@ -95,8 +100,30 @@ def _parse_bundle_spec(bundle_path: str) -> _BundleSpec:
 
     offers: dict[str, _OfferSpec] = {}
     if overlay:
-        for app_name, app_data in (overlay.get("applications") or {}).items():
-            for offer_name, offer_config in ((app_data or {}).get("offers") or {}).items():
+        raw_overlay_apps = overlay.get("applications")
+        if raw_overlay_apps is not None and not isinstance(raw_overlay_apps, dict):
+            raise ValueError(
+                f"Bundle file '{bundle_path}': overlay 'applications' must be a mapping, "
+                f"got {type(raw_overlay_apps).__name__}."
+            )
+        for app_name, app_data in (raw_overlay_apps or {}).items():
+            if app_data is not None and not isinstance(app_data, dict):
+                raise ValueError(
+                    f"Bundle file '{bundle_path}': overlay application '{app_name}' must be a mapping, "
+                    f"got {type(app_data).__name__}."
+                )
+            raw_offers = (app_data or {}).get("offers")
+            if raw_offers is not None and not isinstance(raw_offers, dict):
+                raise ValueError(
+                    f"Bundle file '{bundle_path}': 'offers' for '{app_name}' must be a mapping, "
+                    f"got {type(raw_offers).__name__}."
+                )
+            for offer_name, offer_config in (raw_offers or {}).items():
+                if offer_config is not None and not isinstance(offer_config, dict):
+                    raise ValueError(
+                        f"Bundle file '{bundle_path}': offer '{offer_name}' config must be a mapping, "
+                        f"got {type(offer_config).__name__}."
+                    )
                 raw_endpoints = (offer_config or {}).get("endpoints")
                 if (
                     not raw_endpoints
