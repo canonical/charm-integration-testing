@@ -14,6 +14,7 @@ jobs:
           - ps6-sqa-stg_charm_qa_kubernetes-1
           - ps6-sqa-prod_charm_qa_kubernetes-1
           - ps7-sqa-prod_charm_qa_kubernetes-1
+          - ps7-sqa-prod_charm_qa_openstack-1
     uses: ./.github/workflows/cleanup-k8s.yaml
     with:
       environment: ${{ matrix.environment }}
@@ -21,3 +22,4 @@ jobs:
       PROD_SQA_KUBECONFIG: ${{ secrets.PROD_SQA_KUBECONFIG }}
       STG_SQA_KUBECONFIG: ${{ secrets.STG_SQA_KUBECONFIG }}
       PROD_PS7_KUBECONFIG: ${{ secrets.PROD_PS7_KUBECONFIG }}
+      PROD_PS7_NOVARC: ${{ secrets.PROD_PS7_NOVARC }}
