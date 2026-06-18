@@ -188,6 +188,7 @@ JSON
         _key_b64=$(base64 -w0 < "$_tmp_key")
         rm -f "$_tmp_key" "${_tmp_key}.pub"
         touch "$_ENV_FILE"
+        chmod 600 "$_ENV_FILE"
         echo "SANDBOX_SIGNING_KEY=$_key_b64" >> "$_ENV_FILE"
     fi
     _VM_SIGNING_KEY_B64=$(grep '^SANDBOX_SIGNING_KEY=' "$_ENV_FILE" | cut -d= -f2-)
@@ -339,20 +340,24 @@ EOF
 
     if [ "$INTERACTIVE" = "true" ]; then
         CONTEXT_MSG="Please read $PROMPT_FILE for project context, then await my instructions."
-        multipass exec "$VM_NAME" -- bash -lc "
+        # Build env var array, only including GH_TOKEN/GITHUB_TOKEN if they are actually set
+        _env_args=()
+        [ -n "${GITHUB_TOKEN:-}" ] && _env_args+=("GH_TOKEN=$GITHUB_TOKEN" "GITHUB_TOKEN=$GITHUB_TOKEN")
+        _env_args+=("COPILOT_GITHUB_TOKEN=$_copilot_token" "COPILOT_MODEL=$COPILOT_MODEL")
+        multipass exec "$VM_NAME" -- env "${_env_args[@]}" bash -lc "
             cd /project
-            ${GITHUB_TOKEN:+GH_TOKEN=$GITHUB_TOKEN GITHUB_TOKEN=$GITHUB_TOKEN} COPILOT_GITHUB_TOKEN='$_copilot_token' \
-            COPILOT_MODEL='$COPILOT_MODEL' copilot --yolo \
-                -i \"$CONTEXT_MSG\"
+            copilot --yolo -i \"$CONTEXT_MSG\"
             rm -f $PROMPT_FILE
         "
     else
         [ -n "$TASK" ] || { echo "Usage: scripts/sandbox.sh run 'task description'"; exit 1; }
-        multipass exec "$VM_NAME" -- bash -lc "
+        # Build env var array, only including GH_TOKEN/GITHUB_TOKEN if they are actually set
+        _env_args=()
+        [ -n "${GITHUB_TOKEN:-}" ] && _env_args+=("GH_TOKEN=$GITHUB_TOKEN" "GITHUB_TOKEN=$GITHUB_TOKEN")
+        _env_args+=("COPILOT_GITHUB_TOKEN=$_copilot_token" "COPILOT_MODEL=$COPILOT_MODEL")
+        multipass exec "$VM_NAME" -- env "${_env_args[@]}" bash -lc "
             cd /project
-            ${GITHUB_TOKEN:+GH_TOKEN=$GITHUB_TOKEN GITHUB_TOKEN=$GITHUB_TOKEN} COPILOT_GITHUB_TOKEN='$_copilot_token' \
-            COPILOT_MODEL='$COPILOT_MODEL' copilot --yolo \
-                -p \"\$(cat $PROMPT_FILE)\"
+            copilot --yolo -p \"\$(cat $PROMPT_FILE)\"
             rm -f $PROMPT_FILE
         "
     fi
