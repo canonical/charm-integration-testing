@@ -12,11 +12,11 @@ on:
       environment:
         description: Environment to clean.
         type: choice
-        default: ps6-sqa-stg_charm_qa_kubernetes
-        options: 
-          - ps6-sqa-stg_charm_qa_kubernetes
-          - ps6-sqa-prod_charm_qa_kubernetes
-          - ps7-sqa-prod_charm_qa_kubernetes
+        default: ps6-sqa-stg_charm_qa_kubernetes-1
+        options:
+          - ps6-sqa-stg_charm_qa_kubernetes-1
+          - ps6-sqa-prod_charm_qa_kubernetes-1
+          - ps7-sqa-prod_charm_qa_kubernetes-1
       age_threshold:
         description: Age threshold in minutes (resources older than this will be deleted)
         type: number

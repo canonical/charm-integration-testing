@@ -10,10 +10,10 @@ jobs:
   cleanup-k8s-schedule:
     strategy:
       matrix:
-        environment: 
-          - ps6-sqa-stg_charm_qa_kubernetes
-          - ps6-sqa-prod_charm_qa_kubernetes
-          - ps7-sqa-prod_charm_qa_kubernetes
+        environment:
+          - ps6-sqa-stg_charm_qa_kubernetes-1
+          - ps6-sqa-prod_charm_qa_kubernetes-1
+          - ps7-sqa-prod_charm_qa_kubernetes-1
     uses: ./.github/workflows/cleanup-k8s.yaml
     with:
       environment: ${{ matrix.environment }}
