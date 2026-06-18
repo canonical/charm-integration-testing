@@ -84,9 +84,8 @@ jobs:
           fi
           if [[ -n "${NOVARC_SECRET_NAME}" ]]; then
             echo "openstack=true" >> $GITHUB_OUTPUT
-            for var in ${!NOVARC_SECRET_NAME}; do
-              echo "$var" >> $GITHUB_ENV
-            done
+            # Extract environment variables from RC file (handles both "export VAR=..." and "VAR=..." formats)
+            echo "${!NOVARC_SECRET_NAME}" | grep -E '^(export )?OS_' | sed 's/^export //' >> $GITHUB_ENV
           fi
 
       ##################################################################################
