@@ -8,6 +8,7 @@ from pathlib import Path
 from validators.base import ValidationResult
 
 from .backend import JujuBackend
+from .bundle import _parse_bundle_spec
 from .extension import JujuExtension
 from .models import JujuApplicationInfo, JujuConsumedOfferInfo, JujuIntegration, JujuIntegrationApplication
 from .version import JujuVersion
@@ -121,14 +122,76 @@ class JujuClient:
     ) -> None:
         """Deploy multiple bundles across models with CMR-aware two-phase ordering.
 
-        Phase 1 (all models): deploys apps, converges config, creates offers.
-        Phase 2 (all models): consumes remote offers (SAAS) and creates integrations.
+        Phase 1 (all models): deploys apps, converges config for existing apps, and
+        creates missing offers.  No SAAS consumption or integrations are created in
+        this phase so that all offers exist before they are referenced by any consumer.
 
-        This ensures all offers exist before any model attempts to consume them,
-        handling all CMR topologies correctly.
+        Phase 2 (all models): consumes remote offers (SAAS) and creates integrations.
+        Both operations are idempotent: already-consumed aliases and already-present
+        integrations are silently skipped.
+
+        After phase 2, each model is waited on until all bundle applications are idle.
         """
+        for bundle_path in bundles.values():
+            if not Path(bundle_path).is_file():
+                raise ValueError(f"Bundle file '{bundle_path}' not found.")
+
         self.logger.info(f"Deploying bundles for {len(bundles)} model(s): {list(bundles.keys())}")
-        self.backend.deploy_bundles(bundles, trust=True, force=True)
+
+        bundle_specs = {model: _parse_bundle_spec(bundle_path) for model, bundle_path in bundles.items()}
+
+        # Phase 1: deploy apps + offers for every model.
+        for model, spec in bundle_specs.items():
+            current_apps = self.backend.list_applications(model)
+            current_offers = self.backend.list_offers(model)
+
+            for app_name, app_spec in spec.apps.items():
+                if app_name not in current_apps:
+                    num_units = app_spec.scale if app_spec.scale is not None else (app_spec.num_units or 1)
+                    self.backend.deploy_application(
+                        model,
+                        app_spec.charm,
+                        application=app_name,
+                        channel=app_spec.channel,
+                        revision=app_spec.revision,
+                        base=app_spec.base,
+                        config=app_spec.options or None,
+                        trust=True or app_spec.trust,
+                        force=True,
+                        resources=app_spec.resources or None,
+                        num_units=num_units,
+                    )
+                elif app_spec.options:
+                    self.backend.configure_application(model, app_name, app_spec.options)
+
+            for offer_name, offer_spec in spec.offers.items():
+                if offer_name not in current_offers:
+                    self.backend.offer(model, offer_spec.app, offer_spec.endpoints, offer_name)
+
+        # Phase 2: consume SAAS and create integrations for every model.
+        for model, spec in bundle_specs.items():
+            current_saas = self.backend.list_consumed_offers(model)
+            existing_integrations = self.backend.list_integrations(model)
+            existing_pairs = {frozenset({i.provider, i.requirer}) for i in existing_integrations}
+
+            for saas_alias, saas_url in spec.saas.items():
+                if saas_alias not in current_saas:
+                    self.backend.consume(model, saas_url, saas_alias)
+
+            for ep1, ep2 in spec.relations:
+                ia1 = JujuIntegrationApplication.from_str(ep1)
+                ia2 = JujuIntegrationApplication.from_str(ep2)
+                if frozenset({ia1, ia2}) not in existing_pairs:
+                    self.backend.integrate(model, ia1, ia2)
+
+        for model, spec in bundle_specs.items():
+            self.backend.wait_idle(
+                model=model,
+                timeout=None,
+                count=None,
+                applications=list(spec.apps.keys()),
+            )
+
         for model in bundles:
             for extension in self.extensions:
                 extension.post_deploy(model)

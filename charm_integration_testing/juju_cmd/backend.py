@@ -4,6 +4,7 @@
 
 import json
 import time
+from collections.abc import Iterable
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -218,6 +219,15 @@ class JujuCmdBackend(JujuBackend):
             CmdArg(value=str(target_1)),
             CmdArg(value=str(target_2)),
         )
+
+    def offer(self, model: str, app: str, endpoints: Iterable[str], name: str) -> None:
+        raise NotImplementedError("JujuCmdBackend is deprecated; use JubilantBackend.")
+
+    def consume(self, model: str, saas_url: str, alias: str | None = None) -> None:
+        raise NotImplementedError("JujuCmdBackend is deprecated; use JubilantBackend.")
+
+    def list_offers(self, model: str) -> set[str]:
+        raise NotImplementedError("JujuCmdBackend is deprecated; use JubilantBackend.")
 
     def remove_integration(
         self, model: str, target_1: JujuIntegrationApplication, target_2: JujuIntegrationApplication

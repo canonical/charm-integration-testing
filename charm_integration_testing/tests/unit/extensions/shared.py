@@ -127,14 +127,28 @@ class NullJujuBackend(JujuBackend):
     def remove_secret(self, model: str, name_or_id: str) -> None:
         raise NotImplementedError
 
+    def offer(self, model: str, app: str, endpoints: Iterable[str], name: str) -> None:
+        raise NotImplementedError
+
+    def consume(self, model: str, saas_url: str, alias: str | None = None) -> None:
+        raise NotImplementedError
+
+    def list_offers(self, model: str) -> set[str]:
+        raise NotImplementedError
+
     def deploy_application(
         self,
         model: str,
         charm: str,
         application: str | None = None,
+        channel: str | None = None,
+        revision: int | None = None,
+        base: str | None = None,
         config: dict[str, Any] | None = None,
         trust: bool = False,
         force: bool = False,
+        resources: dict[str, str] | None = None,
+        num_units: int | None = None,
     ) -> None:
         raise NotImplementedError
 
@@ -276,9 +290,14 @@ class JujuStub(NullJujuBackend):
         model: str,
         charm: str,
         application: str | None = None,
+        channel: str | None = None,
+        revision: int | None = None,
+        base: str | None = None,
         config: dict[str, Any] | None = None,
         trust: bool = False,
         force: bool = False,
+        resources: dict[str, str] | None = None,
+        num_units: int | None = None,
     ) -> None:
         """Mock deploying an application (captures call for verification)"""
         self.deployed.append((model, charm, application))  # Ignoring config, trust, and force for simplicity

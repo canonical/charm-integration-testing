@@ -843,3 +843,271 @@ class TestJujuClientMigrateModelHooks:
         # THEN both extensions received the hook
         assert ext1.post_migrate_calls == [("mymodel", "source-ctrl", "target-ctrl")]
         assert ext2.post_migrate_calls == [("mymodel", "source-ctrl", "target-ctrl")]
+
+
+# ---------------------------------------------------------------------------
+# TestJujuClientDeployBundles
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class DeployBundlesBackendStub(NullJujuBackend):
+    """Backend stub that records deploy_bundles orchestration calls for assertions."""
+
+    ops: list[str] = field(default_factory=list)
+    existing_apps: list[str] = field(default_factory=list)
+    existing_offers: set[str] = field(default_factory=set)
+    existing_saas: list[str] = field(default_factory=list)
+    existing_integrations: set[Any] = field(default_factory=set)
+
+    def list_applications(self, model: str) -> dict[str, Any]:
+        from juju.models import JujuApplicationInfo
+
+        return {a: JujuApplicationInfo(charm=a, revision=1) for a in self.existing_apps}
+
+    def list_offers(self, model: str) -> set[str]:
+        return set(self.existing_offers)
+
+    def list_consumed_offers(self, model: str) -> dict[str, Any]:
+        from juju.models import JujuConsumedOfferInfo
+
+        return {a: JujuConsumedOfferInfo(a) for a in self.existing_saas}
+
+    def list_integrations(self, model: str) -> set[Any]:
+        return self.existing_integrations
+
+    def deploy_application(
+        self,
+        model: str,
+        charm: str,
+        application: str | None = None,
+        channel: str | None = None,
+        revision: int | None = None,
+        base: str | None = None,
+        config: dict[str, Any] | None = None,
+        trust: bool = False,
+        force: bool = False,
+        resources: dict[str, str] | None = None,
+        num_units: int | None = None,
+    ) -> None:
+        self.ops.append(f"deploy:{application or charm}")
+
+    def configure_application(self, model: str, application: str, values: dict[str, Any]) -> None:
+        self.ops.append(f"configure:{application}")
+
+    def offer(self, model: str, app: str, endpoints: Any, name: str) -> None:
+        self.ops.append(f"offer:{name}")
+
+    def consume(self, model: str, saas_url: str, alias: str | None = None) -> None:
+        self.ops.append(f"consume:{alias or saas_url}")
+
+    def integrate(self, model: str, target_1: Any, target_2: Any) -> None:
+        self.ops.append(f"integrate:{target_1}:{target_2}")
+
+    def wait_idle(
+        self,
+        model: str,
+        timeout: Any,
+        count: Any,
+        strict_timeout: bool = False,
+        applications: list[str] | None = None,
+    ) -> None:
+        pass
+
+
+def _write_bundle(tmp_path: Any, content: dict[str, Any], overlay: dict[str, Any] | None = None) -> str:
+    import yaml
+
+    bundle_file = tmp_path / "bundle.yaml"
+    docs = [content]
+    if overlay:
+        docs.append(overlay)
+    bundle_file.write_text("\n---\n".join(yaml.dump(d) for d in docs))
+    return str(bundle_file)
+
+
+class TestJujuClientDeployBundles:
+    def _client(self, backend: NullJujuBackend) -> JujuClient:
+        return JujuClient(logger=LoggerStub(), backend=backend)  # type: ignore[arg-type]
+
+    def test_fresh_deploy_creates_app(self, tmp_path: Any) -> None:
+        # GIVEN a bundle with one app that is not yet deployed
+        bundle = _write_bundle(tmp_path, {"applications": {"myapp": {"charm": "myapp"}}})
+        stub = DeployBundlesBackendStub()
+
+        self._client(stub).deploy_bundles({"ctrl:model": bundle})
+
+        assert "deploy:myapp" in stub.ops
+
+    def test_existing_app_not_redeployed(self, tmp_path: Any) -> None:
+        # GIVEN the app is already present
+        bundle = _write_bundle(tmp_path, {"applications": {"myapp": {"charm": "myapp"}}})
+        stub = DeployBundlesBackendStub(existing_apps=["myapp"])
+
+        self._client(stub).deploy_bundles({"ctrl:model": bundle})
+
+        assert "deploy:myapp" not in stub.ops
+
+    def test_existing_app_with_options_configures(self, tmp_path: Any) -> None:
+        # GIVEN the app exists but has options in the bundle
+        bundle = _write_bundle(tmp_path, {"applications": {"myapp": {"charm": "myapp", "options": {"key": "value"}}}})
+        stub = DeployBundlesBackendStub(existing_apps=["myapp"])
+
+        self._client(stub).deploy_bundles({"ctrl:model": bundle})
+
+        assert "configure:myapp" in stub.ops
+        assert "deploy:myapp" not in stub.ops
+
+    def test_fresh_offer_is_created(self, tmp_path: Any) -> None:
+        # GIVEN a bundle with an overlay defining an offer not yet in the model
+        bundle = _write_bundle(
+            tmp_path,
+            {"applications": {"svc": {}}},
+            overlay={"applications": {"svc": {"offers": {"svc-offer": {"endpoints": ["ep"]}}}}},
+        )
+        stub = DeployBundlesBackendStub()
+
+        self._client(stub).deploy_bundles({"ctrl:model": bundle})
+
+        assert "offer:svc-offer" in stub.ops
+
+    def test_existing_offer_not_recreated(self, tmp_path: Any) -> None:
+        # GIVEN the offer is already present
+        bundle = _write_bundle(
+            tmp_path,
+            {"applications": {"svc": {}}},
+            overlay={"applications": {"svc": {"offers": {"svc-offer": {"endpoints": ["ep"]}}}}},
+        )
+        stub = DeployBundlesBackendStub(existing_offers={"svc-offer"})
+
+        self._client(stub).deploy_bundles({"ctrl:model": bundle})
+
+        assert "offer:svc-offer" not in stub.ops
+
+    def test_saas_consumed_if_not_present(self, tmp_path: Any) -> None:
+        # GIVEN a bundle with a SAAS alias not yet consumed
+        bundle = _write_bundle(
+            tmp_path, {"applications": {}, "saas": {"remote-db": {"url": "admin/neighbor.db-offer"}}}
+        )
+        stub = DeployBundlesBackendStub()
+
+        self._client(stub).deploy_bundles({"ctrl:model": bundle})
+
+        assert "consume:remote-db" in stub.ops
+
+    def test_existing_saas_not_reconsumed(self, tmp_path: Any) -> None:
+        # GIVEN the SAAS alias is already consumed
+        bundle = _write_bundle(
+            tmp_path, {"applications": {}, "saas": {"remote-db": {"url": "admin/neighbor.db-offer"}}}
+        )
+        stub = DeployBundlesBackendStub(existing_saas=["remote-db"])
+
+        self._client(stub).deploy_bundles({"ctrl:model": bundle})
+
+        assert "consume:remote-db" not in stub.ops
+
+    def test_integration_created(self, tmp_path: Any) -> None:
+        # GIVEN a bundle with a relation between two apps
+        bundle = _write_bundle(
+            tmp_path,
+            {
+                "applications": {"db": {}, "app": {}},
+                "relations": [["db:db", "app:db"]],
+            },
+        )
+        stub = DeployBundlesBackendStub()
+
+        self._client(stub).deploy_bundles({"ctrl:model": bundle})
+
+        assert any("integrate" in op for op in stub.ops)
+
+    def test_existing_integration_not_recreated(self, tmp_path: Any) -> None:
+        # GIVEN the integration already exists
+        from juju.models import JujuIntegration, JujuIntegrationApplication
+
+        bundle = _write_bundle(
+            tmp_path,
+            {
+                "applications": {"db": {}, "app": {}},
+                "relations": [["db:db", "app:db"]],
+            },
+        )
+        existing = {
+            JujuIntegration(
+                JujuIntegrationApplication("db", "db"),
+                JujuIntegrationApplication("app", "db"),
+                interface="pgsql",
+            )
+        }
+        stub = DeployBundlesBackendStub(existing_integrations=existing)
+
+        self._client(stub).deploy_bundles({"ctrl:model": bundle})
+
+        assert not any("integrate" in op for op in stub.ops)
+
+    def test_cmr_two_phase_ordering(self, tmp_path: Any) -> None:
+        # GIVEN a neighbor model with an offer and a target model that consumes it
+        (tmp_path / "neighbor").mkdir()
+        neighbor_bundle = _write_bundle(
+            tmp_path / "neighbor",
+            {"applications": {"svc": {}}},
+            overlay={"applications": {"svc": {"offers": {"svc-offer": {"endpoints": ["ep"]}}}}},
+        )
+        target_bundle = _write_bundle(
+            tmp_path,
+            {"applications": {}, "saas": {"svc-offer": {"url": "admin/neighbor.svc-offer"}}},
+        )
+        all_ops: list[str] = []
+
+        class OrderingStub(DeployBundlesBackendStub):
+            def offer(self, model: str, app: str, endpoints: Any, name: str) -> None:
+                all_ops.append(f"offer:{name}")
+                super().offer(model, app, endpoints, name)
+
+            def consume(self, model: str, saas_url: str, alias: str | None = None) -> None:
+                all_ops.append(f"consume:{alias or saas_url}")
+                super().consume(model, saas_url, alias)
+
+        stub = OrderingStub()
+        self._client(stub).deploy_bundles({"ctrl:admin/neighbor": neighbor_bundle, "ctrl:admin/target": target_bundle})
+
+        assert "offer:svc-offer" in all_ops
+        assert "consume:svc-offer" in all_ops
+        assert all_ops.index("offer:svc-offer") < all_ops.index("consume:svc-offer")
+
+    def test_bundle_without_overlay_has_no_offers(self, tmp_path: Any) -> None:
+        # GIVEN a single-document bundle (no overlay)
+        bundle = _write_bundle(tmp_path, {"applications": {"myapp": {"charm": "myapp"}}})
+        stub = DeployBundlesBackendStub()
+
+        self._client(stub).deploy_bundles({"ctrl:model": bundle})
+
+        assert not any("offer" in op for op in stub.ops)
+
+    def test_nonexistent_bundle_raises(self, tmp_path: Any) -> None:
+        stub = DeployBundlesBackendStub()
+        with pytest.raises(ValueError, match="not found"):
+            self._client(stub).deploy_bundles({"ctrl:model": str(tmp_path / "nonexistent.yaml")})
+
+    def test_post_deploy_extension_called_for_each_model(self, tmp_path: Any) -> None:
+        # GIVEN two bundles and an extension
+        (tmp_path / "m1").mkdir()
+        (tmp_path / "m2").mkdir()
+        bundle1 = _write_bundle(tmp_path / "m1", {"applications": {}})
+        bundle2 = _write_bundle(tmp_path / "m2", {"applications": {}})
+
+        post_deploy_calls: list[str] = []
+
+        class TrackingExtension(JujuExtension):
+            def post_deploy(self, model: str) -> None:
+                post_deploy_calls.append(model)
+
+        stub = DeployBundlesBackendStub()
+        client = JujuClient(
+            logger=LoggerStub(),  # type: ignore[arg-type]
+            backend=stub,
+            extensions=[TrackingExtension()],
+        )
+        client.deploy_bundles({"ctrl:m1": bundle1, "ctrl:m2": bundle2})
+
+        assert sorted(post_deploy_calls) == ["ctrl:m1", "ctrl:m2"]

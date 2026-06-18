@@ -69,7 +69,7 @@ def _parse_bundle_spec(bundle_path: str) -> _BundleSpec:
             f"Bundle file '{bundle_path}': second YAML document (overlay) must be a mapping, "
             f"got {type(raw_overlay).__name__}."
         )
-    overlay: dict | None = raw_overlay
+    overlay: dict[str, Any] | None = raw_overlay
 
     apps: dict[str, _AppSpec] = {}
     for app_name, raw in (base.get("applications") or {}).items():

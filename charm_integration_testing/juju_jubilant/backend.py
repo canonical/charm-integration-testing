@@ -9,6 +9,7 @@ import shutil
 import tempfile
 import time
 import warnings
+from collections.abc import Iterable
 from datetime import datetime, timedelta
 from typing import Any, Callable
 
@@ -34,7 +35,6 @@ from tenacity import retry, stop_after_attempt, wait_fixed
 
 from validators.base.validator import ValidationResult
 
-from .bundle import _BundleSpec, _parse_bundle_spec
 from .client import JubilantClient
 from .structures import JujuExecTask
 from .wait import (
@@ -43,7 +43,6 @@ from .wait import (
     applications_are_removed,
     applications_are_scaled,
     applications_have_no_units,
-    bundle_applications_integrations_exist,
     integrations_are_removed,
     units_have_message,
 )
@@ -295,93 +294,6 @@ class JubilantBackend(JujuCmdBackend):
             name_or_id,
         )
 
-    def deploy_bundles(
-        self,
-        bundles: dict[str, str],
-        timeout: timedelta | None = None,
-        trust: bool = False,
-        force: bool = False,
-    ) -> None:
-        """Deploy one or more bundles across models with CMR-aware two-phase ordering.
-
-        Phase 1 (all models): deploy new applications, converge config for existing
-        applications, and create any missing offers.  No SAAS consumption or integrations
-        are established in this phase so that all offers exist before they are referenced.
-
-        Phase 2 (all models): consume remote offers (SAAS) and create integrations —
-        both local and cross-model.  Each operation is idempotent: already-consumed
-        SAAS aliases and already-present integrations are silently skipped.
-
-        After phase 2, each model is waited on until its bundle applications and
-        integrations are present in Juju status.
-
-        Args:
-            bundles: Mapping of model URI (e.g. ``"controller:admin/model"``) to the
-                path of the bundle YAML file to deploy into that model.
-            timeout: Per-model wait timeout forwarded to :meth:`wait`.
-            trust: Whether to grant cloud-credential trust to deployed applications.
-            force: Whether to bypass charm compatibility checks on deploy.
-        """
-        for bundle_path in bundles.values():
-            if not pathlib.Path(bundle_path).is_file():
-                raise ValueError(f"Bundle file '{bundle_path}' not found.")
-
-        bundle_specs: dict[str, _BundleSpec] = {
-            model: _parse_bundle_spec(bundle_path) for model, bundle_path in bundles.items()
-        }
-
-        # Phase 1: deploy apps + offers for every model.
-        for model, spec in bundle_specs.items():
-            juju = self.client.model(model)
-            current_status = self.status(model)
-
-            for app_name, app_spec in spec.apps.items():
-                if app_name not in current_status.apps:
-                    num_units = app_spec.scale if app_spec.scale is not None else (app_spec.num_units or 1)
-                    juju.deploy(
-                        charm=app_spec.charm,
-                        app=app_name,
-                        channel=app_spec.channel,
-                        revision=app_spec.revision,
-                        base=app_spec.base,
-                        config=app_spec.options or None,
-                        trust=trust or app_spec.trust,
-                        force=force,
-                        resources=app_spec.resources or None,
-                        num_units=num_units,
-                    )
-                elif app_spec.options:
-                    # App already exists — converge its configuration.
-                    self.configure_application(model, app_name, app_spec.options)
-
-            for offer_name, offer_spec in spec.offers.items():
-                if offer_name not in current_status.offers:
-                    juju.offer(offer_spec.app, endpoint=offer_spec.endpoints, name=offer_name)
-
-        # Phase 2: consume SAAS and create integrations for every model.
-        for model, spec in bundle_specs.items():
-            juju = self.client.model(model)
-            current_status = self.status(model)
-            existing_integrations = self.list_integrations(model)
-            existing_integration_pairs = {frozenset({i.provider, i.requirer}) for i in existing_integrations}
-
-            for saas_alias, saas_url in spec.saas.items():
-                if saas_alias not in current_status.app_endpoints:
-                    juju.consume(saas_url, alias=saas_alias)
-
-            for ep1, ep2 in spec.relations:
-                ia1 = JujuIntegrationApplication.from_str(ep1)
-                ia2 = JujuIntegrationApplication.from_str(ep2)
-                if frozenset({ia1, ia2}) not in existing_integration_pairs:
-                    juju.integrate(ep1, ep2)
-
-        for model, bundle_path in bundles.items():
-
-            def _ready(status: jubilant.Status, bp: str = bundle_path) -> tuple[bool, JujuWaitState]:
-                return bundle_applications_integrations_exist(status, bp)
-
-            self.wait(model, _ready, timeout=timeout)
-
     def deploy_bundle_file(
         self,
         model: str,
@@ -390,23 +302,44 @@ class JubilantBackend(JujuCmdBackend):
         trust: bool = False,
         force: bool = False,
     ) -> None:
-        self.deploy_bundles({model: bundle}, timeout=timeout, trust=trust, force=force)
+        raise NotImplementedError(
+            "deploy_bundle_file is not supported in JubilantBackend; use JujuClient.deploy_bundles instead."
+        )
+
+    def offer(self, model: str, app: str, endpoints: Iterable[str], name: str) -> None:
+        self.client.model(model).offer(app, endpoint=endpoints, name=name)
+
+    def consume(self, model: str, saas_url: str, alias: str | None = None) -> None:
+        self.client.model(model).consume(saas_url, alias=alias)
+
+    def list_offers(self, model: str) -> set[str]:
+        return set(self.status(model).offers.keys())
 
     def deploy_application(
         self,
         model: str,
         charm: str,
         application: str | None = None,
+        channel: str | None = None,
+        revision: int | None = None,
+        base: str | None = None,
         config: dict[str, Any] | None = None,
         trust: bool = False,
         force: bool = False,
+        resources: dict[str, str] | None = None,
+        num_units: int | None = None,
     ) -> None:
         self.client.model(model).deploy(
             charm=charm,
             app=application,
+            channel=channel,
+            revision=revision,
+            base=base,
             config=config,
             trust=trust,
             force=force,
+            resources=resources,
+            num_units=num_units if num_units is not None else 1,
         )
 
     def configure_application(self, model: str, application: str, values: dict[str, str]) -> None:

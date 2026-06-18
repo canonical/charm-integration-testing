@@ -3,7 +3,7 @@
 
 import warnings
 from abc import ABC, abstractmethod
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import field
 from datetime import datetime, timedelta
 from functools import wraps
@@ -212,13 +212,15 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def deploy_bundles(
-        self,
-        bundles: dict[str, str],
-        timeout: timedelta | None = None,
-        trust: bool = False,
-        force: bool = False,
-    ) -> None:
+    def offer(self, model: str, app: str, endpoints: Iterable[str], name: str) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def consume(self, model: str, saas_url: str, alias: str | None = None) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_offers(self, model: str) -> set[str]:
         raise NotImplementedError
 
     @abstractmethod
@@ -301,9 +303,14 @@ class JujuBackend(ABC):
         model: str,
         charm: str,
         application: str | None = None,
+        channel: str | None = None,
+        revision: int | None = None,
+        base: str | None = None,
         config: dict[str, Any] | None = None,
         trust: bool = False,
         force: bool = False,
+        resources: dict[str, str] | None = None,
+        num_units: int | None = None,
     ) -> None:
         raise NotImplementedError
 
