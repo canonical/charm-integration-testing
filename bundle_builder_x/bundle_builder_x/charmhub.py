@@ -203,6 +203,10 @@ class CharmhubClient:
             ).items():
                 charms[charm] = platforms
 
+            # Remove charms with delisting overrides
+            delisted = self.overrides_client.get_charm_delisting_overrides()
+            charms = {charm: platforms for charm, platforms in charms.items() if charm not in delisted}
+
             # Add platform overrides
             for charm, platforms in self._find_charms_platform_overrides(set(charms.keys())).items():
                 charms[charm] = platforms
