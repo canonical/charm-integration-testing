@@ -75,8 +75,9 @@ jobs:
         env:
           KUBECONFIG_SECRET_NAME: ${{ steps.env_info.outputs.kubeconfig-secret }}
           NOVARC_SECRET_NAME: ${{ steps.env_info.outputs.novarc-secret }}
-          PROD_SQA_KUBECONFIG: ${{ secrets.PROD_SQA_KUBECONFIG }}
           STG_SQA_KUBECONFIG: ${{ secrets.STG_SQA_KUBECONFIG }}
+          PROD_SQA_KUBECONFIG: ${{ secrets.PROD_SQA_KUBECONFIG }}
+          PROD_SQA_NOVARC: ${{ secrets.PROD_SQA_NOVARC }}
           PROD_PS7_KUBECONFIG: ${{ secrets.PROD_PS7_KUBECONFIG }}
           PROD_PS7_NOVARC: ${{ secrets.PROD_PS7_NOVARC }}
         run: |
