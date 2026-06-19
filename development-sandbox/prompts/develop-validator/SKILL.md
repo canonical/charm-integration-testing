@@ -51,7 +51,7 @@ under `validators/<name>/` with passing `dev-validate` output.
 
 8. Run and iterate:
    ```
-   /project/validator-development-sandbox/bin/dev-validate.py --model <interface>-test --app <requirer> --reinstall
+   /project/development-sandbox/bin/dev-validate.py --model <interface>-test --app <requirer> --reinstall
    ```
    Read the JSON output. Fix checks that fail. Repeat until all PASS.
 
@@ -103,31 +103,31 @@ under `validators/<name>/` with passing `dev-validate` output.
     **highest level the validator supports** (check `validate()` in `validator.py`
     -- use `deep` if implemented, otherwise `simple`):
     ```
-    /project/validator-development-sandbox/bin/verify-validator.sh \
+    /project/development-sandbox/bin/verify-validator.sh \
       --model <interface>-test \
       --app <requirer> \
       --provider <provider> \
       --validator <name> \
       --level <highest-supported-level> \
-      --output-dir /project/validator-development-sandbox/reports/<name>-$(date +%Y%m%d-%H%M%S)
+      --output-dir /project/development-sandbox/reports/<name>-$(date +%Y%m%d-%H%M%S)
     ```
     If the backend is a raw Kubernetes deployment (not a Juju app — e.g. MinIO for `s3`),
     the default `juju scale-application` down step won't break connectivity because the
     Juju databag retains credentials even at 0 units. In that case use `--down-cmd` and
     `--restore-cmd` to scale the k8s deployment directly:
     ```
-    /project/validator-development-sandbox/bin/verify-validator.sh \
+    /project/development-sandbox/bin/verify-validator.sh \
       --model <interface>-test \
       --app <requirer> \
       --provider <provider> \
       --validator <name> \
       --level <highest-supported-level> \
-      --output-dir /project/validator-development-sandbox/reports/<name>-$(date +%Y%m%d-%H%M%S) \
+      --output-dir /project/development-sandbox/reports/<name>-$(date +%Y%m%d-%H%M%S) \
       --down-cmd "sudo k8s kubectl scale deployment <backend> -n <interface>-test --replicas=0 && sleep 5" \
       --restore-cmd "sudo k8s kubectl scale deployment <backend> -n <interface>-test --replicas=1 && sleep 15"
     ```
     The report is written to the `--output-dir` and persists on the host at
-    `validator-development-sandbox/reports/`. Include the `summary.txt` and `report.json`
+    `development-sandbox/reports/`. Include the `summary.txt` and `report.json`
     paths in your completion summary.
 
 12. When done, destroy the dedicated model:
