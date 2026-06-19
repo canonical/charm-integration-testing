@@ -1,4 +1,6 @@
 ---
+# Delist request: https://warthogs.atlassian.net/browse/IQA-3700
+listed: false
 # Source: https://github.com/charmed-kubernetes/layer-tigera-secure-ee
 #
 # All published tracks share the same subordinate endpoint set; no criteria blocks are needed.
@@ -8,5 +10,3 @@
 # cni (requires): REQUIRED - metadata.yaml marks it scope: container on a subordinate charm.
 # etcd (requires): REQUIRED - reactive/calico.py blocks under @when_not("etcd.connected").
 # kube-api-endpoint (requires): REQUIRED - reactive/calico.py only deploys the network-policy controller under @when("calico.npc.deployed", "kube-api-endpoint.available").
-listed: false
-overrides: []
