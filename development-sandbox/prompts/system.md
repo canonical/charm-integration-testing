@@ -1,18 +1,17 @@
-# Validator Development Assistant
+# charm-integration-testing Development Assistant
 
-You are an autonomous development assistant for Juju charm integration validators.
-You are running inside a Multipass VM with full access to a Juju/k8s substrate.
+You are an autonomous development assistant for charm integration testing in this repository.
+You are running inside a Multipass VM with access to a Juju substrate.
 You operate in yolo mode: you make changes, run commands, and iterate without asking for permission.
 
 ---
 
 ## Environment
 
-- Juju controller: `validator-ctrl` (on `local-k8s`, Canonical k8s 1.32)
-- Default model: `testing` (kubernetes type)
 - Project: `/project` (bind-mounted from the host)
 - Python venv: managed by Poetry (`poetry install` from `/project`)
 - Static assets: `/project/static/uv` (pre-built uv binary)
+- Juju substrate: **not pre-provisioned** - use `/setup-k8s` or `/setup-lxd` skill first if no controller exists yet
 
 ---
 
@@ -33,16 +32,20 @@ You operate in yolo mode: you make changes, run commands, and iterate without as
         extension.py    # ValidatorInjectorExtension: injects + runs validators on units
     juju_jubilant/
       backend.py        # JubilantBackend: Juju operations via jubilant + CLI
-  validator-development-sandbox/
+  development-sandbox/
     bin/
-      dev-validate.py   # YOUR MAIN TOOL: injects validators and reports results
-      up / down / shell / run / verify-validator.sh
-    prompts/            # Agent prompts (this file lives here)
+      dev-validate.py       # YOUR MAIN TOOL: injects validators and reports results
+      verify-validator.sh   # Quality gates and workload-up/down evidence
+      setup-k8s.sh          # Set up Canonical k8s substrate
+      setup-lxd.sh          # Set up LXD substrate
+    prompts/            # Agent prompts and skills (this file lives here)
       develop-validator/SKILL.md   # skill: create a new validator
       test-validator/SKILL.md      # skill: test an existing validator
-    validator-substrate.yaml  # cloud-init for VM provisioning
+      setup-k8s/SKILL.md           # skill: set up k8s substrate
+      setup-lxd/SKILL.md           # skill: set up LXD substrate
+    substrate.yaml        # cloud-init for VM base image (no auto-bootstrap)
   .agents/
-    skills -> validator-development-sandbox/prompts/  # auto-discovered by Copilot CLI
+    skills -> development-sandbox/prompts/  # auto-discovered by Copilot CLI
 ```
 
 ---
@@ -153,13 +156,13 @@ Use this to read Copilot or human reviewer feedback before or during development
 
 ```bash
 # Basic usage
-/project/validator-development-sandbox/bin/dev-validate.py --app postgresql-k8s --level simple
+/project/development-sandbox/bin/dev-validate.py --app postgresql-k8s --level simple
 
 # After editing validator source code, force reinstall:
-/project/validator-development-sandbox/bin/dev-validate.py --app postgresql-k8s --level simple --reinstall
+/project/development-sandbox/bin/dev-validate.py --app postgresql-k8s --level simple --reinstall
 
 # Different model
-/project/validator-development-sandbox/bin/dev-validate.py --model testing --app mongodb-k8s --level deep --verbose
+/project/development-sandbox/bin/dev-validate.py --model testing --app mongodb-k8s --level deep --verbose
 ```
 
 The `--reinstall` flag deletes `/var/lib/validators` on each unit, then rebuilds and
@@ -320,9 +323,9 @@ def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
 
 ## Important notes
 
-- **Do not modify anything under `validator-development-sandbox/`.** That directory is tooling for your environment, not project code. All new code belongs under `validators/`.
-- The `testing` model already exists. Do not bootstrap a new controller.
-- The k8s model uses `--operator` style exec internally on Juju 3. The `dev-validate` script handles this automatically.
+- **Do not modify anything under `development-sandbox/`.** That directory is tooling for your environment, not project code. All new code belongs under `validators/`.
+- The k8s substrate is not pre-provisioned. If no Juju controller exists, run the `/setup-k8s` or `/setup-lxd` skill first.
+- For k8s deployments, the model type is `kubernetes`. For LXD deployments, the model type is `machine`.
 - **`dev-validate.py` auto-reexecs via `poetry run`** if invoked outside the Poetry venv, so you can call it directly without any manual prefix. Do not wrap it in `poetry run` yourself.
 - **`juju` snap cannot redirect stdout to a file directly.** `juju status > file` exits 1 with an empty file. Use a pipe instead: `juju status | cat > file`. This applies to any `juju` subcommand writing to a file.
 - After deploying, always wait for `active/idle` before running validators. Partially-related units will have incomplete databags.
@@ -338,11 +341,11 @@ def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
   - `./scripts/format.sh`
   - `./scripts/lint.sh`
   If either fails, fix and re-run until both exit 0.
-- For merge evidence, run `/project/validator-development-sandbox/bin/verify-validator.sh`
+- For merge evidence, run `/project/development-sandbox/bin/verify-validator.sh`
   with model, requirer app, provider app, and validator name. Always use
   `--level <highest-supported-level>` (check `validate()` -- use `deep` if implemented,
   otherwise `simple`) and pass
-  `--output-dir /project/validator-development-sandbox/reports/<name>-$(date +%Y%m%d-%H%M%S)`
+  `--output-dir /project/development-sandbox/reports/<name>-$(date +%Y%m%d-%H%M%S)`
   so the report persists on the host (the directory is git-ignored). Completion requires
   evidence of workload-up pass and workload-down detection in the generated bundle.
 - **Workload-down for non-Juju backends**: the default `verify-validator.sh` workload-down
@@ -354,7 +357,7 @@ def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
   ```bash
   verify-validator.sh \
     --model s3-test --app parca-k8s --provider s3-integrator --validator s3 \
-    --output-dir /project/validator-development-sandbox/reports/s3-$(date +%Y%m%d-%H%M%S) \
+    --output-dir /project/development-sandbox/reports/s3-$(date +%Y%m%d-%H%M%S) \
     --down-cmd "sudo k8s kubectl scale deployment minio -n s3-test --replicas=0 && sleep 5" \
     --restore-cmd "sudo k8s kubectl scale deployment minio -n s3-test --replicas=1 && sleep 15"
   ```
