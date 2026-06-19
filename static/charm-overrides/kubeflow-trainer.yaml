@@ -1,0 +1,44 @@
+---
+# Source: https://github.com/canonical/kubeflow-trainer-operator
+#
+# Track 2.1/stable only has dashboard-links (requires) and grafana-dashboard,
+# metrics-endpoint (provides), all missing optional: true.
+# Edge tracks additionally add service-mesh, require-cmr-mesh (requires) and
+# provide-cmr-mesh (provides), also missing optional: true.
+#
+# dashboard-links (requires): optional - adds documentation links to Kubeflow dashboard
+#   sidebar; _on_event reaches ActiveStatus without it (charm.py), secondary purpose
+# service-mesh (requires): optional - Istio service mesh, secondary
+# require-cmr-mesh (requires): optional - CMR mesh cross-model access, secondary
+# grafana-dashboard (provides): optional - observability hook, not primary purpose
+# metrics-endpoint (provides): optional - observability hook, not primary purpose
+# provide-cmr-mesh (provides): optional - CMR mesh consumer hook, secondary
+overrides:
+  - criteria:
+      - any_of:
+          - track: '2.1'
+            risk: edge
+          - track: latest
+            risk: edge
+    requires:
+      dashboard-links:
+        optional: true
+      require-cmr-mesh:
+        optional: true
+      service-mesh:
+        optional: true
+    provides:
+      grafana-dashboard:
+        optional: true
+      metrics-endpoint:
+        optional: true
+      provide-cmr-mesh:
+        optional: true
+  - requires:
+      dashboard-links:
+        optional: true
+    provides:
+      grafana-dashboard:
+        optional: true
+      metrics-endpoint:
+        optional: true
