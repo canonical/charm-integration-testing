@@ -1,6 +1,6 @@
 ---
-name: Clean up K8s environments
-run-name: Cleaning up ${{ inputs.environment }} K8s environment
+name: Cleaning up environment
+run-name: Cleaning up ${{ inputs.environment }} environment
 concurrency:
   group: ${{ github.workflow }}-${{ inputs.environment }}
   cancel-in-progress: true
@@ -12,8 +12,12 @@ on:
       environment:
         description: Environment to clean.
         type: choice
-        default: staging
-        options: [staging, production]
+        default: ps6-sqa-stg_charm_qa_kubernetes-1
+        options:
+          - ps6-sqa-stg_charm_qa_kubernetes-1
+          - ps6-sqa-prod_charm_qa_kubernetes-1
+          - ps7-sqa-prod_charm_qa_kubernetes-1
+          - ps7-sqa-prod_charm_qa_openstack-1
       age_threshold:
         description: Age threshold in minutes (resources older than this will be deleted)
         type: number
@@ -33,35 +37,76 @@ on:
         required: true
       STG_SQA_KUBECONFIG:
         required: true
+      PROD_PS7_KUBECONFIG:
+        required: true
+      PROD_PS7_NOVARC:
+        required: true
 jobs:
-  cleanup-k8s:
-    name: Clean up any leftover K8s artifacts from old Charm QA environments
+  cleanup-environment:
+    name: Clean up any leftover artifacts from old Charm QA environments
     runs-on: [self-hosted-linux-amd64-noble-private-endpoint-small]
     env:
       AGE_THRESHOLD: ${{ inputs.age_threshold }}
     steps:
+
+      ##################################################################################
+      # _____ ______ _______ _    _ _____  
+      #  / ____|  ____|__   __| |  | |  __ \ 
+      # | (___ | |__     | |  | |  | | |__) |
+      #  \___ \|  __|    | |  | |  | |  ___/ 
+      #  ____) | |____   | |  | |__| | |     
+      # |_____/|______|  |_|   \____/|_|     
+      #                                      
       - name: Clone Repo
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
+      - name: Get environment info
+        id: env_info
+        uses: ./.github/actions/get-environment-info
+        with:
+          environment_name: ${{ inputs.environment }}
+      - name: Resolve credentials
+        id: creds
+        shell: bash
+        env:
+          KUBECONFIG_SECRET_NAME: ${{ steps.env_info.outputs.kubeconfig-secret }}
+          NOVARC_SECRET_NAME: ${{ steps.env_info.outputs.novarc-secret }}
+          PROD_SQA_KUBECONFIG: ${{ secrets.PROD_SQA_KUBECONFIG }}
+          STG_SQA_KUBECONFIG: ${{ secrets.STG_SQA_KUBECONFIG }}
+          PROD_PS7_KUBECONFIG: ${{ secrets.PROD_PS7_KUBECONFIG }}
+          PROD_PS7_NOVARC: ${{ secrets.PROD_PS7_NOVARC }}
+        run: |
+          if [[ -n "${KUBECONFIG_SECRET_NAME}" ]]; then
+            echo "kubernetes=true" >> $GITHUB_OUTPUT
+            echo "${!KUBECONFIG_SECRET_NAME}" > "kubeconfig"
+            echo "KUBECONFIG=$(realpath kubeconfig)" >> $GITHUB_ENV
+          fi
+          if [[ -n "${NOVARC_SECRET_NAME}" ]]; then
+            echo "openstack=true" >> $GITHUB_OUTPUT
+            # Extract environment variables from RC file (handles both "export VAR=..." and "VAR=..." formats)
+            # Mask each secret value to prevent exposure in logs
+            echo "${!NOVARC_SECRET_NAME}" | grep -E '^(export )?OS_' | sed 's/^export //' | while IFS='=' read -r key value; do
+              echo "::add-mask::$value"
+              echo "$key=$value" >> $GITHUB_ENV
+            done
+          fi
+
+      ##################################################################################
+      #  _  ___    _ ____  ______ _____  _   _ ______ _______ ______  _____ 
+      # | |/ / |  | |  _ \|  ____|  __ \| \ | |  ____|__   __|  ____|/ ____|
+      # | ' /| |  | | |_) | |__  | |__) |  \| | |__     | |  | |__  | (___  
+      # |  < | |  | |  _ <|  __| |  _  /| . ` |  __|    | |  |  __|  \___ \ 
+      # | . \| |__| | |_) | |____| | \ \| |\  | |____   | |  | |____ ____) |
+      # |_|\_\\____/|____/|______|_|  \_\_| \_|______|  |_|  |______|_____/ 
+      #
       - name: Install kubectl
+        if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
         uses: ./.github/actions/install-with-retry
         with:
           command: sudo snap install kubectl --classic
-      - name: Setup kube config
-        shell: bash
-        env:
-          environment: ${{ inputs.environment }}
-          production_kubeconfig: ${{ secrets.PROD_SQA_KUBECONFIG }}
-          staging_kubeconfig: ${{ secrets.STG_SQA_KUBECONFIG }}
-        run: |
-          case "$environment" in
-            "production") echo "$production_kubeconfig" > "kubeconfig" ;;
-            "staging") echo "$staging_kubeconfig" > "kubeconfig" ;;
-            *) echo "Unknown environment '$environment'"; exit 1 ;;
-          esac
-          echo "KUBECONFIG=$(realpath kubeconfig)" >> $GITHUB_ENV
       - name: Remove orphaned rawfile PV directories from nodes
+        if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -134,6 +179,7 @@ jobs:
             kubectl delete "pod/$pod_name" --ignore-not-found=true --timeout=2m
           done <<< "$NODES"
       - name: Find all model and controller namespaces older than an hour
+        if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
         shell: bash
         run: |
           kubectl get namespaces --output json | jq --raw-output --argjson age "$AGE_THRESHOLD" '
@@ -143,6 +189,7 @@ jobs:
             .kind + "/" + .metadata.name
           ' >> resources_to_remove.txt
       - name: Find all webhook configurations older than an hour
+        if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
         shell: bash
         run: |
           kubectl get validatingwebhookconfigurations,mutatingwebhookconfigurations --output json | jq --raw-output --argjson age "$AGE_THRESHOLD" '
@@ -151,6 +198,7 @@ jobs:
             .kind + "/" + .metadata.name
           ' >> resources_to_remove.txt
       - name: Find all juju-credential service accounts older than an hour
+        if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
         shell: bash
         run: |
           kubectl get serviceaccounts --all-namespaces --output json | jq --raw-output --argjson age "$AGE_THRESHOLD" '
@@ -160,6 +208,7 @@ jobs:
             .metadata.namespace + ":" + .kind + "/" + .metadata.name
           ' >> resources_to_remove.txt
       - name: Find all juju-credential secrets older than an hour
+        if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
         shell: bash
         run: |
           kubectl get secrets --all-namespaces --output json | jq --raw-output --argjson age "$AGE_THRESHOLD" '
@@ -170,6 +219,7 @@ jobs:
             .metadata.namespace + ":" + .kind + "/" + .metadata.name
           ' >> resources_to_remove.txt
       - name: Find Released rawfile PersistentVolumes
+        if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
         shell: bash
         run: |
           # Released rawfile PVs should be cleaned up by the CSI driver automatically, but
@@ -184,7 +234,7 @@ jobs:
           ' >> resources_to_remove.txt
       - name: Remove all resources
         shell: bash
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
         run: |-
           # Group resources by namespace
           declare -A namespaced_resources
@@ -209,3 +259,83 @@ jobs:
             kubectl delete ${namespaced_resources[$namespace]} --namespace="$namespace" --timeout=25m &
           done
           wait
+
+      ##################################################################################
+      #   ____  _____  ______ _   _  _____ _______       _____ _  __
+      #  / __ \|  __ \|  ____| \ | |/ ____|__   __|/\   / ____| |/ /
+      # | |  | | |__) | |__  |  \| | (___    | |  /  \ | |    | ' / 
+      # | |  | |  ___/|  __| | . ` |\___ \   | | / /\ \| |    |  <  
+      # | |__| | |    | |____| |\  |____) |  | |/ ____ \ |____| . \ 
+      #  \____/|_|    |______|_| \_|_____/   |_/_/    \_\_____|_|\_\
+      #
+      - name: Install openstack client
+        if: ${{ !cancelled() && steps.creds.outputs.openstack == 'true' }}
+        uses: ./.github/actions/install-with-retry
+        with:
+          command: sudo snap install openstackclients
+      - name: Find and delete servers older than age threshold
+        if: ${{ !cancelled() && steps.creds.outputs.openstack == 'true' }}
+        shell: bash
+        run: |
+          openstack server list --format json | jq --raw-output '.[].ID' | while read -r server_id; do
+            created=$(openstack server show "$server_id" --format json | jq -r '.created')
+            age_minutes=$(( ($(date +%s) - $(date -d "$created" +%s)) / 60 ))
+            if [[ $age_minutes -gt $AGE_THRESHOLD ]]; then
+              echo "Deleting server: $server_id (age: $age_minutes minutes)"
+              openstack server delete "$server_id" || true
+            fi
+          done
+      - name: Find and delete security groups older than age threshold
+        if: ${{ !cancelled() && steps.creds.outputs.openstack == 'true' }}
+        shell: bash
+        run: |
+          openstack security group list --format json | jq --raw-output '.[] | select(.Name != "default") | .ID' | while read -r sg_id; do
+            created=$(openstack security group show "$sg_id" --format json | jq -r '.created_at')
+            age_minutes=$(( ($(date +%s) - $(date -d "$created" +%s)) / 60 ))
+            if [[ $age_minutes -gt $AGE_THRESHOLD ]]; then
+              echo "Deleting security group: $sg_id (age: $age_minutes minutes)"
+              openstack security group delete "$sg_id" || true
+            fi
+          done
+      - name: Find and delete load balancers older than age threshold
+        if: ${{ !cancelled() && steps.creds.outputs.openstack == 'true' }}
+        shell: bash
+        run: |
+          openstack loadbalancer list --format json | jq --raw-output '.[].id' | while read -r lb_id; do
+            created=$(openstack loadbalancer show "$lb_id" --format json | jq -r '.created_at')
+            age_minutes=$(( ($(date +%s) - $(date -d "$created" +%s)) / 60 ))
+            if [[ $age_minutes -gt $AGE_THRESHOLD ]]; then
+              echo "Deleting load balancer: $lb_id (age: $age_minutes minutes)"
+              # Delete pools first
+              openstack loadbalancer pool list --loadbalancer "$lb_id" --format json | jq --raw-output '.[].id' | while read -r pool_id; do
+                echo "  Deleting pool: $pool_id"
+                openstack loadbalancer pool delete "$pool_id" || true
+              done
+              # Then delete the load balancer
+              openstack loadbalancer delete "$lb_id" || true
+            fi
+          done
+      - name: Find and delete volumes older than age threshold
+        if: ${{ !cancelled() && steps.creds.outputs.openstack == 'true' }}
+        shell: bash
+        run: |
+          openstack volume list --format json | jq --raw-output '.[].ID' | while read -r volume_id; do
+            created=$(openstack volume show "$volume_id" --format json | jq -r '.created_at')
+            age_minutes=$(( ($(date +%s) - $(date -d "$created" +%s)) / 60 ))
+            if [[ $age_minutes -gt $AGE_THRESHOLD ]]; then
+              echo "Deleting volume: $volume_id (age: $age_minutes minutes)"
+              openstack volume delete "$volume_id" || true
+            fi
+          done
+      - name: Find and delete floating IPs older than age threshold
+        if: ${{ !cancelled() && steps.creds.outputs.openstack == 'true' }}
+        shell: bash
+        run: |-
+          openstack floating ip list --format json | jq --raw-output '.[].ID' | while read -r fip_id; do
+            created=$(openstack floating ip show "$fip_id" --format json | jq -r '.created_at')
+            age_minutes=$(( ($(date +%s) - $(date -d "$created" +%s)) / 60 ))
+            if [[ $age_minutes -gt $AGE_THRESHOLD ]]; then
+              echo "Deleting floating IP: $fip_id (age: $age_minutes minutes)"
+              openstack floating ip delete "$fip_id" || true
+            fi
+          done
