@@ -16,6 +16,7 @@ on:
         options:
           - ps6-sqa-stg_charm_qa_kubernetes-1
           - ps6-sqa-prod_charm_qa_kubernetes-1
+          - ps6-sqa-prod_charm_qa_openstack-1
           - ps7-sqa-prod_charm_qa_kubernetes-1
           - ps7-sqa-prod_charm_qa_openstack-1
       age_threshold:
@@ -36,6 +37,8 @@ on:
       PROD_SQA_KUBECONFIG:
         required: true
       STG_SQA_KUBECONFIG:
+        required: true
+      PROD_SQA_NOVARC:
         required: true
       PROD_PS7_KUBECONFIG:
         required: true
@@ -178,7 +181,7 @@ jobs:
             kubectl logs "pod/$pod_name" || echo "  Warning: could not retrieve logs for $pod_name"
             kubectl delete "pod/$pod_name" --ignore-not-found=true --timeout=2m
           done <<< "$NODES"
-      - name: Find all model and controller namespaces older than an hour
+      - name: Find all model and controller namespaces older than the age threshold
         if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
         shell: bash
         run: |
@@ -188,7 +191,7 @@ jobs:
             select((now - (.metadata.creationTimestamp | fromdateiso8601)) > ($age * 60)) |
             .kind + "/" + .metadata.name
           ' >> resources_to_remove.txt
-      - name: Find all webhook configurations older than an hour
+      - name: Find all webhook configurations older than the age threshold
         if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
         shell: bash
         run: |
@@ -197,7 +200,7 @@ jobs:
             select((now - (.metadata.creationTimestamp | fromdateiso8601)) > ($age * 60)) |
             .kind + "/" + .metadata.name
           ' >> resources_to_remove.txt
-      - name: Find all juju-credential service accounts older than an hour
+      - name: Find all juju-credential service accounts older than the age threshold
         if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
         shell: bash
         run: |
@@ -207,7 +210,7 @@ jobs:
             select((now - (.metadata.creationTimestamp | fromdateiso8601)) > ($age * 60)) |
             .metadata.namespace + ":" + .kind + "/" + .metadata.name
           ' >> resources_to_remove.txt
-      - name: Find all juju-credential secrets older than an hour
+      - name: Find all juju-credential secrets older than the age threshold
         if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
         shell: bash
         run: |
