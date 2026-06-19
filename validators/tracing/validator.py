@@ -18,13 +18,20 @@ import socket
 from typing import Any, Literal
 from urllib.parse import urlparse
 
-from validators.base import BaseValidator, ValidationCheck, ValidationLevel, ValidationResult
+from validators.base import (
+    BaseValidator,
+    ValidationCheck,
+    ValidationLevel,
+    ValidationResult,
+)
 
 
 class TracingValidator(BaseValidator):
     def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
+        if self.role != "requires":
+            return self._skipped_result_due_to_role(level, self.role)
         if level not in ("simple", "deep"):
-            return self._skipped_result(level)
+            return self._skipped_result_due_to_level(level)
 
         if self.relation.app is None:
             return self._error_result(level, f"No remote application on relation '{self.endpoint}'.")
@@ -42,33 +49,6 @@ class TracingValidator(BaseValidator):
 
         status: Literal["PASS", "FAIL"] = "PASS" if all(c.passed for c in checks) else "FAIL"
         return self._make_result(status, level, checks)
-
-    # ------------------------------------------------------------------
-    # Result helpers
-    # ------------------------------------------------------------------
-
-    def _make_result(
-        self,
-        status: Literal["PASS", "FAIL", "ERROR"],
-        level: ValidationLevel,
-        checks: list[ValidationCheck],
-        error: str | None = None,
-    ) -> ValidationResult:
-        return ValidationResult(
-            status=status,
-            endpoint=self.endpoint,
-            interface=self.interface,
-            level=level,
-            relation_id=self.relation_id,
-            checks=checks,
-            error=error,
-        )
-
-    def _error_result(self, level: ValidationLevel, error: str) -> ValidationResult:
-        return self._make_result("ERROR", level, [], error)
-
-    def _fail_result(self, level: ValidationLevel, checks: list[ValidationCheck]) -> ValidationResult:
-        return self._make_result("FAIL", level, checks)
 
 
 # ---------------------------------------------------------------------------

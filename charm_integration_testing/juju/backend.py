@@ -7,13 +7,15 @@ from collections.abc import Callable
 from dataclasses import field
 from datetime import datetime, timedelta
 from functools import wraps
+from pathlib import Path
 from typing import Any, ParamSpec, TypeVar
 
 from pydantic.dataclasses import dataclass
 
 from validators.base.validator import ValidationResult
 
-from .models import JujuApplicationInfo, JujuIntegration, JujuIntegrationApplication
+from .models import JujuApplicationInfo, JujuConsumedOfferInfo, JujuIntegration, JujuIntegrationApplication
+from .version import JujuVersion
 
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
@@ -151,6 +153,10 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def list_consumed_offers(self, model: str) -> dict[str, JujuConsumedOfferInfo]:
+        raise NotImplementedError
+
+    @abstractmethod
     def list_integrations(self, model: str) -> set[JujuIntegration]:
         raise NotImplementedError
 
@@ -206,7 +212,9 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def deploy_bundle_file(self, model: str, bundle: str) -> None:
+    def deploy_bundle_file(
+        self, model: str, bundle: str, timeout: timedelta | None = None, trust: bool = False, force: bool = False
+    ) -> None:
         raise NotImplementedError
 
     @abstractmethod
@@ -285,6 +293,7 @@ class JujuBackend(ABC):
         application: str | None = None,
         config: dict[str, Any] | None = None,
         trust: bool = False,
+        force: bool = False,
     ) -> None:
         raise NotImplementedError
 
@@ -297,7 +306,15 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def bootstrap_controller(self, cloud: str, controller: str, controller_constraints: dict[str, str]) -> None:
+    def bootstrap_controller(
+        self,
+        cloud: str,
+        controller: str,
+        controller_constraints: dict[str, str],
+        bootstrap_configuration: dict[str, str],
+        metadata_source: Path | None = None,
+        agent_version: str | None = None,
+    ) -> None:
         raise NotImplementedError
 
     @abstractmethod
@@ -321,7 +338,11 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def version(self, model: str) -> str:
+    def version(self, model: str) -> JujuVersion:
+        raise NotImplementedError
+
+    @abstractmethod
+    def cli_version(self) -> JujuVersion:
         raise NotImplementedError
 
     @abstractmethod
@@ -337,6 +358,14 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def upgrade_controller(self, controller: str, agent_version: str | None = None) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def upgrade_model(self, model: str, agent_version: str | None = None) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
     def wait_for_application_revision(
         self,
         application: str,
@@ -344,4 +373,8 @@ class JujuBackend(ABC):
         timeout: timedelta | None,
         model: str = "default",
     ) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def debug_log(self, model: str) -> str:
         raise NotImplementedError

@@ -1,0 +1,19 @@
+---
+# Override for mysql-router
+# Source: https://github.com/canonical/mysql-operator (mysql-router charm)
+#
+# Subordinate charm that proxies MySQL shared-db connections to a mysql-innodb-cluster.
+# It attaches to principals via shared-db (provides, scope: container).
+#
+# shared-db (provides, scope: container) - REQUIRED: primary purpose; principals connect here.
+# db-router (requires) - REQUIRED: connects to the mysql-innodb-cluster.
+#
+# juju-info (requires, scope: container) - OPTIONAL: generic subordinate attachment point;
+#   redundant because mysql-router already co-locates with principals via shared-db.
+#   Without this override the solver spuriously attaches mysql-router to non-DB hosts.
+overrides:
+  - requires:
+      juju-info:
+        optional: true
+      certificates:
+        optional: true

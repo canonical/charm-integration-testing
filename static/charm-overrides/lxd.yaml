@@ -1,0 +1,49 @@
+---
+# lxd: LXD container and VM hypervisor.
+# Source: https://github.com/canonical/charm-lxd
+#
+# lxd deploys standalone with no required relations (juju deploy ch:lxd).
+# All endpoints are optional integrations.
+#
+# requires:
+#   ceph:        Ceph remote storage backend. Local ZFS/dir storage works without it.
+#   certificates: TLS certs for the HTTPS listener (only when lxd-listen-https=true).
+#   logging:     Syslog forwarding. LXD has built-in logging without it.
+#   ovsdb-cms:   OVN network backend. Other network backends work without it.
+#
+# provides:
+#   bgp:                  BGP peer for network routing. Optional networking feature.
+#   dns:                  DNS integration. Optional.
+#   grafana-dashboard:    COS observability. Optional.
+#   grafana-dashboard-k8s: COS observability (k8s). Optional.
+#   https:                HTTPS API endpoint. Optional (requires lxd-listen-https config).
+#   metrics:              Prometheus metrics. Optional (observability).
+#   metrics-endpoint:     Prometheus metrics. Optional (observability).
+#   prometheus-manual:    Prometheus metrics. Optional (observability).
+overrides:
+  - requires:
+      ceph:
+        optional: true
+      certificates:
+        optional: true
+      logging:
+        optional: true
+      ovsdb-cms:
+        optional: true
+    provides:
+      bgp:
+        optional: true
+      dns:
+        optional: true
+      grafana-dashboard:
+        optional: true
+      grafana-dashboard-k8s:
+        optional: true
+      https:
+        optional: true
+      metrics:
+        optional: true
+      metrics-endpoint:
+        optional: true
+      prometheus-manual:
+        optional: true

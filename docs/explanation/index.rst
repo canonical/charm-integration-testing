@@ -9,6 +9,6 @@ Contents
 .. toctree::
    :maxdepth: 1
 
-   bundle-builder-algorithm
+   bundle-builder-x-algorithm
    charm-priorities
    wait-conditions

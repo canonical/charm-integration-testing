@@ -1,0 +1,8 @@
+---
+overrides:
+  - configs:
+      external_hostname: ['discourse.example.com', null]
+      force_https: [true, null]
+    constraints:
+      - 'bool(endpoint[saml]) => set(config[external_hostname])'
+      - 'bool(endpoint[saml]) => set(config[force_https])'

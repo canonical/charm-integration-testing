@@ -3,7 +3,8 @@ from datetime import timedelta
 from typing import Any, Iterable
 
 from juju.backend import JujuBackend, JujuExecOutput, JujuTask
-from juju.models import JujuApplicationInfo, JujuIntegration, JujuIntegrationApplication
+from juju.models import JujuApplicationInfo, JujuConsumedOfferInfo, JujuIntegration, JujuIntegrationApplication
+from juju.version import JujuVersion
 from kubernetes_client import KubernetesClient
 
 from validators.base.validator import ValidationResult
@@ -22,6 +23,9 @@ class NullJujuBackend(JujuBackend):
         raise NotImplementedError
 
     def list_applications(self, model: str) -> dict[str, JujuApplicationInfo]:
+        raise NotImplementedError
+
+    def list_consumed_offers(self, model: str) -> dict[str, JujuConsumedOfferInfo]:
         raise NotImplementedError
 
     def list_integrations(self, model: str) -> set[JujuIntegration]:
@@ -62,7 +66,9 @@ class NullJujuBackend(JujuBackend):
     ) -> None:
         raise NotImplementedError
 
-    def deploy_bundle_file(self, model: str, bundle: str) -> None:
+    def deploy_bundle_file(
+        self, model: str, bundle: str, timeout: timedelta | None = None, trust: bool = False, force: bool = False
+    ) -> None:
         raise NotImplementedError
 
     def refresh_application(
@@ -123,6 +129,7 @@ class NullJujuBackend(JujuBackend):
         application: str | None = None,
         config: dict[str, Any] | None = None,
         trust: bool = False,
+        force: bool = False,
     ) -> None:
         raise NotImplementedError
 
@@ -132,7 +139,15 @@ class NullJujuBackend(JujuBackend):
     def get_application_config(self, model: str, application: str) -> dict[str, Any]:
         raise NotImplementedError
 
-    def bootstrap_controller(self, cloud: str, controller: str, controller_constraints: dict[str, str]) -> None:
+    def bootstrap_controller(
+        self,
+        cloud: str,
+        controller: str,
+        controller_constraints: dict[str, str],
+        bootstrap_configuration: dict[str, str],
+        metadata_source: Any | None = None,
+        agent_version: str | None = None,
+    ) -> None:
         raise NotImplementedError
 
     def add_model(self, controller: str, model: str, model_config: dict[str, str]) -> None:
@@ -159,7 +174,10 @@ class NullJujuBackend(JujuBackend):
     def reboot_model_controller_leader(self, model: str) -> None:
         raise NotImplementedError
 
-    def version(self, model: str) -> str:
+    def version(self, model: str) -> JujuVersion:
+        raise NotImplementedError
+
+    def cli_version(self) -> JujuVersion:
         raise NotImplementedError
 
     def validate_application(self, model: str, application: str, level: str) -> dict[str, list[ValidationResult]]:
@@ -178,6 +196,12 @@ class NullJujuBackend(JujuBackend):
     def migrate_model(self, model_name: str, source_controller: str, target_controller: str) -> None:
         raise NotImplementedError
 
+    def upgrade_controller(self, controller: str, agent_version: str | None = None) -> None:
+        raise NotImplementedError
+
+    def upgrade_model(self, model: str, agent_version: str | None = None) -> None:
+        raise NotImplementedError
+
     def wait_for_application_revision(
         self,
         application: str,
@@ -185,6 +209,9 @@ class NullJujuBackend(JujuBackend):
         timeout: timedelta | None,
         model: str = "default",
     ) -> None:
+        raise NotImplementedError
+
+    def debug_log(self, model: str) -> str:
         raise NotImplementedError
 
 
@@ -246,9 +273,10 @@ class JujuStub(NullJujuBackend):
         application: str | None = None,
         config: dict[str, Any] | None = None,
         trust: bool = False,
+        force: bool = False,
     ) -> None:
         """Mock deploying an application (captures call for verification)"""
-        self.deployed.append((model, charm, application))  # Ignoring config and trust for simplicity
+        self.deployed.append((model, charm, application))  # Ignoring config, trust, and force for simplicity
 
     def configure_application(self, model: str, application: str, values: dict[str, Any]) -> None:
         """Mock configuring an application (captures call for verification)"""

@@ -1,0 +1,43 @@
+---
+# temporal-ui-k8s: web UI for the Temporal workflow engine (k8s).
+#
+# NOTE: latest/ is the OLD version (no temporal-host-info, nginx-route only).
+#       1.23/ is the current versioned track that added temporal-host-info + ingress.
+#
+# temporal-host-info (requires, 1.23+ only): provided by temporal-k8s on the
+#   same track. cyclic: true because temporal-ui-k8s <-> temporal-k8s is a cycle.
+# nginx-route (requires): optional reverse-proxy routing; ui accessible without it.
+# ingress (requires, 1.23+ only): optional reverse-proxy; accessible via ClusterIP.
+overrides:
+  # latest/ track: old version, no temporal-host-info or ingress
+  - criteria:
+      - track: latest
+    provides:
+      # https://github.com/canonical/temporal-k8s-operator/issues/120
+      ui:
+        limit: 1
+        optional: false
+        features: [ui]
+    requires:
+      nginx-route:
+        optional: true
+    constraints:
+      - 'bool(endpoint[ui]) => features(endpoint[ui]) == {"ui"}'
+
+  # 1.23/ and future versioned tracks: temporal-host-info + ingress
+  - provides:
+      # https://github.com/canonical/temporal-k8s-operator/issues/120
+      ui:
+        limit: 1
+        optional: false
+        features: [ui]
+    requires:
+      nginx-route:
+        optional: true
+      ingress:
+        optional: true
+      temporal-host-info:
+        cyclic: true
+    constraints:
+      - 'bool(endpoint[ui]) => features(endpoint[ui]) == {"ui"}'
+      - 'charms(endpoint[temporal-host-info]) == charms(endpoint[ui])'

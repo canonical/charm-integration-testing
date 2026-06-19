@@ -5,6 +5,9 @@ permissions:
 on:
   workflow_call:
     inputs:
+      target_environment:
+        type: string
+        required: true
       target_charm:
         type: string
         required: true
@@ -17,13 +20,16 @@ on:
       target_base:
         type: string
         required: true
+      target_track:
+        type: string
+        required: true
+      target_risk:
+        type: string
+        required: true
       neighbor_charm:
         type: string
         required: true
       neighbor_endpoint:
-        type: string
-        required: true
-      substrate:
         type: string
         required: true
     secrets:
@@ -31,7 +37,7 @@ on:
         required: true
 jobs:
   run-charm-tests-and-assert-pass:
-    runs-on: [self-hosted, charm_qa]
+    runs-on: [self-hosted, solqa]
     permissions:
       contents: read
       actions: write
@@ -51,8 +57,8 @@ jobs:
           arch: charm-testing-integration-test-assert-pass-arch
           environment: charm-testing-integration-test-assert-pass-environment
           test_plan: charm-testing-integration-test-assert-pass-test_plan
-          track: '14'
-          risk: stable
+          track: ${{ inputs.target_track }}
+          risk: ${{ inputs.target_risk }}
           status: NOT_STARTED
       - name: Trigger Charm Tests
         id: trigger-charm-tests
@@ -60,13 +66,10 @@ jobs:
         with:
           workflow: charm-testing.yaml
           ref: ${{ github.head_ref || github.ref_name }}
-          title: 'Testing ${{ inputs.target_charm }}:${{ inputs.target_endpoint }}
-            against ${{ inputs.neighbor_charm }}:${{ inputs.neighbor_endpoint }}.
-            (environment: staging, test execution: ${{ steps.create-test-execution.outputs.test_execution_id }},
-            substrate: ${{ inputs.substrate }})'
           inputs: |
             {
-              "environment": "staging",
+              "test_observer_environment": "staging",
+              "target_environment": "${{ inputs.target_environment }}",
               "charm_under_test": "${{ inputs.target_charm }}",
               "charm_endpoint": "${{ inputs.target_endpoint }}",
               "execution_id": "${{ steps.create-test-execution.outputs.test_execution_id }}",
@@ -75,8 +78,7 @@ jobs:
               "neighbor_endpoint": "${{ inputs.neighbor_endpoint }}",
               "revision": "${{ inputs.target_revision }}",
               "series": "${{ inputs.target_base }}",
-              "substrate": "${{ inputs.substrate }}",
-              "channel": "14/stable"
+              "channel": "${{ inputs.target_track }}/${{ inputs.target_risk }}"
             }
       - name: Ensure Charm Tests Workflow Success
         shell: bash

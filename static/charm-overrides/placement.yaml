@@ -1,0 +1,27 @@
+---
+# Override for placement
+# Source: https://github.com/openstack/charm-placement
+#
+# Reactive charm (Train+). required_relations from src/lib/charm/openstack/placement.py:
+#   ['shared-db', 'identity-service', 'placement'].
+#
+# placement (provides) - REQUIRED: primary purpose; nova-cloud-controller connects here.
+#
+# shared-db, identity-service (requires) - REQUIRED: in required_relations.
+# amqp (requires) - OPTIONAL: not in required_relations; placement does not use messaging.
+# ha (requires, scope: container) - OPTIONAL: hacluster subordinate.
+# certificates (requires) - OPTIONAL: TLS; not required for functionality.
+overrides:
+  - requires:
+      amqp:
+        optional: true
+      ha:
+        optional: true
+      certificates:
+        optional: true
+    constraints:
+      # All connected OpenStack service charms must be on the same release track.
+      - 'tracks(charms(endpoint[identity-service])) == tracks({self})'
+      - 'risks(charms(endpoint[identity-service])) == risks({self})'
+      - 'tracks(charms(endpoint[placement])) == tracks({self})'
+      - 'risks(charms(endpoint[placement])) == risks({self})'

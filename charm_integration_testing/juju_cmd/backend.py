@@ -3,7 +3,6 @@
 
 
 import json
-import os
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -16,6 +15,7 @@ from juju import (
     JujuIntegration,
     JujuIntegrationApplication,
     JujuTask,
+    JujuVersion,
     JujuWaitTimeoutError,
 )
 from juju.backend import JujuStatusPerformanceWarning, warn_performance
@@ -229,15 +229,10 @@ class JujuCmdBackend(JujuBackend):
             CmdArg(value=str(target_2)),
         )
 
-    def deploy_bundle_file(self, model: str, bundle: str) -> None:
-        if not os.path.isfile(bundle):
-            raise ValueError(f"Bundle file '{bundle}' not found.")
-        self._call_juju(
-            CmdArg(value="deploy"),
-            CmdArg(name="model", value=model),
-            CmdArg(name="trust"),
-            CmdArg(value=bundle),
-        )
+    def deploy_bundle_file(
+        self, model: str, bundle: str, timeout: timedelta | None = None, trust: bool = False, force: bool = False
+    ) -> None:
+        raise NotImplementedError
 
     def remove_applications(self, model: str, *applications: str) -> None:
         self._call_juju(
@@ -352,5 +347,8 @@ class JujuCmdBackend(JujuBackend):
     def remove_secret(self, model: str, name_or_id: str) -> None:
         raise NotImplementedError
 
-    def version(self, model: str) -> str:
+    def version(self, model: str) -> JujuVersion:
+        raise NotImplementedError
+
+    def debug_log(self, model: str) -> str:
         raise NotImplementedError

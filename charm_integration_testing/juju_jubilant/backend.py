@@ -5,19 +5,25 @@
 import dataclasses
 import pathlib
 import re
+import shutil
+import tempfile
 import time
+import warnings
 from datetime import datetime, timedelta
 from typing import Any, Callable
 
 import jubilant
 import yaml
 from juju import (
+    CharmChannel,
     JujuApplicationInfo,
+    JujuConsumedOfferInfo,
     JujuExecOutput,
     JujuIntegration,
     JujuIntegrationApplication,
     JujuStatusPerformanceWarning,
     JujuTask,
+    JujuVersion,
     JujuWaitState,
     JujuWaitTimeoutError,
     warn_performance,
@@ -288,10 +294,17 @@ class JubilantBackend(JujuCmdBackend):
             name_or_id,
         )
 
-    def deploy_bundle_file(self, model: str, bundle: str, timeout: timedelta | None = None) -> None:
+    def deploy_bundle_file(
+        self,
+        model: str,
+        bundle: str,
+        timeout: timedelta | None = None,
+        trust: bool = False,
+        force: bool = False,
+    ) -> None:
         if not pathlib.Path(bundle).is_file():
             raise ValueError(f"Bundle file '{bundle}' not found.")
-        self.client.model(model).deploy(charm=pathlib.Path(bundle).resolve(), trust=True)
+        self.client.model(model).deploy(charm=pathlib.Path(bundle).resolve(), trust=trust, force=force)
 
         self.wait(model, lambda status: bundle_applications_integrations_exist(status, bundle), timeout=timeout)
 
@@ -302,12 +315,14 @@ class JubilantBackend(JujuCmdBackend):
         application: str | None = None,
         config: dict[str, Any] | None = None,
         trust: bool = False,
+        force: bool = False,
     ) -> None:
         self.client.model(model).deploy(
             charm=charm,
             app=application,
             config=config,
             trust=trust,
+            force=force,
         )
 
     def configure_application(self, model: str, application: str, values: dict[str, str]) -> None:
@@ -334,7 +349,13 @@ class JubilantBackend(JujuCmdBackend):
     def exec_unit(self, model: str, unit: str, task: str, operator: bool = False) -> JujuExecOutput:
         args = ["--unit", unit]
         if operator:
-            args.append("--operator")
+            if self.cli_version() >= JujuVersion(4, 0, 0):
+                warnings.warn(
+                    "operator=True has no effect on Juju 4+: the --operator flag was removed.",
+                    stacklevel=2,
+                )
+            else:
+                args.append("--operator")
         args += ["--", task]
 
         parsed_output = self._exec(model, *args)
@@ -366,7 +387,27 @@ class JubilantBackend(JujuCmdBackend):
     def scp(self, model: str, source: str, destination: str) -> None:
         # Jubilant scp doesn't work for directories
         # https://github.com/canonical/jubilant/issues/266
-        self.client.model(model).cli("scp", source, destination)
+        #
+        # Furthermore, machine charms need to specify -r if source is a directory
+        #   we'll always specify -r to be safe
+        options = () if self.is_k8s_model(model) else ("--", "-r")
+
+        # The Juju snap can only access files under $HOME.  Stage any source
+        # that lives outside the home directory into a temporary directory
+        # before handing it to juju scp.
+        home = pathlib.Path.home()
+        source_path = pathlib.Path(source).resolve()
+        if not source_path.is_relative_to(home):
+            with tempfile.TemporaryDirectory(dir=home) as staging:
+                staged = pathlib.Path(staging) / source_path.name
+                if source_path.is_dir():
+                    shutil.copytree(source_path, staged)
+                else:
+                    shutil.copy2(source_path, staged)
+                self.client.model(model).cli("scp", *options, str(staged), destination)
+            return
+
+        self.client.model(model).cli("scp", *options, source, destination)
 
     def ssh(self, model: str, application: str, command: str) -> None:
         self.client.model(model).ssh(
@@ -384,9 +425,16 @@ class JubilantBackend(JujuCmdBackend):
 
     def list_applications(self, model: str) -> dict[str, JujuApplicationInfo]:
         return {
-            app_name: JujuApplicationInfo(charm=app_info.charm, revision=app_info.charm_rev)
+            app_name: JujuApplicationInfo(
+                charm=app_info.charm,
+                revision=app_info.charm_rev,
+                channel=CharmChannel.parse(app_info.charm_channel) if app_info.charm_channel else None,
+            )
             for app_name, app_info in self.status(model).apps.items()
         }
+
+    def list_consumed_offers(self, model: str) -> dict[str, JujuConsumedOfferInfo]:
+        return {offer: JujuConsumedOfferInfo(url=info.url) for offer, info in self.status(model).app_endpoints.items()}
 
     def list_integrations(self, model: str) -> set[JujuIntegration]:
         # Juju status yaml format doesn't expose provider/requirer information or
@@ -437,18 +485,46 @@ class JubilantBackend(JujuCmdBackend):
             JujuIntegrationApplication(application=application_2, endpoint=endpoint_2),
         } in [{integration.provider, integration.requirer} for integration in self.list_integrations(model)]
 
-    def version(self, model: str) -> str:
-        return str(self.client.model(model).version())
+    def version(self, model: str) -> JujuVersion:
+        return JujuVersion.parse(str(self.status(model).model.version).strip())
+
+    def cli_version(self) -> JujuVersion:
+        return JujuVersion.parse(str(self.client.model(None).version()).strip())
 
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(5), reraise=True)
-    def bootstrap_controller(self, cloud: str, controller: str, controller_constraints: dict[str, str]) -> None:
-        # XXX (@mbenzan): we have to be able to pass in `extra_arguments` for Openstack integrations.
-        # This is currently not supported by Jubilant. I'll open a PR there to add this functionality
-        # and then update the code here to use it. In the meantime, O11 will fail to provision.
-        # PR: https://github.com/canonical/jubilant/pull/272
-        return self.client.model(None).bootstrap(
-            cloud=cloud, controller=controller, bootstrap_constraints=controller_constraints
-        )
+    def bootstrap_controller(
+        self,
+        cloud: str,
+        controller: str,
+        controller_constraints: dict[str, str],
+        bootstrap_configuration: dict[str, str],
+        metadata_source: pathlib.Path | None = None,
+        agent_version: str | None = None,
+    ) -> None:
+        if agent_version or metadata_source:
+            bootstrap_args: list[str] = ["bootstrap", cloud, controller]
+            if controller_constraints:
+                bootstrap_args.extend(
+                    [
+                        "--bootstrap-constraints",
+                        " ".join(f"{k}={v}" for k, v in controller_constraints.items()),
+                    ]
+                )
+            if agent_version:
+                bootstrap_args.extend(["--agent-version", agent_version])
+            if metadata_source:
+                bootstrap_args.extend(["--metadata-source", str(metadata_source)])
+            if bootstrap_configuration:
+                for key, val in bootstrap_configuration.items():
+                    bootstrap_args.extend(["--config", f"{key}={val}"])
+            self.client.model(None).cli(*bootstrap_args, include_model=False)
+        else:
+            self.client.model(None).bootstrap(
+                cloud=cloud,
+                controller=controller,
+                bootstrap_constraints=controller_constraints,
+                config=bootstrap_configuration,
+            )
 
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(5), reraise=True)
     def add_model(self, controller: str, model: str, model_config: dict[str, str]) -> None:
@@ -496,10 +572,21 @@ class JubilantBackend(JujuCmdBackend):
 
     def kill_controller(self, controller: str) -> None:
         self.client.model(None).cli(
-            "kill-controller", controller, "--no-prompt", "--timeout", "5m", include_model=False
+            "kill-controller", controller, "--no-prompt", "--timeout", "2m", include_model=False
         )
 
     def migrate_model(self, model_name: str, source_controller: str, target_controller: str) -> None:
         self.client.model(model_name).cli(
             "migrate", f"{source_controller}:{model_name}", target_controller, include_model=False
         )
+
+    def upgrade_controller(self, controller: str, agent_version: str | None = None) -> None:
+        extra = ("--agent-version", agent_version) if agent_version else ()
+        self.client.model(None).cli("upgrade-controller", "-c", controller, *extra, include_model=False)
+
+    def upgrade_model(self, model: str, agent_version: str | None = None) -> None:
+        extra = ("--agent-version", agent_version) if agent_version else ()
+        self.client.model(model).cli("upgrade-model", *extra)
+
+    def debug_log(self, model: str) -> str:
+        return self.client.model(model).debug_log()

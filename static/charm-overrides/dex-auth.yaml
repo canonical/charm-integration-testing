@@ -1,0 +1,13 @@
+---
+# Remove after: https://github.com/canonical/charm-integration-testing/issues/282
+overrides:
+  - provides:
+      metrics-endpoint:
+        optional: true
+      grafana-dashboard:
+        optional: true
+      # dex-auth and oidc-gatekeeper mutually require each other (dex-auth provides
+      # dex-oidc-config which oidc-gatekeeper requires, and oidc-gatekeeper provides
+      # oidc-client which dex-auth requires). Mark as cyclic.
+      dex-oidc-config:
+        cyclic: true

@@ -1,0 +1,29 @@
+---
+# Override for openstack-integrator
+# Source: https://github.com/charmed-kubernetes/openstack-integrator
+#
+# openstack-integrator provides three independent endpoints, each serving a
+# distinct deployment scenario. A valid deployment only needs one of them:
+#
+# - clients:      Charmed Kubernetes charms needing OpenStack credentials
+# - credentials:  OpenStack service charms needing keystone credentials
+# - loadbalancer: Legacy reactive-era endpoint (public-address interface).
+#                 No current consumers exist; the modern kubeapi-load-balancer
+#                 dropped this endpoint entirely.
+overrides:
+  - provides:
+      clients:
+        optional: true
+      credentials:
+        optional: true
+      loadbalancer:
+        optional: true
+    constraints:
+      # At least one endpoint must be present
+      - 'bool(endpoint[clients]) or bool(endpoint[credentials]) or bool(endpoint[loadbalancer])'
+      # CK charms connecting via clients must be on the same Kubernetes track.
+      # The equivalent constraint for credentials is expressed on the
+      # kubernetes-control-plane side (keystone-credentials endpoint) so that
+      # non-CK OpenStack service charms (nova, neutron, etc.) are not
+      # incorrectly forced onto a Kubernetes version track.
+      - 'tracks(charms(endpoint[clients])) <= tracks({self})'

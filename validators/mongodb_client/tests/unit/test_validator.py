@@ -19,47 +19,29 @@ from unittest.mock import patch
 
 import ops
 import pymongo
+import pytest
 from pymongo.errors import WriteError
 
 from validators.mongodb_client.validator import MongoDBClientValidator
+from validators.test_utils.helpers import make_charm_from_relation
+from validators.test_utils.stubs import (
+    ApplicationStub,
+    RelationRoleStub,
+    RelationStub,
+)
 
 # ---------------------------------------------------------------------------
 # Stubs
 # ---------------------------------------------------------------------------
 
 
-class AppStub:
-    """Minimal stand-in for ops.Application.  Must be hashable (dict key)."""
-
-
-class RelationStub:
-    def __init__(self, app: AppStub | None, databag: dict[str, str], name: str = "db", id: int = 0) -> None:
-        self.app = app
-        self.name = name
-        self.id = id
-        self.data: dict[AppStub | None, dict[str, str]] = {app: databag}
-
-
-class RelationMetaStub:
-    def __init__(self, interface_name: str) -> None:
-        self.interface_name = interface_name
-
-
-class CharmMetaStub:
-    def __init__(self, endpoint: str, interface_name: str) -> None:
-        self.relations = {endpoint: RelationMetaStub(interface_name)}
-
-
-class CharmStub:
-    def __init__(self, endpoint: str = "db", interface_name: str = "mongodb_client") -> None:
-        self.meta = CharmMetaStub(endpoint, interface_name)
-
-
-def _make_validator(databag: dict[str, str], endpoint: str = "db") -> MongoDBClientValidator:
-    app = AppStub()
-    relation = RelationStub(app=app, databag=databag, name=endpoint)
-    charm = cast(ops.CharmBase, CharmStub(endpoint=endpoint))
-    return MongoDBClientValidator(charm, cast(ops.Relation, relation))
+def _make_validator(
+    databag: dict[str, str], endpoint: str = "db", role: RelationRoleStub = RelationRoleStub.requires
+) -> MongoDBClientValidator:
+    app = ApplicationStub()
+    relation = RelationStub(app=app, data={app: databag}, name=endpoint, id=0)
+    charm = make_charm_from_relation(relation, interface_name="mongodb_client", role=role)
+    return MongoDBClientValidator(cast(ops.CharmBase, charm), cast(ops.Relation, relation))
 
 
 @dataclass
@@ -153,6 +135,20 @@ VALID_DATABAG: dict[str, str] = {
 
 
 class TestMongoDBClientValidatorSimple:
+    @pytest.mark.parametrize(
+        "role,should_skip",
+        [(RelationRoleStub.requires, False), (RelationRoleStub.provides, True), (RelationRoleStub.peer, True)],
+    )
+    def test_returns_skipped_based_on_role(self, role: RelationRoleStub, should_skip: bool) -> None:
+        # GIVEN
+        validator = _make_validator(VALID_DATABAG, role=role)
+
+        # WHEN
+        result = validator.validate(level="simple")
+
+        # THEN
+        assert (result.status == "SKIPPED") == should_skip
+
     def test_returns_skipped_for_unsupported_level(self) -> None:
         # GIVEN
         validator = _make_validator(VALID_DATABAG)
@@ -164,19 +160,6 @@ class TestMongoDBClientValidatorSimple:
         assert result.status == "SKIPPED"
         assert result.error is not None
         assert "not supported" in result.error
-
-    def test_returns_error_when_relation_app_is_none(self) -> None:
-        # GIVEN a relation whose remote app is not yet known
-        relation = RelationStub(app=None, databag={})
-        validator = MongoDBClientValidator(
-            cast(ops.CharmBase, CharmStub(endpoint=relation.name)), cast(ops.Relation, relation)
-        )
-
-        # WHEN
-        result = validator.validate(level="simple")
-
-        # THEN
-        assert result.status == "ERROR"
 
     def test_fails_schema_check_when_required_fields_missing(self) -> None:
         # GIVEN a databag with missing required fields

@@ -1,0 +1,153 @@
+---
+# Override for kubernetes-worker
+# Source: https://github.com/charmed-kubernetes/charm-kubernetes-worker
+#
+# Upstream PR: https://github.com/charmed-kubernetes/charm-kubernetes-worker/pull/215
+# (applies to 1.29+ ops charm only)
+#
+# Evidence gathered from src/charm.py and src/cloud_integration.py
+# (main branch, 2025).
+#
+# Four criteria blocks cover the four distinct endpoint generations:
+#   1.23:       legacy reactive charm
+#   1.24-1.28:  legacy reactive charm, adds scrape (Prometheus) in provides
+#   1.29:       ops-based rewrite; azure/gcp absent, tokens added, cos-agent added
+#   1.30+:      same ops charm; azure and gcp restored as optional
+#
+# Truly required in all tracks (DO NOT mark optional):
+#   certificates  - ReconcilerError("CA Certificate not ready") raised in
+#                   _request_certificates(), _write_certificates(), and
+#                   _create_kubeconfigs() (src/charm.py)
+#   kube-control  - _check_kubecontrol_integration(event) called from
+#                   _configure_kubelet(), _configure_kubeproxy(), and
+#                   _create_kubeconfigs(); each raises ReconcilerError with
+#                   WaitingStatus if not ready
+#
+# Truly required provides in all tracks (DO NOT mark optional):
+#   container-runtime (scope: container):
+#                   ReconcilerError("container-runtime not established")
+#                   if not self.container_runtime.relations
+#   cni           (scope: container):
+#                   ReconcilerError("CNI relation not established") unless
+#                   config ignore-missing-cni=true (defaults to required)
+overrides:
+
+  # -- 1.23 track (legacy reactive charm) ------------------------------------
+  # Endpoint set includes kube-api-endpoint and the full set of cloud
+  # endpoints (aws/azure/gcp/openstack/vsphere/nfs).  No tokens or cos-agent.
+  - criteria:
+      - track: '1.23'
+    requires:
+      aws:
+        optional: true
+        # cloud_integration.py: `if not (cloud := self.cloud): return None`
+        # + `if not cloud.relation: return` - entirely skipped with no relation
+      azure:
+        optional: true
+        # same cloud_integration.py pattern as aws
+      gcp:
+        optional: true
+        # same cloud_integration.py pattern as aws
+      kube-api-endpoint:
+        optional: true
+        # Superseded by kube-control in 1.29+; in 1.23-1.28 used to discover
+        # the API server address, but not blocking - charm continues without it
+      nfs:
+        optional: true
+        # NFS storage integration; purely additive
+      openstack:
+        optional: true
+        # same cloud_integration.py pattern as aws
+      vsphere:
+        optional: true
+        # same cloud_integration.py pattern as aws
+    provides:
+      ingress-proxy:
+        optional: true
+        # Only configured when config option `ingress=true`
+      nrpe-external-master:
+        optional: true
+        # Legacy NRPE monitoring; only activated when relation is present
+    constraints:
+      # Container-runtime subordinate must be on the same track as this charm.
+      - 'tracks(charms(endpoint[container-runtime])) <= tracks({self})'
+      # CNI plugin subordinate must be on the same track.
+      - 'tracks(charms(endpoint[cni])) <= tracks({self})'
+
+  # -- 1.24-1.28 tracks (legacy reactive charm) ------------------------------
+  # Same endpoint set as 1.23 but with `scrape` (Prometheus) added to provides.
+  # Uses any_of because criteria entries are AND-ed; OR logic requires any_of.
+  - criteria:
+      - any_of:
+          - track: '1.24'
+          - track: '1.25'
+          - track: '1.26'
+          - track: '1.27'
+          - track: '1.28'
+    requires:
+      aws:
+        optional: true
+      azure:
+        optional: true
+      gcp:
+        optional: true
+      kube-api-endpoint:
+        optional: true
+      nfs:
+        optional: true
+      openstack:
+        optional: true
+      vsphere:
+        optional: true
+    provides:
+      ingress-proxy:
+        optional: true
+      nrpe-external-master:
+        optional: true
+      scrape:
+        optional: true
+        # Prometheus scrape endpoint; only active when related
+    constraints:
+      # Container-runtime subordinate must be on the same track as this charm.
+      - 'tracks(charms(endpoint[container-runtime])) <= tracks({self})'
+      # CNI plugin subordinate must be on the same track.
+      - 'tracks(charms(endpoint[cni])) <= tracks({self})'
+
+  # -- 1.29 track (ops rewrite; azure/gcp absent in this generation) ---------
+  # Major rewrite dropped the old reactive cloud endpoints and kube-api-endpoint.
+  # azure and gcp are not present in this track's charmcraft.yaml metadata.
+  - criteria:
+      - track: '1.29'
+    requires:
+      aws:
+        optional: true
+    provides:
+      cos-agent:
+        optional: true
+        # COSAgentProvider registered but never asserted in the reconcile loop
+      ingress-proxy:
+        optional: true
+    constraints:
+      # Container-runtime subordinate must be on the same track as this charm.
+      - 'tracks(charms(endpoint[container-runtime])) <= tracks({self})'
+      # CNI plugin subordinate must be on the same track.
+      - 'tracks(charms(endpoint[cni])) <= tracks({self})'
+
+  # -- 1.30+ tracks (ops charm; azure and gcp restored as optional) ----------
+  - requires:
+      aws:
+        optional: true
+      azure:
+        optional: true
+      gcp:
+        optional: true
+    provides:
+      cos-agent:
+        optional: true
+      ingress-proxy:
+        optional: true
+    constraints:
+      # Container-runtime subordinate must be on the same track as this charm.
+      - 'tracks(charms(endpoint[container-runtime])) <= tracks({self})'
+      # CNI plugin subordinate must be on the same track.
+      - 'tracks(charms(endpoint[cni])) <= tracks({self})'

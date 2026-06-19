@@ -29,7 +29,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "types-psycopg2",
+    "types-psycopg2>=2.9.21.20260422,<3"
 ]
 
 [project.entry-points."endpoint_validators"]

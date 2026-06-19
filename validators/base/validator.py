@@ -14,12 +14,20 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from abc import ABC, abstractmethod
-from typing import Literal, Optional
+from typing import Literal, Optional, cast, get_args
 
 import ops
 from pydantic import BaseModel, Field
 
 ValidationLevel = Literal["simple", "deep", "uat"]
+ValidationRole = Literal["requires", "provides", "peer"]
+ValidationResultStatus = Literal["SKIPPED", "PASS", "FAIL", "ERROR"]
+
+
+def str_to_validation_role(s: str) -> ValidationRole:
+    if s not in get_args(ValidationRole):
+        raise ValueError(f"Invalid validation role '{s}'. Must be one of {get_args(ValidationRole)}.")
+    return cast(ValidationRole, s)
 
 
 class ValidationCheck(BaseModel):
@@ -29,9 +37,10 @@ class ValidationCheck(BaseModel):
 
 
 class ValidationResult(BaseModel):
-    status: Literal["PASS", "FAIL", "ERROR", "SKIPPED"]
+    status: ValidationResultStatus
     endpoint: str
     interface: str
+    role: ValidationRole
     level: ValidationLevel
     relation_id: int
     checks: list[ValidationCheck] = Field(default_factory=list)
@@ -47,6 +56,11 @@ class BaseValidator(ABC):
         self.relation = relation
 
     @property
+    def role(self) -> ValidationRole:
+        relation = self.charm.meta.relations[self.relation.name]
+        return str_to_validation_role(relation.role.value)
+
+    @property
     def endpoint(self) -> str:
         return self.relation.name
 
@@ -56,7 +70,7 @@ class BaseValidator(ABC):
 
     @property
     def databag(self) -> dict[str, str]:
-        if self.relation.app is None:
+        if self.relation.app not in self.relation.data:
             return {}
         return dict(self.relation.data[self.relation.app])
 
@@ -64,15 +78,22 @@ class BaseValidator(ABC):
     def interface(self) -> str:
         return self.charm.meta.relations[self.relation.name].interface_name or ""
 
-    def _skipped_result(self, level: ValidationLevel) -> ValidationResult:
+    def _skipped_result_due_to_level(self, level: ValidationLevel) -> ValidationResult:
         """Return a SKIPPED result indicating this validator does not support *level*."""
-        return ValidationResult(
+        return self._make_result(
             status="SKIPPED",
-            endpoint=self.endpoint,
-            interface=self.interface,
             level=level,
-            relation_id=self.relation_id,
+            checks=[],
             error=f"Level '{level}' is not supported by {self.__class__.__name__}.",
+        )
+
+    def _skipped_result_due_to_role(self, level: ValidationLevel, role: ValidationRole) -> ValidationResult:
+        """Return a SKIPPED result indicating this validator does not support *role*."""
+        return self._make_result(
+            status="SKIPPED",
+            level=level,
+            checks=[],
+            error=f"Role '{role}' is not supported by {self.__class__.__name__}.",
         )
 
     @abstractmethod
@@ -80,7 +101,7 @@ class BaseValidator(ABC):
         pass
 
     def relation_exists(self) -> bool:
-        return self.relation.app is not None
+        return self.relation.app in self.relation.data
 
     def resolve_secret(self, uri_key: str, *fields: str) -> dict[str, str]:
         if uri := self.databag.get(uri_key):
@@ -97,3 +118,31 @@ class BaseValidator(ABC):
             passed=not missing,
             message="OK" if not missing else f"Missing: {', '.join(missing)}",
         )
+
+    def _make_result(
+        self,
+        status: ValidationResultStatus,
+        level: ValidationLevel,
+        checks: list[ValidationCheck] | None = None,
+        error: str | None = None,
+        endpoint: str | None = None,
+        interface: str | None = None,
+        role: ValidationRole | None = None,
+        relation_id: int | None = None,
+    ) -> ValidationResult:
+        return ValidationResult(
+            status=status,
+            endpoint=self.endpoint if endpoint is None else endpoint,
+            interface=self.interface if interface is None else interface,
+            role=role or self.role,
+            level=level,
+            relation_id=self.relation_id if relation_id is None else relation_id,
+            checks=[] if checks is None else checks,
+            error=error,
+        )
+
+    def _error_result(self, level: ValidationLevel, error: str) -> ValidationResult:
+        return self._make_result("ERROR", level, [], error)
+
+    def _fail_result(self, level: ValidationLevel, checks: list[ValidationCheck]) -> ValidationResult:
+        return self._make_result("FAIL", level, checks)

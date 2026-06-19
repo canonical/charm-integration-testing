@@ -1,0 +1,36 @@
+---
+# Kubeflow Central Dashboard - main UI entry point
+overrides:
+    # Track 1.7: provides is empty in charm metadata; do not declare grafana-dashboard
+    # or metrics-endpoint to avoid UnparsableCharmException.
+  - criteria:
+      - track: '1.7'
+    requires:
+      kubeflow-profiles:
+        features: [kubeflow-profiles]
+    constraints:
+      - '"kubeflow-profiles" in features(endpoint[kubeflow-profiles])'
+    # Tracks 1.8 and 1.9 have grafana-dashboard in provides but not metrics-endpoint.
+  - criteria:
+      - any_of:
+          - track: '1.8'
+          - track: '1.9'
+    provides:
+      grafana-dashboard:
+        optional: true
+    requires:
+      kubeflow-profiles:
+        features: [kubeflow-profiles]
+    constraints:
+      - '"kubeflow-profiles" in features(endpoint[kubeflow-profiles])'
+    # Track 1.10 and later have both grafana-dashboard and metrics-endpoint in provides.
+  - provides:
+      metrics-endpoint:
+        optional: true
+      grafana-dashboard:
+        optional: true
+    requires:
+      kubeflow-profiles:
+        features: [kubeflow-profiles]
+    constraints:
+      - '"kubeflow-profiles" in features(endpoint[kubeflow-profiles])'

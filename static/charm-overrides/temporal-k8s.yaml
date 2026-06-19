@@ -1,0 +1,75 @@
+---
+# For some reason temporal k8s isn't listed as a provider of `temporal-host-info`
+# https://github.com/canonical/temporal-k8s-operator/issues/139
+listed: true
+# Remove after: https://github.com/canonical/temporal-k8s-operator/pull/117
+overrides:
+  # latest track is obsolete: no frontend-certificates endpoint
+  - criteria:
+      - track: 'latest'
+    requires:
+      nginx-route:
+        optional: true
+        limit: 1
+      openfga:
+        optional: true
+        limit: 1
+      s3-parameters:
+        optional: true
+        limit: 1
+      admin:
+        optional: false
+        features: [admin]
+      ui:
+        optional: true
+        features: [ui]
+    provides:
+      metrics-endpoint:
+        interface: prometheus_scrape
+        optional: true
+      grafana-dashboard:
+        interface: grafana_dashboard
+        optional: true
+    configs:
+      num-history-shards: [1, 2, 4]
+    constraints:
+      - config[num-history-shards] in {1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024}
+      - bool(endpoint[admin]) => features(endpoint[admin]) == {"admin"}
+      - bool(endpoint[ui]) => features(endpoint[ui]) == {"ui"}
+  # 1.23+ tracks
+  - requires:
+      frontend-certificates:
+        optional: true
+        limit: 1
+      nginx-route:
+        optional: true
+        limit: 1
+      openfga:
+        optional: true
+        limit: 1
+      s3-parameters:
+        optional: true
+        limit: 1
+      # https://github.com/canonical/temporal-k8s-operator/issues/120
+      admin:
+        optional: false
+        features: [admin]
+      ui:
+        optional: true
+        features: [ui]
+    provides:
+      metrics-endpoint:
+        interface: prometheus_scrape
+        optional: true
+      grafana-dashboard:
+        interface: grafana_dashboard
+        optional: true
+    configs:
+      num-history-shards: [1, 2, 4]
+    constraints:
+      # num-history-shards must be one of the specified values
+      - config[num-history-shards] in {1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024}
+      # admin endpoint must negotiate exactly the admin feature
+      - bool(endpoint[admin]) => features(endpoint[admin]) == {"admin"}
+      # ui endpoint must negotiate exactly the ui feature
+      - bool(endpoint[ui]) => features(endpoint[ui]) == {"ui"}

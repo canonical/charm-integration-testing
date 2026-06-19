@@ -1,0 +1,38 @@
+---
+# Override for glance
+# Source: https://github.com/openstack/charm-glance
+#
+# Classic (non-reactive) charm. Endpoint optionality from glance_utils.py:
+#
+# REQUIRED_INTERFACES = {'database': ['shared-db'], 'identity': ['identity-service']}
+# All other requires are in get_optional_interfaces() - checked only when present.
+#
+# image-service (provides) - REQUIRED: primary purpose; charm exists to provide images.
+# nrpe-external-master (provides) - OPTIONAL: monitoring subordinate; convention.
+#
+# shared-db, identity-service (requires) - REQUIRED: in REQUIRED_INTERFACES.
+# amqp (requires) - already optional: true upstream; no override needed.
+# All other requires: optional - none in REQUIRED_INTERFACES; no BlockedStatus when absent.
+overrides:
+  - provides:
+      nrpe-external-master:
+        optional: true
+    requires:
+      ceph:
+        optional: true
+      certificates:
+        optional: true
+      cinder-volume-service:
+        optional: true
+      ha:
+        optional: true
+      object-store:
+        optional: true
+      storage-backend:
+        optional: true
+    constraints:
+      # All connected OpenStack service charms must be on the same release track.
+      - 'tracks(charms(endpoint[identity-service])) == tracks({self})'
+      - 'risks(charms(endpoint[identity-service])) == risks({self})'
+      - 'tracks(charms(endpoint[image-service])) == tracks({self})'
+      - 'risks(charms(endpoint[image-service])) == risks({self})'

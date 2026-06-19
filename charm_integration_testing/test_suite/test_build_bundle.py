@@ -5,15 +5,16 @@ import logging
 from pathlib import Path
 
 import pytest
+from juju import JujuVersion
 
-from bundle_builder import (
-    Application,
-    ApplicationEndpoint,
-    Bundle,
+from bundle_builder_x import (
+    AppSpec,
     BundleBuilder,
     CharmhubClient,
-    Integration,
+    IntegrationSpec,
+    ModelSpec,
     OverridesClient,
+    SpecFile,
 )
 
 from .scheduler.states import State
@@ -21,75 +22,122 @@ from .scheduler.states import State
 
 @pytest.mark.state(requires=State.NO_BUNDLE, provides=State.NO_CONTROLLER)
 def test_build_bundle(
-    target_charm: str,
-    neighbor_charm: str,
+    bundle_mermaid_output: Path,
+    charm_overrides: Path,
+    logger: logging.Logger,
+    juju_cli_version: JujuVersion,
+    target_application: str,
+    target_bundle: Path,
     target_channel: str | None,
+    target_charm: str,
+    target_controller: str,
+    target_endpoint: str,
+    model: str,
+    target_platform: str,
     target_revision: int | None,
     target_series: str | None,
-    target_endpoint: str,
-    neighbor_endpoint: str,
-    platform: str,
-    charm_metadata_overrides: Path,
-    charm_platform_overrides: Path,
-    charm_listing_overrides: Path,
-    charm_test_configs: Path,
-    charm_priorities_config: Path,
-    charm_default_versions: Path,
-    target_application: str,
     neighbor_application: str,
-    bundle: Path,
-    bundle_mermaid_output: Path,
-    logger: logging.Logger,
+    neighbor_bundle: Path | None,
+    neighbor_charm: str,
+    neighbor_controller: str | None,
+    neighbor_endpoint: str,
+    neighbor_model: str | None,
+    neighbor_platform: str,
 ) -> None:
-    overrides_client = OverridesClient(
-        charm_metadata_overrides=charm_metadata_overrides,
-        charm_platform_overrides=charm_platform_overrides,
-        charm_listing_overrides=charm_listing_overrides,
-        charm_test_configs=charm_test_configs,
-        charm_priorities_config=charm_priorities_config,
-        charm_default_versions=charm_default_versions,
-    )
+    overrides_client = OverridesClient(overrides=charm_overrides, logger=logger)
     charmhub_client = CharmhubClient(logger=logger, overrides_client=overrides_client)
 
-    fetched_target_charm = charmhub_client.charm_from_store(
-        charm_name=target_charm,
-        charm_channel=target_channel,
-        charm_revision=target_revision,
-        ubuntu_version=target_series,
-        ubuntu_arch="amd64",
+    target_app_spec = AppSpec(
+        charm=target_charm,
+        channel=target_channel,
+        revision=target_revision,
+        base=target_series,
     )
+    neighbor_app_spec = AppSpec(charm=neighbor_charm)
 
-    neighbor = charmhub_client.charm_from_store(
-        charm_name=neighbor_charm,
-        ubuntu_arch="amd64",
-    )
-
-    integration: Integration = frozenset(
-        {
-            ApplicationEndpoint(target_application, target_endpoint),
-            ApplicationEndpoint(neighbor_application, neighbor_endpoint),
-        }
-    )
-    base_bundle = Bundle(
-        applications=frozenset(
-            {
-                Application(name=target_application, charm=fetched_target_charm),
-                Application(name=neighbor_application, charm=neighbor),
-            }
-        ),
-        integrations=frozenset({integration}),
-        platform=platform,
-        arch="amd64",
-    )
+    if neighbor_bundle is None:
+        # Single-model (non-CMR) build
+        spec = SpecFile(
+            models=[
+                ModelSpec(
+                    name=model,
+                    platform=target_platform,
+                    arch="amd64",
+                    # TODO: Juju model isn't bootstrapped until later in the test setup,
+                    # so we can't resolve the Juju version here. We should refactor to
+                    # support the user passing in the juju version for target and neighbor.
+                    juju=str(juju_cli_version),
+                    controller=target_controller,
+                    applications={
+                        target_application: target_app_spec,
+                        neighbor_application: neighbor_app_spec,
+                    },
+                    integrations=[
+                        IntegrationSpec(
+                            application=target_application,
+                            endpoint=target_endpoint,
+                            remote_application=neighbor_application,
+                            remote_endpoint=neighbor_endpoint,
+                        ),
+                    ],
+                ),
+            ]
+        )
+    else:
+        assert neighbor_controller is not None
+        assert neighbor_model is not None
+        # Cross-model relation (CMR) build
+        spec = SpecFile(
+            models=[
+                ModelSpec(
+                    name=model,
+                    platform=target_platform,
+                    arch="amd64",
+                    juju=str(juju_cli_version),
+                    controller=target_controller,
+                    applications={target_application: target_app_spec},
+                    integrations=[
+                        IntegrationSpec(
+                            application=target_application,
+                            endpoint=target_endpoint,
+                            remote_application=neighbor_application,
+                            remote_endpoint=neighbor_endpoint,
+                            remote_model=neighbor_model,
+                            remote_controller=neighbor_controller,
+                        ),
+                    ],
+                ),
+                ModelSpec(
+                    name=neighbor_model,
+                    platform=neighbor_platform,
+                    arch="amd64",
+                    juju=str(juju_cli_version),
+                    controller=neighbor_controller,
+                    applications={neighbor_application: neighbor_app_spec},
+                ),
+            ]
+        )
 
     bundle_builder = BundleBuilder(charmhub_client=charmhub_client, logger=logger)
-    built_bundle = bundle_builder.build(base_bundle)
+    solution = bundle_builder.build(spec)
 
-    bundle_contents = built_bundle.export()
     separator = "-" * 80
-    bundle.write_text(bundle_contents, encoding="utf-8")
-    logger.info(f"Bundle written to {bundle}.")
-    logger.info(f"Bundle content:\n{separator}\n{bundle_contents.strip()}\n{separator}")
+    bundles_by_model = {b.model: b for b in solution.bundles}
 
-    bundle_mermaid_output.write_text(built_bundle.export_mermaid(), encoding="utf-8")
+    target_model_key = f"{target_controller}/{model}"
+    target_contents = bundles_by_model[target_model_key].export()
+    target_bundle.write_text(target_contents, encoding="utf-8")
+    logger.info(f"Bundle written to {target_bundle}.")
+    logger.info(f"Bundle content:\n{separator}\n{target_contents.strip()}\n{separator}")
+
+    if neighbor_bundle is not None:
+        assert neighbor_model is not None
+        assert neighbor_controller is not None
+        neighbor_model_key = f"{neighbor_controller}/{neighbor_model}"
+        neighbor_contents = bundles_by_model[neighbor_model_key].export()
+        neighbor_bundle.write_text(neighbor_contents, encoding="utf-8")
+        logger.info(f"Bundle written to {neighbor_bundle}.")
+        logger.info(f"Bundle content:\n{separator}\n{neighbor_contents.strip()}\n{separator}")
+
+    bundle_mermaid_output.write_text(solution.export_mermaid(), encoding="utf-8")
     logger.info(f"Bundle Mermaid diagram written to {bundle_mermaid_output}")

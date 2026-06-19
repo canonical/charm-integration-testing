@@ -1,0 +1,134 @@
+---
+# Override for nova-cloud-controller
+# Source: https://github.com/openstack/charm-nova-cloud-controller
+#
+# Classic charm. REQUIRED_INTERFACES from hooks/nova_cc_utils.py:
+#   database (shared-db), messaging (amqp), identity (identity-service),
+#   image (image-service), compute (cloud-compute). For Train+: placement.
+#
+# cloud-controller (provides) - OPTIONAL: consumed only in multi-cell; not standard.
+# nova-cell-api (provides) - OPTIONAL: multi-cell deployments only.
+# nrpe-external-master (provides) - OPTIONAL: monitoring subordinate; convention.
+#
+# shared-db, amqp, identity-service, image-service, cloud-compute (requires) - REQUIRED.
+# placement (requires) - REQUIRED for Train+; not present in metadata on queens/rocky/stein.
+# All other requires: optional - not in REQUIRED_INTERFACES; checked only when present.
+overrides:
+  # queens, rocky, stein: placement endpoint not present in charm metadata.
+  - criteria:
+      - any_of:
+          - track: queens
+          - track: rocky
+          - track: stein
+    provides:
+      nrpe-external-master:
+        optional: true
+      cloud-controller:
+        optional: true
+      nova-cell-api:
+        optional: true
+    requires:
+      cinder-volume-service:
+        optional: true
+      quantum-network-service:
+        optional: true
+      neutron-api:
+        optional: true
+      ha:
+        optional: true
+      nova-vmware:
+        optional: true
+      memcache:
+        optional: true
+      certificates:
+        optional: true
+      shared-db-cell:
+        optional: true
+      amqp-cell:
+        optional: true
+    constraints:
+      # All connected OpenStack service charms must be on the same release track.
+      - 'tracks(charms(endpoint[identity-service])) == tracks({self})'
+      - 'risks(charms(endpoint[identity-service])) == risks({self})'
+      - 'tracks(charms(endpoint[image-service])) == tracks({self})'
+      - 'risks(charms(endpoint[image-service])) == risks({self})'
+      - 'tracks(charms(endpoint[cloud-compute])) == tracks({self})'
+      - 'risks(charms(endpoint[cloud-compute])) == risks({self})'
+  # train: placement endpoint present in metadata and required; dashboard not yet present.
+  - criteria:
+      - track: train
+    provides:
+      nrpe-external-master:
+        optional: true
+      cloud-controller:
+        optional: true
+      nova-cell-api:
+        optional: true
+    requires:
+      cinder-volume-service:
+        optional: true
+      quantum-network-service:
+        optional: true
+      neutron-api:
+        optional: true
+      ha:
+        optional: true
+      nova-vmware:
+        optional: true
+      memcache:
+        optional: true
+      certificates:
+        optional: true
+      shared-db-cell:
+        optional: true
+      amqp-cell:
+        optional: true
+    constraints:
+      # All connected OpenStack service charms must be on the same release track.
+      - 'tracks(charms(endpoint[identity-service])) == tracks({self})'
+      - 'risks(charms(endpoint[identity-service])) == risks({self})'
+      - 'tracks(charms(endpoint[image-service])) == tracks({self})'
+      - 'risks(charms(endpoint[image-service])) == risks({self})'
+      - 'tracks(charms(endpoint[cloud-compute])) == tracks({self})'
+      - 'risks(charms(endpoint[cloud-compute])) == risks({self})'
+      - 'tracks(charms(endpoint[placement])) == tracks({self})'
+      - 'risks(charms(endpoint[placement])) == risks({self})'
+  # Default (ussuri and later): placement required; dashboard endpoint also present.
+  - provides:
+      nrpe-external-master:
+        optional: true
+      cloud-controller:
+        optional: true
+      nova-cell-api:
+        optional: true
+    requires:
+      cinder-volume-service:
+        optional: true
+      dashboard:
+        optional: true
+      quantum-network-service:
+        optional: true
+      neutron-api:
+        optional: true
+      ha:
+        optional: true
+      nova-vmware:
+        optional: true
+      memcache:
+        optional: true
+      certificates:
+        optional: true
+      shared-db-cell:
+        optional: true
+      amqp-cell:
+        optional: true
+    constraints:
+      # All connected OpenStack service charms must be on the same release track.
+      - 'tracks(charms(endpoint[identity-service])) == tracks({self})'
+      - 'risks(charms(endpoint[identity-service])) == risks({self})'
+      - 'tracks(charms(endpoint[image-service])) == tracks({self})'
+      - 'risks(charms(endpoint[image-service])) == risks({self})'
+      - 'tracks(charms(endpoint[cloud-compute])) == tracks({self})'
+      - 'risks(charms(endpoint[cloud-compute])) == risks({self})'
+      - 'tracks(charms(endpoint[placement])) == tracks({self})'
+      - 'risks(charms(endpoint[placement])) == risks({self})'

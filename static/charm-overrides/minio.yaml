@@ -1,0 +1,8 @@
+---
+# Remove after: https://github.com/canonical/charm-integration-testing/issues/282
+overrides:
+  - provides:
+      metrics-endpoint:
+        optional: true
+      grafana-dashboard:
+        optional: true

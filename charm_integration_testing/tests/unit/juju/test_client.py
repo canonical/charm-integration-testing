@@ -10,6 +10,7 @@ from juju import JujuValidationError
 from juju.client import JujuClient
 from juju.extension import JujuExtension
 from juju.models import JujuApplicationInfo
+from juju.version import JujuVersion
 
 from validators.base.validator import ValidationCheck, ValidationResult
 
@@ -125,11 +126,15 @@ class RevisionSequenceBackendStub(NullJujuBackend):
 
 
 def _pass(endpoint: str = "db", interface: str = "postgresql_client") -> ValidationResult:
-    return ValidationResult(status="PASS", endpoint=endpoint, interface=interface, level="simple", relation_id=0)
+    return ValidationResult(
+        status="PASS", endpoint=endpoint, interface=interface, level="simple", role="requires", relation_id=0
+    )
 
 
 def _fail(endpoint: str = "db", interface: str = "postgresql_client") -> ValidationResult:
-    return ValidationResult(status="FAIL", endpoint=endpoint, interface=interface, level="simple", relation_id=0)
+    return ValidationResult(
+        status="FAIL", endpoint=endpoint, interface=interface, level="simple", role="requires", relation_id=0
+    )
 
 
 def _fail_with_check(
@@ -140,6 +145,7 @@ def _fail_with_check(
         endpoint=endpoint,
         interface="postgresql_client",
         level="simple",
+        role="requires",
         relation_id=0,
         checks=[ValidationCheck(name=check_name, passed=False, message=check_message)],
     )
@@ -147,12 +153,20 @@ def _fail_with_check(
 
 def _error(endpoint: str = "db", error: str = "exception occurred") -> ValidationResult:
     return ValidationResult(
-        status="ERROR", endpoint=endpoint, interface="postgresql_client", level="simple", relation_id=0, error=error
+        status="ERROR",
+        endpoint=endpoint,
+        interface="postgresql_client",
+        level="simple",
+        role="requires",
+        relation_id=0,
+        error=error,
     )
 
 
 def _skipped(endpoint: str = "db", interface: str = "postgresql_client") -> ValidationResult:
-    return ValidationResult(status="SKIPPED", endpoint=endpoint, interface=interface, level="simple", relation_id=0)
+    return ValidationResult(
+        status="SKIPPED", endpoint=endpoint, interface=interface, level="simple", role="requires", relation_id=0
+    )
 
 
 def _app_info(charm: str = "postgresql") -> JujuApplicationInfo:
@@ -496,3 +510,336 @@ class TestJujuClientMigrateModel:
 
         # THEN an info message mentioning the model and both controllers was logged
         assert any("mymodel" in msg and "source-ctrl" in msg and "target-ctrl" in msg for msg in logger.infos)
+
+
+@dataclass
+class UpgradeControllerBackendStub(NullJujuBackend):
+    """Backend stub that records upgrade_controller calls."""
+
+    upgrade_controller_calls: list[tuple[str, str | None]] = field(default_factory=list)
+
+    def upgrade_controller(self, controller: str, agent_version: str | None = None) -> None:
+        self.upgrade_controller_calls.append((controller, agent_version))
+
+
+class TestJujuClientUpgradeController:
+    @pytest.fixture
+    def logger(self) -> LoggerStub:
+        return LoggerStub()
+
+    def _client(self, logger: Any, backend: NullJujuBackend) -> JujuClient:
+        return JujuClient(backend, logger, [])
+
+    def test_delegates_to_backend(self, logger: LoggerStub) -> None:
+        # GIVEN a backend that records upgrade_controller calls
+        backend = UpgradeControllerBackendStub()
+        client = self._client(logger, backend)
+
+        # WHEN
+        client.upgrade_controller("mycontroller", agent_version="3.6.21")
+
+        # THEN the backend received the call with the correct arguments
+        assert ("mycontroller", "3.6.21") in backend.upgrade_controller_calls
+
+    def test_delegates_without_agent_version(self, logger: LoggerStub) -> None:
+        # GIVEN a backend that records upgrade_controller calls
+        backend = UpgradeControllerBackendStub()
+        client = self._client(logger, backend)
+
+        # WHEN
+        client.upgrade_controller("mycontroller")
+
+        # THEN the backend received the call with None agent_version
+        assert ("mycontroller", None) in backend.upgrade_controller_calls
+
+    def test_logs_controller_and_version(self, logger: LoggerStub) -> None:
+        # GIVEN a backend stub
+        backend = UpgradeControllerBackendStub()
+        client = self._client(logger, backend)
+
+        # WHEN
+        client.upgrade_controller("mycontroller", agent_version="3.6.21")
+
+        # THEN an info message mentioning the controller and version was logged
+        assert any("mycontroller" in msg and "3.6.21" in msg for msg in logger.infos)
+
+
+@dataclass
+class UpgradeModelBackendStub(NullJujuBackend):
+    """Backend stub that records upgrade_model calls."""
+
+    upgrade_model_calls: list[tuple[str, str | None]] = field(default_factory=list)
+
+    def upgrade_model(self, model: str, agent_version: str | None = None) -> None:
+        self.upgrade_model_calls.append((model, agent_version))
+
+
+class TestJujuClientUpgradeModel:
+    @pytest.fixture
+    def logger(self) -> LoggerStub:
+        return LoggerStub()
+
+    def _client(self, logger: Any, backend: NullJujuBackend) -> JujuClient:
+        return JujuClient(backend, logger, [])
+
+    def test_delegates_to_backend(self, logger: LoggerStub) -> None:
+        # GIVEN a backend that records upgrade_model calls
+        backend = UpgradeModelBackendStub()
+        client = self._client(logger, backend)
+
+        # WHEN
+        client.upgrade_model("mymodel", agent_version="4.0.5")
+
+        # THEN the backend received the call with the correct arguments
+        assert ("mymodel", "4.0.5") in backend.upgrade_model_calls
+
+    def test_delegates_without_agent_version(self, logger: LoggerStub) -> None:
+        # GIVEN a backend that records upgrade_model calls
+        backend = UpgradeModelBackendStub()
+        client = self._client(logger, backend)
+
+        # WHEN
+        client.upgrade_model("mymodel")
+
+        # THEN the backend received the call with None agent_version
+        assert ("mymodel", None) in backend.upgrade_model_calls
+
+    def test_logs_model_and_version(self, logger: LoggerStub) -> None:
+        # GIVEN a backend stub
+        backend = UpgradeModelBackendStub()
+        client = self._client(logger, backend)
+
+        # WHEN
+        client.upgrade_model("mymodel", agent_version="4.0.5")
+
+        # THEN an info message mentioning the model and version was logged
+        assert any("mymodel" in msg and "4.0.5" in msg for msg in logger.infos)
+
+
+@dataclass
+class VersionBackendStub(NullJujuBackend):
+    """Backend stub that returns a fixed version string."""
+
+    _version: str = "3.6.1"
+    _cli_version: str = "3.6.1-ubuntu-amd64"
+
+    def version(self, model: str) -> JujuVersion:
+        return JujuVersion.parse(self._version)
+
+    def cli_version(self) -> JujuVersion:
+        return JujuVersion.parse(self._cli_version)
+
+
+@pytest.fixture
+def logger() -> LoggerStub:
+    return LoggerStub()
+
+
+class TestJujuClientVersion:
+    def _client(self, logger: Any, backend: NullJujuBackend) -> JujuClient:
+        return JujuClient(backend, logger, [])
+
+    def test_delegates_version_to_backend(self, logger: LoggerStub) -> None:
+        backend = VersionBackendStub(_version="3.6.1")
+        client = self._client(logger, backend)
+
+        assert client.version("mymodel") == JujuVersion(3, 6, 1)
+
+    def test_delegates_cli_version_to_backend(self, logger: LoggerStub) -> None:
+        backend = VersionBackendStub(_cli_version="3.6.1-ubuntu-amd64")
+        client = self._client(logger, backend)
+
+        assert client.cli_version() == JujuVersion(3, 6, 1)
+
+
+class DebugLogStub(NullJujuBackend):
+    """Backend stub that offers debug_log."""
+
+    def debug_log(self, model: str) -> str:
+        return f"this is a debug log\nmessage\n{model}"
+
+
+class TestJujuClientDebugLog:
+    def _client(self, logger: Any, backend: NullJujuBackend) -> JujuClient:
+        return JujuClient(backend, logger, [])
+
+    def test_debug_log_calls_backend(self, logger: LoggerStub) -> None:
+        # GIVEN a backend that returns debug_log
+        backend = DebugLogStub()
+        client = self._client(logger, backend)
+
+        # WHEN
+        log = client.debug_log("mymodel")
+
+        # THEN the backend's debug_log method was called and returned the expected string
+        assert "Collecting debug log from model mymodel" in logger.infos
+        assert log == "this is a debug log\nmessage\nmymodel"
+
+
+# ---------------------------------------------------------------------------
+# Stubs for controller lifecycle hook tests
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class BootstrapControllerBackendStub(NullJujuBackend):
+    """Backend stub that records bootstrap_controller calls."""
+
+    bootstrapped: list[str] = field(default_factory=list)
+
+    def bootstrap_controller(
+        self,
+        cloud: str,
+        controller: str,
+        controller_constraints: dict[str, str],
+        bootstrap_configuration: dict[str, str],
+        metadata_source: Any | None = None,
+        agent_version: str | None = None,
+    ) -> None:
+        self.bootstrapped.append(controller)
+
+
+@dataclass
+class HookRecordingExtension(JujuExtension):
+    """Extension that records all lifecycle hook calls."""
+
+    post_bootstrap_calls: list[str] = field(default_factory=list)
+    pre_kill_calls: list[str] = field(default_factory=list)
+    post_migrate_calls: list[tuple[str, str, str]] = field(default_factory=list)
+
+    def post_bootstrap_controller(self, controller: str) -> None:
+        self.post_bootstrap_calls.append(controller)
+
+    def pre_kill_controller(self, controller: str) -> None:
+        self.pre_kill_calls.append(controller)
+
+    def post_migrate_model(self, model: str, source: str, target: str) -> None:
+        self.post_migrate_calls.append((model, source, target))
+
+
+# ---------------------------------------------------------------------------
+# Tests: JujuClient controller lifecycle hooks
+# ---------------------------------------------------------------------------
+
+
+class TestJujuClientBootstrapControllerHooks:
+    @pytest.fixture
+    def logger(self) -> LoggerStub:
+        return LoggerStub()
+
+    def _client(
+        self, logger: Any, backend: NullJujuBackend, extensions: list[JujuExtension] | None = None
+    ) -> JujuClient:
+        return JujuClient(backend, logger, extensions or [])
+
+    def test_post_bootstrap_controller_hook_fires(self, logger: LoggerStub) -> None:
+        # GIVEN a client with a hook-recording extension
+        ext = HookRecordingExtension()
+        backend = BootstrapControllerBackendStub()
+        client = self._client(logger, backend, [ext])
+
+        # WHEN a controller is bootstrapped
+        client.bootstrap_controller(
+            cloud="mycloud", controller="my-ctrl", controller_constraints={}, bootstrap_configuration={}
+        )
+
+        # THEN the extension hook received the controller name
+        assert ext.post_bootstrap_calls == ["my-ctrl"]
+
+    def test_post_bootstrap_controller_hook_fires_for_all_extensions(self, logger: LoggerStub) -> None:
+        # GIVEN a client with two extensions
+        ext1 = HookRecordingExtension()
+        ext2 = HookRecordingExtension()
+        backend = BootstrapControllerBackendStub()
+        client = self._client(logger, backend, [ext1, ext2])
+
+        # WHEN a controller is bootstrapped
+        client.bootstrap_controller(
+            cloud="mycloud", controller="my-ctrl", controller_constraints={}, bootstrap_configuration={}
+        )
+
+        # THEN both extensions received the hook
+        assert ext1.post_bootstrap_calls == ["my-ctrl"]
+        assert ext2.post_bootstrap_calls == ["my-ctrl"]
+
+
+class TestJujuClientKillControllerHooks:
+    @pytest.fixture
+    def logger(self) -> LoggerStub:
+        return LoggerStub()
+
+    def _client(
+        self, logger: Any, backend: NullJujuBackend, extensions: list[JujuExtension] | None = None
+    ) -> JujuClient:
+        return JujuClient(backend, logger, extensions or [])
+
+    def test_pre_kill_controller_hook_fires_before_backend(self, logger: LoggerStub) -> None:
+        # GIVEN a client with a hook-recording extension that appends to an order list
+        order: list[str] = []
+
+        class OrderRecordingExtension(HookRecordingExtension):
+            def pre_kill_controller(self, controller: str) -> None:
+                order.append("hook")
+                super().pre_kill_controller(controller)
+
+        @dataclass
+        class OrderedKillBackend(NullJujuBackend):
+            def kill_controller(self, controller: str) -> None:
+                order.append("backend")
+
+        ext = OrderRecordingExtension()
+        client = self._client(logger, OrderedKillBackend(), [ext])
+
+        # WHEN the controller is killed
+        client.kill_controller("my-ctrl")
+
+        # THEN hook fires before backend
+        assert order == ["hook", "backend"]
+
+    def test_pre_kill_controller_hook_fires_for_all_extensions(self, logger: LoggerStub) -> None:
+        # GIVEN a client with two extensions
+        ext1 = HookRecordingExtension()
+        ext2 = HookRecordingExtension()
+        client = self._client(logger, KillControllerBackendStub(), [ext1, ext2])
+
+        # WHEN
+        client.kill_controller("my-ctrl")
+
+        # THEN both extensions received the hook
+        assert ext1.pre_kill_calls == ["my-ctrl"]
+        assert ext2.pre_kill_calls == ["my-ctrl"]
+
+
+class TestJujuClientMigrateModelHooks:
+    @pytest.fixture
+    def logger(self) -> LoggerStub:
+        return LoggerStub()
+
+    def _client(
+        self, logger: Any, backend: NullJujuBackend, extensions: list[JujuExtension] | None = None
+    ) -> JujuClient:
+        return JujuClient(backend, logger, extensions or [])
+
+    def test_post_migrate_model_hook_fires(self, logger: LoggerStub) -> None:
+        # GIVEN a client with a hook-recording extension
+        ext = HookRecordingExtension()
+        client = self._client(logger, MigrateModelBackendStub(), [ext])
+
+        # WHEN a model is migrated
+        client.migrate_model("mymodel", "source-ctrl", "target-ctrl")
+
+        # THEN the extension hook received all three arguments
+        assert ext.post_migrate_calls == [("mymodel", "source-ctrl", "target-ctrl")]
+
+    def test_post_migrate_model_hook_fires_for_all_extensions(self, logger: LoggerStub) -> None:
+        # GIVEN a client with two extensions
+        ext1 = HookRecordingExtension()
+        ext2 = HookRecordingExtension()
+        client = self._client(logger, MigrateModelBackendStub(), [ext1, ext2])
+
+        # WHEN
+        client.migrate_model("mymodel", "source-ctrl", "target-ctrl")
+
+        # THEN both extensions received the hook
+        assert ext1.post_migrate_calls == [("mymodel", "source-ctrl", "target-ctrl")]
+        assert ext2.post_migrate_calls == [("mymodel", "source-ctrl", "target-ctrl")]

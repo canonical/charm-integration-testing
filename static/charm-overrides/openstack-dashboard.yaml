@@ -1,0 +1,100 @@
+---
+# Override for openstack-dashboard
+# Source: https://github.com/openstack/charm-openstack-dashboard
+#
+# Classic charm. REQUIRED_INTERFACES from hooks/horizon_utils.py:
+#   identity (identity-service).
+#
+# nrpe-external-master (provides) - OPTIONAL: monitoring subordinate; convention.
+# website (provides) - OPTIONAL: HTTP; works without a consuming reverse-proxy relation.
+# dashboard-plugin (provides) - OPTIONAL: scope=container; additive plugin subordinates.
+# websso-trusted-dashboard (provides) - OPTIONAL: WebSSO feature; not primary purpose.
+# dashboard (provides) - OPTIONAL: nova-cc console integration; not primary purpose.
+#
+# identity-service (requires) - REQUIRED: only entry in REQUIRED_INTERFACES.
+# ha (requires) - OPTIONAL: scope=container; HA is additive.
+# certificates (requires) - OPTIONAL: TLS; charm runs without it.
+# websso-fid-service-provider (requires) - OPTIONAL: WebSSO FID; not in REQUIRED_INTERFACES.
+# application-dashboard (requires) - OPTIONAL: not in REQUIRED_INTERFACES (yoga+).
+overrides:
+  # queens-train: dashboard endpoint not yet present in `provides` metadata
+  - criteria:
+      - any_of:
+          - track: 'queens'
+          - track: 'rocky'
+          - track: 'stein'
+          - track: 'train'
+    provides:
+      nrpe-external-master:
+        optional: true
+      website:
+        optional: true
+      dashboard-plugin:
+        optional: true
+      websso-trusted-dashboard:
+        optional: true
+    requires:
+      ha:
+        optional: true
+      certificates:
+        optional: true
+      websso-fid-service-provider:
+        optional: true
+    constraints:
+      # All connected OpenStack service charms must be on the same release track.
+      - 'tracks(charms(endpoint[identity-service])) == tracks({self})'
+      - 'risks(charms(endpoint[identity-service])) == risks({self})'
+  # ussuri-xena: dashboard endpoint present; application-dashboard not yet available
+  - criteria:
+      - any_of:
+          - track: 'ussuri'
+          - track: 'victoria'
+          - track: 'wallaby'
+          - track: 'xena'
+    provides:
+      nrpe-external-master:
+        optional: true
+      website:
+        optional: true
+      dashboard-plugin:
+        optional: true
+      websso-trusted-dashboard:
+        optional: true
+      dashboard:
+        optional: true
+    requires:
+      ha:
+        optional: true
+      certificates:
+        optional: true
+      websso-fid-service-provider:
+        optional: true
+    constraints:
+      # All connected OpenStack service charms must be on the same release track.
+      - 'tracks(charms(endpoint[identity-service])) == tracks({self})'
+      - 'risks(charms(endpoint[identity-service])) == risks({self})'
+  # default (yoga, zed, 2023.1+, latest, and future tracks)
+  - provides:
+      nrpe-external-master:
+        optional: true
+      website:
+        optional: true
+      dashboard-plugin:
+        optional: true
+      websso-trusted-dashboard:
+        optional: true
+      dashboard:
+        optional: true
+    requires:
+      application-dashboard:
+        optional: true
+      ha:
+        optional: true
+      certificates:
+        optional: true
+      websso-fid-service-provider:
+        optional: true
+    constraints:
+      # All connected OpenStack service charms must be on the same release track.
+      - 'tracks(charms(endpoint[identity-service])) == tracks({self})'
+      - 'risks(charms(endpoint[identity-service])) == risks({self})'

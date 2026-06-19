@@ -1,0 +1,77 @@
+---
+# Override for ceph-mon
+# Source: https://github.com/canonical/ceph-charms/tree/main/ceph-mon
+# Upstream PR: https://github.com/canonical/ceph-charms/pull/184
+#
+# Two endpoint generations exist across stable tracks:
+#   octopus, pacific: no cos-agent or metrics-endpoint
+#   reef, quincy, squid+: adds cos-agent and metrics-endpoint
+#
+# bootstrap-source (requires): optional - only used for the "no-bootstrap"
+#   workflow (joining an existing cluster). Gated on config('no-bootstrap').
+#   Deprecated upstream; no charm on Charmhub provides ceph-bootstrap.
+#
+# osd (provides): REQUIRED - primary endpoint; ceph-osd connects here for
+#   bootstrap keys and cluster auth. A mon with no OSDs is non-functional.
+#
+# All other provides: optional - each activates only on relation events;
+#   none cause BlockedStatus when absent.
+overrides:
+
+  # ── luminous, mimic, nautilus, octopus, pacific tracks ─────────────────────
+  # These tracks predate the COS observability stack and do not expose
+  # cos-agent or metrics-endpoint.
+  - criteria:
+      - any_of:
+          - track: 'luminous'
+          - track: 'mimic'
+          - track: 'nautilus'
+          - track: 'octopus'
+          - track: 'pacific'
+    requires:
+      bootstrap-source:
+        optional: true
+    provides:
+      admin:
+        optional: true
+      client:
+        optional: true
+      dashboard:
+        optional: true
+      mds:
+        optional: true
+      nrpe-external-master:
+        optional: true
+      prometheus:
+        optional: true
+      radosgw:
+        optional: true
+      rbd-mirror:
+        optional: true
+
+  # ── reef, quincy, squid and newer (default) ─────────────────────────────────
+  # Adds cos-agent and metrics-endpoint to the provides set.
+  - requires:
+      bootstrap-source:
+        optional: true
+    provides:
+      admin:
+        optional: true
+      client:
+        optional: true
+      cos-agent:
+        optional: true
+      dashboard:
+        optional: true
+      mds:
+        optional: true
+      metrics-endpoint:
+        optional: true
+      nrpe-external-master:
+        optional: true
+      prometheus:
+        optional: true
+      radosgw:
+        optional: true
+      rbd-mirror:
+        optional: true

@@ -1,0 +1,11 @@
+---
+overrides:
+  # latest non-edge channels lack cos-agent
+  - criteria:
+      - track: 'latest'
+        none_of:
+          - risk: 'edge'
+  # default (track 3 and future tracks): cos-agent
+  - provides:
+      cos-agent:
+        optional: true

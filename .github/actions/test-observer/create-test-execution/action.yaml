@@ -84,6 +84,14 @@ runs:
         test_observer_token: ${{ inputs.test_observer_token }}
         method_type: PUT
         request_body: '@${{ steps.request-body.outputs.file }}'
+    - name: Print failing response body
+      if: failure()
+      shell: bash
+      run: |
+        if [[ -f response_file ]]; then
+          echo "Response body:"
+          cat response_file
+        fi
     - name: Read response
       id: read-response
       shell: bash

@@ -1,0 +1,8 @@
+---
+# ML Metadata - stores metadata for ML workflows
+overrides:
+  - provides:
+      grpc:
+        features: [mlmd-grpc]
+    constraints:
+      - '"mlmd-grpc" in features(endpoint[grpc])'

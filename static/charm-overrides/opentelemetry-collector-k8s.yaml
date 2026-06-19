@@ -1,0 +1,41 @@
+---
+# Source: https://github.com/canonical/opentelemetry-collector-k8s-operator
+#
+# Two endpoint generations:
+#   track 1: no CMR mesh endpoints; grafana-dashboards-* not optional upstream
+#   track 2, dev: adds require-cmr-mesh, service-mesh (requires) and provide-cmr-mesh (provides);
+#                 grafana-dashboards-* still not optional upstream
+#
+# grafana-dashboards-consumer (requires): optional - _get_missing_mandatory_relations() only blocks
+#   when this IS connected but unpaired; absent relation causes no BlockedStatus
+# grafana-dashboards-provider (provides): optional - same reasoning; forwarding is secondary purpose
+# require-cmr-mesh, service-mesh (requires): optional - CMR mesh is additive mesh integration
+# provide-cmr-mesh (provides): optional - CMR mesh is additive mesh integration
+overrides:
+  # track 1: no CMR mesh
+  - criteria:
+      - track: "1"
+    requires:
+      grafana-dashboards-consumer:
+        optional: true
+    provides:
+      grafana-dashboards-provider:
+        optional: true
+
+  # track 2 and dev: CMR mesh endpoints present but not optional upstream
+  - criteria:
+      - any_of:
+          - track: "2"
+          - track: dev
+    requires:
+      grafana-dashboards-consumer:
+        optional: true
+      require-cmr-mesh:
+        optional: true
+      service-mesh:
+        optional: true
+    provides:
+      grafana-dashboards-provider:
+        optional: true
+      provide-cmr-mesh:
+        optional: true

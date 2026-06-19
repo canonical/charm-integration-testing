@@ -28,45 +28,6 @@ jobs:
         run: npm install markdownlint-cli2 --global
       - name: Run linter
         run: ./scripts/lint.sh
-  bundle-builder-unit-tests:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with:
-          persist-credentials: false
-      - name: Install poetry
-        run: pipx install poetry==2.0.1
-      - name: Install dependencies
-        run: poetry install
-      - name: Run Bundle Builder Unit Tests
-        run: ./scripts/bundle-builder-unit-tests.sh
-  bundle-builder-integration-tests:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with:
-          persist-credentials: false
-      - name: Install poetry
-        run: pipx install poetry==2.0.1
-      - name: Install dependencies
-        run: poetry install
-      - name: Run Bundle Builder Integration Tests
-        run: ./scripts/bundle-builder-integration-tests.sh
-  bundle-builder-logic-tests:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with:
-          persist-credentials: false
-      - name: Install poetry
-        run: pipx install poetry==2.0.1
-      - name: Install dependencies
-        run: poetry install
-      - name: Run Bundle Builder Integration Tests
-        run: ./scripts/bundle-builder-logic-tests.sh
   charm-integration-testing-unit-tests:
     runs-on: ubuntu-latest
     steps:
@@ -98,3 +59,21 @@ jobs:
         run: poetry install
       - name: Run Validators Unit Tests
         run: ./scripts/validators-unit-tests.sh
+  bundle-builder-x-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Install poetry
+        run: pipx install poetry==2.0.1
+      - name: Install dependencies
+        run: poetry install
+      - name: Run Bundle Builder X Tests
+        env:
+          GITHUB_BASE_REF: ${{ github.base_ref }}
+        run: |-
+          ./scripts/bundle-builder-x-tests.sh 'unit|integration|logic|overrides' \
+            --overrides ./static/charm-overrides --overrides-modified-since "origin/${GITHUB_BASE_REF}"

@@ -1,0 +1,34 @@
+---
+overrides:
+  - criteria:
+      - track: '16'
+    provides:
+      database:
+        limit: 1
+        optional: true
+        features: [tls]
+    constraints:
+      # If database endpoint uses tls mode, client-certificates is required
+      - '"tls" in features(endpoint[database]) => bool(endpoint[client-certificates])'
+  - criteria:
+      - track: '14'
+    provides:
+      database:
+        limit: 1
+        optional: true
+        features: [tls]
+      db:
+        limit: 1
+        features: [tls]
+      db-admin:
+        limit: 1
+        features: [tls]
+    constraints:
+      # database, db, and db-admin are mutually exclusive (at most one can be used at a time)
+      - len(endpoint[database]) + len(endpoint[db]) + len(endpoint[db-admin]) <= 1
+      # If database endpoint uses tls mode, certificates is required
+      - '"tls" in features(endpoint[database]) => bool(endpoint[certificates])'
+      # If db endpoint uses tls mode, certificates is required
+      - '"tls" in features(endpoint[db]) => bool(endpoint[certificates])'
+      # If db-admin endpoint uses tls mode, certificates is required
+      - '"tls" in features(endpoint[db-admin]) => bool(endpoint[certificates])'

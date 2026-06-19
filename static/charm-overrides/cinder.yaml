@@ -1,0 +1,100 @@
+---
+# Override for cinder
+# Source: https://github.com/openstack/charm-cinder
+#
+# Classic charm. REQUIRED_INTERFACES from hooks/cinder_utils.py:
+#   database (shared-db), messaging (amqp).
+# identity-service: already optional: true upstream (no override needed).
+# secrets-storage: already optional: true upstream (no override needed).
+#
+# cinder-volume-service (provides) - REQUIRED: primary purpose; charm provides block storage.
+# nrpe-external-master (provides) - OPTIONAL: monitoring subordinate; convention.
+#
+# shared-db, amqp (requires) - REQUIRED: in REQUIRED_INTERFACES.
+# All other requires: optional - not in REQUIRED_INTERFACES; no BlockedStatus when absent.
+overrides:
+  # ── queens, rocky, stein, train ─────────────────────────────────────────────
+  # identity-credentials (requires) not present until ussuri.
+  - criteria:
+      - any_of:
+          - track: 'queens'
+          - track: 'rocky'
+          - track: 'stein'
+          - track: 'train'
+    provides:
+      nrpe-external-master:
+        optional: true
+    requires:
+      ceph:
+        optional: true
+      image-service:
+        optional: true
+      ha:
+        optional: true
+      storage-backend:
+        optional: true
+      backup-backend:
+        optional: true
+      certificates:
+        optional: true
+    constraints:
+      # Connected OpenStack service charms must be on the same release track.
+      - 'bool(endpoint[identity-service]) => tracks(charms(endpoint[identity-service]))
+        == tracks({self})'
+      - 'bool(endpoint[identity-service]) => risks(charms(endpoint[identity-service]))
+        == risks({self})'
+      - 'bool(endpoint[image-service]) => tracks(charms(endpoint[image-service]))
+        == tracks({self})'
+      - 'bool(endpoint[image-service]) => risks(charms(endpoint[image-service])) ==
+        risks({self})'
+      - 'tracks(charms(endpoint[cinder-volume-service])) == tracks({self})'
+      - 'risks(charms(endpoint[cinder-volume-service])) == risks({self})'
+
+  # ── ussuri and later ─────────────────────────────────────────────────────────
+  # identity-credentials (requires) added in ussuri.
+  - criteria:
+      - any_of:
+          - track: 'ussuri'
+          - track: 'victoria'
+          - track: 'wallaby'
+          - track: 'xena'
+          - track: 'yoga'
+          - track: 'zed'
+          - track: '2023.1'
+          - track: '2023.2'
+          - track: '2024.1'
+          - track: 'latest'
+    provides:
+      nrpe-external-master:
+        optional: true
+    requires:
+      ceph:
+        optional: true
+      image-service:
+        optional: true
+      ha:
+        optional: true
+      storage-backend:
+        optional: true
+      backup-backend:
+        optional: true
+      certificates:
+        optional: true
+      identity-credentials:
+        optional: true
+    constraints:
+      # Connected OpenStack service charms must be on the same release track.
+      - 'bool(endpoint[identity-service]) => tracks(charms(endpoint[identity-service]))
+        == tracks({self})'
+      - 'bool(endpoint[identity-service]) => risks(charms(endpoint[identity-service]))
+        == risks({self})'
+      - 'bool(endpoint[image-service]) => tracks(charms(endpoint[image-service]))
+        == tracks({self})'
+      - 'bool(endpoint[image-service]) => risks(charms(endpoint[image-service])) ==
+        risks({self})'
+      - 'bool(endpoint[identity-credentials]) => tracks(charms(endpoint[identity-credentials]))
+        == tracks({self})'
+      - 'bool(endpoint[identity-credentials]) => risks(charms(endpoint[identity-credentials]))
+        == risks({self})'
+      - 'tracks(charms(endpoint[cinder-volume-service])) == tracks({self})'
+      - 'risks(charms(endpoint[cinder-volume-service])) == risks({self})'

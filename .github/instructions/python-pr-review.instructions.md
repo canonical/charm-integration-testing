@@ -13,7 +13,7 @@ This is a multi-package monorepo. Dependency direction flows strictly bottom-to-
 2. **Backend** — ABCs and their concrete implementations (`JujuBackend`, `KubernetesBackend`, `BaseValidator`). Depend only on data models.
 3. **Client / Facade** — orchestration classes that accept backends and extensions via constructor injection (`JujuClient`, `KubernetesClient`, `ValidatorRunner`). Depend on backend ABCs and data models.
 4. **Extension** — lifecycle hooks injected into clients (`JujuExtension` subclasses). Depend on backend ABCs.
-5. **Bundle Building** — standalone sub-system (`bundle_builder` package). Depends on `CharmhubClient` and Pydantic models; no dependency on Juju layers.
+5. **Bundle Building** — standalone sub-system (`bundle_builder_x` package). Depends on `CharmhubClient` and Pydantic models; no dependency on Juju layers.
 6. **Test Suite** — top-level orchestration. The only layer allowed to depend on all others.
 
 Flag cross-layer violations: e.g. a data model importing a client, or a backend constructing an extension internally.
@@ -55,7 +55,6 @@ Flag cross-layer violations: e.g. a data model importing a client, or a backend 
 - Keep model responsibilities focused:
   - Transport/validation structures → Pydantic models.
   - Immutable domain-like structures → frozen dataclasses.
-- In the `bundle_builder` package, prefer `@immutable_dataclass` over `@dataclass(frozen=True)` for domain models — it additionally supports `@cached_method` and `@computed_property`.
 - `@serializeable_dataclass` is deprecated alongside `JujuCmdBackend`. Do not use it in new code. Existing uses are expected to disappear as `JujuCmdBackend` is phased out.
 - Flag mutable defaults and recommend default factories.
 
@@ -97,6 +96,36 @@ Flag cross-layer violations: e.g. a data model importing a client, or a backend 
 - Flag long functions that mix multiple responsibilities.
 - Prefer explicit names over terse variable names.
 - Ask for docstrings on non-obvious logic and public APIs.
+
+## ResourceRegistry (SQ105)
+
+The `resource_registry` package is the single system responsible for tracking live infrastructure resources (Juju controllers, models, etc.) and ensuring logs are collected and the resources are destroyed even when tests fail mid-run.
+
+### Core design
+
+- **`ResourceRegistry`** (in `charm_integration_testing/resource_registry/registry.py`) is the central store. Resources are registered on creation and torn down in reverse registration order (`teardown_all()`). Children are torn down depth-first before their parent.
+- **`ResourceHandle` protocol** identifies a resource: `resource_id` (unique string key), `resource_type` (human label), `path_segment` (filesystem-safe name used in log file names). Implementations must be frozen dataclasses. `path_segment` must sanitize unsafe path characters.
+- **`LogCollector` protocol** collects logs for a resource. `supports(handle)` guards whether it applies. `collect(handle)` does the work and **should raise on failure** — the registry will catch, save, and re-raise after cleanup. Collectors receive their destination at construction time, not at call time.
+- **`ResourceTeardownWarning`** is emitted by `teardown_all()` when a `teardown()` call raises, so that all resources are still processed. Within a single `teardown()`, log and destroy exceptions propagate directly so callers can observe them. If both fail, the destroy exception is raised chained from the log exception (`raise destroy_exc from log_exc`).
+
+### Juju integration
+
+- **`JujuControllerHandle`** (in `charm_integration_testing/juju/resource_registry/handles.py`) is the concrete `ResourceHandle` for Juju controllers.
+- **`JujuCrashdumpCollector`** (in `charm_integration_testing/juju/resource_registry/collectors.py`) wraps `juju-crashdump` (machine) and `juju-k8s-crashdump` (Kubernetes). `output_dir` is a constructor argument; if `None`, collection is silently skipped. Output is a single `.tar.gz` file written flat into `output_dir` — no subdirectories. File name is `{handle.path_segment}.tar.gz`.
+- **`JujuResourceRegistryExtension`** (in `charm_integration_testing/juju/resource_registry/extension.py`) is a `JujuExtension` that wires the registry into the `JujuClient` lifecycle: registers on `post_bootstrap_controller`, collects logs on `pre_kill_controller`, deregisters on `post_kill_controller`.
+
+### Review rules
+
+- The `ResourceRegistry` must not be called directly from test code or backends — only from extensions or session-scoped fixtures.
+- `LogCollector.collect()` must not swallow exceptions. Failures should propagate so the registry can surface them correctly.
+- `LogCollector` implementations must accept `output_dir` (and any other destination config) at construction time, not as arguments to `collect()`.
+- `ResourceHandle` implementations must be frozen dataclasses; `path_segment` must produce a filesystem-safe string (no slashes, colons, spaces, or other shell-special characters).
+- Log output files must be written flat into `output_dir` — no subdirectories per resource.
+- Teardown must always run even when log collection fails. Flag any pattern that would skip the destroyer when a collector raises.
+- `register()` enforces that a handle is not already registered and that a parent exists before its child is registered. Flag code that tries to work around these invariants.
+- `deregister()` re-parents orphaned children to root so they remain reachable by `teardown_all()`. Flag any refactor that removes this re-parenting.
+- Log messages from `ResourceRegistry` and `LogCollector` subclasses must start with a capital letter.
+- Loggers in these classes must be created via `logger.getChild(type(self).__name__)` — never store the parent logger directly.
 
 ## Copyright Headers
 

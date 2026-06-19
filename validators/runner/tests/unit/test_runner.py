@@ -14,11 +14,19 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, cast
 from unittest.mock import patch
+
+import ops
+import pytest
 
 from validators.base import BaseValidator, ValidationLevel, ValidationResult
 from validators.runner.runner import ValidatorRunner, ValidatorRunnerResults
+from validators.test_utils.helpers import make_charm_from_relation
+from validators.test_utils.stubs import (
+    RelationRoleStub,
+    RelationStub,
+)
 
 # ---------------------------------------------------------------------------
 # Validator stubs
@@ -31,6 +39,7 @@ class PassingValidator(BaseValidator):
             status="PASS",
             endpoint=self.endpoint,
             interface="test-interface",
+            role=self.role,
             level=level,
             relation_id=self.relation_id,
         )
@@ -42,6 +51,7 @@ class FailingValidator(BaseValidator):
             status="FAIL",
             endpoint=self.endpoint,
             interface="test-interface",
+            role=self.role,
             level=level,
             relation_id=self.relation_id,
         )
@@ -57,11 +67,12 @@ class SkippingValidator(BaseValidator):
 
     def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
         if level != "simple":
-            return self._skipped_result(level)
+            return self._skipped_result_due_to_level(level)
         return ValidationResult(
             status="PASS",
             endpoint=self.endpoint,
             interface="test-interface",
+            role=self.role,
             level=level,
             relation_id=self.relation_id,
         )
@@ -70,38 +81,6 @@ class SkippingValidator(BaseValidator):
 # ---------------------------------------------------------------------------
 # Charm / entry-point stubs
 # ---------------------------------------------------------------------------
-
-
-@dataclass
-class EndpointMetadataStub:
-    interface_name: Optional[str]
-
-
-@dataclass
-class IntegrationStub:
-    name: str
-    id: int = 0
-
-
-@dataclass
-class ModelStub:
-    relations: dict[str, list[IntegrationStub]]
-
-
-@dataclass
-class MetaStub:
-    requires: dict[str, EndpointMetadataStub]
-
-    def __post_init__(self) -> None:
-        # charm.meta.relations is the merged view of all relations; in tests
-        # we only have requires, so alias it so the interface property works.
-        self.relations = self.requires
-
-
-@dataclass
-class CharmStub:
-    meta: MetaStub
-    model: ModelStub
 
 
 @dataclass
@@ -114,21 +93,6 @@ class EntryPointStub:
         if self._load_error is not None:
             raise self._load_error
         return self._load_result
-
-
-def _make_charm(requires: dict[str, Optional[str]], relations: dict[str, int]) -> CharmStub:
-    """Build a CharmStub.
-
-    Args:
-        requires: mapping of endpoint name -> interface name (or None for fallback test).
-        relations: mapping of endpoint name -> number of integrations.
-    """
-    return CharmStub(
-        meta=MetaStub(requires={ep: EndpointMetadataStub(interface_name=iface) for ep, iface in requires.items()}),
-        model=ModelStub(
-            relations={ep: [IntegrationStub(name=ep, id=i) for i in range(n)] for ep, n in relations.items()}
-        ),
-    )
 
 
 class TestValidatorRunnerLoadValidators:
@@ -191,10 +155,25 @@ class TestValidatorRunnerRun:
     def test_returns_pass_result(self) -> None:
         # GIVEN
         runner = self._runner_with("test-interface", PassingValidator)
-        charm = _make_charm(requires={"db": "test-interface"}, relations={"db": 1})
+        relation = RelationStub(name="db", id=0)
+        charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
 
         # WHEN
-        results = runner.run(charm, level="simple")  # type: ignore[arg-type]
+        results = runner.run(cast(ops.CharmBase, charm), level="simple")
+
+        # THEN
+        assert isinstance(results, ValidatorRunnerResults)
+        assert len(results.results) == 1
+        assert results.results[0].status == "PASS"
+
+    def test_returns_pass_result_with_provides(self) -> None:
+        # GIVEN
+        runner = self._runner_with("test-interface", PassingValidator)
+        relation = RelationStub(name="api", id=0)
+        charm = make_charm_from_relation(relation, role=RelationRoleStub.provides, interface_name="test-interface")
+
+        # WHEN
+        results = runner.run(cast(ops.CharmBase, charm), level="simple")
 
         # THEN
         assert isinstance(results, ValidatorRunnerResults)
@@ -204,10 +183,11 @@ class TestValidatorRunnerRun:
     def test_returns_fail_result(self) -> None:
         # GIVEN
         runner = self._runner_with("test-interface", FailingValidator)
-        charm = _make_charm(requires={"db": "test-interface"}, relations={"db": 1})
+        relation = RelationStub(name="db", id=0)
+        charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
 
         # WHEN
-        results = runner.run(charm, level="simple")  # type: ignore[arg-type]
+        results = runner.run(cast(ops.CharmBase, charm), level="simple")
 
         # THEN
         assert results.results[0].status == "FAIL"
@@ -215,10 +195,11 @@ class TestValidatorRunnerRun:
     def test_captures_validator_exception_as_error(self) -> None:
         # GIVEN
         runner = self._runner_with("test-interface", ExplodingValidator)
-        charm = _make_charm(requires={"db": "test-interface"}, relations={"db": 1})
+        relation = RelationStub(name="db", id=0)
+        charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
 
         # WHEN
-        results = runner.run(charm, level="simple")  # type: ignore[arg-type]
+        results = runner.run(cast(ops.CharmBase, charm), level="simple")
 
         # THEN
         assert results.results[0].status == "ERROR"
@@ -228,10 +209,11 @@ class TestValidatorRunnerRun:
         # GIVEN a runner with no validators for the endpoint's interface
         runner = ValidatorRunner.__new__(ValidatorRunner)
         runner.validators = {}
-        charm = _make_charm(requires={"db": "test-interface"}, relations={"db": 1})
+        relation = RelationStub(name="db", id=0)
+        charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
 
         # WHEN
-        results = runner.run(charm, level="simple")  # type: ignore[arg-type]
+        results = runner.run(cast(ops.CharmBase, charm), level="simple")
 
         # THEN
         assert results.results == []
@@ -239,10 +221,11 @@ class TestValidatorRunnerRun:
     def test_uses_endpoint_name_as_fallback_when_interface_is_none(self) -> None:
         # GIVEN an endpoint whose interface_name is None
         runner = self._runner_with("db", PassingValidator)
-        charm = _make_charm(requires={"db": None}, relations={"db": 1})
+        relation = RelationStub(name="db", id=0)
+        charm = make_charm_from_relation(relation, role=RelationRoleStub.requires, interface_name=None)
 
         # WHEN
-        results = runner.run(charm, level="simple")  # type: ignore[arg-type]
+        results = runner.run(cast(ops.CharmBase, charm), level="simple")
 
         # THEN
         assert results.results[0].status == "PASS"
@@ -250,10 +233,11 @@ class TestValidatorRunnerRun:
     def test_passes_level_to_validator(self) -> None:
         # GIVEN
         runner = self._runner_with("test-interface", PassingValidator)
-        charm = _make_charm(requires={"db": "test-interface"}, relations={"db": 1})
+        relation = RelationStub(name="db", id=0)
+        charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
 
         # WHEN
-        results = runner.run(charm, level="deep")  # type: ignore[arg-type]
+        results = runner.run(cast(ops.CharmBase, charm), level="deep")
 
         # THEN
         assert results.results[0].level == "deep"
@@ -261,10 +245,13 @@ class TestValidatorRunnerRun:
     def test_runs_across_multiple_integrations(self) -> None:
         # GIVEN two integrations on the same endpoint
         runner = self._runner_with("test-interface", PassingValidator)
-        charm = _make_charm(requires={"db": "test-interface"}, relations={"db": 2})
+        relation = RelationStub(name="db", id=0)
+        charm = make_charm_from_relation(
+            relation, interface_name="test-interface", role=RelationRoleStub.requires, integrations_count=2
+        )
 
         # WHEN
-        results = runner.run(charm, level="simple")  # type: ignore[arg-type]
+        results = runner.run(cast(ops.CharmBase, charm), level="simple")
 
         # THEN
         assert len(results.results) == 2
@@ -272,10 +259,11 @@ class TestValidatorRunnerRun:
     def test_falls_back_to_simple_when_deep_is_skipped(self) -> None:
         # GIVEN a validator that only supports simple
         runner = self._runner_with("test-interface", SkippingValidator)
-        charm = _make_charm(requires={"db": "test-interface"}, relations={"db": 1})
+        relation = RelationStub(name="db", id=0)
+        charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
 
         # WHEN the runner is asked for deep
-        results = runner.run(charm, level="deep")  # type: ignore[arg-type]
+        results = runner.run(cast(ops.CharmBase, charm), level="deep")
 
         # THEN it fell back and got a real result at simple
         assert results.results[0].status == "PASS"
@@ -284,10 +272,11 @@ class TestValidatorRunnerRun:
     def test_falls_back_through_two_levels(self) -> None:
         # GIVEN a validator that only supports simple, but uat is requested
         runner = self._runner_with("test-interface", SkippingValidator)
-        charm = _make_charm(requires={"db": "test-interface"}, relations={"db": 1})
+        relation = RelationStub(name="db", id=0)
+        charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
 
         # WHEN the runner is asked for uat
-        results = runner.run(charm, level="uat")  # type: ignore[arg-type]
+        results = runner.run(cast(ops.CharmBase, charm), level="uat")
 
         # THEN it fell back through deep → simple and got a real result
         assert results.results[0].status == "PASS"
@@ -297,15 +286,40 @@ class TestValidatorRunnerRun:
         # GIVEN a validator that skips every level
         class AlwaysSkippingValidator(BaseValidator):
             def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
-                return self._skipped_result(level)
+                return self._skipped_result_due_to_level(level)
 
         runner = self._runner_with("test-interface", AlwaysSkippingValidator)
-        charm = _make_charm(requires={"db": "test-interface"}, relations={"db": 2})
+        relation = RelationStub(name="db", id=0)
+        charm = make_charm_from_relation(
+            relation, interface_name="test-interface", role=RelationRoleStub.requires, integrations_count=2
+        )
 
         # WHEN
-        results = runner.run(charm, level="simple")  # type: ignore[arg-type]
+        results = runner.run(cast(ops.CharmBase, charm), level="simple")
 
         # THEN both integrations produce independent SKIPPED results
         assert results.results[0].status == "SKIPPED"
         assert results.results[1].status == "SKIPPED"
         assert results.results[0].relation_id != results.results[1].relation_id
+
+    @pytest.mark.parametrize(
+        "role,ignore_validator",
+        [(RelationRoleStub.peer, True), (RelationRoleStub.provides, False), (RelationRoleStub.requires, False)],
+    )
+    def test_skips_based_on_relation(self, role: RelationRoleStub, ignore_validator: bool) -> None:
+        # GIVEN a runner with a validator registered for the interface with the given role
+        runner = self._runner_with("test-interface", PassingValidator)
+        relation = RelationStub(name="cluster", id=0)
+        charm = make_charm_from_relation(relation, interface_name="test-interface", role=role)
+
+        # WHEN
+        results = runner.run(cast(ops.CharmBase, charm), level="simple")
+
+        if ignore_validator:
+            # THEN the validator is ignored
+            assert results.results == []
+        else:
+            # THEN the relation is processed and results are returned
+            assert len(results.results) == 1
+            assert results.results[0].status == "PASS"
+            assert results.results[0].role == role.value

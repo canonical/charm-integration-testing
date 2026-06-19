@@ -2,17 +2,20 @@
 name: Setup Kubernetes
 description: Setup A kubernetes environment for charm qa
 inputs:
-  environment:
-    description: Environment to setup the k8s for
+  kubeconfig:
+    description: Kubeconfig content for the Kubernetes cluster.
     required: true
   kubeconfig_path:
-    description: Path to kubeconfig file
+    description: Path to write the kubeconfig file to.
     required: false
     default: /home/ubuntu/.kube/config
+  cloud-name:
+    description: Name to register the Juju cloud under.
+    required: true
 outputs:
   cloud-name:
     description: Name of the cloud created and bootstrapped to
-    value: ${{ steps.cloud.outputs.cloud }}
+    value: ${{ inputs.cloud-name }}
   kubeconfig_path:
     description: Path to kubeconfig file
     value: ${{ inputs.kubeconfig_path }}
@@ -21,24 +24,18 @@ runs:
   steps:
     - name: Setup Kubeconfig
       env:
-        environment: ${{ inputs.environment }}
+        KUBECONFIG_CONTENT: ${{ inputs.kubeconfig }}
         kubeconfig_path: ${{ inputs.kubeconfig_path }}
       shell: bash
       run: |
         mkdir -p $HOME/.kube
-        if [ "${environment}" = "production" ]; then
-          echo "${k8sprod}" > ${kubeconfig_path}
-        else
-          echo "${k8sstg}" > ${kubeconfig_path}
-        fi
+        echo "${KUBECONFIG_CONTENT}" > "${kubeconfig_path}"
     - name: Add K8s
       env:
-        environment: ${{ inputs.environment }}
+        CLOUD: ${{ inputs.cloud-name }}
         kubeconfig_path: ${{ inputs.kubeconfig_path }}
       shell: bash
-      id: cloud
       run: |-
-        export CLOUD="k8s-${environment}"
         for ((attempt = 1; ; attempt++)); do
           if KUBECONFIG="${kubeconfig_path}" juju add-k8s $CLOUD --client; then
             break
@@ -49,4 +46,3 @@ runs:
             exit 1
           fi
         done
-        echo "cloud=$CLOUD" >> $GITHUB_OUTPUT

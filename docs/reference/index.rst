@@ -11,4 +11,6 @@ Contents
 
    execution-metadata
    charm-deployment-constraints
+   constraint-dsl
+   spec-file
    validators

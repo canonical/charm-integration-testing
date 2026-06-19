@@ -10,7 +10,8 @@ from unittest.mock import patch
 import jubilant
 import pytest
 import yaml
-from juju import JujuIntegrationApplication, JujuWaitState, JujuWaitTimeoutError
+from juju import CharmChannel, JujuConsumedOfferInfo, JujuIntegrationApplication, JujuWaitState, JujuWaitTimeoutError
+from juju.version import JujuVersion
 from juju_jubilant.backend import JubilantBackend
 from juju_jubilant.client import JubilantClient
 from juju_jubilant.wait import _parse_bundle
@@ -216,7 +217,14 @@ class StatusStub:
 
         return status
 
-    def deploy(self, charm: Any = None, app: str | None = None, config: Any = None, trust: bool = False) -> None:
+    def deploy(
+        self,
+        charm: Any = None,
+        app: str | None = None,
+        config: Any = None,
+        trust: bool = False,
+        force: bool = False,
+    ) -> None:
         pass
 
 
@@ -1077,7 +1085,14 @@ class TestJubilantBackend:
             charm: str | None = None
             app: str | None = None
 
-            def deploy(self, charm: str, app: str | None = None, config: Any = None, trust: bool = False) -> None:
+            def deploy(
+                self,
+                charm: str,
+                app: str | None = None,
+                config: Any = None,
+                trust: bool = False,
+                force: bool = False,
+            ) -> None:
                 self.charm = charm
                 self.app = app
                 self.config = config
@@ -1121,22 +1136,93 @@ class TestJubilantBackend:
 
     class TestScp:
         @dataclass
+        class ModelStub:
+            type: str = "kubernetes"
+
+        @dataclass
         class ScpStub:
             args: list[str] = field(default_factory=list)
+            model: Any = None
+
+            def show_model(self) -> Any:
+                return self.model
 
             def cli(self, *args: str) -> None:
                 self.args = list(args)
 
-        def test(self) -> None:
+        def test_k8s_model(self, tmp_path: Path) -> None:
             # GIVEN
             stub = self.ScpStub()
+            stub.model = self.ModelStub(type="kubernetes")
+            client = JubilantClientStub(client=stub)
+            source = tmp_path / "a"
+            source.write_text("")
+
+            # WHEN
+            with patch("pathlib.Path.home", return_value=tmp_path):
+                JubilantBackend(client).scp("test-model", source=str(source), destination="b")
+
+            # THEN
+            assert stub.args == ["scp", str(source), "b"]
+
+        def test_non_k8s_model_specifies_recursive(self, tmp_path: Path) -> None:
+            # GIVEN
+            stub = self.ScpStub()
+            stub.model = self.ModelStub(type="not-kubernetes")
+            client = JubilantClientStub(client=stub)
+            source = tmp_path / "a"
+            source.write_text("")
+
+            # WHEN
+            with patch("pathlib.Path.home", return_value=tmp_path):
+                JubilantBackend(client).scp("test-model", source=str(source), destination="b")
+
+            # THEN
+            assert stub.args == ["scp", "--", "-r", str(source), "b"]
+
+        def test_out_of_home_file_is_staged(self, tmp_path: Path) -> None:
+            # GIVEN a source file outside $HOME (e.g. /project/validator.py)
+            home_dir = tmp_path / "home"
+            home_dir.mkdir()
+            source_file = tmp_path / "project" / "validator.py"
+            source_file.parent.mkdir()
+            source_file.write_text("# content")
+
+            stub = self.ScpStub()
+            stub.model = self.ModelStub(type="kubernetes")
             client = JubilantClientStub(client=stub)
 
             # WHEN
-            JubilantBackend(client).scp("test-model", source="a", destination="b")
+            with patch("pathlib.Path.home", return_value=home_dir):
+                JubilantBackend(client).scp("test-model", source=str(source_file), destination="unit/0:/tmp/")
 
-            # THEN
-            assert stub.args == ["scp", "a", "b"]
+            # THEN scp was called with a staged copy inside home_dir with the same filename
+            assert stub.args[0] == "scp"
+            staged_source = Path(stub.args[-2])
+            assert staged_source.is_relative_to(home_dir)
+            assert staged_source.name == source_file.name
+
+        def test_out_of_home_directory_is_staged(self, tmp_path: Path) -> None:
+            # GIVEN a source directory outside $HOME (e.g. /project/mypackage/)
+            home_dir = tmp_path / "home"
+            home_dir.mkdir()
+            source_dir = tmp_path / "project" / "mypackage"
+            source_dir.mkdir(parents=True)
+            (source_dir / "file.py").write_text("# content")
+
+            stub = self.ScpStub()
+            stub.model = self.ModelStub(type="kubernetes")
+            client = JubilantClientStub(client=stub)
+
+            # WHEN
+            with patch("pathlib.Path.home", return_value=home_dir):
+                JubilantBackend(client).scp("test-model", source=str(source_dir), destination="unit/0:/tmp/")
+
+            # THEN scp was called with a staged copy inside home_dir with the same directory name
+            assert stub.args[0] == "scp"
+            staged_source = Path(stub.args[-2])
+            assert staged_source.is_relative_to(home_dir)
+            assert staged_source.name == source_dir.name
 
     class TestSsh:
         @dataclass
@@ -1182,12 +1268,16 @@ class TestJubilantBackend:
             calls: list[tuple[str, ...]] = field(default_factory=list)
             response: str = ""
             fail_with_task_error: bool = False
+            juju_version: str = "3.6.1-ubuntu-amd64"
 
             def cli(self, *args: str) -> str:
                 self.calls.append(tuple(args))
                 if self.fail_with_task_error:
                     raise jubilant.CLIError(1, ["juju"], self.response, "ERROR the following task failed")
                 return self.response
+
+            def version(self) -> str:
+                return self.juju_version
 
         # Stub that provides both cli() (for exec) and status() (for leader resolution).
         class ExecAndStatusStub:
@@ -1244,8 +1334,11 @@ class TestJubilantBackend:
             assert result.stderr == ""
 
         def test_exec_with_operator(self) -> None:
-            # GIVEN
-            stub = self.ExecCliStub(response=self._exec_yaml("myapp/0", 0, stdout="hello\n"))
+            # GIVEN a Juju 3 backend
+            stub = self.ExecCliStub(
+                response=self._exec_yaml("myapp/0", 0, stdout="hello\n"),
+                juju_version="3.6.1-ubuntu-amd64",
+            )
             client = JubilantClientStub(client=stub)
 
             # WHEN operator=True is passed
@@ -1254,6 +1347,26 @@ class TestJubilantBackend:
             # THEN --operator appears after --unit but before "--"
             assert stub.calls == [("exec", "--format", "yaml", "--unit", "myapp/0", "--operator", "--", "echo hello")]
             assert result.return_code == 0
+
+        def test_exec_with_operator_on_juju4_warns(self) -> None:
+            # GIVEN a Juju 4 backend
+            stub = self.ExecCliStub(
+                response=self._exec_yaml("myapp/0", 0, stdout="hello\n"),
+                juju_version="4.0.0-ubuntu-amd64",
+            )
+            client = JubilantClientStub(client=stub)
+
+            # WHEN operator=True is passed
+            import warnings
+
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                JubilantBackend(client).exec_unit("test-model", "myapp/0", "echo hello", operator=True)
+
+            # THEN a warning is emitted and --operator is NOT passed
+            assert len(caught) == 1
+            assert "--operator" in str(caught[0].message)
+            assert stub.calls == [("exec", "--format", "yaml", "--unit", "myapp/0", "--", "echo hello")]
 
         def test_exec_nonzero_return_code(self) -> None:
             # GIVEN a command that exits non-zero (juju exec raises CLIError with "task failed")
@@ -1422,6 +1535,73 @@ class TestJubilantBackend:
             app_info = applications["my-app"]
             assert app_info.charm == "my-charm"
             assert app_info.revision == 1
+            assert app_info.channel is None
+
+        def test_with_channel(self) -> None:
+            # GIVEN
+            class ModelStatusWithChannel:
+                def __init__(self) -> None:
+                    self.apps = {
+                        "my-app": jubilant.statustypes.AppStatus(
+                            charm="my-charm",
+                            charm_origin="charmhub",
+                            charm_name="my-charm",
+                            charm_rev=1,
+                            charm_channel="1.0/stable",
+                            exposed=False,
+                        )
+                    }
+
+            class StatusStubClientWithChannel:
+                def status(self) -> ModelStatusWithChannel:
+                    return ModelStatusWithChannel()
+
+            class ModelStubWithChannel:
+                def __init__(self) -> None:
+                    self.client = StatusStubClientWithChannel()
+
+                def status(self) -> ModelStatusWithChannel:
+                    return self.client.status()
+
+            client = JubilantClientStub(client=ModelStubWithChannel())
+
+            # WHEN
+            applications = JubilantBackend(client).list_applications("test-model")
+
+            # THEN
+            assert len(applications) == 1
+            app_info = applications["my-app"]
+            assert app_info.charm == "my-charm"
+            assert app_info.revision == 1
+            assert app_info.channel == CharmChannel(track="1.0", risk="stable", branch="")
+
+    class TestListConsumedOffers:
+        class Client(JubilantClientStub):
+            def __init__(self) -> None:
+                super().__init__(client=self)
+
+            def status(self) -> Any:
+                return self
+
+            @property
+            def app_endpoints(self) -> dict[str, jubilant.statustypes.RemoteAppStatus]:
+                return {
+                    "consumed-offer": jubilant.statustypes.RemoteAppStatus(
+                        url="neighbor-controller:admin/neighbor-model.neighbor-offer"
+                    )
+                }
+
+        def test(self) -> None:
+            # GIVEN
+            client = self.Client()
+
+            # WHEN
+            consumed_offers = JubilantBackend(client).list_consumed_offers("ignored-in-stub")
+
+            # THEN
+            assert consumed_offers == {
+                "consumed-offer": JujuConsumedOfferInfo(url="neighbor-controller:admin/neighbor-model.neighbor-offer")
+            }
 
     class TestListIntegrations:
         class CliStub:
@@ -1711,7 +1891,14 @@ class TestJubilantBackend:
             add_model_calls: int = 0
             switch_calls: int = 0
 
-            def bootstrap(self, cloud: str, controller: str, bootstrap_constraints: dict[str, str]) -> None:
+            def bootstrap(
+                self,
+                cloud: str,
+                controller: str,
+                bootstrap_constraints: dict[str, str],
+                metadata_source: str | None = None,
+                config: dict[str, str] | None = None,
+            ) -> None:
                 self.bootstrap_calls += 1
                 if self.bootstrap_failures_remaining > 0:
                     self.bootstrap_failures_remaining -= 1
@@ -1733,7 +1920,9 @@ class TestJubilantBackend:
             backend = JubilantBackend(JubilantClientStub(client=stub))
 
             with patch("tenacity.nap.sleep", return_value=None):
-                backend.bootstrap_controller(cloud="k8s-stg", controller="test-controller", controller_constraints={})
+                backend.bootstrap_controller(
+                    cloud="k8s-stg", controller="test-controller", controller_constraints={}, bootstrap_configuration={}
+                )
 
             assert stub.bootstrap_calls == 3
 
@@ -1744,7 +1933,10 @@ class TestJubilantBackend:
             with patch("tenacity.nap.sleep", return_value=None):
                 with pytest.raises(RuntimeError, match="transient bootstrap failure"):
                     backend.bootstrap_controller(
-                        cloud="k8s-stg", controller="test-controller", controller_constraints={}
+                        cloud="k8s-stg",
+                        controller="test-controller",
+                        controller_constraints={},
+                        bootstrap_configuration={},
                     )
 
             assert stub.bootstrap_calls == 3
@@ -1891,3 +2083,95 @@ class TestDeployBundleFile:
 
         # THEN the predicate returns True
         assert result is True
+
+
+class TestJubilantBackendVersion:
+    @dataclass
+    class VersionStub:
+        version_str: str = "3.6.1-ubuntu-amd64"
+
+        def status(self) -> jubilant.Status:
+            return jubilant.Status(
+                model=jubilant.statustypes.ModelStatus(
+                    name="test-model",
+                    type="caas",
+                    controller="test",
+                    cloud="test",
+                    version=self.version_str,
+                ),
+                machines={},
+                apps={},
+            )
+
+    def test_returns_version_from_model(self) -> None:
+        # GIVEN a client stub whose status() exposes a known version
+        client = JubilantClientStub(client=self.VersionStub(version_str="3.6.1-ubuntu-amd64"))
+        backend = JubilantBackend(client)
+
+        # WHEN
+        result = backend.version("test-model")
+
+        # THEN the version is parsed and returned as a JujuVersion
+        assert result == JujuVersion(3, 6, 1)
+
+
+class TestJubilantBackendCliVersion:
+    @dataclass
+    class VersionStub:
+        version_str: str = "3.6.1-ubuntu-amd64"
+
+        def version(self) -> str:
+            return self.version_str
+
+    def test_returns_cli_version_stripped(self) -> None:
+        # GIVEN a client stub that returns a version with surrounding whitespace
+        client = JubilantClientStub(client=self.VersionStub(version_str="  3.6.1-ubuntu-amd64  "))
+        backend = JubilantBackend(client)
+
+        # WHEN
+        result = backend.cli_version()
+
+        # THEN the version is parsed and returned as a JujuVersion
+        assert result == JujuVersion(3, 6, 1)
+
+    def test_passes_none_model_to_client(self) -> None:
+        # GIVEN a client stub that records which model was requested
+        requested_models: list[str | None] = []
+        version_stub = self.VersionStub()
+
+        class TrackingClient(JubilantClientStub):
+            def model(self, model: str | None) -> Any:
+                requested_models.append(model)
+                return version_stub
+
+        backend = JubilantBackend(TrackingClient(client=version_stub))
+
+        # WHEN
+        backend.cli_version()
+
+        # THEN model(None) was called (no specific model - CLI-level version)
+        assert None in requested_models
+
+
+class TestJubilantBackendDebugLog:
+    def test_debug_log_calls_client_debug_log(self) -> None:
+        # GIVEN a client stub that returns a debug log message
+        class ModelStub:
+            def __init__(self, model: str) -> None:
+                self.model = model
+
+            def debug_log(self) -> str:
+                return f"this is a debug log for model {self.model}"
+
+        class DebugClient(JubilantClientStub):
+            def model(self, model: str | Any) -> Any:
+                return ModelStub(model=model)
+
+        client = DebugClient(client=None)
+        backend = JubilantBackend(client)
+
+        # WHEN we call debug_log on the backend
+        log = backend.debug_log("my-model")
+
+        # THEN the client's debug_log message from the client is returned
+        assert log == "this is a debug log for model my-model"

@@ -1,0 +1,7 @@
+---
+# Listed on Ubuntu 20.04 only (EOL April 2025). Last upstream commit May 2023.
+# The primary interface 'influxdb-api' (query endpoint) has no public consumers
+# on Charmhub (Charmhub find?requires=influxdb-api returns empty). kapacitor,
+# the expected consumer, is also already delisted (IQA-3663).
+# Delist request: https://warthogs.atlassian.net/browse/IQA-3694
+listed: false

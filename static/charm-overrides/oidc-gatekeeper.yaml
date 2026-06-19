@@ -1,0 +1,29 @@
+---
+# Source: https://github.com/canonical/oidc-gatekeeper-operator
+#
+# Two endpoint generations across CKF tracks:
+#   ckf-1.7, ckf-1.8: [ingress, ingress-auth] / [oidc-client] (OIDC provider via model config)
+#   ckf-1.9+, latest: adds dex-oidc-config (requires) and logging (already optional=True upstream)
+#
+# ingress (requires): optional - _configure_mesh() gated with `if interfaces["ingress"]`
+# ingress-auth (requires): optional - gated with `if interfaces["ingress-auth"]: send_data(...)`
+# dex-oidc-config (requires): REQUIRED - BlockedStatus in _check_dex_oidc_config_relation() when absent
+# logging (requires): already optional=True upstream in ckf-1.9+; observability hook
+overrides:
+  # ckf-1.7, ckf-1.8: no dex-oidc-config or logging endpoints
+  - criteria:
+      - any_of:
+          - track: ckf-1.7
+          - track: ckf-1.8
+    requires:
+      ingress:
+        optional: true
+      ingress-auth:
+        optional: true
+
+  # ckf-1.9+, latest: dex-oidc-config required; logging already optional=True upstream
+  - requires:
+      ingress:
+        optional: true
+      ingress-auth:
+        optional: true

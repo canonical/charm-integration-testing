@@ -1,0 +1,8 @@
+---
+overrides:
+  - requires:
+      application-dashboard:  # Charm that offers it has been delisted
+        optional: true
+    provides:
+      hosted:  # Waiting on this endpoint to be deleted
+        optional: true

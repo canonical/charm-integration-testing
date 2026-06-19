@@ -1,0 +1,24 @@
+---
+overrides:
+  # latest track is obsolete: no temporal-host-info in metadata
+  - criteria:
+      - track: 'latest'
+    provides:
+      admin:
+        limit: 1
+        optional: false
+        features: [admin]
+    constraints:
+      - bool(endpoint[admin]) => features(endpoint[admin]) == {"admin"}
+  # 1.23+ tracks: temporal-k8s requires admin from temporal-admin-k8s;
+  # temporal-host-info exists in metadata but has no provider, so mark optional.
+  - provides:
+      admin:
+        limit: 1
+        optional: false
+        features: [admin]
+    requires:
+      temporal-host-info:
+        optional: true
+    constraints:
+      - bool(endpoint[admin]) => features(endpoint[admin]) == {"admin"}

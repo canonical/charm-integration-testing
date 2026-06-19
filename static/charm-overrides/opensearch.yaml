@@ -1,0 +1,32 @@
+---
+# All channels are on the 2/ track with identical endpoint sets.
+#
+# Cloud backup integrations (azure-credentials, gcs-credentials, s3-credentials)
+# and smtp are Meaning 1 optional: the charm reaches active without them; they
+# are additive storage-backend and notification integrations only used when the
+# operator explicitly configures a backup target or SMTP relay.
+# These are not indexed in the Charmhub search API so the solver cannot auto-
+# discover their providers.
+#
+# cos-agent (provides, interface cos_agent): COS observability subordinate hook.
+# The grafana-agent machine charm is not reliably discoverable via search API
+# for machine-platform bundles, so this is marked optional to prevent solver
+# sprawl.
+#
+# jwt-configuration, oauth, peer-cluster, peer-cluster-orchestrator are already
+# optional=True in upstream metadata and need no override.
+#
+# All channels (2/stable through 2/edge) have identical endpoint sets.
+overrides:
+  - requires:
+      azure-credentials:
+        optional: true
+      gcs-credentials:
+        optional: true
+      s3-credentials:
+        optional: true
+      smtp:
+        optional: true
+    provides:
+      cos-agent:
+        optional: true

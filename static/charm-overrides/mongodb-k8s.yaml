@@ -1,0 +1,19 @@
+---
+overrides:
+  - configs:
+      role: [config-server, shard, null]
+    constraints:
+      # config-server and sharding are mutually exclusive
+      - 'not (bool(endpoint[sharding]) and bool(endpoint[config-server]))'
+      # if ldap is integrated, certificate transfer is required and must reach all ldap charms
+      - 'bool(endpoint[ldap]) == bool(endpoint[ldap-certificate-transfer])'
+      - 'bool(endpoint[ldap-certificate-transfer]) => reachable(endpoint[ldap-certificate-transfer])
+        >= charms(endpoint[ldap])'
+      # role must match the integrated endpoint
+      - 'bool(endpoint[config-server]) == (config[role] == "config-server")'
+      - 'bool(endpoint[sharding]) == (config[role] == "shard")'
+      # sharding must be on the same track and risk
+      - 'bool(endpoint[sharding]) => tracks(charms(endpoint[sharding])) == tracks({self})
+        and risks(charms(endpoint[sharding])) == risks({self})'
+      - 'bool(endpoint[config-server]) => tracks(charms(endpoint[config-server]))
+        == tracks({self}) and risks(charms(endpoint[config-server])) == risks({self})'
