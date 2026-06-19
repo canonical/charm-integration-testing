@@ -1,6 +1,6 @@
 ---
-name: Cleaning up environment
-run-name: Cleaning up ${{ inputs.environment }} environment
+name: Clean up environment
+run-name: Clean up ${{ inputs.environment }} environment
 concurrency:
   group: ${{ github.workflow }}-${{ inputs.environment }}
   cancel-in-progress: true
