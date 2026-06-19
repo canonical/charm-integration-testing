@@ -459,6 +459,43 @@ identifiers; ``CharmSet`` values are only obtained via ``charms()`` or ``{self}`
    tracks({self})    ->  Set[Str]   # singleton set containing this charm's track
    revisions({self}) ->  Set[Int]   # singleton set containing this charm's revision
 
+Unit count
+~~~~~~~~~~
+
+::
+
+   units(charm_set)        ->  UnitSet
+   len(units(charm_set))   ->  Int
+
+``units(charm_set)`` returns the set of deployed units for each charm in
+``charm_set``.  Wrapping it with ``len()`` gives the total unit count as an
+integer — matching the familiar ``len(endpoint[x])`` pattern for integration counts.
+
+The most common form uses ``{self}`` (the current application):
+
+.. code-block:: yaml
+
+   constraints: |
+     # Minimum 3 units for HA, but allow more for larger clusters.
+     len(units({self})) >= 3
+
+The solver minimises unit counts subject to constraints, so
+``len(units({self})) >= 3`` produces exactly 3 units unless a higher value is
+required by another constraint.
+
+.. note::
+
+   ``len(units({self}))`` returns ``Int`` and participates in the same
+   arithmetic and comparison operators as ``len(endpoint[x])``.  For example:
+
+   .. code-block:: yaml
+
+      # Exactly 3 units
+      - len(units({self})) == 3
+
+      # Unit count must equal the number of active replication peers
+      - len(units({self})) == len(endpoint[replication]) + 1
+
 Logical
 ~~~~~~~
 
@@ -538,6 +575,24 @@ An endpoint requires more than one integration:
 
    # Backend requires at least 2 integrations for HA
    - len(endpoint[backend]) >= 2
+
+Minimum unit count
+~~~~~~~~~~~~~~~~~~
+
+An application requires a minimum number of deployed units:
+
+.. code-block:: yaml
+
+   constraints: |
+     # OpenSearch requires at least 3 units for a healthy HA cluster.
+     len(units({self})) >= 3
+
+The unit count may also be constrained relative to other integer expressions:
+
+.. code-block:: yaml
+
+   # Each replication peer must be matched by a local unit (plus one coordinator)
+   - len(units({self})) == len(endpoint[replication]) + 1
 
 Capability requirements (constraint type 5)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -673,3 +728,6 @@ The solver enforces these automatically:
    * - Acyclic integration graph
      - Structural
      - Enforced globally via topological rank constraints
+   * - Minimum unit count (default)
+     - Structural
+     - Every application gets ``num_units >= 1`` automatically; raise the floor with ``len(units({self})) >= N``

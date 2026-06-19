@@ -44,6 +44,7 @@ from bundle_builder_x.constraints_dsl import (
     SetResourceExpr,
     StrLit,
     StrLiteralSet,
+    UnitsExpr,
     parse_constraint,
 )
 
@@ -710,3 +711,109 @@ class TestSyntaxErrors:
     def test(self, params: Params) -> None:
         with pytest.raises((DSLSyntaxError, DSLTypeError)):
             parse_constraint(params.text)
+
+
+# ---------------------------------------------------------------------------
+# units() function
+# ---------------------------------------------------------------------------
+
+
+class TestUnitsExpr:
+    """Tests for the units(charm_set) DSL function and len(units(...)) composition."""
+
+    def test_units_self_parses(self) -> None:
+        # GIVEN the expression units({self})
+        # WHEN parsed
+        result = parse_constraint("units({self})")
+
+        # THEN it produces UnitsExpr(SelfExpr()) with UNIT_SET type
+        assert result == UnitsExpr(arg=SelfExpr())
+        assert result.dsl_type == DSLType.UNIT_SET
+
+    def test_len_units_self_parses(self) -> None:
+        # GIVEN len(units({self}))
+        # WHEN parsed
+        result = parse_constraint("len(units({self}))")
+
+        # THEN it produces LenExpr(UnitsExpr(SelfExpr())) with INT type
+        assert result == LenExpr(arg=UnitsExpr(arg=SelfExpr()))
+        assert result.dsl_type == DSLType.INT
+
+    def test_len_units_self_ge(self) -> None:
+        # GIVEN the opensearch HA constraint
+        # WHEN parsed
+        result = parse_constraint("len(units({self})) >= 3")
+
+        # THEN it produces a CompareExpr wrapping LenExpr(UnitsExpr(...))
+        assert result == CompareExpr(
+            op=">=",
+            left=LenExpr(arg=UnitsExpr(arg=SelfExpr())),
+            right=IntLit(value=3),
+        )
+
+    def test_units_requires_charm_set(self) -> None:
+        # GIVEN units() with a non-CharmSet argument (an integer literal)
+        # WHEN parsed and type-checked
+        # THEN a DSLTypeError is raised
+        from bundle_builder_x.constraints_dsl import DSLTypeError
+
+        with pytest.raises(DSLTypeError, match="CharmSet"):
+            parse_constraint("units(3)")
+
+    def test_len_units_real_override(self) -> None:
+        # GIVEN the exact constraint from static/charm-overrides/opensearch.yaml
+        # WHEN parsed
+        result = parse_constraint("len(units({self})) >= 3")
+
+        # THEN no exception and result is a boolean comparison
+        assert result.dsl_type == DSLType.BOOL
+
+
+# ---------------------------------------------------------------------------
+# CharmOverrides constraints string validator
+# ---------------------------------------------------------------------------
+
+
+class TestCharmOverridesConstraintsString:
+    """Tests for the field_validator that coerces a block-scalar string to list[str]."""
+
+    def test_list_passthrough(self) -> None:
+        from bundle_builder_x.overrides import CharmOverrides
+
+        # GIVEN constraints as a list (current format)
+        overrides = CharmOverrides.model_validate({"constraints": ["bool(endpoint[a])", "bool(endpoint[b])"]})
+
+        # THEN stored as-is
+        assert overrides.constraints == ["bool(endpoint[a])", "bool(endpoint[b])"]
+
+    def test_string_split_on_newlines(self) -> None:
+        from bundle_builder_x.overrides import CharmOverrides
+
+        # GIVEN constraints as a multi-line block scalar
+        block = "bool(endpoint[a])\nbool(endpoint[b])"
+        overrides = CharmOverrides.model_validate({"constraints": block})
+
+        # THEN each non-blank non-comment line becomes one constraint string
+        assert overrides.constraints == ["bool(endpoint[a])", "bool(endpoint[b])"]
+
+    def test_string_strips_comments_and_blanks(self) -> None:
+        from bundle_builder_x.overrides import CharmOverrides
+
+        # GIVEN a block scalar with comment and blank lines (as in opensearch.yaml)
+        block = "# Minimum 3 units for HA, but allow more for larger clusters.\nlen(units({self})) >= 3\n"
+        overrides = CharmOverrides.model_validate({"constraints": block})
+
+        # THEN only the actual constraint remains
+        assert overrides.constraints == ["len(units({self})) >= 3"]
+
+    def test_empty_string_gives_empty_list(self) -> None:
+        from bundle_builder_x.overrides import CharmOverrides
+
+        overrides = CharmOverrides.model_validate({"constraints": ""})
+        assert overrides.constraints == []
+
+    def test_comments_only_gives_empty_list(self) -> None:
+        from bundle_builder_x.overrides import CharmOverrides
+
+        overrides = CharmOverrides.model_validate({"constraints": "# just a comment\n# another comment\n"})
+        assert overrides.constraints == []

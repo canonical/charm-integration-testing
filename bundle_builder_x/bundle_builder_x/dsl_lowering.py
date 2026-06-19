@@ -100,6 +100,7 @@ from .constraints_dsl import (
     StrLit,
     StrLiteralSet,
     TracksExpr,
+    UnitsExpr,
 )
 from .domain import Domain, DomainCharm
 
@@ -746,6 +747,21 @@ def _lower(expr: AnyExpr, ctx: LoweringContext) -> _LoweredValue:  # noqa: C901
             if res.var is not None:
                 return res.isset_var if res.isset_var is not None else z3.BoolVal(True)
             return z3.BoolVal(res.default is not None)
+
+        case LenExpr(arg=UnitsExpr(arg=SelfExpr())):
+            # Fast path: len(units({self})) → this charm's num_units directly.
+            return ctx.domain_charm.num_units
+
+        case LenExpr(arg=UnitsExpr(arg=inner)):
+            # General path: len(units(charm_set)) → sum num_units over the set.
+            charm_set_z3 = _lower(inner, ctx)
+            return z3.Sum(
+                [
+                    z3.If(z3.IsMember(z3.IntVal(i), charm_set_z3), charm.num_units, z3.IntVal(0))
+                    for i, charm in enumerate(ctx.domain.charms)
+                ]
+                + [z3.IntVal(0)]
+            )
 
         case LenExpr(arg=arg):
             endpoints = _lower_as_endpoints(arg, ctx)
