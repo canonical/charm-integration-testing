@@ -11,7 +11,7 @@ APP=""
 PROVIDER=""
 VALIDATOR=""
 INTERFACE=""
-LEVEL="simple"
+LEVELS="simple,deep,uat"
 DOWN_MODE="scale"
 PROVIDER_UNITS="auto"
 OUTPUT_DIR=""
@@ -33,7 +33,8 @@ Required:
 
 Optional:
   --interface <name>     Endpoint interface name (default: same as --validator)
-  --level <level>        Validation level for dev-validate (default: simple)
+  --levels <list>        Comma-separated validation levels to run (default: simple,deep,uat).
+                         SKIPPED results are treated as "not supported" and are not failures.
   --down-mode <mode>     Workload-down method: scale (default)
   --provider-units <n>   Units to restore provider to (default: auto from juju status)
   --down-cmd <cmd>       Override the provider-down command entirely (e.g. for k8s-only backends).
@@ -68,8 +69,8 @@ while [ "$#" -gt 0 ]; do
             INTERFACE="${2:-}"
             shift 2
             ;;
-        --level)
-            LEVEL="${2:-}"
+        --levels|--level)
+            LEVELS="${2:-}"
             shift 2
             ;;
         --down-mode)
@@ -114,6 +115,9 @@ done
 [ -n "$VALIDATOR" ] || { echo "Missing required --validator" >&2; exit 1; }
 INTERFACE="${INTERFACE:-$VALIDATOR}"
 
+# Parse LEVELS into an array (comma-separated input).
+IFS=',' read -ra LEVEL_ARRAY <<< "$LEVELS"
+
 if [ -z "$OUTPUT_DIR" ]; then
     OUTPUT_DIR="/tmp/validator-verification-$(date +%Y%m%d-%H%M%S)"
 fi
@@ -148,8 +152,8 @@ summary="$OUTPUT_DIR/summary.txt"
 report="$OUTPUT_DIR/report.json"
 
 printf "Validator verification summary\n" > "$summary"
-printf "model=%s app=%s provider=%s validator=%s interface=%s level=%s\n\n" \
-    "$MODEL" "$APP" "$PROVIDER" "$VALIDATOR" "$INTERFACE" "$LEVEL" >> "$summary"
+printf "model=%s app=%s provider=%s validator=%s interface=%s levels=%s\n\n" \
+    "$MODEL" "$APP" "$PROVIDER" "$VALIDATOR" "$INTERFACE" "$LEVELS" >> "$summary"
 
 declare -A STEP_RC
 
@@ -201,11 +205,17 @@ if not statuses:
     sys.exit(4)
 
 if mode == "up":
+    # PASS = validator ran and succeeded.
+    # SKIPPED = level not supported by this validator; acceptable.
+    # FAIL / ERROR = problem detected; not acceptable.
     has_bad = any(s in ("FAIL", "ERROR") for s in statuses)
-    has_pass = any(s == "PASS" for s in statuses)
-    sys.exit(0 if has_pass and not has_bad else 1)
+    has_actionable = any(s in ("PASS", "SKIPPED") for s in statuses)
+    sys.exit(0 if has_actionable and not has_bad else 1)
 
 if mode == "down":
+    # At least one result must be FAIL or ERROR to confirm the validator
+    # detected the provider outage.  SKIPPED means the level is not
+    # supported by this validator, so it contributes nothing either way.
     has_down_signal = any(s in ("FAIL", "ERROR") for s in statuses)
     sys.exit(0 if has_down_signal else 1)
 
@@ -226,14 +236,27 @@ run_step wiring_runner "grep -q '\"validators-$VALIDATOR_PKG\"' validators/runne
 run_step wiring_root "grep -q '^validators-$VALIDATOR_PKG = { path = \"./validators/$VALIDATOR\", develop = true' pyproject.toml"
 run_step entrypoint "cd /project && poetry run python3 -c \"from importlib.metadata import entry_points; import sys; names=[e.name for e in entry_points(group='endpoint_validators')]; sys.exit(0 if '$INTERFACE' in names else 1)\""
 
-run_step validate_up "/project/development-sandbox/bin/dev-validate.py --model $MODEL --app $APP --level $LEVEL --reinstall"
+# Validate at each level while the workload is up.
+# Use --reinstall on the first call to push latest code; reuse venv for the rest.
+_first_up=true
+for _level in "${LEVEL_ARRAY[@]}"; do
+    _step="validate_up_${_level}"
+    if [ "$_first_up" = "true" ]; then
+        run_step "$_step" "/project/development-sandbox/bin/dev-validate.py --model $MODEL --app $APP --level $_level --reinstall"
+        _first_up=false
+    else
+        run_step "$_step" "/project/development-sandbox/bin/dev-validate.py --model $MODEL --app $APP --level $_level"
+    fi
+done
 run_step status_up "juju status -m $MODEL --relations"
 
 if [ -n "$DOWN_CMD" ]; then
     # Custom down/restore commands override the default Juju scale behavior.
     run_step provider_down "$DOWN_CMD"
     run_step status_down "juju status -m $MODEL --relations"
-    run_step validate_down "/project/development-sandbox/bin/dev-validate.py --model $MODEL --app $APP --level $LEVEL --reinstall"
+    for _level in "${LEVEL_ARRAY[@]}"; do
+        run_step "validate_down_${_level}" "/project/development-sandbox/bin/dev-validate.py --model $MODEL --app $APP --level $_level"
+    done
     run_step provider_restore "$RESTORE_CMD"
     run_step status_restored "juju status -m $MODEL --relations"
 else
@@ -266,22 +289,36 @@ PY
 
     run_step provider_down "juju scale-application -m $MODEL $PROVIDER 0"
     run_step status_down "juju status -m $MODEL --relations"
-    run_step validate_down "/project/development-sandbox/bin/dev-validate.py --model $MODEL --app $APP --level $LEVEL --reinstall"
+    for _level in "${LEVEL_ARRAY[@]}"; do
+        run_step "validate_down_${_level}" "/project/development-sandbox/bin/dev-validate.py --model $MODEL --app $APP --level $_level"
+    done
     run_step provider_restore "juju scale-application -m $MODEL $PROVIDER $orig_units"
     run_step status_restored "juju status -m $MODEL --relations"
 fi
 
-up_pass=false
+up_pass=true
 down_detected=false
 quality_pass=false
 wiring_pass=false
 
-if [ "${STEP_RC[validate_up]:-1}" -eq 0 ] && interface_status_check "$OUTPUT_DIR/validate_up.out" up; then
-    up_pass=true
-fi
-if [ "${STEP_RC[validate_down]:-0}" -ne 0 ] && interface_status_check "$OUTPUT_DIR/validate_down.out" down; then
-    down_detected=true
-fi
+# up_pass: every level must be PASS or SKIPPED (no FAIL/ERROR).
+for _level in "${LEVEL_ARRAY[@]}"; do
+    _step="validate_up_${_level}"
+    if [ "${STEP_RC[$_step]:-1}" -ne 0 ] || ! interface_status_check "$OUTPUT_DIR/${_step}.out" up; then
+        up_pass=false
+        break
+    fi
+done
+
+# down_detected: at least one level must show FAIL/ERROR when the provider is down.
+for _level in "${LEVEL_ARRAY[@]}"; do
+    _step="validate_down_${_level}"
+    if [ "${STEP_RC[$_step]:-0}" -ne 0 ] && interface_status_check "$OUTPUT_DIR/${_step}.out" down; then
+        down_detected=true
+        break
+    fi
+done
+
 if [ "${STEP_RC[format]:-1}" -eq 0 ] && [ "${STEP_RC[lint]:-1}" -eq 0 ] && [ "${STEP_RC[unit_tests]:-1}" -eq 0 ]; then
     quality_pass=true
 fi
@@ -294,6 +331,17 @@ if [ "$quality_pass" = "true" ] && [ "$wiring_pass" = "true" ] && [ "$up_pass" =
     overall=0
 fi
 
+# Build per-level step entries for the report.
+_level_steps_json=""
+for _level in "${LEVEL_ARRAY[@]}"; do
+    _up_rc=${STEP_RC["validate_up_${_level}"]:-1}
+    _dn_rc=${STEP_RC["validate_down_${_level}"]:-1}
+    _level_steps_json+="    \"validate_up_${_level}\": ${_up_rc},"$'\n'
+    _level_steps_json+="    \"validate_down_${_level}\": ${_dn_rc},"$'\n'
+done
+# Strip trailing comma+newline from last entry.
+_level_steps_json="${_level_steps_json%,$'\n'}"$'\n'
+
 cat > "$report" <<EOF
 {
   "model": "$MODEL",
@@ -301,7 +349,7 @@ cat > "$report" <<EOF
   "provider": "$PROVIDER",
   "validator": "$VALIDATOR",
   "interface": "$INTERFACE",
-  "level": "$LEVEL",
+  "levels": "$LEVELS",
   "output_dir": "$OUTPUT_DIR",
   "steps": {
     "pre_status": ${STEP_RC[pre_status]:-1},
@@ -311,14 +359,12 @@ cat > "$report" <<EOF
     "wiring_runner": ${STEP_RC[wiring_runner]:-1},
     "wiring_root": ${STEP_RC[wiring_root]:-1},
     "entrypoint": ${STEP_RC[entrypoint]:-1},
-    "validate_up": ${STEP_RC[validate_up]:-1},
     "status_up": ${STEP_RC[status_up]:-1},
     "provider_down": ${STEP_RC[provider_down]:-1},
     "status_down": ${STEP_RC[status_down]:-1},
-    "validate_down": ${STEP_RC[validate_down]:-1},
     "provider_restore": ${STEP_RC[provider_restore]:-1},
-    "status_restored": ${STEP_RC[status_restored]:-1}
-  },
+    "status_restored": ${STEP_RC[status_restored]:-1},
+${_level_steps_json}  },
   "checks": {
     "quality_pass": $quality_pass,
     "wiring_pass": $wiring_pass,
