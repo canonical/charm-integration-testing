@@ -453,15 +453,13 @@ class TestProvidesSimple:
         assert not schema.passed
         assert "database" in schema.message
 
-    def test_invalid_extra_user_roles_missing(self) -> None:
-        """Invalid L1: requirer did not publish 'extra-user-roles' → extra_user_roles FAIL."""
+    def test_valid_extra_user_roles_missing(self) -> None:
+        """Valid L1: 'extra-user-roles' is optional; omitting it should not fail."""
         validator = _make_validator({"database": "mongos-k8s_testing"}, role=RelationRoleStub.provides)
         result = validator.validate(level="simple")
 
-        assert result.status == "FAIL"
-        roles = next(c for c in result.checks if c.name == "extra_user_roles")
-        assert not roles.passed
-        assert "empty" in roles.message.lower()
+        assert result.status == "PASS", result
+        assert not any(c.name == "extra_user_roles" for c in result.checks)
 
     def test_invalid_extra_user_roles_empty(self) -> None:
         """Invalid L1: extra-user-roles present but empty string → extra_user_roles FAIL."""
