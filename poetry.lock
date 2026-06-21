@@ -2275,7 +2275,7 @@ validators-base = "*"
 
 [package.source]
 type = "directory"
-url = "validators/config-server"
+url = "validators/config_server"
 
 [[package]]
 name = "validators-loki-push-api"
@@ -2533,4 +2533,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<4.0"
-content-hash = "df0d97f176fce960508e5df7fcfa4d379efc7367c557cea46ae6b876d8d3bde3"
+content-hash = "1617143b12c5ad4f133c924dc8bf9bada252c600b05932a6ab636c52a9641d2c"
