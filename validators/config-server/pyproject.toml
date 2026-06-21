@@ -38,4 +38,4 @@ build-backend = "setuptools.build_meta"
 packages = ["validators.config_server"]
 
 [tool.setuptools.package-dir]
-"validators.config_server" = "validators/config_server"
+"validators.config_server" = "."
