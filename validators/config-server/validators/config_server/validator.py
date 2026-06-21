@@ -207,8 +207,9 @@ class ConfigServerValidator(BaseValidator):
         if not schema_check.passed:
             return self._build_result("simple", checks)
 
-        roles_check = _check_extra_user_roles(self.databag.get("extra-user-roles", ""))
-        checks.append(roles_check)
+        if "extra-user-roles" in self.databag:
+            roles_check = _check_extra_user_roles(self.databag["extra-user-roles"])
+            checks.append(roles_check)
 
         return self._build_result("simple", checks)
 
