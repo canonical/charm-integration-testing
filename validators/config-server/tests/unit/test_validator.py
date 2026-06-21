@@ -179,8 +179,8 @@ class TestRequiresSimple:
         validator = _make_validator(_VALID_PROVIDER_DATABAG)
 
         with patch("validators.config_server.validator.socket.create_connection") as mock_conn:
-            mock_conn.return_value.__enter__ = lambda s: s
-            mock_conn.return_value.__exit__ = MagicMock(return_value=False)
+            mock_conn.return_value.__enter__.return_value = mock_conn.return_value
+            mock_conn.return_value.__exit__.return_value = False
             result = validator.validate(level="simple")
 
         assert result.status == "PASS", result
@@ -268,8 +268,8 @@ class TestRequiresSimple:
         validator.charm.model.get_secret = MagicMock(return_value=secret_stub)
 
         with patch("validators.config_server.validator.socket.create_connection") as mock_conn:
-            mock_conn.return_value.__enter__ = lambda s: s
-            mock_conn.return_value.__exit__ = MagicMock(return_value=False)
+            mock_conn.return_value.__enter__.return_value = mock_conn.return_value
+            mock_conn.return_value.__exit__.return_value = False
             result = validator.validate(level="simple")
 
         assert result.status == "PASS", result
@@ -295,8 +295,8 @@ class TestRequiresSimple:
         validator.charm.model.get_secret = _get_secret  # type: ignore[assignment]
 
         with patch("validators.config_server.validator.socket.create_connection") as mock_conn:
-            mock_conn.return_value.__enter__ = lambda s: s
-            mock_conn.return_value.__exit__ = MagicMock(return_value=False)
+            mock_conn.return_value.__enter__.return_value = mock_conn.return_value
+            mock_conn.return_value.__exit__.return_value = False
             result = validator.validate(level="simple")
 
         assert result.status == "PASS", result
@@ -321,8 +321,8 @@ class TestRequiresDeep:
             patch("validators.config_server.validator.socket.create_connection") as mock_conn,
             patch("validators.config_server.validator._build_mongo_client", return_value=mock_client),
         ):
-            mock_conn.return_value.__enter__ = lambda s: s
-            mock_conn.return_value.__exit__ = MagicMock(return_value=False)
+            mock_conn.return_value.__enter__.return_value = mock_conn.return_value
+            mock_conn.return_value.__exit__.return_value = False
             result = validator.validate(level="deep")
 
         assert result.status == "PASS", result
@@ -345,8 +345,8 @@ class TestRequiresDeep:
             patch("validators.config_server.validator.socket.create_connection") as mock_conn,
             patch("validators.config_server.validator._build_mongo_client", return_value=mock_client),
         ):
-            mock_conn.return_value.__enter__ = lambda s: s
-            mock_conn.return_value.__exit__ = MagicMock(return_value=False)
+            mock_conn.return_value.__enter__.return_value = mock_conn.return_value
+            mock_conn.return_value.__exit__.return_value = False
             result = validator.validate(level="deep")
 
         assert result.status == "FAIL"
@@ -366,8 +366,8 @@ class TestRequiresDeep:
             patch("validators.config_server.validator.socket.create_connection") as mock_conn,
             patch("validators.config_server.validator._build_mongo_client", return_value=mock_client),
         ):
-            mock_conn.return_value.__enter__ = lambda s: s
-            mock_conn.return_value.__exit__ = MagicMock(return_value=False)
+            mock_conn.return_value.__enter__.return_value = mock_conn.return_value
+            mock_conn.return_value.__exit__.return_value = False
             result = validator.validate(level="deep")
 
         assert result.status == "FAIL"
@@ -417,8 +417,8 @@ class TestRequiresDeep:
             patch("validators.config_server.validator.socket.create_connection") as mock_conn,
             patch("validators.config_server.validator._build_mongo_client", return_value=mock_client),
         ):
-            mock_conn.return_value.__enter__ = lambda s: s
-            mock_conn.return_value.__exit__ = MagicMock(return_value=False)
+            mock_conn.return_value.__enter__.return_value = mock_conn.return_value
+            mock_conn.return_value.__exit__.return_value = False
             validator.validate(level="deep")
 
         mock_client.close.assert_called_once()
