@@ -61,7 +61,6 @@ from validators.base import (
 # and underscores.  At least one host:port pair must follow the slash.
 _CONFIG_SERVER_DB_RE = re.compile(r"^[A-Za-z0-9_\-]+/[A-Za-z0-9_\-\.]+:\d+(?:,[A-Za-z0-9_\-\.]+:\d+)*$")
 
-_MONGODB_PORT = 27017
 _CONNECT_TIMEOUT_MS = 5_000
 _SERVER_SELECTION_TIMEOUT_MS = 5_000
 _SOCKET_TIMEOUT_MS = 10_000
@@ -341,7 +340,7 @@ def _tcp_connectivity_check(hosts: list[tuple[str, int]]) -> ValidationCheck:
     errors: list[str] = []
     for host, port in hosts:
         try:
-            with socket.create_connection((host, port), timeout=5.0):
+            with socket.create_connection((host, port), timeout=_CONNECT_TIMEOUT_MS / 1000):
                 pass
         except OSError as exc:
             errors.append(f"{host}:{port} — {exc}")
