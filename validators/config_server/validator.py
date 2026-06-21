@@ -272,7 +272,10 @@ def _check_config_server_db_format(config_server_db: str) -> ValidationCheck:
 
 
 def _check_extra_user_roles(roles_raw: str) -> ValidationCheck:
-    """Validate that ``extra-user-roles`` is non-empty and contains valid role tokens."""
+    """Validate that ``extra-user-roles`` is present and non-empty.
+
+    Role token values are not restricted — MongoDB role names are deployment-specific.
+    """
     roles = [r.strip() for r in roles_raw.split(",") if r.strip()]
     if not roles:
         return ValidationCheck(
@@ -404,7 +407,7 @@ def _list_databases_check(client: "MongoClient[Any]") -> ValidationCheck:
         return ValidationCheck(
             name="list_databases",
             passed=True,
-            message=f"Listed {len(db_names)} database(s): {', '.join(sorted(db_names)) or '(none)'}.",
+            message=f"Listed {len(db_names)} database(s).",
         )
     except PyMongoError as exc:
         return ValidationCheck(
