@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 
 from .charm import CharmChannel, CharmConfigValue, CharmEndpointProxy, CharmResourceValue, EndpointType
 from .timing import NullTimeline, Timeline
@@ -60,19 +60,6 @@ class CharmOverrides(BaseModel):
     resources: dict[str, list[CharmResourceValue]] = Field(default_factory=dict)
     constraints: list[str] = Field(default_factory=list)
     assumes: list[str | dict[str, Any]] | None = None
-
-    @field_validator("constraints", mode="before")
-    @classmethod
-    def _coerce_constraints(cls, v: object) -> object:
-        """Accept a YAML block scalar string in addition to the normal list format."""
-        if not isinstance(v, str):
-            return v
-        lines = []
-        for line in v.splitlines():
-            stripped = line.strip()
-            if stripped and not stripped.startswith("#"):
-                lines.append(stripped)
-        return lines
 
     def meets(self, channel: CharmChannel) -> bool:
         return all(criterion.meets(channel) for criterion in self.criteria)
