@@ -1,11 +1,16 @@
 ---
+# Source: https://github.com/canonical/postgresql-operator
+#
+# 16 has only the modern database endpoint; 14 also carries db/db-admin; latest/stable is the legacy charm with only db/db-admin.
+#
+# database (provides, track 16): REQUIRED - metadata.yaml leaves it non-optional and the charm's primary purpose is serving PostgreSQL clients.
+# database/db/db-admin (provides, track 14): optional - src/charm.py aggregates all three client relation names in client_relations; endpoints are mutually exclusive and the solver may omit all (standalone deployment allowed).
+# db/db-admin (provides, latest): optional - legacy track exposes both client endpoints; they are mutually exclusive; standalone deployment is allowed.
 overrides:
   - criteria:
       - track: '16'
     provides:
       database:
-        limit: 1
-        optional: true
         features: [tls]
     constraints:
       # If database endpoint uses tls mode, client-certificates is required
@@ -19,16 +24,28 @@ overrides:
         features: [tls]
       db:
         limit: 1
+        optional: true
         features: [tls]
       db-admin:
         limit: 1
+        optional: true
         features: [tls]
     constraints:
       # database, db, and db-admin are mutually exclusive (at most one can be used at a time)
       - len(endpoint[database]) + len(endpoint[db]) + len(endpoint[db-admin]) <= 1
-      # If database endpoint uses tls mode, certificates is required
+      # If a client endpoint uses tls mode, certificates is required.
       - '"tls" in features(endpoint[database]) => bool(endpoint[certificates])'
-      # If db endpoint uses tls mode, certificates is required
       - '"tls" in features(endpoint[db]) => bool(endpoint[certificates])'
-      # If db-admin endpoint uses tls mode, certificates is required
       - '"tls" in features(endpoint[db-admin]) => bool(endpoint[certificates])'
+  - criteria:
+      - track: 'latest'
+    provides:
+      db:
+        limit: 1
+        optional: true
+      db-admin:
+        limit: 1
+        optional: true
+    constraints:
+      # db and db-admin are mutually exclusive (at most one can be used at a time)
+      - len(endpoint[db]) + len(endpoint[db-admin]) <= 1

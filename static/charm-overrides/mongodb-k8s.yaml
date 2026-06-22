@@ -1,9 +1,16 @@
 ---
+# Source: https://github.com/canonical/mongodb-k8s-operator
+#
+# One block covers all published tracks; the endpoint names used in the constraints exist in every live channel generation.
+#
+# role (config): replication/config-server/shard are the only source-supported modes; config.yaml defaults to replication.
+# ldap-certificate-transfer (requires): REQUIRED iff ldap is related - metadata.yaml exposes both relations independently, but LDAP TLS needs both.
+# sharding/config-server: Meaning-2 endpoints - role-specific integration that must match the selected role, not unconditional dependencies.
 overrides:
   - configs:
-      role: [config-server, shard, null]
+      role: [replication, config-server, shard, null]
     constraints:
-      # config-server and sharding are mutually exclusive
+      # config-server and sharding are mutually exclusive roles
       - 'not (bool(endpoint[sharding]) and bool(endpoint[config-server]))'
       # if ldap is integrated, certificate transfer is required and must reach all ldap charms
       - 'bool(endpoint[ldap]) == bool(endpoint[ldap-certificate-transfer])'
@@ -12,7 +19,7 @@ overrides:
       # role must match the integrated endpoint
       - 'bool(endpoint[config-server]) == (config[role] == "config-server")'
       - 'bool(endpoint[sharding]) == (config[role] == "shard")'
-      # sharding must be on the same track and risk
+      # sharding relations must stay on the same channel generation
       - 'bool(endpoint[sharding]) => tracks(charms(endpoint[sharding])) == tracks({self})
         and risks(charms(endpoint[sharding])) == risks({self})'
       - 'bool(endpoint[config-server]) => tracks(charms(endpoint[config-server]))

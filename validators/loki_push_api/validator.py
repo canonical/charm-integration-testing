@@ -6,7 +6,7 @@ import socket
 import ssl
 import time
 import uuid
-from typing import Any, Literal
+from typing import Any
 from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
 
@@ -40,8 +40,7 @@ class LokiPushApiValidator(BaseValidator):
         if level == "deep" and all(c.passed for c in checks):
             checks.extend(_canary_checks(endpoint_infos))
 
-        status: Literal["PASS", "FAIL"] = "PASS" if all(c.passed for c in checks) else "FAIL"
-        return self._make_result(status, level, checks)
+        return self._make_result(level=level, checks=checks)
 
 
 # ---------------------------------------------------------------------------

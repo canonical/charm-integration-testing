@@ -1,18 +1,20 @@
 ---
 # Source: https://github.com/canonical/opentelemetry-collector-k8s-operator
 #
-# Two endpoint generations:
-#   track 1: no CMR mesh endpoints; grafana-dashboards-* not optional upstream
-#   track 2, dev: adds require-cmr-mesh, service-mesh (requires) and provide-cmr-mesh (provides);
-#                 grafana-dashboards-* still not optional upstream
+# Three endpoint generations:
+#   track 1: metrics-endpoint + receive-loki-logs (provides); no CMR mesh, no receive-traces, no send-otlp
+#   track 2: adds receive-traces/receive-profiles (provides); CMR mesh (requires/provides); no send-otlp
+#   dev: adds external-config/ingress/istio-ingress/send-otlp (requires); receive-otlp (provides)
 #
-# grafana-dashboards-consumer (requires): optional - _get_missing_mandatory_relations() only blocks
-#   when this IS connected but unpaired; absent relation causes no BlockedStatus
-# grafana-dashboards-provider (provides): optional - same reasoning; forwarding is secondary purpose
-# require-cmr-mesh, service-mesh (requires): optional - CMR mesh is additive mesh integration
-# provide-cmr-mesh (provides): optional - CMR mesh is additive mesh integration
+# grafana-dashboards-consumer (requires): optional - _get_missing_mandatory_relations() only
+#   blocks when this IS connected but unpaired; absent relation causes no BlockedStatus.
+# grafana-dashboards-provider (provides): optional - same reasoning; forwarding is secondary purpose.
+# require-cmr-mesh, service-mesh (requires): optional - CMR mesh is additive mesh integration.
+# provide-cmr-mesh (provides): optional - CMR mesh is additive mesh integration.
+# Pipeline pairing: _get_missing_mandatory_relations() sets BlockedStatus if an incoming telemetry
+#   relation is connected without a matching outgoing backend. Modelled as implications.
 overrides:
-  # track 1: no CMR mesh
+  # track 1: no CMR mesh; metrics-endpoint and receive-loki-logs as incoming; send-otlp absent
   - criteria:
       - track: "1"
     requires:
@@ -21,12 +23,15 @@ overrides:
     provides:
       grafana-dashboards-provider:
         optional: true
+    constraints:
+      - 'bool(endpoint[metrics-endpoint]) => bool(endpoint[cloud-config]) or bool(endpoint[send-remote-write])'
+      - 'bool(endpoint[receive-loki-logs]) => bool(endpoint[cloud-config]) or bool(endpoint[send-loki-logs])'
+      - 'bool(endpoint[grafana-dashboards-consumer]) => bool(endpoint[grafana-dashboards-provider])
+        or bool(endpoint[cloud-config])'
 
-  # track 2 and dev: CMR mesh endpoints present but not optional upstream
+  # track 2: CMR mesh present; receive-traces/receive-profiles added; send-otlp still absent
   - criteria:
-      - any_of:
-          - track: "2"
-          - track: dev
+      - track: "2"
     requires:
       grafana-dashboards-consumer:
         optional: true
@@ -39,3 +44,36 @@ overrides:
         optional: true
       provide-cmr-mesh:
         optional: true
+    constraints:
+      - 'bool(endpoint[metrics-endpoint]) => bool(endpoint[cloud-config]) or bool(endpoint[send-remote-write])'
+      - 'bool(endpoint[receive-loki-logs]) => bool(endpoint[cloud-config]) or bool(endpoint[send-loki-logs])'
+      - 'bool(endpoint[receive-traces]) => bool(endpoint[cloud-config]) or bool(endpoint[send-traces])'
+      - 'bool(endpoint[grafana-dashboards-consumer]) => bool(endpoint[grafana-dashboards-provider])
+        or bool(endpoint[cloud-config])'
+
+  # dev: CMR mesh + send-otlp/receive-otlp added as valid pipeline backends
+  - criteria:
+      - track: dev
+    requires:
+      grafana-dashboards-consumer:
+        optional: true
+      require-cmr-mesh:
+        optional: true
+      service-mesh:
+        optional: true
+    provides:
+      grafana-dashboards-provider:
+        optional: true
+      provide-cmr-mesh:
+        optional: true
+    constraints:
+      - 'bool(endpoint[metrics-endpoint]) => bool(endpoint[cloud-config]) or bool(endpoint[send-remote-write])
+        or bool(endpoint[send-otlp])'
+      - 'bool(endpoint[receive-loki-logs]) => bool(endpoint[cloud-config]) or bool(endpoint[send-loki-logs])
+        or bool(endpoint[send-otlp])'
+      - 'bool(endpoint[receive-traces]) => bool(endpoint[cloud-config]) or bool(endpoint[send-traces])
+        or bool(endpoint[send-otlp])'
+      - 'bool(endpoint[grafana-dashboards-consumer]) => bool(endpoint[grafana-dashboards-provider])
+        or bool(endpoint[cloud-config])'
+      - 'bool(endpoint[receive-otlp]) => bool(endpoint[cloud-config]) or bool(endpoint[send-otlp])
+        or bool(endpoint[send-traces]) or bool(endpoint[send-loki-logs]) or bool(endpoint[send-remote-write])'
