@@ -147,12 +147,13 @@ class Bundle(BaseModel):
                 app_dict["resources"] = info.resources
             if info.juju_constraints:
                 # Emit as a Juju constraint string, e.g. "cores=2 mem=4096M root-disk=20480M"
+                # On Kubernetes only `mem` is supported; `cores` and `root-disk` are machine-only.
                 parts = []
-                if "cores" in info.juju_constraints:
+                if self.platform != "kubernetes" and "cores" in info.juju_constraints:
                     parts.append(f"cores={info.juju_constraints['cores']}")
                 if "mem" in info.juju_constraints:
                     parts.append(f"mem={info.juju_constraints['mem']}M")
-                if "root-disk" in info.juju_constraints:
+                if self.platform != "kubernetes" and "root-disk" in info.juju_constraints:
                     parts.append(f"root-disk={info.juju_constraints['root-disk']}M")
                 if parts:
                     app_dict["constraints"] = " ".join(parts)
