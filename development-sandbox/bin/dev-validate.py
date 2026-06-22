@@ -91,7 +91,7 @@ def main() -> None:
         from charm_integration_testing.juju_jubilant.backend import JubilantBackend
     except ImportError as exc:
         print(f"ERROR: Could not import project packages: {exc}", file=sys.stderr)
-        print("Run 'validator-development-sandbox/bin/up.sh' to set up the Python venv.", file=sys.stderr)
+        print("Run 'scripts/sandbox.sh up' to set up the Python venv.", file=sys.stderr)
         sys.exit(1)
 
     backend = JubilantBackend()

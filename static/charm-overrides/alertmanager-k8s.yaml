@@ -1,0 +1,23 @@
+---
+# Source: https://github.com/canonical/alertmanager-k8s-operator
+#
+# Track 1 already has all optional: true flags set upstream.
+# Tracks 2 and dev add service-mesh, require-cmr-mesh (requires) and
+# provide-cmr-mesh (provides) without optional: true.
+#
+# require-cmr-mesh (requires): optional - CMR mesh cross-model access, secondary to alertmanager's core alerting purpose
+# service-mesh (requires): optional - Istio service mesh integration, secondary to core alerting
+# provide-cmr-mesh (provides): optional - CMR mesh consumer hook, secondary to core alerting
+overrides:
+  - criteria:
+      - any_of:
+          - track: '2'
+          - track: dev
+    requires:
+      require-cmr-mesh:
+        optional: true
+      service-mesh:
+        optional: true
+    provides:
+      provide-cmr-mesh:
+        optional: true

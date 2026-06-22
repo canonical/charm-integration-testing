@@ -1,0 +1,28 @@
+---
+name: Clean up environments on a schedule
+run-name: Cleaning up environments on a schedule
+permissions:
+  contents: read  # only needed for private repos
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+jobs:
+  cleanup-schedule:
+    strategy:
+      fail-fast: false
+      matrix:
+        environment:
+          - ps6-sqa-stg_charm_qa_kubernetes-1
+          - ps6-sqa-prod_charm_qa_kubernetes-1
+          - ps6-sqa-prod_charm_qa_openstack-1
+          - ps7-sqa-prod_charm_qa_kubernetes-1
+          - ps7-sqa-prod_charm_qa_openstack-1
+    uses: ./.github/workflows/cleanup-environment.yaml
+    with:
+      environment: ${{ matrix.environment }}
+    secrets:
+      PROD_SQA_KUBECONFIG: ${{ secrets.PROD_SQA_KUBECONFIG }}
+      STG_SQA_KUBECONFIG: ${{ secrets.STG_SQA_KUBECONFIG }}
+      PROD_SQA_NOVARC: ${{ secrets.PROD_SQA_NOVARC }}
+      PROD_PS7_KUBECONFIG: ${{ secrets.PROD_PS7_KUBECONFIG }}
+      PROD_PS7_NOVARC: ${{ secrets.PROD_PS7_NOVARC }}

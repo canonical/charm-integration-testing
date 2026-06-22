@@ -2312,6 +2312,24 @@ type = "directory"
 url = "validators/base"
 
 [[package]]
+name = "validators-config-server"
+version = "0.1.0"
+description = "Validator for config-server interface (MongoDB sharding)"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+pymongo = ">=4.0.0"
+validators-base = "*"
+
+[package.source]
+type = "directory"
+url = "validators/config_server"
+
+[[package]]
 name = "validators-loki-push-api"
 version = "0.1.0"
 description = "Validator for loki_push_api interface"
@@ -2439,6 +2457,7 @@ develop = true
 ops = ">=3.3.0,<4.0.0"
 pydantic = ">=2.0.0"
 validators-base = "*"
+validators-config-server = "*"
 validators-loki-push-api = "*"
 validators-object-storage = "*"
 validators-opensearch-client = "*"
@@ -2585,4 +2604,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<4.0"
-content-hash = "59ad95a6f9bd763f05c7ba7fec4089cd882a62b7d2a594e71319d167e752b030"
+content-hash = "cf6a92a6704443d02c595ed0abc9bb61eb7bdcce740f29a1d253ab6bb888373c"
