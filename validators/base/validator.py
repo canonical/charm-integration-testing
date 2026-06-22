@@ -121,8 +121,9 @@ class BaseValidator(ABC):
 
     def _make_result(
         self,
-        status: ValidationResultStatus,
+        *,
         level: ValidationLevel,
+        status: ValidationResultStatus | None = None,
         checks: list[ValidationCheck] | None = None,
         error: str | None = None,
         endpoint: str | None = None,
@@ -130,6 +131,9 @@ class BaseValidator(ABC):
         role: ValidationRole | None = None,
         relation_id: int | None = None,
     ) -> ValidationResult:
+        resolved_checks = [] if checks is None else checks
+        if status is None:
+            status = "PASS" if all(c.passed for c in resolved_checks) else "FAIL"
         return ValidationResult(
             status=status,
             endpoint=self.endpoint if endpoint is None else endpoint,
@@ -137,12 +141,12 @@ class BaseValidator(ABC):
             role=role or self.role,
             level=level,
             relation_id=self.relation_id if relation_id is None else relation_id,
-            checks=[] if checks is None else checks,
+            checks=resolved_checks,
             error=error,
         )
 
     def _error_result(self, level: ValidationLevel, error: str) -> ValidationResult:
-        return self._make_result("ERROR", level, [], error)
+        return self._make_result(status="ERROR", level=level, checks=[], error=error)
 
     def _fail_result(self, level: ValidationLevel, checks: list[ValidationCheck]) -> ValidationResult:
-        return self._make_result("FAIL", level, checks)
+        return self._make_result(status="FAIL", level=level, checks=checks)

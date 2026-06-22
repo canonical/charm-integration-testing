@@ -21,6 +21,7 @@ dependencies = [
     "validators-object-storage",
     "validators-prometheus-scrape",
     "validators-opensearch-client",
+    "validators-temporal-host-info",
     "validators-config-server",
 ]
 
