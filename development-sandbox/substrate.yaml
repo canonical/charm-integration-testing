@@ -1,0 +1,21 @@
+---
+# cloud-config
+# charm-integration-testing development sandbox base image.
+#
+# Provisions base packages and the /project mount point only.
+# Substrate setup (k8s or lxd) is done separately inside the VM via:
+#   development-sandbox/bin/setup-k8s.sh
+#   development-sandbox/bin/setup-lxd.sh
+#
+# Launch via:
+#   scripts/sandbox.sh up
+package_update: true
+packages:
+  - python3-pip
+  - python3-venv
+runcmd:
+  - mkdir -p /project
+  - chown ubuntu:ubuntu /project
+final_message: |-
+  Sandbox base image ready.
+  Run 'scripts/sandbox.sh up' on the host to finish provisioning.

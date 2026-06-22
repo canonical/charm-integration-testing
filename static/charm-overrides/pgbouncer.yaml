@@ -1,0 +1,38 @@
+---
+# pgbouncer is a PostgreSQL connection pooler.
+# Primary purpose: accepts database connections from app charms (db/db-admin/
+# database provides) and proxies them to a backend PostgreSQL (backend-database
+# requires).
+#
+# cos-agent (provides) - OPTIONAL: COS monitoring integration; charm still pools
+#   connections without it.
+# ha (requires) - OPTIONAL: hacluster HA integration; standalone mode works.
+# certificates (requires) - OPTIONAL: TLS for client connections; non-TLS works.
+# tracing (requires) - OPTIONAL: OpenTelemetry tracing; observability addon.
+#
+# backend-database (requires) - REQUIRED: pgbouncer's primary purpose is pooling
+#   connections to a PostgreSQL backend. Not marked optional here.
+#
+# latest/* is an older track with different metadata (backend-db-admin,
+# nrpe-external-master, pgbouncer-extra-config).
+overrides:
+  # latest/*: older track - different endpoint set; no backend-database
+  - criteria:
+      - track: 'latest'
+    requires:
+      ha:
+        optional: true
+    provides:
+      nrpe-external-master:
+        optional: true
+  # track 1 and future tracks: backend-database required; cos-agent optional
+  - provides:
+      cos-agent:
+        optional: true
+    requires:
+      ha:
+        optional: true
+      certificates:
+        optional: true
+      tracing:
+        optional: true

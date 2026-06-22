@@ -75,6 +75,14 @@ Charm Information
      - Revision number for a specific charm. Dynamic category based on charm name (e.g., ``charm:postgresql:revision``). Collected at start and end of test.
      - No
      - ``123``
+   * - ``charm:<name>:track``
+     - Channel track for a specific charm (e.g., ``charm:postgresql:track``). Only collected when channel information is available from Juju status and the channel has an explicit track set.
+     - No
+     - ``14``
+   * - ``charm:<name>:risk``
+     - Channel risk for a specific charm (e.g., ``charm:postgresql:risk``). Only collected when channel information is available from Juju status.
+     - No
+     - ``stable``
 
 Integration Information
 ~~~~~~~~~~~~~~~~~~~~~~~
@@ -132,15 +140,8 @@ Warning Information
      - Yes
      - ``UserWarning: Deprecated function``
 
-Failure and Error Information
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-The framework distinguishes between expected failures and unexpected errors, using different metadata prefixes for each category. All metadata keys use either ``failure:*`` or ``error:*`` prefixes depending on the exception type classification.
-
-Failure Metadata (Expected Failures)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-Collected when the exception type is in ``KNOWN_FAILURE_EXCEPTIONS`` (``JujuWaitTimeoutError``, ``JujuValidationError``, ``AssertionError``, ``CalledProcessError``):
+Failure Information
+~~~~~~~~~~~~~~~~~~~
 
 .. list-table::
    :header-rows: 1
@@ -151,31 +152,31 @@ Collected when the exception type is in ``KNOWN_FAILURE_EXCEPTIONS`` (``JujuWait
      - Normalized
      - Example Value
    * - ``failure:message``
-     - Failure message when a test fails with a known exception. Contains the error message from failed tests.
+     - Failure message when a test fails. Contains the error message from failed tests.
      - Yes
      - ``AssertionError: Expected 'active'``
    * - ``failure:charm:<name>:status``
-     - Status information for a specific charm when test fails due to ``JujuWaitTimeoutError``. Format: ``application:<status>:<message>`` or ``unit:<status>:<message>``. The message portion is normalized.
+     - Status information for a specific charm when a test times out waiting for Juju. Format: ``application:<status>:<message>``, ``unit:<status>:<message>``, or ``unit_agent:<status>:<message>``. The message portion is normalized.
      - Partial
      - ``application:blocked:Init failed``
    * - ``failure:cli:cmd``
-     - The command that failed when test fails due to ``CalledProcessError``. Contains the command string.
+     - The command that failed when a test fails due to a CLI error. Contains the command string.
      - Yes
      - ``juju deploy postgresql``
    * - ``failure:cli:return_code``
-     - The return code from a failed command. Only recorded for ``CalledProcessError`` exceptions.
+     - The return code from a failed command.
      - No
      - ``1``
    * - ``failure:cli:stdout``
-     - Standard output from a failed command. Only recorded for ``CalledProcessError`` with stdout.
+     - Standard output from a failed command. Only recorded when stdout is present.
      - Yes, multi-line normalized
      - ``Error: unit not found``
    * - ``failure:cli:stderr``
-     - Standard error from a failed command. Only recorded for ``CalledProcessError`` with stderr.
+     - Standard error from a failed command. Only recorded when stderr is present.
      - Yes, multi-line normalized
      - ``ERROR connection refused``
    * - ``failure:validator:interface:<interface>``
-     - Validation result status for a specific interface when a test fails due to ``JujuValidationError``. Dynamic category based on interface name (e.g., ``failure:validator:interface:postgresql_client``). Value is ``FAIL`` or ``ERROR``.
+     - Validation result status for a specific interface when a test fails validation. Dynamic category based on interface name (e.g., ``failure:validator:interface:postgresql_client``). Value is ``FAIL`` or ``ERROR``.
      - No
      - ``FAIL``
    * - ``failure:validator:interface:<interface>:check``
@@ -195,24 +196,6 @@ Collected when the exception type is in ``KNOWN_FAILURE_EXCEPTIONS`` (``JujuWait
      - No
      - ``postgresql_client``
 
-Error Metadata (Unexpected Errors)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-Collected when the exception type is **not** in ``KNOWN_FAILURE_EXCEPTIONS``:
-
-.. list-table::
-   :header-rows: 1
-   :widths: 25 40 15 20
-
-   * - Category
-     - Description
-     - Normalized
-     - Example Value
-   * - ``failure:expected``
-     - Flag indicating the failure was unexpected
-     - No
-     - ``false``
-   
 Skip Information
 ~~~~~~~~~~~~~~~~
 

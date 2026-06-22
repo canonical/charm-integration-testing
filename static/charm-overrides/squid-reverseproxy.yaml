@@ -1,0 +1,19 @@
+---
+# Override for squid-reverseproxy
+# Source: https://github.com/openstack/charm-squid-reverseproxy
+#
+# squid-reverseproxy is a Squid HTTP caching proxy. Its primary purpose is to
+# proxy and cache a website endpoint (requires: website).
+#
+# local-monitors (provides, local-monitors): NRPE-style local monitoring hook.
+#   No charm on Charmhub provides a consumer for the local-monitors interface.
+#   Optional: monitoring is not required for proxy operation.
+#
+# nrpe-external-master (provides, nrpe-external-master): monitoring subordinate.
+#   Optional: monitoring is not required for proxy operation.
+overrides:
+  - provides:
+      local-monitors:
+        optional: true
+      nrpe-external-master:
+        optional: true
