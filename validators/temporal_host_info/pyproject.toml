@@ -1,0 +1,29 @@
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+[project]
+name = "validators-temporal-host-info"
+version = "0.1.0"
+description = "Validator for temporal-host-info interface"
+authors = [
+    {name = "SQA Team", email = "solutionsqa@canonical.com"}
+]
+
+requires-python = ">=3.10"
+dependencies = [
+    "temporalio>=1.0.0,<2.0.0",
+    "validators-base",
+]
+
+[project.entry-points."endpoint_validators"]
+temporal-host-info = "validators.temporal_host_info:TemporalHostInfoValidator"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["validators.temporal_host_info"]
+
+[tool.setuptools.package-dir]
+"validators.temporal_host_info" = "."

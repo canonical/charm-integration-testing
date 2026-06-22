@@ -41,7 +41,6 @@ from validators.base import (
     ValidationCheck,
     ValidationLevel,
     ValidationResult,
-    ValidationResultStatus,
 )
 
 # Pattern: {replicaSetName}/{host}:{port}[,{host}:{port}...]
@@ -94,19 +93,19 @@ class ConfigServerValidator(BaseValidator):
         )
         checks.append(schema_check)
         if not schema_check.passed:
-            return self._build_result("simple", checks)
+            return self._make_result(level="simple", checks=checks)
 
         config_server_db = merged.get("config-server-db", "")
 
         format_check = _check_config_server_db_format(config_server_db)
         checks.append(format_check)
         if not format_check.passed:
-            return self._build_result("simple", checks)
+            return self._make_result(level="simple", checks=checks)
 
         hosts = _parse_hosts(config_server_db)
         checks.append(_tcp_connectivity_check(hosts))
 
-        return self._build_result("simple", checks)
+        return self._make_result(level="simple", checks=checks)
 
     def _validate_requires_deep(self) -> ValidationResult:
         """L2: All L1 checks + authenticated pymongo ping and database list."""
@@ -128,20 +127,20 @@ class ConfigServerValidator(BaseValidator):
         )
         checks.append(schema_check)
         if not schema_check.passed:
-            return self._build_result("deep", checks)
+            return self._make_result(level="deep", checks=checks)
 
         config_server_db = merged.get("config-server-db", "")
 
         format_check = _check_config_server_db_format(config_server_db)
         checks.append(format_check)
         if not format_check.passed:
-            return self._build_result("deep", checks)
+            return self._make_result(level="deep", checks=checks)
 
         hosts = _parse_hosts(config_server_db)
         tcp_check = _tcp_connectivity_check(hosts)
         checks.append(tcp_check)
         if not tcp_check.passed:
-            return self._build_result("deep", checks)
+            return self._make_result(level="deep", checks=checks)
 
         replica_set = _parse_replica_set(config_server_db)
         username = merged.get("username", "")
@@ -154,7 +153,7 @@ class ConfigServerValidator(BaseValidator):
             ping_check = _ping_check(client, hosts[0])
             checks.append(ping_check)
             if not ping_check.passed:
-                return self._build_result("deep", checks)
+                return self._make_result(level="deep", checks=checks)
 
             list_check = _list_databases_check(client)
             checks.append(list_check)
@@ -175,7 +174,7 @@ class ConfigServerValidator(BaseValidator):
             )
         )
 
-        return self._build_result("deep", checks)
+        return self._make_result(level="deep", checks=checks)
 
     # ------------------------------------------------------------------
     # Provides role — config-server reads mongos requirer databag
@@ -192,13 +191,13 @@ class ConfigServerValidator(BaseValidator):
         schema_check = self.validate_schema(["database"])
         checks.append(schema_check)
         if not schema_check.passed:
-            return self._build_result("simple", checks)
+            return self._make_result(level="simple", checks=checks)
 
         if "extra-user-roles" in self.databag:
             roles_check = _check_extra_user_roles(self.databag["extra-user-roles"])
             checks.append(roles_check)
 
-        return self._build_result("simple", checks)
+        return self._make_result(level="simple", checks=checks)
 
     # ------------------------------------------------------------------
     # Helpers
@@ -230,10 +229,6 @@ class ConfigServerValidator(BaseValidator):
         content contains ``config-server-db`` and ``key-file`` as keys.
         """
         return self.resolve_secret("secret-extra", "config-server-db", "key-file")
-
-    def _build_result(self, level: ValidationLevel, checks: list[ValidationCheck]) -> ValidationResult:
-        status: ValidationResultStatus = "PASS" if all(c.passed for c in checks) else "FAIL"
-        return self._make_result(status=status, level=level, checks=checks)
 
 
 # ---------------------------------------------------------------------------

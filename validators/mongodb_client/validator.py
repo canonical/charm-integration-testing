@@ -27,7 +27,6 @@ from validators.base import (
     ValidationCheck,
     ValidationLevel,
     ValidationResult,
-    ValidationResultStatus,
 )
 
 
@@ -67,7 +66,7 @@ class MongoDBClientValidator(BaseValidator):
         schema_check = self.validate_schema(schema, creds)
         checks.append(schema_check)
         if not schema_check.passed:
-            return self._build_result("simple", checks)
+            return self._make_result(level="simple", checks=checks)
 
         # --- 4. Connect & ping ---
         endpoint = self.databag["endpoints"].split(",")[0].strip()
@@ -75,13 +74,13 @@ class MongoDBClientValidator(BaseValidator):
             mongodb_client = self._build_mongodb_client(creds)
         except Exception as exc:
             checks.append(ValidationCheck(name="connect", passed=False, message=str(exc)))
-            return self._build_result("simple", checks)
+            return self._make_result(level="simple", checks=checks)
 
         try:
             connect_check = self._attempt_connection(mongodb_client, endpoint)
             checks.append(connect_check)
             if not connect_check.passed:
-                return self._build_result("simple", checks)
+                return self._make_result(level="simple", checks=checks)
 
             # --- 5. Canary read-only query ---
             try:
@@ -95,7 +94,7 @@ class MongoDBClientValidator(BaseValidator):
         finally:
             self._cleanup_client(mongodb_client)
 
-        return self._build_result("simple", checks)
+        return self._make_result(level="simple", checks=checks)
 
     def _validate_deep(self) -> ValidationResult:
         """L2: Read/Write Capability with canary collection (create, write, read-verify, cleanup)."""
@@ -116,7 +115,7 @@ class MongoDBClientValidator(BaseValidator):
         schema_check = self.validate_schema(schema, creds)
         checks.append(schema_check)
         if not schema_check.passed:
-            return self._build_result("deep", checks)
+            return self._make_result(level="deep", checks=checks)
 
         # --- 4. Connect ---
         endpoint = self.databag["endpoints"].split(",")[0].strip()
@@ -124,13 +123,13 @@ class MongoDBClientValidator(BaseValidator):
             mongodb_client = self._build_mongodb_client(creds)
         except Exception as exc:
             checks.append(ValidationCheck(name="connect", passed=False, message=str(exc)))
-            return self._build_result("deep", checks)
+            return self._make_result(level="deep", checks=checks)
 
         try:
             connect_check = self._attempt_connection(mongodb_client, endpoint)
             checks.append(connect_check)
             if not connect_check.passed:
-                return self._build_result("deep", checks)
+                return self._make_result(level="deep", checks=checks)
 
             # --- 5. Create canary collection, write, read-verify, cleanup ---
             canary_collection = f"__canary_{uuid.uuid4().hex[:8]}"
@@ -212,7 +211,7 @@ class MongoDBClientValidator(BaseValidator):
                 )
             )
 
-        return self._build_result("deep", checks)
+        return self._make_result(level="deep", checks=checks)
 
     def _check_relation_exists(self, level: ValidationLevel) -> ValidationResult | None:
         """Check if remote app exists on relation. Returns error result if missing, else None."""
@@ -263,15 +262,6 @@ class MongoDBClientValidator(BaseValidator):
             return ValidationCheck(name="connect", passed=True, message=f"Connected to {endpoint}.")
         except Exception as exc:
             return ValidationCheck(name="connect", passed=False, message=str(exc))
-
-    def _build_result(self, level: ValidationLevel, checks: list[ValidationCheck]) -> ValidationResult:
-        """Build a ValidationResult from checks list."""
-        status: ValidationResultStatus = "PASS" if all(c.passed for c in checks) else "FAIL"
-        return self._make_result(
-            status=status,
-            level=level,
-            checks=checks,
-        )
 
     def _cleanup_client(self, mongodb_client: MongoClient[Any] | None) -> None:
         """Clean up MongoDB client and temporary CA file."""
