@@ -1,7 +1,7 @@
 #!/bin/bash
 # Run deterministic validator verification gates inside the VM workspace.
 #
-# This script is VM-native and must be run from inside the validator VM where
+# This script is VM-native and must be run from inside the sandbox VM where
 # /project is mounted.
 
 set -euo pipefail
@@ -22,7 +22,7 @@ RESTORE_CMD=""
 usage() {
     cat <<'EOF'
 Usage:
-  validator-development-sandbox/bin/verify-validator.sh \
+  development-sandbox/bin/verify-validator.sh \
     --model <model> --app <requirer-app> --provider <provider-app> --validator <validator-name> [options]
 
 Required:
@@ -226,14 +226,14 @@ run_step wiring_runner "grep -q '\"validators-$VALIDATOR_PKG\"' validators/runne
 run_step wiring_root "grep -q '^validators-$VALIDATOR_PKG = { path = \"./validators/$VALIDATOR\", develop = true' pyproject.toml"
 run_step entrypoint "cd /project && poetry run python3 -c \"from importlib.metadata import entry_points; import sys; names=[e.name for e in entry_points(group='endpoint_validators')]; sys.exit(0 if '$INTERFACE' in names else 1)\""
 
-run_step validate_up "/project/validator-development-sandbox/bin/dev-validate.py --model $MODEL --app $APP --level $LEVEL --reinstall"
+run_step validate_up "/project/development-sandbox/bin/dev-validate.py --model $MODEL --app $APP --level $LEVEL --reinstall"
 run_step status_up "juju status -m $MODEL --relations"
 
 if [ -n "$DOWN_CMD" ]; then
     # Custom down/restore commands override the default Juju scale behavior.
     run_step provider_down "$DOWN_CMD"
     run_step status_down "juju status -m $MODEL --relations"
-    run_step validate_down "/project/validator-development-sandbox/bin/dev-validate.py --model $MODEL --app $APP --level $LEVEL --reinstall"
+    run_step validate_down "/project/development-sandbox/bin/dev-validate.py --model $MODEL --app $APP --level $LEVEL --reinstall"
     run_step provider_restore "$RESTORE_CMD"
     run_step status_restored "juju status -m $MODEL --relations"
 else
@@ -266,7 +266,7 @@ PY
 
     run_step provider_down "juju scale-application -m $MODEL $PROVIDER 0"
     run_step status_down "juju status -m $MODEL --relations"
-    run_step validate_down "/project/validator-development-sandbox/bin/dev-validate.py --model $MODEL --app $APP --level $LEVEL --reinstall"
+    run_step validate_down "/project/development-sandbox/bin/dev-validate.py --model $MODEL --app $APP --level $LEVEL --reinstall"
     run_step provider_restore "juju scale-application -m $MODEL $PROVIDER $orig_units"
     run_step status_restored "juju status -m $MODEL --relations"
 fi
