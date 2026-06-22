@@ -13,7 +13,6 @@ from validators.base import (
     ValidationCheck,
     ValidationLevel,
     ValidationResult,
-    ValidationResultStatus,
 )
 
 _CONNECT_TIMEOUT = 5
@@ -26,15 +25,13 @@ class OpenSearchClientValidator(BaseValidator):
     def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
         if self.role != "requires":
             return self._skipped_result_due_to_role(level, self.role)
-        if level == "uat":
+        if level not in ("simple", "deep"):
             return self._skipped_result_due_to_level(level)
         if not self.relation_exists():
             return self._error_result(level, f"No remote application on relation '{self.endpoint}'.")
-        if level == "simple":
-            return self._validate_simple()
         if level == "deep":
             return self._validate_deep()
-        return self._skipped_result_due_to_level(level)
+        return self._validate_simple()
 
     # ------------------------------------------------------------------
     # L1: Schema + cluster connectivity + health
@@ -48,13 +45,13 @@ class OpenSearchClientValidator(BaseValidator):
         schema_check = self.validate_schema(_REQUIRED_FIELDS, creds)
         checks.append(schema_check)
         if not schema_check.passed:
-            return self._build_result("simple", checks)
+            return self._make_result(level="simple", checks=checks)
 
         try:
             client = self._build_client(creds)
         except Exception as exc:
             checks.append(ValidationCheck(name="connect", passed=False, message=str(exc)))
-            return self._build_result("simple", checks)
+            return self._make_result(level="simple", checks=checks)
 
         try:
             health_check = self._check_cluster_health(client)
@@ -62,7 +59,7 @@ class OpenSearchClientValidator(BaseValidator):
         finally:
             self._close_client(client)
 
-        return self._build_result("simple", checks)
+        return self._make_result(level="simple", checks=checks)
 
     # ------------------------------------------------------------------
     # L2: Schema + health + canary index (create → index → get → delete)
@@ -76,25 +73,25 @@ class OpenSearchClientValidator(BaseValidator):
         schema_check = self.validate_schema(_REQUIRED_FIELDS, creds)
         checks.append(schema_check)
         if not schema_check.passed:
-            return self._build_result("deep", checks)
+            return self._make_result(level="deep", checks=checks)
 
         try:
             client = self._build_client(creds)
         except Exception as exc:
             checks.append(ValidationCheck(name="connect", passed=False, message=str(exc)))
-            return self._build_result("deep", checks)
+            return self._make_result(level="deep", checks=checks)
 
         try:
             health_check = self._check_cluster_health(client)
             checks.append(health_check)
             if not health_check.passed:
-                return self._build_result("deep", checks)
+                return self._make_result(level="deep", checks=checks)
 
             checks.extend(self._check_canary_index(client))
         finally:
             self._close_client(client)
 
-        return self._build_result("deep", checks)
+        return self._make_result(level="deep", checks=checks)
 
     # ------------------------------------------------------------------
     # Checks
@@ -217,10 +214,6 @@ class OpenSearchClientValidator(BaseValidator):
         except Exception:  # nosec B110
             pass
         self._remove_ca_file()
-
-    def _build_result(self, level: ValidationLevel, checks: list[ValidationCheck]) -> ValidationResult:
-        status: ValidationResultStatus = "PASS" if all(c.passed for c in checks) else "FAIL"
-        return self._make_result(status=status, level=level, checks=checks)
 
     # ------------------------------------------------------------------
     # CA certificate helpers
