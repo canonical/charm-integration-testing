@@ -1,6 +1,6 @@
 ---
 name: charm-override-investigator
-description: 'Charm Override Investigator - investigates charm metadata and creates per-charm override YAML files in static/charm-overrides/. USE FOR: creating a new override from scratch, updating after an upstream PR lands, fixing broken constraints, auditing against live metadata. GUIDED WORKFLOWS: write_new_override, update_existing_override, validate_override. INPUTS: charm name, optional upstream PR URL, optional track filter. OUTPUTS: PR-ready YAML with evidence comments.'
+description: 'Charm Override Investigator - investigates charm metadata and creates per-charm override YAML files in static/charm-overrides/. USE FOR: creating a new override from scratch, updating after an upstream PR lands, fixing broken constraints, auditing against live metadata, determining production resource constraints. GUIDED WORKFLOWS: write_new_override, update_existing_override, validate_override, investigate_resource_constraints. INPUTS: charm name, optional upstream PR URL, optional track filter. OUTPUTS: PR-ready YAML with evidence comments.'
 tools: ['github/*']
 ---
 
@@ -187,6 +187,106 @@ A single repo may contain multiple charms (e.g. `kfp-operators`, `cos-charms`). 
 8. Run self-validation checklist.
 9. Run the solver against a minimal single-charm spec and verify the bundle is realistic.
 10. For endpoints that qualify for Meaning 1: prepare upstream PR diff (with user permission).
+
+### investigate_resource_constraints
+
+Determine the correct `juju_constraint[mem/cores/root-disk] >= N` values for a charm's
+production deployment and add them to the override file.
+
+**Goal:** find the minimum resources that make the charm work correctly in production
+configuration. Do NOT use testing/development profiles — the purpose here is production-
+esque charm QA.
+
+#### Step 1 — Find the source repository
+
+Use the same discovery approach as `write_new_override`.
+
+#### Step 2 — Look for a profile system
+
+Search `config.yaml` for a `profile` key (common pattern in Canonical data charms):
+
+```bash
+gh api "repos/canonical/<repo>/contents/config.yaml" | python3 -c "
+import sys,json,base64; d=json.load(sys.stdin)
+print(base64.b64decode(d['content'].replace('\n','')).decode())
+" | grep -B2 -A15 "profile"
+```
+
+If `profile: testing|production` exists, focus on the **production** path. Do NOT set
+`profile: testing` in the override's `configs:` block.
+
+#### Step 3 — Find enforced resource minimums
+
+Look for code that checks available resources and blocks/waits when they are insufficient.
+Common patterns:
+
+| Pattern | What to look for |
+|---------|-----------------|
+| `check_memory_requirements` | Compares `meminfo["MemTotal"]` against a threshold |
+| `memory_requirements.memory_size` | A `ProfileMemoryRequirements` dataclass field |
+| `BlockedStatus("Insufficient memory")` | Hard check that blocks startup |
+| `check_missing_system_requirements` | OS-level checks (vm.max_map_count etc.) |
+| `JVM_MEM_MAX_GB` / `heap_opts()` | JVM heap size for production profile |
+| `shared_buffers` formula | PostgreSQL: typically 25% of available RAM |
+
+For JVM charms, the production heap size **is** the memory floor: add ~2 GB OS overhead.
+Example: `JVM_MEM_MAX_GB = 6` → `mem >= 8192` (6 GB heap + 2 GB OS).
+
+For charms with enforced minimums (like opensearch's 8 GB check), that value **is** the
+floor. For charms without an enforced minimum (like postgresql), use the production tuning
+formula to derive a practical floor.
+
+#### Step 4 — Find minimum replica count
+
+Look for `MIN_REPLICAS` constants or profile `cluster_topology_requirements`:
+
+```bash
+grep -r "MIN_REPLICAS\|cluster_managers\|min_units\|minimum.*unit" src/ lib/
+```
+
+If `MIN_REPLICAS = 3`, add `len(units({self})) >= 3` as a constraint (if not already present).
+
+#### Step 5 — Derive cores and root-disk
+
+Neither is commonly enforced in code. Apply these heuristics:
+
+- **cores:** Pure Python charms → 1. JVM charms with heap ≤ 2 GB → 2. JVM charms with heap > 2 GB → 4. Database charms (autovacuum + connections) → 2 minimum.
+- **root-disk:** Stateless charms → default (8192 MB). Database/log-retention charms → at least 10240 MB (10 GB). Search engine charms with indices → at least 20480 MB (20 GB).
+
+On **Kubernetes**, only `mem` is emitted (cores/root-disk are filtered at export time).
+Still record cores/root-disk in the override — they are used for machine deployments of the
+same charm.
+
+#### Step 6 — Add constraints with evidence comments
+
+Add to the relevant criteria block(s) in the override file:
+
+```yaml
+constraints:
+  # <N> GB floor: <why — cite source file and constant or formula>
+  - juju_constraint[mem] >= <N_MB>
+  # <M> cores: <why>
+  - juju_constraint[cores] >= <M>
+  # <P> GB disk: <why>
+  - juju_constraint[root-disk] >= <P_MB>
+```
+
+If the charm has multiple criteria blocks (e.g. per-track), add resource constraints to
+**each block** that applies. If resource requirements are identical across all tracks, add a
+top-level (no-criteria) block.
+
+#### Step 7 — Validate
+
+Run the solver and confirm the bundle YAML contains the expected constraints string:
+
+```bash
+poetry run bundle-builder-x --spec /tmp/test.yaml --overrides ./static/charm-overrides/
+```
+
+Check the output bundle YAML — for a machine platform you should see something like:
+`constraints: "cores=4 mem=8192M root-disk=20480M"`.
+
+---
 
 ### update_existing_override
 

@@ -33,3 +33,15 @@ overrides:
     constraints:
       # Minimum 3 units for HA, but allow more for larger clusters.
       - len(units({self})) >= 3
+      # Production profile (default) enforces 8 GB minimum RAM per unit:
+      #   ProductionProfile.memory_requirements.memory_size = 8 * _1GB_IN_KB
+      #   Source: opensearch-charms-single-kernel/opensearch_single_kernel/core/models.py
+      # JVM heap = 50% of RAM → effective floor is 8 GB to give the JVM 4 GB.
+      - juju_constraint[mem] >= 8192
+      # OpenSearch is CPU-intensive; 4 cores recommended for production workloads.
+      # The charm does not enforce a cores minimum, but below 4 cores indexing
+      # and query throughput degrade significantly.
+      - juju_constraint[cores] >= 4
+      # OpenSearch needs disk for segment storage + JVM heap dumps.
+      # 20 GB is a practical floor for a small QA index.
+      - juju_constraint[root-disk] >= 20480
