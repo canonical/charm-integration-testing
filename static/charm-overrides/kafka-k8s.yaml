@@ -1,8 +1,16 @@
 ---
+# Source: https://github.com/canonical/kafka-k8s-operator
+#
 # When client-cas or oauth is integrated, certificates is also required.
 # When zookeeper is integrated (pre-track-4 and latest/* non-stable), certificates is also required.
 # Track 4 is KRaft mode - the zookeeper endpoint no longer exists.
 # See: https://github.com/canonical/charm-integration-testing/issues/408
+#
+# Resource constraints (production profile):
+#   JVM heap = JVM_MEM_MAX_GB = 6 GB  (src/literals.py, production default)
+#   6 GB heap + OS overhead → 8 GB RAM floor
+#   MIN_REPLICAS = 3  (src/literals.py)
+#   On K8s only mem is emitted (cores/root-disk are not supported by Juju K8s).
 overrides:
   - criteria:
       - track: '4'
@@ -17,6 +25,12 @@ overrides:
       - 'bool(endpoint[client-cas]) or bool(endpoint[oauth]) => bool(endpoint[certificates])'
       - 'bool(endpoint[peer-cluster]) => config[roles] == "broker"'
       - 'not bool(endpoint[peer-cluster]) => config[roles] == "broker,controller"'
+      # Production JVM heap = 6 GB; total with OS overhead = ~8 GB.
+      # Source: JVM_MEM_MAX_GB = 6 in src/literals.py; heap_opts() uses MAX when profile != testing.
+      - juju_constraint[mem] >= 8192
+      # Minimum 3 brokers: WaitingStatus triggers below MIN_REPLICAS.
+      # Source: NOT_ENOUGH_BROKERS status in src/literals.py, MIN_REPLICAS = 3.
+      - len(units({self})) >= 3
 
   # latest/stable is on ubuntu/20.04 (EOL April 2025). It uses the old 'kafka'
   # interface name (renamed to 'kafka-client' in track 3). No public Charmhub

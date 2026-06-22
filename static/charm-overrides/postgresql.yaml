@@ -1,4 +1,11 @@
 ---
+# Source: https://github.com/canonical/postgresql-operator
+#
+# PostgreSQL auto-tunes shared_buffers = 25% of available RAM via
+# build_postgresql_parameters() (src/charm.py get_available_memory).
+# No enforced memory minimum, but below 2 GB shared_buffers is too small
+# for any meaningful production workload.  2 GB RAM → ~512 MB shared_buffers.
+# profile_limit_memory can cap it; production profile uses full available RAM.
 overrides:
   - criteria:
       - track: '16'
@@ -10,6 +17,12 @@ overrides:
     constraints:
       # If database endpoint uses tls mode, client-certificates is required
       - '"tls" in features(endpoint[database]) => bool(endpoint[client-certificates])'
+      # 2 GB floor: gives PostgreSQL ~512 MB shared_buffers in production profile.
+      # No charm-enforced minimum; derived from PostgreSQL best-practice (shared_buffers = 25% RAM).
+      - juju_constraint[mem] >= 2048
+      # PostgreSQL needs disk for data + WAL (write-ahead log).
+      # 10 GB is a practical floor for a small QA dataset.
+      - juju_constraint[root-disk] >= 10240
   - criteria:
       - track: '14'
     provides:

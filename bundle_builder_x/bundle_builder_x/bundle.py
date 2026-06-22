@@ -47,6 +47,7 @@ def _mermaid_node_id(model_id: str, application: str) -> str:
 class Application(BaseModel):
     charm: Charm
     num_units: int = 1
+    juju_constraints: dict[str, int] = Field(default_factory=dict)
     config: dict[str, CharmConfigValue] = Field(default_factory=dict)
     resources: dict[str, str] = Field(default_factory=dict)
 
@@ -144,6 +145,18 @@ class Bundle(BaseModel):
                 app_dict[scale_key] = info.num_units
             if len(info.resources) > 0:
                 app_dict["resources"] = info.resources
+            if info.juju_constraints:
+                # Emit as a Juju constraint string, e.g. "cores=2 mem=4096M root-disk=20480M"
+                # On Kubernetes only `mem` is supported; `cores` and `root-disk` are machine-only.
+                parts = []
+                if self.platform != "kubernetes" and "cores" in info.juju_constraints:
+                    parts.append(f"cores={info.juju_constraints['cores']}")
+                if "mem" in info.juju_constraints:
+                    parts.append(f"mem={info.juju_constraints['mem']}M")
+                if self.platform != "kubernetes" and "root-disk" in info.juju_constraints:
+                    parts.append(f"root-disk={info.juju_constraints['root-disk']}M")
+                if parts:
+                    app_dict["constraints"] = " ".join(parts)
             applications_dict[application] = app_dict
 
         # Build relations list including cross-model relations

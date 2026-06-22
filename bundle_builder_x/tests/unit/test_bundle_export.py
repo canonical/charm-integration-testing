@@ -247,6 +247,91 @@ class TestBundleExport:
         # THEN num_units is 3, not 1
         assert exported["applications"]["opensearch"]["num_units"] == 3
 
+    def test_juju_constraints_emitted_when_set(self) -> None:
+        # GIVEN a machine bundle where opensearch has resource constraints
+        bundle = _make_bundle(
+            platform="machine",
+            applications={
+                "opensearch": Application(
+                    charm=_make_charm("opensearch"),
+                    juju_constraints={"cores": 2, "mem": 4096, "root-disk": 20480},
+                )
+            },
+        )
+
+        # WHEN exporting
+        exported = yaml.safe_load(bundle.export())
+
+        # THEN constraints string is emitted with correct Juju format
+        assert exported["applications"]["opensearch"]["constraints"] == "cores=2 mem=4096M root-disk=20480M"
+
+    def test_juju_constraints_omitted_when_empty(self) -> None:
+        # GIVEN a bundle where the application has an empty juju_constraints dict
+        bundle = _make_bundle(
+            platform="machine",
+            applications={"app": Application(charm=_make_charm("app"), juju_constraints={})},
+        )
+
+        # WHEN exporting
+        exported = yaml.safe_load(bundle.export())
+
+        # THEN no constraints key is present (Application model default is empty dict)
+        assert "constraints" not in exported["applications"]["app"]
+
+    def test_juju_constraints_partial_keys(self) -> None:
+        # GIVEN only mem constrained (not cores or root-disk)
+        bundle = _make_bundle(
+            platform="machine",
+            applications={
+                "app": Application(
+                    charm=_make_charm("app"),
+                    juju_constraints={"mem": 2048},
+                )
+            },
+        )
+
+        # WHEN exporting
+        exported = yaml.safe_load(bundle.export())
+
+        # THEN only mem appears in the constraints string
+        assert exported["applications"]["app"]["constraints"] == "mem=2048M"
+
+    def test_juju_constraints_on_kubernetes_omits_cores_and_root_disk(self) -> None:
+        # GIVEN a kubernetes bundle with all three resource dimensions set
+        bundle = _make_bundle(
+            platform="kubernetes",
+            applications={
+                "app": Application(
+                    charm=_make_charm("app"),
+                    juju_constraints={"cores": 2, "mem": 512, "root-disk": 8192},
+                )
+            },
+        )
+
+        # WHEN exporting
+        exported = yaml.safe_load(bundle.export())
+
+        # THEN only mem is emitted — cores and root-disk are not supported by Juju on K8s
+        assert exported["applications"]["app"]["constraints"] == "mem=512M"
+
+    def test_juju_constraints_on_machine_emits_all_dimensions(self) -> None:
+        # GIVEN a machine bundle with all three resource dimensions set
+        bundle = _make_bundle(
+            platform="machine",
+            applications={
+                "app": Application(
+                    charm=_make_charm("app"),
+                    juju_constraints={"cores": 2, "mem": 512, "root-disk": 8192},
+                )
+            },
+        )
+
+        # WHEN exporting
+        exported = yaml.safe_load(bundle.export())
+
+        # THEN all three dimensions are emitted
+        assert exported["applications"]["app"]["constraints"] == "cores=2 mem=512M root-disk=8192M"
+
     def test_local_relations_sorted(self) -> None:
         # GIVEN a bundle with two local integrations
         provider = _make_charm(

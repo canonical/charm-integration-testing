@@ -61,6 +61,12 @@ from typing import Annotated, Literal, Union
 from pydantic import BaseModel, ConfigDict, Field
 
 # ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+_JUJU_CONSTRAINT_KEYS: frozenset[str] = frozenset({"cores", "mem", "root-disk"})
+
+# ---------------------------------------------------------------------------
 # Errors
 # ---------------------------------------------------------------------------
 
@@ -370,6 +376,32 @@ class UnitsExpr(BaseModel):
     arg: "AnyExpr"
 
 
+class JujuConstraintExpr(BaseModel):
+    """juju_constraint[key] — a Juju resource constraint dimension for this charm.
+
+    Returns an ``Int`` representing the constraint value for the named dimension.
+    Use with comparison operators to declare resource floors::
+
+        juju_constraint[cores] >= 2
+        juju_constraint[mem] >= 4096        # MB
+        juju_constraint[root-disk] >= 20480 # MB
+
+    On machine/VM clouds the exported value is a *minimum* (Juju finds a machine
+    meeting at least that spec).  On Kubernetes it is a *cap* (Juju limits the
+    container to at most that value).  In both cases the optimizer minimises to
+    the smallest value that satisfies all constraints, so declaring a floor also
+    produces the tightest cap for container environments.
+
+    Valid keys: ``cores``, ``mem``, ``root-disk``.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    kind: Literal["juju_constraint"] = "juju_constraint"
+    dsl_type: Literal[DSLType.INT] = DSLType.INT
+    key: str
+
+
 class ArithExpr(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -462,6 +494,7 @@ AnyExpr = Annotated[
         SetConfigExpr,
         ResourceExpr,
         SetResourceExpr,
+        JujuConstraintExpr,
         LenExpr,
         BoolFunc,
         CharmsExpr,
@@ -487,6 +520,7 @@ AnyExpr = Annotated[
 # Resolve forward references now that AnyExpr is defined
 SetConfigExpr.model_rebuild()
 SetResourceExpr.model_rebuild()
+JujuConstraintExpr.model_rebuild()
 LenExpr.model_rebuild()
 BoolFunc.model_rebuild()
 CharmsExpr.model_rebuild()
@@ -744,6 +778,14 @@ class _Parser:
                 self._expect(TokenKind.RBRACKET)
                 return ResourceExpr(key=key_token.value)
 
+            # juju_constraint[key]
+            if name == "juju_constraint":
+                self._advance()
+                self._expect(TokenKind.LBRACKET)
+                key_token = self._expect(TokenKind.IDENT)
+                self._expect(TokenKind.RBRACKET)
+                return JujuConstraintExpr(key=key_token.value)
+
             raise DSLSyntaxError(f"Unexpected identifier {name!r} at position {token.pos}")
 
         # Brace expressions: {self} or {v1, v2, ...}
@@ -893,6 +935,12 @@ def _check_types(node: AnyExpr) -> AnyExpr:  # noqa: C901 (intentionally large s
             if arg.dsl_type != DSLType.CHARM_SET:
                 raise _type_error(f"units() requires CharmSet argument, got {arg.dsl_type.value}")
             return UnitsExpr(arg=arg)
+
+        case JujuConstraintExpr(key=key):
+            valid = sorted(_JUJU_CONSTRAINT_KEYS)
+            if key not in _JUJU_CONSTRAINT_KEYS:
+                raise _type_error(f"Unknown juju_constraint key {key!r}. Valid keys: {valid}")
+            return JujuConstraintExpr(key=key)
 
         case ArithExpr(op=op, left=left, right=right):
             left = _check_types(left)

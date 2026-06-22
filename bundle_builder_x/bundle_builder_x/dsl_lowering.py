@@ -86,6 +86,7 @@ from .constraints_dsl import (
     InExpr,
     IntLit,
     IntLiteralSet,
+    JujuConstraintExpr,
     LenExpr,
     NotExpr,
     OrExpr,
@@ -771,6 +772,16 @@ def _lower(expr: AnyExpr, ctx: LoweringContext) -> _LoweredValue:  # noqa: C901
             endpoints = _lower_as_endpoints(arg, ctx)
             counts = [ctx.domain_charm.endpoints[ep].count for ep in endpoints]
             return z3.Sum(counts + [z3.IntVal(0)])
+
+        case JujuConstraintExpr(key=key):
+            if key == "cores":
+                return ctx.domain_charm.cores
+            if key == "mem":
+                return ctx.domain_charm.mem_mb
+            if key == "root-disk":
+                return ctx.domain_charm.root_disk_mb
+            # Should never reach here after _check_types validates the key.
+            raise ValueError(f"Unknown juju_constraint key: {key!r}")  # pragma: no cover
 
         case BoolFunc(arg=arg):
             endpoints = _lower_as_endpoints(arg, ctx)
