@@ -4,15 +4,13 @@
 # 16 has only the modern database endpoint; 14 also carries db/db-admin; latest/stable is the legacy charm with only db/db-admin.
 #
 # database (provides, track 16): REQUIRED - metadata.yaml leaves it non-optional and the charm's primary purpose is serving PostgreSQL clients.
-# database/db/db-admin (provides, track 14): Meaning-2 optional - src/charm.py aggregates all three client relation names in client_relations, so any one client endpoint is enough.
-# db/db-admin (provides, latest): Meaning-2 optional - legacy track still exists only to serve client relations, so at least one of them must be connected.
+# database/db/db-admin (provides, track 14): optional - src/charm.py aggregates all three client relation names in client_relations; endpoints are mutually exclusive and the solver may omit all (standalone deployment allowed).
+# db/db-admin (provides, latest): optional - legacy track exposes both client endpoints; they are mutually exclusive; standalone deployment is allowed.
 overrides:
   - criteria:
       - track: '16'
     provides:
       database:
-        limit: 1
-        optional: true
         features: [tls]
     constraints:
       # If database endpoint uses tls mode, client-certificates is required

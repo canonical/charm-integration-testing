@@ -3,7 +3,7 @@
 #
 # All published channels share the same endpoint set.
 #
-# balancer/reverseproxy/website-cache/vhost-config (requires): optional - hooks/hooks.py reads relation data opportunistically and still ends config_changed() with status_set("active", "Unit is ready").
+# balancer/reverseproxy/website-cache/vhost-config/logging (requires): optional - hooks/hooks.py reads relation data opportunistically and still ends config_changed() with status_set("active", "Unit is ready").
 # apache-website/website (provides): optional - hooks/hooks.py can configure and activate Apache from charm config alone via ApacheWebsites.from_config(...).
 # logs/local-monitors/nrpe-external-master (provides): optional - log shipping and monitoring hooks are additive integrations.
 overrides:
