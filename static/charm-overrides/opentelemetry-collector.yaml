@@ -1,29 +1,38 @@
 ---
-# All channels (2/stable through dev/edge) have consistent endpoint sets.
+# Source: https://github.com/canonical/opentelemetry-collector-operator
 #
-# opentelemetry-collector acts as a dashboard proxy: it receives dashboard
-# definitions from upstream charms via grafana-dashboards-consumer (requires),
-# then forwards them to Grafana via grafana-dashboards-provider (provides).
+# Two endpoint generations:
+#   track 2: base endpoint set (no external-config or send-otlp)
+#   dev: adds external-config (optional upstream) and send-otlp (optional upstream)
 #
-# grafana-dashboards-provider (provides, grafana_dashboard): Grafana is not
-# discoverable via the Charmhub search API for machine-platform bundles,
-# so the solver cannot fulfill this endpoint.
-#
-# grafana-dashboards-consumer (requires, grafana_dashboard): same interface,
-# same discoverability issue; the upstream dashboard source is not discoverable.
-#
-# Most other requires (cloud-config, cos-agent, metrics-endpoint, receive-ca-cert,
-# receive-server-cert, send-charm-traces, send-loki-logs, send-profiles,
-# send-remote-write, send-traces) are already optional=True in upstream metadata.
-#
-# juju-info (requires): kept non-optional. opentelemetry-collector is a subordinate
-# charm; juju-info is its principal attachment point. Without a principal in the
-# bundle the subordinate has no machine to run on and the deployment is invalid.
-# The solver will discover an appropriate principal automatically.
+# grafana-dashboards-consumer (requires): optional - _get_missing_mandatory_relations() only
+#   blocks when this IS connected but unpaired; absent relation causes no BlockedStatus.
+# grafana-dashboards-provider (provides): optional - dashboard forwarding is secondary purpose;
+#   upstream Grafana machine charm is not discoverable by the solver for machine bundles.
+# juju-info (requires): REQUIRED - subordinate principal attachment point (scope: container).
+# At-least-one outgoing: _get_missing_mandatory_relations() (line 592) sets BlockedStatus when
+#   juju-info is connected (always) without cloud-config/send-remote-write/send-loki-logs/send-otlp.
 overrides:
+  # dev/edge: adds send-otlp as an additional valid outgoing telemetry backend
+  - criteria:
+      - track: dev
+    requires:
+      grafana-dashboards-consumer:
+        optional: true
+    provides:
+      grafana-dashboards-provider:
+        optional: true
+    constraints:
+      # juju-info is always connected (required subordinate); at least one outgoing backend must follow
+      - 'bool(endpoint[cloud-config]) or bool(endpoint[send-remote-write]) or bool(endpoint[send-loki-logs])
+        or bool(endpoint[send-otlp])'
+  # track 2 fallback (stable, candidate, beta, edge): send-otlp absent on this track
   - requires:
       grafana-dashboards-consumer:
         optional: true
     provides:
       grafana-dashboards-provider:
         optional: true
+    constraints:
+      # juju-info is always connected (required subordinate); at least one outgoing backend must follow
+      - 'bool(endpoint[cloud-config]) or bool(endpoint[send-remote-write]) or bool(endpoint[send-loki-logs])'
