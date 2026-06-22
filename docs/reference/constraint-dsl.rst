@@ -475,9 +475,8 @@ The most common form uses ``{self}`` (the current application):
 
 .. code-block:: yaml
 
-   constraints: |
-     # Minimum 3 units for HA, but allow more for larger clusters.
-     len(units({self})) >= 3
+   constraints:
+     - len(units({self})) >= 3
 
 The solver minimises unit counts subject to constraints, so
 ``len(units({self})) >= 3`` produces exactly 3 units unless a higher value is
@@ -583,9 +582,8 @@ An application requires a minimum number of deployed units:
 
 .. code-block:: yaml
 
-   constraints: |
-     # OpenSearch requires at least 3 units for a healthy HA cluster.
-     len(units({self})) >= 3
+   constraints:
+     - len(units({self})) >= 3
 
 The unit count may also be constrained relative to other integer expressions:
 

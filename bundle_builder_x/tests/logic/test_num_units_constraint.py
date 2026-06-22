@@ -30,10 +30,10 @@ class TestUnitCountConstraint:
         # WHEN building a single-model bundle
         bundle = build_single_model(builder, {"opensearch": AppSpec(charm="opensearch")})
 
-        # THEN the exported application has scale >= 3
+        # THEN the exported application has exactly 3 units (the optimizer minimizes)
         app = bundle.applications.get("opensearch")
         assert app is not None
-        assert app.num_units >= 3
+        assert app.num_units == 3
 
     def test_no_unit_count_constraint_defaults_to_1(self) -> None:
         # GIVEN a charm with no unit-count constraint
