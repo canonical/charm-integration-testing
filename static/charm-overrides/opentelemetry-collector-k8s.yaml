@@ -14,7 +14,7 @@
 # Pipeline pairing: _get_missing_mandatory_relations() sets BlockedStatus if an incoming telemetry
 #   relation is connected without a matching outgoing backend. Modelled as implications.
 overrides:
-  # track 1: no CMR mesh; only receive-loki-logs as incoming; send-otlp absent
+  # track 1: no CMR mesh; metrics-endpoint and receive-loki-logs as incoming; send-otlp absent
   - criteria:
       - track: "1"
     requires:
