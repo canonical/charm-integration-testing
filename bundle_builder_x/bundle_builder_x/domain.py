@@ -19,6 +19,19 @@ from pydantic import BaseModel, ConfigDict, Field
 from .charm import Charm, CharmChannel, CharmConfigValue, CharmResourceValue, EndpointScope, EndpointType
 from .juju_version import JujuVersion
 
+# Default resource constraint values applied to every charm when no DSL constraint
+# forces a higher value.  These are intentionally small — the goal is to avoid
+# over-provisioning in test environments.  A future task will tune these per-charm
+# via override files once the right values are known.
+#   cores     — CPU cores (bare integer)
+#   mem       — RAM in MB
+#   root-disk — root disk in MB
+JUJU_CONSTRAINT_DEFAULTS: dict[str, int] = {
+    "cores": 1,
+    "mem": 1024,  # 1 GB
+    "root-disk": 8192,  # 8 GB
+}
+
 
 class ModelRef(BaseModel):
     """A lightweight reference to a Juju model, carrying both its plain name and optional controller.
@@ -157,6 +170,11 @@ class DomainCharm(BaseModel):
 
     exists: z3.BoolRef
     num_units: z3.ArithRef
+    # Juju resource constraint variables (integer; units: cores=count, mem/root-disk=MB).
+    # On machine clouds these become minimums; on Kubernetes they become caps.
+    cores: z3.ArithRef
+    mem_mb: z3.ArithRef
+    root_disk_mb: z3.ArithRef
     spec: Charm
     model: ModelRef
     endpoints: dict[str, DomainCharmEndpoint]
@@ -282,6 +300,9 @@ def add_charm_to_domain(charm: Charm, domain: Domain, model_ref: ModelRef | None
         DomainCharm(
             exists=z3.Bool(f"charm_{charm.name}_{charm_id}_exists"),
             num_units=z3.Int(f"charm_{charm.name}_{charm_id}_num_units"),
+            cores=z3.Int(f"charm_{charm.name}_{charm_id}_cores"),
+            mem_mb=z3.Int(f"charm_{charm.name}_{charm_id}_mem_mb"),
+            root_disk_mb=z3.Int(f"charm_{charm.name}_{charm_id}_root_disk_mb"),
             spec=charm,
             model=model_ref,
             config=charm_config,

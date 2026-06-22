@@ -38,6 +38,7 @@ from .assertion_tags import (
 )
 from .charm import EndpointScope
 from .domain import (
+    JUJU_CONSTRAINT_DEFAULTS,
     Domain,
     DomainApplicationIntegration,
     DomainCharm,
@@ -294,6 +295,13 @@ def add_charm_metadata_constraints(solver: z3.Solver, domain: Domain) -> None:
     # Unit count lower bound: when a charm exists it must have at least one unit.
     for charm in domain.charms:
         solver.add(z3.Implies(charm.exists, charm.num_units >= 1))
+
+    # Resource constraint lower bounds: when a charm exists each dimension is >= its default.
+    # The defaults are intentionally small; DSL constraints can only raise them higher.
+    for charm in domain.charms:
+        solver.add(z3.Implies(charm.exists, charm.cores >= JUJU_CONSTRAINT_DEFAULTS["cores"]))
+        solver.add(z3.Implies(charm.exists, charm.mem_mb >= JUJU_CONSTRAINT_DEFAULTS["mem"]))
+        solver.add(z3.Implies(charm.exists, charm.root_disk_mb >= JUJU_CONSTRAINT_DEFAULTS["root-disk"]))
 
     # Ensure non-optional endpoints have at least one integration if charm exists
     for charm_id, charm in enumerate(domain.charms):

@@ -19,7 +19,7 @@ import z3  # type: ignore[import-untyped]
 
 from .bundle import Application, ApplicationEndpoint, Bundle, CrossModelIntegration, Integration, Solution
 from .charm import EndpointType
-from .domain import Domain, ModelRef
+from .domain import JUJU_CONSTRAINT_DEFAULTS, Domain, ModelRef
 
 
 def _extract_single_model(
@@ -125,7 +125,29 @@ def _extract_single_model(
         raw_units = model.evaluate(charm.num_units, model_completion=True)
         num_units = int(raw_units.as_long()) if z3.is_int_value(raw_units) else 1
 
-        applications[app_name] = Application(charm=charm.spec, num_units=num_units, config=config, resources=resources)
+        # Extract solved resource constraint dimensions.  All three are always emitted
+        # to ensure small resource usage in test environments.  The Z3 lower bounds
+        # are the defaults from JUJU_CONSTRAINT_DEFAULTS; DSL constraints can only
+        # raise them higher.
+        raw_cores = model.evaluate(charm.cores, model_completion=True)
+        cores = int(raw_cores.as_long()) if z3.is_int_value(raw_cores) else JUJU_CONSTRAINT_DEFAULTS["cores"]
+        raw_mem = model.evaluate(charm.mem_mb, model_completion=True)
+        mem_mb = int(raw_mem.as_long()) if z3.is_int_value(raw_mem) else JUJU_CONSTRAINT_DEFAULTS["mem"]
+        raw_disk = model.evaluate(charm.root_disk_mb, model_completion=True)
+        root_disk_mb = int(raw_disk.as_long()) if z3.is_int_value(raw_disk) else JUJU_CONSTRAINT_DEFAULTS["root-disk"]
+        juju_constraints: dict[str, int] = {
+            "cores": cores,
+            "mem": mem_mb,
+            "root-disk": root_disk_mb,
+        }
+
+        applications[app_name] = Application(
+            charm=charm.spec,
+            num_units=num_units,
+            juju_constraints=juju_constraints,
+            config=config,
+            resources=resources,
+        )
 
     integrations = set()
     for integration in domain.charm_integrations:

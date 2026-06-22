@@ -495,6 +495,58 @@ required by another constraint.
       # Unit count must equal the number of active replication peers
       - len(units({self})) == len(endpoint[replication]) + 1
 
+Juju resource constraints
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+::
+
+   juju_constraint[key]  ->  Int
+
+``juju_constraint[key]`` returns the solver-assigned value for a named Juju
+resource constraint dimension.  It is an ``Int`` and participates in the same
+comparison and arithmetic operators as other integer expressions.
+
+**Valid keys:** ``cores``, ``mem``, ``root-disk``.
+
+**Units:** ``mem`` and ``root-disk`` values are in **megabytes** (MB).
+The exported bundle uses Juju's native ``M`` suffix (e.g. ``mem=4096M``).
+
+.. code-block:: yaml
+
+   constraints:
+     - juju_constraint[cores] >= 2
+     - juju_constraint[mem] >= 4096        # at least 4 GB RAM
+     - juju_constraint[root-disk] >= 20480 # at least 20 GB disk
+
+The solver minimises total resource consumption, so a ``>= N`` constraint
+produces exactly ``N`` unless a higher value is forced by another constraint.
+Only dimensions whose solved value exceeds the default lower bound (1) are
+included in the exported ``constraints:`` string.
+
+**Machine vs Kubernetes semantics**
+
+On machine and VM clouds the exported value is a *minimum* — Juju finds a
+machine meeting at least that specification.  On Kubernetes the exported value
+is a *cap* — Juju limits the container to at most that value.  In both cases
+the optimizer produces the tightest-fitting value, which is the right behaviour
+for resource-efficient testing:
+
+- **Machine:** a floor just large enough to run the charm.
+- **Kubernetes:** a cap equal to the minimum the charm needs.
+
+For the rare charm whose resource profile differs substantially between
+platforms, use the DSL implication operator (planned future feature)::
+
+   platform == "machine" => juju_constraint[cores] >= 2
+
+This is currently out of scope; a single constraint applies to all platforms.
+
+.. note::
+
+   To add support for a new dimension (e.g. ``virt-mem``) in the future,
+   update ``JUJU_CONSTRAINT_KEYS`` in ``domain.py`` and ``_JUJU_CONSTRAINT_KEYS``
+   in ``constraints_dsl.py`` — no parser changes are needed.
+
 Logical
 ~~~~~~~
 
@@ -591,6 +643,29 @@ The unit count may also be constrained relative to other integer expressions:
 
    # Each replication peer must be matched by a local unit (plus one coordinator)
    - len(units({self})) == len(endpoint[replication]) + 1
+
+Resource constraints
+~~~~~~~~~~~~~~~~~~~~
+
+Declare the minimum hardware resources a charm needs.  The solver minimises
+resource consumption, so ``>= N`` produces exactly ``N`` in the bundle:
+
+.. code-block:: yaml
+
+   constraints:
+     - juju_constraint[cores] >= 2
+     - juju_constraint[mem] >= 4096        # 4 GB RAM (MB)
+     - juju_constraint[root-disk] >= 20480 # 20 GB disk (MB)
+
+For lightweight charms (e.g. ``self-signed-certificates``) a tight constraint
+prevents over-provisioning on machine clouds and sets a sensible cap on K8s:
+
+.. code-block:: yaml
+
+   constraints:
+     - juju_constraint[cores] >= 1
+     - juju_constraint[mem] >= 512
+     - juju_constraint[root-disk] >= 8192
 
 Capability requirements (constraint type 5)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

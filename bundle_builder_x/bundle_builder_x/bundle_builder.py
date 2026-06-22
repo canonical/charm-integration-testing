@@ -530,8 +530,8 @@ class BundleBuilder:
         return True
 
     @staticmethod
-    def _build_cost_exprs(domain: Domain) -> tuple[z3.ExprRef, z3.ExprRef, z3.ExprRef]:
-        """Build cost z3 expressions for a domain: charm cost, integration count, total num_units."""
+    def _build_cost_exprs(domain: Domain) -> tuple[z3.ExprRef, z3.ExprRef, z3.ExprRef, z3.ExprRef]:
+        """Build cost z3 expressions: charm cost, integration count, total num_units, total resources."""
         charm_cost_expr = z3.Sum(
             [
                 z3.If(
@@ -552,7 +552,20 @@ class BundleBuilder:
         num_units_cost_expr = z3.Sum(
             [z3.If(charm.exists, charm.num_units, z3.IntVal(0)) for charm in domain.charms] + [z3.IntVal(0)]
         )
-        return charm_cost_expr, integration_cost_expr, num_units_cost_expr
+        # Weighted sum of resource dimensions for existing charms.  cores is scaled by
+        # 1024 to be commensurate with mem_mb and root_disk_mb (both in MB).
+        resource_cost_expr = z3.Sum(
+            [
+                z3.If(
+                    charm.exists,
+                    charm.cores * z3.IntVal(1024) + charm.mem_mb + charm.root_disk_mb,
+                    z3.IntVal(0),
+                )
+                for charm in domain.charms
+            ]
+            + [z3.IntVal(0)]
+        )
+        return charm_cost_expr, integration_cost_expr, num_units_cost_expr, resource_cost_expr
 
     def _optimize_solution(
         self,
@@ -562,17 +575,29 @@ class BundleBuilder:
     ) -> z3.ModelRef:
         """Find the minimum cost model; tries z3.Optimize, falls back to iterative descent."""
         timeout_ms = int(self.optimize_timeout.total_seconds() * 1000)
-        charm_cost_expr, integration_cost_expr, num_units_cost_expr = self._build_cost_exprs(domain)
+        charm_cost_expr, integration_cost_expr, num_units_cost_expr, resource_cost_expr = self._build_cost_exprs(domain)
 
         model = self._try_z3_optimize(
-            domain, charm_cost_expr, integration_cost_expr, num_units_cost_expr, timeout_ms, extra_constraints
+            domain,
+            charm_cost_expr,
+            integration_cost_expr,
+            num_units_cost_expr,
+            resource_cost_expr,
+            timeout_ms,
+            extra_constraints,
         )
         if model is not None:
             return model
 
         self.logger.warning("z3.Optimize timed out; falling back to iterative descent")
         return self._iterative_descent(
-            domain, charm_cost_expr, integration_cost_expr, num_units_cost_expr, initial_model, extra_constraints
+            domain,
+            charm_cost_expr,
+            integration_cost_expr,
+            num_units_cost_expr,
+            resource_cost_expr,
+            initial_model,
+            extra_constraints,
         )
 
     def _try_z3_optimize(
@@ -581,6 +606,7 @@ class BundleBuilder:
         charm_cost_expr: z3.ExprRef,
         integration_cost_expr: z3.ExprRef,
         num_units_cost_expr: z3.ExprRef,
+        resource_cost_expr: z3.ExprRef,
         timeout_ms: int,
         extra_constraints: list[z3.BoolRef] | None,
     ) -> z3.ModelRef | None:
@@ -593,6 +619,7 @@ class BundleBuilder:
         opt.minimize(charm_cost_expr)
         opt.minimize(integration_cost_expr)
         opt.minimize(num_units_cost_expr)
+        opt.minimize(resource_cost_expr)
         result = opt.check()
         if result == z3.sat:
             self.logger.info("z3.Optimize found optimal solution")
@@ -607,10 +634,11 @@ class BundleBuilder:
         charm_cost_expr: z3.ExprRef,
         integration_cost_expr: z3.ExprRef,
         num_units_cost_expr: z3.ExprRef,
+        resource_cost_expr: z3.ExprRef,
         initial_model: z3.ModelRef | None,
         extra_constraints: list[z3.BoolRef] | None,
     ) -> z3.ModelRef:
-        """Minimize cost via three-phase SAT descent (charm cost, integration count, unit count).
+        """Minimize cost via four-phase SAT descent (charm cost, integration count, unit count, resources).
 
         Each step gets the full optimize_timeout because each check is independently
         hard; a tight per-step budget would cause premature timeouts before the solver
@@ -635,6 +663,15 @@ class BundleBuilder:
         def eval_units_cost(m: z3.ModelRef) -> int:
             return sum(
                 m.eval(c.num_units, model_completion=True).as_long()
+                for c in domain.charms
+                if z3.is_true(m.eval(c.exists, model_completion=True))
+            )
+
+        def eval_resource_cost(m: z3.ModelRef) -> int:
+            return sum(
+                m.eval(c.cores, model_completion=True).as_long() * 1024
+                + m.eval(c.mem_mb, model_completion=True).as_long()
+                + m.eval(c.root_disk_mb, model_completion=True).as_long()
                 for c in domain.charms
                 if z3.is_true(m.eval(c.exists, model_completion=True))
             )
@@ -727,6 +764,33 @@ class BundleBuilder:
             else:
                 solver.pop()
                 self.logger.warning("Optimizer timed out during unit count minimization; integration count is optimal")
+                break
+
+        # Phase 4: fix charm, integration, and unit costs, minimize total resource consumption.
+        final_units_cost = eval_units_cost(model)
+        iterations = 0
+        while True:
+            current_resource_cost = eval_resource_cost(model)
+            solver.push()
+            solver.add(charm_cost_expr == z3.IntVal(final_charm_cost))
+            solver.add(integration_cost_expr == z3.IntVal(final_int_cost))
+            solver.add(num_units_cost_expr == z3.IntVal(final_units_cost))
+            solver.add(resource_cost_expr < z3.IntVal(current_resource_cost))
+            result = solver.check()
+            if result == z3.sat:
+                model = solver.model()
+                solver.pop()
+                iterations += 1
+                self.logger.debug(
+                    f"Optimize step {iterations}: resource cost {current_resource_cost} -> {eval_resource_cost(model)}"
+                )
+            elif result == z3.unsat:
+                solver.pop()
+                self.logger.info(f"Optimal resource cost found: {current_resource_cost} ({iterations} descent step(s))")
+                break
+            else:
+                solver.pop()
+                self.logger.warning("Optimizer timed out during resource cost minimization; unit count is optimal")
                 break
 
         return model

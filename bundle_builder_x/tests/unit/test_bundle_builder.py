@@ -410,7 +410,9 @@ class TestIterativeDescent:
         # GIVEN a domain where charm B has higher priority
         domain, id_a, id_b = _domain_with_two_alternatives(priority_a=1.0, priority_b=2.0)
         builder = BundleBuilder(charmhub_client=_FakeCharmhubClient())
-        charm_cost_expr, integration_cost_expr, num_units_cost_expr = BundleBuilder._build_cost_exprs(domain)
+        charm_cost_expr, integration_cost_expr, num_units_cost_expr, resource_cost_expr = (
+            BundleBuilder._build_cost_exprs(domain)
+        )
 
         # WHEN _iterative_descent runs directly (bypassing z3.Optimize)
         model = builder._iterative_descent(
@@ -418,6 +420,7 @@ class TestIterativeDescent:
             charm_cost_expr,
             integration_cost_expr,
             num_units_cost_expr,
+            resource_cost_expr,
             initial_model=None,
             extra_constraints=None,
         )
@@ -430,7 +433,9 @@ class TestIterativeDescent:
         # GIVEN a domain and an initial SAT model already pinning charm A
         domain, id_a, id_b = _domain_with_two_alternatives(priority_a=1.0, priority_b=2.0)
         builder = BundleBuilder(charmhub_client=_FakeCharmhubClient())
-        charm_cost_expr, integration_cost_expr, num_units_cost_expr = BundleBuilder._build_cost_exprs(domain)
+        charm_cost_expr, integration_cost_expr, num_units_cost_expr, resource_cost_expr = (
+            BundleBuilder._build_cost_exprs(domain)
+        )
 
         # Obtain an initial model from a plain solver
         solver = z3.Solver()
@@ -444,6 +449,7 @@ class TestIterativeDescent:
             charm_cost_expr,
             integration_cost_expr,
             num_units_cost_expr,
+            resource_cost_expr,
             initial_model=initial,
             extra_constraints=None,
         )

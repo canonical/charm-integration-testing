@@ -34,6 +34,7 @@ from bundle_builder_x.constraints_dsl import (
     InExpr,
     IntLit,
     IntLiteralSet,
+    JujuConstraintExpr,
     LenExpr,
     NotExpr,
     OrExpr,
@@ -785,3 +786,74 @@ class TestUnitsExpr:
 
         # THEN no exception and result is a boolean comparison
         assert result.dsl_type == DSLType.BOOL
+
+
+# ---------------------------------------------------------------------------
+# JujuConstraintExpr
+# ---------------------------------------------------------------------------
+
+
+class TestJujuConstraintExpr:
+    """Tests for juju_constraint[key] DSL expressions."""
+
+    def test_cores_parses(self) -> None:
+        # GIVEN juju_constraint[cores]
+        # WHEN parsed
+        result = parse_constraint("juju_constraint[cores] >= 2")
+
+        # THEN it produces a CompareExpr wrapping a JujuConstraintExpr
+        assert result == CompareExpr(
+            op=">=",
+            left=JujuConstraintExpr(key="cores"),
+            right=IntLit(value=2),
+        )
+        assert result.dsl_type == DSLType.BOOL
+
+    def test_mem_parses(self) -> None:
+        # GIVEN juju_constraint[mem] (mem in MB)
+        result = parse_constraint("juju_constraint[mem] >= 4096")
+
+        assert result == CompareExpr(
+            op=">=",
+            left=JujuConstraintExpr(key="mem"),
+            right=IntLit(value=4096),
+        )
+
+    def test_root_disk_parses(self) -> None:
+        # GIVEN juju_constraint[root-disk] (hyphen in key)
+        result = parse_constraint("juju_constraint[root-disk] >= 20480")
+
+        assert result == CompareExpr(
+            op=">=",
+            left=JujuConstraintExpr(key="root-disk"),
+            right=IntLit(value=20480),
+        )
+
+    def test_juju_constraint_expr_has_int_type(self) -> None:
+        result = parse_constraint("juju_constraint[cores]")
+
+        assert result == JujuConstraintExpr(key="cores")
+        assert result.dsl_type == DSLType.INT
+
+    def test_unknown_key_raises_type_error(self) -> None:
+        # GIVEN an invalid key
+        # WHEN parsed and type-checked
+        # THEN a DSLTypeError is raised naming the invalid key
+        with pytest.raises(DSLTypeError, match="virt-mem"):
+            parse_constraint("juju_constraint[virt-mem] >= 1")
+
+    def test_juju_constraint_arithmetic(self) -> None:
+        # GIVEN juju_constraint[cores] used in an arithmetic expression
+        result = parse_constraint("juju_constraint[cores] + juju_constraint[mem] >= 100")
+
+        assert result.dsl_type == DSLType.BOOL
+
+    def test_real_self_signed_certificates_constraint(self) -> None:
+        # GIVEN realistic tight-resource constraints for self-signed-certificates
+        for expr in [
+            "juju_constraint[cores] >= 1",
+            "juju_constraint[mem] >= 512",
+            "juju_constraint[root-disk] >= 8192",
+        ]:
+            result = parse_constraint(expr)
+            assert result.dsl_type == DSLType.BOOL
