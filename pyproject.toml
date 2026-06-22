@@ -44,7 +44,6 @@ extend-select = ["I"]
 
 [tool.pytest.ini_options]
 timeout = 14400
-addopts = "--import-mode=importlib"
 
 log_cli = true
 log_cli_level = "INFO"
