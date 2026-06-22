@@ -2,7 +2,7 @@
 # Source: https://github.com/canonical/opentelemetry-collector-k8s-operator
 #
 # Three endpoint generations:
-#   track 1: only receive-loki-logs (provides); no CMR mesh, no receive-traces, no send-otlp
+#   track 1: metrics-endpoint + receive-loki-logs (provides); no CMR mesh, no receive-traces, no send-otlp
 #   track 2: adds receive-traces/receive-profiles (provides); CMR mesh (requires/provides); no send-otlp
 #   dev: adds external-config/ingress/istio-ingress/send-otlp (requires); receive-otlp (provides)
 #
