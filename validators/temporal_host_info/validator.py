@@ -15,19 +15,19 @@ from validators.base import (
 
 _REQUIRED_FIELDS = ["host", "port"]
 _PROBE_TIMEOUT_SECS = 10
+_PORT_MIN = 1
+_PORT_MAX = 65535
 
 
 class TemporalHostInfoValidator(BaseValidator):
     def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
         if self.role != "requires":
             return self._skipped_result_due_to_role(level, self.role)
-        if level in ("deep", "uat"):
+        if level != "simple":
             return self._skipped_result_due_to_level(level)
         if not self.relation_exists():
             return self._error_result(level, f"No remote application on relation '{self.endpoint}'.")
-        if level == "simple":
-            return self._validate_simple()
-        return self._skipped_result_due_to_level(level)
+        return self._validate_simple()
 
     def _validate_simple(self) -> ValidationResult:
         """L1: Schema, port format, and Temporal GetSystemInfo RPC."""
@@ -53,8 +53,8 @@ class TemporalHostInfoValidator(BaseValidator):
         """Verify the port field is a valid positive integer."""
         try:
             port = int(port_value)
-            if port <= 0 or port > 65535:
-                raise ValueError(f"Port {port} out of valid range 1-65535.")
+            if port < _PORT_MIN or port > _PORT_MAX:
+                raise ValueError(f"Port {port} out of valid range {_PORT_MIN}-{_PORT_MAX}.")
             return ValidationCheck(name="port_format", passed=True, message=f"Port {port} is valid.")
         except ValueError as exc:
             return ValidationCheck(name="port_format", passed=False, message=str(exc))
