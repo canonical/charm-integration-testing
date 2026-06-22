@@ -1,0 +1,18 @@
+---
+# Source: https://github.com/charmed-kubernetes/charm-keepalived
+#
+# All published tracks share the same subordinate endpoint set.
+#
+# juju-info (requires): REQUIRED - src/metadata.yaml marks it scope: container on a subordinate charm.
+# lb-sink (requires): optional - src/reactive/keepalived.py never references lb-sink.
+# loadbalancer (provides): optional - only configured under @when("loadbalancer.available", "keepalived.started").
+# website (provides): optional - only configured under @when("website.available", "keepalived.started").
+overrides:
+  - provides:
+      loadbalancer:
+        optional: true
+      website:
+        optional: true
+    requires:
+      lb-sink:
+        optional: true
