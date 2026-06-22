@@ -511,7 +511,7 @@ ImpliesExpr.model_rebuild()
 # Parser
 # ---------------------------------------------------------------------------
 
-_SET_TYPES = {DSLType.RELATION_SET, DSLType.CHARM_SET, DSLType.UNIT_SET, DSLType.SET_STR, DSLType.SET_INT}
+_SET_TYPES = {DSLType.RELATION_SET, DSLType.CHARM_SET, DSLType.SET_STR, DSLType.SET_INT}
 
 
 class _Parser:
@@ -711,8 +711,14 @@ class _Parser:
                         return ChannelsExpr(arg=arg)
                     case "revisions":
                         return RevisionsExpr(arg=arg)
+                    case "units":
+                        return UnitsExpr(arg=arg)
                     case _:
-                        return UnitsExpr(arg=arg)  # "units"
+                        # "set" reached here means set(non-config/non-resource) which is not supported.
+                        raise DSLSyntaxError(
+                            f"Unsupported use of '{name}(...)' at position {token.pos}; "
+                            "set() only accepts config[key] or resource[key] arguments"
+                        )
 
             # endpoint[name]
             if name == "endpoint":
@@ -920,6 +926,10 @@ def _check_types(node: AnyExpr) -> AnyExpr:  # noqa: C901 (intentionally large s
                 # == and != require matching types (UNRESOLVED config is allowed to match any)
                 if lt != rt and lt != DSLType.RUNTIME and rt != DSLType.RUNTIME:
                     raise _type_error(f"Operator '{op}' requires matching types, got {lt.value} and {rt.value}")
+                if lt == DSLType.UNIT_SET or rt == DSLType.UNIT_SET:
+                    raise _type_error(
+                        f"UnitSet cannot be used in '{op}' comparisons; use len(units(...)) to compare unit counts"
+                    )
             return CompareExpr(op=op, left=left, right=right)
 
         case SetOpExpr(op=op, left=left, right=right):

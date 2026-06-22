@@ -757,7 +757,11 @@ def _lower(expr: AnyExpr, ctx: LoweringContext) -> _LoweredValue:  # noqa: C901
             charm_set_z3 = _lower(inner, ctx)
             return z3.Sum(
                 [
-                    z3.If(z3.IsMember(z3.IntVal(i), charm_set_z3), charm.num_units, z3.IntVal(0))
+                    z3.If(
+                        z3.And(charm.exists, z3.IsMember(z3.IntVal(i), charm_set_z3)),
+                        charm.num_units,
+                        z3.IntVal(0),
+                    )
                     for i, charm in enumerate(ctx.domain.charms)
                 ]
                 + [z3.IntVal(0)]
