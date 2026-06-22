@@ -11,7 +11,6 @@ from validators.base import (
     ValidationCheck,
     ValidationLevel,
     ValidationResult,
-    ValidationResultStatus,
 )
 
 _REQUIRED_FIELDS = ["host", "port"]
@@ -37,18 +36,18 @@ class TemporalHostInfoValidator(BaseValidator):
         schema_check = self.validate_schema(_REQUIRED_FIELDS)
         checks.append(schema_check)
         if not schema_check.passed:
-            return self._build_result("simple", checks)
+            return self._make_result(level="simple", checks=checks)
 
         port_check = self._check_port_is_integer(self.databag["port"])
         checks.append(port_check)
         if not port_check.passed:
-            return self._build_result("simple", checks)
+            return self._make_result(level="simple", checks=checks)
 
         host = self.databag["host"]
         port = int(self.databag["port"])
         checks.append(self._check_get_system_info(host, port))
 
-        return self._build_result("simple", checks)
+        return self._make_result(level="simple", checks=checks)
 
     def _check_port_is_integer(self, port_value: str) -> ValidationCheck:
         """Verify the port field is a valid positive integer."""
@@ -96,7 +95,3 @@ class TemporalHostInfoValidator(BaseValidator):
             await client.service_client.workflow_service.get_system_info(GetSystemInfoRequest())
         finally:
             del client  # release gRPC channel; SDK has no explicit close()
-
-    def _build_result(self, level: ValidationLevel, checks: list[ValidationCheck]) -> ValidationResult:
-        status: ValidationResultStatus = "PASS" if all(c.passed for c in checks) else "FAIL"
-        return self._make_result(status=status, level=level, checks=checks)
