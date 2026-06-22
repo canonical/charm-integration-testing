@@ -1119,6 +1119,21 @@ files = [
 ]
 
 [[package]]
+name = "nexus-rpc"
+version = "1.4.0"
+description = "Nexus Python SDK"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = [
+    {file = "nexus_rpc-1.4.0-py3-none-any.whl", hash = "sha256:14c953d3519113f8ccec533a9efdb6b10c28afef75d11cdd6d422640c40b3a49"},
+    {file = "nexus_rpc-1.4.0.tar.gz", hash = "sha256:3b8b373d4865671789cc43623e3dc0bcbf192562e40e13727e17f1c149050fba"},
+]
+
+[package.dependencies]
+typing-extensions = ">=4.12.2"
+
+[[package]]
 name = "oauthlib"
 version = "3.3.1"
 description = "A generic, spec-compliant, thorough implementation of the OAuth request-signing logic"
@@ -2066,6 +2081,41 @@ files = [
 ]
 
 [[package]]
+name = "temporalio"
+version = "1.28.0"
+description = "Temporal.io Python SDK"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = [
+    {file = "temporalio-1.28.0-cp310-abi3-macosx_10_12_x86_64.whl", hash = "sha256:544e48028d83ffda51d6e0cdb1bf27babc868b3f63adb0e1613efcbbaab197a3"},
+    {file = "temporalio-1.28.0-cp310-abi3-macosx_11_0_arm64.whl", hash = "sha256:737f3d9c470514ed0e4922ebe00ef4a186c82343e195d26b9c485e0bfcc4f14d"},
+    {file = "temporalio-1.28.0-cp310-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:1b8ecc38c2cdae5efe8b127b1cbe726e9c92b10bc506753f1074957984fc6d7d"},
+    {file = "temporalio-1.28.0-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:17a9993342d4ba4ae0c4b37a95e8f2aa488379d0917a637d8fdd5f4332aad3e2"},
+    {file = "temporalio-1.28.0-cp310-abi3-win_amd64.whl", hash = "sha256:41381cbd68d1206c55750147118de3962bcc79229a61035296f3c0af44a3d006"},
+    {file = "temporalio-1.28.0.tar.gz", hash = "sha256:eb390ee968204a9f8fda91544d6f03497a7614acbfcc9862b5bd08a2d26edb04"},
+]
+
+[package.dependencies]
+nexus-rpc = "1.4.0"
+protobuf = ">=3.20,<7.0.0"
+python-dateutil = {version = ">=2.8.2,<3", markers = "python_full_version < \"3.11.0\""}
+types-protobuf = ">=3.20,<7.0.0"
+typing-extensions = ">=4.2.0,<5"
+
+[package.extras]
+aioboto3 = ["aioboto3 (>=10.4.0)", "types-aioboto3[s3] (>=10.4.0)"]
+google-adk = ["google-adk (>=1.27.0,<2)"]
+grpc = ["grpcio (>=1.48.2,<2)"]
+lambda-worker-otel = ["opentelemetry-api (>=1.11.1,<2)", "opentelemetry-exporter-otlp-proto-grpc (>=1.11.1,<2)", "opentelemetry-sdk (>=1.11.1,<2)", "opentelemetry-sdk-extension-aws (>=2.0.0,<3)", "opentelemetry-semantic-conventions (>=0.40b0,<1)"]
+langgraph = ["langgraph (>=1.1.0)"]
+langsmith = ["langsmith (>=0.7.34,<0.9)"]
+openai-agents = ["mcp (>=1.9.4,<2)", "openai-agents (>=0.17.1)"]
+opentelemetry = ["opentelemetry-api (>=1.11.1,<2)", "opentelemetry-sdk (>=1.11.1,<2)"]
+pydantic = ["pydantic (>=2.0.0,<3)"]
+strands-agents = ["strands-agents (>=1.39.0)"]
+
+[[package]]
 name = "tenacity"
 version = "9.1.4"
 description = "Retry code until it succeeds"
@@ -2156,6 +2206,18 @@ annotated-doc = ">=0.0.2"
 colorama = {version = "*", markers = "platform_system == \"Windows\""}
 rich = ">=13.8.0"
 shellingham = ">=1.3.0"
+
+[[package]]
+name = "types-protobuf"
+version = "6.32.1.20260221"
+description = "Typing stubs for protobuf"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = [
+    {file = "types_protobuf-6.32.1.20260221-py3-none-any.whl", hash = "sha256:da7cdd947975964a93c30bfbcc2c6841ee646b318d3816b033adc2c4eb6448e4"},
+    {file = "types_protobuf-6.32.1.20260221.tar.gz", hash = "sha256:6d5fb060a616bfb076cbb61b4b3c3969f5fc8bec5810f9a2f7e648ee5cbcbf6e"},
+]
 
 [[package]]
 name = "types-psycopg2"
@@ -2258,6 +2320,24 @@ pydantic = ">=2.0.0"
 [package.source]
 type = "directory"
 url = "validators/base"
+
+[[package]]
+name = "validators-config-server"
+version = "0.1.0"
+description = "Validator for config-server interface (MongoDB sharding)"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+pymongo = ">=4.0.0"
+validators-base = "*"
+
+[package.source]
+type = "directory"
+url = "validators/config_server"
 
 [[package]]
 name = "validators-loki-push-api"
@@ -2369,11 +2449,13 @@ develop = true
 ops = ">=3.3.0,<4.0.0"
 pydantic = ">=2.0.0"
 validators-base = "*"
+validators-config-server = "*"
 validators-loki-push-api = "*"
 validators-object-storage = "*"
 validators-postgresql-client = "*"
 validators-prometheus-scrape = "*"
 validators-s3 = "*"
+validators-temporal-host-info = "*"
 validators-tracing = {version = "*", extras = ["deep"]}
 
 [package.source]
@@ -2400,6 +2482,24 @@ dev = ["validators-test-utils"]
 [package.source]
 type = "directory"
 url = "validators/s3"
+
+[[package]]
+name = "validators-temporal-host-info"
+version = "0.1.0"
+description = "Validator for temporal-host-info interface"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+temporalio = ">=1.0.0,<2.0.0"
+validators-base = "*"
+
+[package.source]
+type = "directory"
+url = "validators/temporal_host_info"
 
 [[package]]
 name = "validators-test-utils"
@@ -2514,4 +2614,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<4.0"
-content-hash = "8eea937eafc02d70ec571b531550b2245d10752b5609c497203be572e85d5af1"
+content-hash = "a17680681d2783150f859a31d6c0b60265a61e56760531cef35f8892a1674ba3"

@@ -24,7 +24,6 @@ from validators.base import (
     ValidationCheck,
     ValidationLevel,
     ValidationResult,
-    ValidationResultStatus,
 )
 
 
@@ -55,7 +54,7 @@ class PostgreSQLClientValidator(BaseValidator):
         schema_check = self.validate_schema(["uris", "database", "username", "password"], creds)
         checks.append(schema_check)
         if not schema_check.passed:
-            return self._build_result("simple", checks)
+            return self._make_result(level="simple", checks=checks)
 
         # --- 4. Database consistency check ---
         data = self.databag | creds
@@ -63,7 +62,7 @@ class PostgreSQLClientValidator(BaseValidator):
         db_check = self._check_database_consistency(uri, data["database"])
         checks.append(db_check)
         if not db_check.passed:
-            return self._build_result("simple", checks)
+            return self._make_result(level="simple", checks=checks)
 
         # --- 5. Connect ---
         try:
@@ -72,7 +71,7 @@ class PostgreSQLClientValidator(BaseValidator):
             checks.append(ValidationCheck(name="connect", passed=True, message=f"Connected to {safe_target}."))
         except Exception as exc:
             checks.append(ValidationCheck(name="connect", passed=False, message=str(exc)))
-            return self._build_result("simple", checks)
+            return self._make_result(level="simple", checks=checks)
 
         # --- 6. Canary read-only query ---
         try:
@@ -93,7 +92,7 @@ class PostgreSQLClientValidator(BaseValidator):
         finally:
             conn.close()
 
-        return self._build_result("simple", checks)
+        return self._make_result(level="simple", checks=checks)
 
     def _validate_deep(self) -> ValidationResult:
         """L2: Read/Write capability with canary table (create, write, read-verify, cleanup)."""
@@ -113,7 +112,7 @@ class PostgreSQLClientValidator(BaseValidator):
         schema_check = self.validate_schema(["uris", "database", "username", "password"], creds)
         checks.append(schema_check)
         if not schema_check.passed:
-            return self._build_result("deep", checks)
+            return self._make_result(level="deep", checks=checks)
 
         # --- 4. Database consistency check ---
         data = self.databag | creds
@@ -121,7 +120,7 @@ class PostgreSQLClientValidator(BaseValidator):
         db_check = self._check_database_consistency(uri, data["database"])
         checks.append(db_check)
         if not db_check.passed:
-            return self._build_result("deep", checks)
+            return self._make_result(level="deep", checks=checks)
 
         # --- 5. Connect ---
         try:
@@ -131,7 +130,7 @@ class PostgreSQLClientValidator(BaseValidator):
             checks.append(ValidationCheck(name="connect", passed=True, message=f"Connected to {safe_target}."))
         except Exception as exc:
             checks.append(ValidationCheck(name="connect", passed=False, message=str(exc)))
-            return self._build_result("deep", checks)
+            return self._make_result(level="deep", checks=checks)
 
         # --- 6. Canary read-only query ---
         try:
@@ -141,7 +140,7 @@ class PostgreSQLClientValidator(BaseValidator):
         except Exception as exc:
             checks.append(ValidationCheck(name="query", passed=False, message=str(exc)))
             conn.close()
-            return self._build_result("deep", checks)
+            return self._make_result(level="deep", checks=checks)
 
         # --- 7. Optional extensions check ---
         try:
@@ -151,11 +150,11 @@ class PostgreSQLClientValidator(BaseValidator):
                     checks.append(ext_check)
                     if not ext_check.passed:
                         conn.close()
-                        return self._build_result("deep", checks)
+                        return self._make_result(level="deep", checks=checks)
         except Exception as exc:
             checks.append(ValidationCheck(name="extensions", passed=False, message=str(exc)))
             conn.close()
-            return self._build_result("deep", checks)
+            return self._make_result(level="deep", checks=checks)
 
         # --- 8. Create canary table, write, read-verify, cleanup ---
         canary_table = f"__canary_{uuid.uuid4().hex[:8]}"
@@ -240,7 +239,7 @@ class PostgreSQLClientValidator(BaseValidator):
                 )
             )
 
-        return self._build_result("deep", checks)
+        return self._make_result(level="deep", checks=checks)
 
     def _check_database_consistency(self, uri: str, expected_db: str) -> ValidationCheck:
         """Verify the database in the URI matches the `database` field in the databag."""
@@ -299,15 +298,6 @@ class PostgreSQLClientValidator(BaseValidator):
     def _connect(self, uri: str) -> "psycopg2.extensions.connection":
         """Open a psycopg2 connection using a PostgreSQL URI."""
         return psycopg2.connect(dsn=uri, connect_timeout=5)
-
-    def _build_result(self, level: ValidationLevel, checks: list[ValidationCheck]) -> ValidationResult:
-        """Build a ValidationResult from a checks list."""
-        status: ValidationResultStatus = "PASS" if all(c.passed for c in checks) else "FAIL"
-        return self._make_result(
-            status=status,
-            level=level,
-            checks=checks,
-        )
 
     def _safe_uri_string(self, uri: str) -> str:
         parsed = urllib.parse.urlsplit(uri)

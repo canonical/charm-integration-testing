@@ -20,6 +20,8 @@ dependencies = [
     "validators-loki-push-api",
     "validators-object-storage",
     "validators-prometheus-scrape",
+    "validators-temporal-host-info",
+    "validators-config-server",
 ]
 
 [build-system]
