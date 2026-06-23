@@ -2360,6 +2360,23 @@ type = "directory"
 url = "validators/config_server"
 
 [[package]]
+name = "validators-cve-catalog"
+version = "0.1.0"
+description = "Validator for cve-catalog interface"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+validators-base = "*"
+
+[package.source]
+type = "directory"
+url = "validators/cve_catalog"
+
+[[package]]
 name = "validators-kafka-client"
 version = "0.1.0"
 description = "Validator for kafka_client interface"
@@ -2488,6 +2505,7 @@ ops = ">=3.3.0,<4.0.0"
 pydantic = ">=2.0.0"
 validators-base = "*"
 validators-config-server = "*"
+validators-cve-catalog = "*"
 validators-kafka-client = "*"
 validators-loki-push-api = "*"
 validators-object-storage = "*"
@@ -2653,4 +2671,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<4.0"
-content-hash = "edf3e6f0c4a958149db9888404df3bb91ca2e513116dfa641d0c5bcb9b7a188e"
+content-hash = "04daa51032d643a108c19357c1f63f4e14d49a9a543fd8b816eda547cddbaac1"
