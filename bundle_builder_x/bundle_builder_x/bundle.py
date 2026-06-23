@@ -46,6 +46,7 @@ def _mermaid_node_id(model_id: str, application: str) -> str:
 
 class Application(BaseModel):
     charm: Charm
+    num_units: int = 1
     config: dict[str, CharmConfigValue] = Field(default_factory=dict)
     resources: dict[str, str] = Field(default_factory=dict)
 
@@ -140,7 +141,7 @@ class Bundle(BaseModel):
                 "options": {key: value for key, value in info.config.items() if value is not None},
             }
             if not info.charm.subordinate:
-                app_dict[scale_key] = 1
+                app_dict[scale_key] = info.num_units
             if len(info.resources) > 0:
                 app_dict["resources"] = info.resources
             applications_dict[application] = app_dict
