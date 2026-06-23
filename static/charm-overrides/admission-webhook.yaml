@@ -1,0 +1,26 @@
+---
+# Source: https://github.com/canonical/admission-webhook-operator
+#
+# Only 2.0/edge adds the service-mesh cross-model endpoints; older tracks just expose pod-defaults.
+#
+# pod-defaults (provides): optional - consumers (notebook operators etc.) are not on Charmhub; charm is active without connected consumers.
+# service-mesh (requires): optional - src/charm.py only instantiates the workload and LogForwarder; no handler blocks on this relation.
+# require-cmr-mesh (requires): optional - endpoint is declared in metadata but unused in src/charm.py.
+# provide-cmr-mesh (provides): optional - endpoint is declared in metadata but unused in src/charm.py.
+overrides:
+  - criteria:
+      - track: '2.0'
+      - risk: edge
+    provides:
+      pod-defaults:
+        optional: true
+      provide-cmr-mesh:
+        optional: true
+    requires:
+      require-cmr-mesh:
+        optional: true
+      service-mesh:
+        optional: true
+  - provides:
+      pod-defaults:
+        optional: true

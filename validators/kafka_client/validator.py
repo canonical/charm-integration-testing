@@ -1,17 +1,5 @@
-# Copyright (C) 2026 Canonical Ltd
-
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
 
 import os
 import tempfile
@@ -28,7 +16,6 @@ from validators.base import (
     ValidationCheck,
     ValidationLevel,
     ValidationResult,
-    ValidationResultStatus,
 )
 
 _CLIENT_TIMEOUT_MS = 5000
@@ -46,12 +33,11 @@ class KafkaClientValidator(BaseValidator):
     def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
         if self.role != "requires":
             return self._skipped_result_due_to_role(level, self.role)
-        if level == "simple":
-            return self._validate_simple()
-        elif level == "deep":
-            return self._validate_deep()
-        else:
+        if level not in ("simple", "deep"):
             return self._skipped_result_due_to_level(level)
+        if level == "deep":
+            return self._validate_deep()
+        return self._validate_simple()
 
     def _validate_simple(self) -> ValidationResult:
         """L1: Schema validation + Kafka consumer connectivity (list_topics)."""
@@ -72,7 +58,7 @@ class KafkaClientValidator(BaseValidator):
         )
         checks.append(schema_check)
         if not schema_check.passed:
-            return self._build_result("simple", checks)
+            return self._make_result(level="simple", checks=checks)
 
         data = self.databag | creds
 
@@ -80,7 +66,7 @@ class KafkaClientValidator(BaseValidator):
         endpoint_check = self._check_bootstrap_servers(data["endpoints"])
         checks.append(endpoint_check)
         if not endpoint_check.passed:
-            return self._build_result("simple", checks)
+            return self._make_result(level="simple", checks=checks)
 
         # --- 5. Connect via consumer and list topics ---
         consumer: KafkaConsumer | None = None
@@ -119,7 +105,7 @@ class KafkaClientValidator(BaseValidator):
                 )
             )
 
-        return self._build_result("simple", checks)
+        return self._make_result(level="simple", checks=checks)
 
     def _validate_deep(self) -> ValidationResult:
         """L2: Produce a canary message to the granted topic and consume it to verify."""
@@ -140,7 +126,7 @@ class KafkaClientValidator(BaseValidator):
         )
         checks.append(schema_check)
         if not schema_check.passed:
-            return self._build_result("deep", checks)
+            return self._make_result(level="deep", checks=checks)
 
         data = self.databag | creds
 
@@ -148,7 +134,7 @@ class KafkaClientValidator(BaseValidator):
         endpoint_check = self._check_bootstrap_servers(data["endpoints"])
         checks.append(endpoint_check)
         if not endpoint_check.passed:
-            return self._build_result("deep", checks)
+            return self._make_result(level="deep", checks=checks)
 
         topic = data["topic"]
         canary_value = f"validator-probe-{uuid.uuid4().hex[:12]}"
@@ -183,7 +169,7 @@ class KafkaClientValidator(BaseValidator):
                 checks.append(ValidationCheck(name="produce", passed=False, message=str(exc)))
 
             if not produce_succeeded:
-                return self._build_result("deep", checks)
+                return self._make_result(level="deep", checks=checks)
 
             # --- 7. Consume canary message ---
             try:
@@ -246,7 +232,7 @@ class KafkaClientValidator(BaseValidator):
                 )
             )
 
-        return self._build_result("deep", checks)
+        return self._make_result(level="deep", checks=checks)
 
     def _check_bootstrap_servers(self, endpoints: str) -> ValidationCheck:
         """Validate each entry in the endpoints field is a valid host:port pair."""
@@ -303,7 +289,7 @@ class KafkaClientValidator(BaseValidator):
 
     def _build_kafka_client_kwargs(self, data: dict[str, str]) -> dict[str, Any]:
         """Build shared Kafka client kwargs, handling SASL and TLS configuration."""
-        bootstrap_servers = [e.strip() for e in data["endpoints"].split(",")]
+        bootstrap_servers = [e.strip() for e in data["endpoints"].split(",") if e.strip()]
         kwargs: dict[str, Any] = {
             "bootstrap_servers": bootstrap_servers,
             "security_protocol": "PLAINTEXT",
@@ -379,11 +365,6 @@ class KafkaClientValidator(BaseValidator):
         finally:
             self._close_admin(admin)
 
-    def _build_result(self, level: ValidationLevel, checks: list[ValidationCheck]) -> ValidationResult:
-        """Build a ValidationResult from a checks list."""
-        status: ValidationResultStatus = "PASS" if all(c.passed for c in checks) else "FAIL"
-        return self._make_result(status=status, level=level, checks=checks)
-
     def _create_temp_ca_file(self, ca_content: str) -> None:
         """Write CA certificate content to a temporary PEM file."""
         if self._ca_file_path:
@@ -394,8 +375,11 @@ class KafkaClientValidator(BaseValidator):
 
     def _remove_temp_ca_file(self) -> None:
         """Remove the temporary CA certificate file if it exists."""
-        if self._ca_file_path and os.path.exists(self._ca_file_path):
-            os.remove(self._ca_file_path)
+        if self._ca_file_path:
+            try:
+                os.remove(self._ca_file_path)
+            except OSError:
+                pass
             self._ca_file_path = None
 
     def _close_admin(self, admin: KafkaAdminClient | None) -> None:
