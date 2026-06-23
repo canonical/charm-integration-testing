@@ -2340,6 +2340,23 @@ type = "directory"
 url = "validators/config_server"
 
 [[package]]
+name = "validators-cve-catalog"
+version = "0.1.0"
+description = "Validator for cve-catalog interface"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+validators-base = "*"
+
+[package.source]
+type = "directory"
+url = "validators/cve_catalog"
+
+[[package]]
 name = "validators-loki-push-api"
 version = "0.1.0"
 description = "Validator for loki_push_api interface"
@@ -2450,6 +2467,7 @@ ops = ">=3.3.0,<4.0.0"
 pydantic = ">=2.0.0"
 validators-base = "*"
 validators-config-server = "*"
+validators-cve-catalog = "*"
 validators-loki-push-api = "*"
 validators-object-storage = "*"
 validators-postgresql-client = "*"
@@ -2614,4 +2632,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<4.0"
-content-hash = "a17680681d2783150f859a31d6c0b60265a61e56760531cef35f8892a1674ba3"
+content-hash = "848d3d2831fae2efe65621b46a4e66d7745bdf49f04e0c9d2d105c21a1b43932"

@@ -23,6 +23,7 @@ validators-loki-push-api = { path = "./validators/loki_push_api", develop = true
 validators-temporal-host-info = { path = "./validators/temporal_host_info", develop = true }
 validators-object-storage = { path = "./validators/object_storage", develop = true }
 validators-config-server = { path = "./validators/config_server", develop = true }
+validators-cve-catalog = { path = "./validators/cve_catalog", develop = true }
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
