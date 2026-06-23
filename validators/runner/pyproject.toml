@@ -23,6 +23,7 @@ dependencies = [
     "validators-opensearch-client",
     "validators-temporal-host-info",
     "validators-config-server",
+    "validators-cve-catalog",
 ]
 
 [build-system]
