@@ -177,7 +177,7 @@ def _validate_url_syntax(url: str) -> ValidationCheck:
         parsed = urllib.parse.urlparse(url)
         if parsed.scheme not in ("http", "https") or not parsed.netloc:
             raise ValueError(f"Scheme '{parsed.scheme}' is not http/https or host is missing.")
-    except Exception as exc:
+    except ValueError as exc:
         return ValidationCheck(
             name="url_syntax",
             passed=False,
@@ -212,8 +212,13 @@ def _fetch_catalog(
     Any ``api-key`` value is sent as an ``Authorization: Bearer`` header.
     Returns ``(check, None)`` when the request fails.
     """
-    params = urllib.parse.urlencode({"limit": limit}) if limit > 0 else ""
-    full_url = f"{url}?{params}" if params else url
+    parts = urllib.parse.urlsplit(url)
+    if limit > 0:
+        existing = urllib.parse.parse_qs(parts.query, keep_blank_values=True)
+        existing["limit"] = [str(limit)]
+        new_query = urllib.parse.urlencode(existing, doseq=True)
+        parts = parts._replace(query=new_query)
+    full_url = urllib.parse.urlunsplit(parts)
 
     headers: dict[str, str] = {"Accept": "application/json"}
     if api_key:

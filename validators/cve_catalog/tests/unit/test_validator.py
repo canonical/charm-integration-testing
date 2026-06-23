@@ -13,6 +13,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import json
 import urllib.error
 import urllib.request
 from typing import cast
@@ -318,6 +319,55 @@ class TestCveCatalogValidatorSimple:
         assert "Authorization" in captured_req["headers"]
         assert "tok-SUPERSECRET" in captured_req["headers"]["Authorization"]
 
+    def test_limit_appended_correctly_when_url_has_no_query(self) -> None:
+        databag = {**VALID_DATABAG, "catalog-url": "http://cve-catalog.example.com/api/v1/cves"}
+        validator = _make_validator(databag)
+
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.headers.get.return_value = "application/json"
+        mock_resp.read.return_value = b'{"entries": []}'
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+
+        captured_req: dict[str, urllib.request.Request] = {}
+
+        def fake_urlopen(req: urllib.request.Request, timeout: float | None = None) -> MagicMock:
+            captured_req["req"] = req
+            return mock_resp
+
+        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            validator.validate(level="simple")
+
+        assert captured_req["req"].full_url == "http://cve-catalog.example.com/api/v1/cves?limit=1"
+
+    def test_limit_merged_when_url_already_has_query_params(self) -> None:
+        databag = {**VALID_DATABAG, "catalog-url": "http://cve-catalog.example.com/api/v1/cves?format=json&page=1"}
+        validator = _make_validator(databag)
+
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.headers.get.return_value = "application/json"
+        mock_resp.read.return_value = b'{"entries": []}'
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+
+        captured_req: dict[str, urllib.request.Request] = {}
+
+        def fake_urlopen(req: urllib.request.Request, timeout: float | None = None) -> MagicMock:
+            captured_req["req"] = req
+            return mock_resp
+
+        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            validator.validate(level="simple")
+
+        parsed = urllib.parse.urlsplit(captured_req["req"].full_url)
+        qs = urllib.parse.parse_qs(parsed.query)
+        assert qs.get("limit") == ["1"]
+        assert qs.get("format") == ["json"]
+        assert qs.get("page") == ["1"]
+        assert "?" not in parsed.path
+
 
 # ---------------------------------------------------------------------------
 # L2 – deep validation
@@ -329,7 +379,7 @@ class TestCveCatalogValidatorDeep:
         mock_resp = MagicMock()
         mock_resp.status = 200
         mock_resp.headers.get.return_value = "application/json"
-        mock_resp.read.return_value = __import__("json").dumps(payload).encode()
+        mock_resp.read.return_value = json.dumps(payload).encode()
         mock_resp.__enter__ = lambda s: s
         mock_resp.__exit__ = MagicMock(return_value=False)
         return mock_resp
