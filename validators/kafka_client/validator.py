@@ -181,8 +181,8 @@ class KafkaClientValidator(BaseValidator):
                     records = consumer.poll(timeout_ms=1000, max_records=50)
                     for msgs in records.values():
                         for msg in msgs:
-                            if msg.value and msg.value.decode() == canary_value:
-                                consumed_value = msg.value.decode()
+                            if msg.value == canary_value.encode():
+                                consumed_value = canary_value
                                 break
                         if consumed_value:
                             break
