@@ -47,11 +47,11 @@ The build loop has three phases that repeat until the problem is satisfiable:
 
 3. **Solve and expand** -- The solver checks satisfiability. If the problem is
    ``unsat``, the unsat core (the minimal set of conflicting constraints) is
-   decoded to determine what went wrong. The builder then expands the domain,
-   typically by fetching a new charm that can fulfill an unsatisfied endpoint,
-   and loops back to step 2. If the problem is ``sat``, an optimization pass
-   minimizes the number of applications and integrations, and the result is
-   extracted into concrete ``Bundle`` objects.
+   decoded to determine what went wrong. The builder then lazily expands the
+   domain -- adding **one new candidate charm per unsatisfied endpoint** per
+   iteration -- and loops back to step 2. If the problem is ``sat``, an
+   optimization pass minimizes the number of applications and integrations,
+   and the result is extracted into concrete ``Bundle`` objects.
 
 .. mermaid::
 
@@ -77,8 +77,14 @@ first):
 - ``APPLICATION_INTEGRATION_EXISTS`` -- an explicit integration references
   applications not yet in the domain. Fetch them.
 - ``CHARM_ENDPOINT_NON_OPTIONAL`` -- a charm has a non-optional endpoint
-  with no compatible charm in the domain. Search Charmhub for a charm that
-  provides or requires the matching interface and add it.
+  with no compatible charm in the domain. Search Charmhub for charms that
+  provide or require the matching interface. Candidates are sorted by
+  priority (descending) and **exactly one new charm is added per call**.
+  Subsequent iterations add the next candidate if the solver still cannot
+  find a solution. This lazy strategy keeps the domain small: adding all
+  candidates at once causes cascading expansions (each new charm brings in
+  its own required endpoints), which can make the Z3 constraint set
+  exponentially large within a handful of iterations.
 - ``ENDPOINT_COUNT_MATCHES_INTEGRATIONS`` / ``PEER_CHANNEL_MISMATCH`` --
   structural mismatches that indicate a constraint conflict.
 
@@ -88,7 +94,10 @@ resolved together in a single step, rather than one dimension at a time.
 
 This loop is bounded (default 100 iterations). If the domain cannot be
 expanded further and the problem is still unsatisfiable, the builder raises
-``UncompletableBundleError`` with the decoded unsat core.
+``UncompletableBundleError`` with the decoded unsat core. The main SAT
+check also has a configurable timeout (default 1 minute); if Z3 exceeds it
+the builder raises ``UncompletableBundleError`` immediately rather than
+hanging indefinitely.
 
 Key properties
 --------------
