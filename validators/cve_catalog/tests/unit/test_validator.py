@@ -294,7 +294,7 @@ class TestCveCatalogValidatorSimple:
         mock_resp.__enter__ = lambda s: s
         mock_resp.__exit__ = MagicMock(return_value=False)
 
-        captured_req = {}
+        captured_req: dict[str, dict[str, str]] = {}
 
         def fake_urlopen(req: urllib.request.Request, timeout: float | None = None) -> MagicMock:
             captured_req["headers"] = dict(req.headers)
