@@ -342,9 +342,7 @@ class TestKafkaClientValidatorDeep:
         captured_value: list[bytes] = []
 
         class CapturingProducerStub(KafkaProducerStub):
-            def send(
-                self, topic: str, key: bytes | None = None, value: bytes | None = None
-            ) -> FutureStub:
+            def send(self, topic: str, key: bytes | None = None, value: bytes | None = None) -> FutureStub:
                 if value:
                     captured_value.append(value)
                 return self.future
@@ -463,9 +461,7 @@ class TestKafkaClientValidatorDeep:
         canary_value_ref: list[bytes] = []
 
         class TrackingProducerStub(KafkaProducerStub):
-            def send(
-                self, topic: str, key: bytes | None = None, value: bytes | None = None
-            ) -> FutureStub:
+            def send(self, topic: str, key: bytes | None = None, value: bytes | None = None) -> FutureStub:
                 if value:
                     canary_value_ref.append(value)
                 return self.future
@@ -493,9 +489,7 @@ class TestKafkaClientValidatorDeep:
         canary_ref: list[bytes] = []
 
         class CapturingProducer(KafkaProducerStub):
-            def send(
-                self, topic: str, key: bytes | None = None, value: bytes | None = None
-            ) -> FutureStub:
+            def send(self, topic: str, key: bytes | None = None, value: bytes | None = None) -> FutureStub:
                 if value:
                     canary_ref.append(value)
                 return self.future
