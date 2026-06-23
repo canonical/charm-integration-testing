@@ -53,13 +53,13 @@ class ObjectStorageValidator(BaseValidator):
         sdi_data, schema_check = self._parse_and_check_schema()
         checks.append(schema_check)
         if not schema_check.passed:
-            return self._build_result("simple", checks)
+            return self._make_result(level="simple", checks=checks)
 
         try:
             client = self._build_client(sdi_data)
         except Exception as exc:
             checks.append(ValidationCheck(name="client_init", passed=False, message=str(exc)))
-            return self._build_result("simple", checks)
+            return self._make_result(level="simple", checks=checks)
 
         bucket = _test_bucket_name()
         bucket_created = False
@@ -72,7 +72,7 @@ class ObjectStorageValidator(BaseValidator):
                 checks.append(self._delete_bucket(client, bucket))
             self._close_client(client)
 
-        return self._build_result("simple", checks)
+        return self._make_result(level="simple", checks=checks)
 
     # ------------------------------------------------------------------
     # Deep (L2): schema + create bucket + write / read / delete canary
@@ -84,13 +84,13 @@ class ObjectStorageValidator(BaseValidator):
         sdi_data, schema_check = self._parse_and_check_schema()
         checks.append(schema_check)
         if not schema_check.passed:
-            return self._build_result("deep", checks)
+            return self._make_result(level="deep", checks=checks)
 
         try:
             client = self._build_client(sdi_data)
         except Exception as exc:
             checks.append(ValidationCheck(name="client_init", passed=False, message=str(exc)))
-            return self._build_result("deep", checks)
+            return self._make_result(level="deep", checks=checks)
 
         bucket = _test_bucket_name()
         canary_key = f"__canary_{uuid.uuid4().hex[:8]}"
@@ -101,7 +101,7 @@ class ObjectStorageValidator(BaseValidator):
             checks.append(create_check)
             bucket_created = create_check.passed
             if not bucket_created:
-                return self._build_result("deep", checks)
+                return self._make_result(level="deep", checks=checks)
 
             write_check = self._put_object(client, bucket, canary_key, canary_body)
             checks.append(write_check)
@@ -117,7 +117,7 @@ class ObjectStorageValidator(BaseValidator):
                 checks.append(self._delete_bucket(client, bucket))
             self._close_client(client)
 
-        return self._build_result("deep", checks)
+        return self._make_result(level="deep", checks=checks)
 
     # ------------------------------------------------------------------
     # SDI parsing
@@ -222,13 +222,6 @@ class ObjectStorageValidator(BaseValidator):
     def _close_client(self, client: Any) -> None:
         if hasattr(client, "close"):
             client.close()
-
-    def _build_result(self, level: ValidationLevel, checks: list[ValidationCheck]) -> ValidationResult:
-        return self._make_result(
-            "PASS" if all(c.passed for c in checks) else "FAIL",
-            level,
-            checks,
-        )
 
 
 def _test_bucket_name() -> str:

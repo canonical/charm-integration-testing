@@ -55,13 +55,13 @@ class S3Validator(BaseValidator):
         schema_check = self.validate_schema(list(_REQUIRED_FIELDS), creds)
         checks.append(schema_check)
         if not schema_check.passed:
-            return self._build_result("simple", checks)
+            return self._make_result(level="simple", checks=checks)
 
         try:
             client = self._build_client(creds)
         except Exception as exc:
             checks.append(ValidationCheck(name="client_init", passed=False, message=str(exc)))
-            return self._build_result("simple", checks)
+            return self._make_result(level="simple", checks=checks)
 
         try:
             bucket = (self.databag | creds)["bucket"]
@@ -70,7 +70,7 @@ class S3Validator(BaseValidator):
         finally:
             self._cleanup_client(client)
 
-        return self._build_result("simple", checks)
+        return self._make_result(level="simple", checks=checks)
 
     # ------------------------------------------------------------------
     # Deep (L2): schema + bucket accessibility + write/read/delete canary
@@ -84,13 +84,13 @@ class S3Validator(BaseValidator):
         schema_check = self.validate_schema(list(_REQUIRED_FIELDS), creds)
         checks.append(schema_check)
         if not schema_check.passed:
-            return self._build_result("deep", checks)
+            return self._make_result(level="deep", checks=checks)
 
         try:
             client = self._build_client(creds)
         except Exception as exc:
             checks.append(ValidationCheck(name="client_init", passed=False, message=str(exc)))
-            return self._build_result("deep", checks)
+            return self._make_result(level="deep", checks=checks)
 
         try:
             bucket = (self.databag | creds)["bucket"]
@@ -99,7 +99,7 @@ class S3Validator(BaseValidator):
             head_check = self._head_bucket(client, bucket)
             checks.append(head_check)
             if not head_check.passed:
-                return self._build_result("deep", checks)
+                return self._make_result(level="deep", checks=checks)
 
             canary_suffix = f"__canary_{uuid.uuid4().hex[:8]}"
             canary_key = f"{path_prefix}/{canary_suffix}" if path_prefix else canary_suffix
@@ -121,7 +121,7 @@ class S3Validator(BaseValidator):
         finally:
             self._cleanup_client(client)
 
-        return self._build_result("deep", checks)
+        return self._make_result(level="deep", checks=checks)
 
     # ------------------------------------------------------------------
     # S3 operations
@@ -232,10 +232,3 @@ class S3Validator(BaseValidator):
             if os.path.exists(self._ca_file_path):
                 os.remove(self._ca_file_path)
             self._ca_file_path = None
-
-    def _build_result(self, level: ValidationLevel, checks: list[ValidationCheck]) -> ValidationResult:
-        return self._make_result(
-            "PASS" if all(c.passed for c in checks) else "FAIL",
-            level,
-            checks,
-        )

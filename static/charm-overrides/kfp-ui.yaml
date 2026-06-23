@@ -1,10 +1,123 @@
 ---
-# Kubeflow Pipelines UI - web interface for pipeline management
+# Source: https://github.com/canonical/kfp-operators/tree/main/charms/kfp-ui
+#
+# 2.0-alpha.7/2.0-beta predate dashboard-links; 2.5/edge and 2.15-2.16/edge published transient endpoint sets.
+#
+# kfp-api (requires): REQUIRED - MlPipelineUiPebbleService depends_on relation:kfp-api and reads service-name/service-port.
+# object-storage (requires): REQUIRED - MlPipelineUiPebbleService depends_on relation:object-storage and reads MinIO credentials.
+# kfp-ui (provides): optional - no Charmhub requirer (kubeflow-dashboard uses ingress, not kfp-ui interface); charm is active without consumers.
+# ingress (requires): optional - relation broadcaster/ambient ingress components are independent of the workload service dependencies.
+# dashboard-links (requires): optional - KubeflowDashboardLinksRequirer only adds sidebar links.
+# service-mesh/require-cmr-mesh/istio-ingress-route/provide-cmr-mesh: optional - additive mesh integrations, not inputs to MlPipelineUiPebbleService.
 overrides:
-  - provides:
+  - criteria:
+      - track: '2.0-alpha.7'
+    provides:
       kfp-ui:
+        optional: true
         features: [kfp-ui]
     requires:
+      ingress:
+        optional: true
+      kfp-api:
+        features: [kfp-api]
+    constraints:
+      - '"kfp-ui" in features(endpoint[kfp-ui])'
+      - '"kfp-api" in features(endpoint[kfp-api])'
+  - criteria:
+      - track: '2.0'
+      - risk: beta
+    provides:
+      kfp-ui:
+        optional: true
+        features: [kfp-ui]
+    requires:
+      ingress:
+        optional: true
+      kfp-api:
+        features: [kfp-api]
+    constraints:
+      - '"kfp-ui" in features(endpoint[kfp-ui])'
+      - '"kfp-api" in features(endpoint[kfp-api])'
+  - criteria:
+      - track: '2.0'
+      - risk: edge
+    provides:
+      kfp-ui:
+        optional: true
+        features: [kfp-ui]
+    requires:
+      dashboard-links:
+        optional: true
+      ingress:
+        optional: true
+      kfp-api:
+        features: [kfp-api]
+    constraints:
+      - '"kfp-ui" in features(endpoint[kfp-ui])'
+      - '"kfp-api" in features(endpoint[kfp-api])'
+  - criteria:
+      - track: '2.0'
+      - risk: stable
+    provides:
+      kfp-ui:
+        optional: true
+        features: [kfp-ui]
+    requires:
+      dashboard-links:
+        optional: true
+      ingress:
+        optional: true
+      kfp-api:
+        features: [kfp-api]
+    constraints:
+      - '"kfp-ui" in features(endpoint[kfp-ui])'
+      - '"kfp-api" in features(endpoint[kfp-api])'
+  - criteria:
+      - track: '2.5'
+      - risk: edge
+    requires:
+      dashboard-links:
+        optional: true
+      ingress:
+        optional: true
+      kfp-api:
+        features: [kfp-api]
+    constraints:
+      - '"kfp-api" in features(endpoint[kfp-api])'
+  - criteria:
+      - any_of:
+          - track: '2.15'
+          - track: '2.16'
+          - track: 'latest'
+      - risk: edge
+    provides:
+      provide-cmr-mesh:
+        optional: true
+    requires:
+      dashboard-links:
+        optional: true
+      ingress:
+        optional: true
+      istio-ingress-route:
+        optional: true
+      kfp-api:
+        features: [kfp-api]
+      require-cmr-mesh:
+        optional: true
+      service-mesh:
+        optional: true
+    constraints:
+      - '"kfp-api" in features(endpoint[kfp-api])'
+  - provides:
+      kfp-ui:
+        optional: true
+        features: [kfp-ui]
+    requires:
+      dashboard-links:
+        optional: true
+      ingress:
+        optional: true
       kfp-api:
         features: [kfp-api]
     constraints:
