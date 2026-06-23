@@ -34,6 +34,7 @@ class _FakeCharmhubClient(CharmhubClient):
         self,
         charm_responses: list[Charm | Exception] | Charm | Exception | None = None,
         find_result: set[str] | None = None,
+        charm_by_name: dict[str, Charm] | None = None,
     ) -> None:
         # Bypass CharmhubClient.__init__ - no HTTP client needed for unit tests.
         if charm_responses is None:
@@ -44,6 +45,10 @@ class _FakeCharmhubClient(CharmhubClient):
             # Single Charm or Exception: repeat indefinitely.
             self._responses = repeat(charm_responses)
         self._find_result: set[str] = find_result if find_result is not None else set()
+        # When set, charm_from_store returns the mapped charm regardless of call order,
+        # which is needed for deterministic priority-ordering tests (set iteration is
+        # non-deterministic, so sequential _responses would produce flaky results).
+        self._charm_by_name: dict[str, Charm] | None = charm_by_name
         self.charm_from_store_calls: list[dict[str, object]] = []
 
     def charm_from_store(
@@ -69,6 +74,10 @@ class _FakeCharmhubClient(CharmhubClient):
                 "ubuntu_version": ubuntu_version,
             }
         )
+        if self._charm_by_name is not None:
+            if charm_name not in self._charm_by_name:
+                raise CharmReleaseNotFoundException(charm_name, "not in charm_by_name fixture")
+            return self._charm_by_name[charm_name]
         resp = next(self._responses)
         if isinstance(resp, Exception):
             raise resp
@@ -83,7 +92,9 @@ class _FakeCharmhubClient(CharmhubClient):
         return self._find_result
 
 
-def _make_charm(name: str, endpoints: dict[str, CharmEndpoint], ubuntu_version: str = "22.04") -> Charm:
+def _make_charm(
+    name: str, endpoints: dict[str, CharmEndpoint], ubuntu_version: str = "22.04", priority: float = 1.0
+) -> Charm:
     return Charm(
         name=name,
         channel=_CHANNEL,
@@ -91,6 +102,7 @@ def _make_charm(name: str, endpoints: dict[str, CharmEndpoint], ubuntu_version: 
         ubuntu_version=ubuntu_version,
         ubuntu_arch="amd64",
         endpoints=endpoints,
+        priority=priority,
     )
 
 
@@ -354,6 +366,114 @@ def _domain_with_two_alternatives(
     id_a = add_charm_to_domain(_make_charm_variant(revision=1, priority=priority_a), domain, model_ref)
     id_b = add_charm_to_domain(_make_charm_variant(revision=2, priority=priority_b), domain, model_ref)
     return domain, id_a, id_b
+
+
+class TestExpandForEndpoint:
+    """BundleBuilder._expand_for_endpoint: lazy CEGIS expansion (one candidate per call)."""
+
+    _PROVIDES_PGSQL = CharmEndpoint(type=EndpointType.PROVIDES, interface="pgsql")
+    _REQUIRES_PGSQL = CharmEndpoint(type=EndpointType.REQUIRES, interface="pgsql")
+
+    def _domain_with_requires_endpoint(self) -> tuple[Domain, int]:
+        """Domain with one app that has a requires/pgsql endpoint."""
+        domain = Domain()
+        model_ref = ModelRef(name="m")
+        domain.models[model_ref] = DomainModel(
+            arch="amd64",
+            platform="kubernetes",
+            juju_version=_JUJU,
+            applications={"app": DomainApplication(charm="app")},
+        )
+        charm_id = add_charm_to_domain(
+            _make_charm("app", {"db": self._REQUIRES_PGSQL}),
+            domain,
+            model_ref,
+        )
+        return domain, charm_id
+
+    def test_returns_true_and_adds_one_charm_when_candidate_found(self) -> None:
+        # GIVEN a domain with a charm that needs a pgsql provider
+        domain, charm_id = self._domain_with_requires_endpoint()
+        pg = _make_charm("postgresql", {"database": self._PROVIDES_PGSQL})
+        fake = _FakeCharmhubClient(charm_responses=pg, find_result={"postgresql"})
+        builder = BundleBuilder(charmhub_client=fake)
+
+        # WHEN expanding for the unfulfilled endpoint
+        result = builder._expand_for_endpoint(charm_id, "db", domain)
+
+        # THEN exactly one charm is added and True is returned
+        assert result is True
+        assert len(domain.charms) == 2
+        assert domain.charms[1].spec.name == "postgresql"
+
+    def test_returns_false_when_no_candidates_found(self) -> None:
+        # GIVEN no charms provide the required interface
+        domain, charm_id = self._domain_with_requires_endpoint()
+        fake = _FakeCharmhubClient(find_result=set())
+        builder = BundleBuilder(charmhub_client=fake)
+
+        # WHEN expanding
+        result = builder._expand_for_endpoint(charm_id, "db", domain)
+
+        # THEN nothing is added and False is returned
+        assert result is False
+        assert len(domain.charms) == 1
+
+    def test_returns_false_when_candidate_already_in_domain(self) -> None:
+        # GIVEN a candidate that was already added on a previous iteration
+        domain, charm_id = self._domain_with_requires_endpoint()
+        pg = _make_charm("postgresql", {"database": self._PROVIDES_PGSQL})
+        # Single charm (not list) → repeats indefinitely across both calls
+        fake = _FakeCharmhubClient(charm_responses=pg, find_result={"postgresql"})
+        builder = BundleBuilder(charmhub_client=fake)
+        builder._expand_for_endpoint(charm_id, "db", domain)  # first call adds it
+
+        # WHEN called again with the same candidate already present
+        result = builder._expand_for_endpoint(charm_id, "db", domain)
+
+        # THEN nothing new is added and False is returned
+        assert result is False
+        assert len(domain.charms) == 2  # unchanged
+
+    def test_adds_highest_priority_candidate_first(self) -> None:
+        # GIVEN two provider candidates with different priorities
+        domain, charm_id = self._domain_with_requires_endpoint()
+        low = _make_charm("pg-low", {"database": self._PROVIDES_PGSQL}, priority=1.0)
+        high = _make_charm("pg-high", {"database": self._PROVIDES_PGSQL}, priority=2.0)
+        # charm_by_name ensures deterministic lookup regardless of set iteration order
+        fake = _FakeCharmhubClient(
+            charm_by_name={"pg-low": low, "pg-high": high},
+            find_result={"pg-low", "pg-high"},
+        )
+        builder = BundleBuilder(charmhub_client=fake)
+
+        # WHEN expanding for the first time
+        result = builder._expand_for_endpoint(charm_id, "db", domain)
+
+        # THEN the high-priority candidate is added
+        assert result is True
+        assert len(domain.charms) == 2
+        assert domain.charms[1].spec.name == "pg-high"
+
+    def test_second_call_adds_next_priority_candidate(self) -> None:
+        # GIVEN two candidates; first call consumed the highest-priority one
+        domain, charm_id = self._domain_with_requires_endpoint()
+        low = _make_charm("pg-low", {"database": self._PROVIDES_PGSQL}, priority=1.0)
+        high = _make_charm("pg-high", {"database": self._PROVIDES_PGSQL}, priority=2.0)
+        fake = _FakeCharmhubClient(
+            charm_by_name={"pg-low": low, "pg-high": high},
+            find_result={"pg-low", "pg-high"},
+        )
+        builder = BundleBuilder(charmhub_client=fake)
+        builder._expand_for_endpoint(charm_id, "db", domain)  # adds pg-high
+
+        # WHEN called again (simulating the next CEGIS iteration)
+        result = builder._expand_for_endpoint(charm_id, "db", domain)
+
+        # THEN the next-best candidate is added
+        assert result is True
+        assert len(domain.charms) == 3
+        assert domain.charms[2].spec.name == "pg-low"
 
 
 class TestOptimizeSolution:

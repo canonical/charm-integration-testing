@@ -137,9 +137,10 @@ class BundleBuilder:
         for iteration in range(max_iterations):
             self.logger.info(f"Iteration {iteration + 1}/{max_iterations}")
 
-            # Create solver with unsat core tracking
+            # Create solver with unsat core tracking and a per-iteration timeout
             solver = z3.Solver()
             solver.set("unsat_core", True)
+            solver.set("timeout", int(self.optimize_timeout.total_seconds() * 1000))
 
             # Add constraints
             t_constraints = self.timeline.on(f"iter{iteration}/add_constraints")
@@ -172,7 +173,10 @@ class BundleBuilder:
 
                 self._handle_unsat_core(unsat_core, domain)
             else:
-                raise UncompletableBundleError("Solver returned unknown")
+                raise UncompletableBundleError(
+                    f"Solver timed out after {self.optimize_timeout} at iteration {iteration + 1}; "
+                    "the domain may be too large to solve"
+                )
 
         raise UncompletableBundleError(f"Could not satisfy constraints after {max_iterations} iterations")
 
@@ -268,11 +272,16 @@ class BundleBuilder:
     ) -> bool:
         """Expand the domain to satisfy an unfulfilled endpoint.
 
-        Tries the owning model first. If no same-platform charm can satisfy the
-        endpoint (e.g. a kubernetes charm requiring an interface that only a
-        machine charm provides), tries other models. Adding a provider to
-        another model creates a cross-model DomainCharmIntegration that the solver can activate on
-        the next iteration.
+        Adds exactly one new candidate charm per call (lazy CEGIS expansion).
+        Candidates are sorted by priority descending so the solver encounters
+        the most-preferred option first.  Adding all candidates at once causes
+        the domain to grow by O(|candidates|) per iteration and can trigger
+        cascading expansions (each added charm has its own required endpoints),
+        making the Z3 constraint set exponentially large within a handful of
+        iterations.
+
+        Tries the owning model first. If all owning-model candidates are already
+        in the domain, falls back to other models (cross-model relations).
         """
         owning_model = domain.charms[charm_id].model
 
@@ -282,19 +291,19 @@ class BundleBuilder:
                 f"No charms found for endpoint {domain.charms[charm_id].spec.name}:{endpoint_name} "
                 f"in model '{owning_model.key}'"
             )
-        results = [self._add_charm_for_charm_id(charm, charm_id, domain, owning_model) for charm in charms]
 
-        if not any(results):
-            for other_model_ref in domain.models:
-                if other_model_ref == owning_model:
-                    continue
-                other_charms = self._get_charms_for_endpoint(charm_id, endpoint_name, domain, other_model_ref)
-                other_results = [
-                    self._add_charm_for_charm_id(charm, charm_id, domain, other_model_ref) for charm in other_charms
-                ]
-                if any(other_results):
+        for charm in sorted(charms, key=lambda c: c.priority, reverse=True):
+            if self._add_charm_for_charm_id(charm, charm_id, domain, owning_model):
+                return True
+
+        for other_model_ref in domain.models:
+            if other_model_ref == owning_model:
+                continue
+            other_charms = self._get_charms_for_endpoint(charm_id, endpoint_name, domain, other_model_ref)
+            for charm in sorted(other_charms, key=lambda c: c.priority, reverse=True):
+                if self._add_charm_for_charm_id(charm, charm_id, domain, other_model_ref):
                     return True
-        return any(results)
+        return False
 
     def _handle_peer_channel_mismatch(
         self,
