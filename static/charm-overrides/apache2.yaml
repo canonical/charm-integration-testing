@@ -1,0 +1,31 @@
+---
+# Source: Charmhub apache2 artifact (publisher apache2-charmers; no public git source URL advertised)
+#
+# All published channels share the same endpoint set.
+#
+# balancer/reverseproxy/website-cache/vhost-config/logging (requires): optional - hooks/hooks.py reads relation data opportunistically and still ends config_changed() with status_set("active", "Unit is ready").
+# apache-website/website (provides): optional - hooks/hooks.py can configure and activate Apache from charm config alone via ApacheWebsites.from_config(...).
+# logs/local-monitors/nrpe-external-master (provides): optional - log shipping and monitoring hooks are additive integrations.
+overrides:
+  - provides:
+      apache-website:
+        optional: true
+      local-monitors:
+        optional: true
+      logs:
+        optional: true
+      nrpe-external-master:
+        optional: true
+      website:
+        optional: true
+    requires:
+      balancer:
+        optional: true
+      logging:
+        optional: true
+      reverseproxy:
+        optional: true
+      vhost-config:
+        optional: true
+      website-cache:
+        optional: true
