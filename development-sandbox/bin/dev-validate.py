@@ -98,9 +98,11 @@ def main() -> None:
 
     if args.reinstall:
         logger.info("Removing remote validator venv on all units of '%s'...", args.app)
+        is_k8s = backend.is_k8s_model(args.model)
+        rm_cmd = "rm -rf /var/lib/validators" if is_k8s else "sudo rm -rf /var/lib/validators"
         for unit in backend.application_units(args.model, args.app):
-            logger.debug("  rm -rf /var/lib/validators on %s", unit)
-            backend.ssh(args.model, unit, "rm -rf /var/lib/validators")
+            logger.debug("  %s on %s", rm_cmd, unit)
+            backend.ssh(args.model, unit, rm_cmd)
 
     uv_file = STATIC_UV if STATIC_UV.exists() else None
     extension = ValidatorInjectorExtension(
