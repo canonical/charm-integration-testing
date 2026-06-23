@@ -122,7 +122,10 @@ def _extract_single_model(
             if z3.is_string_value(raw):
                 resources[key] = raw.as_string()
 
-        applications[app_name] = Application(charm=charm.spec, config=config, resources=resources)
+        raw_units = model.evaluate(charm.num_units, model_completion=True)
+        num_units = int(raw_units.as_long()) if z3.is_int_value(raw_units) else 1
+
+        applications[app_name] = Application(charm=charm.spec, num_units=num_units, config=config, resources=resources)
 
     integrations = set()
     for integration in domain.charm_integrations:
