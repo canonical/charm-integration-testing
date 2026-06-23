@@ -98,7 +98,7 @@ class CveCatalogValidator(BaseValidator):
 
         # 5. HTTP reachability: expect 200 with application/json body.
         api_key = creds.get("api-key")
-        reach_check, _ = _fetch_catalog(url, api_key, limit=0)
+        reach_check, _ = _fetch_catalog(url, api_key, limit=1)
         checks.append(reach_check)
 
         return self._build_result("simple", checks)
@@ -206,7 +206,9 @@ def _fetch_catalog(
 ) -> tuple[ValidationCheck, dict[str, Any] | list[Any] | None]:
     """Perform an HTTP GET against *url* and return a (check, parsed-body) pair.
 
-    A *limit* of 0 does a lightweight HEAD-equivalent (small page request).
+    When *limit* is greater than 0 it is appended as a ``?limit=`` query parameter
+    to bound the response size. When *limit* is 0 no limit parameter is sent and
+    the full catalog body is fetched.
     Any ``api-key`` value is sent as an ``Authorization: Bearer`` header.
     Returns ``(check, None)`` when the request fails.
     """

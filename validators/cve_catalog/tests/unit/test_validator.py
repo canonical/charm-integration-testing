@@ -329,9 +329,7 @@ class TestCveCatalogValidatorDeep:
         mock_resp = MagicMock()
         mock_resp.status = 200
         mock_resp.headers.get.return_value = "application/json"
-        mock_resp.read.return_value = (
-            payload if isinstance(payload, bytes) else __import__("json").dumps(payload).encode()
-        )
+        mock_resp.read.return_value = __import__("json").dumps(payload).encode()
         mock_resp.__enter__ = lambda s: s
         mock_resp.__exit__ = MagicMock(return_value=False)
         return mock_resp
