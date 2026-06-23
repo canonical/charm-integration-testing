@@ -156,6 +156,7 @@ class DomainCharm(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     exists: z3.BoolRef
+    num_units: z3.ArithRef
     spec: Charm
     model: ModelRef
     endpoints: dict[str, DomainCharmEndpoint]
@@ -280,6 +281,7 @@ def add_charm_to_domain(charm: Charm, domain: Domain, model_ref: ModelRef | None
     domain.charms.append(
         DomainCharm(
             exists=z3.Bool(f"charm_{charm.name}_{charm_id}_exists"),
+            num_units=z3.Int(f"charm_{charm.name}_{charm_id}_num_units"),
             spec=charm,
             model=model_ref,
             config=charm_config,
