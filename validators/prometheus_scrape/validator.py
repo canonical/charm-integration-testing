@@ -4,7 +4,7 @@
 import json
 import re
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any
 from urllib.parse import urlparse
 from urllib.request import urlopen
 
@@ -79,8 +79,7 @@ class PrometheusScrapeValidator(BaseValidator):
             # L2: verify static labels are valid Prometheus label name/value pairs.
             checks.append(_static_labels_check(scrape_jobs))
 
-        status: Literal["PASS", "FAIL"] = "PASS" if all(c.passed for c in checks) else "FAIL"
-        return self._make_result(status, level, checks)
+        return self._make_result(level=level, checks=checks)
 
 
 # ---------------------------------------------------------------------------

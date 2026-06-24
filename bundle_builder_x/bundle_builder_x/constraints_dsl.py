@@ -42,6 +42,7 @@ Grammar (in precedence order, lowest to highest)::
                  | 'risks' '(' constraint ')'
                  | 'channels' '(' constraint ')'
                  | 'revisions' '(' constraint ')'
+                 | 'units' '(' constraint ')'
                  | 'config' '[' NAME ']'
                  | 'resource' '[' NAME ']'
                  | '{' 'self' '}'
@@ -83,6 +84,7 @@ class DSLType(str, Enum):
     STR = "Str"
     RELATION_SET = "RelationSet"
     CHARM_SET = "CharmSet"
+    UNIT_SET = "UnitSet"
     SET_STR = "Set[Str]"
     SET_INT = "Set[Int]"
     RUNTIME = "Runtime"  # ConfigExpr/ResourceExpr: type resolved at Z3 lowering time
@@ -349,6 +351,25 @@ class RevisionsExpr(BaseModel):
     arg: "AnyExpr"
 
 
+class UnitsExpr(BaseModel):
+    """units(charm_set) — the set of Juju units for a charm set.
+
+    Used with ``len()`` to constrain how many units a charm is deployed with::
+
+        len(units({self})) >= 3   # require at least 3 units (e.g. OpenSearch HA)
+
+    The argument must be a ``CharmSet`` expression.  The most common form is
+    ``{self}`` (the current application), but any ``CharmSet`` is accepted for
+    forward-compatibility with multi-charm summation.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    kind: Literal["units"] = "units"
+    dsl_type: Literal[DSLType.UNIT_SET] = DSLType.UNIT_SET
+    arg: "AnyExpr"
+
+
 class ArithExpr(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -450,6 +471,7 @@ AnyExpr = Annotated[
         RisksExpr,
         ChannelsExpr,
         RevisionsExpr,
+        UnitsExpr,
         ArithExpr,
         CompareExpr,
         SetOpExpr,
@@ -474,6 +496,7 @@ TracksExpr.model_rebuild()
 RisksExpr.model_rebuild()
 ChannelsExpr.model_rebuild()
 RevisionsExpr.model_rebuild()
+UnitsExpr.model_rebuild()
 ArithExpr.model_rebuild()
 CompareExpr.model_rebuild()
 SetOpExpr.model_rebuild()
@@ -645,7 +668,7 @@ class _Parser:
         if token.kind == TokenKind.IDENT:
             name = token.value
 
-            # Call expressions: len(...), bool(...), charms(...), etc.
+            # Call expressions: len(...), bool(...), charms(...), units(...) etc.
             if name in (
                 "len",
                 "bool",
@@ -656,6 +679,7 @@ class _Parser:
                 "risks",
                 "channels",
                 "revisions",
+                "units",
                 "set",
             ):
                 self._advance()
@@ -685,8 +709,16 @@ class _Parser:
                         return RisksExpr(arg=arg)
                     case "channels":
                         return ChannelsExpr(arg=arg)
+                    case "revisions":
+                        return RevisionsExpr(arg=arg)
+                    case "units":
+                        return UnitsExpr(arg=arg)
                     case _:
-                        return RevisionsExpr(arg=arg)  # "revisions"
+                        # "set" reached here means set(non-config/non-resource) which is not supported.
+                        raise DSLSyntaxError(
+                            f"Unsupported use of '{name}(...)' at position {token.pos}; "
+                            "set() only accepts config[key] or resource[key] arguments"
+                        )
 
             # endpoint[name]
             if name == "endpoint":
@@ -804,8 +836,8 @@ def _check_types(node: AnyExpr) -> AnyExpr:  # noqa: C901 (intentionally large s
 
         case LenExpr(arg=arg):
             arg = _check_types(arg)
-            if arg.dsl_type != DSLType.RELATION_SET:
-                raise _type_error(f"len() requires RelationSet argument, got {arg.dsl_type.value}")
+            if arg.dsl_type not in (DSLType.RELATION_SET, DSLType.UNIT_SET):
+                raise _type_error(f"len() requires a RelationSet or UnitSet argument, got {arg.dsl_type.value}")
             return LenExpr(arg=arg)
 
         case BoolFunc(arg=arg):
@@ -856,6 +888,12 @@ def _check_types(node: AnyExpr) -> AnyExpr:  # noqa: C901 (intentionally large s
                 raise _type_error(f"revisions() requires CharmSet argument, got {arg.dsl_type.value}")
             return RevisionsExpr(arg=arg)
 
+        case UnitsExpr(arg=arg):
+            arg = _check_types(arg)
+            if arg.dsl_type != DSLType.CHARM_SET:
+                raise _type_error(f"units() requires CharmSet argument, got {arg.dsl_type.value}")
+            return UnitsExpr(arg=arg)
+
         case ArithExpr(op=op, left=left, right=right):
             left = _check_types(left)
             right = _check_types(right)
@@ -888,6 +926,10 @@ def _check_types(node: AnyExpr) -> AnyExpr:  # noqa: C901 (intentionally large s
                 # == and != require matching types (UNRESOLVED config is allowed to match any)
                 if lt != rt and lt != DSLType.RUNTIME and rt != DSLType.RUNTIME:
                     raise _type_error(f"Operator '{op}' requires matching types, got {lt.value} and {rt.value}")
+                if lt == DSLType.UNIT_SET or rt == DSLType.UNIT_SET:
+                    raise _type_error(
+                        f"UnitSet cannot be used in '{op}' comparisons; use len(units(...)) to compare unit counts"
+                    )
             return CompareExpr(op=op, left=left, right=right)
 
         case SetOpExpr(op=op, left=left, right=right):

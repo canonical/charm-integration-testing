@@ -30,3 +30,6 @@ overrides:
     provides:
       cos-agent:
         optional: true
+    constraints:
+      # Minimum 3 units for HA, but allow more for larger clusters.
+      - len(units({self})) >= 3

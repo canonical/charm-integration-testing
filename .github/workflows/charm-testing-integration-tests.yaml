@@ -5,6 +5,9 @@ permissions:
 on:
   workflow_dispatch:
   workflow_call:
+    secrets:
+      STG_TEST_OBSERVER_TOKEN:
+        required: true
 jobs:
   assert-pass:
     strategy:
