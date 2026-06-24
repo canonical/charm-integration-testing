@@ -26,6 +26,7 @@ from bundle_builder_x.domain import (
 )
 from bundle_builder_x.extract import extract_solution
 from bundle_builder_x.juju_version import JujuVersion
+from tests.unit._integration_helpers import materialize_all_integrations
 
 _JUJU = JujuVersion(major=3, minor=6, patch=0)
 _LOGGER = logging.getLogger("test_app_integration_ordering")
@@ -55,6 +56,7 @@ def _make_charm(
 
 def _solve(domain: Domain) -> z3.ModelRef:
     """Run the solver and return the Z3 model, asserting SAT."""
+    materialize_all_integrations(domain)
     solver = z3.Solver()
     add_constraints(solver, domain)
     result = solver.check()

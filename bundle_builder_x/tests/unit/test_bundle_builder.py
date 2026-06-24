@@ -8,7 +8,13 @@ from typing import Iterator
 
 import z3  # type: ignore[import-untyped]
 
-from bundle_builder_x.assertion_tags import CharmPayload, PeerChannelMismatchTag, SubordinateBaseMismatchTag
+from bundle_builder_x.assertion_tags import (
+    AppEndpointPayload,
+    ApplicationIntegrationExistsTag,
+    CharmPayload,
+    PeerChannelMismatchTag,
+    SubordinateBaseMismatchTag,
+)
 from bundle_builder_x.bundle_builder import BundleBuilder
 from bundle_builder_x.charm import Charm, CharmChannel, CharmEndpoint, EndpointScope, EndpointType
 from bundle_builder_x.charmhub import CharmhubClient
@@ -368,10 +374,19 @@ def _domain_with_two_alternatives(
     return domain, id_a, id_b
 
 
-class TestExpandForEndpoint:
-    """BundleBuilder._expand_for_endpoint: lazy CEGIS expansion (one candidate per call)."""
+class TestSatisfyEndpoint:
+    """BundleBuilder._satisfy_endpoint: capacity-aware lazy integration creation.
+
+    Each call creates at most one integration variable (and at most one charm),
+    reusing an in-domain partner with spare capacity before instantiating a new one.
+    The reuse pass uses integration_index for dedup (skipping already-wired providers)
+    and _is_saturated for capacity (skipping limit-N providers at capacity).  This
+    means providers from any chain — not just the current requirer's chain — are
+    correctly found and reused.
+    """
 
     _PROVIDES_PGSQL = CharmEndpoint(type=EndpointType.PROVIDES, interface="pgsql")
+    _PROVIDES_PGSQL_LIMIT_1 = CharmEndpoint(type=EndpointType.PROVIDES, interface="pgsql", limit=1)
     _REQUIRES_PGSQL = CharmEndpoint(type=EndpointType.REQUIRES, interface="pgsql")
 
     def _domain_with_requires_endpoint(self) -> tuple[Domain, int]:
@@ -391,20 +406,41 @@ class TestExpandForEndpoint:
         )
         return domain, charm_id
 
-    def test_returns_true_and_adds_one_charm_when_candidate_found(self) -> None:
-        # GIVEN a domain with a charm that needs a pgsql provider
+    def _domain_with_two_requirers(self, provider_endpoint: CharmEndpoint) -> tuple[Domain, int, int]:
+        """Domain with two apps that both require pgsql; provider not yet present."""
+        domain = Domain()
+        model_ref = ModelRef(name="m")
+        domain.models[model_ref] = DomainModel(
+            arch="amd64",
+            platform="kubernetes",
+            juju_version=_JUJU,
+            applications={
+                "app-a": DomainApplication(charm="app-a"),
+                "app-b": DomainApplication(charm="app-b"),
+            },
+        )
+        id_a = add_charm_to_domain(_make_charm("app-a", {"db": self._REQUIRES_PGSQL}), domain, model_ref)
+        id_b = add_charm_to_domain(_make_charm("app-b", {"db": self._REQUIRES_PGSQL}), domain, model_ref)
+        return domain, id_a, id_b
+
+    def test_instantiates_provider_and_creates_one_integration(self) -> None:
+        # GIVEN a domain with a charm that needs a pgsql provider, none in domain yet
         domain, charm_id = self._domain_with_requires_endpoint()
         pg = _make_charm("postgresql", {"database": self._PROVIDES_PGSQL})
         fake = _FakeCharmhubClient(charm_responses=pg, find_result={"postgresql"})
         builder = BundleBuilder(charmhub_client=fake)
 
-        # WHEN expanding for the unfulfilled endpoint
-        result = builder._expand_for_endpoint(charm_id, "db", domain)
+        # WHEN satisfying the unfulfilled endpoint
+        result = builder._satisfy_endpoint(charm_id, "db", domain)
 
-        # THEN exactly one charm is added and True is returned
+        # THEN exactly one provider charm AND one integration variable are added
         assert result is True
         assert len(domain.charms) == 2
         assert domain.charms[1].spec.name == "postgresql"
+        assert len(domain.charm_integrations) == 1
+        integ = domain.charm_integrations[0]
+        assert integ.requires_charm_id == charm_id
+        assert domain.charms[integ.provides_charm_id].spec.name == "postgresql"
 
     def test_returns_false_when_no_candidates_found(self) -> None:
         # GIVEN no charms provide the required interface
@@ -412,51 +448,104 @@ class TestExpandForEndpoint:
         fake = _FakeCharmhubClient(find_result=set())
         builder = BundleBuilder(charmhub_client=fake)
 
-        # WHEN expanding
-        result = builder._expand_for_endpoint(charm_id, "db", domain)
+        # WHEN satisfying
+        result = builder._satisfy_endpoint(charm_id, "db", domain)
 
         # THEN nothing is added and False is returned
         assert result is False
         assert len(domain.charms) == 1
+        assert len(domain.charm_integrations) == 0
 
-    def test_returns_false_when_candidate_already_in_domain(self) -> None:
-        # GIVEN a candidate that was already added on a previous iteration
+    def test_reuses_existing_unlimited_provider_without_new_charm(self) -> None:
+        # GIVEN a requirer plus an unlimited provider already in the domain
         domain, charm_id = self._domain_with_requires_endpoint()
-        pg = _make_charm("postgresql", {"database": self._PROVIDES_PGSQL})
-        # Single charm (not list) → repeats indefinitely across both calls
-        fake = _FakeCharmhubClient(charm_responses=pg, find_result={"postgresql"})
-        builder = BundleBuilder(charmhub_client=fake)
-        builder._expand_for_endpoint(charm_id, "db", domain)  # first call adds it
-
-        # WHEN called again with the same candidate already present
-        result = builder._expand_for_endpoint(charm_id, "db", domain)
-
-        # THEN nothing new is added and False is returned
-        assert result is False
-        assert len(domain.charms) == 2  # unchanged
-
-    def test_adds_highest_priority_candidate_first(self) -> None:
-        # GIVEN two provider candidates with different priorities
-        domain, charm_id = self._domain_with_requires_endpoint()
-        low = _make_charm("pg-low", {"database": self._PROVIDES_PGSQL}, priority=1.0)
-        high = _make_charm("pg-high", {"database": self._PROVIDES_PGSQL}, priority=2.0)
-        # charm_by_name ensures deterministic lookup regardless of set iteration order
-        fake = _FakeCharmhubClient(
-            charm_by_name={"pg-low": low, "pg-high": high},
-            find_result={"pg-low", "pg-high"},
+        add_charm_to_domain(
+            _make_charm("postgresql", {"database": self._PROVIDES_PGSQL}), domain, ModelRef(name="m")
         )
+        # No charm_responses: if the fetch path were taken it would error, proving reuse-first.
+        fake = _FakeCharmhubClient(find_result={"postgresql"})
         builder = BundleBuilder(charmhub_client=fake)
 
-        # WHEN expanding for the first time
-        result = builder._expand_for_endpoint(charm_id, "db", domain)
+        # WHEN satisfying
+        result = builder._satisfy_endpoint(charm_id, "db", domain)
 
-        # THEN the high-priority candidate is added
+        # THEN no new charm is added; one integration wires to the existing provider
         assert result is True
         assert len(domain.charms) == 2
-        assert domain.charms[1].spec.name == "pg-high"
+        assert len(domain.charm_integrations) == 1
+        integ = domain.charm_integrations[0]
+        assert integ.requires_charm_id == charm_id
+        assert domain.charms[integ.provides_charm_id].spec.name == "postgresql"
 
-    def test_second_call_adds_next_priority_candidate(self) -> None:
-        # GIVEN two candidates; first call consumed the highest-priority one
+    def test_reuses_provider_across_consumers_unlimited(self) -> None:
+        # GIVEN two consumers and an unlimited provider
+        domain, id_a, id_b = self._domain_with_two_requirers(self._PROVIDES_PGSQL)
+        pg = _make_charm("postgresql", {"database": self._PROVIDES_PGSQL})
+        fake = _FakeCharmhubClient(charm_responses=pg, find_result={"postgresql"})
+        builder = BundleBuilder(charmhub_client=fake)
+
+        # WHEN the first consumer instantiates the provider, the second reuses it
+        builder._satisfy_endpoint(id_a, "db", domain)
+        assert len(domain.charms) == 3  # app-a, app-b, postgresql
+        builder._satisfy_endpoint(id_b, "db", domain)
+
+        # THEN no second provider is added; both consumers share one instance (O(R) vars)
+        assert len(domain.charms) == 3
+        assert len(domain.charm_integrations) == 2
+
+    def test_instantiates_second_provider_when_existing_saturated(self) -> None:
+        # GIVEN two consumers and a provider whose endpoint has limit=1
+        domain, id_a, id_b = self._domain_with_two_requirers(self._PROVIDES_PGSQL_LIMIT_1)
+        pg = _make_charm("postgresql", {"database": self._PROVIDES_PGSQL_LIMIT_1})
+        fake = _FakeCharmhubClient(charm_responses=pg, find_result={"postgresql"})
+        builder = BundleBuilder(charmhub_client=fake)
+
+        # WHEN the first consumer instantiates provider-1, the second cannot reuse it (saturated)
+        builder._satisfy_endpoint(id_a, "db", domain)
+        assert len(domain.charms) == 3
+        builder._satisfy_endpoint(id_b, "db", domain)
+
+        # THEN a fresh provider-2 is instantiated (diagonal matching), still O(R) vars
+        assert len(domain.charms) == 4
+        assert domain.charms[3].spec.name == "postgresql"
+        assert len(domain.charm_integrations) == 2
+
+    def test_reuses_cross_chain_provider_instead_of_duplicating(self) -> None:
+        # Regression: without proven_saturated bypassing reuse, the algorithm must
+        # correctly reuse an in-domain provider added by a *different* requirer's
+        # chain rather than duplicating it.
+        #
+        # Scenario:
+        #   Round 1 — A instantiates P_1 (A.charms_added=[P_1]); B reuses P_1 (B.charms_added=[]).
+        #   Round 2 — B (charms_added empty) instantiates P_2; A's reuse pass finds P_2
+        #             (not yet wired to A, not saturated) and reuses it: no P_3 created.
+        domain, id_a, id_b = self._domain_with_two_requirers(self._PROVIDES_PGSQL)
+        pg = _make_charm("postgresql", {"database": self._PROVIDES_PGSQL})
+        fake = _FakeCharmhubClient(charm_responses=pg, find_result={"postgresql"})
+        builder = BundleBuilder(charmhub_client=fake)
+
+        # Round 1: A instantiates P_1, B reuses it (B adds no charm of its own).
+        builder._satisfy_endpoint(id_a, "db", domain)  # P_1 added (charm_2)
+        builder._satisfy_endpoint(id_b, "db", domain)  # B reuses P_1; B.charms_added=[]
+        assert len(domain.charms) == 3
+        assert len(domain.charm_integrations) == 2  # (A↔P_1), (B↔P_1)
+
+        # Round 2 — B's reuse pass finds P_1 already wired → falls through to instantiate.
+        # B.charms_added is empty, so _add_charm_for_charm_id succeeds → P_2 added.
+        result_b2 = builder._satisfy_endpoint(id_b, "db", domain)
+        assert result_b2 is True
+        assert len(domain.charms) == 4  # P_2 (charm_3) added for B
+        assert len(domain.charm_integrations) == 3  # (A↔P_1), (B↔P_1), (B↔P_2)
+
+        # A's reuse pass finds P_2 (charm_3) — not in A's integration_index, not saturated.
+        # Reuses it; no third instance created.
+        result_a2 = builder._satisfy_endpoint(id_a, "db", domain)
+        assert result_a2 is True
+        assert len(domain.charms) == 4  # no P_3 created
+        assert len(domain.charm_integrations) == 4  # (A↔P_1), (B↔P_1), (B↔P_2), (A↔P_2)
+
+    def test_instantiates_highest_priority_provider_first(self) -> None:
+        # GIVEN two provider candidates with different priorities, none in domain
         domain, charm_id = self._domain_with_requires_endpoint()
         low = _make_charm("pg-low", {"database": self._PROVIDES_PGSQL}, priority=1.0)
         high = _make_charm("pg-high", {"database": self._PROVIDES_PGSQL}, priority=2.0)
@@ -465,15 +554,138 @@ class TestExpandForEndpoint:
             find_result={"pg-low", "pg-high"},
         )
         builder = BundleBuilder(charmhub_client=fake)
-        builder._expand_for_endpoint(charm_id, "db", domain)  # adds pg-high
 
-        # WHEN called again (simulating the next CEGIS iteration)
-        result = builder._expand_for_endpoint(charm_id, "db", domain)
+        # WHEN satisfying
+        result = builder._satisfy_endpoint(charm_id, "db", domain)
 
-        # THEN the next-best candidate is added
+        # THEN the highest-priority candidate is instantiated (cheapest-first => optimal)
         assert result is True
-        assert len(domain.charms) == 3
-        assert domain.charms[2].spec.name == "pg-low"
+        assert domain.charms[1].spec.name == "pg-high"
+        assert len(domain.charm_integrations) == 1
+
+    def test_no_duplicate_variable_when_already_satisfied(self) -> None:
+        # GIVEN an endpoint already satisfied by a prior call
+        domain, charm_id = self._domain_with_requires_endpoint()
+        pg = _make_charm("postgresql", {"database": self._PROVIDES_PGSQL})
+        fake = _FakeCharmhubClient(charm_responses=pg, find_result={"postgresql"})
+        builder = BundleBuilder(charmhub_client=fake)
+        builder._satisfy_endpoint(charm_id, "db", domain)
+        n_charms, n_int = len(domain.charms), len(domain.charm_integrations)
+
+        # WHEN satisfying the same endpoint again
+        result = builder._satisfy_endpoint(charm_id, "db", domain)
+
+        # THEN no duplicate variable or charm is created: the reuse pair is already
+        # in integration_index, and per-parent dedup blocks a second identical charm
+        assert result is False
+        assert len(domain.charms) == n_charms
+        assert len(domain.charm_integrations) == n_int
+
+
+class TestSatisfyApplicationIntegration:
+    """BundleBuilder._satisfy_application_integration: named-endpoint wiring.
+
+    Unlike _satisfy_endpoint (which discovers a partner by interface), this method is
+    given the exact application and endpoint names from the user's spec.  It must:
+      1. Ensure both applications have a backing charm (adding one if needed).
+      2. Create the integration variable between the named endpoints.
+      3. Be idempotent: a second call for the same pair returns False (nothing new added).
+    """
+
+    _PROVIDES_PGSQL = CharmEndpoint(type=EndpointType.PROVIDES, interface="pgsql")
+    _REQUIRES_PGSQL = CharmEndpoint(type=EndpointType.REQUIRES, interface="pgsql")
+
+    def _base_domain(self) -> tuple[Domain, ModelRef]:
+        """Domain with two applications, neither yet backed by a charm."""
+        domain = Domain()
+        model_ref = ModelRef(name="m")
+        domain.models[model_ref] = DomainModel(
+            arch="amd64",
+            platform="kubernetes",
+            juju_version=_JUJU,
+            applications={
+                "app-req": DomainApplication(charm="app-req"),
+                "app-prov": DomainApplication(charm="app-prov"),
+            },
+        )
+        return domain, model_ref
+
+    def _tag(self, model_ref: ModelRef) -> ApplicationIntegrationExistsTag:
+        return ApplicationIntegrationExistsTag(
+            model=model_ref,
+            integration=[
+                AppEndpointPayload(application="app-req", endpoint="db"),
+                AppEndpointPayload(application="app-prov", endpoint="database"),
+            ],
+        )
+
+    def test_first_call_adds_charms_and_integration(self) -> None:
+        # GIVEN a domain with two un-backed applications
+        domain, model_ref = self._base_domain()
+        req = _make_charm("app-req", {"db": self._REQUIRES_PGSQL})
+        prov = _make_charm("app-prov", {"database": self._PROVIDES_PGSQL})
+        fake = _FakeCharmhubClient(charm_by_name={"app-req": req, "app-prov": prov})
+        builder = BundleBuilder(charmhub_client=fake)
+        tag = self._tag(model_ref)
+
+        # WHEN satisfying the named integration for the first time
+        result = builder._satisfy_application_integration(tag, domain)
+
+        # THEN both charms are added and exactly one integration variable is created
+        assert result is True
+        assert len(domain.charms) == 2
+        assert len(domain.charm_integrations) == 1
+        integ = domain.charm_integrations[0]
+        names = {domain.charms[integ.requires_charm_id].spec.name, domain.charms[integ.provides_charm_id].spec.name}
+        assert names == {"app-req", "app-prov"}
+
+    def test_idempotent_second_call_returns_false(self) -> None:
+        # GIVEN the integration was already satisfied once
+        domain, model_ref = self._base_domain()
+        req = _make_charm("app-req", {"db": self._REQUIRES_PGSQL})
+        prov = _make_charm("app-prov", {"database": self._PROVIDES_PGSQL})
+        # charm_by_name allows repeated calls without exhausting a response iterator
+        fake = _FakeCharmhubClient(charm_by_name={"app-req": req, "app-prov": prov})
+        builder = BundleBuilder(charmhub_client=fake)
+        tag = self._tag(model_ref)
+        builder._satisfy_application_integration(tag, domain)
+        n_charms, n_int = len(domain.charms), len(domain.charm_integrations)
+
+        # WHEN calling a second time with the same tag
+        result = builder._satisfy_application_integration(tag, domain)
+
+        # THEN nothing new is created and False is returned
+        assert result is False
+        assert len(domain.charms) == n_charms
+        assert len(domain.charm_integrations) == n_int
+
+    def test_mismatched_endpoint_names_return_false(self) -> None:
+        # GIVEN both charms are already satisfied (charms_added populated) via a good tag
+        domain, model_ref = self._base_domain()
+        req = _make_charm("app-req", {"db": self._REQUIRES_PGSQL})
+        prov = _make_charm("app-prov", {"database": self._PROVIDES_PGSQL})
+        fake = _FakeCharmhubClient(charm_by_name={"app-req": req, "app-prov": prov})
+        builder = BundleBuilder(charmhub_client=fake)
+        # First satisfy the valid integration so charms_added is populated
+        builder._satisfy_application_integration(self._tag(model_ref), domain)
+        n_charms, n_int = len(domain.charms), len(domain.charm_integrations)
+
+        # The tag references "wrong-endpoint" which does not exist on app-req
+        bad_tag = ApplicationIntegrationExistsTag(
+            model=model_ref,
+            integration=[
+                AppEndpointPayload(application="app-req", endpoint="wrong-endpoint"),
+                AppEndpointPayload(application="app-prov", endpoint="database"),
+            ],
+        )
+
+        # WHEN satisfying with mismatched endpoint names (charms already present, no new wiring possible)
+        result = builder._satisfy_application_integration(bad_tag, domain)
+
+        # THEN no new charm or integration variable is created and False is returned
+        assert result is False
+        assert len(domain.charms) == n_charms
+        assert len(domain.charm_integrations) == n_int
 
 
 class TestOptimizeSolution:
