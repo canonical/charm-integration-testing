@@ -236,9 +236,7 @@ class BundleBuilder:
     ) -> bool:
         if tag.kind == Assertions.CHARM_ENDPOINT_NON_OPTIONAL:
             non_optional = cast(CharmEndpointNonOptionalTag, tag)
-            return self._satisfy_endpoint(
-                non_optional.charm.charm_id, non_optional.charm.endpoint, domain
-            )
+            return self._satisfy_endpoint(non_optional.charm.charm_id, non_optional.charm.endpoint, domain)
 
         elif tag.kind == Assertions.APPLICATION_EXISTS:
             app_exists = cast(ApplicationExistsTag, tag)
@@ -325,9 +323,7 @@ class BundleBuilder:
                 get_or_create_integration(domain, req_cid, req_ep, prov_cid, prov_ep)
                 return True
 
-        self.logger.debug(
-            f"No partner found for endpoint {domain.charms[charm_id].spec.name}:{endpoint_name}"
-        )
+        self.logger.debug(f"No partner found for endpoint {domain.charms[charm_id].spec.name}:{endpoint_name}")
         return False
 
     def _endpoint_var_count(self, domain: Domain, cid: int, endpoint_name: str) -> int:

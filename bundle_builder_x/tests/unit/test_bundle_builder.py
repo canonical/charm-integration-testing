@@ -459,9 +459,7 @@ class TestSatisfyEndpoint:
     def test_reuses_existing_unlimited_provider_without_new_charm(self) -> None:
         # GIVEN a requirer plus an unlimited provider already in the domain
         domain, charm_id = self._domain_with_requires_endpoint()
-        add_charm_to_domain(
-            _make_charm("postgresql", {"database": self._PROVIDES_PGSQL}), domain, ModelRef(name="m")
-        )
+        add_charm_to_domain(_make_charm("postgresql", {"database": self._PROVIDES_PGSQL}), domain, ModelRef(name="m"))
         # No charm_responses: if the fetch path were taken it would error, proving reuse-first.
         fake = _FakeCharmhubClient(find_result={"postgresql"})
         builder = BundleBuilder(charmhub_client=fake)
