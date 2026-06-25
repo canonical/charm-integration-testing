@@ -16,7 +16,7 @@ from bundle_builder_x.domain import (
     add_charm_to_domain,
 )
 from bundle_builder_x.juju_version import JujuVersion
-from tests.unit._integration_helpers import materialize_all_integrations
+from tests.unit.integration_helpers import materialize_all_integrations
 
 _JUJU = JujuVersion(major=3, minor=6, patch=0)
 _CHANNEL = CharmChannel(track="latest", risk="stable", branch="")

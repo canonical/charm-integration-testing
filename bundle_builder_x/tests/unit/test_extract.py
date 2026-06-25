@@ -32,7 +32,7 @@ from bundle_builder_x.domain import (
 )
 from bundle_builder_x.extract import extract_solution
 from bundle_builder_x.juju_version import JujuVersion
-from tests.unit._integration_helpers import materialize_all_integrations
+from tests.unit.integration_helpers import materialize_all_integrations
 
 _JUJU = JujuVersion(major=3, minor=6, patch=0)
 _LOGGER = logging.getLogger("test_extract")
