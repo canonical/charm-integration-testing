@@ -73,24 +73,25 @@ jobs:
         id: creds
         shell: bash
         env:
-          KUBECONFIG_SECRET_NAME: ${{ steps.env_info.outputs.kubeconfig-secret }}
-          NOVARC_SECRET_NAME: ${{ steps.env_info.outputs.novarc-secret }}
+          CREDENTIALS_SECRET_NAME: ${{ steps.env_info.outputs.credentials-secret }}
+          CLOUD_TYPE: ${{ steps.env_info.outputs.cloud-type }}
           STG_SQA_KUBECONFIG: ${{ secrets.STG_SQA_KUBECONFIG }}
           PROD_SQA_KUBECONFIG: ${{ secrets.PROD_SQA_KUBECONFIG }}
           PROD_SQA_NOVARC: ${{ secrets.PROD_SQA_NOVARC }}
           PROD_PS7_KUBECONFIG: ${{ secrets.PROD_PS7_KUBECONFIG }}
           PROD_PS7_NOVARC: ${{ secrets.PROD_PS7_NOVARC }}
+          PROD_PS7_LXD: ${{ secrets.PROD_PS7_LXD }}
         run: |
-          if [[ -n "${KUBECONFIG_SECRET_NAME}" ]]; then
+          if [[ "${CLOUD_TYPE}" == "k8s" && -n "${CREDENTIALS_SECRET_NAME}" ]]; then
             echo "kubernetes=true" >> $GITHUB_OUTPUT
-            echo "${!KUBECONFIG_SECRET_NAME}" > "kubeconfig"
+            echo "${!CREDENTIALS_SECRET_NAME}" > "kubeconfig"
             echo "KUBECONFIG=$(realpath kubeconfig)" >> $GITHUB_ENV
           fi
-          if [[ -n "${NOVARC_SECRET_NAME}" ]]; then
+          if [[ "${CLOUD_TYPE}" == "o7k" && -n "${CREDENTIALS_SECRET_NAME}" ]]; then
             echo "openstack=true" >> $GITHUB_OUTPUT
             # Extract environment variables from RC file (handles both "export VAR=..." and "VAR=..." formats)
             # Mask each secret value to prevent exposure in logs
-            echo "${!NOVARC_SECRET_NAME}" | grep -E '^(export )?OS_' | sed 's/^export //' | while IFS='=' read -r key value; do
+            echo "${!CREDENTIALS_SECRET_NAME}" | grep -E '^(export )?OS_' | sed 's/^export //' | while IFS='=' read -r key value; do
               echo "::add-mask::$value"
               echo "$key=$value" >> $GITHUB_ENV
             done
