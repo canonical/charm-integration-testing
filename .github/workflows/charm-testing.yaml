@@ -237,22 +237,17 @@ jobs:
         id: target_creds
         shell: bash
         env:
-          KUBECONFIG_SECRET_NAME: ${{ steps.target_env_info.outputs.kubeconfig-secret }}
-          NOVARC_SECRET_NAME: ${{ steps.target_env_info.outputs.novarc-secret }}
+          CREDENTIALS_SECRET_NAME: ${{ steps.target_env_info.outputs.credentials-secret }}
           PROD_SQA_KUBECONFIG: ${{ secrets.PROD_SQA_KUBECONFIG }}
           STG_SQA_KUBECONFIG: ${{ secrets.STG_SQA_KUBECONFIG }}
           PROD_PS7_KUBECONFIG: ${{ secrets.PROD_PS7_KUBECONFIG }}
           PROD_SQA_NOVARC: ${{ secrets.PROD_SQA_NOVARC }}
           PROD_PS7_NOVARC: ${{ secrets.PROD_PS7_NOVARC }}
+          PROD_PS7_LXD: ${{ secrets.PROD_PS7_LXD }}
         run: |
-          if [[ -n "${KUBECONFIG_SECRET_NAME}" ]]; then
-            echo "kubeconfig<<EOF" >> "$GITHUB_OUTPUT"
-            echo "${!KUBECONFIG_SECRET_NAME}" >> "$GITHUB_OUTPUT"
-            echo "EOF" >> "$GITHUB_OUTPUT"
-          fi
-          if [[ -n "${NOVARC_SECRET_NAME}" ]]; then
-            echo "novarc<<EOF" >> "$GITHUB_OUTPUT"
-            echo "${!NOVARC_SECRET_NAME}" >> "$GITHUB_OUTPUT"
+          if [[ -n "${CREDENTIALS_SECRET_NAME}" ]]; then
+            echo "cloud-credentials<<EOF" >> "$GITHUB_OUTPUT"
+            echo "${!CREDENTIALS_SECRET_NAME}" >> "$GITHUB_OUTPUT"
             echo "EOF" >> "$GITHUB_OUTPUT"
           fi
       - name: Resolve neighbor credentials
@@ -260,22 +255,17 @@ jobs:
         if: ${{ inputs.neighbor_environment != '' }}
         shell: bash
         env:
-          KUBECONFIG_SECRET_NAME: ${{ steps.neighbor_env_info.outputs.kubeconfig-secret }}
-          NOVARC_SECRET_NAME: ${{ steps.neighbor_env_info.outputs.novarc-secret }}
+          CREDENTIALS_SECRET_NAME: ${{ steps.neighbor_env_info.outputs.credentials-secret }}
           PROD_SQA_KUBECONFIG: ${{ secrets.PROD_SQA_KUBECONFIG }}
           STG_SQA_KUBECONFIG: ${{ secrets.STG_SQA_KUBECONFIG }}
           PROD_PS7_KUBECONFIG: ${{ secrets.PROD_PS7_KUBECONFIG }}
           PROD_SQA_NOVARC: ${{ secrets.PROD_SQA_NOVARC }}
           PROD_PS7_NOVARC: ${{ secrets.PROD_PS7_NOVARC }}
+          PROD_PS7_LXD: ${{ secrets.PROD_PS7_LXD }}
         run: |
-          if [[ -n "${KUBECONFIG_SECRET_NAME}" ]]; then
-            echo "kubeconfig<<EOF" >> "$GITHUB_OUTPUT"
-            echo "${!KUBECONFIG_SECRET_NAME}" >> "$GITHUB_OUTPUT"
-            echo "EOF" >> "$GITHUB_OUTPUT"
-          fi
-          if [[ -n "${NOVARC_SECRET_NAME}" ]]; then
-            echo "novarc<<EOF" >> "$GITHUB_OUTPUT"
-            echo "${!NOVARC_SECRET_NAME}" >> "$GITHUB_OUTPUT"
+          if [[ -n "${CREDENTIALS_SECRET_NAME}" ]]; then
+            echo "cloud-credentials<<EOF" >> "$GITHUB_OUTPUT"
+            echo "${!CREDENTIALS_SECRET_NAME}" >> "$GITHUB_OUTPUT"
             echo "EOF" >> "$GITHUB_OUTPUT"
           fi
       - name: Setup Target Cloud
@@ -284,8 +274,7 @@ jobs:
         with:
           cloud-name: target-cloud
           cloud-type: ${{ steps.target_env_info.outputs.cloud-type }}
-          kubeconfig: ${{ steps.target_creds.outputs.kubeconfig }}
-          novarc: ${{ steps.target_creds.outputs.novarc }}
+          cloud-credentials: ${{ steps.target_creds.outputs.cloud-credentials }}
       - name: Post 'setup_target_failed' event
         if: ${{ failure() && env.TEST_OBSERVER_API != '' && inputs.execution_id != '' && steps.setup_target.conclusion == 'failure' }}
         uses: ./.github/actions/test-observer/post-events
@@ -302,8 +291,7 @@ jobs:
         with:
           cloud-name: neighbor-cloud
           cloud-type: ${{ steps.neighbor_env_info.outputs.cloud-type }}
-          kubeconfig: ${{ steps.neighbor_creds.outputs.kubeconfig }}
-          novarc: ${{ steps.neighbor_creds.outputs.novarc }}
+          cloud-credentials: ${{ steps.neighbor_creds.outputs.cloud-credentials }}
       - name: Post 'setup_neighbor_failed' event
         if: ${{ failure() && env.TEST_OBSERVER_API != '' && inputs.execution_id != '' && steps.setup_neighbor.conclusion == 'failure' }}
         uses: ./.github/actions/test-observer/post-events

@@ -14,16 +14,12 @@ outputs:
     description: Architecture string (e.g. amd64).
     value: ${{ steps.lookup.outputs.arch }}
   cloud-type:
-    description: Cloud setup type (k8s or o7k).
+    description: Cloud setup type (k8s, o7k, or lxd).
     value: ${{ steps.lookup.outputs.cloud-type }}
-  kubeconfig-secret:
-    description: Name of the GitHub Actions secret holding the kubeconfig (k8s environments
-      only).
-    value: ${{ steps.lookup.outputs.kubeconfig-secret }}
-  novarc-secret:
-    description: Name of the GitHub Actions secret holding the novarc (o7k environments
-      only).
-    value: ${{ steps.lookup.outputs.novarc-secret }}
+  credentials-secret:
+    description: Name of the GitHub Actions secret holding the cloud credentials
+      (kubeconfig for k8s, novarc for o7k, LXD credentials YAML for lxd).
+    value: ${{ steps.lookup.outputs.credentials-secret }}
   bootstrap-config:
     description: Path to a temporary file containing the Juju bootstrap config as
       JSON.
@@ -58,8 +54,12 @@ runs:
         fi
         arch=$(yq ".environments[\"${ENVIRONMENT_NAME}\"].arch" "${table}")
         cloud_type=$(yq ".environments[\"${ENVIRONMENT_NAME}\"][\"cloud-type\"]" "${table}")
-        kubeconfig_secret=$(yq ".environments[\"${ENVIRONMENT_NAME}\"][\"kubeconfig-secret\"] // \"\"" "${table}")
-        novarc_secret=$(yq ".environments[\"${ENVIRONMENT_NAME}\"][\"novarc-secret\"] // \"\"" "${table}")
+        case "${cloud_type}" in
+          k8s) credentials_secret=$(yq ".environments[\"${ENVIRONMENT_NAME}\"][\"kubeconfig-secret\"] // \"\"" "${table}") ;;
+          o7k) credentials_secret=$(yq ".environments[\"${ENVIRONMENT_NAME}\"][\"novarc-secret\"] // \"\"" "${table}") ;;
+          lxd) credentials_secret=$(yq ".environments[\"${ENVIRONMENT_NAME}\"][\"lxd-secret\"] // \"\"" "${table}") ;;
+          *)   credentials_secret="" ;;
+        esac
 
         # Write Juju config objects to per-environment temp files so that
         # multiple calls (e.g. target + neighbor) don't overwrite each other.
@@ -73,8 +73,7 @@ runs:
         echo "platform=${platform}" >> "${GITHUB_OUTPUT}"
         echo "arch=${arch}" >> "${GITHUB_OUTPUT}"
         echo "cloud-type=${cloud_type}" >> "${GITHUB_OUTPUT}"
-        echo "kubeconfig-secret=${kubeconfig_secret}" >> "${GITHUB_OUTPUT}"
-        echo "novarc-secret=${novarc_secret}" >> "${GITHUB_OUTPUT}"
+        echo "credentials-secret=${credentials_secret}" >> "${GITHUB_OUTPUT}"
         echo "bootstrap-config=${bootstrap_config_file}" >> "${GITHUB_OUTPUT}"
         echo "bootstrap-constraints=${bootstrap_constraints_file}" >> "${GITHUB_OUTPUT}"
         echo "model-config=${model_config_file}" >> "${GITHUB_OUTPUT}"
