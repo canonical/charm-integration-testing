@@ -132,14 +132,18 @@ class BundleBuilder:
         return extract_solution(z3_model, domain, logger=self.logger)
 
     def _solve(self, domain: Domain) -> z3.ModelRef:
-        # Iterative loop: expand domain until satisfiable
-        max_iterations = 100
-        for iteration in range(max_iterations):
-            self.logger.info(f"Iteration {iteration + 1}/{max_iterations}")
+        # Iterative CEGIS loop: expand domain until satisfiable.
+        # Termination relies on the per-iteration solver timeout; there is no hard
+        # iteration cap so that arbitrarily complex dependency graphs can converge.
+        iteration = 0
+        while True:
+            iteration += 1
+            self.logger.info(f"Iteration {iteration}")
 
-            # Create solver with unsat core tracking
+            # Create solver with unsat core tracking and a per-iteration timeout
             solver = z3.Solver()
             solver.set("unsat_core", True)
+            solver.set("timeout", int(self.optimize_timeout.total_seconds() * 1000))
 
             # Add constraints
             t_constraints = self.timeline.on(f"iter{iteration}/add_constraints")
@@ -172,9 +176,10 @@ class BundleBuilder:
 
                 self._handle_unsat_core(unsat_core, domain)
             else:
-                raise UncompletableBundleError("Solver returned unknown")
-
-        raise UncompletableBundleError(f"Could not satisfy constraints after {max_iterations} iterations")
+                raise UncompletableBundleError(
+                    f"Solver timed out after {self.optimize_timeout} at iteration {iteration}; "
+                    "the domain may be too large to solve"
+                )
 
     def _handle_unsat_core(self, unsat_core: z3.AstVector, domain: Domain) -> None:
         tags: list[AssertionTag] = sorted(
