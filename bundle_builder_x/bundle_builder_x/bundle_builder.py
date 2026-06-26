@@ -192,6 +192,7 @@ class BundleBuilder:
             if self._handle_failed_assertion(tag, domain):
                 self.logger.info(f"Expanded domain to handle failed assertion tag: {tag}")
                 expanded = True
+                break  # add at most one charm per CEGIS iteration; re-solve before expanding further
         if not expanded:
             raise UncompletableBundleError(unsat_core=tags)
 
@@ -273,6 +274,12 @@ class BundleBuilder:
     ) -> bool:
         """Expand the domain to satisfy an unfulfilled endpoint.
 
+        Candidates are sorted by priority (descending) and only the single
+        highest-priority charm that can be added is selected.  This ensures
+        each CEGIS iteration introduces at most one new charm, keeping the
+        solver's search space small.  Previously all candidates were added at
+        once, which created an all-pairs integration variable explosion.
+
         Tries the owning model first. If no same-platform charm can satisfy the
         endpoint (e.g. a kubernetes charm requiring an interface that only a
         machine charm provides), tries other models. Adding a provider to
@@ -287,19 +294,20 @@ class BundleBuilder:
                 f"No charms found for endpoint {domain.charms[charm_id].spec.name}:{endpoint_name} "
                 f"in model '{owning_model.key}'"
             )
-        results = [self._add_charm_for_charm_id(charm, charm_id, domain, owning_model) for charm in charms]
+        for charm in sorted(charms, key=lambda c: c.priority, reverse=True):
+            result = self._add_charm_for_charm_id(charm, charm_id, domain, owning_model)
+            if result is not None:
+                return True
 
-        if not any(results):
-            for other_model_ref in domain.models:
-                if other_model_ref == owning_model:
-                    continue
-                other_charms = self._get_charms_for_endpoint(charm_id, endpoint_name, domain, other_model_ref)
-                other_results = [
-                    self._add_charm_for_charm_id(charm, charm_id, domain, other_model_ref) for charm in other_charms
-                ]
-                if any(other_results):
+        for other_model_ref in domain.models:
+            if other_model_ref == owning_model:
+                continue
+            other_charms = self._get_charms_for_endpoint(charm_id, endpoint_name, domain, other_model_ref)
+            for charm in sorted(other_charms, key=lambda c: c.priority, reverse=True):
+                result = self._add_charm_for_charm_id(charm, charm_id, domain, other_model_ref)
+                if result is not None:
                     return True
-        return any(results)
+        return False
 
     def _handle_peer_channel_mismatch(
         self,
