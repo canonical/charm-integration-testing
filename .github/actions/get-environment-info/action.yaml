@@ -17,8 +17,8 @@ outputs:
     description: Cloud setup type (k8s, o7k, or lxd).
     value: ${{ steps.lookup.outputs.cloud-type }}
   credentials-secret:
-    description: Name of the GitHub Actions secret holding the cloud credentials
-      (kubeconfig for k8s, novarc for o7k, LXD credentials YAML for lxd).
+    description: Name of the GitHub Actions secret holding the cloud credentials (kubeconfig
+      for k8s, novarc for o7k, LXD credentials YAML for lxd).
     value: ${{ steps.lookup.outputs.credentials-secret }}
   bootstrap-config:
     description: Path to a temporary file containing the Juju bootstrap config as
