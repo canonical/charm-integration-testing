@@ -30,6 +30,22 @@ overrides:
     provides:
       cos-agent:
         optional: true
+    configs:
+      profile: [testing, production]
     constraints:
-      # Minimum 3 units for HA, but allow more for larger clusters.
-      - len(units({self})) >= 3
+      # Production profile: 8 GB RAM enforced, 3 units required, 4 cores + 20 GB disk recommended.
+      # Note: default profile is "testing" — these constraints only apply when explicitly set.
+      # Source: ProductionProfile in opensearch-charms-single-kernel/core/models.py
+      # Testing profile: 1 unit is explicitly supported — confirmed by the charm's own integration
+      # test (test_deploy_and_remove_single_unit), which deploys 1 unit and asserts active status.
+      - 'config[profile] == "production" => len(units({self})) >= 3'
+      # Production profile enforces 8 GB RAM minimum per unit.
+      # Source: ProductionProfile.memory_requirements.memory_size = 8 * _1GB_IN_KB in core/models.py
+      - 'config[profile] == "production" => juju_constraint[mem] >= 8192'
+      # 4 cores recommended for production OpenSearch indexing/query throughput.
+      - 'config[profile] == "production" => juju_constraint[cores] >= 4'
+      # 20 GB disk floor for segment storage + JVM heap dumps in production.
+      - 'config[profile] == "production" => juju_constraint[root-disk] >= 20480'
+      # Testing profile: fixed 1 GB JVM heap — global defaults suffice.
+      # Source: TestingProfile in core/models.py; memory_size=None, jvm_heap_percentage=None,
+      #   get_jvm_heap_size() falls back to _1GB_IN_KB; ClusterTopologyRequirements(cluster_managers=1, data=1)

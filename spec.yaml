@@ -1,0 +1,7 @@
+---
+models:
+  - name: default
+    platform: machine
+    applications:
+      opensearch:
+        charm: opensearch

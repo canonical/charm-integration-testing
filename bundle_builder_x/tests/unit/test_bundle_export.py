@@ -296,14 +296,14 @@ class TestBundleExport:
         # THEN only mem appears in the constraints string
         assert exported["applications"]["app"]["constraints"] == "mem=2048M"
 
-    def test_juju_constraints_on_kubernetes(self) -> None:
-        # GIVEN a kubernetes bundle with resource constraints (interpreted as caps by Juju)
+    def test_juju_constraints_on_kubernetes_omits_cores_and_root_disk(self) -> None:
+        # GIVEN a kubernetes bundle with all three resource dimensions set
         bundle = _make_bundle(
             platform="kubernetes",
             applications={
                 "app": Application(
                     charm=_make_charm("app"),
-                    juju_constraints={"cores": 1, "mem": 512},
+                    juju_constraints={"cores": 2, "mem": 512, "root-disk": 8192},
                 )
             },
         )
@@ -311,8 +311,26 @@ class TestBundleExport:
         # WHEN exporting
         exported = yaml.safe_load(bundle.export())
 
-        # THEN constraints string is emitted (Juju interprets as caps on k8s)
-        assert exported["applications"]["app"]["constraints"] == "cores=1 mem=512M"
+        # THEN only mem is emitted — cores and root-disk are not supported by Juju on K8s
+        assert exported["applications"]["app"]["constraints"] == "mem=512M"
+
+    def test_juju_constraints_on_machine_emits_all_dimensions(self) -> None:
+        # GIVEN a machine bundle with all three resource dimensions set
+        bundle = _make_bundle(
+            platform="machine",
+            applications={
+                "app": Application(
+                    charm=_make_charm("app"),
+                    juju_constraints={"cores": 2, "mem": 512, "root-disk": 8192},
+                )
+            },
+        )
+
+        # WHEN exporting
+        exported = yaml.safe_load(bundle.export())
+
+        # THEN all three dimensions are emitted
+        assert exported["applications"]["app"]["constraints"] == "cores=2 mem=512M root-disk=8192M"
 
     def test_local_relations_sorted(self) -> None:
         # GIVEN a bundle with two local integrations

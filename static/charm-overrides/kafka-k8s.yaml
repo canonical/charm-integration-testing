@@ -1,8 +1,16 @@
 ---
+# Source: https://github.com/canonical/kafka-k8s-operator
+#
 # When client-cas or oauth is integrated, certificates is also required.
 # When zookeeper is integrated (pre-track-4 and latest/* non-stable), certificates is also required.
 # Track 4 is KRaft mode - the zookeeper endpoint no longer exists.
 # See: https://github.com/canonical/charm-integration-testing/issues/408
+#
+# Resource constraints (production profile):
+#   JVM heap = JVM_MEM_MAX_GB = 6 GB  (src/literals.py, production default)
+#   6 GB heap + OS overhead → 8 GB RAM floor
+#   MIN_REPLICAS = 3  (src/literals.py)
+#   On K8s only mem is emitted (cores/root-disk are not supported by Juju K8s).
 overrides:
   - criteria:
       - track: '4'
@@ -17,6 +25,14 @@ overrides:
       - 'bool(endpoint[client-cas]) or bool(endpoint[oauth]) => bool(endpoint[certificates])'
       - 'bool(endpoint[peer-cluster]) => config[roles] == "broker"'
       - 'not bool(endpoint[peer-cluster]) => config[roles] == "broker,controller"'
+      # Production profile heap = JVM_MEM_MAX_GB = 6 GB + ~2 GB OS overhead = 8 GB.
+      # Source: heap_opts() in src/managers/config.py; JVM_MEM_MAX_GB in src/literals.py
+      - 'config[profile] != "testing" => juju_constraint[mem] >= 8192'
+      # Minimum 3 brokers in production: WaitingStatus below MIN_REPLICAS.
+      # Source: NOT_ENOUGH_BROKERS status, MIN_REPLICAS = 3 in src/literals.py.
+      - 'config[profile] != "testing" => len(units({self})) >= 3'
+      # Testing profile: heap = JVM_MEM_MIN_GB = 1 GB — global mem default (1024 MB) suffices.
+      # Source: heap_opts() uses JVM_MEM_MIN_GB when profile == PROFILE_TESTING in src/managers/config.py
 
   # latest/stable is on ubuntu/20.04 (EOL April 2025). It uses the old 'kafka'
   # interface name (renamed to 'kafka-client' in track 3). No public Charmhub
