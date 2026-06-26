@@ -2409,6 +2409,23 @@ type = "directory"
 url = "validators/cve_catalog"
 
 [[package]]
+name = "validators-livepatch-pro-airgapped-server"
+version = "0.1.0"
+description = "Validator for livepatch-pro-airgapped-server interface"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+validators-base = "*"
+
+[package.source]
+type = "directory"
+url = "validators/livepatch_pro_airgapped_server"
+
+[[package]]
 name = "validators-loki-push-api"
 version = "0.1.0"
 description = "Validator for loki_push_api interface"
@@ -2538,6 +2555,7 @@ pydantic = ">=2.0.0"
 validators-base = "*"
 validators-config-server = "*"
 validators-cve-catalog = "*"
+validators-livepatch-pro-airgapped-server = "*"
 validators-loki-push-api = "*"
 validators-object-storage = "*"
 validators-opensearch-client = "*"
@@ -2703,4 +2721,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<4.0"
-content-hash = "5f5d98e4f24ed835cf0758a99d65b363a1306dd4a3ab88e15e3c4365596f4763"
+content-hash = "f4a1ab4181248d59a1baa6da473835aec2e94aea16876139ae96221b7909dfcd"
