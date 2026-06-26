@@ -24,6 +24,7 @@ dependencies = [
     "validators-temporal-host-info",
     "validators-config-server",
     "validators-cve-catalog",
+    "validators-grpc",
 ]
 
 [build-system]

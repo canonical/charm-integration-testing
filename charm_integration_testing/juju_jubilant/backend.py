@@ -48,6 +48,28 @@ from .wait import (
 )
 
 
+def _ignore_unreadable(directory: str, contents: list[str]) -> list[str]:
+    """Return names of files in *directory* that cannot actually be opened.
+
+    Used as the ``ignore`` argument to :func:`shutil.copytree` so that
+    unreadable files (e.g. stale editor temp files on virtiofs mounts) are
+    silently skipped instead of aborting the copy.
+    """
+    import os
+
+    skip: list[str] = []
+    for name in contents:
+        path = os.path.join(directory, name)
+        if not os.path.isfile(path):
+            continue
+        try:
+            with open(path, "rb"):
+                pass
+        except OSError:
+            skip.append(name)
+    return skip
+
+
 class JubilantBackend(JujuCmdBackend):
     client: JubilantClient
     _kubernetes_client: KubernetesClient | None
@@ -401,7 +423,7 @@ class JubilantBackend(JujuCmdBackend):
             with tempfile.TemporaryDirectory(dir=home) as staging:
                 staged = pathlib.Path(staging) / source_path.name
                 if source_path.is_dir():
-                    shutil.copytree(source_path, staged)
+                    shutil.copytree(source_path, staged, ignore=_ignore_unreadable)
                 else:
                     shutil.copy2(source_path, staged)
                 self.client.model(model).cli("scp", *options, str(staged), destination)
