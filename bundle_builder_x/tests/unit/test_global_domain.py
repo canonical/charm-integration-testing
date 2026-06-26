@@ -15,6 +15,7 @@ from bundle_builder_x.domain import (
     add_charm_to_domain,
 )
 from bundle_builder_x.juju_version import JujuVersion
+from tests.unit.integration_helpers import materialize_all_integrations
 
 
 def _make_domain(models: dict[ModelRef, DomainModel]) -> Domain:
@@ -103,6 +104,7 @@ class TestAddCharmCrossModelPairing:
         )
         add_charm_to_domain(pg, domain, ModelRef(name="m1"))
         add_charm_to_domain(proxy, domain, ModelRef(name="m1"))
+        materialize_all_integrations(domain)
 
         # THEN a local DomainCharmIntegration is created (no cross-model)
         assert len(domain.charm_integrations) == 1
@@ -142,6 +144,7 @@ class TestAddCharmCrossModelPairing:
         )
         add_charm_to_domain(pg, domain, ModelRef(name="machine"))
         add_charm_to_domain(proxy, domain, ModelRef(name="k8s"))
+        materialize_all_integrations(domain)
 
         # THEN no local integration, but a cross-model DomainCharmIntegration is created
         assert len(domain.charm_integrations) == 1
@@ -290,12 +293,14 @@ class TestCMRIntegrationMapping:
 
         # WHEN only the local (consumer) charm is added
         add_charm_to_domain(consumer, domain, ModelRef(name="consumer-model"))
+        materialize_all_integrations(domain)
 
         # THEN no CMR mapping exists yet
         assert _cmr_mapping_count(domain, ModelRef(name="consumer-model")) == 0
 
         # WHEN the remote (provider) charm is also added
         add_charm_to_domain(provider, domain, ModelRef(name="provider-model"))
+        materialize_all_integrations(domain)
 
         # THEN exactly one CMR mapping is created for the consumer-model
         assert _cmr_mapping_count(domain, ModelRef(name="consumer-model")) == 1
@@ -345,12 +350,14 @@ class TestCMRIntegrationMapping:
 
         # WHEN the provider charm is added first (reverse order)
         add_charm_to_domain(provider, domain, ModelRef(name="provider-model"))
+        materialize_all_integrations(domain)
 
         # THEN still no CMR mapping yet
         assert _cmr_mapping_count(domain, ModelRef(name="consumer-model")) == 0
 
         # WHEN the consumer charm is added second
         add_charm_to_domain(consumer, domain, ModelRef(name="consumer-model"))
+        materialize_all_integrations(domain)
 
         # THEN the mapping is created correctly
         assert _cmr_mapping_count(domain, ModelRef(name="consumer-model")) == 1
@@ -408,6 +415,7 @@ class TestAddCharmToDomainContainerScopeGating:
         )
         add_charm_to_domain(principal, domain, ModelRef(name="m"))
         add_charm_to_domain(subordinate, domain, ModelRef(name="m"))
+        materialize_all_integrations(domain)
 
         juju_info = [i for i in domain.charm_integrations if domain.integration_interface(i) == "juju-info"]
         assert len(juju_info) == 1
@@ -430,6 +438,7 @@ class TestAddCharmToDomainContainerScopeGating:
         )
         add_charm_to_domain(principal, domain, ModelRef(name="k"))
         add_charm_to_domain(subordinate, domain, ModelRef(name="k"))
+        materialize_all_integrations(domain)
 
         juju_info = [i for i in domain.charm_integrations if domain.integration_interface(i) == "juju-info"]
         assert len(juju_info) == 0
@@ -442,6 +451,7 @@ class TestAddCharmToDomainContainerScopeGating:
         charm_b = _make_charm("pg", {"database": CharmEndpoint(type=EndpointType.PROVIDES, interface="pgsql")})
         add_charm_to_domain(charm_a, domain, ModelRef(name="k"))
         add_charm_to_domain(charm_b, domain, ModelRef(name="k"))
+        materialize_all_integrations(domain)
 
         assert len([i for i in domain.charm_integrations if domain.integration_interface(i) == "pgsql"]) == 1
 
@@ -468,6 +478,7 @@ class TestAddCharmToDomainContainerScopeGating:
         )
         add_charm_to_domain(principal, domain, ModelRef(name="k"))
         add_charm_to_domain(subordinate, domain, ModelRef(name="k"))
+        materialize_all_integrations(domain)
 
         assert len(domain.charm_integrations) == 0
 
@@ -492,6 +503,7 @@ class TestAddCharmToDomainContainerScopeGating:
         )
         add_charm_to_domain(principal, domain, ModelRef(name="m"))
         add_charm_to_domain(subordinate, domain, ModelRef(name="k"))
+        materialize_all_integrations(domain)
 
         juju_info = [i for i in domain.charm_integrations if domain.integration_interface(i) == "juju-info"]
         assert len(juju_info) == 0
@@ -517,6 +529,7 @@ class TestAddCharmToDomainContainerScopeGating:
         )
         add_charm_to_domain(principal, domain, ModelRef(name="m1"))
         add_charm_to_domain(subordinate, domain, ModelRef(name="m2"))
+        materialize_all_integrations(domain)
 
         juju_info = [i for i in domain.charm_integrations if domain.integration_interface(i) == "juju-info"]
         assert len(juju_info) == 0
@@ -548,6 +561,7 @@ class TestIntegrationOfferName:
         )
         add_charm_to_domain(provider_charm, domain, ModelRef(name="provider-model"))
         add_charm_to_domain(requirer_charm, domain, ModelRef(name="consumer-model"))
+        materialize_all_integrations(domain)
         integration = domain.charm_integrations[0]
         return domain, integration
 

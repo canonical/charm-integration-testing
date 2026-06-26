@@ -32,7 +32,7 @@ from .assertion_tags import (
     SubordinateBaseMismatchTag,
 )
 from .bundle import Solution
-from .charm import Charm, CharmChannel, EndpointScope, EndpointType
+from .charm import Charm, CharmChannel, CharmEndpoint, EndpointScope, EndpointType
 from .charmhub import CharmhubClient
 from .charmhub_http import CharmReleaseNotFoundException
 from .constraints import add_constraints
@@ -40,6 +40,7 @@ from .domain import (
     Domain,
     ModelRef,
     add_charm_to_domain,
+    get_or_create_integration,
 )
 from .domain_builder import DomainBuilder
 from .extract import extract_solution
@@ -186,6 +187,7 @@ class BundleBuilder:
             self._merge_mismatch_tags([AssertionTag.decode(str(a)) for a in unsat_core]),
             key=lambda a: (_EXPANSION_PRIORITY.get(a.kind, len(_EXPANSION_PRIORITY)), str(a)),
         )
+
         expanded = False
         for tag in tags:
             self.logger.debug(f"Unsat core item: {tag}")
@@ -235,7 +237,7 @@ class BundleBuilder:
     ) -> bool:
         if tag.kind == Assertions.CHARM_ENDPOINT_NON_OPTIONAL:
             non_optional = cast(CharmEndpointNonOptionalTag, tag)
-            return self._expand_for_endpoint(non_optional.charm.charm_id, non_optional.charm.endpoint, domain)
+            return self._satisfy_endpoint(non_optional.charm.charm_id, non_optional.charm.endpoint, domain)
 
         elif tag.kind == Assertions.APPLICATION_EXISTS:
             app_exists = cast(ApplicationExistsTag, tag)
@@ -245,16 +247,11 @@ class BundleBuilder:
 
         elif tag.kind == Assertions.APPLICATION_INTEGRATION_EXISTS:
             app_integration_exists = cast(ApplicationIntegrationExistsTag, tag)
-            results = []
-            for endpoint in app_integration_exists.integration:
-                model_ref = endpoint.model if endpoint.model.name is not None else app_integration_exists.model
-                charm = self._get_charm_for_application(endpoint.application, domain, model_ref)
-                results.append(self._add_charm_for_application(charm, endpoint.application, domain, model_ref))
-            return any(results)
+            return self._satisfy_application_integration(app_integration_exists, domain)
 
         elif tag.kind == Assertions.ENDPOINT_COUNT_MATCHES_INTEGRATIONS:
             count_tag = cast(EndpointCountMatchesIntegrationsTag, tag)
-            return self._expand_for_endpoint(count_tag.charm.charm_id, count_tag.charm.endpoint, domain)
+            return self._satisfy_endpoint(count_tag.charm.charm_id, count_tag.charm.endpoint, domain)
 
         elif tag.kind == Assertions.PEER_CHANNEL_MISMATCH:
             mismatch = cast(PeerChannelMismatchTag, tag)
@@ -266,48 +263,323 @@ class BundleBuilder:
 
         return False
 
-    def _expand_for_endpoint(
+    def _satisfy_endpoint(
         self,
         charm_id: int,
         endpoint_name: str,
         domain: Domain,
+        _allow_unblocking: bool = True,
     ) -> bool:
-        """Expand the domain to satisfy an unfulfilled endpoint.
+        """Create exactly ONE integration variable to help satisfy charm_id:endpoint_name.
 
-        Candidates are sorted by priority (descending) and only the single
-        highest-priority charm that can be added is selected.  This ensures
-        each CEGIS iteration introduces at most one new charm, keeping the
-        solver's search space small.  Previously all candidates were added at
-        once, which created an all-pairs integration variable explosion.
+        Capacity-aware CEGIS on integrations:
+          1. REUSE - connect to an existing in-domain charm whose compatible
+             endpoint has spare capacity. Creates one integration variable; no
+             new charm.
+          2. INSTANTIATE - if no reusable partner exists, fetch a new charm from
+             Charmhub, add it, and create one integration variable.
+          3. UNBLOCK - if Passes 1 and 2 both fail but existing integration
+             variables exist for this endpoint, the partner charm(s) may be
+             blocked by their own unresolved required endpoints.  Satisfy those
+             endpoints (one level deep only) to allow the solver to activate the
+             existing integration in the next iteration.
 
-        Tries the owning model first. If no same-platform charm can satisfy the
-        endpoint (e.g. a kubernetes charm requiring an interface that only a
-        machine charm provides), tries other models. Adding a provider to
-        another model creates a cross-model DomainCharmIntegration that the solver can activate on
-        the next iteration.
+        Reuse-before-instantiate keeps the integration-variable count O(endpoint
+        demand) instead of O(providers x requirers):
+          - unlimited provider: every requirer reuses the single instance.
+          - limit:N provider: the instance saturates after N integrations, so the
+            next requirer instantiates a fresh one -> ceil(demand / N) instances.
+
+        The reuse pass already handles deduplication via integration_index (skipping
+        providers already wired to this requirer) and saturation via _is_saturated.
+        This means the reuse pass naturally finds the first available unsaturated
+        partner from any chain, including those added by independent requirer chains.
+
+        Tries the owning model first, then other models (cross-model relations).
+        Returns True if a variable (and possibly a charm) was added.
         """
         owning_model = domain.charms[charm_id].model
+        models_in_order = [owning_model] + [m for m in domain.models if m != owning_model]
 
-        charms = self._get_charms_for_endpoint(charm_id, endpoint_name, domain, owning_model)
-        if not charms:
-            self.logger.debug(
-                f"No charms found for endpoint {domain.charms[charm_id].spec.name}:{endpoint_name} "
-                f"in model '{owning_model.key}'"
-            )
-        for charm in sorted(charms, key=lambda c: c.priority, reverse=True):
-            result = self._add_charm_for_charm_id(charm, charm_id, domain, owning_model)
-            if result is not None:
+        # Pass 1: reuse an existing in-domain partner that has spare capacity.
+        # _best_reuse_partner skips providers already wired to charm_id (via
+        # integration_index) and saturated providers (via _is_saturated), so
+        # this pass never creates duplicate variables.
+        for model_ref in models_in_order:
+            pair = self._best_reuse_partner(charm_id, endpoint_name, domain, model_ref)
+            if pair is not None:
+                req_cid, req_ep, prov_cid, prov_ep = pair
+                get_or_create_integration(domain, req_cid, req_ep, prov_cid, prov_ep)
+                self.logger.debug(
+                    f"Reusing in-domain partner for {domain.charms[charm_id].spec.name}:{endpoint_name} "
+                    f"-> charm id {prov_cid if prov_cid != charm_id else req_cid}"
+                )
                 return True
 
-        for other_model_ref in domain.models:
-            if other_model_ref == owning_model:
+        # Pass 2: instantiate a new partner charm from Charmhub and wire to it.
+        for model_ref in models_in_order:
+            charms = self._get_charms_for_endpoint(charm_id, endpoint_name, domain, model_ref)
+            for partner in sorted(charms, key=lambda c: c.priority, reverse=True):
+                new_id = self._add_charm_for_charm_id(partner, charm_id, domain, model_ref)
+                if new_id is None:
+                    continue
+                pair = self._semantic_pair_with_charm(charm_id, endpoint_name, new_id, domain)
+                if pair is None:
+                    continue  # partner matched the interface query but had no compatible endpoint
+                req_cid, req_ep, prov_cid, prov_ep = pair
+                get_or_create_integration(domain, req_cid, req_ep, prov_cid, prov_ep)
+                return True
+
+        # Pass 3: if passes 1 and 2 couldn't help (endpoint saturated or no new
+        # charm found), try to unblock existing integration partners.  The lazy
+        # CEGIS algorithm may have already wired this endpoint to a partner whose
+        # own required endpoints are unresolved, preventing that partner from
+        # existing and therefore preventing the integration from being active.
+        # Satisfying those downstream requirements allows the solver to activate
+        # the existing integration variable next iteration.
+        # _allow_unblocking=False is passed when this call is already inside
+        # _unblock_integration_partners to prevent infinite recursion.
+        if not _allow_unblocking:
+            self.logger.debug(f"No partner found for endpoint {domain.charms[charm_id].spec.name}:{endpoint_name}")
+            return False
+
+        made_progress = self._unblock_integration_partners(charm_id, endpoint_name, domain)
+
+        if not made_progress:
+            self.logger.debug(f"No partner found for endpoint {domain.charms[charm_id].spec.name}:{endpoint_name}")
+        return made_progress
+
+    def _unblock_integration_partners(self, charm_id: int, endpoint_name: str, domain: Domain) -> bool:
+        """Satisfy unresolved required endpoints on existing integration partners.
+
+        When endpoint (charm_id, endpoint_name) is saturated or has no new
+        candidate partners, the lazy CEGIS algorithm may be stuck: existing
+        integration variables cannot be activated because the partner charm
+        cannot exist (its own required endpoints have no integration variables
+        yet).  This pass finds such partners and calls _satisfy_endpoint for
+        their unresolved required endpoints, allowing the solver to activate
+        the existing integration in the next iteration.
+
+        Calls _satisfy_endpoint with _allow_unblocking=False to limit the
+        expansion to one level and prevent unbounded recursive unblocking.
+        """
+        made_progress = False
+        for integration in domain.charm_integrations:
+            if integration.requires_charm_id == charm_id and integration.requires_endpoint == endpoint_name:
+                partner_id = integration.provides_charm_id
+            elif integration.provides_charm_id == charm_id and integration.provides_endpoint == endpoint_name:
+                partner_id = integration.requires_charm_id
+            else:
                 continue
-            other_charms = self._get_charms_for_endpoint(charm_id, endpoint_name, domain, other_model_ref)
-            for charm in sorted(other_charms, key=lambda c: c.priority, reverse=True):
-                result = self._add_charm_for_charm_id(charm, charm_id, domain, other_model_ref)
-                if result is not None:
-                    return True
-        return False
+            for ep_name, spec_ep in domain.charms[partner_id].spec.endpoints.items():
+                if not spec_ep.optional and self._endpoint_var_count(domain, partner_id, ep_name) == 0:
+                    if self._satisfy_endpoint(partner_id, ep_name, domain, _allow_unblocking=False):
+                        made_progress = True
+        return made_progress
+
+    def _endpoint_var_count(self, domain: Domain, cid: int, endpoint_name: str) -> int:
+        """Number of integration variables already incident on (cid, endpoint_name)."""
+        count = 0
+        for integration in domain.charm_integrations:
+            if (integration.requires_charm_id == cid and integration.requires_endpoint == endpoint_name) or (
+                integration.provides_charm_id == cid and integration.provides_endpoint == endpoint_name
+            ):
+                count += 1
+        return count
+
+    def _is_saturated(self, domain: Domain, cid: int, endpoint_name: str) -> bool:
+        """True when (cid, endpoint_name) already has >= limit integration variables.
+
+        An endpoint with an explicit limit can be ON in at most `limit` integrations,
+        so offering a (limit+1)th variable cannot help: if the solver wanted to use
+        this endpoint for the new consumer it would have to drop an existing
+        consumer, which then re-triggers expansion and obtains its own partner. So
+        skipping a saturated endpoint and instantiating a fresh partner instead is
+        both complete and avoids the O(consumers x providers) variable blow-up.
+        """
+        limit = domain.charms[cid].spec.endpoints[endpoint_name].limit
+        return limit is not None and self._endpoint_var_count(domain, cid, endpoint_name) >= limit
+
+    def _scope_compatible(
+        self,
+        my_ep: CharmEndpoint,
+        other_ep: CharmEndpoint,
+        same_model: bool,
+        req_model: ModelRef,
+        prov_model: ModelRef,
+        domain: Domain,
+    ) -> bool:
+        """Container-scoped (subordinate) relations must be co-located on a machine model."""
+        if my_ep.scope == EndpointScope.CONTAINER or other_ep.scope == EndpointScope.CONTAINER:
+            if not same_model:
+                return False
+            req_platform = domain.models[req_model].platform if req_model in domain.models else None
+            prov_platform = domain.models[prov_model].platform if prov_model in domain.models else None
+            if req_platform != "machine" or prov_platform != "machine":
+                return False
+        return True
+
+    @staticmethod
+    def _features_compatible(ep1_features: frozenset[str], ep2_features: frozenset[str]) -> bool:
+        """Return True when the two endpoint feature sets can produce a valid integration.
+
+        When the coherence constraint is applied (integration.exists =>
+        req.feature_f == prov.feature_f for each shared feature, and
+        => NOT(side.feature_f) for features only on one side), features that
+        exist on one endpoint but not the other are forced False.
+
+        If a custom constraint on either side mandates a feature be True when
+        connected (e.g. ``bool(ep) => features(ep) == {"admin"}``), forcing that
+        feature False creates an unsatisfiable contradiction.
+
+        The conservative safe heuristic: if both endpoints declare features but
+        their intersection is empty (completely disjoint), this pairing can never
+        satisfy any feature constraint on either side.  Pairings where one side
+        has features and the other is empty are allowed: the solver may choose
+        not to activate those features if no constraint requires them.
+        """
+        if not ep1_features or not ep2_features:
+            return True  # at least one side is unconstrained
+        return bool(ep1_features & ep2_features)  # non-empty intersection required
+
+    def _semantic_pair_with_charm(
+        self,
+        my_cid: int,
+        my_endpoint: str,
+        other_cid: int,
+        domain: Domain,
+    ) -> tuple[int, str, int, str] | None:
+        """Find a compatible endpoint on other_cid and return the (req, prov) ordering.
+
+        Returns (requires_charm_id, requires_endpoint, provides_charm_id, provides_endpoint)
+        for the first compatible endpoint, or None if no compatible endpoint exists.
+        """
+        my_charm = domain.charms[my_cid]
+        other_charm = domain.charms[other_cid]
+        my_ep = my_charm.spec.endpoints[my_endpoint]
+        same_model = my_charm.model == other_charm.model
+        for other_endpoint, other_ep in other_charm.spec.endpoints.items():
+            if other_ep.interface != my_ep.interface:
+                continue
+            if my_ep.type == EndpointType.REQUIRES and other_ep.type == EndpointType.PROVIDES:
+                req_cid, req_ep, prov_cid, prov_ep = my_cid, my_endpoint, other_cid, other_endpoint
+            elif my_ep.type == EndpointType.PROVIDES and other_ep.type == EndpointType.REQUIRES:
+                req_cid, req_ep, prov_cid, prov_ep = other_cid, other_endpoint, my_cid, my_endpoint
+            else:
+                continue
+            if not self._scope_compatible(
+                my_ep, other_ep, same_model, domain.charms[req_cid].model, domain.charms[prov_cid].model, domain
+            ):
+                continue
+            if not self._features_compatible(my_ep.features, other_ep.features):
+                continue
+            return req_cid, req_ep, prov_cid, prov_ep
+        return None
+
+    def _best_reuse_partner(
+        self,
+        charm_id: int,
+        endpoint_name: str,
+        domain: Domain,
+        model_ref: ModelRef,
+    ) -> tuple[int, str, int, str] | None:
+        """Pick the highest-priority in-domain partner with spare capacity.
+
+        Considers every existing charm in model_ref (excluding self) with a
+        compatible endpoint that is not saturated and not already wired to
+        (charm_id, endpoint_name). Returns the (req, prov) ordering for the best
+        candidate, or None.
+        """
+        if self._is_saturated(domain, charm_id, endpoint_name):
+            return None
+
+        best: tuple[int, str, int, str] | None = None
+        best_priority = float("-inf")
+        for other_cid, other_charm in enumerate(domain.charms):
+            if other_cid == charm_id or other_charm.model != model_ref:
+                continue
+            pair = self._semantic_pair_with_charm(charm_id, endpoint_name, other_cid, domain)
+            if pair is None:
+                continue
+            req_cid, req_ep, prov_cid, prov_ep = pair
+            if (req_cid, req_ep, prov_cid, prov_ep) in domain.integration_index:
+                continue  # already offered this exact pair
+            # The partner is whichever charm is not me.
+            partner_cid, partner_ep = (prov_cid, prov_ep) if prov_cid != charm_id else (req_cid, req_ep)
+            if self._is_saturated(domain, partner_cid, partner_ep):
+                continue
+            priority = other_charm.spec.priority
+            if priority > best_priority:
+                best_priority = priority
+                best = pair
+        return best
+
+    def _semantic_pair_named(
+        self,
+        cid1: int,
+        ep1: str,
+        cid2: int,
+        ep2: str,
+        domain: Domain,
+    ) -> tuple[int, str, int, str] | None:
+        """Order two explicitly-named charm endpoints into (req, prov), or None.
+
+        Used for user-specified integrations where the endpoints are named by the
+        spec, so we honour them directly without a scope check.
+        """
+        e1 = domain.charms[cid1].spec.endpoints.get(ep1)
+        e2 = domain.charms[cid2].spec.endpoints.get(ep2)
+        if e1 is None or e2 is None:
+            return None
+        if e1.type == EndpointType.REQUIRES and e2.type == EndpointType.PROVIDES:
+            return cid1, ep1, cid2, ep2
+        if e1.type == EndpointType.PROVIDES and e2.type == EndpointType.REQUIRES:
+            return cid2, ep2, cid1, ep1
+        return None
+
+    def _satisfy_application_integration(
+        self,
+        tag: ApplicationIntegrationExistsTag,
+        domain: Domain,
+    ) -> bool:
+        """Satisfy a user-specified integration: ensure both charms, then wire them.
+
+        Unlike endpoint demand (which discovers a partner), the spec names exactly
+        which two application endpoints to integrate, so we create the integration
+        variable(s) directly between the charms backing those applications.
+        """
+        endpoints = tag.integration
+        if len(endpoints) != 2:
+            return False
+
+        expanded = False
+
+        # 1. Ensure both applications have a backing charm.
+        for ep in endpoints:
+            model_ref = ep.model if ep.model.name is not None else tag.model
+            charm = self._get_charm_for_application(ep.application, domain, model_ref)
+            if self._add_charm_for_application(charm, ep.application, domain, model_ref):
+                expanded = True
+
+        # 2. Create the integration variable(s) between the backing charms.
+        ep1, ep2 = endpoints[0], endpoints[1]
+        m1 = ep1.model if ep1.model.name is not None else tag.model
+        m2 = ep2.model if ep2.model.name is not None else tag.model
+        app1 = domain.models[m1].applications.get(ep1.application) if m1 in domain.models else None
+        app2 = domain.models[m2].applications.get(ep2.application) if m2 in domain.models else None
+        if app1 is not None and app2 is not None:
+            for cid1 in list(app1.charm_ids):
+                for cid2 in list(app2.charm_ids):
+                    if cid1 == cid2:
+                        continue
+                    pair = self._semantic_pair_named(cid1, ep1.endpoint, cid2, ep2.endpoint, domain)
+                    if pair is None:
+                        continue
+                    before = len(domain.charm_integrations)
+                    get_or_create_integration(domain, *pair)
+                    if len(domain.charm_integrations) > before:
+                        expanded = True
+        return expanded
 
     def _handle_peer_channel_mismatch(
         self,
@@ -338,7 +610,7 @@ class BundleBuilder:
                 charm_risk=risk,
                 charm_revision=tag.required_revision,
             )
-            expanded |= self._add_charm_for_charm_id(peer_charm, tag.peer_charm_id, domain, owning_model)
+            expanded |= self._wire_variant(peer_charm, tag.peer_charm_id, tag.charm.charm_id, domain, owning_model)
         except CharmReleaseNotFoundException:
             self.logger.debug(f"No release found for {tag.peer_charm_name} on {track}/{risk or '*'}")
 
@@ -353,13 +625,87 @@ class BundleBuilder:
                 charm_track=peer_channel.track,
                 charm_risk=peer_channel.risk,
             )
-            expanded |= self._add_charm_for_charm_id(owning_charm, tag.charm.charm_id, domain, owning_model)
+            expanded |= self._wire_variant(owning_charm, tag.charm.charm_id, tag.peer_charm_id, domain, owning_model)
         except CharmReleaseNotFoundException:
             self.logger.debug(
                 f"No release found for {tag.charm.charm_name} on {peer_channel.track}/{peer_channel.risk or '*'}"
             )
 
         return expanded
+
+    def _wire_all_matching(self, cid_a: int, cid_b: int, domain: Domain) -> bool:
+        """Create integration variables for every compatible endpoint pair between two charms.
+
+        Used after fetching a charm variant (peer/subordinate mismatch handlers):
+        the variant must be offered as an integration partner to the specific other
+        charm so the solver can select the matching pair. Bounded to a single pair
+        of charms, so no combinatorial growth.
+        """
+        created = False
+        for ep_name in domain.charms[cid_a].spec.endpoints:
+            pair = self._semantic_pair_with_charm(cid_a, ep_name, cid_b, domain)
+            if pair is None:
+                continue
+            before = len(domain.charm_integrations)
+            get_or_create_integration(domain, *pair)
+            if len(domain.charm_integrations) > before:
+                created = True
+        return created
+
+    def _find_existing_domain_charm(
+        self,
+        charm: Charm,
+        model_ref: ModelRef,
+        domain: Domain,
+    ) -> int | None:
+        """Return the ID of any existing domain charm with the same spec, or None.
+
+        Used by the variant-wiring path (PEER_CHANNEL_MISMATCH, subordinate mismatch)
+        to reuse an already-present charm instance instead of adding an infinite series
+        of per-parent duplicates.  Unlike _add_charm_for_charm_id (which deduplicates
+        only within a single parent's charms_added list), this scan covers the whole
+        domain so that mismatches from different parents all converge on the same
+        pre-existing instance.
+        """
+        for cid, dc in enumerate(domain.charms):
+            if dc.model == model_ref and dc.spec == charm:
+                return cid
+        return None
+
+    def _wire_variant(
+        self,
+        variant_charm: Charm,
+        variant_parent_id: int,
+        wire_to_id: int,
+        domain: Domain,
+        model_ref: ModelRef,
+    ) -> bool:
+        """Add a charm variant (cycle-safe) and wire it to a specific other charm.
+
+        Before adding a new instance, checks whether any domain charm already has the
+        same spec (name + channel).  If one exists it is reused, preventing the
+        PEER_CHANNEL_MISMATCH handler from spawning an unbounded series of identical
+        charm instances when different parents each trigger a mismatch for the same
+        required peer channel.
+
+        Returns True if either a new instance was added or a new integration variable
+        was created (i.e. the domain was expanded in any way).
+        """
+        # Reuse an existing domain charm with the same spec if present.
+        existing_id = self._find_existing_domain_charm(variant_charm, model_ref, domain)
+        if existing_id is not None:
+            if existing_id == wire_to_id:
+                # The wire_to charm already IS the matching variant; nothing to add.
+                return False
+            # Wire the existing instance to wire_to_id — this may already be done
+            # (in which case _wire_all_matching returns False), but it is idempotent.
+            return self._wire_all_matching(existing_id, wire_to_id, domain)
+
+        new_id = self._add_charm_for_charm_id(variant_charm, variant_parent_id, domain, model_ref)
+        if new_id is None:
+            return False
+        self._wire_all_matching(new_id, wire_to_id, domain)
+        return True
 
     def _handle_subordinate_base_mismatch(
         self,
@@ -390,7 +736,9 @@ class BundleBuilder:
                 charm_risk=sub_charm_spec.channel.risk or None,
                 ubuntu_version=principal_base,
             )
-            expanded |= self._add_charm_for_charm_id(sub_charm, tag.subordinate_charm_id, domain, model_ref)
+            expanded |= self._wire_variant(
+                sub_charm, tag.subordinate_charm_id, tag.principal_charm_id, domain, model_ref
+            )
         except CharmReleaseNotFoundException:
             self.logger.debug(
                 f"No release found for subordinate {tag.subordinate_charm_name} " f"on base {principal_base}"
@@ -409,7 +757,9 @@ class BundleBuilder:
                 charm_risk=principal_spec.channel.risk or None,
                 ubuntu_version=tag.subordinate_base,
             )
-            expanded |= self._add_charm_for_charm_id(principal_charm, tag.principal_charm_id, domain, model_ref)
+            expanded |= self._wire_variant(
+                principal_charm, tag.principal_charm_id, tag.subordinate_charm_id, domain, model_ref
+            )
         except CharmReleaseNotFoundException:
             self.logger.debug(
                 f"No release found for principal {tag.principal_charm_name} " f"on base {tag.subordinate_base}"
@@ -439,7 +789,14 @@ class BundleBuilder:
         domain: Domain,
         target_model: ModelRef,
     ) -> list[Charm]:
-        """Find charms that can fulfill an endpoint, compatible with target_model's platform/arch."""
+        """Fetch NEW candidate charms from Charmhub that can fulfill an endpoint.
+
+        This is the "instantiate" path of _satisfy_endpoint. Reuse of charms
+        already in the domain is handled separately and capacity-aware by
+        _best_reuse_partner, so this method intentionally fetches fresh specs -
+        including a fresh instance of a charm whose existing instances are all
+        saturated (e.g. a second limit:1 provider for a second consumer).
+        """
         model = domain.models[target_model]
         endpoint = domain.charms[charm_id].spec.endpoints[endpoint_name]
 
@@ -473,6 +830,26 @@ class BundleBuilder:
                 )
             except CharmReleaseNotFoundException:
                 self.logger.debug(f"Skipping {charm_name}: no compatible release for {model.platform}/{model.arch}")
+
+        # On non-machine models, drop any candidate whose only matching endpoint is
+        # container-scoped.  Container (subordinate) relations require machine co-location
+        # and cannot be used on kubernetes or other non-machine platforms.  Filtering here
+        # prevents _add_charm_for_charm_id from consuming a charms_added slot for a
+        # partner that _semantic_pair_with_charm would immediately reject, which would
+        # permanently block re-trying valid alternatives on the next CEGIS iteration.
+        if model.platform != "machine":
+            partner_type = EndpointType.PROVIDES if endpoint.type == EndpointType.REQUIRES else EndpointType.REQUIRES
+            results = [
+                c
+                for c in results
+                if any(
+                    ep.interface == endpoint.interface
+                    and ep.type == partner_type
+                    and ep.scope != EndpointScope.CONTAINER
+                    for ep in c.endpoints.values()
+                )
+            ]
+
         return results
 
     def _add_charm_for_application(
@@ -503,12 +880,17 @@ class BundleBuilder:
         charm_id: int,
         domain: Domain,
         model_ref: ModelRef,
-    ) -> bool:
+    ) -> int | None:
+        """Add `charm` as a dependency of `charm_id`; return the new charm id, or None.
+
+        Returns None (no charm added) when the exact spec was already added for this
+        parent, or when adding it would create a dependency cycle.
+        """
         # Check if this exact charm was already added for this charm_id
         parent_charm = domain.charms[charm_id]
         for added_charm_id in parent_charm.charms_added:
             if domain.charms[added_charm_id].spec == charm:
-                return False
+                return None
 
         # Traverse the dependency chain to detect cycles
         # Walk backwards from charm_id through parents to see if the charm we're trying to add
@@ -524,7 +906,7 @@ class BundleBuilder:
 
             # If the charm we're trying to add is already this ancestor charm, it would create a cycle
             if domain.charms[ancestor_id].spec == charm:
-                return False
+                return None
 
             # Continue traversing: find parents that added this ancestor
             for pid, parent in enumerate(domain.charms):
@@ -540,7 +922,7 @@ class BundleBuilder:
 
         # Record that this charm was added for this charm_id
         parent_charm.charms_added.append(new_charm_id)
-        return True
+        return new_charm_id
 
     @staticmethod
     def _build_cost_exprs(domain: Domain) -> tuple[z3.ExprRef, z3.ExprRef, z3.ExprRef]:

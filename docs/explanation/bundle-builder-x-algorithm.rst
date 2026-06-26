@@ -47,11 +47,12 @@ The build loop has three phases that repeat until the problem is satisfiable:
 
 3. **Solve and expand** -- The solver checks satisfiability. If the problem is
    ``unsat``, the unsat core (the minimal set of conflicting constraints) is
-   decoded to determine what went wrong. The builder then expands the domain,
-   typically by fetching a new charm that can fulfill an unsatisfied endpoint,
-   and loops back to step 2. If the problem is ``sat``, an optimization pass
-   minimizes the number of applications and integrations, and the result is
-   extracted into concrete ``Bundle`` objects.
+   decoded to determine what went wrong. The builder then lazily expands the
+   domain -- creating **one new integration variable** (reusing an in-domain
+   charm where possible, otherwise instantiating one new charm) per unsatisfied
+   endpoint per iteration -- and loops back to step 2. If the problem is
+   ``sat``, an optimization pass minimizes the number of applications and
+   integrations, and the result is extracted into concrete ``Bundle`` objects.
 
 .. mermaid::
 
@@ -75,10 +76,11 @@ first):
 - ``APPLICATION_EXISTS`` -- the spec references an application whose charm is
   not yet in the domain. Fetch it from Charmhub.
 - ``APPLICATION_INTEGRATION_EXISTS`` -- an explicit integration references
-  applications not yet in the domain. Fetch them.
-- ``CHARM_ENDPOINT_NON_OPTIONAL`` -- a charm has a non-optional endpoint
-  with no compatible charm in the domain. Search Charmhub for a charm that
-  provides or requires the matching interface and add it.
+  applications not yet in the domain. Fetch them, then create the integration
+  variable between the two named endpoints.
+- ``CHARM_ENDPOINT_NON_OPTIONAL`` -- a charm has a non-optional endpoint that
+  is not yet connected. The builder creates **exactly one new integration
+  variable** to satisfy it (see *Lazy integration materialization* below).
 - ``ENDPOINT_COUNT_MATCHES_INTEGRATIONS`` / ``PEER_CHANNEL_MISMATCH`` --
   structural mismatches that indicate a constraint conflict.
 
@@ -86,9 +88,55 @@ Pairs of ``PEER_CHANNEL_MISMATCH`` tags for the same (anchor, peer) charm
 pair are merged before processing so that track and risk constraints are
 resolved together in a single step, rather than one dimension at a time.
 
-This loop is bounded (default 100 iterations). If the domain cannot be
-expanded further and the problem is still unsatisfiable, the builder raises
-``UncompletableBundleError`` with the decoded unsat core.
+This loop runs until one of three outcomes occurs: the problem becomes ``sat``,
+the unsat core contains no tag the builder can act on (the domain cannot be
+expanded further and the problem is provably unsatisfiable, so the builder
+raises ``UncompletableBundleError``), or the per-iteration SAT check exceeds
+its configurable timeout (default 1 minute), in which case ``UncompletableBundleError``
+is raised immediately rather than hanging indefinitely.  There is no fixed
+iteration cap; arbitrarily deep dependency graphs converge naturally without an
+artificial limit.
+
+Lazy integration materialization
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Integration variables (one Z3 boolean per possible relation between two charm
+endpoints) are **not** created eagerly. A naive "all pairs" approach -- creating
+a variable for every compatible (provider, requirer) endpoint pair as charms are
+added -- produces ``O(providers x requirers)`` variables per interface. When many
+charms share an interface, this dominates both constraint-building and solve time,
+and identical interchangeable providers create a factorial number of symmetric
+solutions that the solver must search.
+
+Instead, integration variables are materialized lazily by the solve loop, the
+same way charms are. When an endpoint demands a connection, the builder applies a
+capacity-aware, reuse-before-instantiate rule:
+
+1. **Reuse** -- connect to an existing in-domain charm whose compatible endpoint
+   has spare capacity, creating a single integration variable and no new charm.
+2. **Instantiate** -- if no reusable partner exists, fetch one new charm from
+   Charmhub (highest priority first) and wire to it. This includes a fresh
+   instance of a charm whose existing instances are all saturated -- for example
+   a second ``limit: 1`` provider for a second consumer.
+
+An endpoint is *saturated* when it already has as many integration variables as
+its declared ``limit`` allows; offering another variable to a saturated endpoint
+cannot help (the solver would have to drop an existing consumer, which simply
+re-triggers expansion), so the builder instantiates a fresh partner instead.
+
+This keeps the integration-variable count proportional to actual endpoint demand
+rather than to the product of providers and requirers:
+
+- an **unlimited** provider is shared by every consumer (one variable each);
+- a ``limit: N`` provider saturates after ``N`` consumers, so the next consumer
+  instantiates a fresh instance -- ``ceil(demand / N)`` instances in total.
+
+On real ``opentelemetry-collector-k8s`` specs this produces 3.6x-16x fewer
+integration variables than the all-pairs scheme on the same final domain, and it
+eliminates the symmetric-provider blow-up that previously caused multi-hour
+solves. Completeness is preserved: variables are only ever added, never removed,
+so any feasible solution remains reachable; and offering the highest-priority
+partner first makes the first satisfying assignment use the lowest-cost option.
 
 Key properties
 --------------

@@ -132,3 +132,7 @@ SCPs
 validator
 validators
 virtualenv
+materialization
+materialized
+requirer
+requirers

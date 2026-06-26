@@ -30,6 +30,7 @@ from bundle_builder_x.domain import (
 )
 from bundle_builder_x.extract import extract_solution
 from bundle_builder_x.juju_version import JujuVersion
+from tests.unit.integration_helpers import materialize_all_integrations
 
 _LOGGER = logging.getLogger("test_cmr_discovery")
 _JUJU = JujuVersion(major=3, minor=6, patch=0)
@@ -93,6 +94,7 @@ class TestSolverDiscoversCMR:
         )
         add_charm_to_domain(pg, domain, ModelRef(name="machine"))
         add_charm_to_domain(proxy, domain, ModelRef(name="k8s"))
+        materialize_all_integrations(domain)
 
         # WHEN solving
         solver = z3.Solver()
@@ -143,6 +145,7 @@ class TestSolverDiscoversCMR:
         )
         add_charm_to_domain(pg, domain, ModelRef(name="machine"))
         add_charm_to_domain(proxy, domain, ModelRef(name="k8s"))
+        materialize_all_integrations(domain)
 
         solver = z3.Solver()
         add_constraints(solver, domain)
@@ -212,6 +215,7 @@ class TestSolverDiscoversCMR:
         add_charm_to_domain(pg, domain, ModelRef(name="m1"))
         add_charm_to_domain(proxy, domain, ModelRef(name="m1"))
         add_charm_to_domain(other, domain, ModelRef(name="m2"))
+        materialize_all_integrations(domain)
 
         solver = z3.Solver()
         add_constraints(solver, domain)
