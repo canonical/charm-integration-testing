@@ -66,10 +66,11 @@ class ParcaStoreValidator(BaseValidator):
             return self._make_result(level="simple", checks=checks)
 
         # 3. TCP reachability.
-        checks.append(_tcp_ping_check(host, port))
+        tcp_check = _tcp_ping_check(host, port)
+        checks.append(tcp_check)
 
         # 4. TLS prerequisite: if insecure=false the port must speak TLS.
-        if not insecure:
+        if tcp_check.passed and not insecure:
             checks.append(_tls_prerequisite_check(host, port))
 
         return self._make_result(level="simple", checks=checks)
