@@ -1,17 +1,5 @@
-# Copyright (C) 2026 Canonical Ltd
-
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
 
 """Validator for the livepatch-pro-airgapped-server Juju interface.
 
@@ -109,7 +97,7 @@ class LivepatchProAirgappedServerValidator(BaseValidator):
         if not port_check.passed:
             return self._make_result(level="simple", checks=checks)
 
-        tcp_check = _check_tcp(hostname, port)
+        tcp_check = _check_tcp(hostname, port, scheme)
         checks.append(tcp_check)
 
         return self._make_result(level="simple", checks=checks)
@@ -146,7 +134,7 @@ class LivepatchProAirgappedServerValidator(BaseValidator):
         if not port_check.passed:
             return self._make_result(level="deep", checks=checks)
 
-        tcp_check = _check_tcp(hostname, port)
+        tcp_check = _check_tcp(hostname, port, scheme)
         checks.append(tcp_check)
         if not tcp_check.passed:
             return self._make_result(level="deep", checks=checks)
@@ -270,13 +258,13 @@ def _check_port(port_raw: str) -> tuple[ValidationCheck, int | None]:
     return ValidationCheck(name="port", passed=True, message=f"Port {port} is a valid TCP port."), port
 
 
-def _check_tcp(hostname: str, port: int | None) -> ValidationCheck:
+def _check_tcp(hostname: str, port: int | None, scheme: str = "http") -> ValidationCheck:
     """Attempt a TCP connection to hostname:port to verify network reachability.
 
-    When *port* is None the default ports for HTTP (80) and HTTPS (443) are
-    probed on port 80 (conservative default).
+    When *port* is None the default port for the given *scheme* is probed
+    (80 for ``http``, 443 for ``https``).
     """
-    target_port = port if port is not None else 80
+    target_port = port if port is not None else (443 if scheme == "https" else 80)
     try:
         with socket.create_connection((hostname, target_port), timeout=_CONNECT_TIMEOUT_SECS):
             pass
@@ -298,8 +286,13 @@ def _check_tcp(hostname: str, port: int | None) -> ValidationCheck:
 
 
 def _build_url(scheme: str, hostname: str, port: int | None) -> str:
-    """Construct the contracts base URL from validated fields."""
-    netloc = hostname if port is None else f"{hostname}:{port}"
+    """Construct the contracts base URL from validated fields.
+
+    IPv6 literal hostnames are wrapped in brackets so the resulting URL netloc
+    is valid (e.g. ``http://[2001:db8::1]``).
+    """
+    host = f"[{hostname}]" if ":" in hostname and not hostname.startswith("[") else hostname
+    netloc = host if port is None else f"{host}:{port}"
     return urllib.parse.urlunparse((scheme, netloc, "", "", "", ""))
 
 
