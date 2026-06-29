@@ -257,9 +257,8 @@ class TestGrpcValidatorDeep:
 # _grpc_channel_ready_check — channel selection logic
 # ---------------------------------------------------------------------------
 
-# Patch the `grpc` attribute on the validator module directly to avoid the
-# sys.path naming collision: pytest adds validators/ to sys.path so that
-# `import grpc` resolves to the local validators/grpc package, not grpcio.
+# Patch the `grpc` attribute on the validator module directly so these tests can
+# unit-test channel selection logic with a lightweight mock implementation.
 
 
 class _FakeTimeoutError(Exception):
