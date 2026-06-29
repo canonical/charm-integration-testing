@@ -104,7 +104,14 @@ class ParcaStoreValidator(BaseValidator):
         if not tcp_check.passed:
             return self._make_result(level="deep", checks=checks)
 
-        # 4. gRPC channel ready — proves transport layer negotiates correctly.
+        # 4. TLS prerequisite: if insecure=false the port must speak TLS.
+        if not insecure:
+            tls_check = _tls_prerequisite_check(host, port)
+            checks.append(tls_check)
+            if not tls_check.passed:
+                return self._make_result(level="deep", checks=checks)
+
+        # 5. gRPC channel ready — proves transport layer negotiates correctly.
         checks.append(_grpc_channel_ready_check(address, insecure=insecure, token=token))
 
         return self._make_result(level="deep", checks=checks)
