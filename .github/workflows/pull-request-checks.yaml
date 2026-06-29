@@ -46,6 +46,8 @@ jobs:
     permissions:
       contents: read
       actions: write
+    secrets:
+      STG_TEST_OBSERVER_TOKEN: ${{ secrets.STG_TEST_OBSERVER_TOKEN }}
   validators-unit-tests:
     runs-on: ubuntu-latest
     steps:

@@ -221,6 +221,32 @@ class TestBundleExport:
         # THEN num_units is set to 1
         assert exported["applications"]["app"]["num_units"] == 1
 
+    def test_custom_num_units_emitted_as_scale_on_kubernetes(self) -> None:
+        # GIVEN a kubernetes bundle with a charm requiring 3 units
+        bundle = _make_bundle(
+            platform="kubernetes",
+            applications={"opensearch": Application(charm=_make_charm("opensearch"), num_units=3)},
+        )
+
+        # WHEN exporting
+        exported = yaml.safe_load(bundle.export())
+
+        # THEN scale is 3, not 1
+        assert exported["applications"]["opensearch"]["scale"] == 3
+
+    def test_custom_num_units_emitted_as_num_units_on_machine(self) -> None:
+        # GIVEN a machine bundle with a charm requiring 3 units
+        bundle = _make_bundle(
+            platform="machine",
+            applications={"opensearch": Application(charm=_make_charm("opensearch"), num_units=3)},
+        )
+
+        # WHEN exporting
+        exported = yaml.safe_load(bundle.export())
+
+        # THEN num_units is 3, not 1
+        assert exported["applications"]["opensearch"]["num_units"] == 3
+
     def test_local_relations_sorted(self) -> None:
         # GIVEN a bundle with two local integrations
         provider = _make_charm(

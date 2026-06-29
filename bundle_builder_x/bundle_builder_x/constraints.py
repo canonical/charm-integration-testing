@@ -291,6 +291,10 @@ def add_charm_constraints(solver: z3.Solver, domain: Domain) -> None:
 
 
 def add_charm_metadata_constraints(solver: z3.Solver, domain: Domain) -> None:
+    # Unit count lower bound: when a charm exists it must have at least one unit.
+    for charm in domain.charms:
+        solver.add(z3.Implies(charm.exists, charm.num_units >= 1))
+
     # Ensure non-optional endpoints have at least one integration if charm exists
     for charm_id, charm in enumerate(domain.charms):
         for endpoint_name, spec_endpoint in charm.spec.endpoints.items():

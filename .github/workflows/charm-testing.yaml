@@ -557,13 +557,13 @@ jobs:
             }}
           log_path: ${{ steps.collect_logs.outputs.directory_path }}
           swift_bucket: charm-qa
-          SWIFT_OS_AUTH_URL: ${{ secrets.SWIFT_OS_AUTH_URL }}
-          SWIFT_OS_USERNAME: ${{ secrets.SWIFT_OS_USERNAME }}
-          SWIFT_OS_PASSWORD: ${{ secrets.SWIFT_OS_PASSWORD }}
-          SWIFT_OS_PROJECT_NAME: ${{ secrets.SWIFT_OS_PROJECT_NAME }}
-          SWIFT_OS_REGION_NAME: ${{ secrets.SWIFT_OS_REGION_NAME }}
-          SWIFT_OS_USER_DOMAIN_NAME: ${{ secrets.SWIFT_OS_USER_DOMAIN_NAME }}
-          SWIFT_OS_PROJECT_DOMAIN_NAME: ${{ secrets.SWIFT_OS_PROJECT_DOMAIN_NAME }}
+          SWIFT_OS_AUTH_URL: ${{ secrets.SWIFT_OS_AUTH_URL_PS7 }}
+          SWIFT_OS_USERNAME: ${{ secrets.SWIFT_OS_USERNAME_PS7 }}
+          SWIFT_OS_PASSWORD: ${{ secrets.SWIFT_OS_PASSWORD_PS7 }}
+          SWIFT_OS_PROJECT_NAME: ${{ secrets.SWIFT_OS_PROJECT_NAME_PS7 }}
+          SWIFT_OS_REGION_NAME: ${{ secrets.SWIFT_OS_REGION_NAME_PS7 }}
+          SWIFT_OS_USER_DOMAIN_NAME: ${{ secrets.SWIFT_OS_USER_DOMAIN_NAME_PS7 }}
+          SWIFT_OS_PROJECT_DOMAIN_NAME: ${{ secrets.SWIFT_OS_PROJECT_DOMAIN_NAME_PS7 }}
       - name: Post 'log_collection_finished' event
         if: ${{ !cancelled() && steps.post_logs_to_swift.outcome == 'success' && env.TEST_OBSERVER_API != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-events
