@@ -1,17 +1,5 @@
-# Copyright (C) 2026 Canonical Ltd
-
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
 
 from typing import cast
 from unittest.mock import MagicMock, patch
@@ -19,7 +7,8 @@ from unittest.mock import MagicMock, patch
 import ops
 import pytest
 
-from validators.grpc.validator import ParcaStoreValidator, _parse_grpc_address
+import validators.grpc.validator as _grpc_validator_mod
+from validators.grpc.validator import ParcaStoreValidator, _grpc_channel_ready_check, _parse_grpc_address
 from validators.test_utils.helpers import make_charm_from_relation
 from validators.test_utils.stubs import (
     ApplicationStub,
@@ -262,3 +251,103 @@ class TestGrpcValidatorDeep:
         mock_grpc.assert_called_once()
         grpc_check = next(c for c in result.checks if c.name == "grpc_ready")
         assert grpc_check.passed
+
+
+# ---------------------------------------------------------------------------
+# _grpc_channel_ready_check — channel selection logic
+# ---------------------------------------------------------------------------
+
+# Patch the `grpc` attribute on the validator module directly to avoid the
+# sys.path naming collision: pytest adds validators/ to sys.path so that
+# `import grpc` resolves to the local validators/grpc package, not grpcio.
+
+
+class _FakeTimeoutError(Exception):
+    """Stand-in for grpc.FutureTimeoutError in channel-selection tests."""
+
+
+def _make_mock_grpc() -> MagicMock:
+    mock = MagicMock()
+    mock.FutureTimeoutError = _FakeTimeoutError
+    return mock
+
+
+class TestGrpcChannelReadyCheck:
+    def test_uses_insecure_channel_when_insecure_true(self) -> None:
+        mock_grpc = _make_mock_grpc()
+        mock_channel = MagicMock()
+        mock_future = MagicMock()
+        mock_future.result.return_value = None
+        mock_grpc.insecure_channel.return_value = mock_channel
+        mock_grpc.channel_ready_future.return_value = mock_future
+
+        with patch.object(_grpc_validator_mod, "grpc", mock_grpc):
+            check = _grpc_channel_ready_check("10.0.0.1:7070", insecure=True, token="")
+
+        mock_grpc.insecure_channel.assert_called_once_with("10.0.0.1:7070")
+        mock_grpc.secure_channel.assert_not_called()
+        assert check.passed
+
+    def test_uses_secure_channel_without_token(self) -> None:
+        mock_grpc = _make_mock_grpc()
+        mock_channel = MagicMock()
+        mock_future = MagicMock()
+        mock_future.result.return_value = None
+        mock_ssl_creds = MagicMock()
+        mock_grpc.ssl_channel_credentials.return_value = mock_ssl_creds
+        mock_grpc.secure_channel.return_value = mock_channel
+        mock_grpc.channel_ready_future.return_value = mock_future
+
+        with patch.object(_grpc_validator_mod, "grpc", mock_grpc):
+            check = _grpc_channel_ready_check("10.0.0.1:7070", insecure=False, token="")
+
+        mock_grpc.insecure_channel.assert_not_called()
+        mock_grpc.access_token_call_credentials.assert_not_called()
+        mock_grpc.secure_channel.assert_called_once_with("10.0.0.1:7070", mock_ssl_creds)
+        assert check.passed
+
+    def test_uses_composite_credentials_with_token(self) -> None:
+        mock_grpc = _make_mock_grpc()
+        mock_channel = MagicMock()
+        mock_future = MagicMock()
+        mock_future.result.return_value = None
+        mock_ssl_creds = MagicMock()
+        mock_call_creds = MagicMock()
+        mock_composite_creds = MagicMock()
+        mock_grpc.ssl_channel_credentials.return_value = mock_ssl_creds
+        mock_grpc.access_token_call_credentials.return_value = mock_call_creds
+        mock_grpc.composite_channel_credentials.return_value = mock_composite_creds
+        mock_grpc.secure_channel.return_value = mock_channel
+        mock_grpc.channel_ready_future.return_value = mock_future
+
+        with patch.object(_grpc_validator_mod, "grpc", mock_grpc):
+            check = _grpc_channel_ready_check("10.0.0.1:7070", insecure=False, token="my-token")
+
+        mock_grpc.access_token_call_credentials.assert_called_once_with("my-token")
+        mock_grpc.composite_channel_credentials.assert_called_once_with(mock_ssl_creds, mock_call_creds)
+        mock_grpc.secure_channel.assert_called_once_with("10.0.0.1:7070", mock_composite_creds)
+        assert check.passed
+
+    def test_returns_failed_check_on_timeout(self) -> None:
+        mock_grpc = _make_mock_grpc()
+        mock_channel = MagicMock()
+        mock_future = MagicMock()
+        mock_future.result.side_effect = _FakeTimeoutError()
+        mock_grpc.insecure_channel.return_value = mock_channel
+        mock_grpc.channel_ready_future.return_value = mock_future
+
+        with patch.object(_grpc_validator_mod, "grpc", mock_grpc):
+            check = _grpc_channel_ready_check("10.0.0.1:7070", insecure=True, token="")
+
+        assert not check.passed
+        assert "10.0.0.1:7070" in check.message
+
+    def test_returns_failed_check_on_generic_exception(self) -> None:
+        mock_grpc = _make_mock_grpc()
+        mock_grpc.insecure_channel.side_effect = RuntimeError("boom")
+
+        with patch.object(_grpc_validator_mod, "grpc", mock_grpc):
+            check = _grpc_channel_ready_check("10.0.0.1:7070", insecure=True, token="")
+
+        assert not check.passed
+        assert "boom" in check.message
