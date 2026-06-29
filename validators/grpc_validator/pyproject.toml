@@ -2,7 +2,7 @@
 # See LICENSE file for licensing details.
 
 [project]
-name = "validators-grpc"
+name = "validators-grpc-validator"
 version = "0.1.0"
 description = "Validator for parca_store (gRPC) interface"
 authors = [
@@ -16,14 +16,14 @@ dependencies = [
 ]
 
 [project.entry-points."endpoint_validators"]
-parca_store = "validators.grpc:ParcaStoreValidator"
+parca_store = "validators.grpc_validator:ParcaStoreValidator"
 
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["validators.grpc"]
+packages = ["validators.grpc_validator"]
 
 [tool.setuptools.package-dir]
-"validators.grpc" = "."
+"validators.grpc_validator" = "."

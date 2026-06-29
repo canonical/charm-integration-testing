@@ -4,6 +4,7 @@
 import socket
 
 import grpc  # type: ignore[import-untyped]
+
 from validators.base import (
     BaseValidator,
     ValidationCheck,

@@ -7,8 +7,8 @@ from unittest.mock import MagicMock, patch
 import ops
 import pytest
 
-import validators.grpc.validator as _grpc_validator_mod
-from validators.grpc.validator import ParcaStoreValidator, _grpc_channel_ready_check, _parse_grpc_address
+import validators.grpc_validator.validator as _grpc_validator_mod
+from validators.grpc_validator.validator import ParcaStoreValidator, _grpc_channel_ready_check, _parse_grpc_address
 from validators.test_utils.helpers import make_charm_from_relation
 from validators.test_utils.stubs import (
     ApplicationStub,
@@ -124,7 +124,7 @@ class TestGrpcValidatorSimple:
 
     def test_fails_connect_when_host_unreachable(self) -> None:
         v = _make_validator(VALID_DATABAG)
-        with patch("validators.grpc.validator.socket.create_connection", side_effect=OSError("refused")):
+        with patch("validators.grpc_validator.validator.socket.create_connection", side_effect=OSError("refused")):
             result = v.validate(level="simple")
         assert result.status == "FAIL"
         connect_check = next(c for c in result.checks if c.name == "connect")
@@ -136,7 +136,7 @@ class TestGrpcValidatorSimple:
         mock_conn = MagicMock()
         mock_conn.__enter__ = MagicMock(return_value=mock_conn)
         mock_conn.__exit__ = MagicMock(return_value=False)
-        with patch("validators.grpc.validator.socket.create_connection", return_value=mock_conn):
+        with patch("validators.grpc_validator.validator.socket.create_connection", return_value=mock_conn):
             result = v.validate(level="simple")
         assert result.status == "PASS"
         assert any(c.name == "connect" and c.passed for c in result.checks)
@@ -153,8 +153,8 @@ class TestGrpcValidatorSimple:
         mock_conn.__exit__ = MagicMock(return_value=False)
         tls_check = ValidationCheck(name="tls", passed=True, message="OK")
         with (
-            patch("validators.grpc.validator.socket.create_connection", return_value=mock_conn),
-            patch("validators.grpc.validator._tls_prerequisite_check", return_value=tls_check) as mock_tls,
+            patch("validators.grpc_validator.validator.socket.create_connection", return_value=mock_conn),
+            patch("validators.grpc_validator.validator._tls_prerequisite_check", return_value=tls_check) as mock_tls,
         ):
             result = v.validate(level="simple")
         mock_tls.assert_called_once()
@@ -165,7 +165,7 @@ class TestGrpcValidatorSimple:
         mock_conn = MagicMock()
         mock_conn.__enter__ = MagicMock(return_value=mock_conn)
         mock_conn.__exit__ = MagicMock(return_value=False)
-        with patch("validators.grpc.validator.socket.create_connection", return_value=mock_conn):
+        with patch("validators.grpc_validator.validator.socket.create_connection", return_value=mock_conn):
             result = v.validate(level="simple")
         assert result.endpoint == "my-grpc-ep"
         assert result.interface == "parca_store"
@@ -208,7 +208,7 @@ class TestGrpcValidatorDeep:
 
     def test_fails_tcp_when_host_unreachable(self) -> None:
         v = _make_validator(VALID_DATABAG)
-        with patch("validators.grpc.validator.socket.create_connection", side_effect=OSError("refused")):
+        with patch("validators.grpc_validator.validator.socket.create_connection", side_effect=OSError("refused")):
             result = v.validate(level="deep")
         assert result.status == "FAIL"
         connect_check = next(c for c in result.checks if c.name == "connect")
@@ -225,8 +225,8 @@ class TestGrpcValidatorDeep:
         mock_conn.__exit__ = MagicMock(return_value=False)
         grpc_fail = ValidationCheck(name="grpc_ready", passed=False, message="timeout")
         with (
-            patch("validators.grpc.validator.socket.create_connection", return_value=mock_conn),
-            patch("validators.grpc.validator._grpc_channel_ready_check", return_value=grpc_fail) as mock_grpc,
+            patch("validators.grpc_validator.validator.socket.create_connection", return_value=mock_conn),
+            patch("validators.grpc_validator.validator._grpc_channel_ready_check", return_value=grpc_fail) as mock_grpc,
         ):
             result = v.validate(level="deep")
         assert result.status == "FAIL"
@@ -243,8 +243,8 @@ class TestGrpcValidatorDeep:
         mock_conn.__exit__ = MagicMock(return_value=False)
         grpc_ok = ValidationCheck(name="grpc_ready", passed=True, message="READY")
         with (
-            patch("validators.grpc.validator.socket.create_connection", return_value=mock_conn),
-            patch("validators.grpc.validator._grpc_channel_ready_check", return_value=grpc_ok) as mock_grpc,
+            patch("validators.grpc_validator.validator.socket.create_connection", return_value=mock_conn),
+            patch("validators.grpc_validator.validator._grpc_channel_ready_check", return_value=grpc_ok) as mock_grpc,
         ):
             result = v.validate(level="deep")
         assert result.status == "PASS"

@@ -2409,7 +2409,7 @@ type = "directory"
 url = "validators/cve_catalog"
 
 [[package]]
-name = "validators-grpc"
+name = "validators-grpc-validator"
 version = "0.1.0"
 description = "Validator for parca_store (gRPC) interface"
 optional = false
@@ -2424,7 +2424,7 @@ validators-base = "*"
 
 [package.source]
 type = "directory"
-url = "validators/grpc"
+url = "validators/grpc_validator"
 
 [[package]]
 name = "validators-loki-push-api"
@@ -2556,7 +2556,7 @@ pydantic = ">=2.0.0"
 validators-base = "*"
 validators-config-server = "*"
 validators-cve-catalog = "*"
-validators-grpc = "*"
+validators-grpc-validator = "*"
 validators-loki-push-api = "*"
 validators-object-storage = "*"
 validators-opensearch-client = "*"
@@ -2722,4 +2722,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<4.0"
-content-hash = "30d0a0d36748053189654d2b1aaaf3a9b081198f33df021ba611a46e458b2e9d"
+content-hash = "06dc4adb2f6bab0d172057ad2a3f421a183b8ab5dc71bdde545b49992ddd02c7"
