@@ -656,9 +656,6 @@ class TestCharmhubClient:
         def _find_client(
             self, find_names: list[str], listed_by_charm: dict[str, bool | None] | None = None
         ) -> CharmhubClient:
-            from bundle_builder_x.charmhub_http import FindResponse
-            from typing import cast
-
             class _StubFindClient(_NullHttpClient):
                 def find(self, provides: str | None = None, requires: str | None = None) -> list[FindResponse]:
                     return [
