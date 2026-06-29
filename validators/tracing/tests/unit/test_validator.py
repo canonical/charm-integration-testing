@@ -422,9 +422,15 @@ class TestTracingValidatorDeep:
             def force_flush(self, timeout_millis: int = 30_000) -> bool:
                 return True
 
+        import sys
+        from types import ModuleType
+
         import validators.tracing.validator as vmod
 
-        with patch("opentelemetry.exporter.otlp.proto.grpc.trace_exporter.OTLPSpanExporter", FakeGrpcExporter):
+        fake_grpc_trace_mod = ModuleType("opentelemetry.exporter.otlp.proto.grpc.trace_exporter")
+        fake_grpc_trace_mod.OTLPSpanExporter = FakeGrpcExporter  # type: ignore[attr-defined]
+
+        with patch.dict(sys.modules, {"opentelemetry.exporter.otlp.proto.grpc.trace_exporter": fake_grpc_trace_mod}):
             vmod._emit_test_span("tempo.example.com:4317", "grpc")
 
         assert len(captured_kwargs) == 1
