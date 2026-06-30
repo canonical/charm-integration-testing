@@ -158,6 +158,11 @@ class OverridesClient:
             charm for charm, overrides in self._get_all_charm_global_overrides().items() if overrides.listed is True
         }
 
+    def get_charm_delisting_overrides(self) -> set[str]:
+        return {
+            charm for charm, overrides in self._get_all_charm_global_overrides().items() if overrides.listed is False
+        }
+
     def get_charm_priority(self, charm: str) -> float:
         return self._get_charm_global_overrides(charm).priority or 1.0
 
