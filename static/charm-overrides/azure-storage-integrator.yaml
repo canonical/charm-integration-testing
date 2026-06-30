@@ -1,0 +1,9 @@
+---
+# Source: https://github.com/canonical/object-storage-integrator
+#
+# azure-credentials (provides): optional - secondary Azure credential interface,
+# azure_storage is the primary interface for this integrator.
+overrides:
+  - provides:
+      azure-credentials:
+        optional: true
