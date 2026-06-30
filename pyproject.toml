@@ -53,6 +53,8 @@ log_cli = true
 log_cli_level = "INFO"
 log_format = "%(levelname)s %(message)s"
 
+addopts = "--tb=short"
+
 junit_family = "legacy"
 junit_logging = "log"
 junit_log_passing_tests = true
