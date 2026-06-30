@@ -42,9 +42,10 @@ _VALID_SCHEMES = ("http", "https")
 _CONNECT_TIMEOUT_SECS = 5
 _HTTP_TIMEOUT_SECS = 10
 
-# Canary HTTP path used at L2.  The Pro contracts server exposes a standard
-# ``/v1/`` API root; a bare GET returns a well-formed JSON response that can
-# be used to confirm the server is accepting connections.
+# Canary HTTP path.  The Pro contracts server exposes a standard ``/v1/`` API
+# root; a bare GET returns a well-formed JSON response that can be used to
+# confirm the server is accepting connections.  This probe is cheap and
+# read-only, so it runs as part of the ``simple`` level.
 _CANARY_PATH = "/v1/"
 
 
@@ -61,16 +62,18 @@ class LivepatchProAirgappedServerValidator(BaseValidator):
             return self._skipped_result_due_to_role(level, self.role)
         if level == "simple":
             return self._validate_simple()
-        if level == "deep":
-            return self._validate_deep()
         return self._skipped_result_due_to_level(level)
 
     # ------------------------------------------------------------------
-    # L1 – schema + TCP connectivity
+    # Schema + TCP connectivity + HTTP canary
     # ------------------------------------------------------------------
 
     def _validate_simple(self) -> ValidationResult:
-        """L1: Validate required databag fields, field formats, and TCP reach."""
+        """Validate databag fields, field formats, TCP reach, and HTTP canary.
+
+        The contracts API canary is a cheap, read-only GET, so it runs here
+        rather than as a separate ``deep`` level.
+        """
         checks: list[ValidationCheck] = []
 
         if not self.relation_exists():
@@ -99,51 +102,14 @@ class LivepatchProAirgappedServerValidator(BaseValidator):
 
         tcp_check = _check_tcp(hostname, port, scheme)
         checks.append(tcp_check)
-
-        return self._make_result(level="simple", checks=checks)
-
-    # ------------------------------------------------------------------
-    # L2 – HTTP canary interaction
-    # ------------------------------------------------------------------
-
-    def _validate_deep(self) -> ValidationResult:
-        """L2: All L1 checks + HTTP canary against the contracts API root."""
-        checks: list[ValidationCheck] = []
-
-        if not self.relation_exists():
-            return self._error_result("deep", f"No remote application on relation '{self.endpoint}'.")
-
-        unit_dbs = _unit_databags(self.relation)
-        unit_check = _check_units_published(unit_dbs)
-        checks.append(unit_check)
-        if not unit_check.passed:
-            return self._make_result(level="deep", checks=checks)
-
-        fields = _first_populated_unit(unit_dbs)
-        hostname = fields.get("hostname", "")
-        scheme = fields.get("scheme", "http")
-        port_raw = fields.get("port", "")
-
-        scheme_check = _check_scheme(scheme)
-        checks.append(scheme_check)
-        if not scheme_check.passed:
-            return self._make_result(level="deep", checks=checks)
-
-        port_check, port = _check_port(port_raw)
-        checks.append(port_check)
-        if not port_check.passed:
-            return self._make_result(level="deep", checks=checks)
-
-        tcp_check = _check_tcp(hostname, port, scheme)
-        checks.append(tcp_check)
         if not tcp_check.passed:
-            return self._make_result(level="deep", checks=checks)
+            return self._make_result(level="simple", checks=checks)
 
         base_url = _build_url(scheme, hostname, port)
         http_check = _check_http_canary(base_url)
         checks.append(http_check)
 
-        return self._make_result(level="deep", checks=checks)
+        return self._make_result(level="simple", checks=checks)
 
 
 # ---------------------------------------------------------------------------
@@ -160,9 +126,9 @@ def _unit_databags(relation: ops.Relation) -> list[dict[str, str]]:
     """
     result: list[dict[str, str]] = []
     for unit in relation.units:
-        data = relation.data.get(unit)
+        data = dict(relation.data[unit])
         if data:
-            result.append(dict(data))
+            result.append(data)
     return result
 
 

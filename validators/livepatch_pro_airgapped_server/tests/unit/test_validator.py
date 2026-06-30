@@ -74,6 +74,24 @@ VALID_UNIT_DATABAG: dict[str, str] = {
 }
 
 
+def _mock_tcp_conn() -> MagicMock:
+    """Return a mock context manager standing in for a successful TCP socket."""
+    conn = MagicMock()
+    conn.__enter__ = MagicMock(return_value=conn)
+    conn.__exit__ = MagicMock(return_value=False)
+    return conn
+
+
+def _mock_http_response(status: int = 200, content_type: str = "application/json") -> MagicMock:
+    """Return a mock context-manager HTTP response for the canary urlopen."""
+    resp = MagicMock()
+    resp.status = status
+    resp.headers.get.return_value = content_type
+    resp.__enter__ = MagicMock(return_value=resp)
+    resp.__exit__ = MagicMock(return_value=False)
+    return resp
+
+
 # ---------------------------------------------------------------------------
 # Pure helper tests
 # ---------------------------------------------------------------------------
@@ -238,7 +256,7 @@ class TestUnitDatabags:
         hostnames = {db["hostname"] for db in dbs}
         assert hostnames == {"host1", "host2"}
 
-    def test_skips_units_with_no_data_entry(self) -> None:
+    def test_skips_units_with_empty_data_entry(self) -> None:
         unit_with_data = UnitStub("provider/0")
         unit_no_data = UnitStub("provider/1")
         app = ApplicationStub()
@@ -246,7 +264,7 @@ class TestUnitDatabags:
             name="rel",
             id=0,
             app=app,
-            data={app: {}, unit_with_data: {"hostname": "host1"}},
+            data={app: {}, unit_with_data: {"hostname": "host1"}, unit_no_data: {}},
             units=frozenset([unit_with_data, unit_no_data]),
         )
         dbs = _unit_databags(cast(ops.Relation, relation))
@@ -255,7 +273,7 @@ class TestUnitDatabags:
 
 
 # ---------------------------------------------------------------------------
-# L1 (simple) tests
+# Simple validation tests
 # ---------------------------------------------------------------------------
 
 
@@ -346,19 +364,19 @@ class TestSimpleValidation:
         assert "Connection refused" in tcp_check.message
 
     def test_passes_with_valid_fields_and_tcp(self) -> None:
-        # GIVEN a valid databag and a successful TCP connection
+        # GIVEN a valid databag, a successful TCP connection, and a 200 canary
         unit = UnitStub("provider/0")
         validator = _make_validator(unit_databags={unit: dict(VALID_UNIT_DATABAG)})
 
-        mock_conn = MagicMock()
-        mock_conn.__enter__ = MagicMock(return_value=mock_conn)
-        mock_conn.__exit__ = MagicMock(return_value=False)
-
         with patch(
             "validators.livepatch_pro_airgapped_server.validator.socket.create_connection",
-            return_value=mock_conn,
+            return_value=_mock_tcp_conn(),
         ):
-            result = validator.validate(level="simple")
+            with patch(
+                "validators.livepatch_pro_airgapped_server.validator.urllib.request.urlopen",
+                return_value=_mock_http_response(),
+            ):
+                result = validator.validate(level="simple")
 
         assert result.status == "PASS"
         assert all(c.passed for c in result.checks)
@@ -368,15 +386,15 @@ class TestSimpleValidation:
         unit = UnitStub("provider/0")
         validator = _make_validator(unit_databags={unit: {"hostname": "10.0.0.5", "port": "8080"}})
 
-        mock_conn = MagicMock()
-        mock_conn.__enter__ = MagicMock(return_value=mock_conn)
-        mock_conn.__exit__ = MagicMock(return_value=False)
-
         with patch(
             "validators.livepatch_pro_airgapped_server.validator.socket.create_connection",
-            return_value=mock_conn,
+            return_value=_mock_tcp_conn(),
         ):
-            result = validator.validate(level="simple")
+            with patch(
+                "validators.livepatch_pro_airgapped_server.validator.urllib.request.urlopen",
+                return_value=_mock_http_response(),
+            ):
+                result = validator.validate(level="simple")
 
         assert result.status == "PASS"
 
@@ -385,15 +403,15 @@ class TestSimpleValidation:
         unit = UnitStub("provider/0")
         validator = _make_validator(unit_databags={unit: {"hostname": "10.0.0.5", "scheme": "http"}})
 
-        mock_conn = MagicMock()
-        mock_conn.__enter__ = MagicMock(return_value=mock_conn)
-        mock_conn.__exit__ = MagicMock(return_value=False)
-
         with patch(
             "validators.livepatch_pro_airgapped_server.validator.socket.create_connection",
-            return_value=mock_conn,
+            return_value=_mock_tcp_conn(),
         ):
-            result = validator.validate(level="simple")
+            with patch(
+                "validators.livepatch_pro_airgapped_server.validator.urllib.request.urlopen",
+                return_value=_mock_http_response(),
+            ):
+                result = validator.validate(level="simple")
 
         assert result.status == "PASS"
         port_check = next(c for c in result.checks if c.name == "port")
@@ -427,53 +445,40 @@ class TestSimpleValidation:
         assert result.status == "SKIPPED"
         assert result.error is not None
 
+    def test_skips_for_deep_level(self) -> None:
+        unit = UnitStub("provider/0")
+        validator = _make_validator(unit_databags={unit: dict(VALID_UNIT_DATABAG)})
+
+        result = validator.validate(level="deep")
+
+        assert result.status == "SKIPPED"
+        assert result.error is not None
+
     def test_result_reflects_endpoint_and_interface(self) -> None:
         unit = UnitStub("provider/0")
         validator = _make_validator(unit_databags={unit: dict(VALID_UNIT_DATABAG)}, endpoint="my-endpoint")
 
-        mock_conn = MagicMock()
-        mock_conn.__enter__ = MagicMock(return_value=mock_conn)
-        mock_conn.__exit__ = MagicMock(return_value=False)
-
         with patch(
             "validators.livepatch_pro_airgapped_server.validator.socket.create_connection",
-            return_value=mock_conn,
+            return_value=_mock_tcp_conn(),
         ):
-            result = validator.validate(level="simple")
+            with patch(
+                "validators.livepatch_pro_airgapped_server.validator.urllib.request.urlopen",
+                return_value=_mock_http_response(),
+            ):
+                result = validator.validate(level="simple")
 
         assert result.endpoint == "my-endpoint"
         assert result.interface == _INTERFACE
 
 
 # ---------------------------------------------------------------------------
-# L2 (deep) tests
+# HTTP canary tests (runs at the simple level)
 # ---------------------------------------------------------------------------
 
 
-class TestDeepValidation:
-    def test_returns_error_when_no_remote_app(self) -> None:
-        relation = RelationStub(name=_ENDPOINT, id=0, app=None, data={})
-        charm = cast(
-            ops.CharmBase,
-            make_charm_from_relation(relation, interface_name=_INTERFACE, role=RelationRoleStub.requires),
-        )
-        validator = LivepatchProAirgappedServerValidator(charm, cast(ops.Relation, relation))
-
-        result = validator.validate(level="deep")
-
-        assert result.status == "ERROR"
-
-    def test_fails_schema_when_hostname_missing(self) -> None:
-        # GIVEN no unit published hostname
-        validator = _make_validator(unit_databags=None)
-
-        result = validator.validate(level="deep")
-
-        assert result.status == "FAIL"
-        unit_check = next(c for c in result.checks if c.name == "unit_data")
-        assert not unit_check.passed
-
-    def test_fails_when_tcp_unreachable(self) -> None:
+class TestHttpCanary:
+    def test_skips_canary_when_tcp_unreachable(self) -> None:
         unit = UnitStub("provider/0")
         validator = _make_validator(unit_databags={unit: dict(VALID_UNIT_DATABAG)})
 
@@ -481,7 +486,7 @@ class TestDeepValidation:
             "validators.livepatch_pro_airgapped_server.validator.socket.create_connection",
             side_effect=OSError("Network unreachable"),
         ):
-            result = validator.validate(level="deep")
+            result = validator.validate(level="simple")
 
         assert result.status == "FAIL"
         tcp_check = next(c for c in result.checks if c.name == "tcp_connect")
@@ -493,19 +498,15 @@ class TestDeepValidation:
         unit = UnitStub("provider/0")
         validator = _make_validator(unit_databags={unit: dict(VALID_UNIT_DATABAG)})
 
-        mock_conn = MagicMock()
-        mock_conn.__enter__ = MagicMock(return_value=mock_conn)
-        mock_conn.__exit__ = MagicMock(return_value=False)
-
         with patch(
             "validators.livepatch_pro_airgapped_server.validator.socket.create_connection",
-            return_value=mock_conn,
+            return_value=_mock_tcp_conn(),
         ):
             with patch(
                 "validators.livepatch_pro_airgapped_server.validator.urllib.request.urlopen",
                 side_effect=urllib.error.HTTPError(url="", code=500, msg="Internal Server Error", hdrs=None, fp=None),  # type: ignore[arg-type]
             ):
-                result = validator.validate(level="deep")
+                result = validator.validate(level="simple")
 
         assert result.status == "FAIL"
         http_check = next(c for c in result.checks if c.name == "http_canary")
@@ -517,19 +518,15 @@ class TestDeepValidation:
         unit = UnitStub("provider/0")
         validator = _make_validator(unit_databags={unit: dict(VALID_UNIT_DATABAG)})
 
-        mock_conn = MagicMock()
-        mock_conn.__enter__ = MagicMock(return_value=mock_conn)
-        mock_conn.__exit__ = MagicMock(return_value=False)
-
         with patch(
             "validators.livepatch_pro_airgapped_server.validator.socket.create_connection",
-            return_value=mock_conn,
+            return_value=_mock_tcp_conn(),
         ):
             with patch(
                 "validators.livepatch_pro_airgapped_server.validator.urllib.request.urlopen",
                 side_effect=urllib.error.HTTPError(url="", code=401, msg="Unauthorized", hdrs=None, fp=None),  # type: ignore[arg-type]
             ):
-                result = validator.validate(level="deep")
+                result = validator.validate(level="simple")
 
         assert result.status == "PASS"
         http_check = next(c for c in result.checks if c.name == "http_canary")
@@ -541,19 +538,15 @@ class TestDeepValidation:
         unit = UnitStub("provider/0")
         validator = _make_validator(unit_databags={unit: dict(VALID_UNIT_DATABAG)})
 
-        mock_conn = MagicMock()
-        mock_conn.__enter__ = MagicMock(return_value=mock_conn)
-        mock_conn.__exit__ = MagicMock(return_value=False)
-
         with patch(
             "validators.livepatch_pro_airgapped_server.validator.socket.create_connection",
-            return_value=mock_conn,
+            return_value=_mock_tcp_conn(),
         ):
             with patch(
                 "validators.livepatch_pro_airgapped_server.validator.urllib.request.urlopen",
                 side_effect=urllib.error.URLError("Connection refused"),
             ):
-                result = validator.validate(level="deep")
+                result = validator.validate(level="simple")
 
         assert result.status == "FAIL"
         http_check = next(c for c in result.checks if c.name == "http_canary")
@@ -565,28 +558,18 @@ class TestDeepValidation:
         unit = UnitStub("provider/0")
         validator = _make_validator(unit_databags={unit: dict(VALID_UNIT_DATABAG)})
 
-        mock_conn = MagicMock()
-        mock_conn.__enter__ = MagicMock(return_value=mock_conn)
-        mock_conn.__exit__ = MagicMock(return_value=False)
-
-        mock_resp = MagicMock()
-        mock_resp.status = 200
-        mock_resp.headers.get.return_value = "application/json"
-        mock_resp.__enter__ = MagicMock(return_value=mock_resp)
-        mock_resp.__exit__ = MagicMock(return_value=False)
-
         with patch(
             "validators.livepatch_pro_airgapped_server.validator.socket.create_connection",
-            return_value=mock_conn,
+            return_value=_mock_tcp_conn(),
         ):
             with patch(
                 "validators.livepatch_pro_airgapped_server.validator.urllib.request.urlopen",
-                return_value=mock_resp,
+                return_value=_mock_http_response(),
             ):
-                result = validator.validate(level="deep")
+                result = validator.validate(level="simple")
 
         assert result.status == "PASS"
-        assert result.level == "deep"
+        assert result.level == "simple"
         http_check = next(c for c in result.checks if c.name == "http_canary")
         assert http_check.passed
         assert "200" in http_check.message
@@ -602,24 +585,15 @@ class TestDeepValidation:
             }
         )
 
-        mock_conn = MagicMock()
-        mock_conn.__enter__ = MagicMock(return_value=mock_conn)
-        mock_conn.__exit__ = MagicMock(return_value=False)
-        mock_resp = MagicMock()
-        mock_resp.status = 200
-        mock_resp.headers.get.return_value = "application/json"
-        mock_resp.__enter__ = MagicMock(return_value=mock_resp)
-        mock_resp.__exit__ = MagicMock(return_value=False)
-
         with patch(
             "validators.livepatch_pro_airgapped_server.validator.socket.create_connection",
-            return_value=mock_conn,
+            return_value=_mock_tcp_conn(),
         ) as mock_tcp:
             with patch(
                 "validators.livepatch_pro_airgapped_server.validator.urllib.request.urlopen",
-                return_value=mock_resp,
+                return_value=_mock_http_response(),
             ):
-                result = validator.validate(level="deep")
+                result = validator.validate(level="simple")
 
         assert result.status == "PASS"
         # TCP should be called with the second unit's hostname
