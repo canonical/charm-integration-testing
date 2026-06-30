@@ -1,0 +1,29 @@
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+[project]
+name = "validators-kafka-client"
+version = "0.1.0"
+description = "Validator for kafka_client interface"
+authors = [
+    {name = "SQA Team", email = "solutionsqa@canonical.com"}
+]
+
+requires-python = ">=3.10"
+dependencies = [
+    "kafka-python>=2.0.0",
+    "validators-base",
+]
+
+[project.entry-points."endpoint_validators"]
+kafka_client = "validators.kafka_client:KafkaClientValidator"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["validators.kafka_client"]
+
+[tool.setuptools.package-dir]
+"validators.kafka_client" = "."
