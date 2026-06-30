@@ -20,6 +20,7 @@ dependencies = [
     "validators-loki-push-api",
     "validators-object-storage",
     "validators-prometheus-scrape",
+    "validators-kafka-client",
     "validators-opensearch-client",
     "validators-temporal-host-info",
     "validators-config-server",
