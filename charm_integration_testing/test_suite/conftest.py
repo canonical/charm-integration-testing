@@ -30,7 +30,7 @@ from juju.resource_registry import (
 from juju_jubilant import JubilantBackend
 from kubernetes_client import KubernetesBackend, KubernetesClient
 from pytest import StashKey
-from resource_registry import LogCollector, ResourceRegistry, ResourceTeardownWarning
+from resource_registry import ResourceRegistry, ResourceTeardownWarning
 from test_observer_client import TestObserverClient as TestObserverAPIClient
 from test_observer_client import TestObserverClientError
 from utils import generate_juju_name, normalize_string, normalize_string_multiline
