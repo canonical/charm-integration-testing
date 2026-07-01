@@ -843,6 +843,26 @@ files = [
 PyYAML = "==6.*"
 
 [[package]]
+name = "kafka-python"
+version = "3.0.7"
+description = "Pure Python client for Apache Kafka"
+optional = false
+python-versions = ">=3.8"
+groups = ["main"]
+files = [
+    {file = "kafka_python-3.0.7-py3-none-any.whl", hash = "sha256:37dde37c1ed6d4f77ce5164d92eab70fc5d0ed57e9f20a970dc776d0371d4025"},
+    {file = "kafka_python-3.0.7.tar.gz", hash = "sha256:24da5a3aa6f3dc421c74deee1b365d656b9dc54ab8e17a065b73ac4255a5254d"},
+]
+
+[package.extras]
+benchmarks = ["pyperf"]
+crc32c = ["crc32c"]
+lz4 = ["lz4"]
+snappy = ["python-snappy"]
+testing = ["pytest", "pytest-mock", "pytest-timeout"]
+zstd = ["zstandard"]
+
+[[package]]
 name = "kubernetes"
 version = "32.0.1"
 description = "Kubernetes python client"
@@ -2356,6 +2376,26 @@ socks = ["pysocks (>=1.5.6,!=1.5.7,<2.0)"]
 zstd = ["backports-zstd (>=1.0.0) ; python_version < \"3.14\""]
 
 [[package]]
+name = "validators-azure-storage"
+version = "0.1.0"
+description = "Validator for azure_storage interface"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+validators-base = "*"
+
+[package.extras]
+dev = ["validators-test-utils"]
+
+[package.source]
+type = "directory"
+url = "validators/azure_storage"
+
+[[package]]
 name = "validators-base"
 version = "0.1.0"
 description = "Base validator class for Interface Validators Framework (SQ096)"
@@ -2407,6 +2447,24 @@ validators-base = "*"
 [package.source]
 type = "directory"
 url = "validators/cve_catalog"
+
+[[package]]
+name = "validators-kafka-client"
+version = "0.1.0"
+description = "Validator for kafka_client interface"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+kafka-python = ">=2.0.0"
+validators-base = "*"
+
+[package.source]
+type = "directory"
+url = "validators/kafka_client"
 
 [[package]]
 name = "validators-loki-push-api"
@@ -2553,9 +2611,11 @@ develop = true
 [package.dependencies]
 ops = ">=3.3.0,<4.0.0"
 pydantic = ">=2.0.0"
+validators-azure-storage = "*"
 validators-base = "*"
 validators-config-server = "*"
 validators-cve-catalog = "*"
+validators-kafka-client = "*"
 validators-loki-push-api = "*"
 validators-object-storage = "*"
 validators-opensearch-client = "*"
@@ -2722,4 +2782,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<4.0"
-content-hash = "b8ccdbe2a15bad607761bc492e9fb1fcf69002cd36aa6807b6fa81a7ad1a3d1c"
+content-hash = "7664a09b633474a526368c434c01d7cd396ebe47a0592895bb2a57df9de5c90b"
