@@ -113,7 +113,7 @@ class ParcaStoreValidator(BaseValidator):
                 return self._make_result(level="deep", checks=checks)
 
         # 5. gRPC channel ready — proves transport layer negotiates correctly.
-        checks.append(_grpc_channel_ready_check(address, insecure=insecure, token=token))
+        checks.append(_grpc_channel_ready_check(address.split("://")[-1].strip(), insecure=insecure, token=token))
 
         return self._make_result(level="deep", checks=checks)
 
@@ -131,8 +131,8 @@ def _parse_grpc_address(address: str) -> tuple[ValidationCheck, str, int]:
     scheme (e.g. ``10.1.2.3:7070`` or ``parca.namespace.svc:7070``).
     """
     try:
-        # Strip any accidental scheme prefix.
-        stripped = address.split("://")[-1]
+        # Strip any accidental scheme prefix and surrounding whitespace.
+        stripped = address.strip().split("://")[-1].strip()
         if ":" not in stripped:
             return (
                 ValidationCheck(
@@ -144,7 +144,8 @@ def _parse_grpc_address(address: str) -> tuple[ValidationCheck, str, int]:
                 0,
             )
         host, port_str = stripped.rsplit(":", 1)
-        port = int(port_str)
+        host = host.strip()
+        port = int(port_str.strip())
         if not host:
             raise ValueError("empty host")
         if not (1 <= port <= 65535):
