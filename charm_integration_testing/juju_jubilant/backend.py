@@ -3,6 +3,7 @@
 
 
 import dataclasses
+import os
 import pathlib
 import re
 import shutil
@@ -55,8 +56,6 @@ def _ignore_unreadable(directory: str, contents: list[str]) -> list[str]:
     unreadable files (e.g. stale editor temp files on virtiofs mounts) are
     silently skipped instead of aborting the copy.
     """
-    import os
-
     skip: list[str] = []
     for name in contents:
         path = os.path.join(directory, name)

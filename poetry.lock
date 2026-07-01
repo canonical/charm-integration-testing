@@ -2409,24 +2409,6 @@ type = "directory"
 url = "validators/cve_catalog"
 
 [[package]]
-name = "validators-grpc-validator"
-version = "0.1.0"
-description = "Validator for parca_store (gRPC) interface"
-optional = false
-python-versions = ">=3.10"
-groups = ["main"]
-files = []
-develop = true
-
-[package.dependencies]
-grpcio = ">=1.60.0"
-validators-base = "*"
-
-[package.source]
-type = "directory"
-url = "validators/grpc_validator"
-
-[[package]]
 name = "validators-loki-push-api"
 version = "0.1.0"
 description = "Validator for loki_push_api interface"
@@ -2502,6 +2484,24 @@ type = "directory"
 url = "validators/opensearch_client"
 
 [[package]]
+name = "validators-parca-store"
+version = "0.1.0"
+description = "Validator for parca_store (gRPC) interface"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+grpcio = ">=1.60.0"
+validators-base = "*"
+
+[package.source]
+type = "directory"
+url = "validators/parca_store"
+
+[[package]]
 name = "validators-postgresql-client"
 version = "0.1.0"
 description = "Validator for postgresql_client interface"
@@ -2556,10 +2556,10 @@ pydantic = ">=2.0.0"
 validators-base = "*"
 validators-config-server = "*"
 validators-cve-catalog = "*"
-validators-grpc-validator = "*"
 validators-loki-push-api = "*"
 validators-object-storage = "*"
 validators-opensearch-client = "*"
+validators-parca-store = "*"
 validators-postgresql-client = "*"
 validators-prometheus-scrape = "*"
 validators-s3 = "*"
@@ -2722,4 +2722,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<4.0"
-content-hash = "06dc4adb2f6bab0d172057ad2a3f421a183b8ab5dc71bdde545b49992ddd02c7"
+content-hash = "b8ccdbe2a15bad607761bc492e9fb1fcf69002cd36aa6807b6fa81a7ad1a3d1c"

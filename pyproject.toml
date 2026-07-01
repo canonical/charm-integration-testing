@@ -25,7 +25,7 @@ validators-object-storage = { path = "./validators/object_storage", develop = tr
 validators-opensearch-client = { path = "./validators/opensearch_client", develop = true }
 validators-config-server = { path = "./validators/config_server", develop = true }
 validators-cve-catalog = { path = "./validators/cve_catalog", develop = true }
-validators-grpc-validator = { path = "./validators/grpc_validator", develop = true }
+validators-parca-store = { path = "./validators/parca_store", develop = true }
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
