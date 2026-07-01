@@ -29,13 +29,19 @@ class JujuCrashdumpCollector:
         logger: logging.Logger,
         output_dir: Path | None = None,
         kubeconfig_path: Path | None = None,
+        controller_allowlist: set[str] | None = None,
     ) -> None:
         self._logger = logger.getChild(type(self).__name__)
         self._output_dir = output_dir
         self._kubeconfig_path = kubeconfig_path
+        self._controller_allowlist = controller_allowlist
 
     def supports(self, handle: ResourceHandle) -> bool:
-        return isinstance(handle, JujuControllerHandle)
+        if not isinstance(handle, JujuControllerHandle):
+            return False
+        if self._controller_allowlist is not None:
+            return handle.controller in self._controller_allowlist
+        return True
 
     def collect(self, handle: ResourceHandle) -> None:
         if not isinstance(handle, JujuControllerHandle):
@@ -83,6 +89,9 @@ class JujuCrashdumpCollector:
         result.check_returncode()
 
     def _collect_machine(self, controller: str, output_path: Path) -> None:
+        # juju-crashdump writes the archive to output_dir as "juju-crashdump-{uniq}.tar.{compression}".
+        # We derive uniq from the expected output filename so we can rename the result afterwards.
+        uniq = output_path.name.removesuffix(".tar.gz")
         cmd = [
             "juju-crashdump",
             "--model",
@@ -94,8 +103,10 @@ class JujuCrashdumpCollector:
             str(_JUJU_CRASHDUMP_MAX_FILE_SIZE_BYTES),
             "--compression",
             "gz",
-            "--unit-dump-location",
-            str(output_path),
+            "-o",
+            str(output_path.parent),
+            "--uniq",
+            uniq,
             "--as-root",
         ]
         self._logger.debug(f"Running {' '.join(str(c) for c in cmd)}")
@@ -116,3 +127,6 @@ class JujuCrashdumpCollector:
             if result.stderr:
                 self._logger.debug(f"juju-crashdump stderr:\n{result.stderr}")
         result.check_returncode()
+        # Rename from juju-crashdump's default naming scheme to the expected output_path.
+        created = output_path.parent / f"juju-crashdump-{uniq}.tar.gz"
+        created.rename(output_path)
