@@ -30,7 +30,7 @@ from juju.resource_registry import (
 from juju_jubilant import JubilantBackend
 from kubernetes_client import KubernetesBackend, KubernetesClient
 from pytest import StashKey
-from resource_registry import ResourceRegistry, ResourceTeardownWarning
+from resource_registry import LogCollector, ResourceRegistry, ResourceTeardownWarning
 from test_observer_client import TestObserverClient as TestObserverAPIClient
 from test_observer_client import TestObserverClientError
 from utils import generate_juju_name, normalize_string, normalize_string_multiline
@@ -151,7 +151,7 @@ def session_resource_registry(
     if neighbor_controller is not None:
         # CMR test: scope each collector to its own controller so the wrong
         # substrate tool is never invoked on the other side.
-        global_collectors = [
+        global_collectors: list[LogCollector] = [
             JujuCrashdumpCollector(
                 logger,
                 output_dir=log_dir,
