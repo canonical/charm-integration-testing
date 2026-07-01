@@ -843,6 +843,26 @@ files = [
 PyYAML = "==6.*"
 
 [[package]]
+name = "kafka-python"
+version = "3.0.2"
+description = "Pure Python client for Apache Kafka"
+optional = false
+python-versions = ">=3.8"
+groups = ["main"]
+files = [
+    {file = "kafka_python-3.0.2-py3-none-any.whl", hash = "sha256:8f674afff08d40c981db903b6eb8ae9f3652909081158921437ee80e465bd9c7"},
+    {file = "kafka_python-3.0.2.tar.gz", hash = "sha256:1921af12d8bc9e37843025b89c782d1c90498d80373af590aad45ba4fcfa6e77"},
+]
+
+[package.extras]
+benchmarks = ["pyperf"]
+crc32c = ["crc32c"]
+lz4 = ["lz4"]
+snappy = ["python-snappy"]
+testing = ["pytest", "pytest-mock", "pytest-timeout"]
+zstd = ["zstandard"]
+
+[[package]]
 name = "kubernetes"
 version = "32.0.1"
 description = "Kubernetes python client"
@@ -2429,6 +2449,24 @@ type = "directory"
 url = "validators/cve_catalog"
 
 [[package]]
+name = "validators-kafka-client"
+version = "0.1.0"
+description = "Validator for kafka_client interface"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+kafka-python = ">=2.0.0"
+validators-base = "*"
+
+[package.source]
+type = "directory"
+url = "validators/kafka_client"
+
+[[package]]
 name = "validators-loki-push-api"
 version = "0.1.0"
 description = "Validator for loki_push_api interface"
@@ -2559,6 +2597,7 @@ validators-azure-storage = "*"
 validators-base = "*"
 validators-config-server = "*"
 validators-cve-catalog = "*"
+validators-kafka-client = "*"
 validators-loki-push-api = "*"
 validators-object-storage = "*"
 validators-opensearch-client = "*"
@@ -2724,4 +2763,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<4.0"
-content-hash = "58da1bf0244639b8966543ffaa2ad24a0e919fe3def694e3a81de4ad89adf51e"
+content-hash = "66829d72a944055a85aad107f4d998bb5cc7a49fb52bba33d2de93ca6ed4597f"
