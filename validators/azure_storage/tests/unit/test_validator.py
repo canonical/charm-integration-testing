@@ -1,23 +1,12 @@
-# Copyright (C) 2026 Canonical Ltd
-
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ # Copyright 2026 Canonical Ltd.
+ # See LICENSE file for licensing details.
 
 from typing import cast
 
 import ops
 import pytest
 
+from validators.base import ValidationLevel
 from validators.azure_storage.validator import AzureStorageValidator
 from validators.test_utils.helpers import make_charm_from_relation, make_charm_from_relation_and_secrets
 from validators.test_utils.stubs import ApplicationStub, RelationRoleStub, RelationStub
@@ -78,12 +67,12 @@ class TestAzureStorageValidatorRole:
 
 class TestAzureStorageValidatorLevel:
     @pytest.mark.parametrize("level", ["deep", "uat"])
-    def test_unsupported_levels_return_skipped(self, level: str) -> None:
+    def test_unsupported_levels_return_skipped(self, level: ValidationLevel) -> None:
         # GIVEN
         validator = _make_validator(VALID_DATABAG)
 
         # WHEN
-        result = validator.validate(level=level)  # type: ignore[arg-type]
+        result = validator.validate(level=level)
 
         # THEN
         assert result.status == "SKIPPED"
