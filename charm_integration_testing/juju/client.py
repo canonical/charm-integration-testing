@@ -9,7 +9,13 @@ from validators.base import ValidationResult
 
 from .backend import JujuBackend
 from .extension import JujuExtension
-from .models import JujuApplicationInfo, JujuConsumedOfferInfo, JujuIntegration, JujuIntegrationApplication
+from .models import (
+    JujuApplicationInfo,
+    JujuConsumedOfferInfo,
+    JujuIntegration,
+    JujuIntegrationApplication,
+    JujuResolvedIntegration,
+)
 from .version import JujuVersion
 
 
@@ -83,6 +89,84 @@ class JujuClient:
         self.logger.info(f"Collecting debug log from model {model}")
         return self.backend.debug_log(model)
 
+    def find_integration_location(
+        self,
+        target_model: str,
+        target_application: str,
+        target_endpoint: str,
+        neighbor_application: str,
+        neighbor_endpoint: str,
+        neighbor_model: str | None = None,
+    ) -> JujuResolvedIntegration:
+        """Resolve where a CMR integration lives and what SAAS alias to use.
+
+        For same-model integrations this is a pass-through. For CMR tests it determines which
+        model holds the consuming side and substitutes the local SAAS alias for the remote
+        application name so that Juju commands succeed.
+
+        Resolution order:
+        1. ``list_integrations(target_model)`` — if the live integration is visible in the
+           target model, extract the actual application names (one side may be a SAAS alias).
+        2. ``list_consumed_offers(target_model)`` — if any SAAS entry in the target model
+           exposes ``neighbor_endpoint``, the target is the consuming side.  Used when the
+           integration has already been removed and step 1 finds nothing.
+        3. Same as 1–2 on ``neighbor_model`` with roles swapped (neighbor-as-consumer).
+        4. Fallback: treat as a same-model integration and use names as provided.
+        """
+        # Step 1: look for a live integration in the target model.
+        for integration in self.backend.list_integrations(target_model):
+            sides = {integration.provider, integration.requirer}
+            target_side = next((s for s in sides if s.application == target_application and s.endpoint == target_endpoint), None)
+            neighbor_side = next((s for s in sides if s.endpoint == neighbor_endpoint and s.application != target_application), None)
+            if target_side is not None and neighbor_side is not None:
+                return JujuResolvedIntegration(
+                    model=target_model,
+                    endpoint_1=target_side,
+                    endpoint_2=neighbor_side,
+                )
+
+        # Step 2: the integration may be gone already (post-remove restore path).
+        # Check consumed offers in the target model for a SAAS that exposes neighbor_endpoint.
+        consumed_in_target = self.backend.list_consumed_offers(target_model)
+        for saas_name, offer_info in consumed_in_target.items():
+            if neighbor_endpoint in offer_info.endpoints:
+                return JujuResolvedIntegration(
+                    model=target_model,
+                    endpoint_1=JujuIntegrationApplication(target_application, target_endpoint),
+                    endpoint_2=JujuIntegrationApplication(saas_name, neighbor_endpoint),
+                )
+
+        # Steps 3a/3b: check the neighbor model (neighbor-as-consumer case).
+        if neighbor_model is not None:
+            # Step 3a: live integration visible in the neighbor model.
+            for integration in self.backend.list_integrations(neighbor_model):
+                sides = {integration.provider, integration.requirer}
+                neighbor_side = next((s for s in sides if s.application == neighbor_application and s.endpoint == neighbor_endpoint), None)
+                target_side = next((s for s in sides if s.endpoint == target_endpoint and s.application != neighbor_application), None)
+                if neighbor_side is not None and target_side is not None:
+                    return JujuResolvedIntegration(
+                        model=neighbor_model,
+                        endpoint_1=target_side,
+                        endpoint_2=neighbor_side,
+                    )
+
+            # Step 3b: consumed offers in the neighbor model expose target_endpoint.
+            consumed_in_neighbor = self.backend.list_consumed_offers(neighbor_model)
+            for saas_name, offer_info in consumed_in_neighbor.items():
+                if target_endpoint in offer_info.endpoints:
+                    return JujuResolvedIntegration(
+                        model=neighbor_model,
+                        endpoint_1=JujuIntegrationApplication(saas_name, target_endpoint),
+                        endpoint_2=JujuIntegrationApplication(neighbor_application, neighbor_endpoint),
+                    )
+
+        # Step 4: same-model (or no CMR context available) — use as provided.
+        return JujuResolvedIntegration(
+            model=target_model,
+            endpoint_1=JujuIntegrationApplication(target_application, target_endpoint),
+            endpoint_2=JujuIntegrationApplication(neighbor_application, neighbor_endpoint),
+        )
+
     def integrate(
         self,
         application_1: str,
@@ -90,14 +174,18 @@ class JujuClient:
         endpoint_1: str,
         endpoint_2: str,
         model: str = "default",
+        neighbor_model: str | None = None,
     ) -> None:
-        # Get targets
-        target_1 = JujuIntegrationApplication(application_1, endpoint_1)
-        target_2 = JujuIntegrationApplication(application_2, endpoint_2)
-
-        # Integrate
-        self.logger.info(f"Integrating {target_1} with {target_2}.")
-        self.backend.integrate(model, target_1, target_2)
+        resolved = self.find_integration_location(
+            target_model=model,
+            target_application=application_1,
+            target_endpoint=endpoint_1,
+            neighbor_application=application_2,
+            neighbor_endpoint=endpoint_2,
+            neighbor_model=neighbor_model,
+        )
+        self.logger.info(f"Integrating {resolved.endpoint_1} with {resolved.endpoint_2}.")
+        self.backend.integrate(resolved.model, resolved.endpoint_1, resolved.endpoint_2)
 
     def remove_integration(
         self,
@@ -106,14 +194,18 @@ class JujuClient:
         endpoint_1: str,
         endpoint_2: str,
         model: str = "default",
+        neighbor_model: str | None = None,
     ) -> None:
-        # Get targets
-        target_1 = JujuIntegrationApplication(application_1, endpoint_1)
-        target_2 = JujuIntegrationApplication(application_2, endpoint_2)
-
-        # Remove integration
-        self.logger.info(f"Removing integration between {target_1} and {target_2}.")
-        self.backend.remove_integration(model, target_1, target_2)
+        resolved = self.find_integration_location(
+            target_model=model,
+            target_application=application_1,
+            target_endpoint=endpoint_1,
+            neighbor_application=application_2,
+            neighbor_endpoint=endpoint_2,
+            neighbor_model=neighbor_model,
+        )
+        self.logger.info(f"Removing integration between {resolved.endpoint_1} and {resolved.endpoint_2}.")
+        self.backend.remove_integration(resolved.model, resolved.endpoint_1, resolved.endpoint_2)
 
     def deploy_bundle_file(
         self,
@@ -165,13 +257,21 @@ class JujuClient:
         endpoint_2: str,
         model: str = "default",
         timeout: timedelta | None = None,
+        neighbor_model: str | None = None,
     ) -> None:
-        target_1 = JujuIntegrationApplication(application_1, endpoint_1)
-        target_2 = JujuIntegrationApplication(application_2, endpoint_2)
-        self.logger.info(
-            f"{self._waiting_timeout_log(timeout)} for removal of integration between {target_1} and {target_2}."
+        resolved = self.find_integration_location(
+            target_model=model,
+            target_application=application_1,
+            target_endpoint=endpoint_1,
+            neighbor_application=application_2,
+            neighbor_endpoint=endpoint_2,
+            neighbor_model=neighbor_model,
         )
-        self.backend.wait_for_removal_of_integration(model, target_1, target_2, timeout)
+        self.logger.info(
+            f"{self._waiting_timeout_log(timeout)} for removal of integration between "
+            f"{resolved.endpoint_1} and {resolved.endpoint_2}."
+        )
+        self.backend.wait_for_removal_of_integration(resolved.model, resolved.endpoint_1, resolved.endpoint_2, timeout)
 
     def wait_for_removal_of_units(
         self, *applications: str, model: str = "default", timeout: timedelta | None = None

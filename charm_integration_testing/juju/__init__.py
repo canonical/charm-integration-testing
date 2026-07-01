@@ -22,6 +22,7 @@ from .models import (
     JujuConsumedOfferInfo,
     JujuIntegration,
     JujuIntegrationApplication,
+    JujuResolvedIntegration,
 )
 from .version import JujuVersion
 
@@ -37,6 +38,7 @@ __all__ = [
     "JujuIntegration",
     "JujuIntegrationApplication",
     "JujuPerformanceWarning",
+    "JujuResolvedIntegration",
     "JujuStatusPerformanceWarning",
     "JujuTask",
     "JujuUnitAgentState",

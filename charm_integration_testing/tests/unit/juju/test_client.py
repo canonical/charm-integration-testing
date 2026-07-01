@@ -9,7 +9,13 @@ import pytest
 from juju import JujuValidationError
 from juju.client import JujuClient
 from juju.extension import JujuExtension
-from juju.models import JujuApplicationInfo
+from juju.models import (
+    JujuApplicationInfo,
+    JujuConsumedOfferInfo,
+    JujuIntegration,
+    JujuIntegrationApplication,
+    JujuResolvedIntegration,
+)
 from juju.version import JujuVersion
 
 from validators.base.validator import ValidationCheck, ValidationResult
@@ -843,3 +849,394 @@ class TestJujuClientMigrateModelHooks:
         # THEN both extensions received the hook
         assert ext1.post_migrate_calls == [("mymodel", "source-ctrl", "target-ctrl")]
         assert ext2.post_migrate_calls == [("mymodel", "source-ctrl", "target-ctrl")]
+
+
+# ---------------------------------------------------------------------------
+# Stubs for CMR integration tests
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class IntegrationLocationBackendStub(NullJujuBackend):
+    """Backend stub with configurable integrations and consumed offers per model."""
+
+    integrations_by_model: dict[str, set[JujuIntegration]] = field(default_factory=dict)
+    consumed_offers_by_model: dict[str, dict[str, JujuConsumedOfferInfo]] = field(default_factory=dict)
+    integrate_calls: list[tuple[str, JujuIntegrationApplication, JujuIntegrationApplication]] = field(
+        default_factory=list
+    )
+    remove_calls: list[tuple[str, JujuIntegrationApplication, JujuIntegrationApplication]] = field(
+        default_factory=list
+    )
+    wait_removal_calls: list[
+        tuple[str, JujuIntegrationApplication, JujuIntegrationApplication, Any]
+    ] = field(default_factory=list)
+
+    def list_integrations(self, model: str) -> set[JujuIntegration]:
+        return self.integrations_by_model.get(model, set())
+
+    def list_consumed_offers(self, model: str) -> dict[str, JujuConsumedOfferInfo]:
+        return self.consumed_offers_by_model.get(model, {})
+
+    def integrate(
+        self, model: str, target_1: JujuIntegrationApplication, target_2: JujuIntegrationApplication
+    ) -> None:
+        self.integrate_calls.append((model, target_1, target_2))
+
+    def remove_integration(
+        self, model: str, target_1: JujuIntegrationApplication, target_2: JujuIntegrationApplication
+    ) -> None:
+        self.remove_calls.append((model, target_1, target_2))
+
+    def wait_for_removal_of_integration(
+        self,
+        model: str,
+        endpoint_1: JujuIntegrationApplication,
+        endpoint_2: JujuIntegrationApplication,
+        timeout: Any,
+    ) -> None:
+        self.wait_removal_calls.append((model, endpoint_1, endpoint_2, timeout))
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+_TARGET_APP = "target"
+_TARGET_EP = "grafana-dashboards-consumer"
+_NEIGHBOR_APP = "neighbor"
+_NEIGHBOR_EP = "grafana-dashboard"
+_SAAS_ALIAS = "neighbor-offer"
+_TARGET_MODEL = "ctrl-a:model-a"
+_NEIGHBOR_MODEL = "ctrl-b:model-b"
+
+
+def _client(backend: NullJujuBackend) -> JujuClient:
+    class _SilentLogger:
+        def info(self, *a: object, **kw: object) -> None: pass
+        def error(self, *a: object, **kw: object) -> None: pass
+        def debug(self, *a: object, **kw: object) -> None: pass
+        def warning(self, *a: object, **kw: object) -> None: pass
+        def getChild(self, suffix: str) -> "_SilentLogger": return self
+
+    return JujuClient(backend, _SilentLogger(), [])  # type: ignore[arg-type]
+
+
+def _integration(
+    provider_app: str, provider_ep: str, requirer_app: str, requirer_ep: str
+) -> JujuIntegration:
+    return JujuIntegration(
+        provider=JujuIntegrationApplication(provider_app, provider_ep),
+        requirer=JujuIntegrationApplication(requirer_app, requirer_ep),
+        interface="grafana_dashboard",
+    )
+
+
+# ---------------------------------------------------------------------------
+# TestFindIntegrationLocation
+# ---------------------------------------------------------------------------
+
+
+class TestFindIntegrationLocation:
+    """Tests for JujuClient.find_integration_location covering all CMR resolution paths."""
+
+    def test_non_cmr_no_integration_returns_as_provided(self) -> None:
+        # GIVEN both apps are local (no SAAS, no consumed offers, no neighbor model)
+        backend = IntegrationLocationBackendStub(
+            integrations_by_model={
+                _TARGET_MODEL: {_integration(_NEIGHBOR_APP, _NEIGHBOR_EP, _TARGET_APP, _TARGET_EP)}
+            }
+        )
+        client = _client(backend)
+
+        # WHEN
+        result = client.find_integration_location(
+            target_model=_TARGET_MODEL,
+            target_application=_TARGET_APP,
+            target_endpoint=_TARGET_EP,
+            neighbor_application=_NEIGHBOR_APP,
+            neighbor_endpoint=_NEIGHBOR_EP,
+        )
+
+        # THEN model is the target model and names are unchanged
+        assert result.model == _TARGET_MODEL
+        assert result.endpoint_1.application == _TARGET_APP
+        assert result.endpoint_2.application == _NEIGHBOR_APP
+
+    def test_target_as_consumer_live_integration_resolved_via_list_integrations(self) -> None:
+        # GIVEN the target model is the consuming side — the integration is visible there
+        #       with the SAAS alias (not the original neighbor app name)
+        backend = IntegrationLocationBackendStub(
+            integrations_by_model={
+                _TARGET_MODEL: {
+                    _integration(_SAAS_ALIAS, _NEIGHBOR_EP, _TARGET_APP, _TARGET_EP)
+                }
+            }
+        )
+        client = _client(backend)
+
+        # WHEN
+        result = client.find_integration_location(
+            target_model=_TARGET_MODEL,
+            target_application=_TARGET_APP,
+            target_endpoint=_TARGET_EP,
+            neighbor_application=_NEIGHBOR_APP,
+            neighbor_endpoint=_NEIGHBOR_EP,
+        )
+
+        # THEN the resolved neighbor side uses the SAAS alias, not the original app name
+        assert result.model == _TARGET_MODEL
+        assert result.endpoint_1.application == _TARGET_APP
+        assert result.endpoint_2.application == _SAAS_ALIAS
+        assert result.endpoint_2.endpoint == _NEIGHBOR_EP
+
+    def test_target_as_consumer_post_removal_resolved_via_consumed_offers(self) -> None:
+        # GIVEN the integration has already been removed so list_integrations returns nothing,
+        #       but the target model still has a consumed offer exposing the neighbor endpoint
+        backend = IntegrationLocationBackendStub(
+            integrations_by_model={_TARGET_MODEL: set()},
+            consumed_offers_by_model={
+                _TARGET_MODEL: {
+                    _SAAS_ALIAS: JujuConsumedOfferInfo(
+                        url="admin/model-b.neighbor-offer",
+                        endpoints=frozenset({_NEIGHBOR_EP}),
+                    )
+                }
+            },
+        )
+        client = _client(backend)
+
+        # WHEN
+        result = client.find_integration_location(
+            target_model=_TARGET_MODEL,
+            target_application=_TARGET_APP,
+            target_endpoint=_TARGET_EP,
+            neighbor_application=_NEIGHBOR_APP,
+            neighbor_endpoint=_NEIGHBOR_EP,
+        )
+
+        # THEN SAAS alias is resolved via consumed offers
+        assert result.model == _TARGET_MODEL
+        assert result.endpoint_1.application == _TARGET_APP
+        assert result.endpoint_2.application == _SAAS_ALIAS
+
+    def test_neighbor_as_consumer_live_integration_resolved_via_neighbor_model(self) -> None:
+        # GIVEN the neighbor is the consuming side — the integration lives in neighbor_model
+        #       and references a SAAS alias for the target app
+        target_saas = "target-offer"
+        backend = IntegrationLocationBackendStub(
+            integrations_by_model={
+                _TARGET_MODEL: set(),
+                _NEIGHBOR_MODEL: {
+                    _integration(target_saas, _TARGET_EP, _NEIGHBOR_APP, _NEIGHBOR_EP)
+                },
+            },
+            consumed_offers_by_model={_TARGET_MODEL: {}},
+        )
+        client = _client(backend)
+
+        # WHEN
+        result = client.find_integration_location(
+            target_model=_TARGET_MODEL,
+            target_application=_TARGET_APP,
+            target_endpoint=_TARGET_EP,
+            neighbor_application=_NEIGHBOR_APP,
+            neighbor_endpoint=_NEIGHBOR_EP,
+            neighbor_model=_NEIGHBOR_MODEL,
+        )
+
+        # THEN resolution points to the neighbor model with the SAAS alias on the target side
+        assert result.model == _NEIGHBOR_MODEL
+        assert result.endpoint_1.application == target_saas
+        assert result.endpoint_1.endpoint == _TARGET_EP
+        assert result.endpoint_2.application == _NEIGHBOR_APP
+
+    def test_neighbor_as_consumer_post_removal_resolved_via_neighbor_consumed_offers(self) -> None:
+        # GIVEN the integration has been removed; neighbor model has a consumed offer for target
+        target_saas = "target-offer"
+        backend = IntegrationLocationBackendStub(
+            integrations_by_model={_TARGET_MODEL: set(), _NEIGHBOR_MODEL: set()},
+            consumed_offers_by_model={
+                _TARGET_MODEL: {},
+                _NEIGHBOR_MODEL: {
+                    target_saas: JujuConsumedOfferInfo(
+                        url="admin/model-a.target-offer",
+                        endpoints=frozenset({_TARGET_EP}),
+                    )
+                },
+            },
+        )
+        client = _client(backend)
+
+        # WHEN
+        result = client.find_integration_location(
+            target_model=_TARGET_MODEL,
+            target_application=_TARGET_APP,
+            target_endpoint=_TARGET_EP,
+            neighbor_application=_NEIGHBOR_APP,
+            neighbor_endpoint=_NEIGHBOR_EP,
+            neighbor_model=_NEIGHBOR_MODEL,
+        )
+
+        # THEN resolution points to the neighbor model using the SAAS alias for target
+        assert result.model == _NEIGHBOR_MODEL
+        assert result.endpoint_1.application == target_saas
+        assert result.endpoint_1.endpoint == _TARGET_EP
+        assert result.endpoint_2.application == _NEIGHBOR_APP
+
+    def test_fallback_no_cmr_context_uses_target_model(self) -> None:
+        # GIVEN no integrations found and no consumed offers in any model (no neighbor model provided)
+        backend = IntegrationLocationBackendStub(
+            integrations_by_model={_TARGET_MODEL: set()},
+            consumed_offers_by_model={_TARGET_MODEL: {}},
+        )
+        client = _client(backend)
+
+        # WHEN
+        result = client.find_integration_location(
+            target_model=_TARGET_MODEL,
+            target_application=_TARGET_APP,
+            target_endpoint=_TARGET_EP,
+            neighbor_application=_NEIGHBOR_APP,
+            neighbor_endpoint=_NEIGHBOR_EP,
+        )
+
+        # THEN falls back to target model with original names
+        assert result == JujuResolvedIntegration(
+            model=_TARGET_MODEL,
+            endpoint_1=JujuIntegrationApplication(_TARGET_APP, _TARGET_EP),
+            endpoint_2=JujuIntegrationApplication(_NEIGHBOR_APP, _NEIGHBOR_EP),
+        )
+
+
+# ---------------------------------------------------------------------------
+# TestIntegrationDelegation — remove_integration / integrate /
+#                             wait_for_removal_of_integration pass resolved
+#                             model and endpoints to the backend
+# ---------------------------------------------------------------------------
+
+
+class TestIntegrationDelegation:
+    """Verify that remove_integration, integrate, and wait_for_removal_of_integration
+    delegate to the backend using the resolved model and SAAS alias."""
+
+    def _backend_with_saas(self) -> IntegrationLocationBackendStub:
+        """Backend where the SAAS alias is visible in a live integration."""
+        return IntegrationLocationBackendStub(
+            integrations_by_model={
+                _TARGET_MODEL: {_integration(_SAAS_ALIAS, _NEIGHBOR_EP, _TARGET_APP, _TARGET_EP)}
+            }
+        )
+
+    def _backend_post_removal(self) -> IntegrationLocationBackendStub:
+        """Backend where the integration is gone but consumed offers still exist."""
+        return IntegrationLocationBackendStub(
+            integrations_by_model={_TARGET_MODEL: set()},
+            consumed_offers_by_model={
+                _TARGET_MODEL: {
+                    _SAAS_ALIAS: JujuConsumedOfferInfo(
+                        url="admin/model-b.neighbor-offer",
+                        endpoints=frozenset({_NEIGHBOR_EP}),
+                    )
+                }
+            },
+        )
+
+    def test_remove_integration_uses_resolved_saas_alias(self) -> None:
+        # GIVEN a live CMR integration visible with SAAS alias
+        backend = self._backend_with_saas()
+        client = _client(backend)
+
+        # WHEN
+        client.remove_integration(
+            model=_TARGET_MODEL,
+            application_1=_TARGET_APP,
+            endpoint_1=_TARGET_EP,
+            application_2=_NEIGHBOR_APP,
+            endpoint_2=_NEIGHBOR_EP,
+        )
+
+        # THEN the backend call uses the SAAS alias on the neighbor side
+        assert len(backend.remove_calls) == 1
+        model, ep1, ep2 = backend.remove_calls[0]
+        assert model == _TARGET_MODEL
+        apps = {ep1.application, ep2.application}
+        assert _SAAS_ALIAS in apps
+        assert _TARGET_APP in apps
+
+    def test_integrate_post_removal_uses_resolved_saas_alias(self) -> None:
+        # GIVEN the integration is gone but consumed offer is present
+        backend = self._backend_post_removal()
+        client = _client(backend)
+
+        # WHEN
+        client.integrate(
+            model=_TARGET_MODEL,
+            application_1=_TARGET_APP,
+            endpoint_1=_TARGET_EP,
+            application_2=_NEIGHBOR_APP,
+            endpoint_2=_NEIGHBOR_EP,
+        )
+
+        # THEN the backend call uses the SAAS alias
+        assert len(backend.integrate_calls) == 1
+        model, ep1, ep2 = backend.integrate_calls[0]
+        assert model == _TARGET_MODEL
+        apps = {ep1.application, ep2.application}
+        assert _SAAS_ALIAS in apps
+        assert _TARGET_APP in apps
+
+    def test_wait_for_removal_of_integration_uses_resolved_saas_alias(self) -> None:
+        # GIVEN a live CMR integration visible with SAAS alias
+        backend = self._backend_with_saas()
+        client = _client(backend)
+
+        # WHEN
+        client.wait_for_removal_of_integration(
+            model=_TARGET_MODEL,
+            application_1=_TARGET_APP,
+            endpoint_1=_TARGET_EP,
+            application_2=_NEIGHBOR_APP,
+            endpoint_2=_NEIGHBOR_EP,
+            timeout=timedelta(minutes=5),
+        )
+
+        # THEN the backend wait call uses the SAAS alias
+        assert len(backend.wait_removal_calls) == 1
+        model, ep1, ep2, timeout = backend.wait_removal_calls[0]
+        assert model == _TARGET_MODEL
+        apps = {ep1.application, ep2.application}
+        assert _SAAS_ALIAS in apps
+        assert _TARGET_APP in apps
+
+    def test_remove_integration_neighbor_model_uses_neighbor_model_uri(self) -> None:
+        # GIVEN the neighbor is the consuming side with a SAAS alias for target
+        target_saas = "target-offer"
+        backend = IntegrationLocationBackendStub(
+            integrations_by_model={
+                _TARGET_MODEL: set(),
+                _NEIGHBOR_MODEL: {
+                    _integration(target_saas, _TARGET_EP, _NEIGHBOR_APP, _NEIGHBOR_EP)
+                },
+            },
+            consumed_offers_by_model={_TARGET_MODEL: {}},
+        )
+        client = _client(backend)
+
+        # WHEN
+        client.remove_integration(
+            model=_TARGET_MODEL,
+            application_1=_TARGET_APP,
+            endpoint_1=_TARGET_EP,
+            application_2=_NEIGHBOR_APP,
+            endpoint_2=_NEIGHBOR_EP,
+            neighbor_model=_NEIGHBOR_MODEL,
+        )
+
+        # THEN the backend call is made against the neighbor model
+        assert len(backend.remove_calls) == 1
+        model, ep1, ep2 = backend.remove_calls[0]
+        assert model == _NEIGHBOR_MODEL
+        apps = {ep1.application, ep2.application}
+        assert target_saas in apps
+        assert _NEIGHBOR_APP in apps

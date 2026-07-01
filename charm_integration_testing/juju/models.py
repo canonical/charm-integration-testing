@@ -1,7 +1,7 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import total_ordering
 
 _RISK_ORDER = {"stable": 0, "candidate": 1, "beta": 2, "edge": 3}
@@ -80,3 +80,19 @@ class JujuIntegration:
 @dataclass(frozen=True)
 class JujuConsumedOfferInfo:
     url: str
+    endpoints: frozenset[str] = field(default_factory=frozenset)
+
+
+@dataclass(frozen=True)
+class JujuResolvedIntegration:
+    """Resolved integration endpoints after CMR alias lookup.
+
+    ``model`` is the Juju model URI (controller:model) that owns the consuming side of a CMR
+    integration, or the target model for a same-model integration.
+    ``endpoint_1`` and ``endpoint_2`` are the resolved application:endpoint pairs — any SAAS
+    alias has already been substituted for the original application name.
+    """
+
+    model: str
+    endpoint_1: JujuIntegrationApplication
+    endpoint_2: JujuIntegrationApplication
