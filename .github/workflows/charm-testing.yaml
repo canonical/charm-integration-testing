@@ -372,7 +372,6 @@ jobs:
         shell: bash
         env:
           KUBECONFIG: ${{ steps.setup_target.outputs.kubeconfig_path }}
-          NEIGHBOR_KUBECONFIG: ${{ steps.setup_neighbor.outputs.kubeconfig_path }}
           target_cloud: ${{ steps.setup_target.outputs.cloud-name }}
           neighbor_cloud: ${{ steps.setup_neighbor.outputs.cloud-name }}
           charm_endpoint: ${{ inputs.charm_endpoint }}

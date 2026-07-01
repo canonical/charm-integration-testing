@@ -127,50 +127,16 @@ def kubeconfig_path() -> Path | None:
 
 
 @pytest.fixture(scope="session")
-def neighbor_kubeconfig_path() -> Path | None:
-    """Kubeconfig path for the neighbor controller in CMR tests.
-
-    Read from ``NEIGHBOR_KUBECONFIG``. Returns ``None`` when not set, which
-    means the neighbor controller is treated as a machine substrate.
-    """
-    raw = os.environ.get("NEIGHBOR_KUBECONFIG")
-    stripped = None if raw is None else raw.strip() or None
-    return Path(stripped) if stripped is not None else None
-
-
-@pytest.fixture(scope="session")
 def session_resource_registry(
     log_dir: Path | None,
     logger: logging.Logger,
     kubeconfig_path: Path | None,
-    neighbor_kubeconfig_path: Path | None,
-    target_controller: str,
-    neighbor_controller: str | None,
 ) -> Iterator[ResourceRegistry]:
     """Session-scoped resource registry for the main workflow controller."""
-    if neighbor_controller is not None:
-        # CMR test: scope each collector to its own controller so the wrong
-        # substrate tool is never invoked on the other side.
-        global_collectors: list[LogCollector] = [
-            JujuCrashdumpCollector(
-                logger,
-                output_dir=log_dir,
-                kubeconfig_path=kubeconfig_path,
-                controller_allowlist={target_controller},
-            ),
-            JujuCrashdumpCollector(
-                logger,
-                output_dir=log_dir,
-                kubeconfig_path=neighbor_kubeconfig_path,
-                controller_allowlist={neighbor_controller},
-            ),
-        ]
-    else:
-        global_collectors = [
-            JujuCrashdumpCollector(logger, output_dir=log_dir, kubeconfig_path=kubeconfig_path),
-        ]
     registry = ResourceRegistry(
-        global_collectors=global_collectors,
+        global_collectors=[
+            JujuCrashdumpCollector(logger, output_dir=log_dir, kubeconfig_path=kubeconfig_path),
+        ],
         logger=logger,
     )
     try:
