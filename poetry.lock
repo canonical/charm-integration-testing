@@ -2376,6 +2376,26 @@ socks = ["pysocks (>=1.5.6,!=1.5.7,<2.0)"]
 zstd = ["backports-zstd (>=1.0.0) ; python_version < \"3.14\""]
 
 [[package]]
+name = "validators-azure-storage"
+version = "0.1.0"
+description = "Validator for azure_storage interface"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+validators-base = "*"
+
+[package.extras]
+dev = ["validators-test-utils"]
+
+[package.source]
+type = "directory"
+url = "validators/azure_storage"
+
+[[package]]
 name = "validators-base"
 version = "0.1.0"
 description = "Base validator class for Interface Validators Framework (SQ096)"
@@ -2573,6 +2593,7 @@ develop = true
 [package.dependencies]
 ops = ">=3.3.0,<4.0.0"
 pydantic = ">=2.0.0"
+validators-azure-storage = "*"
 validators-base = "*"
 validators-config-server = "*"
 validators-cve-catalog = "*"
@@ -2742,4 +2763,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<4.0"
-content-hash = "53a22d317ce97f6442659f0c0a7b43216a471e34ca4bf6120b648db6168b4028"
+content-hash = "66829d72a944055a85aad107f4d998bb5cc7a49fb52bba33d2de93ca6ed4597f"
