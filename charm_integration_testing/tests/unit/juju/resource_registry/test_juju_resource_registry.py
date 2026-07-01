@@ -127,6 +127,21 @@ class TestJujuCrashdumpCollectorSupports:
         collector = JujuCrashdumpCollector(LoggerStub(), output_dir=None)
         assert collector.supports(OtherHandle("other")) is False
 
+    def test_allowlist_permits_listed_controller(self) -> None:
+        # GIVEN a collector scoped to a specific controller name
+        collector = JujuCrashdumpCollector(LoggerStub(), output_dir=None, controller_allowlist={"allowed-ctrl"})
+        assert collector.supports(JujuControllerHandle(controller="allowed-ctrl")) is True
+
+    def test_allowlist_rejects_unlisted_controller(self) -> None:
+        # GIVEN a collector scoped to a specific controller name
+        collector = JujuCrashdumpCollector(LoggerStub(), output_dir=None, controller_allowlist={"allowed-ctrl"})
+        assert collector.supports(JujuControllerHandle(controller="other-ctrl")) is False
+
+    def test_no_allowlist_supports_all_controllers(self) -> None:
+        # GIVEN a collector with no allowlist (default — runs for every controller)
+        collector = JujuCrashdumpCollector(LoggerStub(), output_dir=None)
+        assert collector.supports(JujuControllerHandle(controller="any-ctrl")) is True
+
 
 class TestJujuCrashdumpCollectorMachine:
     def test_runs_juju_crashdump(self, tmp_path: Path) -> None:
@@ -135,14 +150,29 @@ class TestJujuCrashdumpCollectorMachine:
         collector = JujuCrashdumpCollector(logger, output_dir=tmp_path, kubeconfig_path=None)
         handle = JujuControllerHandle(controller="my-ctrl")
 
+        # WHEN juju-crashdump runs successfully it creates "juju-crashdump-{uniq}.tar.gz";
+        # pre-create that file to simulate crashdump's output before we mock subprocess.
+        intermediate = tmp_path / "juju-crashdump-juju-controller-my-ctrl.tar.gz"
+        intermediate.write_bytes(b"")
+
         completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
         with patch("subprocess.run", return_value=completed) as mock_run:
             collector.collect(handle)
 
+        # THEN juju-crashdump is invoked with the correct output-dir flag (not --unit-dump-location)
         cmd = mock_run.call_args[0][0]
         assert cmd[0] == "juju-crashdump"
         assert "my-ctrl:controller" in cmd
-        assert any("juju-controller-my-ctrl" in str(arg) for arg in cmd)
+        assert "-o" in cmd
+        assert str(tmp_path) in cmd
+        assert "--uniq" in cmd
+        uniq_idx = cmd.index("--uniq")
+        assert cmd[uniq_idx + 1] == "juju-controller-my-ctrl"
+
+        # AND the intermediate file is renamed to the expected output path
+        expected_output = tmp_path / "juju-controller-my-ctrl.tar.gz"
+        assert expected_output.exists()
+        assert not intermediate.exists()
 
     def test_raises_on_nonzero_exit(self, tmp_path: Path) -> None:
         # GIVEN crashdump exits non-zero

@@ -110,7 +110,12 @@ class TestObserverClient:
                 )
             return payload
         except requests.RequestException as exc:
-            raise TestObserverQueryError(f"Failed to query {endpoint}: {exc}") from exc
+            # Do not embed str(exc): urllib3 includes the full request context
+            # (connection pool, headers) in its repr, which can expose auth tokens.
+            exc_summary = type(exc).__name__
+            if isinstance(exc, requests.HTTPError) and exc.response is not None:
+                exc_summary += f" (HTTP {exc.response.status_code})"
+            raise TestObserverQueryError(f"Failed to query {endpoint}: {exc_summary}") from exc
 
     @staticmethod
     def _extract_first_list(payload: dict[str, Any] | list[dict[str, Any]], *keys: str) -> list[dict[str, Any]]:

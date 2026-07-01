@@ -1,0 +1,14 @@
+---
+# Source: https://github.com/canonical/object-storage-integrator
+#
+# Track 1 has only azure-storage-credentials; azure-credentials was added (and
+# immediately deprecated) in latest/edge. Criteria block scopes the override.
+#
+# azure-credentials (provides): optional - deprecated legacy interface (see TODO comment
+# in metadata.yaml); azure-storage-credentials is the primary interface.
+overrides:
+  - criteria:
+      - track: latest
+    provides:
+      azure-credentials:
+        optional: true
