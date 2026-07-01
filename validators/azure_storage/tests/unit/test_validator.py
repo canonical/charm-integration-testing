@@ -1,13 +1,13 @@
- # Copyright 2026 Canonical Ltd.
- # See LICENSE file for licensing details.
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
 
 from typing import cast
 
 import ops
 import pytest
 
-from validators.base import ValidationLevel
 from validators.azure_storage.validator import AzureStorageValidator
+from validators.base import ValidationLevel
 from validators.test_utils.helpers import make_charm_from_relation, make_charm_from_relation_and_secrets
 from validators.test_utils.stubs import ApplicationStub, RelationRoleStub, RelationStub
 
