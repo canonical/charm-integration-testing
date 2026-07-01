@@ -5,7 +5,7 @@ import re
 
 from validators.base import BaseValidator, ValidationCheck, ValidationLevel, ValidationResult
 
-# Required fields in the provider application databag.
+# Required fields that must be present either in the provider application databag or in a resolved secret.
 _REQUIRED_FIELDS = ("container", "storage-account", "secret-key")
 
 # Juju secret key used by azure-storage-integrator to expose the storage secret key.
@@ -22,14 +22,14 @@ class AzureStorageValidator(BaseValidator):
     def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
         if self.role != "requires":
             return self._skipped_result_due_to_role(level, self.role)
-        if level not in ("simple",):
+        if level != "simple":
             return self._skipped_result_due_to_level(level)
         if not self.relation_exists():
             return self._error_result(level, f"No remote application on relation '{self.endpoint}'.")
         return self._validate_simple()
 
     def _validate_simple(self) -> ValidationResult:
-        """L1: Verify required fields are present and well-formed."""
+        """L1: Verify required fields are present; validate connection-protocol and endpoint URL scheme when provided."""
         checks: list[ValidationCheck] = []
 
         creds = self._resolve_credentials()
