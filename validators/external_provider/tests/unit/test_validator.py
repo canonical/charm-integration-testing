@@ -1,17 +1,5 @@
-# Copyright (C) 2026 Canonical Ltd
-
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
 
 import json
 from typing import cast
@@ -19,6 +7,7 @@ from typing import cast
 import ops
 import pytest
 
+from validators.base import ValidationLevel
 from validators.external_provider.validator import ExternalProviderValidator
 from validators.test_utils.helpers import make_charm_from_relation
 from validators.test_utils.stubs import ApplicationStub, RelationRoleStub, RelationStub
@@ -94,12 +83,12 @@ class TestExternalProviderValidatorGuards:
         assert (result.status == "SKIPPED") == should_skip
 
     @pytest.mark.parametrize("level", ["deep", "uat"])
-    def test_returns_skipped_for_unsupported_levels(self, level: str) -> None:
+    def test_returns_skipped_for_unsupported_levels(self, level: ValidationLevel) -> None:
         # GIVEN
         validator = _make_validator(_providers_databag(VALID_GENERIC_PROVIDER))
 
         # WHEN
-        result = validator.validate(level=cast(ops.RelationRole, level))  # type: ignore[arg-type]
+        result = validator.validate(level=level)
 
         # THEN
         assert result.status == "SKIPPED"
@@ -302,3 +291,16 @@ class TestExternalProviderValidatorFields:
         # THEN
         assert result.endpoint == "my-idp"
         assert result.interface == "external_provider"
+
+    def test_fails_gracefully_when_provider_entry_is_not_a_dict(self) -> None:
+        # GIVEN providers array contains a non-object entry (e.g. a string)
+        validator = _make_validator({"providers": '["not-an-object"]'})
+
+        # WHEN
+        result = validator.validate(level="simple")
+
+        # THEN
+        assert result.status == "FAIL"
+        fields_check = next(c for c in result.checks if c.name == "provider_fields")
+        assert not fields_check.passed
+        assert "providers[0]" in fields_check.message

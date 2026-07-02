@@ -1,17 +1,5 @@
-# Copyright (C) 2026 Canonical Ltd
-
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
 
 import json
 
@@ -54,7 +42,7 @@ class ExternalProviderValidator(BaseValidator):
     def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
         if self.role != "requires":
             return self._skipped_result_due_to_role(level, self.role)
-        if level not in ("simple",):
+        if level != "simple":
             return self._skipped_result_due_to_level(level)
         if not self.relation_exists():
             return self._error_result(level, f"No remote application on relation '{self.endpoint}'.")
@@ -114,6 +102,10 @@ class ExternalProviderValidator(BaseValidator):
         """Verify each provider entry contains the required fields."""
         issues: list[str] = []
         for idx, entry in enumerate(providers):
+            if not isinstance(entry, dict):
+                issues.append(f"providers[{idx}] is not an object (got {type(entry).__name__})")
+                continue
+
             # provider and client_id are required for all types
             for required in ("provider", "client_id"):
                 if not entry.get(required):
