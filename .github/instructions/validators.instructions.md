@@ -36,7 +36,7 @@ Flag any direct read from `self.databag` that bypasses `resolve_secret` for cred
 ### Result construction
 
 Always build `ValidationResult` via `self._make_result(level=..., checks=[...])`.
-Let it compute `status` from checks unless you need `ERROR` — use `self._error_result()` for that case.
+Let it compute `status` from checks unless you need `ERROR` — use `self._error_result(level, "<error message>")` for that case.
 Flag hand-constructed `ValidationResult(...)` calls that bypass these helpers.
 
 ### Canary tables (deep validation)
