@@ -157,9 +157,11 @@ under `validators/<name>/` with passing `dev-validate` output.
     - No unexpected files or directories.
 
     **License header**
-    - Every `.py` file and `pyproject.toml` begins with the GPL-3 block
-      (`# Copyright (C) 2026 Canonical Ltd` ...) exactly as in
-      `validators/postgresql_client/validator.py`.
+    - Every `.py` file and `pyproject.toml` begins with the canonical two-line header:
+      ```
+      # Copyright <year> Canonical Ltd.
+      # See LICENSE file for licensing details.
+      ```
 
     **pyproject.toml**
     - `name` is `"validators-<name>"` in kebab-case matching the directory name.
