@@ -323,41 +323,9 @@ def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
 
 ## Important notes
 
-- **Do not modify anything under `development-sandbox/`.** That directory is tooling for your environment, not project code. All new code belongs under `validators/`.
-- The k8s substrate is not pre-provisioned. If no Juju controller exists, run the `/setup-k8s` or `/setup-lxd` skill first.
+- **Do not modify anything under `development-sandbox/`.** That directory is tooling for your environment, not project code.
+- **Do not modify git configuration.** Never edit `.git/config`, change remote URLs, embed tokens in remote URLs (`https://<token>@github.com/...`), or run `git config` to change settings. The host machine's git identity and remote configuration must not be touched. If you need to push or authenticate, use the `GH_TOKEN` environment variable already present in your session. If that token lacks push permissions, treat it as intentional — do not attempt to work around it.
+- The Juju substrate is not pre-provisioned. If no Juju controller exists, run the `/setup-k8s` or `/setup-lxd` skill first.
 - For k8s deployments, the model type is `kubernetes`. For LXD deployments, the model type is `machine`.
-- **`dev-validate.py` auto-reexecs via `poetry run`** if invoked outside the Poetry venv, so you can call it directly without any manual prefix. Do not wrap it in `poetry run` yourself.
 - **`juju` snap cannot redirect stdout to a file directly.** `juju status > file` exits 1 with an empty file. Use a pipe instead: `juju status | cat > file`. This applies to any `juju` subcommand writing to a file.
-- After deploying, always wait for `active/idle` before running validators. Partially-related units will have incomplete databags.
-- If a relation has no remote app (`relation.app is None`), return an `ERROR` result immediately.
-- Keep validators focused on a single interface. Do not add cross-interface logic.
-- Add client library dependencies (e.g. `psycopg2-binary`) to the validator's `pyproject.toml` `dependencies`.
-- For every new validator package under `validators/<name>/`, also update:
-  - `$PROJECT_ROOT/validators/runner/pyproject.toml` dependencies to include `validators-<name>`.
-  - `$PROJECT_ROOT/pyproject.toml` `[tool.poetry.dependencies]` to include
-    `validators-<name> = { path = "./validators/<name>", develop = true }`.
-  Then run `poetry install` from `$PROJECT_ROOT`.
-- Before declaring completion for validator creation, run from `$PROJECT_ROOT`:
-  - `./scripts/format.sh`
-  - `./scripts/lint.sh`
-  If either fails, fix and re-run until both exit 0.
-- For merge evidence, run `$PROJECT_ROOT/development-sandbox/bin/verify-validator.sh`
-  with model, requirer app, provider app, and validator name. Always use
-  `--level <highest-supported-level>` (check `validate()` -- use `deep` if implemented,
-  otherwise `simple`) and pass
-  `--output-dir $PROJECT_ROOT/development-sandbox/reports/<name>-$(date +%Y%m%d-%H%M%S)`
-  so the report persists on the host (the directory is git-ignored). Completion requires
-  evidence of workload-up pass and workload-down detection in the generated bundle.
-- **Workload-down for non-Juju backends**: the default `verify-validator.sh` workload-down
-  step scales the provider Juju application to 0 units. If the actual backend is a raw
-  Kubernetes deployment (not a Juju app — e.g. MinIO for the `s3` interface), scaling the
-  Juju app to 0 does **not** break connectivity because the application-level databag
-  retains credentials. In that case pass `--down-cmd` and `--restore-cmd` to override the
-  default behaviour:
-  ```bash
-  verify-validator.sh \
-    --model s3-test --app parca-k8s --provider s3-integrator --validator s3 \
-    --output-dir $PROJECT_ROOT/development-sandbox/reports/s3-$(date +%Y%m%d-%H%M%S) \
-    --down-cmd "sudo k8s kubectl scale deployment minio -n s3-test --replicas=0 && sleep 5" \
-    --restore-cmd "sudo k8s kubectl scale deployment minio -n s3-test --replicas=1 && sleep 15"
-  ```
+- After deploying, always wait for `active/idle` before interacting with units. Partially-integrated units will have incomplete databags.

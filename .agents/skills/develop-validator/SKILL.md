@@ -5,6 +5,92 @@ description: Develop a new Juju charm integration validator from scratch. Use wh
 
 # Task: develop a new validator
 
+## How validators work
+
+### Architecture
+
+```
+CharmHub   →   bundle_builder_x   →   juju deploy
+                                           ↓
+                                     Juju unit (pod)
+                                           ↓
+                           ValidatorInjectorExtension
+                           (builds wheels, SCP to unit,
+                            uv pip install, run_validators)
+                                           ↓
+                                     JSON results
+```
+
+### Validator class structure
+
+Every validator lives in `validators/<name>/validator.py` and extends `BaseValidator`:
+
+```python
+from validators.base import BaseValidator, ValidationCheck, ValidationLevel, ValidationResult
+
+class MyValidator(BaseValidator):
+    def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
+        if level != "simple":
+            return self._skipped_result_due_to_level(level)
+
+        checks: list[ValidationCheck] = []
+        databag = self.databag  # safe: returns {} if relation.app is absent
+
+        # Check required fields
+        missing = [f for f in ("host", "port") if not databag.get(f)]
+        checks.append(ValidationCheck(
+            name="schema",
+            passed=not missing,
+            message="OK" if not missing else f"Missing: {', '.join(missing)}",
+        ))
+
+        # Resolve Juju secrets if needed (see "Common patterns" below)
+        return self._make_result(level=level, checks=checks)
+```
+
+### Package structure for a new validator
+
+```
+validators/<name>/
+  __init__.py         # empty
+  validator.py        # the validator class
+  pyproject.toml
+  tests/
+    __init__.py
+    unit/
+      __init__.py
+      test_validator.py
+```
+
+Minimal `pyproject.toml`:
+
+```toml
+[project]
+name = "validators-<name>"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    "validators-base",
+]
+
+[project.entry-points."endpoint_validators"]
+<interface_name> = "validators.<name>:MyValidatorClass"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+```
+
+The entry point key is the **Juju interface name** (e.g. `postgresql`, `mongodb_client`).
+The runner discovers validators by this key and matches them to charm relations.
+
+**Naming convention:** the `[project] name` field always uses dashes, even when the
+directory or module uses underscores. For example, a validator in
+`validators/postgresql_client/` is named `validators-postgresql-client` in
+`pyproject.toml`. Replace underscores with dashes when setting the package name.
+
+---
+
 ## Goal
 
 Write, deploy, and validate a new Juju charm integration validator for the
@@ -85,7 +171,7 @@ under `validators/<name>/` with passing `dev-validate` output.
 
     **validator.py**
     - Class name follows `<Interface>Validator` PascalCase.
-    - `validate()` calls `_skipped_result(level)` for unsupported levels.
+    - `validate()` calls `_skipped_result_due_to_level(level)` for unsupported levels.
     - Uses `self.validate_schema(...)` for required-field checks.
     - Uses `self.resolve_secret(...)` for Juju secret resolution.
     - No hardcoded charm names, model names, or endpoint strings.
@@ -134,6 +220,65 @@ under `validators/<name>/` with passing `dev-validate` output.
    ```
    juju destroy-model <interface>-test --destroy-storage --no-prompt
    ```
+
+## Common patterns
+
+### Resolving Juju secrets
+
+Many charms expose credentials via Juju secrets instead of plain databag fields.
+The base class has a helper:
+
+```python
+creds = self.resolve_secret("secret-user", "username", "password")
+# Returns {"username": "...", "password": "..."} from secret or databag
+```
+
+### Checking connectivity
+
+For database validators, connect with the client library and run a probe query:
+
+```python
+import psycopg2  # add to pyproject.toml dependencies as psycopg2-binary
+
+# Derive connection parameters from the relation databag
+host = databag.get("host", "")
+port = databag.get("port", "5432")
+db = databag.get("database", "")
+
+try:
+    creds = self.resolve_secret("secret-user", "username", "password")
+    conn = psycopg2.connect(
+        host=host, port=port, dbname=db,
+        user=creds["username"], password=creds["password"],
+    )
+    with conn.cursor() as cur:
+        cur.execute("SELECT 1")
+    conn.close()
+    checks.append(ValidationCheck(name="connectivity", passed=True, message="OK"))
+except Exception as exc:
+    checks.append(ValidationCheck(name="connectivity", passed=False, message=str(exc)))
+```
+
+### Adding a deep-level check
+
+Return `_skipped_result_due_to_level` for levels you don't support. Only implement what you've tested:
+
+```python
+def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
+    if level == "uat":
+        return self._skipped_result_due_to_level(level)
+    if level == "deep":
+        # do deeper checks
+        ...
+    # simple checks always run
+```
+
+## Validator-specific notes
+
+- **`dev-validate.py` auto-reexecs via `poetry run`** if invoked outside the Poetry venv, so you can call it directly without any manual prefix. Do not wrap it in `poetry run` yourself.
+- If a relation has no remote app (`relation.app is None`), return an `ERROR` result immediately.
+- Keep validators focused on a single interface. Do not add cross-interface logic.
+- Add client library dependencies (e.g. `psycopg2-binary`) to the validator's `pyproject.toml` `dependencies`.
 
 ## Acceptance criteria
 

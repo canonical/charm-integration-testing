@@ -42,21 +42,10 @@ VM_NAME="${SANDBOX_VM:-charm-qa-sandbox}"
 VM_MOUNT="${SANDBOX_MOUNT:-/project}"
 [[ "$VM_MOUNT" = /* ]] || { echo "ERROR: SANDBOX_MOUNT must be an absolute path: $VM_MOUNT" >&2; exit 1; }
 [[ "$VM_MOUNT" != *"'"* ]] || { echo "ERROR: SANDBOX_MOUNT must not contain single quotes: $VM_MOUNT" >&2; exit 1; }
-[[ "$VM_MOUNT" != *":"* ]] || { echo "ERROR: SANDBOX_MOUNT must not contain colons: $VM_MOUNT" >&2; exit 1; }
-[[ "$VM_NAME" != *"'"* ]] || { echo "ERROR: SANDBOX_VM must not contain single quotes: $VM_NAME" >&2; exit 1; }
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-_ensure_mounted() {
-    if ! multipass info "$VM_NAME" --format json \
-            | python3 -c "import sys,json; mounts=json.load(sys.stdin)['info'][sys.argv[1]].get('mounts',{}); exit(0 if sys.argv[2] in mounts else 1)" "$VM_NAME" "$VM_MOUNT" 2>/dev/null; then
-        echo "==> Mount '$VM_MOUNT' not found in VM — mounting $PROJECT_DIR -> $VM_MOUNT..."
-        multipass exec "$VM_NAME" -- bash -c "sudo mkdir -p '$VM_MOUNT' && sudo chown ubuntu:ubuntu '$VM_MOUNT'"
-        multipass mount "$PROJECT_DIR" "$VM_NAME:$VM_MOUNT"
-    fi
-}
-
 _vm_state() {
     multipass info "$VM_NAME" --format json 2>/dev/null \
         | python3 -c "import sys,json; print(json.load(sys.stdin)['info']['$VM_NAME']['state'])" 2>/dev/null \
@@ -122,7 +111,12 @@ _cmd_up() {
 
     # Mount project if not already mounted
     echo "==> Checking project mount..."
-    _ensure_mounted
+    if ! multipass info "$VM_NAME" --format json \
+            | python3 -c "import sys,json; mounts=json.load(sys.stdin)['info'][sys.argv[1]].get('mounts',{}); exit(0 if sys.argv[2] in mounts else 1)" "$VM_NAME" "$VM_MOUNT" 2>/dev/null; then
+        echo "==> Mounting $PROJECT_DIR -> $VM_MOUNT..."
+        multipass exec "$VM_NAME" -- bash -c "sudo mkdir -p '$VM_MOUNT' && sudo chown ubuntu:ubuntu '$VM_MOUNT'"
+        multipass mount "$PROJECT_DIR" "$VM_NAME:$VM_MOUNT"
+    fi
 
     # Set up Python venv with project packages (poetry manages the venv)
     echo "==> Installing Python dependencies via poetry..."
@@ -155,9 +149,6 @@ _cmd_up() {
             echo '==> @github/copilot: found.'
         fi
 
-        echo '==> Linking project skills to ~/.agents/skills...'
-        mkdir -p ~/.agents
-        ln -sfn '$VM_MOUNT/development-sandbox/prompts' ~/.agents/skills
 
         if ! command -v markdownlint-cli2 &>/dev/null; then
             echo '==> Installing markdownlint-cli2...'
@@ -301,10 +292,11 @@ _cmd_destroy() {
 # Subcommand: shell
 # ---------------------------------------------------------------------------
 _cmd_shell() {
-    _ensure_mounted
     _env_args=("PROJECT_ROOT=$VM_MOUNT")
     [ -n "${GITHUB_TOKEN:-}" ] && _env_args+=("GH_TOKEN=$GITHUB_TOKEN" "GITHUB_TOKEN=$GITHUB_TOKEN")
-    exec multipass exec "$VM_NAME" -- env "${_env_args[@]}" bash -lc "cd '$VM_MOUNT' && exec bash -l"
+    exec multipass exec "$VM_NAME" -- env "${_env_args[@]}" bash -lc "
+        cd '$VM_MOUNT' && exec bash -l
+    "
 }
 
 # ---------------------------------------------------------------------------
@@ -313,7 +305,6 @@ _cmd_shell() {
 _cmd_run() {
     COPILOT_MODEL="${COPILOT_MODEL:-sonnet-4.6}"
     _copilot_token="${COPILOT_GITHUB_TOKEN:-$_gh_token}"
-    _ensure_mounted
 
     INTERACTIVE=false
     while [ "$#" -gt 0 ]; do
@@ -350,7 +341,7 @@ EOF
     PROMPT_FILE=$(multipass exec "$VM_NAME" -- bash -c "mktemp /tmp/copilot-prompt-XXXXXX")
 
     {
-        cat "$DEV_DIR/prompts/system.md"
+        cat "$PROJECT_DIR/.agents/skills/system.md"
         if [ -n "$TASK" ]; then
             printf "\n\n---\n\nTask: %s\n" "$TASK"
         fi
@@ -363,7 +354,7 @@ EOF
         [ -n "${GITHUB_TOKEN:-}" ] && _env_args+=("GH_TOKEN=$GITHUB_TOKEN" "GITHUB_TOKEN=$GITHUB_TOKEN")
         _env_args+=("COPILOT_GITHUB_TOKEN=$_copilot_token" "COPILOT_MODEL=$COPILOT_MODEL" "PROJECT_ROOT=$VM_MOUNT")
         multipass exec "$VM_NAME" -- env "${_env_args[@]}" bash -lc "
-            cd '$VM_MOUNT'
+                cd '$VM_MOUNT'
             copilot --yolo -i \"$CONTEXT_MSG\"
             rm -f $PROMPT_FILE
         "
@@ -374,7 +365,7 @@ EOF
         [ -n "${GITHUB_TOKEN:-}" ] && _env_args+=("GH_TOKEN=$GITHUB_TOKEN" "GITHUB_TOKEN=$GITHUB_TOKEN")
         _env_args+=("COPILOT_GITHUB_TOKEN=$_copilot_token" "COPILOT_MODEL=$COPILOT_MODEL" "PROJECT_ROOT=$VM_MOUNT")
         multipass exec "$VM_NAME" -- env "${_env_args[@]}" bash -lc "
-            cd '$VM_MOUNT'
+                cd '$VM_MOUNT'
             copilot --yolo -p \"\$(cat $PROMPT_FILE)\"
             rm -f $PROMPT_FILE
         "
