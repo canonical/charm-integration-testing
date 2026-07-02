@@ -20,7 +20,7 @@ All host operations go through a single entry point:
 Skills (`/develop-validator`, `/test-validator`, `/setup-k8s`, `/setup-lxd`, `/review-pr`) are
 auto-discovered via `.agents/skills/` at the repository root.
 BMAD agents (`/bmad-agent-pm`, `/bmad-agent-architect`, `/bmad-agent-dev`, etc.) are
-installed by `scripts/sandbox.sh up` and gitignored.
+installed by `scripts/sandbox.sh up` into the project root (not committed).
 Use them inside any interactive Copilot session.
 
 ### VM-side

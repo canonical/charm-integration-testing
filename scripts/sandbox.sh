@@ -80,6 +80,7 @@ Environment (.env keys):
 Inside an interactive session use skill slash commands:
   /develop-validator     Develop a new charm integration validator
   /test-validator        Test an existing validator
+  /review-pr             Review and address pull request feedback
   /setup-k8s             Set up Canonical k8s substrate
   /setup-lxd             Set up LXD substrate
   /bmad-agent-pm         BMAD Product Manager persona
@@ -187,7 +188,8 @@ _cmd_up() {
 
     # Install BMAD method with GitHub Copilot integration.
     # Installs into the bind-mounted project directory; .agents/skills/bmad-*/,
-    # .github/agents/, and _bmad/ are gitignored and regenerated on each 'sandbox.sh up'.
+    # .github/agents/, and _bmad/ are created at the project root and are not
+    # committed — they are regenerated on each 'sandbox.sh up'.
     echo "==> Installing BMAD method (github-copilot target)..."
     multipass exec "$VM_NAME" -- bash -lc "
         set -euo pipefail
