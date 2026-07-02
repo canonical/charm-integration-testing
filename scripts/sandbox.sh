@@ -54,6 +54,11 @@ _vm_state() {
         || echo "absent"
 }
 
+_is_mounted() {
+    multipass info "$VM_NAME" --format json 2>/dev/null \
+        | python3 -c "import sys,json; mounts=json.load(sys.stdin)['info'][sys.argv[1]].get('mounts',{}); exit(0 if sys.argv[2] in mounts else 1)" "$VM_NAME" "$VM_MOUNT" 2>/dev/null
+}
+
 _usage() {
     cat <<'EOF'
 Usage:
@@ -116,8 +121,7 @@ _cmd_up() {
 
     # Mount project if not already mounted
     echo "==> Checking project mount..."
-    if ! multipass info "$VM_NAME" --format json \
-            | python3 -c "import sys,json; mounts=json.load(sys.stdin)['info'][sys.argv[1]].get('mounts',{}); exit(0 if sys.argv[2] in mounts else 1)" "$VM_NAME" "$VM_MOUNT" 2>/dev/null; then
+    if ! _is_mounted; then
         echo "==> Mounting $PROJECT_DIR -> $VM_MOUNT..."
         multipass exec "$VM_NAME" -- bash -c "sudo mkdir -p '$VM_MOUNT' && sudo chown ubuntu:ubuntu '$VM_MOUNT'"
         multipass mount "$PROJECT_DIR" "$VM_NAME:$VM_MOUNT"
@@ -324,8 +328,7 @@ _cmd_destroy() {
 # Subcommand: shell
 # ---------------------------------------------------------------------------
 _cmd_shell() {
-    if ! multipass info "$VM_NAME" --format json \
-            | python3 -c "import sys,json; mounts=json.load(sys.stdin)['info'][sys.argv[1]].get('mounts',{}); exit(0 if sys.argv[2] in mounts else 1)" "$VM_NAME" "$VM_MOUNT" 2>/dev/null; then
+    if ! _is_mounted; then
         echo "==> Mount '$VM_MOUNT' not found — run 'scripts/sandbox.sh up' first to mount the project."
         exit 1
     fi
@@ -375,8 +378,7 @@ EOF
 
     TASK="${*:-}"
 
-    if ! multipass info "$VM_NAME" --format json \
-            | python3 -c "import sys,json; mounts=json.load(sys.stdin)['info'][sys.argv[1]].get('mounts',{}); exit(0 if sys.argv[2] in mounts else 1)" "$VM_NAME" "$VM_MOUNT" 2>/dev/null; then
+    if ! _is_mounted; then
         echo "==> Mount '$VM_MOUNT' not found — run 'scripts/sandbox.sh up' first to mount the project."
         exit 1
     fi
