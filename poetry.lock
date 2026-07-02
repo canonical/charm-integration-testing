@@ -2467,6 +2467,23 @@ type = "directory"
 url = "validators/kafka_client"
 
 [[package]]
+name = "validators-livepatch-pro-airgapped-server"
+version = "0.1.0"
+description = "Validator for livepatch-pro-airgapped-server interface"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+validators-base = "*"
+
+[package.source]
+type = "directory"
+url = "validators/livepatch_pro_airgapped_server"
+
+[[package]]
 name = "validators-loki-push-api"
 version = "0.1.0"
 description = "Validator for loki_push_api interface"
@@ -2616,6 +2633,7 @@ validators-base = "*"
 validators-config-server = "*"
 validators-cve-catalog = "*"
 validators-kafka-client = "*"
+validators-livepatch-pro-airgapped-server = "*"
 validators-loki-push-api = "*"
 validators-object-storage = "*"
 validators-opensearch-client = "*"
@@ -2782,4 +2800,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<4.0"
-content-hash = "7664a09b633474a526368c434c01d7cd396ebe47a0592895bb2a57df9de5c90b"
+content-hash = "c466f7e86f337183118cc4326971a544de833770bb3b0c72c89bf9e4e298597a"

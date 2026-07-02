@@ -15,7 +15,7 @@ charm deployments.
 
 1. Run the setup script:
    ```
-   /project/development-sandbox/bin/setup-lxd.sh
+   $PROJECT_ROOT/development-sandbox/bin/setup-lxd.sh
    ```
    This is idempotent. Each step checks whether it has already been done.
    Wait for it to complete before proceeding.
