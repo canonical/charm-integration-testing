@@ -40,6 +40,7 @@ fi
 
 VM_NAME="${SANDBOX_VM:-charm-qa-sandbox}"
 VM_MOUNT="${SANDBOX_MOUNT:-/project}"
+[[ "$VM_MOUNT" = /* ]] || { echo "ERROR: SANDBOX_MOUNT must be an absolute path: $VM_MOUNT" >&2; exit 1; }
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -127,7 +128,7 @@ _cmd_up() {
             pipx ensurepath
             export PATH=\"\$HOME/.local/bin:\$PATH\"
         fi
-        cd "$VM_MOUNT"
+        cd '$VM_MOUNT'
         poetry install
     "
 
@@ -148,7 +149,7 @@ _cmd_up() {
 
         echo '==> Linking project skills to ~/.agents/skills...'
         mkdir -p ~/.agents
-        ln -sfn "$VM_MOUNT/development-sandbox/prompts" ~/.agents/skills
+        ln -sfn '$VM_MOUNT/development-sandbox/prompts' ~/.agents/skills
 
         if ! command -v markdownlint-cli2 &>/dev/null; then
             echo '==> Installing markdownlint-cli2...'
