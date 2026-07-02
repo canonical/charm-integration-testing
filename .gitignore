@@ -136,10 +136,3 @@ dmypy.json
 
 # macos specific files
 .DS_Store
-# BMAD method — installed into the VM by scripts/sandbox.sh up via the
-# bind-mounted project directory. Not committed: fully regenerated on each
-# 'sandbox.sh up' and not meaningful outside the VM.
-_bmad/
-_bmad-output/
-.agents/skills/bmad-*/
-.github/agents/
