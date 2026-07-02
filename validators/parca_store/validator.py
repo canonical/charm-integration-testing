@@ -90,11 +90,12 @@ class ParcaStoreValidator(BaseValidator):
             return self._make_result(level="deep", checks=checks)
 
         address = self.databag["remote-store-address"]
+        grpc_target = address.strip().split("://")[-1].strip()
         insecure = self.databag.get("remote-store-insecure", "false").lower() == "true"
         token = self.databag.get("remote-store-bearer-token", "")
 
         # 2. Parse the gRPC address.
-        parse_check, host, port = _parse_grpc_address(address)
+        parse_check, host, port = _parse_grpc_address(grpc_target)
         checks.append(parse_check)
         if not parse_check.passed:
             return self._make_result(level="deep", checks=checks)
@@ -113,7 +114,7 @@ class ParcaStoreValidator(BaseValidator):
                 return self._make_result(level="deep", checks=checks)
 
         # 5. gRPC channel ready — proves transport layer negotiates correctly.
-        checks.append(_grpc_channel_ready_check(address.split("://")[-1].strip(), insecure=insecure, token=token))
+        checks.append(_grpc_channel_ready_check(grpc_target, insecure=insecure, token=token))
 
         return self._make_result(level="deep", checks=checks)
 
