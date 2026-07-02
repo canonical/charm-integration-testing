@@ -110,7 +110,8 @@ _cmd_up() {
 
     # Mount project if not already mounted
     echo "==> Checking project mount..."
-    if ! multipass info "$VM_NAME" | grep -qF "$VM_MOUNT"; then
+    if ! multipass info "$VM_NAME" --format json \
+            | python3 -c "import sys,json; mounts=json.load(sys.stdin)['info']['${VM_NAME}'].get('mounts',{}); exit(0 if '${VM_MOUNT}' in mounts else 1)" 2>/dev/null; then
         echo "==> Mounting $PROJECT_DIR -> $VM_MOUNT..."
         multipass exec "$VM_NAME" -- bash -c "sudo mkdir -p '$VM_MOUNT' && sudo chown ubuntu:ubuntu '$VM_MOUNT'"
         multipass mount "$PROJECT_DIR" "$VM_NAME:$VM_MOUNT"
