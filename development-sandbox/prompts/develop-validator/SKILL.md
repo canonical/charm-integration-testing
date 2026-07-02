@@ -46,16 +46,16 @@ under `validators/<name>/` with passing `dev-validate` output.
 7. Wire the new validator package into project dependencies:
    - Add `validators-<name>` to `validators/runner/pyproject.toml` dependencies.
    - Add `validators-<name> = { path = "./validators/<name>", develop = true }`
-     to the root `/project/pyproject.toml` under `[tool.poetry.dependencies]`.
-   - Run `poetry install` from `/project` so the new package is available.
+     to the root `$PROJECT_ROOT/pyproject.toml` under `[tool.poetry.dependencies]`.
+   - Run `poetry install` from `$PROJECT_ROOT` so the new package is available.
 
 8. Run and iterate:
    ```
-   /project/development-sandbox/bin/dev-validate.py --model <interface>-test --app <requirer> --reinstall
+   $PROJECT_ROOT/development-sandbox/bin/dev-validate.py --model <interface>-test --app <requirer> --reinstall
    ```
    Read the JSON output. Fix checks that fail. Repeat until all PASS.
 
-9. Run code quality checks from `/project` and fix any issues:
+9. Run code quality checks from `$PROJECT_ROOT` and fix any issues:
    ```
    ./scripts/format.sh
    ./scripts/lint.sh
@@ -103,26 +103,26 @@ under `validators/<name>/` with passing `dev-validate` output.
     **highest level the validator supports** (check `validate()` in `validator.py`
     -- use `deep` if implemented, otherwise `simple`):
     ```
-    /project/development-sandbox/bin/verify-validator.sh \
+    $PROJECT_ROOT/development-sandbox/bin/verify-validator.sh \
       --model <interface>-test \
       --app <requirer> \
       --provider <provider> \
       --validator <name> \
       --level <highest-supported-level> \
-      --output-dir /project/development-sandbox/reports/<name>-$(date +%Y%m%d-%H%M%S)
+      --output-dir $PROJECT_ROOT/development-sandbox/reports/<name>-$(date +%Y%m%d-%H%M%S)
     ```
     If the backend is a raw Kubernetes deployment (not a Juju app — e.g. MinIO for `s3`),
     the default `juju scale-application` down step won't break connectivity because the
     Juju databag retains credentials even at 0 units. In that case use `--down-cmd` and
     `--restore-cmd` to scale the k8s deployment directly:
     ```
-    /project/development-sandbox/bin/verify-validator.sh \
+    $PROJECT_ROOT/development-sandbox/bin/verify-validator.sh \
       --model <interface>-test \
       --app <requirer> \
       --provider <provider> \
       --validator <name> \
       --level <highest-supported-level> \
-      --output-dir /project/development-sandbox/reports/<name>-$(date +%Y%m%d-%H%M%S) \
+      --output-dir $PROJECT_ROOT/development-sandbox/reports/<name>-$(date +%Y%m%d-%H%M%S) \
       --down-cmd "sudo k8s kubectl scale deployment <backend> -n <interface>-test --replicas=0 && sleep 5" \
       --restore-cmd "sudo k8s kubectl scale deployment <backend> -n <interface>-test --replicas=1 && sleep 15"
     ```
@@ -140,7 +140,7 @@ under `validators/<name>/` with passing `dev-validate` output.
 - `dev-validate` exits 0 with all checks PASS at the highest supported level.
 - The validator package has correct `pyproject.toml` with entry point.
 - `validators/runner/pyproject.toml` includes `validators-<name>`.
-- Root `/project/pyproject.toml` includes `validators-<name>` as a Poetry develop dependency.
+- Root `$PROJECT_ROOT/pyproject.toml` includes `validators-<name>` as a Poetry develop dependency.
 - `./scripts/format.sh` exits 0 after all changes.
 - `./scripts/lint.sh` exits 0 after all changes.
 - Self-review complete: all structure, license, naming, and test coverage criteria met.
