@@ -42,6 +42,8 @@ VM_NAME="${SANDBOX_VM:-charm-qa-sandbox}"
 VM_MOUNT="${SANDBOX_MOUNT:-/project}"
 [[ "$VM_MOUNT" = /* ]] || { echo "ERROR: SANDBOX_MOUNT must be an absolute path: $VM_MOUNT" >&2; exit 1; }
 [[ "$VM_MOUNT" != *"'"* ]] || { echo "ERROR: SANDBOX_MOUNT must not contain single quotes: $VM_MOUNT" >&2; exit 1; }
+[[ "$VM_MOUNT" != *":"* ]] || { echo "ERROR: SANDBOX_MOUNT must not contain colons: $VM_MOUNT" >&2; exit 1; }
+[[ "$VM_NAME" != *"'"* ]] || { echo "ERROR: SANDBOX_VM must not contain single quotes: $VM_NAME" >&2; exit 1; }
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -322,6 +324,11 @@ _cmd_destroy() {
 # Subcommand: shell
 # ---------------------------------------------------------------------------
 _cmd_shell() {
+    if ! multipass info "$VM_NAME" --format json \
+            | python3 -c "import sys,json; mounts=json.load(sys.stdin)['info'][sys.argv[1]].get('mounts',{}); exit(0 if sys.argv[2] in mounts else 1)" "$VM_NAME" "$VM_MOUNT" 2>/dev/null; then
+        echo "==> Mount '$VM_MOUNT' not found — run 'scripts/sandbox.sh up' first to mount the project."
+        exit 1
+    fi
     _env_args=("PROJECT_ROOT=$VM_MOUNT")
     [ -n "${GITHUB_TOKEN:-}" ] && _env_args+=("GH_TOKEN=$GITHUB_TOKEN" "GITHUB_TOKEN=$GITHUB_TOKEN")
     exec multipass exec "$VM_NAME" -- env "${_env_args[@]}" bash -lc "
@@ -367,6 +374,12 @@ EOF
     done
 
     TASK="${*:-}"
+
+    if ! multipass info "$VM_NAME" --format json \
+            | python3 -c "import sys,json; mounts=json.load(sys.stdin)['info'][sys.argv[1]].get('mounts',{}); exit(0 if sys.argv[2] in mounts else 1)" "$VM_NAME" "$VM_MOUNT" 2>/dev/null; then
+        echo "==> Mount '$VM_MOUNT' not found — run 'scripts/sandbox.sh up' first to mount the project."
+        exit 1
+    fi
 
     PROMPT_FILE=$(multipass exec "$VM_NAME" -- bash -c "mktemp /tmp/copilot-prompt-XXXXXX")
 

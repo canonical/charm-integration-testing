@@ -10,7 +10,7 @@ description: Develop a new Juju charm integration validator from scratch. Use wh
 ### Architecture
 
 ```
-CharmHub   →   bundle_builder_x   →   juju deploy
+CharmHub   →   bundle-builder-x   →   juju deploy
                                            ↓
                                      Juju unit (pod)
                                            ↓
