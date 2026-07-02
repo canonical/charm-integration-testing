@@ -152,7 +152,7 @@ sudo k8s kubectl scale deployment minio -n s3-test --replicas=0
 
 ## Important notes
 
-- **Do not modify anything under `development-sandbox/`.** That directory is tooling for your environment, not project code.
+- **Do not modify project source code under `development-sandbox/` unless the task is explicitly about sandbox tooling.** That directory is your runtime environment; accidental edits to `bin/` scripts or `substrate.yaml` can break subsequent runs.
 - **Do not modify git configuration.** Never edit `.git/config`, change remote URLs, embed tokens in remote URLs (`https://<token>@github.com/...`), or run `git config` to change settings. The host machine's git identity and remote configuration must not be touched. If you need to push or authenticate, use the `GH_TOKEN` environment variable already present in your session. If that token lacks push permissions, treat it as intentional — do not attempt to work around it.
 - The Juju substrate is not pre-provisioned. If no Juju controller exists, run the `/setup-k8s` or `/setup-lxd` skill first.
 - For k8s deployments, the model type is `kubernetes`. For LXD deployments, the model type is `machine`.

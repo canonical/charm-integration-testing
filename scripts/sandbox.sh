@@ -75,6 +75,9 @@ Inside an interactive session use skill slash commands:
   /test-validator        Test an existing validator
   /setup-k8s             Set up Canonical k8s substrate
   /setup-lxd             Set up LXD substrate
+  /bmad-agent-pm         BMAD Product Manager persona
+  /bmad-agent-architect  BMAD Architect persona
+  /bmad-agent-dev        BMAD Developer persona
 EOF
 }
 
@@ -163,6 +166,33 @@ _cmd_up() {
         else
             echo '==> gh: found.'
         fi
+
+        # uv is required by BMAD method Python scripts.
+        if ! command -v uv &>/dev/null && ! test -f ~/.local/bin/uv; then
+            echo '==> Installing uv...'
+            INSTALLER=$(mktemp /tmp/uv-install-XXXXXX.sh)
+            curl -LsSf https://astral.sh/uv/install.sh -o "$INSTALLER"
+            sh "$INSTALLER"
+            rm -f "$INSTALLER"
+        else
+            echo '==> uv: found.'
+        fi
+    "
+
+    # Install BMAD method with GitHub Copilot integration.
+    # Installs into the bind-mounted project directory; .agents/skills/bmad-*/,
+    # .github/agents/, and _bmad/ are gitignored and regenerated on each 'sandbox.sh up'.
+    echo "==> Installing BMAD method (github-copilot target)..."
+    multipass exec "$VM_NAME" -- bash -lc "
+        set -euo pipefail
+        export PATH=\"\$HOME/.local/bin:\$PATH\"
+        cd '$VM_MOUNT'
+        npx --yes bmad-method install \
+            --yes \
+            --modules bmm \
+            --tools github-copilot \
+            --directory '$VM_MOUNT' \
+            --set bmm.user_skill_level=expert
     "
 
     # Trust all folders in Copilot so it never prompts for folder confirmation.

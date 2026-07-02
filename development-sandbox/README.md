@@ -17,8 +17,10 @@ All host operations go through a single entry point:
 | `scripts/sandbox.sh run 'task'` | Launch Copilot autonomously |
 | `scripts/sandbox.sh run --interactive` | Launch Copilot interactively |
 
-Skills (`/develop-validator`, `/test-validator`, `/setup-k8s`, `/setup-lxd`) are
+Skills (`/develop-validator`, `/test-validator`, `/setup-k8s`, `/setup-lxd`, `/review-pr`) are
 auto-discovered via `.agents/skills/` at the repository root.
+BMAD agents (`/bmad-agent-pm`, `/bmad-agent-architect`, `/bmad-agent-dev`, etc.) are
+installed by `scripts/sandbox.sh up` and gitignored.
 Use them inside any interactive Copilot session.
 
 ### VM-side
