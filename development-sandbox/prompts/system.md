@@ -333,8 +333,8 @@ def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
 - Keep validators focused on a single interface. Do not add cross-interface logic.
 - Add client library dependencies (e.g. `psycopg2-binary`) to the validator's `pyproject.toml` `dependencies`.
 - For every new validator package under `validators/<name>/`, also update:
-  - `/project/validators/runner/pyproject.toml` dependencies to include `validators-<name>`.
-  - `/project/pyproject.toml` `[tool.poetry.dependencies]` to include
+  - `$PROJECT_ROOT/validators/runner/pyproject.toml` dependencies to include `validators-<name>`.
+  - `$PROJECT_ROOT/pyproject.toml` `[tool.poetry.dependencies]` to include
     `validators-<name> = { path = "./validators/<name>", develop = true }`.
   Then run `poetry install` from `$PROJECT_ROOT`.
 - Before declaring completion for validator creation, run from `$PROJECT_ROOT`:

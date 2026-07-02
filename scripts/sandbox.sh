@@ -41,6 +41,7 @@ fi
 VM_NAME="${SANDBOX_VM:-charm-qa-sandbox}"
 VM_MOUNT="${SANDBOX_MOUNT:-/project}"
 [[ "$VM_MOUNT" = /* ]] || { echo "ERROR: SANDBOX_MOUNT must be an absolute path: $VM_MOUNT" >&2; exit 1; }
+[[ "$VM_MOUNT" != *"'"* ]] || { echo "ERROR: SANDBOX_MOUNT must not contain single quotes: $VM_MOUNT" >&2; exit 1; }
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -111,7 +112,7 @@ _cmd_up() {
     # Mount project if not already mounted
     echo "==> Checking project mount..."
     if ! multipass info "$VM_NAME" --format json \
-            | python3 -c "import sys,json; mounts=json.load(sys.stdin)['info']['${VM_NAME}'].get('mounts',{}); exit(0 if '${VM_MOUNT}' in mounts else 1)" 2>/dev/null; then
+            | python3 -c "import sys,json; mounts=json.load(sys.stdin)['info'][sys.argv[1]].get('mounts',{}); exit(0 if sys.argv[2] in mounts else 1)" "$VM_NAME" "$VM_MOUNT" 2>/dev/null; then
         echo "==> Mounting $PROJECT_DIR -> $VM_MOUNT..."
         multipass exec "$VM_NAME" -- bash -c "sudo mkdir -p '$VM_MOUNT' && sudo chown ubuntu:ubuntu '$VM_MOUNT'"
         multipass mount "$PROJECT_DIR" "$VM_NAME:$VM_MOUNT"
