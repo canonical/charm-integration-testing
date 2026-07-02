@@ -27,6 +27,7 @@ dependencies = [
     "validators-cve-catalog",
     "validators-livepatch-pro-airgapped-server",
     "validators-azure-storage",
+    "validators-external-provider",
 ]
 
 [build-system]

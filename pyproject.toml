@@ -28,6 +28,7 @@ validators-config-server = { path = "./validators/config_server", develop = true
 validators-cve-catalog = { path = "./validators/cve_catalog", develop = true }
 validators-livepatch-pro-airgapped-server = { path = "./validators/livepatch_pro_airgapped_server", develop = true }
 validators-azure-storage = { path = "./validators/azure_storage", develop = true }
+validators-external-provider = { path = "./validators/external_provider", develop = true }
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]

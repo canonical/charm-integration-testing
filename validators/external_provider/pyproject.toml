@@ -1,0 +1,60 @@
+# Copyright (C) 2026 Canonical Ltd
+
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+# Copyright (C) 2026 Canonical Ltd
+
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+[project]
+name = "validators-external-provider"
+version = "0.1.0"
+description = "Validator for external_provider interface"
+authors = [
+    {name = "SQA Team", email = "solutionsqa@canonical.com"}
+]
+
+requires-python = ">=3.10"
+dependencies = [
+    "validators-base",
+]
+
+[project.optional-dependencies]
+dev = [
+    "validators-test-utils",
+]
+
+[project.entry-points."endpoint_validators"]
+external_provider = "validators.external_provider:ExternalProviderValidator"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["validators.external_provider"]
+
+[tool.setuptools.package-dir]
+"validators.external_provider" = "."
