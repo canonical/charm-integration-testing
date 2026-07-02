@@ -66,7 +66,7 @@ Check out the PR branch and read the relevant source files before making any cha
 ```bash
 # Find the branch name
 gh api repos/canonical/charm-integration-testing/pulls/<number> \
-  --jq '.head.ref'
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['head']['ref'])"
 
 git fetch origin <branch>
 git checkout <branch>
