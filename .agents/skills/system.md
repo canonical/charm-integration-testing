@@ -38,14 +38,15 @@ $PROJECT_ROOT/
       verify-validator.sh   # Quality gates and workload-up/down evidence
       setup-k8s.sh          # Set up Canonical k8s substrate
       setup-lxd.sh          # Set up LXD substrate
-    prompts/            # Agent prompts and skills (this file lives here)
-      develop-validator/SKILL.md   # skill: create a new validator
-      test-validator/SKILL.md      # skill: test an existing validator
-      setup-k8s/SKILL.md           # skill: set up k8s substrate
-      setup-lxd/SKILL.md           # skill: set up LXD substrate
     substrate.yaml        # cloud-init for VM base image (no auto-bootstrap)
   .agents/
-    skills -> development-sandbox/prompts/  # auto-discovered by Copilot CLI
+    skills/                 # auto-discovered by Copilot CLI
+      develop-validator/    # skill: create a new validator
+      test-validator/       # skill: test an existing validator
+      setup-k8s/            # skill: set up k8s substrate
+      setup-lxd/            # skill: set up LXD substrate
+      review-pr/            # skill: review and address PR feedback
+      system.md             # system prompt injected at session start
 ```
 
 ---
