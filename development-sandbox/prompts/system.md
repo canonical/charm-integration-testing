@@ -8,9 +8,9 @@ You operate in yolo mode: you make changes, run commands, and iterate without as
 
 ## Environment
 
-- Project: `/project` (bind-mounted from the host)
-- Python venv: managed by Poetry (`poetry install` from `/project`)
-- Static assets: `/project/static/uv` (pre-built uv binary)
+- Project: `$PROJECT_ROOT` (bind-mounted from the host)
+- Python venv: managed by Poetry (`poetry install` from `$PROJECT_ROOT`)
+- Static assets: `$PROJECT_ROOT/static/uv` (pre-built uv binary)
 - Juju substrate: **not pre-provisioned** - use `/setup-k8s` or `/setup-lxd` skill first if no controller exists yet
 
 ---
@@ -18,7 +18,7 @@ You operate in yolo mode: you make changes, run commands, and iterate without as
 ## Project layout
 
 ```
-/project/
+$PROJECT_ROOT/
   validators/
     base/           # BaseValidator ABC, ValidationResult, ValidationCheck
     runner/         # ValidatorRunner: discovers validators via entry points, runs them
@@ -156,13 +156,13 @@ Use this to read Copilot or human reviewer feedback before or during development
 
 ```bash
 # Basic usage
-/project/development-sandbox/bin/dev-validate.py --app postgresql-k8s --level simple
+$PROJECT_ROOT/development-sandbox/bin/dev-validate.py --app postgresql-k8s --level simple
 
 # After editing validator source code, force reinstall:
-/project/development-sandbox/bin/dev-validate.py --app postgresql-k8s --level simple --reinstall
+$PROJECT_ROOT/development-sandbox/bin/dev-validate.py --app postgresql-k8s --level simple --reinstall
 
 # Different model
-/project/development-sandbox/bin/dev-validate.py --model testing --app mongodb-k8s --level deep --verbose
+$PROJECT_ROOT/development-sandbox/bin/dev-validate.py --model testing --app mongodb-k8s --level deep --verbose
 ```
 
 The `--reinstall` flag deletes `/var/lib/validators` on each unit, then rebuilds and
@@ -258,10 +258,10 @@ sudo k8s kubectl scale deployment minio -n s3-test --replicas=0
 5. **Create** the validator skeleton in `validators/<name>/`.
 6. **Wire** the package into both `validators/runner/pyproject.toml` and the root
    `pyproject.toml` (`validators-<name> = { path = "./validators/<name>", develop = true }`),
-   then run `poetry install` from `/project`.
+   then run `poetry install` from `$PROJECT_ROOT`.
 7. **Test**: `dev-validate --app <requirer-app> --reinstall`
 8. **Read the JSON** output. Fix issues in `validator.py`. Repeat until all PASS.
-9. **Format and lint**: run `./scripts/format.sh` and `./scripts/lint.sh` from `/project`.
+9. **Format and lint**: run `./scripts/format.sh` and `./scripts/lint.sh` from `$PROJECT_ROOT`.
 10. **Self-review**: read every file in `validators/<name>/` against the structure,
     license, naming, and test-coverage checklist in `develop-validator.md` step 10.
     Fix any issues found, then re-run format/lint if changes were made.
@@ -336,16 +336,16 @@ def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
   - `/project/validators/runner/pyproject.toml` dependencies to include `validators-<name>`.
   - `/project/pyproject.toml` `[tool.poetry.dependencies]` to include
     `validators-<name> = { path = "./validators/<name>", develop = true }`.
-  Then run `poetry install` from `/project`.
-- Before declaring completion for validator creation, run from `/project`:
+  Then run `poetry install` from `$PROJECT_ROOT`.
+- Before declaring completion for validator creation, run from `$PROJECT_ROOT`:
   - `./scripts/format.sh`
   - `./scripts/lint.sh`
   If either fails, fix and re-run until both exit 0.
-- For merge evidence, run `/project/development-sandbox/bin/verify-validator.sh`
+- For merge evidence, run `$PROJECT_ROOT/development-sandbox/bin/verify-validator.sh`
   with model, requirer app, provider app, and validator name. Always use
   `--level <highest-supported-level>` (check `validate()` -- use `deep` if implemented,
   otherwise `simple`) and pass
-  `--output-dir /project/development-sandbox/reports/<name>-$(date +%Y%m%d-%H%M%S)`
+  `--output-dir $PROJECT_ROOT/development-sandbox/reports/<name>-$(date +%Y%m%d-%H%M%S)`
   so the report persists on the host (the directory is git-ignored). Completion requires
   evidence of workload-up pass and workload-down detection in the generated bundle.
 - **Workload-down for non-Juju backends**: the default `verify-validator.sh` workload-down
@@ -357,7 +357,7 @@ def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
   ```bash
   verify-validator.sh \
     --model s3-test --app parca-k8s --provider s3-integrator --validator s3 \
-    --output-dir /project/development-sandbox/reports/s3-$(date +%Y%m%d-%H%M%S) \
+    --output-dir $PROJECT_ROOT/development-sandbox/reports/s3-$(date +%Y%m%d-%H%M%S) \
     --down-cmd "sudo k8s kubectl scale deployment minio -n s3-test --replicas=0 && sleep 5" \
     --restore-cmd "sudo k8s kubectl scale deployment minio -n s3-test --replicas=1 && sleep 15"
   ```

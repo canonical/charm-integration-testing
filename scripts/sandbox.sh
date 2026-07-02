@@ -15,6 +15,7 @@
 #   GITHUB_TOKEN          Fine-grained PAT for gh CLI inside the VM
 #   COPILOT_GITHUB_TOKEN  Override for Copilot AI auth (default: gh auth token)
 #   SANDBOX_VM            VM name override (default: charm-qa-sandbox)
+#   SANDBOX_MOUNT         VM-side mount path (default: /project)
 #   COPILOT_MODEL         Copilot model override (default: sonnet-4.6)
 
 set -euo pipefail
@@ -38,6 +39,7 @@ if [ -f "$DEV_DIR/.env" ]; then
 fi
 
 VM_NAME="${SANDBOX_VM:-charm-qa-sandbox}"
+VM_MOUNT="${SANDBOX_MOUNT:-/project}"
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -61,6 +63,7 @@ Usage:
 
 Environment (.env keys):
   SANDBOX_VM             VM name override (default: charm-qa-sandbox)
+  SANDBOX_MOUNT          VM-side mount path (default: /project)
   GITHUB_TOKEN           Fine-grained PAT for gh CLI inside the VM
   COPILOT_GITHUB_TOKEN   Copilot AI auth token (default: gh auth token)
   COPILOT_MODEL          Copilot model (default: sonnet-4.6)
@@ -106,9 +109,10 @@ _cmd_up() {
 
     # Mount project if not already mounted
     echo "==> Checking project mount..."
-    if ! multipass info "$VM_NAME" | grep -qF "/project"; then
-        echo "==> Mounting $PROJECT_DIR -> /project..."
-        multipass mount "$PROJECT_DIR" "$VM_NAME:/project"
+    if ! multipass info "$VM_NAME" | grep -qF "$VM_MOUNT"; then
+        echo "==> Mounting $PROJECT_DIR -> $VM_MOUNT..."
+        multipass exec "$VM_NAME" -- bash -c "sudo mkdir -p '$VM_MOUNT' && sudo chown ubuntu:ubuntu '$VM_MOUNT'"
+        multipass mount "$PROJECT_DIR" "$VM_NAME:$VM_MOUNT"
     fi
 
     # Set up Python venv with project packages (poetry manages the venv)
@@ -123,7 +127,7 @@ _cmd_up() {
             pipx ensurepath
             export PATH=\"\$HOME/.local/bin:\$PATH\"
         fi
-        cd /project
+        cd "$VM_MOUNT"
         poetry install
     "
 
@@ -144,7 +148,7 @@ _cmd_up() {
 
         echo '==> Linking project skills to ~/.agents/skills...'
         mkdir -p ~/.agents
-        ln -sfn /project/development-sandbox/prompts ~/.agents/skills
+        ln -sfn "$VM_MOUNT/development-sandbox/prompts" ~/.agents/skills
 
         if ! command -v markdownlint-cli2 &>/dev/null; then
             echo '==> Installing markdownlint-cli2...'
@@ -288,7 +292,7 @@ _cmd_destroy() {
 # Subcommand: shell
 # ---------------------------------------------------------------------------
 _cmd_shell() {
-    exec multipass exec "$VM_NAME" -- bash -lc "cd /project && exec bash -l"
+    exec multipass exec "$VM_NAME" -- env "PROJECT_ROOT=$VM_MOUNT" bash -lc "cd '$VM_MOUNT' && exec bash -l"
 }
 
 # ---------------------------------------------------------------------------
@@ -344,9 +348,9 @@ EOF
         # Build env var array, only including GH_TOKEN/GITHUB_TOKEN if they are actually set
         _env_args=()
         [ -n "${GITHUB_TOKEN:-}" ] && _env_args+=("GH_TOKEN=$GITHUB_TOKEN" "GITHUB_TOKEN=$GITHUB_TOKEN")
-        _env_args+=("COPILOT_GITHUB_TOKEN=$_copilot_token" "COPILOT_MODEL=$COPILOT_MODEL")
+        _env_args+=("COPILOT_GITHUB_TOKEN=$_copilot_token" "COPILOT_MODEL=$COPILOT_MODEL" "PROJECT_ROOT=$VM_MOUNT")
         multipass exec "$VM_NAME" -- env "${_env_args[@]}" bash -lc "
-            cd /project
+            cd '$VM_MOUNT'
             copilot --yolo -i \"$CONTEXT_MSG\"
             rm -f $PROMPT_FILE
         "
@@ -355,9 +359,9 @@ EOF
         # Build env var array, only including GH_TOKEN/GITHUB_TOKEN if they are actually set
         _env_args=()
         [ -n "${GITHUB_TOKEN:-}" ] && _env_args+=("GH_TOKEN=$GITHUB_TOKEN" "GITHUB_TOKEN=$GITHUB_TOKEN")
-        _env_args+=("COPILOT_GITHUB_TOKEN=$_copilot_token" "COPILOT_MODEL=$COPILOT_MODEL")
+        _env_args+=("COPILOT_GITHUB_TOKEN=$_copilot_token" "COPILOT_MODEL=$COPILOT_MODEL" "PROJECT_ROOT=$VM_MOUNT")
         multipass exec "$VM_NAME" -- env "${_env_args[@]}" bash -lc "
-            cd /project
+            cd '$VM_MOUNT'
             copilot --yolo -p \"\$(cat $PROMPT_FILE)\"
             rm -f $PROMPT_FILE
         "
