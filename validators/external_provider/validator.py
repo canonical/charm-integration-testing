@@ -117,7 +117,7 @@ class ExternalProviderValidator(BaseValidator):
                 issues.append(f"providers[{idx}] unknown provider type: '{provider_name}'")
 
             # client_secret is required for all providers except those using asymmetric keys
-            if provider_name not in _KEYAUTH_PROVIDERS and not entry.get("client_secret"):
+            if provider_name and provider_name not in _KEYAUTH_PROVIDERS and not entry.get("client_secret"):
                 issues.append(f"providers[{idx}] missing: client_secret")
 
         return ValidationCheck(
