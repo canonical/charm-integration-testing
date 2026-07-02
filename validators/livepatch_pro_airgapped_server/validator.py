@@ -125,7 +125,7 @@ def _unit_databags(relation: ops.Relation) -> list[dict[str, str]]:
     databag rather than the application databag.
     """
     result: list[dict[str, str]] = []
-    for unit in relation.units:
+    for unit in sorted(relation.units, key=lambda u: getattr(u, "name", repr(u))):
         data = dict(relation.data[unit])
         if data:
             result.append(data)
