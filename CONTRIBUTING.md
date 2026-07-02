@@ -13,7 +13,7 @@ and download dependencies.
 ## Linting and Formatting
 
 Linting and formatting is enforced by [ruff](https://docs.astral.sh/ruff) and
-[mdformat](https://mdformat.readthedocs.io) as a GitHub Action that runs
+[markdownlint](https://github.com/davidanson/markdownlint) as a GitHub Action that runs
 automatically on Pull Requests to this repository. To format, run:
 
 ```bash
