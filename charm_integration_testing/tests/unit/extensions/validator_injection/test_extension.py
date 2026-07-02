@@ -9,7 +9,8 @@ from pathlib import Path
 import pytest
 from extensions.validator_injection.extension import (
     ValidatorInjectorExtension,
-    remote_validators_path,
+    remote_validators_path_k8s,
+    remote_validators_path_machine,
 )
 from juju.backend import JujuExecOutput
 
@@ -382,7 +383,7 @@ class TestValidatorInjectorExtension:
             assert len(juju.scp_calls) == 2  # validators + uv
             _, source, dest = juju.scp_calls[0]
             assert source == str(validators_path.resolve())
-            assert dest == f"myapp/0:{remote_validators_path}/packages"
+            assert dest == f"myapp/0:{remote_validators_path_k8s}/packages"
 
         def test_calls_ssh_mkdir_before_scp(
             self,
@@ -399,7 +400,7 @@ class TestValidatorInjectorExtension:
             assert len(juju.ssh_calls) == 1
             _, unit, cmd = juju.ssh_calls[0]
             assert unit == "myapp/0"
-            assert cmd == f"mkdir -p {remote_validators_path}"
+            assert cmd == f"mkdir -p {remote_validators_path_k8s}"
 
         def test_calls_ssh_mkdir_before_scp_with_sudo_in_non_k8s_model_and_chowns_it(
             self,
@@ -417,8 +418,8 @@ class TestValidatorInjectorExtension:
             _, unit, cmd = juju.ssh_calls[0]
             mkdir, chown = cmd.split(" && ")
             assert unit == "myapp/0"
-            assert mkdir == f"sudo mkdir -p {remote_validators_path}"
-            assert chown == f"sudo chown -R $(id -u) {remote_validators_path}"
+            assert mkdir == f"sudo mkdir -p {remote_validators_path_machine}"
+            assert chown == f"sudo chown -R $(id -u) {remote_validators_path_machine}"
 
         def test_runs_three_install_commands(self, extension: ValidatorInjectorExtension, juju: JujuStub) -> None:
             # GIVEN all install commands succeed
