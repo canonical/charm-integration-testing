@@ -2,9 +2,13 @@
 # Run deterministic validator verification gates inside the VM workspace.
 #
 # This script is VM-native and must be run from inside the sandbox VM where
-# /project is mounted.
+# the project is mounted. The project root is auto-detected from this script's
+# location or can be overridden via the PROJECT_ROOT environment variable.
 
 set -euo pipefail
+
+# Derive project root from this script's location: <project>/development-sandbox/bin/verify-validator.sh
+PROJECT="${PROJECT_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
 
 MODEL=""
 APP=""
@@ -141,12 +145,12 @@ if [ -z "$DOWN_CMD" ] && [ -n "$RESTORE_CMD" ]; then
     exit 1
 fi
 
-if [ ! -d /project ]; then
-    echo "This script must run inside the validator VM where /project is mounted." >&2
+if [ ! -d "$PROJECT" ]; then
+    echo "This script must run inside the sandbox VM where the project is mounted." >&2
     exit 1
 fi
 
-cd /project
+cd "$PROJECT"
 mkdir -p "$OUTPUT_DIR"
 summary="$OUTPUT_DIR/summary.txt"
 report="$OUTPUT_DIR/report.json"
@@ -234,7 +238,7 @@ run_step unit_tests "$TEST_CMD"
 VALIDATOR_PKG="${VALIDATOR//_/-}"
 run_step wiring_runner "grep -q '\"validators-$VALIDATOR_PKG\"' validators/runner/pyproject.toml"
 run_step wiring_root "grep -q '^validators-$VALIDATOR_PKG = { path = \"./validators/$VALIDATOR\", develop = true' pyproject.toml"
-run_step entrypoint "cd /project && poetry run python3 -c \"from importlib.metadata import entry_points; import sys; names=[e.name for e in entry_points(group='endpoint_validators')]; sys.exit(0 if '$INTERFACE' in names else 1)\""
+run_step entrypoint "cd '$PROJECT' && poetry run python3 -c \"from importlib.metadata import entry_points; import sys; names=[e.name for e in entry_points(group='endpoint_validators')]; sys.exit(0 if '$INTERFACE' in names else 1)\""
 
 # Validate at each level while the workload is up.
 # Use --reinstall on the first call to push latest code; reuse venv for the rest.
@@ -242,10 +246,10 @@ _first_up=true
 for _level in "${LEVEL_ARRAY[@]}"; do
     _step="validate_up_${_level}"
     if [ "$_first_up" = "true" ]; then
-        run_step "$_step" "/project/development-sandbox/bin/dev-validate.py --model $MODEL --app $APP --level $_level --reinstall"
+        run_step "$_step" "$PROJECT/development-sandbox/bin/dev-validate.py --model $MODEL --app $APP --level $_level --reinstall"
         _first_up=false
     else
-        run_step "$_step" "/project/development-sandbox/bin/dev-validate.py --model $MODEL --app $APP --level $_level"
+        run_step "$_step" "$PROJECT/development-sandbox/bin/dev-validate.py --model $MODEL --app $APP --level $_level"
     fi
 done
 run_step status_up "juju status -m $MODEL --relations"
@@ -255,7 +259,7 @@ if [ -n "$DOWN_CMD" ]; then
     run_step provider_down "$DOWN_CMD"
     run_step status_down "juju status -m $MODEL --relations"
     for _level in "${LEVEL_ARRAY[@]}"; do
-        run_step "validate_down_${_level}" "/project/development-sandbox/bin/dev-validate.py --model $MODEL --app $APP --level $_level"
+        run_step "validate_down_${_level}" "$PROJECT/development-sandbox/bin/dev-validate.py --model $MODEL --app $APP --level $_level"
     done
     run_step provider_restore "$RESTORE_CMD"
     run_step status_restored "juju status -m $MODEL --relations"
@@ -290,7 +294,7 @@ PY
     run_step provider_down "juju scale-application -m $MODEL $PROVIDER 0"
     run_step status_down "juju status -m $MODEL --relations"
     for _level in "${LEVEL_ARRAY[@]}"; do
-        run_step "validate_down_${_level}" "/project/development-sandbox/bin/dev-validate.py --model $MODEL --app $APP --level $_level"
+        run_step "validate_down_${_level}" "$PROJECT/development-sandbox/bin/dev-validate.py --model $MODEL --app $APP --level $_level"
     done
     run_step provider_restore "juju scale-application -m $MODEL $PROVIDER $orig_units"
     run_step status_restored "juju status -m $MODEL --relations"
