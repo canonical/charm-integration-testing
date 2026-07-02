@@ -293,7 +293,9 @@ _cmd_destroy() {
 # Subcommand: shell
 # ---------------------------------------------------------------------------
 _cmd_shell() {
-    exec multipass exec "$VM_NAME" -- env "PROJECT_ROOT=$VM_MOUNT" bash -lc "cd '$VM_MOUNT' && exec bash -l"
+    _env_args=("PROJECT_ROOT=$VM_MOUNT")
+    [ -n "${GITHUB_TOKEN:-}" ] && _env_args+=("GH_TOKEN=$GITHUB_TOKEN" "GITHUB_TOKEN=$GITHUB_TOKEN")
+    exec multipass exec "$VM_NAME" -- env "${_env_args[@]}" bash -lc "cd '$VM_MOUNT' && exec bash -l"
 }
 
 # ---------------------------------------------------------------------------
