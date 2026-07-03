@@ -1,0 +1,33 @@
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+[project]
+name = "validators-external-provider"
+version = "0.1.0"
+description = "Validator for external_provider interface"
+authors = [
+    {name = "SQA Team", email = "solutionsqa@canonical.com"}
+]
+
+requires-python = ">=3.10"
+dependencies = [
+    "validators-base",
+]
+
+[project.optional-dependencies]
+dev = [
+    "validators-test-utils",
+]
+
+[project.entry-points."endpoint_validators"]
+external_provider = "validators.external_provider:ExternalProviderValidator"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["validators.external_provider"]
+
+[tool.setuptools.package-dir]
+"validators.external_provider" = "."
