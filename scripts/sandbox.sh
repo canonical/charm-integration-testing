@@ -7,6 +7,8 @@
 #   scripts/sandbox.sh down          Stop the VM (preserves state)
 #   scripts/sandbox.sh destroy       Delete the VM permanently
 #   scripts/sandbox.sh shell         Open a shell inside the VM
+#   scripts/sandbox.sh sync push    Push local changes to remote (remote mode)
+#   scripts/sandbox.sh sync pull    Pull remote changes to local (remote mode)
 #   scripts/sandbox.sh run 'task'    Run Copilot in autonomous mode
 #   scripts/sandbox.sh run --interactive   Run Copilot in interactive mode
 #   scripts/sandbox.sh --help        Show this help
@@ -16,6 +18,8 @@
 #   COPILOT_GITHUB_TOKEN  Override for Copilot AI auth (default: gh auth token)
 #   SANDBOX_VM            VM name override (default: charm-qa-sandbox)
 #   SANDBOX_MOUNT         VM-side mount path (default: /project)
+#   SANDBOX_HOST          Remote host for Multipass (e.g. user@remote-box)
+#   SANDBOX_HOST_DIR      Project path on remote host (default: /tmp/sandbox-project)
 #   COPILOT_MODEL         Copilot model override (default: sonnet-4.6)
 
 set -euo pipefail
@@ -40,25 +44,96 @@ fi
 
 VM_NAME="${SANDBOX_VM:-charm-qa-sandbox}"
 VM_MOUNT="${SANDBOX_MOUNT:-/project}"
+SANDBOX_HOST="${SANDBOX_HOST:-}"
+SANDBOX_HOST_DIR="${SANDBOX_HOST_DIR:-/tmp/sandbox-project}"
+
 [[ "$VM_MOUNT" = /* ]] || { echo "ERROR: SANDBOX_MOUNT must be an absolute path: $VM_MOUNT" >&2; exit 1; }
 [[ "$VM_MOUNT" != *"'"* ]] || { echo "ERROR: SANDBOX_MOUNT must not contain single quotes: $VM_MOUNT" >&2; exit 1; }
 [[ "$VM_MOUNT" != *":"* ]] || { echo "ERROR: SANDBOX_MOUNT must not contain colons: $VM_MOUNT" >&2; exit 1; }
 [[ "$VM_NAME" != *"'"* ]] || { echo "ERROR: SANDBOX_VM must not contain single quotes: $VM_NAME" >&2; exit 1; }
 
 # ---------------------------------------------------------------------------
+# Remote driver helpers
+# ---------------------------------------------------------------------------
+_is_remote() { [ -n "$SANDBOX_HOST" ]; }
+
+# Run multipass locally or on the remote host. Arguments are shell-escaped for
+# safe transport over SSH.
+_mp() {
+    if _is_remote; then
+        ssh "$SANDBOX_HOST" "$(printf '%q ' multipass "$@")"
+    else
+        multipass "$@"
+    fi
+}
+
+# Like _mp but allocates a TTY (for interactive exec sessions).
+_mp_tty() {
+    if _is_remote; then
+        ssh -t "$SANDBOX_HOST" "$(printf '%q ' multipass "$@")"
+    else
+        multipass "$@"
+    fi
+}
+
+# Pipe stdin into a multipass exec on the remote (no TTY).
+_mp_pipe() {
+    if _is_remote; then
+        ssh "$SANDBOX_HOST" "$(printf '%q ' multipass "$@")"
+    else
+        multipass "$@"
+    fi
+}
+
+# Sync the local project to the remote host via rsync.
+_sync_to_remote() {
+    if _is_remote; then
+        echo "==> Syncing project to $SANDBOX_HOST:$SANDBOX_HOST_DIR..."
+        rsync -auvz --delete \
+            --exclude='.git' \
+            --exclude='development-sandbox/reports' \
+            --exclude='__pycache__' \
+            --exclude='.venv' \
+            --exclude='*.egg-info' \
+            "$PROJECT_DIR/" "$SANDBOX_HOST:$SANDBOX_HOST_DIR/"
+    fi
+}
+
+# Pull the project back from the remote host to local.
+_sync_from_remote() {
+    if _is_remote; then
+        echo "==> Pulling project from $SANDBOX_HOST:$SANDBOX_HOST_DIR..."
+        rsync -auvz --delete \
+            --exclude='.git' \
+            --exclude='__pycache__' \
+            --exclude='.venv' \
+            --exclude='*.egg-info' \
+            "$SANDBOX_HOST:$SANDBOX_HOST_DIR/" "$PROJECT_DIR/"
+    fi
+}
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 _ensure_mounted() {
-    if ! multipass info "$VM_NAME" --format json \
+    local _mount_src
+    if _is_remote; then
+        _sync_to_remote
+        _mount_src="$SANDBOX_HOST_DIR"
+    else
+        _mount_src="$PROJECT_DIR"
+    fi
+
+    if ! _mp info "$VM_NAME" --format json \
             | python3 -c "import sys,json; mounts=json.load(sys.stdin)['info'][sys.argv[1]].get('mounts',{}); exit(0 if sys.argv[2] in mounts else 1)" "$VM_NAME" "$VM_MOUNT" 2>/dev/null; then
-        echo "==> Mount '$VM_MOUNT' not found in VM — mounting $PROJECT_DIR -> $VM_MOUNT..."
-        multipass exec "$VM_NAME" -- bash -c "sudo mkdir -p '$VM_MOUNT' && sudo chown ubuntu:ubuntu '$VM_MOUNT'"
-        multipass mount "$PROJECT_DIR" "$VM_NAME:$VM_MOUNT"
+        echo "==> Mount '$VM_MOUNT' not found in VM — mounting $_mount_src -> $VM_MOUNT..."
+        _mp exec "$VM_NAME" -- bash -c "sudo mkdir -p '$VM_MOUNT' && sudo chown ubuntu:ubuntu '$VM_MOUNT'"
+        _mp mount "$_mount_src" "$VM_NAME:$VM_MOUNT"
     fi
 }
 
 _vm_state() {
-    multipass info "$VM_NAME" --format json 2>/dev/null \
+    _mp info "$VM_NAME" --format json 2>/dev/null \
         | python3 -c "import sys,json; print(json.load(sys.stdin)['info']['$VM_NAME']['state'])" 2>/dev/null \
         || echo "absent"
 }
@@ -70,6 +145,8 @@ Usage:
   scripts/sandbox.sh down                      Stop the VM (preserves state)
   scripts/sandbox.sh destroy                   Delete the VM permanently
   scripts/sandbox.sh shell                     Open a shell inside the VM
+  scripts/sandbox.sh sync push                  Push local changes to remote
+  scripts/sandbox.sh sync pull                  Pull remote changes to local
   scripts/sandbox.sh run 'task description'    Autonomous Copilot mode
   scripts/sandbox.sh run --interactive         Interactive Copilot mode
   scripts/sandbox.sh --help                    Show this help
@@ -77,6 +154,8 @@ Usage:
 Environment (.env keys):
   SANDBOX_VM             VM name override (default: charm-qa-sandbox)
   SANDBOX_MOUNT          VM-side mount path (default: /project)
+  SANDBOX_HOST           Remote host running Multipass (e.g. user@remote-box)
+  SANDBOX_HOST_DIR       Project path on remote host (default: /tmp/sandbox-project)
   GITHUB_TOKEN           Fine-grained PAT for gh CLI inside the VM
   COPILOT_GITHUB_TOKEN   Copilot AI auth token (default: gh auth token)
   COPILOT_MODEL          Copilot model (default: sonnet-4.6)
@@ -84,8 +163,8 @@ Environment (.env keys):
 Inside an interactive session use skill slash commands:
   /develop-validator     Develop a new charm integration validator
   /test-validator        Test an existing validator
-  /setup-k8s             Set up Canonical k8s substrate
-  /setup-lxd             Set up LXD substrate
+  /setup-k8s            Set up Canonical k8s substrate
+  /setup-lxd            Set up LXD substrate
 EOF
 }
 
@@ -93,30 +172,41 @@ EOF
 # Subcommand: up
 # ---------------------------------------------------------------------------
 _cmd_up() {
+    # In remote mode, sync first so cloud-init file is available on the remote.
+    _sync_to_remote
+
     echo "==> Checking VM state..."
     state=$(_vm_state)
+
+    # Resolve cloud-init path: local file or remote-synced copy.
+    local _cloud_init
+    if _is_remote; then
+        _cloud_init="$SANDBOX_HOST_DIR/development-sandbox/substrate.yaml"
+    else
+        _cloud_init="$DEV_DIR/substrate.yaml"
+    fi
 
     case "$state" in
         absent)
             echo "==> Launching $VM_NAME..."
-            multipass launch 24.04 \
+            _mp launch 24.04 \
                 --name "$VM_NAME" \
                 --cpus 4 \
                 --memory 8G \
                 --disk 40G \
-                --cloud-init "$DEV_DIR/substrate.yaml" \
+                --cloud-init "$_cloud_init" \
                 --timeout 1800
             ;;
         Stopped)
             echo "==> Starting $VM_NAME..."
-            multipass start "$VM_NAME"
+            _mp start "$VM_NAME"
             ;;
         Running)
             echo "==> $VM_NAME already running."
             ;;
         *)
             echo "==> VM is in state '$state', attempting to start..."
-            multipass start "$VM_NAME"
+            _mp start "$VM_NAME"
             ;;
     esac
 
@@ -126,7 +216,7 @@ _cmd_up() {
 
     # Set up Python venv with project packages (poetry manages the venv)
     echo "==> Installing Python dependencies via poetry..."
-    multipass exec "$VM_NAME" -- bash -lc "
+    _mp exec "$VM_NAME" -- bash -lc "
         set -euo pipefail
         if ! command -v poetry &>/dev/null && ! test -f ~/.local/bin/poetry; then
             if ! command -v pipx &>/dev/null; then
@@ -142,7 +232,7 @@ _cmd_up() {
 
     # Install node-based tools used by the sandbox if not present
     echo "==> Checking for node-based tools..."
-    multipass exec "$VM_NAME" -- bash -lc "
+    _mp exec "$VM_NAME" -- bash -lc "
         set -euo pipefail
         if ! command -v node &>/dev/null; then
             sudo snap install node --classic
@@ -176,7 +266,7 @@ _cmd_up() {
 
     # Trust all folders in Copilot so it never prompts for folder confirmation.
     echo "==> Configuring Copilot trusted folders..."
-    multipass exec "$VM_NAME" -- bash -lc "
+    _mp exec "$VM_NAME" -- bash -lc "
         mkdir -p ~/.copilot
         cat > ~/.copilot/config.json <<'JSON'
 {
@@ -208,11 +298,11 @@ JSON
     _VM_SIGNING_KEY_B64=$(grep '^SANDBOX_SIGNING_KEY=' "$_ENV_FILE" | cut -d= -f2-)
 
     # Install the signing key into the VM and generate the .pub file.
-    multipass exec "$VM_NAME" -- install -d -m 700 /home/ubuntu/.ssh
+    _mp exec "$VM_NAME" -- install -d -m 700 /home/ubuntu/.ssh
     echo "$_VM_SIGNING_KEY_B64" | base64 -d \
-        | multipass exec "$VM_NAME" -- tee /home/ubuntu/.ssh/id_signing > /dev/null
-    multipass exec "$VM_NAME" -- chmod 600 /home/ubuntu/.ssh/id_signing
-    multipass exec "$VM_NAME" -- bash -c \
+        | _mp_pipe exec "$VM_NAME" -- tee /home/ubuntu/.ssh/id_signing > /dev/null
+    _mp exec "$VM_NAME" -- chmod 600 /home/ubuntu/.ssh/id_signing
+    _mp exec "$VM_NAME" -- bash -c \
         "ssh-keygen -y -f /home/ubuntu/.ssh/id_signing > /home/ubuntu/.ssh/id_signing.pub"
 
     # Build the gitconfig: propagate host identity, strip signing config,
@@ -244,10 +334,10 @@ JSON
                 print "\t" setting " = " value
             }'
         printf '[user]\n\tsigningkey = /home/ubuntu/.ssh/id_signing\n[gpg]\n\tformat = ssh\n[commit]\n\tgpgsign = true\n[tag]\n\tgpgsign = true\n'
-    } | multipass exec "$VM_NAME" -- tee /home/ubuntu/.gitconfig > /dev/null
+    } | _mp_pipe exec "$VM_NAME" -- tee /home/ubuntu/.gitconfig > /dev/null
 
     # Print the signing public key so the user can add it to GitHub.
-    _signing_pub=$(multipass exec "$VM_NAME" -- cat /home/ubuntu/.ssh/id_signing.pub)
+    _signing_pub=$(_mp exec "$VM_NAME" -- cat /home/ubuntu/.ssh/id_signing.pub)
     echo ""
     echo "  *** VM signing key (add to GitHub if not already done) ***"
     echo "  https://github.com/settings/ssh  ->  New SSH key  ->  Key type: Signing Key"
@@ -265,6 +355,9 @@ JSON
 
     echo ""
     echo "Sandbox ready."
+    if _is_remote; then
+        echo "  (remote mode: VM on $SANDBOX_HOST)"
+    fi
     echo "  Run agent    : scripts/sandbox.sh run 'your task here'"
     echo "  Interactive  : scripts/sandbox.sh run --interactive"
     echo "  Shell        : scripts/sandbox.sh shell"
@@ -275,7 +368,7 @@ JSON
 # ---------------------------------------------------------------------------
 _cmd_down() {
     echo "==> Stopping $VM_NAME..."
-    multipass stop "$VM_NAME"
+    _mp stop "$VM_NAME"
     echo "==> Done. Run 'scripts/sandbox.sh up' to resume."
 }
 
@@ -284,6 +377,9 @@ _cmd_down() {
 # ---------------------------------------------------------------------------
 _cmd_destroy() {
     echo "This will permanently delete VM '$VM_NAME' and all its data."
+    if _is_remote; then
+        echo "  (remote host: $SANDBOX_HOST)"
+    fi
     read -r -p "Type the VM name to confirm: " confirm
 
     if [ "$confirm" != "$VM_NAME" ]; then
@@ -292,8 +388,8 @@ _cmd_destroy() {
     fi
 
     echo "==> Deleting $VM_NAME..."
-    multipass delete "$VM_NAME"
-    multipass purge
+    _mp delete "$VM_NAME"
+    _mp purge
     echo "==> Done."
 }
 
@@ -304,7 +400,32 @@ _cmd_shell() {
     _ensure_mounted
     _env_args=("PROJECT_ROOT=$VM_MOUNT")
     [ -n "${GITHUB_TOKEN:-}" ] && _env_args+=("GH_TOKEN=$GITHUB_TOKEN" "GITHUB_TOKEN=$GITHUB_TOKEN")
-    exec multipass exec "$VM_NAME" -- env "${_env_args[@]}" bash -lc "cd '$VM_MOUNT' && exec bash -l"
+    _mp_tty exec "$VM_NAME" -- env "${_env_args[@]}" bash -lc "cd '$VM_MOUNT' && exec bash -l"
+}
+
+# ---------------------------------------------------------------------------
+# Subcommand: sync
+# ---------------------------------------------------------------------------
+_cmd_sync() {
+    if ! _is_remote; then
+        echo "==> Not in remote mode (SANDBOX_HOST is unset). Nothing to sync." >&2
+        exit 1
+    fi
+    local direction="${1:-}"
+    case "$direction" in
+        push)
+            _sync_to_remote
+            echo "==> Push complete."
+            ;;
+        pull)
+            _sync_from_remote
+            echo "==> Pull complete."
+            ;;
+        *)
+            echo "Usage: scripts/sandbox.sh sync push|pull" >&2
+            exit 1
+            ;;
+    esac
 }
 
 # ---------------------------------------------------------------------------
@@ -347,14 +468,14 @@ EOF
 
     TASK="${*:-}"
 
-    PROMPT_FILE=$(multipass exec "$VM_NAME" -- bash -c "mktemp /tmp/copilot-prompt-XXXXXX")
+    PROMPT_FILE=$(_mp exec "$VM_NAME" -- bash -c "mktemp /tmp/copilot-prompt-XXXXXX")
 
     {
         cat "$DEV_DIR/prompts/system.md"
         if [ -n "$TASK" ]; then
             printf "\n\n---\n\nTask: %s\n" "$TASK"
         fi
-    } | multipass exec "$VM_NAME" -- bash -c "cat > $PROMPT_FILE"
+    } | _mp_pipe exec "$VM_NAME" -- bash -c "cat > $PROMPT_FILE"
 
     if [ "$INTERACTIVE" = "true" ]; then
         CONTEXT_MSG="Please read $PROMPT_FILE for project context, then await my instructions."
@@ -362,7 +483,7 @@ EOF
         _env_args=()
         [ -n "${GITHUB_TOKEN:-}" ] && _env_args+=("GH_TOKEN=$GITHUB_TOKEN" "GITHUB_TOKEN=$GITHUB_TOKEN")
         _env_args+=("COPILOT_GITHUB_TOKEN=$_copilot_token" "COPILOT_MODEL=$COPILOT_MODEL" "PROJECT_ROOT=$VM_MOUNT")
-        multipass exec "$VM_NAME" -- env "${_env_args[@]}" bash -lc "
+        _mp_tty exec "$VM_NAME" -- env "${_env_args[@]}" bash -lc "
             cd '$VM_MOUNT'
             copilot --yolo -i \"$CONTEXT_MSG\"
             rm -f $PROMPT_FILE
@@ -373,12 +494,15 @@ EOF
         _env_args=()
         [ -n "${GITHUB_TOKEN:-}" ] && _env_args+=("GH_TOKEN=$GITHUB_TOKEN" "GITHUB_TOKEN=$GITHUB_TOKEN")
         _env_args+=("COPILOT_GITHUB_TOKEN=$_copilot_token" "COPILOT_MODEL=$COPILOT_MODEL" "PROJECT_ROOT=$VM_MOUNT")
-        multipass exec "$VM_NAME" -- env "${_env_args[@]}" bash -lc "
+        _mp_tty exec "$VM_NAME" -- env "${_env_args[@]}" bash -lc "
             cd '$VM_MOUNT'
             copilot --yolo -p \"\$(cat $PROMPT_FILE)\"
             rm -f $PROMPT_FILE
         "
     fi
+
+    # Pull changes back after a run (remote mode only).
+    _sync_from_remote
 }
 
 # ---------------------------------------------------------------------------
@@ -396,6 +520,10 @@ case "${1:-}" in
         ;;
     shell)
         _cmd_shell
+        ;;
+    sync)
+        shift
+        _cmd_sync "$@"
         ;;
     run)
         shift

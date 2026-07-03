@@ -14,6 +14,8 @@ All host operations go through a single entry point:
 | `scripts/sandbox.sh down` | Stop the VM |
 | `scripts/sandbox.sh destroy` | Delete the VM |
 | `scripts/sandbox.sh shell` | Open a shell inside the VM |
+| `scripts/sandbox.sh sync push` | Push local changes to remote host (remote mode) |
+| `scripts/sandbox.sh sync pull` | Pull remote changes to local (remote mode) |
 | `scripts/sandbox.sh run 'task'` | Launch Copilot autonomously |
 | `scripts/sandbox.sh run --interactive` | Launch Copilot interactively |
 
@@ -47,10 +49,32 @@ All tokens are optional. Set them in `development-sandbox/.env`
 - `GITHUB_TOKEN`: fine-grained PAT passed to `gh` CLI inside the VM. If not set, `gh` CLI uses whatever auth is already present in the VM. Recommended permissions: Contents (read), Pull requests (read and write); Repository access: All repositories.
 - `COPILOT_GITHUB_TOKEN`: Copilot AI auth token. Defaults to `gh auth token` on the host.
 
+## Remote mode
+
+The sandbox VM can be created on a remote machine instead of locally.
+This is useful when you want to run the VM on a more powerful host, a
+different architecture, or a shared team server.
+
+1. Ensure you have passwordless SSH access to the remote (e.g. `ssh user@remote-box`).
+2. Install Multipass on the remote: `sudo snap install multipass`.
+3. Add to `development-sandbox/.env`:
+   ```
+   SANDBOX_HOST=user@remote-box
+   # optional: override where the project lands on the remote
+   # SANDBOX_HOST_DIR=/tmp/sandbox-project
+   ```
+4. Run `scripts/sandbox.sh up` as usual — the script syncs the project via
+   `rsync`, creates the VM on the remote, and tunnels all commands over SSH.
+
+Use `scripts/sandbox.sh sync push` and `scripts/sandbox.sh sync pull` to
+manually transfer changes between local and remote between `up` calls.
+
 ## Notes
 
 - `SANDBOX_VM` overrides the Multipass VM name (default: `charm-qa-sandbox`).
 - `SANDBOX_MOUNT` overrides the VM-side mount path (default: `/project`). Set this to a unique path (e.g. `/project-fork`) when multiple repo clones share the same VM.
+- `SANDBOX_HOST` offloads the VM to a remote host (see Remote mode above).
+- `SANDBOX_HOST_DIR` overrides the project sync path on the remote (default: `/tmp/sandbox-project`).
 - `COPILOT_MODEL` overrides the Copilot model.
 - Inside the VM the project is accessible via `$PROJECT_ROOT` (set automatically by the sandbox tooling to the VM-side mount path).
 - Python dependencies are managed with Poetry.
