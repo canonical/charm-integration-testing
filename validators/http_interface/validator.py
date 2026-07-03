@@ -153,6 +153,8 @@ def _connectivity_check(unit_infos: list[dict[str, str]]) -> ValidationCheck:
     errors: list[str] = []
     for info in unit_infos:
         host = info["hostname"]
+        if host.startswith("[") and host.endswith("]"):
+            host = host[1:-1]
         port = int(info["port"])
         try:
             _tcp_ping(host, port)
