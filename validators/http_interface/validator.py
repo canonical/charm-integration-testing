@@ -24,7 +24,7 @@ class HttpInterfaceValidator(BaseValidator):
         if level not in ("simple", "deep"):
             return self._skipped_result_due_to_level(level)
 
-        if self.relation.app is None:
+        if not self.relation_exists():
             return self._error_result(level, f"No remote application on relation '{self.endpoint}'.")
 
         unit_infos, collection_errors = _collect_unit_infos(self.relation)
@@ -184,7 +184,8 @@ def _http_probe_checks(unit_infos: list[dict[str, str]]) -> list[ValidationCheck
         host = info["hostname"]
         port = int(info["port"])
         check_name = f"http_probe[{host}:{port}]"
-        url = f"http://{host}:{port}/"
+        host_for_url = f"[{host}]" if ":" in host and not host.startswith("[") else host
+        url = f"http://{host_for_url}:{port}/"
         try:
             req = Request(url)  # nosec B310 - scheme is always http://
             with urlopen(req, timeout=_HTTP_GET_TIMEOUT) as resp:  # nosec B310
