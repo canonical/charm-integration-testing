@@ -13,6 +13,7 @@ from kubernetes import watch
 from kubernetes.client import ApiException  # type: ignore[import-untyped]
 
 from kubernetes_client.backend import KubernetesBackend
+from kubernetes_client.models import PvcSnapshot
 
 T = TypeVar("T")
 
@@ -58,6 +59,41 @@ class KubernetesClient:
         pods = self.backend.core_v1_api.list_namespaced_pod(model)  # juju creates a namespace for each model
         matching_pods = [pod for pod in pods.items if pattern.match(pod.metadata.name)]
         return matching_pods
+
+    def get_model_pvcs(self, model: str) -> list[PvcSnapshot]:
+        """
+        Gets a snapshot of every PersistentVolumeClaim in the model's namespace.
+
+        Juju creates a namespace per model, so listing PVCs in that namespace captures
+        all storage claimed by the applications deployed in the model.
+
+        Args:
+            model: Model whose PVCs should be snapshotted (used as the namespace name)
+
+        Raises:
+            ApiException: If there is an error communicating with the Kubernetes API
+
+        Returns:
+            List of PvcSnapshot objects, one per PVC in the namespace
+        """
+        try:
+            pvcs = self.backend.core_v1_api.list_namespaced_persistent_volume_claim(model)
+        except ApiException as e:
+            self.logger.error(f"Failed to list PVCs in namespace {model}: {e}")
+            raise
+
+        snapshots = [
+            PvcSnapshot(
+                name=pvc.metadata.name,
+                namespace=model,
+                storage_class=pvc.spec.storage_class_name or "",
+                requested_storage=(pvc.spec.resources.requests or {}).get("storage", ""),
+                phase=pvc.status.phase or "",
+            )
+            for pvc in pvcs.items
+        ]
+        self.logger.debug(f"Found {len(snapshots)} PVC(s) in namespace {model}")
+        return snapshots
 
     def wait(
         self,
