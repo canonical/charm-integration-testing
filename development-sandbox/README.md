@@ -51,6 +51,7 @@ All tokens are optional. Set them in `development-sandbox/.env`
 
 - `SANDBOX_VM` overrides the Multipass VM name (default: `charm-qa-sandbox`).
 - `SANDBOX_MOUNT` overrides the VM-side mount path (default: `/project`). Set this to a unique path (e.g. `/project-fork`) when multiple repo clones share the same VM.
+- `SANDBOX_CPUS` / `SANDBOX_MEMORY` / `SANDBOX_DISK` override VM resources at creation time (defaults: `4`, `8G`, `40G`). Can also be passed as `--cpus`, `--memory`, `--disk` flags to `sandbox.sh up`. Values are ignored when the VM already exists.
 - `COPILOT_MODEL` overrides the Copilot model.
 - Inside the VM the project is accessible via `$PROJECT_ROOT` (set automatically by the sandbox tooling to the VM-side mount path).
 - Python dependencies are managed with Poetry.
