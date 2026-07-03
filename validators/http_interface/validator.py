@@ -68,8 +68,7 @@ def _collect_unit_infos(
 
     for unit in sorted(relation.units, key=lambda u: getattr(u, "name", repr(u))):
         unit_name = getattr(unit, "name", repr(unit))
-        unit_data = dict(relation.data.get(unit, {}))
-
+        unit_data = dict(relation.data[unit])
         hostname = unit_data.get("hostname", "").strip()
         port = unit_data.get("port", "").strip()
 
@@ -121,6 +120,9 @@ def _schema_check(
 
         if not hostname:
             errors.append(f"Unit {unit_name!r}: 'hostname' is empty")
+            continue
+        if any(ch in hostname for ch in ("/", "@")) or any(ch.isspace() for ch in hostname):
+            errors.append(f"Unit {unit_name!r}: 'hostname' contains invalid characters: {hostname!r}")
             continue
 
         try:
