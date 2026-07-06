@@ -18,7 +18,7 @@ def _find_saas_alias(bundle_path: Path, local_app: str, local_ep: str, remote_ep
     Bundle YAML relations may be a flat list of strings (``["app:ep", "app2:ep2"]``) or a nested
     list of single-item lists (``[["app:ep"], ["app2:ep2"]]``); both forms are normalised here.
     """
-    data = next(yaml.safe_load_all(bundle_path.read_text(encoding="utf-8")))
+    data = yaml.safe_load(bundle_path.read_text(encoding="utf-8"))
     saas_names = set(data.get("saas", {}).keys())
     if not saas_names:
         return None

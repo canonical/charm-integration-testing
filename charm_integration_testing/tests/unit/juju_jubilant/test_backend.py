@@ -1587,7 +1587,8 @@ class TestJubilantBackend:
             def app_endpoints(self) -> dict[str, jubilant.statustypes.RemoteAppStatus]:
                 return {
                     "consumed-offer": jubilant.statustypes.RemoteAppStatus(
-                        url="neighbor-controller:admin/neighbor-model.neighbor-offer"
+                        url="neighbor-controller:admin/neighbor-model.neighbor-offer",
+                        endpoints={"database": None},
                     )
                 }
 
@@ -1600,7 +1601,10 @@ class TestJubilantBackend:
 
             # THEN
             assert consumed_offers == {
-                "consumed-offer": JujuConsumedOfferInfo(url="neighbor-controller:admin/neighbor-model.neighbor-offer")
+                "consumed-offer": JujuConsumedOfferInfo(
+                    url="neighbor-controller:admin/neighbor-model.neighbor-offer",
+                    endpoints=frozenset(["database"]),
+                )
             }
 
     class TestListIntegrations:
