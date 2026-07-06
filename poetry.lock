@@ -2469,6 +2469,23 @@ type = "directory"
 url = "validators/external_provider"
 
 [[package]]
+name = "validators-http-interface"
+version = "0.1.0"
+description = "Validator for http interface"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+validators-base = "*"
+
+[package.source]
+type = "directory"
+url = "validators/http_interface"
+
+[[package]]
 name = "validators-kafka-client"
 version = "0.1.0"
 description = "Validator for kafka_client interface"
@@ -2635,6 +2652,7 @@ validators-base = "*"
 validators-config-server = "*"
 validators-cve-catalog = "*"
 validators-external-provider = "*"
+validators-http-interface = "*"
 validators-kafka-client = "*"
 validators-livepatch-pro-airgapped-server = "*"
 validators-loki-push-api = "*"
@@ -2802,4 +2820,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<4.0"
-content-hash = "d1b776b261cf9706421818593b0b1a07e1274d77c01e35418a17c0230cef6194"
+content-hash = "bb35b243b2ea72f3f452770ac66415271120629277fc22856496ce678ef7833a"
