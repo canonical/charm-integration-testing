@@ -68,7 +68,8 @@ it passes at the requested level. Report any failures with diagnostic detail.
    - Show the full JSON output.
    - Show `juju debug-log` output if relevant.
    - Describe what the failure indicates about the validator or the charm.
-   - Do NOT modify validator code unless instructed.
+   - Do NOT modify validator code unless instructed. If you are asked to fix the
+     validator, follow the patterns and notes in the `/develop-validator` skill.
 
 7. Clean up:
    ```

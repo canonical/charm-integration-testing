@@ -17,9 +17,8 @@ All host operations go through a single entry point:
 | `scripts/sandbox.sh run 'task'` | Launch Copilot autonomously |
 | `scripts/sandbox.sh run --interactive` | Launch Copilot interactively |
 
-Skills (`/develop-validator`, `/test-validator`, `/setup-k8s`, `/setup-lxd`) are
-auto-discovered via `.agents/skills/` (a symlink to `development-sandbox/prompts/`).
-Use them inside any interactive Copilot session.
+Skills (`/develop-validator`, `/test-validator`, `/setup-k8s`, `/setup-lxd`, `/review-pr`) are
+auto-discovered via `.agents/skills/` at the repository root.
 
 ### VM-side
 
