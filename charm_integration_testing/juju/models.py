@@ -1,7 +1,7 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import total_ordering
 
 _RISK_ORDER = {"stable": 0, "candidate": 1, "beta": 2, "edge": 3}
@@ -80,3 +80,4 @@ class JujuIntegration:
 @dataclass(frozen=True)
 class JujuConsumedOfferInfo:
     url: str
+    endpoints: frozenset[str] = field(default_factory=frozenset)

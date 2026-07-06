@@ -290,7 +290,11 @@ def integrations_are_removed(
     for integration in integrations:
         if integration in existing_integrations:
             for endpoint in integration:
-                noncompliant_applications[endpoint.application] = get_application_state(status, endpoint.application)
+                # Skip SAAS applications (consumed offers) - they're not local apps in this model
+                if endpoint.application in status.apps:
+                    noncompliant_applications[endpoint.application] = get_application_state(
+                        status, endpoint.application
+                    )
 
     return len(noncompliant_applications) == 0, JujuWaitState(
         message="waiting for integration removal",

@@ -9,7 +9,10 @@ import pytest
 from juju import JujuValidationError
 from juju.client import JujuClient
 from juju.extension import JujuExtension
-from juju.models import JujuApplicationInfo
+from juju.models import (
+    JujuApplicationInfo,
+    JujuIntegrationApplication,
+)
 from juju.version import JujuVersion
 
 from validators.base.validator import ValidationCheck, ValidationResult
@@ -843,3 +846,84 @@ class TestJujuClientMigrateModelHooks:
         # THEN both extensions received the hook
         assert ext1.post_migrate_calls == [("mymodel", "source-ctrl", "target-ctrl")]
         assert ext2.post_migrate_calls == [("mymodel", "source-ctrl", "target-ctrl")]
+
+
+# ---------------------------------------------------------------------------
+# Stubs and helpers for integration delegation tests
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class IntegrationTrackingBackendStub(NullJujuBackend):
+    """Backend stub that records integrate, remove_integration, and wait_for_removal_of_integration calls."""
+
+    integrate_calls: list[tuple[str, JujuIntegrationApplication, JujuIntegrationApplication]] = field(
+        default_factory=list
+    )
+    remove_calls: list[tuple[str, JujuIntegrationApplication, JujuIntegrationApplication]] = field(default_factory=list)
+    wait_removal_calls: list[tuple[str, JujuIntegrationApplication, JujuIntegrationApplication, timedelta | None]] = (
+        field(default_factory=list)
+    )
+
+    def integrate(self, model: str, target_1: JujuIntegrationApplication, target_2: JujuIntegrationApplication) -> None:
+        self.integrate_calls.append((model, target_1, target_2))
+
+    def remove_integration(
+        self, model: str, target_1: JujuIntegrationApplication, target_2: JujuIntegrationApplication
+    ) -> None:
+        self.remove_calls.append((model, target_1, target_2))
+
+    def wait_for_removal_of_integration(
+        self,
+        model: str,
+        endpoint_1: JujuIntegrationApplication,
+        endpoint_2: JujuIntegrationApplication,
+        timeout: timedelta | None,
+    ) -> None:
+        self.wait_removal_calls.append((model, endpoint_1, endpoint_2, timeout))
+
+
+_EP1 = JujuIntegrationApplication("target", "grafana-dashboards-consumer")
+_EP2 = JujuIntegrationApplication("neighbor-offer", "grafana-dashboard")
+_MODEL = "ctrl-a:model-a"
+
+
+def _client(backend: NullJujuBackend) -> JujuClient:
+    return JujuClient(backend, LoggerStub(), [])  # type: ignore[arg-type]
+
+
+# ---------------------------------------------------------------------------
+# TestIntegrationMethods
+# ---------------------------------------------------------------------------
+
+
+class TestIntegrationMethods:
+    """Verify that integrate, remove_integration, and wait_for_removal_of_integration
+    delegate directly to the backend with the provided model and endpoint objects."""
+
+    def test_integrate_delegates_to_backend(self) -> None:
+        backend = IntegrationTrackingBackendStub()
+        _client(backend).integrate(endpoint_1=_EP1, endpoint_2=_EP2, model=_MODEL)
+
+        assert backend.integrate_calls == [(_MODEL, _EP1, _EP2)]
+
+    def test_remove_integration_delegates_to_backend(self) -> None:
+        backend = IntegrationTrackingBackendStub()
+        _client(backend).remove_integration(endpoint_1=_EP1, endpoint_2=_EP2, model=_MODEL)
+
+        assert backend.remove_calls == [(_MODEL, _EP1, _EP2)]
+
+    def test_wait_for_removal_of_integration_delegates_to_backend(self) -> None:
+        backend = IntegrationTrackingBackendStub()
+        timeout = timedelta(minutes=5)
+        _client(backend).wait_for_removal_of_integration(
+            endpoint_1=_EP1, endpoint_2=_EP2, model=_MODEL, timeout=timeout
+        )
+
+        assert backend.wait_removal_calls == [(_MODEL, _EP1, _EP2, timeout)]
+
+    def test_wait_for_removal_of_integration_defaults_timeout_to_none(self) -> None:
+        backend = IntegrationTrackingBackendStub()
+        _client(backend).wait_for_removal_of_integration(endpoint_1=_EP1, endpoint_2=_EP2, model=_MODEL)
+
+        assert backend.wait_removal_calls == [(_MODEL, _EP1, _EP2, None)]
