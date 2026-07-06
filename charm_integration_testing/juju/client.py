@@ -388,4 +388,3 @@ class JujuClient:
         version_suffix = f" to agent version '{agent_version}'" if agent_version else ""
         self.logger.info(f"Upgrading controller '{controller}'{version_suffix}.")
         self.backend.upgrade_controller(controller=controller, agent_version=agent_version)
-

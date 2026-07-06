@@ -76,9 +76,7 @@ class JujuCrashdumpCollector:
         # Determine the actual cloud type of this specific controller
         if self._is_k8s_controller(handle.controller):
             if self._kubeconfig_path is None:
-                raise ValueError(
-                    f"Controller '{handle.controller}' is K8s-based but kubeconfig_path not available"
-                )
+                raise ValueError(f"Controller '{handle.controller}' is K8s-based but kubeconfig_path not available")
             self._collect_k8s(handle.controller, output_dir / f"{handle.path_segment}.tar.gz")
         else:
             self._collect_machine(handle.controller, output_dir / f"{handle.path_segment}.tar.gz")
@@ -148,6 +146,4 @@ class JujuCrashdumpCollector:
         result.check_returncode()
         # Verify the expected output file was created
         if not output_path.exists():
-            raise FileNotFoundError(
-                f"juju-crashdump succeeded but expected output file not found: {output_path}"
-            )
+            raise FileNotFoundError(f"juju-crashdump succeeded but expected output file not found: {output_path}")

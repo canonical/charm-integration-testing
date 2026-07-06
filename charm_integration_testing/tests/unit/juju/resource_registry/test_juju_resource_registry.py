@@ -142,12 +142,16 @@ class TestJujuCrashdumpCollectorMachine:
         # Mock juju-crashdump to succeed
         crashdump_result = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
 
-        call_count = [0]
-
         def run_side_effect(*args: Any, **kwargs: Any) -> subprocess.CompletedProcess[str]:
-            call_count[0] += 1
             if "show-controller" in args[0]:
                 return show_ctrl_result
+            # Simulate juju-crashdump creating the output file
+            # Find the --unit-dump-location argument and create the file
+            cmd = args[0]
+            if "--unit-dump-location" in cmd:
+                idx = cmd.index("--unit-dump-location")
+                output_path = Path(cmd[idx + 1])
+                output_path.touch()
             return crashdump_result
 
         with patch("subprocess.run", side_effect=run_side_effect) as mock_run:
