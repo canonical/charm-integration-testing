@@ -11,7 +11,9 @@ Before implementing, ask clarifying questions to understand the actual goal, con
 
 ## Tone and Style
 
-Write in plain ASCII: avoid emdashes (use commas or semicolons instead), avoid emojis, use straight quotes. Be direct and matter-of-fact, not eager or enthusiastic.
+In your chat responses, write in plain ASCII: avoid emdashes (use commas or semicolons instead), avoid emojis, use straight quotes. Be direct and matter-of-fact, not eager or enthusiastic.
+
+Note: This applies to your chat output, not to repository documentation or skill files, which may use non-ASCII as needed for clarity.
 
 ---
 

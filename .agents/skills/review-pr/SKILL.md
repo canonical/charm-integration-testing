@@ -106,7 +106,7 @@ Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
 Reply to each inline comment using the `gh api` tool with stdin input:
 
 ```bash
-gh api -X POST repos/canonical/charm-integration-testing/pulls/<number>/comments/<comment_id>/replies --input /dev/stdin <<EOF
+gh api -X POST repos/canonical/charm-integration-testing/pulls/comments/<comment_id>/replies --input /dev/stdin <<EOF
 {
   "body": "<your reply>\n\n> *This comment was posted by an AI assistant (GitHub Copilot) on behalf of the repository maintainer.*"
 }
