@@ -20,10 +20,15 @@ dependencies = [
     "validators-loki-push-api",
     "validators-object-storage",
     "validators-prometheus-scrape",
+    "validators-kafka-client",
     "validators-opensearch-client",
     "validators-temporal-host-info",
     "validators-config-server",
     "validators-cve-catalog",
+    "validators-livepatch-pro-airgapped-server",
+    "validators-azure-storage",
+    "validators-external-provider",
+    "validators-http-interface",
 ]
 
 [build-system]

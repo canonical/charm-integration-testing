@@ -30,7 +30,7 @@ it passes at the requested level. Report any failures with diagnostic detail.
 4. Run the validator at the **highest level the validator supports** (check
    `validate()` in `validator.py` -- use `deep` if implemented, otherwise `simple`):
    ```
-   /project/development-sandbox/bin/dev-validate.py \
+   $PROJECT_ROOT/development-sandbox/bin/dev-validate.py \
      --model <interface>-test \
      --app <requirer> \
      --level <highest-supported-level>
@@ -38,26 +38,26 @@ it passes at the requested level. Report any failures with diagnostic detail.
 
 5. Run automated verification evidence:
    ```
-   /project/development-sandbox/bin/verify-validator.sh \
+   $PROJECT_ROOT/development-sandbox/bin/verify-validator.sh \
      --model <interface>-test \
      --app <requirer> \
      --provider <provider> \
      --validator <name> \
      --level <highest-supported-level> \
-     --output-dir /project/development-sandbox/reports/<name>-$(date +%Y%m%d-%H%M%S)
+     --output-dir $PROJECT_ROOT/development-sandbox/reports/<name>-$(date +%Y%m%d-%H%M%S)
    ```
    If the backend is a raw Kubernetes deployment (not a Juju app — e.g. MinIO for `s3`),
    the default `juju scale-application` down step won't break connectivity because the
    Juju databag retains credentials even at 0 units. In that case use `--down-cmd` and
    `--restore-cmd` to scale the k8s deployment directly:
    ```
-   /project/development-sandbox/bin/verify-validator.sh \
+   $PROJECT_ROOT/development-sandbox/bin/verify-validator.sh \
      --model <interface>-test \
      --app <requirer> \
      --provider <provider> \
      --validator <name> \
      --level <highest-supported-level> \
-     --output-dir /project/development-sandbox/reports/<name>-$(date +%Y%m%d-%H%M%S) \
+     --output-dir $PROJECT_ROOT/development-sandbox/reports/<name>-$(date +%Y%m%d-%H%M%S) \
      --down-cmd "sudo k8s kubectl scale deployment <backend> -n <interface>-test --replicas=0 && sleep 5" \
      --restore-cmd "sudo k8s kubectl scale deployment <backend> -n <interface>-test --replicas=1 && sleep 15"
    ```
@@ -68,7 +68,8 @@ it passes at the requested level. Report any failures with diagnostic detail.
    - Show the full JSON output.
    - Show `juju debug-log` output if relevant.
    - Describe what the failure indicates about the validator or the charm.
-   - Do NOT modify validator code unless instructed.
+   - Do NOT modify validator code unless instructed. If you are asked to fix the
+     validator, follow the patterns and notes in the `/develop-validator` skill.
 
 7. Clean up:
    ```

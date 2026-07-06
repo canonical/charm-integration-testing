@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Inject and run validators against a deployed Juju application.
 #
-# This script is designed to run INSIDE the validator VM at /project.
+# This script is designed to run INSIDE the sandbox VM.
 #
 # Usage:
 #   dev-validate --app <app> [--model <model>] [--level simple] [--reinstall]
@@ -17,7 +17,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-PROJECT_ROOT = Path("/project")
+# Derive project root from this script's location: <project>/development-sandbox/bin/dev-validate.py
+PROJECT_ROOT = Path(os.environ.get("PROJECT_ROOT", str(Path(__file__).parent.parent.parent)))
 
 # If not already running inside the project's Poetry venv, re-exec via
 # "poetry run python3" so all project packages (charm_integration_testing,

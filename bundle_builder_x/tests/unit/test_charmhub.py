@@ -637,3 +637,87 @@ class TestCharmhubClient:
             # WHEN building resources
             # THEN an empty dict is returned
             assert client._get_charm_resources("mycharm", _CHANNEL, CharmMetadata()) == {}
+
+    # ---------------------------------------------------------------------------
+    # TestFindCharms
+    # ---------------------------------------------------------------------------
+
+    class TestFindCharms:
+        class _MultiOverridesClient(OverridesClient):
+            """OverridesClient with per-charm listed overrides."""
+
+            def __init__(self, listed_by_charm: dict[str, bool | None]) -> None:
+                super().__init__()
+                self._listed_by_charm = listed_by_charm
+
+            def _get_all_charm_global_overrides(self) -> dict[str, CharmGlobalOverrides]:  # type: ignore[override]
+                return {charm: CharmGlobalOverrides(listed=val) for charm, val in self._listed_by_charm.items()}
+
+        def _find_client(
+            self, find_names: list[str], listed_by_charm: dict[str, bool | None] | None = None
+        ) -> CharmhubClient:
+            class _StubFindClient(_NullHttpClient):
+                def find(self, provides: str | None = None, requires: str | None = None) -> list[FindResponse]:
+                    return [
+                        FindResponse(name=name, result=FindResponse.Result(**{"deployable-on": {"machine"}}))
+                        for name in find_names
+                    ]
+
+                def info(self, charm: str, include_channel_map: bool = False) -> InfoResponse:
+                    return InfoResponse(result=InfoResponse.Result(**{"deployable-on": frozenset({"machine"})}))
+
+            overrides = self._MultiOverridesClient(listed_by_charm or {})
+            return CharmhubClient(
+                http_client=cast(CharmhubHttpClient, _StubFindClient()),
+                overrides_client=overrides,
+            )
+
+        def test_delisted_charm_excluded_from_api_results(self) -> None:
+            # GIVEN the API returns two charms and one has listed: false
+            client = self._find_client(
+                find_names=["charm-a", "charm-b"],
+                listed_by_charm={"charm-b": False},
+            )
+
+            # WHEN finding charms
+            result = client.find_charms()
+
+            # THEN the delisted charm is excluded
+            assert "charm-a" in result
+            assert "charm-b" not in result
+
+        def test_delisted_charm_not_added_when_absent_from_api(self) -> None:
+            # GIVEN the API returns one charm and a different charm has listed: false
+            client = self._find_client(
+                find_names=["charm-a"],
+                listed_by_charm={"charm-c": False},
+            )
+
+            # WHEN finding charms
+            result = client.find_charms()
+
+            # THEN charm-a is returned and charm-c is not present
+            assert result == {"charm-a"}
+
+        def test_no_delisting_override_returns_all_api_results(self) -> None:
+            # GIVEN the API returns two charms with no listing overrides
+            client = self._find_client(find_names=["charm-a", "charm-b"])
+
+            # WHEN finding charms
+            result = client.find_charms()
+
+            # THEN both charms are returned
+            assert result == {"charm-a", "charm-b"}
+
+        def test_listed_true_does_not_exclude_charm(self) -> None:
+            # GIVEN the API returns a charm that also has listed: true
+            client = self._find_client(
+                find_names=["charm-a"],
+                listed_by_charm={"charm-a": True},
+            )
+
+            # WHEN finding charms
+            result = client.find_charms()
+
+            # THEN the charm is still present
+            assert "charm-a" in result

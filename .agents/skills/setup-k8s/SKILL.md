@@ -14,7 +14,7 @@ as a Juju cloud so that a Juju controller can be bootstrapped against it.
 
 1. Run the setup script:
    ```
-   /project/development-sandbox/bin/setup-k8s.sh
+   $PROJECT_ROOT/development-sandbox/bin/setup-k8s.sh
    ```
    This is idempotent. Each step checks whether it has already been done.
    Wait for it to complete before proceeding.
