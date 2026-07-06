@@ -45,7 +45,7 @@ class ParcaStoreValidator(BaseValidator):
     # ------------------------------------------------------------------
 
     def _validate_simple(self) -> ValidationResult:
-        """L1: Schema correctness, endpoint parse, TCP reachability."""
+        """L1: Schema correctness, endpoint parse, TCP reachability, and TLS prerequisite when insecure=false."""
         checks: list[ValidationCheck] = []
 
         if not self.relation_exists():
@@ -146,6 +146,8 @@ def _parse_grpc_address(address: str) -> tuple[ValidationCheck, str, int]:
             )
         host, port_str = stripped.rsplit(":", 1)
         host = host.strip()
+        if host.startswith("[") and host.endswith("]"):
+            host = host[1:-1].strip()
         port = int(port_str.strip())
         if not host:
             raise ValueError("empty host")

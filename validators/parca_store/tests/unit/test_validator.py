@@ -59,6 +59,12 @@ class TestParseGrpcAddress:
         assert host == "parca.ns.svc"
         assert port == 7070
 
+    def test_strips_ipv6_brackets(self) -> None:
+        check, host, port = _parse_grpc_address("[2001:db8::1]:7070")
+        assert check.passed
+        assert host == "2001:db8::1"
+        assert port == 7070
+
     def test_fails_when_no_port(self) -> None:
         check, host, port = _parse_grpc_address("10.1.2.3")
         assert not check.passed
