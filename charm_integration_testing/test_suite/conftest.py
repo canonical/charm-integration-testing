@@ -132,7 +132,7 @@ def session_resource_registry(
     logger: logging.Logger,
     kubeconfig_path: Path | None,
 ) -> Iterator[ResourceRegistry]:
-    """Session-scoped resource registry for the main workflow controller."""
+    """Session-scoped resource registry covering all workflow controllers."""
     registry = ResourceRegistry(
         global_collectors=[
             JujuCrashdumpCollector(logger, output_dir=log_dir, kubeconfig_path=kubeconfig_path),

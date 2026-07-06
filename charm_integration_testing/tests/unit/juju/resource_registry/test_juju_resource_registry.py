@@ -137,7 +137,7 @@ class TestJujuCrashdumpCollectorMachine:
 
         # Mock "juju show-controller" to return machine cloud
         show_ctrl_result = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout='{"my-ctrl": {"cloud-name": "localhost"}}', stderr=""
+            args=[], returncode=0, stdout='{"my-ctrl": {"details": {"cloud-name": "localhost"}}}', stderr=""
         )
         # Mock juju-crashdump to succeed
         crashdump_result = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
@@ -166,7 +166,7 @@ class TestJujuCrashdumpCollectorMachine:
         handle = JujuControllerHandle(controller="my-ctrl")
 
         show_ctrl_result = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout='{"my-ctrl": {"cloud-name": "localhost"}}', stderr=""
+            args=[], returncode=0, stdout='{"my-ctrl": {"details": {"cloud-name": "localhost"}}}', stderr=""
         )
         failed = subprocess.CompletedProcess(args=["juju-crashdump"], returncode=1, stdout="", stderr="err")
 
@@ -188,7 +188,7 @@ class TestJujuCrashdumpCollectorMachine:
         handle = JujuControllerHandle(controller="my-ctrl")
 
         show_ctrl_result = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout='{"my-ctrl": {"cloud-name": "localhost"}}', stderr=""
+            args=[], returncode=0, stdout='{"my-ctrl": {"details": {"cloud-name": "localhost"}}}', stderr=""
         )
 
         def run_side_effect(*args: Any, **kwargs: Any) -> subprocess.CompletedProcess[str]:
@@ -206,7 +206,7 @@ class TestJujuCrashdumpCollectorMachine:
         handle = JujuControllerHandle(controller="my-ctrl")
 
         show_ctrl_result = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout='{"my-ctrl": {"cloud-name": "localhost"}}', stderr=""
+            args=[], returncode=0, stdout='{"my-ctrl": {"details": {"cloud-name": "localhost"}}}', stderr=""
         )
 
         def run_side_effect(*args: Any, **kwargs: Any) -> subprocess.CompletedProcess[str]:
@@ -240,7 +240,7 @@ class TestJujuCrashdumpCollectorK8s:
 
         # Mock "juju show-controller" to return K8s cloud
         show_ctrl_result = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout='{"my-ctrl": {"cloud-name": "local-k8s"}}', stderr=""
+            args=[], returncode=0, stdout='{"my-ctrl": {"details": {"cloud-name": "local-k8s"}}}', stderr=""
         )
         # Mock juju-k8s-crashdump to succeed
         k8s_result = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
@@ -268,7 +268,7 @@ class TestJujuCrashdumpCollectorK8s:
         handle = JujuControllerHandle(controller="my-ctrl")
 
         show_ctrl_result = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout='{"my-ctrl": {"cloud-name": "local-k8s"}}', stderr=""
+            args=[], returncode=0, stdout='{"my-ctrl": {"details": {"cloud-name": "local-k8s"}}}', stderr=""
         )
 
         def run_side_effect(*args: Any, **kwargs: Any) -> subprocess.CompletedProcess[str]:

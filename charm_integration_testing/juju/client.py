@@ -2,10 +2,8 @@
 # See LICENSE file for licensing details.
 
 import logging
-import os
 from datetime import timedelta
 from pathlib import Path
-from typing import Any, cast
 
 from validators.base import ValidationResult
 
@@ -391,21 +389,3 @@ class JujuClient:
         self.logger.info(f"Upgrading controller '{controller}'{version_suffix}.")
         self.backend.upgrade_controller(controller=controller, agent_version=agent_version)
 
-    def is_controller_kubernetes(self, controller: str) -> bool:
-        """Check if a controller runs on Kubernetes."""
-        try:
-            controller_data = self.backend.show_controller(controller)
-            cloud = controller_data.get(controller, {}).get("details", {}).get("cloud-name")
-            if not cloud:
-                return False
-            clouds = self.backend.clouds()
-            return bool(cast(dict[str, Any], clouds.get(cloud, {})).get("type") == "k8s")
-        except Exception:
-            return False
-
-    def get_kubeconfig_for_controller(self, controller: str) -> Path | None:
-        """Get kubeconfig path if controller is K8s-based."""
-        if not self.is_controller_kubernetes(controller):
-            return None
-        kubeconfig = os.environ.get("KUBECONFIG", "").strip()
-        return Path(kubeconfig) if kubeconfig else None

@@ -46,7 +46,7 @@ class JujuCrashdumpCollector:
         """
         try:
             result = subprocess.run(  # nosec B603, B607
-                ["juju", "show-controller", controller, "--output", "json"],
+                ["juju", "show-controller", controller, "--format", "json"],
                 capture_output=True,
                 text=True,
                 timeout=10,
@@ -54,7 +54,7 @@ class JujuCrashdumpCollector:
             if result.returncode == 0:
                 data = json.loads(result.stdout)
                 controller_info = data.get(controller, {})
-                cloud = controller_info.get("cloud-name", "")
+                cloud = controller_info.get("details", {}).get("cloud-name", "")
                 # List of Kubernetes cloud names that Juju uses
                 return cloud.lower() in ["local-k8s", "kubernetes"]
         except Exception as e:
@@ -75,12 +75,11 @@ class JujuCrashdumpCollector:
 
         # Determine the actual cloud type of this specific controller
         if self._is_k8s_controller(handle.controller):
-            if self._kubeconfig_path is not None:
-                self._collect_k8s(handle.controller, output_dir / f"{handle.path_segment}.tar.gz")
-            else:
-                self._logger.warning(
-                    f"Controller '{handle.controller}' is K8s-based but kubeconfig not available, skipping K8s log collection"
+            if self._kubeconfig_path is None:
+                raise ValueError(
+                    f"Controller '{handle.controller}' is K8s-based but kubeconfig_path not available"
                 )
+            self._collect_k8s(handle.controller, output_dir / f"{handle.path_segment}.tar.gz")
         else:
             self._collect_machine(handle.controller, output_dir / f"{handle.path_segment}.tar.gz")
 
@@ -147,3 +146,8 @@ class JujuCrashdumpCollector:
             if result.stderr:
                 self._logger.debug(f"juju-crashdump stderr:\n{result.stderr}")
         result.check_returncode()
+        # Verify the expected output file was created
+        if not output_path.exists():
+            raise FileNotFoundError(
+                f"juju-crashdump succeeded but expected output file not found: {output_path}"
+            )
