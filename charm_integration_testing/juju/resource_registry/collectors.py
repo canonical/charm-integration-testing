@@ -10,7 +10,6 @@ from resource_registry.protocols import ResourceHandle
 
 from .handles import JujuControllerHandle
 
-
 _JUJU_CRASHDUMP_TIMEOUT_SECONDS = 300
 _JUJU_CRASHDUMP_MAX_FILE_SIZE_BYTES = 100_000_000
 # Subprocess timeout is double the internal tool timeout to allow for startup and
@@ -41,12 +40,12 @@ class JujuCrashdumpCollector:
 
     def _is_k8s_controller(self, controller: str) -> bool:
         """Determine if a controller is Kubernetes-based or machine-based.
-        
+
         Queries juju show-controller to detect the cloud type. Falls back to checking
         kubeconfig availability if the query fails.
         """
         try:
-            result = subprocess.run(  # nosec B603
+            result = subprocess.run(  # nosec B603, B607
                 ["juju", "show-controller", controller, "--output", "json"],
                 capture_output=True,
                 text=True,
@@ -60,7 +59,7 @@ class JujuCrashdumpCollector:
                 return cloud.lower() in ["local-k8s", "kubernetes"]
         except Exception as e:
             self._logger.debug(f"Error querying controller type for {controller}: {e}")
-        
+
         # Fallback: assume k8s if kubeconfig is available, otherwise machine
         return self._kubeconfig_path is not None
 
@@ -86,6 +85,8 @@ class JujuCrashdumpCollector:
             self._collect_machine(handle.controller, output_dir / f"{handle.path_segment}.tar.gz")
 
     def _collect_k8s(self, controller: str, output_path: Path) -> None:
+        if self._kubeconfig_path is None:
+            raise ValueError("kubeconfig_path is required for K8s log collection")
         cmd = [
             "juju-k8s-crashdump",
             str(self._kubeconfig_path.resolve()),

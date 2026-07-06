@@ -4,11 +4,10 @@
 import dataclasses
 import logging
 import subprocess
-import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pytest
 from juju.client import JujuClient
@@ -138,20 +137,19 @@ class TestJujuCrashdumpCollectorMachine:
 
         # Mock "juju show-controller" to return machine cloud
         show_ctrl_result = subprocess.CompletedProcess(
-            args=[], returncode=0, 
-            stdout='{"my-ctrl": {"cloud-name": "localhost"}}',
-            stderr=""
+            args=[], returncode=0, stdout='{"my-ctrl": {"cloud-name": "localhost"}}', stderr=""
         )
         # Mock juju-crashdump to succeed
         crashdump_result = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
-        
+
         call_count = [0]
-        def run_side_effect(*args, **kwargs):
+
+        def run_side_effect(*args: Any, **kwargs: Any) -> subprocess.CompletedProcess[str]:
             call_count[0] += 1
             if "show-controller" in args[0]:
                 return show_ctrl_result
             return crashdump_result
-        
+
         with patch("subprocess.run", side_effect=run_side_effect) as mock_run:
             collector.collect(handle)
 
@@ -168,19 +166,18 @@ class TestJujuCrashdumpCollectorMachine:
         handle = JujuControllerHandle(controller="my-ctrl")
 
         show_ctrl_result = subprocess.CompletedProcess(
-            args=[], returncode=0,
-            stdout='{"my-ctrl": {"cloud-name": "localhost"}}',
-            stderr=""
+            args=[], returncode=0, stdout='{"my-ctrl": {"cloud-name": "localhost"}}', stderr=""
         )
         failed = subprocess.CompletedProcess(args=["juju-crashdump"], returncode=1, stdout="", stderr="err")
-        
+
         call_count = [0]
-        def run_side_effect(*args, **kwargs):
+
+        def run_side_effect(*args: Any, **kwargs: Any) -> subprocess.CompletedProcess[str]:
             call_count[0] += 1
             if "show-controller" in args[0]:
                 return show_ctrl_result
             return failed
-        
+
         with patch("subprocess.run", side_effect=run_side_effect):
             with pytest.raises(subprocess.CalledProcessError):
                 collector.collect(handle)
@@ -191,16 +188,14 @@ class TestJujuCrashdumpCollectorMachine:
         handle = JujuControllerHandle(controller="my-ctrl")
 
         show_ctrl_result = subprocess.CompletedProcess(
-            args=[], returncode=0,
-            stdout='{"my-ctrl": {"cloud-name": "localhost"}}',
-            stderr=""
+            args=[], returncode=0, stdout='{"my-ctrl": {"cloud-name": "localhost"}}', stderr=""
         )
-        
-        def run_side_effect(*args, **kwargs):
+
+        def run_side_effect(*args: Any, **kwargs: Any) -> subprocess.CompletedProcess[str]:
             if "show-controller" in args[0]:
                 return show_ctrl_result
             raise FileNotFoundError("juju-crashdump not found")
-        
+
         with patch("subprocess.run", side_effect=run_side_effect):
             with pytest.raises(FileNotFoundError):
                 collector.collect(handle)
@@ -211,16 +206,14 @@ class TestJujuCrashdumpCollectorMachine:
         handle = JujuControllerHandle(controller="my-ctrl")
 
         show_ctrl_result = subprocess.CompletedProcess(
-            args=[], returncode=0,
-            stdout='{"my-ctrl": {"cloud-name": "localhost"}}',
-            stderr=""
+            args=[], returncode=0, stdout='{"my-ctrl": {"cloud-name": "localhost"}}', stderr=""
         )
-        
-        def run_side_effect(*args, **kwargs):
+
+        def run_side_effect(*args: Any, **kwargs: Any) -> subprocess.CompletedProcess[str]:
             if "show-controller" in args[0]:
                 return show_ctrl_result
             raise subprocess.TimeoutExpired(cmd="juju-crashdump", timeout=600)
-        
+
         with patch("subprocess.run", side_effect=run_side_effect):
             with pytest.raises(subprocess.TimeoutExpired):
                 collector.collect(handle)
@@ -247,18 +240,16 @@ class TestJujuCrashdumpCollectorK8s:
 
         # Mock "juju show-controller" to return K8s cloud
         show_ctrl_result = subprocess.CompletedProcess(
-            args=[], returncode=0,
-            stdout='{"my-ctrl": {"cloud-name": "local-k8s"}}',
-            stderr=""
+            args=[], returncode=0, stdout='{"my-ctrl": {"cloud-name": "local-k8s"}}', stderr=""
         )
         # Mock juju-k8s-crashdump to succeed
         k8s_result = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
-        
-        def run_side_effect(*args, **kwargs):
+
+        def run_side_effect(*args: Any, **kwargs: Any) -> subprocess.CompletedProcess[str]:
             if "show-controller" in args[0]:
                 return show_ctrl_result
             return k8s_result
-        
+
         with patch("subprocess.run", side_effect=run_side_effect) as mock_run:
             collector.collect(handle)
 
@@ -277,16 +268,14 @@ class TestJujuCrashdumpCollectorK8s:
         handle = JujuControllerHandle(controller="my-ctrl")
 
         show_ctrl_result = subprocess.CompletedProcess(
-            args=[], returncode=0,
-            stdout='{"my-ctrl": {"cloud-name": "local-k8s"}}',
-            stderr=""
+            args=[], returncode=0, stdout='{"my-ctrl": {"cloud-name": "local-k8s"}}', stderr=""
         )
-        
-        def run_side_effect(*args, **kwargs):
+
+        def run_side_effect(*args: Any, **kwargs: Any) -> subprocess.CompletedProcess[str]:
             if "show-controller" in args[0]:
                 return show_ctrl_result
             raise FileNotFoundError("juju-k8s-crashdump not found")
-        
+
         with patch("subprocess.run", side_effect=run_side_effect):
             with pytest.raises(FileNotFoundError):
                 collector.collect(handle)
