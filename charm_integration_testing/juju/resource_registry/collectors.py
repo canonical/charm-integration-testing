@@ -1,6 +1,7 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import json
 import logging
 import subprocess  # nosec B404
 from pathlib import Path
@@ -20,22 +21,48 @@ _SUBPROCESS_TIMEOUT_SECONDS = _JUJU_CRASHDUMP_TIMEOUT_SECONDS * 2
 class JujuCrashdumpCollector:
     """Collect controller logs using juju-crashdump or juju-k8s-crashdump.
 
-    Uses JujuClient to determine, for each controller, whether to use
-    juju-crashdump (for machine clouds) or juju-k8s-crashdump (for K8s clouds).
+    Per-controller cloud detection: queries 'juju show-controller' to determine
+    whether each controller is Kubernetes-based or machine-based, then selects
+    the appropriate log collection tool independently for each controller.
     """
 
     def __init__(
         self,
         logger: logging.Logger,
         output_dir: Path | None = None,
-        juju_client: "JujuClient | None" = None,  # noqa: F821
+        kubeconfig_path: Path | None = None,
     ) -> None:
         self._logger = logger.getChild(type(self).__name__)
         self._output_dir = output_dir
-        self._juju_client = juju_client
+        self._kubeconfig_path = kubeconfig_path
 
     def supports(self, handle: ResourceHandle) -> bool:
         return isinstance(handle, JujuControllerHandle)
+
+    def _is_k8s_controller(self, controller: str) -> bool:
+        """Determine if a controller is Kubernetes-based or machine-based.
+        
+        Queries juju show-controller to detect the cloud type. Falls back to checking
+        kubeconfig availability if the query fails.
+        """
+        try:
+            result = subprocess.run(  # nosec B603
+                ["juju", "show-controller", controller, "--output", "json"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if result.returncode == 0:
+                data = json.loads(result.stdout)
+                controller_info = data.get(controller, {})
+                cloud = controller_info.get("cloud-name", "")
+                # List of Kubernetes cloud names that Juju uses
+                return cloud.lower() in ["local-k8s", "kubernetes"]
+        except Exception as e:
+            self._logger.debug(f"Error querying controller type for {controller}: {e}")
+        
+        # Fallback: assume k8s if kubeconfig is available, otherwise machine
+        return self._kubeconfig_path is not None
 
     def collect(self, handle: ResourceHandle) -> None:
         if not isinstance(handle, JujuControllerHandle):
@@ -47,11 +74,10 @@ class JujuCrashdumpCollector:
         output_dir = self._output_dir
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        # Use JujuClient to determine which log collection tool to use
-        if self._juju_client is not None and self._juju_client.is_controller_kubernetes(handle.controller):
-            kubeconfig = self._juju_client.get_kubeconfig_for_controller(handle.controller)
-            if kubeconfig is not None:
-                self._collect_k8s(handle.controller, output_dir / f"{handle.path_segment}.tar.gz", kubeconfig)
+        # Determine the actual cloud type of this specific controller
+        if self._is_k8s_controller(handle.controller):
+            if self._kubeconfig_path is not None:
+                self._collect_k8s(handle.controller, output_dir / f"{handle.path_segment}.tar.gz")
             else:
                 self._logger.warning(
                     f"Controller '{handle.controller}' is K8s-based but kubeconfig not available, skipping K8s log collection"
@@ -59,10 +85,10 @@ class JujuCrashdumpCollector:
         else:
             self._collect_machine(handle.controller, output_dir / f"{handle.path_segment}.tar.gz")
 
-    def _collect_k8s(self, controller: str, output_path: Path, kubeconfig_path: Path) -> None:
+    def _collect_k8s(self, controller: str, output_path: Path) -> None:
         cmd = [
             "juju-k8s-crashdump",
-            str(kubeconfig_path.resolve()),
+            str(self._kubeconfig_path.resolve()),
             controller,
             "--output_path",
             str(output_path),

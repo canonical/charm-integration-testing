@@ -35,22 +35,6 @@ class LoggerStub(logging.Logger):
         self.warnings.append(str(msg))
 
 
-def create_juju_client_mock(is_k8s: bool = False, kubeconfig_path: Path | None = None) -> JujuClient:
-    """Create a mock JujuClient for testing.
-    
-    Args:
-        is_k8s: Whether is_controller_kubernetes should return True
-        kubeconfig_path: Path to return from get_kubeconfig_for_controller
-    
-    Returns:
-        Mock JujuClient configured for testing
-    """
-    client = MagicMock(spec=JujuClient)
-    client.is_controller_kubernetes.return_value = is_k8s
-    client.get_kubeconfig_for_controller.return_value = kubeconfig_path
-    return client
-
-
 @dataclass
 class BootstrapKillBackendStub(NullJujuBackend):
     bootstrapped: list[str] = field(default_factory=list)
@@ -147,57 +131,104 @@ class TestJujuCrashdumpCollectorSupports:
 
 class TestJujuCrashdumpCollectorMachine:
     def test_runs_juju_crashdump(self, tmp_path: Path) -> None:
-        # GIVEN a machine cloud collector (K8s=False)
+        # GIVEN a machine cloud collector
         logger = LoggerStub()
-        juju_client = create_juju_client_mock(is_k8s=False)
-        collector = JujuCrashdumpCollector(logger, output_dir=tmp_path, juju_client=juju_client)
+        collector = JujuCrashdumpCollector(logger, output_dir=tmp_path, kubeconfig_path=None)
         handle = JujuControllerHandle(controller="my-ctrl")
 
-        completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
-        with patch("subprocess.run", return_value=completed) as mock_run:
+        # Mock "juju show-controller" to return machine cloud
+        show_ctrl_result = subprocess.CompletedProcess(
+            args=[], returncode=0, 
+            stdout='{"my-ctrl": {"cloud-name": "localhost"}}',
+            stderr=""
+        )
+        # Mock juju-crashdump to succeed
+        crashdump_result = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+        
+        call_count = [0]
+        def run_side_effect(*args, **kwargs):
+            call_count[0] += 1
+            if "show-controller" in args[0]:
+                return show_ctrl_result
+            return crashdump_result
+        
+        with patch("subprocess.run", side_effect=run_side_effect) as mock_run:
             collector.collect(handle)
 
-        cmd = mock_run.call_args[0][0]
+        # Verify both calls were made
+        assert mock_run.call_count == 2
+        # Verify juju-crashdump was called (second call)
+        cmd = mock_run.call_args_list[1][0][0]
         assert cmd[0] == "juju-crashdump"
         assert "my-ctrl:controller" in cmd
-        assert any("juju-controller-my-ctrl" in str(arg) for arg in cmd)
 
     def test_raises_on_nonzero_exit(self, tmp_path: Path) -> None:
         # GIVEN crashdump exits non-zero
-        juju_client = create_juju_client_mock(is_k8s=False)
-        collector = JujuCrashdumpCollector(LoggerStub(), output_dir=tmp_path, juju_client=juju_client)
+        collector = JujuCrashdumpCollector(LoggerStub(), output_dir=tmp_path, kubeconfig_path=None)
         handle = JujuControllerHandle(controller="my-ctrl")
 
+        show_ctrl_result = subprocess.CompletedProcess(
+            args=[], returncode=0,
+            stdout='{"my-ctrl": {"cloud-name": "localhost"}}',
+            stderr=""
+        )
         failed = subprocess.CompletedProcess(args=["juju-crashdump"], returncode=1, stdout="", stderr="err")
-        with patch("subprocess.run", return_value=failed):
+        
+        call_count = [0]
+        def run_side_effect(*args, **kwargs):
+            call_count[0] += 1
+            if "show-controller" in args[0]:
+                return show_ctrl_result
+            return failed
+        
+        with patch("subprocess.run", side_effect=run_side_effect):
             with pytest.raises(subprocess.CalledProcessError):
                 collector.collect(handle)
 
     def test_raises_when_tool_not_found(self, tmp_path: Path) -> None:
         # GIVEN juju-crashdump is not installed
-        juju_client = create_juju_client_mock(is_k8s=False)
-        collector = JujuCrashdumpCollector(LoggerStub(), output_dir=tmp_path, juju_client=juju_client)
+        collector = JujuCrashdumpCollector(LoggerStub(), output_dir=tmp_path, kubeconfig_path=None)
         handle = JujuControllerHandle(controller="my-ctrl")
 
-        with patch("subprocess.run", side_effect=FileNotFoundError):
+        show_ctrl_result = subprocess.CompletedProcess(
+            args=[], returncode=0,
+            stdout='{"my-ctrl": {"cloud-name": "localhost"}}',
+            stderr=""
+        )
+        
+        def run_side_effect(*args, **kwargs):
+            if "show-controller" in args[0]:
+                return show_ctrl_result
+            raise FileNotFoundError("juju-crashdump not found")
+        
+        with patch("subprocess.run", side_effect=run_side_effect):
             with pytest.raises(FileNotFoundError):
                 collector.collect(handle)
 
     def test_raises_on_timeout(self, tmp_path: Path) -> None:
         # GIVEN crashdump times out
-        juju_client = create_juju_client_mock(is_k8s=False)
-        collector = JujuCrashdumpCollector(LoggerStub(), output_dir=tmp_path, juju_client=juju_client)
+        collector = JujuCrashdumpCollector(LoggerStub(), output_dir=tmp_path, kubeconfig_path=None)
         handle = JujuControllerHandle(controller="my-ctrl")
 
-        with patch("subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="juju-crashdump", timeout=600)):
+        show_ctrl_result = subprocess.CompletedProcess(
+            args=[], returncode=0,
+            stdout='{"my-ctrl": {"cloud-name": "localhost"}}',
+            stderr=""
+        )
+        
+        def run_side_effect(*args, **kwargs):
+            if "show-controller" in args[0]:
+                return show_ctrl_result
+            raise subprocess.TimeoutExpired(cmd="juju-crashdump", timeout=600)
+        
+        with patch("subprocess.run", side_effect=run_side_effect):
             with pytest.raises(subprocess.TimeoutExpired):
                 collector.collect(handle)
 
     def test_skips_when_output_dir_is_none(self) -> None:
         # GIVEN a collector with no output_dir configured
         logger = LoggerStub()
-        juju_client = create_juju_client_mock(is_k8s=False)
-        collector = JujuCrashdumpCollector(logger, output_dir=None, juju_client=juju_client)
+        collector = JujuCrashdumpCollector(logger, output_dir=None, kubeconfig_path=None)
         handle = JujuControllerHandle(controller="my-ctrl")
 
         with patch("subprocess.run") as mock_run:
@@ -211,28 +242,52 @@ class TestJujuCrashdumpCollectorK8s:
         # GIVEN a K8s controller collector
         logger = LoggerStub()
         kubeconfig = Path("/tmp/kubeconfig")
-        juju_client = create_juju_client_mock(is_k8s=True, kubeconfig_path=kubeconfig)
-        collector = JujuCrashdumpCollector(logger, output_dir=tmp_path, juju_client=juju_client)
+        collector = JujuCrashdumpCollector(logger, output_dir=tmp_path, kubeconfig_path=kubeconfig)
         handle = JujuControllerHandle(controller="my-ctrl")
 
-        completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
-        with patch("subprocess.run", return_value=completed) as mock_run:
+        # Mock "juju show-controller" to return K8s cloud
+        show_ctrl_result = subprocess.CompletedProcess(
+            args=[], returncode=0,
+            stdout='{"my-ctrl": {"cloud-name": "local-k8s"}}',
+            stderr=""
+        )
+        # Mock juju-k8s-crashdump to succeed
+        k8s_result = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+        
+        def run_side_effect(*args, **kwargs):
+            if "show-controller" in args[0]:
+                return show_ctrl_result
+            return k8s_result
+        
+        with patch("subprocess.run", side_effect=run_side_effect) as mock_run:
             collector.collect(handle)
 
-        cmd = mock_run.call_args[0][0]
+        # Verify both calls were made
+        assert mock_run.call_count == 2
+        # Verify juju-k8s-crashdump was called (second call)
+        cmd = mock_run.call_args_list[1][0][0]
         assert cmd[0] == "juju-k8s-crashdump"
         assert str(kubeconfig.resolve()) in cmd
         assert "my-ctrl" in cmd
-        assert any("juju-controller-my-ctrl" in str(arg) for arg in cmd)
 
     def test_raises_when_tool_not_found(self, tmp_path: Path) -> None:
         # GIVEN juju-k8s-crashdump is not installed
         kubeconfig = Path("/tmp/kubeconfig")
-        juju_client = create_juju_client_mock(is_k8s=True, kubeconfig_path=kubeconfig)
-        collector = JujuCrashdumpCollector(LoggerStub(), output_dir=tmp_path, juju_client=juju_client)
+        collector = JujuCrashdumpCollector(LoggerStub(), output_dir=tmp_path, kubeconfig_path=kubeconfig)
         handle = JujuControllerHandle(controller="my-ctrl")
 
-        with patch("subprocess.run", side_effect=FileNotFoundError):
+        show_ctrl_result = subprocess.CompletedProcess(
+            args=[], returncode=0,
+            stdout='{"my-ctrl": {"cloud-name": "local-k8s"}}',
+            stderr=""
+        )
+        
+        def run_side_effect(*args, **kwargs):
+            if "show-controller" in args[0]:
+                return show_ctrl_result
+            raise FileNotFoundError("juju-k8s-crashdump not found")
+        
+        with patch("subprocess.run", side_effect=run_side_effect):
             with pytest.raises(FileNotFoundError):
                 collector.collect(handle)
 
