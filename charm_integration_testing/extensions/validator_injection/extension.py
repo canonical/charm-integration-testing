@@ -57,6 +57,7 @@ class ValidatorInjectorExtension(JujuExtension):
         return results
 
     def _run_validators_on_unit(self, model: str, unit: str, level: str, is_k8s: bool = True) -> list[ValidationResult]:
+        # validators_path is the remote directory on the unit (not self.validators_path, which is local)
         validators_path = _validators_path(is_k8s)
         venv_runner = f"{validators_path}/venv/bin/run_validators"
 
@@ -82,6 +83,7 @@ class ValidatorInjectorExtension(JujuExtension):
             raise ValueError("validators_path must be provided to inject validators")
         self.logger.debug(f"Injecting validators on unit {unit}")
 
+        # validators_path is the remote directory on the unit (not self.validators_path, which is the local source)
         validators_path = _validators_path(is_k8s)
         uv_bin = f"{validators_path}/uv"
 
