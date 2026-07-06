@@ -222,11 +222,7 @@ When you use `--prefix "my-unique-id"`, these resources are created with that pr
 ```
 Controllers:      my-unique-id-XXXXXX (random suffix appended)
 Models:           my-unique-id-XXXXXX (random suffix appended)
-Bundles:          generated-target-bundle-my-unique-id.yaml
-                  generated-neighbor-bundle-my-unique-id.yaml
-Log Directory:    test-logs-my-unique-id/
-JUnit XML:        junit-my-unique-id.xml
-Mermaid Diagram:  generated-bundle-my-unique-id.mmd
+Bundle paths, log directory, JUnit XML, and mermaid output are controlled by their respective CLI options (--bundle, --log-dir, --junit-xml, --mermaid-output).
 ```
 
 ### Cleanup After Execution
@@ -234,11 +230,11 @@ Mermaid Diagram:  generated-bundle-my-unique-id.mmd
 When tests complete, the test framework automatically destroys the test controllers. But you can manually clean up if needed:
 
 ```bash
-# List all controllers created by your tests
-juju list-controllers | grep "$PREFIX"
+# List all controllers
+juju controllers
 
 # If cleanup failed, manually destroy
-juju kill-controller "${PREFIX}-xxxxx" -y
+juju kill-controller "<controller-name>" -y
 ```
 
 ### Avoiding Name Collisions
@@ -276,29 +272,23 @@ When given a test execution, map parameters to `run-tests.sh` inputs:
 
 ### 2. Setup Phase
 
-**Option A: Auto-Detection (Recommended)**
-```bash
-runner.prepare()
-```
-- Detects cloud types from environment names
-- Sets up LXD if target/neighbor are machines/OpenStack
-- Sets up K8s if target/neighbor are Kubernetes
-- Bootstraps controllers
-- Creates testing models
+**Option A: Direct API Usage (for programmatic testing)**
+```python
+from charm_integration_testing.test_suite.test_runner import TestRunner
 
-**Option B: Manual Cloud Setup**
-```bash
-runner.setup_lxd()      # Install and bootstrap LXD
-runner.setup_k8s()      # Install and bootstrap K8s
-runner.bootstrap_controllers()
+runner = TestRunner(...)
+runner.run_tests()  # Handles setup, execution, and teardown
 ```
+
+**Option B: Manual Cloud Setup (for interactive development)**
+See the `--setup-lxd` and `--setup-k8s` script options for manual cloud provisioning. The test suite will bootstrap controllers when you run tests with `--current-state`.
 
 **Cloud Type Detection Logic**
 ```
-If environment contains:
+If cloud/platform contains:
   - "kubernetes" or "k8s" → Kubernetes (local-k8s cloud)
+  - "machine" → LXD (localhost cloud)
   - "openstack" or "nova" → OpenStack (requires credentials)
-  - "lxd" or implied → LXD (localhost cloud)
   - "production" → Use secrets/environment config
 ```
 
@@ -555,13 +545,13 @@ The skill translates test observer parameters to `run-tests.sh` invocation:
   --target-channel "14/stable" \
   --target-revision "42" \
   --target-series "22.04" \
-  --target-platform "linux-amd64" \
+  --target-platform "kubernetes" \              # kubernetes or machine only
   \
   --neighbor-cloud "local-k8s" \                  # Kubernetes
   --neighbor-bundle "./generated-neighbor-bundle.yaml" \
   --neighbor-controller-bootstrap-config "..." \
   --neighbor-charm "pgbouncer" \
-  --neighbor-platform "linux-arm64" \
+  --neighbor-platform "machine" \               # kubernetes or machine only
   \
   --target-application "target" \
   --target-endpoint "database" \

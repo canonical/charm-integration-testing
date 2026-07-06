@@ -94,7 +94,7 @@ Always install these regardless of platform, since log collection needs both too
 # 1. Install logging tools
 sudo snap install juju-crashdump --classic
 sudo snap install kubectl --classic
-pip install --break-system-packages "git+https://github.com/canonical/juju-k8s-crashdump.git@22ef04caaeeb94ad6ed49f8392b6bada65184569#egg=juju-k8s-crashdump"
+pipx install "git+https://github.com/canonical/juju-k8s-crashdump.git@22ef04caaeeb94ad6ed49f8392b6bada65184569#egg=juju-k8s-crashdump"
 
 # 2. Setup LXD only
 $PROJECT_ROOT/development-sandbox/bin/setup-lxd.sh
@@ -108,7 +108,7 @@ $PROJECT_ROOT/development-sandbox/bin/setup-lxd.sh
 # 1. Install logging tools
 sudo snap install juju-crashdump --classic
 sudo snap install kubectl --classic
-pip install --break-system-packages "git+https://github.com/canonical/juju-k8s-crashdump.git@22ef04caaeeb94ad6ed49f8392b6bada65184569#egg=juju-k8s-crashdump"
+pipx install "git+https://github.com/canonical/juju-k8s-crashdump.git@22ef04caaeeb94ad6ed49f8392b6bada65184569#egg=juju-k8s-crashdump"
 
 # 2. Setup K8s only
 $PROJECT_ROOT/development-sandbox/bin/setup-k8s.sh
@@ -122,7 +122,7 @@ $PROJECT_ROOT/development-sandbox/bin/setup-k8s.sh
 # 1. Install logging tools
 sudo snap install juju-crashdump --classic
 sudo snap install kubectl --classic
-pip install --break-system-packages "git+https://github.com/canonical/juju-k8s-crashdump.git@22ef04caaeeb94ad6ed49f8392b6bada65184569#egg=juju-k8s-crashdump"
+pipx install "git+https://github.com/canonical/juju-k8s-crashdump.git@22ef04caaeeb94ad6ed49f8392b6bada65184569#egg=juju-k8s-crashdump"
 
 # 2. Setup both substrates
 $PROJECT_ROOT/development-sandbox/bin/setup-lxd.sh
@@ -144,7 +144,7 @@ sudo snap install kubectl --classic
 
 # juju-k8s-crashdump: For Kubernetes controllers
 # Using specific commit hash from charm-testing.yaml workflow
-pip install --break-system-packages "git+https://github.com/canonical/juju-k8s-crashdump.git@22ef04caaeeb94ad6ed49f8392b6bada65184569#egg=juju-k8s-crashdump"
+pipx install "git+https://github.com/canonical/juju-k8s-crashdump.git@22ef04caaeeb94ad6ed49f8392b6bada65184569#egg=juju-k8s-crashdump"
 ```
 
 **Note**: If installation fails, see Troubleshooting section below.

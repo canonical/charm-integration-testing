@@ -106,9 +106,30 @@ _cmd_up() {
     local cpus="$VM_CPUS" memory="$VM_MEMORY" disk="$VM_DISK"
     while [ "$#" -gt 0 ]; do
         case "$1" in
-            --cpus)    cpus="$2";   shift 2 ;;
-            --memory)  memory="$2"; shift 2 ;;
-            --disk)    disk="$2";   shift 2 ;;
+            --cpus)
+                if [ -z "$2" ]; then
+                    echo "Error: --cpus requires a value" >&2
+                    exit 1
+                fi
+                cpus="$2"
+                shift 2
+                ;;
+            --memory)
+                if [ -z "$2" ]; then
+                    echo "Error: --memory requires a value" >&2
+                    exit 1
+                fi
+                memory="$2"
+                shift 2
+                ;;
+            --disk)
+                if [ -z "$2" ]; then
+                    echo "Error: --disk requires a value" >&2
+                    exit 1
+                fi
+                disk="$2"
+                shift 2
+                ;;
             --)        shift; break ;;
             -*)
                 echo "Unknown option: $1" >&2
