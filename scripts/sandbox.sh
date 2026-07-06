@@ -107,7 +107,7 @@ _cmd_up() {
     while [ "$#" -gt 0 ]; do
         case "$1" in
             --cpus)
-                if [ -z "$2" ]; then
+                if [ $# -lt 2 ] || [ -z "${2:-}" ]; then
                     echo "Error: --cpus requires a value" >&2
                     exit 1
                 fi
@@ -115,7 +115,7 @@ _cmd_up() {
                 shift 2
                 ;;
             --memory)
-                if [ -z "$2" ]; then
+                if [ $# -lt 2 ] || [ -z "${2:-}" ]; then
                     echo "Error: --memory requires a value" >&2
                     exit 1
                 fi
@@ -123,7 +123,7 @@ _cmd_up() {
                 shift 2
                 ;;
             --disk)
-                if [ -z "$2" ]; then
+                if [ $# -lt 2 ] || [ -z "${2:-}" ]; then
                     echo "Error: --disk requires a value" >&2
                     exit 1
                 fi
@@ -443,7 +443,8 @@ EOF
 # ---------------------------------------------------------------------------
 case "${1:-}" in
     up)
-        _cmd_up
+        shift
+        _cmd_up "$@"
         ;;
     down)
         _cmd_down

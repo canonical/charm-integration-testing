@@ -272,16 +272,14 @@ When given a test execution, map parameters to `run-tests.sh` inputs:
 
 ### 2. Setup Phase
 
-**Option A: Direct API Usage (for programmatic testing)**
-```python
-from charm_integration_testing.test_suite.test_runner import TestRunner
-
-runner = TestRunner(...)
-runner.run_tests()  # Handles setup, execution, and teardown
+**Option A: Run tests via CLI**
+```bash
+./scripts/run-tests.sh --target-cloud kubernetes --target-charm postgresql-k8s
 ```
+The test suite handles setup, execution, and teardown automatically.
 
 **Option B: Manual Cloud Setup (for interactive development)**
-See the `--setup-lxd` and `--setup-k8s` script options for manual cloud provisioning. The test suite will bootstrap controllers when you run tests with `--current-state`.
+Use the `/setup-lxd` or `/setup-k8s` skills to provision a cloud substrate. The test suite will bootstrap controllers when you run tests with `--current-state`.
 
 **Cloud Type Detection Logic**
 ```
@@ -715,7 +713,7 @@ Increase the timeout and use verbose logging:
   --target-charm "postgresql" \
   --log-cli-level "DEBUG" \
   --log-level "DEBUG" \
-  --pytest-timeout 3600 \
+  --timeout 3600 \
   ...
 ```
 
@@ -745,10 +743,10 @@ juju ssh -m target/mymodel 0 "sudo grep -i relation /var/log/juju/unit*.log"
 
 1. **Start Simple**: Begin with single-cloud tests before CMR
 2. **Narrow Scope**: Run individual test modules before full suite
-3. **Keep Logs**: Use `keep_environment=True` for debugging
-4. **Clean Between Runs**: Call `cleanup()` between iterations
-5. **Check Prerequisites**: Verify LXD/K8s available before running
-6. **Capture Output**: Redirect logs to files for later analysis
+3. **Preserve Models**: Use `--current-state` to skip teardown for debugging
+4. **Clean Between Runs**: Use `scripts/sandbox.sh` to reset or create new VMs between test iterations
+5. **Check Prerequisites**: Verify LXD/K8s available before running with `/setup-lxd` or `/setup-k8s`
+6. **Capture Output**: Logs are automatically collected into the log directory specified by `--log-dir`
 
 ---
 
