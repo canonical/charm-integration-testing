@@ -1588,7 +1588,9 @@ class TestJubilantBackend:
                 return {
                     "consumed-offer": jubilant.statustypes.RemoteAppStatus(
                         url="neighbor-controller:admin/neighbor-model.neighbor-offer",
-                        endpoints={"database": None},
+                        endpoints={
+                            "database": jubilant.statustypes.RemoteEndpoint(interface="database", role="provider")
+                        },
                     )
                 }
 
