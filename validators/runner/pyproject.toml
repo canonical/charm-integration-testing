@@ -28,6 +28,8 @@ dependencies = [
     "validators-livepatch-pro-airgapped-server",
     "validators-azure-storage",
     "validators-parca-store",
+    "validators-external-provider",
+    "validators-http-interface",
 ]
 
 [build-system]
