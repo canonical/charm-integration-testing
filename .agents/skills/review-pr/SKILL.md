@@ -101,6 +101,8 @@ Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
 
 ## Step 4 — Post replies
 
+**Reply to each inline comment individually.** Do not post a single comprehensive PR comment in place of individual replies.
+
 Reply to each inline comment using the `gh api` tool with stdin input:
 
 ```bash
