@@ -1,0 +1,39 @@
+---
+applications:
+  neighbor:
+    base: ubuntu@22.04
+    channel: stable
+    charm: glauth-k8s
+    options: {}
+    revision: 57
+    scale: 1
+    trust: true
+  postgresql-k8s:
+    base: ubuntu@22.04
+    channel: 14/stable
+    charm: postgresql-k8s
+    options: {}
+    revision: 925
+    scale: 1
+    trust: true
+  self-signed-certificates:
+    base: ubuntu@24.04
+    channel: 1/stable
+    charm: self-signed-certificates
+    options: {}
+    revision: 586
+    scale: 1
+    trust: true
+bundle: kubernetes
+relations:
+  -   - neighbor:certificates
+      - self-signed-certificates:certificates
+  -   - neighbor:pg-database
+      - postgresql-k8s:database
+---
+applications:
+  neighbor:
+    offers:
+      neighbor-offer:
+        endpoints:
+          - glauth-auxiliary

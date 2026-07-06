@@ -380,11 +380,11 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def show_controller(self, controller: str) -> dict[str, dict]:
+    def show_controller(self, controller: str) -> dict[str, Any]:
         """Return output of 'juju show-controller <controller> --format=json'."""
         raise NotImplementedError
 
     @abstractmethod
-    def clouds(self) -> dict[str, dict]:
+    def clouds(self) -> dict[str, Any]:
         """Return output of 'juju clouds --format=json'."""
         raise NotImplementedError

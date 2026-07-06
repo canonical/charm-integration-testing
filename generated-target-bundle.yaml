@@ -1,0 +1,16 @@
+---
+applications:
+  target:
+    base: ubuntu@22.04
+    channel: latest/edge
+    charm: glauth-utils
+    num_units: 1
+    options: {}
+    revision: 50
+    trust: true
+relations:
+  -   - neighbor-offer:glauth-auxiliary
+      - target:glauth-auxiliary
+saas:
+  neighbor-offer:
+    url: issue693-final-1783364600-60y1x39q:admin/issue693-final-1783364600-jmv1reos.neighbor-offer

@@ -5,6 +5,7 @@ import logging
 import os
 from datetime import timedelta
 from pathlib import Path
+from typing import Any, cast
 
 from validators.base import ValidationResult
 
@@ -398,7 +399,7 @@ class JujuClient:
             if not cloud:
                 return False
             clouds = self.backend.clouds()
-            return clouds.get(cloud, {}).get("type") == "k8s"
+            return bool(cast(dict[str, Any], clouds.get(cloud, {})).get("type") == "k8s")
         except Exception:
             return False
 
