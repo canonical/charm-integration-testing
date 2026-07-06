@@ -11,7 +11,7 @@ from juju import JujuBackend, JujuExtension
 from validators.base.validator import ValidationResult
 from validators.runner import ValidatorRunnerResults
 
-proxy_env = " ".join(
+install_env = " ".join(
     [
         f"{var}={value}"
         for var, value in {
@@ -102,11 +102,11 @@ class ValidatorInjectorExtension(JujuExtension):
         for cmd, desc in [
             (f"chmod +x {uv_bin}", "make uv executable"),
             (
-                f"{proxy_env} {uv_bin} venv --python '>=3.10' {validators_path}/venv",
+                f"{install_env} {uv_bin} venv --python '>=3.10' {validators_path}/venv",
                 "create venv with python 3.10+",
             ),
             (
-                f"{proxy_env} {uv_bin} pip install --python {validators_path}/venv" f" {validators_path}/packages/*",
+                f"{install_env} {uv_bin} pip install --python {validators_path}/venv {validators_path}/packages/*",
                 "install validator packages",
             ),
         ]:
