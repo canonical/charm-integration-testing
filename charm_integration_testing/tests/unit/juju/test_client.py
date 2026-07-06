@@ -898,7 +898,7 @@ def _client(backend: NullJujuBackend) -> JujuClient:
 
 
 class TestIntegrationMethods:
-    """Verify that integrate, remove_integration, and wait_for_removal_of_integration delegate directly to the backend with the provided model and endpoint objects."""
+    """Verify integration methods delegate to backend with model and endpoint objects."""
 
     def test_integrate_delegates_to_backend(self) -> None:
         backend = IntegrationTrackingBackendStub()
