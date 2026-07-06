@@ -56,7 +56,7 @@ class JujuCrashdumpCollector:
                 controller_info = data.get(controller, {})
                 cloud = controller_info.get("details", {}).get("cloud-name", "")
                 # List of Kubernetes cloud names that Juju uses
-                return cloud.lower() in ["local-k8s", "kubernetes"]
+                return cloud.lower() in ["local-k8s", "kubernetes", "microk8s"]
         except Exception as e:
             self._logger.debug(f"Error querying controller type for {controller}: {e}")
 

@@ -5,7 +5,7 @@
 import json
 import time
 from datetime import datetime, timedelta, timezone
-from typing import Any, cast
+from typing import Any
 
 import yaml
 from juju import (
@@ -353,19 +353,3 @@ class JujuCmdBackend(JujuBackend):
     def debug_log(self, model: str) -> str:
         raise NotImplementedError
 
-    def show_controller(self, controller: str) -> dict[str, Any]:
-        """Return output of 'juju show-controller <controller> --format=json'."""
-        result = self._call_juju(
-            CmdArg(value="show-controller"),
-            CmdArg(value=controller),
-            CmdArg(name="format", value="json"),
-        )
-        return cast(dict[str, Any], json.loads(result))
-
-    def clouds(self) -> dict[str, Any]:
-        """Return output of 'juju clouds --format=json'."""
-        result = self._call_juju(
-            CmdArg(value="clouds"),
-            CmdArg(name="format", value="json"),
-        )
-        return cast(dict[str, Any], json.loads(result))
