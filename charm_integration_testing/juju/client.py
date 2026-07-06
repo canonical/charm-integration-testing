@@ -1,10 +1,8 @@
 # Copyright 2024-2025 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-import json
 import logging
 import os
-import subprocess  # nosec B404
 from datetime import timedelta
 from pathlib import Path
 
@@ -33,7 +31,6 @@ class JujuClient:
     backend: JujuBackend
     logger: logging.Logger
     extensions: list[JujuExtension]
-    _cloud_cache: dict[str, bool]
 
     def __init__(
         self,
@@ -44,7 +41,6 @@ class JujuClient:
         self.backend = backend
         self.logger = logger
         self.extensions = extensions or []
-        self._cloud_cache: dict[str, bool] = {}
 
     def scale_application(self, application: str, num: int, model: str = "default") -> None:
         self.logger.info(f"Scaling application {application} to {num} units.")
@@ -395,130 +391,20 @@ class JujuClient:
         self.backend.upgrade_controller(controller=controller, agent_version=agent_version)
 
     def is_controller_kubernetes(self, controller: str) -> bool:
-        """Check if a controller is running on a Kubernetes cloud.
-
-        Queries Juju to determine:
-        1. What cloud the controller is on (via `juju show-controller`)
-        2. What type that cloud is (via `juju clouds`)
-
-        Returns True if the cloud type is 'k8s', False otherwise.
-
-        Args:
-            controller: Controller name
-
-        Returns:
-            True if controller runs on a Kubernetes cloud, False otherwise
-        """
+        """Check if a controller runs on Kubernetes."""
         try:
-            # Check cache first
-            if controller in self._cloud_cache:
-                return self._cloud_cache[controller]
-
-            # Get the cloud name for this controller
-            cloud_name = self._get_controller_cloud(controller)
-            if cloud_name is None:
-                self.logger.warning(f"Could not determine cloud for controller '{controller}'")
+            controller_data = self.backend.show_controller(controller)
+            cloud = controller_data.get(controller, {}).get("details", {}).get("cloud-name")
+            if not cloud:
                 return False
-
-            # Get cloud type from Juju clouds list
-            is_k8s = self._is_cloud_kubernetes(cloud_name)
-            self._cloud_cache[controller] = is_k8s
-            return is_k8s
-
-        except Exception as exc:
-            self.logger.warning(
-                f"Error determining cloud type for controller '{controller}': {exc}. "
-                "Assuming machine cloud."
-            )
-            return False
-
-    def _get_controller_cloud(self, controller: str) -> str | None:
-        """Get the cloud name for a controller.
-
-        Queries `juju show-controller <name> --format=json` to find which cloud
-        the controller is running on.
-
-        Args:
-            controller: Controller name
-
-        Returns:
-            Cloud name (e.g., "localhost", "local-k8s", "target-cloud") or None if not found
-        """
-        try:
-            cmd = ["juju", "show-controller", controller, "--format=json"]
-            self.logger.debug(f"Running: {' '.join(cmd)}")
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)  # nosec B603
-
-            if result.returncode != 0:
-                self.logger.debug(f"juju show-controller failed: {result.stderr}")
-                return None
-
-            data = json.loads(result.stdout)
-            # Structure: {controller_name: {details: {cloud-name: "..."}}}
-            controller_data = data.get(controller, {})
-            cloud = controller_data.get("details", {}).get("cloud-name")
-            if cloud:
-                self.logger.debug(f"Controller '{controller}' is on cloud '{cloud}'")
-            return cloud
-        except (json.JSONDecodeError, subprocess.TimeoutExpired, FileNotFoundError) as exc:
-            self.logger.debug(f"Failed to query controller cloud: {exc}")
-            return None
-
-    def _is_cloud_kubernetes(self, cloud_name: str) -> bool:
-        """Determine if a cloud is Kubernetes-based.
-
-        Queries `juju clouds --format=json` to get the cloud definitions,
-        then looks up the cloud type. Returns True if type == "k8s".
-
-        Args:
-            cloud_name: Cloud name to check (e.g., "localhost", "local-k8s", "target-cloud")
-
-        Returns:
-            True if cloud type is 'k8s', False otherwise (machine clouds)
-        """
-        try:
-            cmd = ["juju", "clouds", "--format=json"]
-            self.logger.debug(f"Running: {' '.join(cmd)}")
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)  # nosec B603
-
-            if result.returncode != 0:
-                self.logger.debug(f"juju clouds failed: {result.stderr}")
-                return False
-
-            clouds = json.loads(result.stdout)
-            cloud_info = clouds.get(cloud_name, {})
-            cloud_type = cloud_info.get("type", "")
-
-            is_k8s = cloud_type == "k8s"
-            self.logger.debug(
-                f"Cloud '{cloud_name}' has type '{cloud_type}' (k8s={is_k8s})"
-            )
-            return is_k8s
-
-        except (json.JSONDecodeError, subprocess.TimeoutExpired, FileNotFoundError) as exc:
-            self.logger.debug(f"Failed to query cloud type: {exc}")
+            clouds = self.backend.clouds()
+            return clouds.get(cloud, {}).get("type") == "k8s"
+        except Exception:
             return False
 
     def get_kubeconfig_for_controller(self, controller: str) -> Path | None:
-        """Get kubeconfig path for a Kubernetes controller.
-
-        Returns the kubeconfig from the KUBECONFIG environment variable only if the
-        controller is on a Kubernetes cloud. For machine clouds, returns None.
-
-        Args:
-            controller: Controller name
-
-        Returns:
-            Path to kubeconfig if controller is K8s-based and KUBECONFIG is set, None otherwise
-        """
+        """Get kubeconfig path if controller is K8s-based."""
         if not self.is_controller_kubernetes(controller):
             return None
-
-        kubeconfig_str = os.environ.get("KUBECONFIG", "").strip()
-        if not kubeconfig_str:
-            self.logger.warning(
-                f"Controller '{controller}' is Kubernetes-based but KUBECONFIG env var is not set"
-            )
-            return None
-
-        return Path(kubeconfig_str)
+        kubeconfig = os.environ.get("KUBECONFIG", "").strip()
+        return Path(kubeconfig) if kubeconfig else None

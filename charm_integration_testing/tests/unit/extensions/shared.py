@@ -214,6 +214,12 @@ class NullJujuBackend(JujuBackend):
     def debug_log(self, model: str) -> str:
         raise NotImplementedError
 
+    def show_controller(self, controller: str) -> dict[str, dict]:
+        raise NotImplementedError
+
+    def clouds(self) -> dict[str, dict]:
+        raise NotImplementedError
+
 
 @dataclass
 class JujuStub(NullJujuBackend):

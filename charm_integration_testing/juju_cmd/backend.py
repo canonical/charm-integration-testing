@@ -352,3 +352,15 @@ class JujuCmdBackend(JujuBackend):
 
     def debug_log(self, model: str) -> str:
         raise NotImplementedError
+
+    def show_controller(self, controller: str) -> dict[str, dict]:
+        """Return output of 'juju show-controller <controller> --format=json'."""
+        cmd = ["juju", "show-controller", controller, "--format=json"]
+        result = self._run_command(cmd)
+        return json.loads(result)
+
+    def clouds(self) -> dict[str, dict]:
+        """Return output of 'juju clouds --format=json'."""
+        cmd = ["juju", "clouds", "--format=json"]
+        result = self._run_command(cmd)
+        return json.loads(result)

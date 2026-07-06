@@ -198,7 +198,6 @@ def juju_client(
     uv_file: Path | None,
     validators_path: Path | None,
     session_resource_registry: ResourceRegistry,
-    cloud_manager: CloudManager,
 ) -> JujuClient:
     return JujuClient(
         juju_backend,
