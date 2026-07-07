@@ -570,9 +570,9 @@ class JubilantBackend(JujuCmdBackend):
         controller is machine-based. Raises if the controller is K8s-based but no
         kubeconfig is configured for its cloud.
         """
-        model_info = self.client.model(f"{controller}:controller").show_model()
-        if model_info.type != "kubernetes":
+        if not self.is_k8s_controller(controller):
             return None
+        model_info = self.client.model(f"{controller}:controller").show_model()
         cloud = model_info.cloud
         path = self._cloud_kubeconfigs.get(cloud)
         if path is None:
@@ -585,13 +585,13 @@ class JubilantBackend(JujuCmdBackend):
     def reboot_model_controller(self, model: str) -> None:
         controller_name = self.status(model).model.controller
         controller_model = f"{controller_name}:controller"
-        model_info = self.client.model(controller_model).show_model()
 
-        if model_info.type != "kubernetes":
+        if not self.is_k8s_controller(controller_name):
             # XXX(mbenzan): In the future, we might want to implement a rolling restart here too.
             # reboot the leader
             self.ssh(model=controller_model, application="controller/leader", command="sudo reboot")
         else:
+            model_info = self.client.model(controller_model).show_model()
             k8s = self.get_kubernetes_client(model_info.cloud)
             controller_k8s_namespace = f"controller-{controller_name}"
             k8s.restart_statefulset(

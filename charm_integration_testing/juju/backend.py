@@ -168,6 +168,10 @@ class JujuBackend(ABC):
     def is_k8s_model(self, model: str) -> bool:
         raise NotImplementedError
 
+    def is_k8s_controller(self, controller: str) -> bool:
+        """Return True if the controller is Kubernetes-based."""
+        return self.is_k8s_model(f"{controller}:controller")
+
     @abstractmethod
     def integration_exists(
         self, application_1: str, endpoint_1: str, application_2: str, endpoint_2: str, model: str
