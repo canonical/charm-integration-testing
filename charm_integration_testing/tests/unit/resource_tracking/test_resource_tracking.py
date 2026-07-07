@@ -86,9 +86,15 @@ class TestPvcSource:
         snapshots = PvcSource().collect(client, "test-model")  # type: ignore[arg-type]
 
         # THEN the optional fields default to empty strings
-        assert snapshots[0].storage_class == ""
-        assert snapshots[0].requested_storage == ""
-        assert snapshots[0].phase == ""
+        assert snapshots == [
+            PvcSnapshot(
+                name="data-0",
+                namespace="test-model",
+                storage_class="",
+                requested_storage="",
+                phase="",
+            )
+        ]
 
 
 class TestStateResourceTracker:

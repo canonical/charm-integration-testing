@@ -18,13 +18,19 @@ from typing import ClassVar, Mapping, Protocol, runtime_checkable
 
 @runtime_checkable
 class ResourceSnapshot(Protocol):
-    """Structural contract a resource snapshot must satisfy to be tracked."""
+    """Structural contract a resource snapshot must satisfy to be tracked.
 
-    resource_type: str
-    """Short label used in report keys, e.g. ``pvc``."""
+    The members are read-only so that frozen dataclasses (whose fields are
+    immutable) and ``ClassVar`` labels both satisfy the contract.
+    """
 
-    name: str
-    """Human-readable resource name used in reports."""
+    @property
+    def resource_type(self) -> str:
+        """Short label used in report keys, e.g. ``pvc``."""
+
+    @property
+    def name(self) -> str:
+        """Human-readable resource name used in reports."""
 
     @property
     def identity(self) -> tuple[str, ...]:
