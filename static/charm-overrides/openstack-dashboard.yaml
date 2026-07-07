@@ -20,7 +20,6 @@
 #   to deploy and test. They are excluded from automated bundle building to
 #   prevent pipeline congestion.
 listed: false
-
 overrides:
   # queens-train: dashboard endpoint not yet present in `provides` metadata
   - criteria:

@@ -33,7 +33,6 @@
 #   to deploy and test. They are excluded from automated bundle building to
 #   prevent pipeline congestion.
 listed: false
-
 overrides:
   # luminous, mimic, nautilus, octopus, pacific: no secondary, no primary, no s3
   - criteria:

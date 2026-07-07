@@ -3,7 +3,6 @@
 #   to deploy and test. They are excluded from automated bundle building to
 #   prevent pipeline congestion.
 listed: false
-
 overrides:
   # ussuri-yoga: nrpe-external-master not yet available
   - criteria:

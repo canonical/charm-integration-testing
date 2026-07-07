@@ -17,7 +17,6 @@
 #   to deploy and test. They are excluded from automated bundle building to
 #   prevent pipeline congestion.
 listed: false
-
 overrides:
   # queens, rocky, stein: placement endpoint not present in charm metadata.
   - criteria:

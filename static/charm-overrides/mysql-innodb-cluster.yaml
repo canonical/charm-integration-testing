@@ -23,7 +23,6 @@
 #   to deploy and test. They are excluded from automated bundle building to
 #   prevent pipeline congestion.
 listed: false
-
 overrides:
   # ── 8.0 and 8.0.19 tracks: no prometheus endpoint ──────────────────────────
   - criteria:

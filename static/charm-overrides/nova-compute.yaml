@@ -15,7 +15,6 @@
 #   to deploy and test. They are excluded from automated bundle building to
 #   prevent pipeline congestion.
 listed: false
-
 overrides:
   # Old tracks (queens through xena): nova-vgpu endpoint does not exist in charm metadata.
   - criteria:
