@@ -3,9 +3,11 @@
 
 
 import dataclasses
+import os
 import pathlib
 import re
 import shutil
+import stat
 import tempfile
 import time
 import warnings
@@ -46,6 +48,38 @@ from .wait import (
     integrations_are_removed,
     units_have_message,
 )
+
+
+def _skip_unreadable(dir_: str, names: list[str]) -> set[str]:
+    """Ignore function for shutil.copytree that skips unreadable or non-regular entries.
+
+    Skips:
+    - entries whose stat() raises (e.g. broken symlinks, EOVERFLOW inodes)
+    - directories that are not readable/executable
+    - regular files that cannot be opened for reading
+    - special filesystem entries (sockets, FIFOs, devices) which must not be opened
+    """
+    skipped: set[str] = set()
+    for name in names:
+        path = pathlib.Path(dir_) / name
+        try:
+            mode = path.stat().st_mode
+        except OSError:
+            skipped.add(name)
+            continue
+        if stat.S_ISDIR(mode):
+            if not os.access(path, os.R_OK | os.X_OK):
+                skipped.add(name)
+        elif stat.S_ISREG(mode):
+            try:
+                with open(path, "rb") as _f:
+                    _f.read(1)
+            except OSError:
+                skipped.add(name)
+        else:
+            # Skip sockets, FIFOs, block/char devices, and any other special entries.
+            skipped.add(name)
+    return skipped
 
 
 class JubilantBackend(JujuCmdBackend):
@@ -408,7 +442,7 @@ class JubilantBackend(JujuCmdBackend):
             with tempfile.TemporaryDirectory(dir=home) as staging:
                 staged = pathlib.Path(staging) / source_path.name
                 if source_path.is_dir():
-                    shutil.copytree(source_path, staged)
+                    shutil.copytree(source_path, staged, ignore=_skip_unreadable)
                 else:
                     shutil.copy2(source_path, staged)
                 self.client.model(model).cli("scp", *options, str(staged), destination)

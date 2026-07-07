@@ -2469,6 +2469,23 @@ type = "directory"
 url = "validators/external_provider"
 
 [[package]]
+name = "validators-grafana-dashboard"
+version = "0.1.0"
+description = "Validator for grafana_dashboard interface"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+validators-base = "*"
+
+[package.source]
+type = "directory"
+url = "validators/grafana_dashboard"
+
+[[package]]
 name = "validators-http-interface"
 version = "0.1.0"
 description = "Validator for http interface"
@@ -2480,6 +2497,9 @@ develop = true
 
 [package.dependencies]
 validators-base = "*"
+
+[package.extras]
+dev = ["validators-test-utils"]
 
 [package.source]
 type = "directory"
@@ -2652,6 +2672,7 @@ validators-base = "*"
 validators-config-server = "*"
 validators-cve-catalog = "*"
 validators-external-provider = "*"
+validators-grafana-dashboard = "*"
 validators-http-interface = "*"
 validators-kafka-client = "*"
 validators-livepatch-pro-airgapped-server = "*"
@@ -2820,4 +2841,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<4.0"
-content-hash = "bb35b243b2ea72f3f452770ac66415271120629277fc22856496ce678ef7833a"
+content-hash = "75cbbdbefcd1bd8e010cf0b37273de33f7a6c481e61d75e08e2454eb13ddace9"

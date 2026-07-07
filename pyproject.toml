@@ -30,6 +30,7 @@ validators-livepatch-pro-airgapped-server = { path = "./validators/livepatch_pro
 validators-azure-storage = { path = "./validators/azure_storage", develop = true }
 validators-external-provider = { path = "./validators/external_provider", develop = true }
 validators-http-interface = { path = "./validators/http_interface", develop = true }
+validators-grafana-dashboard = { path = "./validators/grafana_dashboard", develop = true }
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
