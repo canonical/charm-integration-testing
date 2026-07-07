@@ -867,10 +867,7 @@ def track_state_resources(
         return
     if failure_message in request.node.stash or skipped_message in request.node.stash:
         return
-    try:
-        marker = read_state_marker(request.node)
-    except ValueError:
-        marker = None
+    marker = read_state_marker(request.node)
     if marker is None:
         return
 

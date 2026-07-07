@@ -271,7 +271,7 @@ class TestModelResourceDiscrepancyReportEntries:
         assert entries == [
             (
                 "resource:pvc:missing",
-                "state=deployed model=test-model pvc=data-1 storage_class=csi-cephfs requested_storage=1Gi",
+                "state=deployed model=test-model pvc=data-1 requested_storage=1Gi storage_class=csi-cephfs",
             )
         ]
 
@@ -291,7 +291,7 @@ class TestModelResourceDiscrepancyReportEntries:
         assert entries == [
             (
                 "resource:pvc:extra",
-                "state=deployed model=test-model pvc=data-1 storage_class=csi-cephfs requested_storage=1Gi",
+                "state=deployed model=test-model pvc=data-1 requested_storage=1Gi storage_class=csi-cephfs",
             )
         ]
 
@@ -324,5 +324,5 @@ class TestResourceConsistencyReport:
         # AND the discrepancy is emitted under a stable key before failing
         assert (
             "resource:pvc:missing",
-            "state=deployed model=test-model pvc=data-1 storage_class=csi-cephfs requested_storage=1Gi",
+            "state=deployed model=test-model pvc=data-1 requested_storage=1Gi storage_class=csi-cephfs",
         ) in recorded

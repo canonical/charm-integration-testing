@@ -80,7 +80,13 @@ class KubernetesClient:
         try:
             pvcs = self.backend.core_v1_api.list_namespaced_persistent_volume_claim(model)
         except ApiException as e:
-            self.logger.error(f"Failed to list PVCs in namespace {model}: {e}")
+            # A missing namespace (404) is an expected, benign condition for
+            # best-effort callers (e.g. non-Kubernetes models); only genuinely
+            # unexpected failures are logged at error level.
+            if e.status == 404:
+                self.logger.debug(f"Namespace {model} not found while listing PVCs: {e}")
+            else:
+                self.logger.error(f"Failed to list PVCs in namespace {model}: {e}")
             raise
 
         self.logger.debug(f"Found {len(pvcs.items)} PVC(s) in namespace {model}")

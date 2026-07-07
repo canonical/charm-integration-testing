@@ -66,7 +66,7 @@ class ModelResourceDiscrepancy:
 
     def _describe(self, snapshot: ResourceSnapshot) -> str:
         detail = f"state={self.state.value} model={self.model} {snapshot.resource_type}={snapshot.name}"
-        attributes = " ".join(f"{key}={value}" for key, value in snapshot.report_attributes().items())
+        attributes = " ".join(f"{key}={value}" for key, value in sorted(snapshot.report_attributes().items()))
         return f"{detail} {attributes}".rstrip()
 
 
