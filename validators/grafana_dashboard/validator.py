@@ -135,7 +135,7 @@ def _validate_content(templates: dict[str, Any]) -> ValidationCheck:
             errors.append(f"template {tid!r}: 'content' is empty")
             continue
         try:
-            decoded = lzma.decompress(base64.b64decode(raw_content.encode("utf-8")))
+            decoded = lzma.decompress(base64.b64decode(raw_content, validate=True))
             json.loads(decoded)
         except Exception as exc:
             errors.append(f"template {tid!r}: decode failed: {exc}")

@@ -3,6 +3,7 @@
 
 
 import dataclasses
+import os
 import pathlib
 import re
 import shutil
@@ -53,7 +54,10 @@ def _skip_unreadable(dir_: str, names: list[str]) -> set[str]:
     skipped: set[str] = set()
     for name in names:
         path = pathlib.Path(dir_) / name
-        if path.is_file():
+        if path.is_dir():
+            if not os.access(path, os.R_OK | os.X_OK):
+                skipped.add(name)
+        else:
             try:
                 with open(path, "rb") as _f:
                     _f.read(1)
