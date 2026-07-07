@@ -11,9 +11,15 @@ import pytest
 from extensions.s3_integrator_minio_backend.extension import (
     MINIO_ACCESS_KEY,
     MINIO_BUCKET,
+    MINIO_CLIENT_PATH,
+    MINIO_CLIENT_STAGING_PATH,
     MINIO_PATH,
     MINIO_SECRET_KEY,
+    MINIO_SERVER_DATA_DIR,
+    MINIO_SERVER_PATH,
+    MINIO_SERVER_STAGING_PATH,
     S3IntegratorMinIOBackendExtension,
+    UBUNTU_CHARM,
 )
 
 from ..shared import JujuStub as JujuStubBase
@@ -73,13 +79,14 @@ class TestS3IntegratorMinIOBackendExtension:
         def test_deploy_flow_sets_up_everything(
             self, extension: S3IntegratorMinIOBackendExtension, juju: JujuStub
         ) -> None:
-            # GIVEN a ready extension with the client downloaded
+            # GIVEN a k8s model and a ready extension with the client downloaded
+            juju.is_k8s = True
             extension.minio_client_file = Path("mc")
 
             # WHEN deploy_minio_s3_backend is called
             extension.deploy_minio_s3_backend("test-model", "s3-app")
 
-            # THEN minio is deployed, configured, waited on, authenticated, and connected
+            # THEN the minio charm is deployed and configured
             assert ("test-model", "minio", "s3-app-minio") in juju.deployed
 
             assert (
@@ -95,8 +102,10 @@ class TestS3IntegratorMinIOBackendExtension:
             assert ("test-model", "s3-app-minio", "0:10:00") in juju.waited_scaled
 
             assert juju.scp_calls == [
-                ("test-model", str(Path("mc").resolve()), "s3-app-minio/leader:/usr/local/bin/mc")
+                ("test-model", str(Path("mc").resolve()), f"s3-app-minio/leader:{MINIO_CLIENT_STAGING_PATH}")
             ]
+
+            assert any(f"sudo install -m 755 {MINIO_CLIENT_STAGING_PATH} {MINIO_CLIENT_PATH}" in cmd for _, _, cmd in juju.ssh_calls)
 
             assert any("/usr/local/bin/mc alias set local" in cmd for _, _, cmd in juju.ssh_calls)
             assert any("/usr/local/bin/mc mb" in cmd for _, _, cmd in juju.ssh_calls)
@@ -113,6 +122,52 @@ class TestS3IntegratorMinIOBackendExtension:
                 },
             ) in juju.configured_applications
 
+            assert (
+                "test-model",
+                "s3-app/leader",
+                "sync-s3-credentials",
+                {
+                    "access-key": MINIO_ACCESS_KEY,
+                    "secret-key": MINIO_SECRET_KEY,
+                },
+            ) in juju.actions
+
+        def test_deploy_flow_machine_uses_binary(
+            self, extension: S3IntegratorMinIOBackendExtension, juju: JujuStub
+        ) -> None:
+            # GIVEN a machine (non-k8s) model and a ready extension with binaries pre-downloaded
+            juju.is_k8s = False
+            extension.minio_client_file = Path("mc")
+            extension.minio_server_file = Path("minio")
+
+            # WHEN deploy_minio_s3_backend is called
+            extension.deploy_minio_s3_backend("test-model", "s3-app")
+
+            # THEN ubuntu is deployed (not the minio charm)
+            assert ("test-model", UBUNTU_CHARM, "s3-app-minio") in juju.deployed
+            assert ("test-model", "minio", "s3-app-minio") not in juju.deployed
+
+            # AND minio server binary is uploaded, installed, and started via systemd-run
+            assert ("test-model", str(Path("minio").resolve()), f"s3-app-minio/leader:{MINIO_SERVER_STAGING_PATH}") in juju.scp_calls
+            assert any(
+                f"sudo install -m 755 {MINIO_SERVER_STAGING_PATH} {MINIO_SERVER_PATH}" in cmd
+                for _, _, cmd in juju.ssh_calls
+            )
+            assert any(f"mkdir -p {MINIO_SERVER_DATA_DIR}" in cmd for _, _, cmd in juju.ssh_calls)
+            assert any(
+                "sudo systemd-run --unit=minio-server" in cmd and MINIO_SERVER_DATA_DIR in cmd
+                for _, _, cmd in juju.ssh_calls
+            )
+
+            # AND the minio charm access-key/secret-key config is NOT used
+            assert not any(
+                app == "s3-app-minio" and "access-key" in cfg
+                for _, app, cfg in juju.configured_applications
+            )
+
+            # AND mc client, bucket, and s3-integrator auth are set up as normal
+            assert ("test-model", str(Path("mc").resolve()), f"s3-app-minio/leader:{MINIO_CLIENT_STAGING_PATH}") in juju.scp_calls
+            assert any("/usr/local/bin/mc mb" in cmd for _, _, cmd in juju.ssh_calls)
             assert (
                 "test-model",
                 "s3-app/leader",
