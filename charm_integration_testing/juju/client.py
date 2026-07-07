@@ -8,6 +8,7 @@ from pathlib import Path
 from validators.base import ValidationResult
 
 from .backend import JujuBackend
+from .bundle_utils import strip_offers_from_bundle, strip_saas_from_bundle
 from .extension import JujuExtension
 from .models import (
     JujuApplicationInfo,
@@ -117,6 +118,51 @@ class JujuClient:
         # Call extensions
         for extension in self.extensions:
             extension.post_deploy(model)
+
+    def deploy_bundles(
+        self,
+        bundles: list[tuple[Path, str]],
+        tmp_dir: Path,
+    ) -> None:
+        """Deploy one or more bundles using a two-phase strategy that handles CMR and Juju 4+.
+
+        Phase 1 strips the ``saas`` section and any cross-model relations from each bundle so
+        that all applications and offers are created before any model tries to consume a remote
+        offer.  This avoids the deadlock that arises in bidirectional CMR where both models need
+        the other's offer to already exist.
+
+        Phase 2 re-deploys the full bundles so that saas consumption and cross-model relations
+        are established.  On Juju 4+, ``juju offer`` no longer supports updating an existing
+        offer (previously idempotent), so any offers that were created in phase 1 are removed
+        before the full bundle is re-deployed.
+
+        Args:
+            bundles: List of ``(bundle_path, model_uri)`` pairs where *model_uri* has the form
+                     ``controller:model-name``.
+            tmp_dir: Directory in which to write the stripped phase-1 bundle files.
+        """
+        juju4 = self.cli_version() >= JujuVersion(4, 0, 0)
+
+        # Phase 1: deploy apps and offers without consuming remote offers.
+        for i, (bundle_path, model_uri) in enumerate(bundles):
+            apps_only_yaml = strip_saas_from_bundle(bundle_path.read_text(encoding="utf-8"))
+            apps_only_path = tmp_dir / f"apps-only-bundle-{i}.yaml"
+            apps_only_path.write_text(apps_only_yaml, encoding="utf-8")
+            self.deploy_bundle_file(str(apps_only_path), model=model_uri)
+
+        # Phase 2: re-deploy full bundles to establish cross-model relations.
+        # On Juju 4+, re-creating an offer that already exists is not supported (not idempotent).
+        # The offers were created in phase 1, so strip them from the phase-2 bundles; the saas
+        # sections remain and Juju will establish the cross-model relations against the existing
+        # offers. This approach works for both asymmetric and symmetric CMR.
+        for i, (bundle_path, model_uri) in enumerate(bundles):
+            if juju4:
+                phase2_yaml = strip_offers_from_bundle(bundle_path.read_text(encoding="utf-8"))
+                phase2_path = tmp_dir / f"phase2-bundle-{i}.yaml"
+                phase2_path.write_text(phase2_yaml, encoding="utf-8")
+                self.deploy_bundle_file(str(phase2_path), model=model_uri)
+            else:
+                self.deploy_bundle_file(str(bundle_path), model=model_uri)
 
     def refresh_application(
         self,

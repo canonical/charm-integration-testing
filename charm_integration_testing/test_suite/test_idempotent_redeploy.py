@@ -22,6 +22,7 @@ def test_idempotent_redeploy(
     target_controller: str,
     neighbor_model: str | None,
     neighbor_controller: str | None,
+    tmp_path: Path,
 ) -> None:
     target_model_uri = f"{target_controller}:{model}"
     all_bundles: list[tuple[Path, str]] = [(target_bundle, target_model_uri)]
@@ -31,14 +32,14 @@ def test_idempotent_redeploy(
         assert neighbor_model is not None
         all_bundles.append((neighbor_bundle, f"{neighbor_controller}:{neighbor_model}"))
 
-    for bundle_path, model_uri in all_bundles:
-        # Redeploy the bundle; existing applications will be ignored
-        juju_client.deploy_bundle_file(str(bundle_path), model=model_uri)
-        juju_client.idle_for_period(model=model_uri, timeout=timedelta(minutes=15))
+    juju_client.deploy_bundles(all_bundles, tmp_path)
 
     assert juju_client.application_exists(
         target_application, model=target_model_uri
     ), f"Application '{target_application}' was not found in target model after redeploy"
+
+    for _, model_uri in all_bundles:
+        juju_client.idle_for_period(model=model_uri, timeout=timedelta(minutes=15))
 
     for _, model_uri in all_bundles:
         juju_client.validate_model(model=model_uri, level="simple")
