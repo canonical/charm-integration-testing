@@ -23,6 +23,8 @@ install_env = " ".join(
     ]
 )
 remote_validators_path = "/var/lib/juju/validators"
+venv_runner = f"{remote_validators_path}/venv/bin/run_validators"
+uv_bin = f"{remote_validators_path}/uv"
 uv_url = "https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-unknown-linux-musl.tar.gz"
 
 
@@ -52,10 +54,6 @@ class ValidatorInjectorExtension(JujuExtension):
         return results
 
     def _run_validators_on_unit(self, model: str, unit: str, level: str, is_k8s: bool = True) -> list[ValidationResult]:
-        # remote_validators_path is the destination directory on the unit (not self.validators_path, which is local)
-        validators_path = remote_validators_path
-        venv_runner = f"{validators_path}/venv/bin/run_validators"
-
         # Inject validators
         if self.juju.exec_unit(model, unit, f"test -f {venv_runner}", operator=is_k8s).return_code != 0:
             if not self.validators_path:
@@ -78,17 +76,13 @@ class ValidatorInjectorExtension(JujuExtension):
             raise ValueError("validators_path must be provided to inject validators")
         self.logger.debug(f"Injecting validators on unit {unit}")
 
-        # remote_validators_path is the destination directory on the unit (not self.validators_path, which is the local source)
-        validators_path = remote_validators_path
-        uv_bin = f"{validators_path}/uv"
-
         # Copy validators
-        self.logger.debug(f"[{unit}] copying validators to {validators_path}")
-        mkdir = f"mkdir -p {validators_path}"
+        self.logger.debug(f"[{unit}] copying validators to {remote_validators_path}")
+        mkdir = f"mkdir -p {remote_validators_path}"
         if not is_k8s:
-            mkdir = f"sudo {mkdir} && sudo chown -R $(id -u) {validators_path}"
+            mkdir = f"sudo {mkdir} && sudo chown -R $(id -u) {remote_validators_path}"
         self.juju.ssh(model, unit, mkdir)
-        self.juju.scp(model, str(self.validators_path.resolve()), f"{unit}:{validators_path}/packages")
+        self.juju.scp(model, str(self.validators_path.resolve()), f"{unit}:{remote_validators_path}/packages")
 
         # Copy uv binary
         uv_file = self._get_uv_file()
@@ -99,11 +93,11 @@ class ValidatorInjectorExtension(JujuExtension):
         for cmd, desc in [
             (f"chmod +x {uv_bin}", "make uv executable"),
             (
-                f"{install_env} {uv_bin} venv --python '>=3.10' {validators_path}/venv",
+                f"{install_env} {uv_bin} venv --python '>=3.10' {remote_validators_path}/venv",
                 "create venv with python 3.10+",
             ),
             (
-                f"{install_env} {uv_bin} pip install --python {validators_path}/venv {validators_path}/packages/*",
+                f"{install_env} {uv_bin} pip install --python {remote_validators_path}/venv {remote_validators_path}/packages/*",
                 "install validator packages",
             ),
         ]:
