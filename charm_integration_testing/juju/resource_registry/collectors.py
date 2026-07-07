@@ -7,7 +7,7 @@ from pathlib import Path
 
 from resource_registry.protocols import ResourceHandle
 
-from ..backend import JujuBackend
+from juju.backend import JujuBackend
 from .handles import JujuControllerHandle
 
 _JUJU_CRASHDUMP_TIMEOUT_SECONDS = 300
@@ -20,8 +20,8 @@ _SUBPROCESS_TIMEOUT_SECONDS = _JUJU_CRASHDUMP_TIMEOUT_SECONDS * 2
 class JujuCrashdumpCollector:
     """Collect controller logs using juju-crashdump or juju-k8s-crashdump.
 
-    Cloud type is determined per-controller by querying the backend, which selects
-    the appropriate log collection tool independently for each controller.
+    Cloud type and kubeconfig lookup are delegated to the backend, which is the
+    single source of truth for controller cloud configuration.
     """
 
     def __init__(
@@ -29,12 +29,10 @@ class JujuCrashdumpCollector:
         logger: logging.Logger,
         backend: JujuBackend,
         output_dir: Path | None = None,
-        kubeconfig_path: Path | None = None,
     ) -> None:
         self._logger = logger.getChild(type(self).__name__)
         self._backend = backend
         self._output_dir = output_dir
-        self._kubeconfig_path = kubeconfig_path
 
     def supports(self, handle: ResourceHandle) -> bool:
         return isinstance(handle, JujuControllerHandle)
@@ -48,20 +46,18 @@ class JujuCrashdumpCollector:
 
         output_dir = self._output_dir
         output_dir.mkdir(parents=True, exist_ok=True)
+        output_path = output_dir / f"{handle.path_segment}.tar.gz"
 
-        if self._backend.is_k8s_model(f"{handle.controller}:controller"):
-            if self._kubeconfig_path is None:
-                raise ValueError(f"Controller '{handle.controller}' is K8s-based but kubeconfig_path not available")
-            self._collect_k8s(handle.controller, output_dir / f"{handle.path_segment}.tar.gz")
+        kubeconfig = self._backend.get_controller_kubeconfig(handle.controller)
+        if kubeconfig is not None:
+            self._collect_k8s(handle.controller, output_path, kubeconfig)
         else:
-            self._collect_machine(handle.controller, output_dir / f"{handle.path_segment}.tar.gz")
+            self._collect_machine(handle.controller, output_path)
 
-    def _collect_k8s(self, controller: str, output_path: Path) -> None:
-        if self._kubeconfig_path is None:
-            raise ValueError("kubeconfig_path is required for K8s log collection")
+    def _collect_k8s(self, controller: str, output_path: Path, kubeconfig: Path) -> None:
         cmd = [
             "juju-k8s-crashdump",
-            str(self._kubeconfig_path.resolve()),
+            str(kubeconfig.resolve()),
             controller,
             "--output_path",
             str(output_path),

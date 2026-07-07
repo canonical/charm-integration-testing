@@ -379,3 +379,8 @@ class JujuBackend(ABC):
     def debug_log(self, model: str) -> str:
         raise NotImplementedError
 
+    @abstractmethod
+    def get_controller_kubeconfig(self, controller: str) -> Path | None:
+        """Return the kubeconfig path for a K8s controller's cloud, or None for machine controllers."""
+        raise NotImplementedError
+

@@ -50,22 +50,31 @@ from .wait import (
 
 class JubilantBackend(JujuCmdBackend):
     client: JubilantClient
-    _kubernetes_client: KubernetesClient | None
 
     default_timeout = timedelta(minutes=5)
     default_successes = 3
     default_delay = timedelta(seconds=1)
 
-    def __init__(self, client: JubilantClient | None = None, kubernetes_client: KubernetesClient | None = None):
+    def __init__(
+        self,
+        client: JubilantClient | None = None,
+        cloud_kubeconfigs: dict[str, pathlib.Path] | None = None,
+    ):
         super().__init__()
         self.client = client or JubilantClient()
-        self._kubernetes_client = kubernetes_client
+        self._cloud_kubeconfigs: dict[str, pathlib.Path] = cloud_kubeconfigs or {}
+        self._kubernetes_clients: dict[str, KubernetesClient] = {}
 
-    @property
-    def kubernetes_client(self) -> KubernetesClient:
-        if self._kubernetes_client is None:
-            raise RuntimeError("No valid KubernetesClient was received. Is this a Kubernetes environment?")
-        return self._kubernetes_client
+    def get_kubernetes_client(self, cloud: str) -> KubernetesClient:
+        """Return a KubernetesClient for the given cloud, constructing and caching it on first use."""
+        if cloud not in self._kubernetes_clients:
+            path = self._cloud_kubeconfigs.get(cloud)
+            if path is None:
+                raise RuntimeError(f"No kubeconfig configured for cloud '{cloud}'")
+            self._kubernetes_clients[cloud] = KubernetesClient(
+                KubernetesBackend.k8s_client(kubeconfig=path)
+            )
+        return self._kubernetes_clients[cloud]
 
     @warn_performance(category=JujuStatusPerformanceWarning, threshold=timedelta(seconds=5))
     def status(self, model: str) -> jubilant.Status:
@@ -553,20 +562,42 @@ class JubilantBackend(JujuCmdBackend):
     def is_k8s_model(self, model: str) -> bool:
         return self.client.model(model).show_model().type == "kubernetes"
 
+    def get_controller_kubeconfig(self, controller: str) -> pathlib.Path | None:
+        """Return the kubeconfig path for a K8s controller's cloud, or None for machine controllers.
+
+        Cloud type is determined by querying Juju (show_model().type), never by
+        whether a kubeconfig was supplied. Returning None unambiguously means the
+        controller is machine-based. Raises if the controller is K8s-based but no
+        kubeconfig is configured for its cloud.
+        """
+        model_info = self.client.model(f"{controller}:controller").show_model()
+        if model_info.type != "kubernetes":
+            return None
+        cloud = model_info.cloud
+        path = self._cloud_kubeconfigs.get(cloud)
+        if path is None:
+            raise ValueError(
+                f"Controller '{controller}' is on K8s cloud '{cloud}' but no kubeconfig is configured for it. "
+                f"Set KUBECONFIG_{cloud.replace('-', '_')} to the kubeconfig path."
+            )
+        return path
+
     def reboot_model_controller(self, model: str) -> None:
         controller_name = self.status(model).model.controller
         controller_model = f"{controller_name}:controller"
+        model_info = self.client.model(controller_model).show_model()
 
-        if not self.is_k8s_model(model=controller_model):
+        if model_info.type != "kubernetes":
             # XXX(mbenzan): In the future, we might want to implement a rolling restart here too.
             # reboot the leader
             self.ssh(model=controller_model, application="controller/leader", command="sudo reboot")
         else:
+            k8s = self.get_kubernetes_client(model_info.cloud)
             controller_k8s_namespace = f"controller-{controller_name}"
-            self.kubernetes_client.restart_statefulset(
+            k8s.restart_statefulset(
                 namespace=controller_k8s_namespace, statefulset_name="controller"
             )
-            self.kubernetes_client.wait_for_statefulset_restart(
+            k8s.wait_for_statefulset_restart(
                 namespace=controller_k8s_namespace, statefulset_name="controller", timeout_seconds=300
             )
 
