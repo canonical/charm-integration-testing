@@ -88,7 +88,7 @@ class CrashdumpBackendStub(NullJujuBackend):
         if controller not in self.k8s_controllers:
             return None
         if self.kubeconfig is None:
-            raise ValueError(f"Controller '{controller}' is K8s-based but no kubeconfig_path is configured")
+            raise ValueError(f"Controller '{controller}' is K8s-based but no kubeconfig is configured")
         return self.kubeconfig
 
 
@@ -191,6 +191,17 @@ class TestJujuCrashdumpCollectorMachine:
         failed = subprocess.CompletedProcess(args=["juju-crashdump"], returncode=1, stdout="", stderr="err")
         with patch("subprocess.run", return_value=failed):
             with pytest.raises(subprocess.CalledProcessError):
+                collector.collect(handle)
+
+    def test_raises_when_archive_not_created(self, tmp_path: Path) -> None:
+        # GIVEN juju-crashdump exits 0 but does not write the expected archive
+        backend = CrashdumpBackendStub()
+        collector = JujuCrashdumpCollector(LoggerStub(), backend, output_dir=tmp_path)
+        handle = JujuControllerHandle(controller="my-ctrl")
+
+        success = subprocess.CompletedProcess(args=["juju-crashdump"], returncode=0, stdout="", stderr="")
+        with patch("subprocess.run", return_value=success):
+            with pytest.raises(FileNotFoundError, match="my-ctrl"):
                 collector.collect(handle)
 
     def test_raises_when_tool_not_found(self, tmp_path: Path) -> None:
