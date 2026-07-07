@@ -22,13 +22,8 @@ install_env = " ".join(
         }.items()
     ]
 )
-remote_validators_path_k8s = "/var/lib/juju/validators"
-remote_validators_path_machine = "/var/lib/validators"
+remote_validators_path = "/var/lib/juju/validators"
 uv_url = "https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-unknown-linux-musl.tar.gz"
-
-
-def _validators_path(is_k8s: bool) -> str:
-    return remote_validators_path_k8s if is_k8s else remote_validators_path_machine
 
 
 class ValidatorInjectorExtension(JujuExtension):
@@ -57,8 +52,8 @@ class ValidatorInjectorExtension(JujuExtension):
         return results
 
     def _run_validators_on_unit(self, model: str, unit: str, level: str, is_k8s: bool = True) -> list[ValidationResult]:
-        # validators_path is the remote directory on the unit (not self.validators_path, which is local)
-        validators_path = _validators_path(is_k8s)
+        # remote_validators_path is the destination directory on the unit (not self.validators_path, which is local)
+        validators_path = remote_validators_path
         venv_runner = f"{validators_path}/venv/bin/run_validators"
 
         # Inject validators
@@ -83,8 +78,8 @@ class ValidatorInjectorExtension(JujuExtension):
             raise ValueError("validators_path must be provided to inject validators")
         self.logger.debug(f"Injecting validators on unit {unit}")
 
-        # validators_path is the remote directory on the unit (not self.validators_path, which is the local source)
-        validators_path = _validators_path(is_k8s)
+        # remote_validators_path is the destination directory on the unit (not self.validators_path, which is the local source)
+        validators_path = remote_validators_path
         uv_bin = f"{validators_path}/uv"
 
         # Copy validators
