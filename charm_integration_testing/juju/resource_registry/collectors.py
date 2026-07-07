@@ -8,6 +8,7 @@ from pathlib import Path
 from resource_registry.protocols import ResourceHandle
 
 from juju.backend import JujuBackend
+
 from .handles import JujuControllerHandle
 
 _JUJU_CRASHDUMP_TIMEOUT_SECONDS = 300

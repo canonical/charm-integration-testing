@@ -29,7 +29,7 @@ from juju import (
     warn_performance,
 )
 from juju_cmd import JujuCmdBackend
-from kubernetes_client import KubernetesClient
+from kubernetes_client import KubernetesBackend, KubernetesClient
 from tenacity import retry, stop_after_attempt, wait_fixed
 
 from validators.base.validator import ValidationResult
