@@ -101,16 +101,19 @@ Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
 
 ## Step 4 — Post replies
 
-Reply to each inline comment using the `gh api` tool (not `curl` — `curl` returns
-404 for this endpoint in this environment):
+**Reply to each inline comment individually.** Do not post a single comprehensive PR comment in place of individual replies.
+
+Reply to each inline comment using the `gh api` tool with stdin input:
 
 ```bash
-gh api repos/canonical/charm-integration-testing/pulls/comments/<comment_id>/replies \
-  -X POST --field body="<your reply>
-
-> *This comment was posted by an AI assistant (GitHub Copilot) on behalf of the repository maintainer.*" \
-  | python3 -c "import sys,json; d=json.load(sys.stdin); print('reply id:', d.get('id','ERROR'), d.get('message',''))"
+gh api -X POST repos/canonical/charm-integration-testing/pulls/comments/<comment_id>/replies --input /dev/stdin <<EOF
+{
+  "body": "<your reply>\n\n> *This comment was posted by an AI assistant (GitHub Copilot) on behalf of the repository maintainer.*"
+}
+EOF
 ```
+
+Verify each reply by checking the returned `id` field is non-empty in the JSON output.
 
 For general PR comments, `curl` works fine:
 
@@ -121,8 +124,6 @@ curl -s -X POST \
   "https://api.github.com/repos/canonical/charm-integration-testing/issues/<number>/comments" \
   -d '{"body": "<your reply>\n\n> *This comment was posted by an AI assistant (GitHub Copilot) on behalf of the repository maintainer.*"}'
 ```
-
-Verify each reply by checking the returned `id` field is non-empty.
 
 ---
 

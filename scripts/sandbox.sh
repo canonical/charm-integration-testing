@@ -40,6 +40,9 @@ fi
 
 VM_NAME="${SANDBOX_VM:-charm-qa-sandbox}"
 VM_MOUNT="${SANDBOX_MOUNT:-/project}"
+VM_CPUS="${SANDBOX_CPUS:-4}"
+VM_MEMORY="${SANDBOX_MEMORY:-8G}"
+VM_DISK="${SANDBOX_DISK:-40G}"
 [[ "$VM_MOUNT" = /* ]] || { echo "ERROR: SANDBOX_MOUNT must be an absolute path: $VM_MOUNT" >&2; exit 1; }
 [[ "$VM_MOUNT" != *"'"* ]] || { echo "ERROR: SANDBOX_MOUNT must not contain single quotes: $VM_MOUNT" >&2; exit 1; }
 [[ "$VM_MOUNT" != *":"* ]] || { echo "ERROR: SANDBOX_MOUNT must not contain colons: $VM_MOUNT" >&2; exit 1; }
@@ -62,7 +65,8 @@ _is_mounted() {
 _usage() {
     cat <<'EOF'
 Usage:
-  scripts/sandbox.sh up                        Create or resume the VM
+  scripts/sandbox.sh up [--cpus N] [--memory SIZE] [--disk SIZE]
+                                               Create or resume the VM
   scripts/sandbox.sh down                      Stop the VM (preserves state)
   scripts/sandbox.sh destroy                   Delete the VM permanently
   scripts/sandbox.sh shell                     Open a shell inside the VM
@@ -73,6 +77,9 @@ Usage:
 Environment (.env keys):
   SANDBOX_VM             VM name override (default: charm-qa-sandbox)
   SANDBOX_MOUNT          VM-side mount path (default: /project)
+  SANDBOX_CPUS           vCPU count for new VMs (default: 4)
+  SANDBOX_MEMORY         RAM for new VMs, e.g. 8G or 16G (default: 8G)
+  SANDBOX_DISK           Disk size for new VMs, e.g. 40G or 80G (default: 40G)
   GITHUB_TOKEN           Fine-grained PAT for gh CLI inside the VM
   COPILOT_GITHUB_TOKEN   Copilot AI auth token (default: gh auth token)
   COPILOT_MODEL          Copilot model (default: sonnet-4.6)
@@ -83,6 +90,11 @@ Inside an interactive session use skill slash commands:
   /review-pr             Review and address pull request feedback
   /setup-k8s             Set up Canonical k8s substrate
   /setup-lxd             Set up LXD substrate
+
+VM resource flags (only applied when the VM does not yet exist):
+  --cpus N               vCPU count (default: SANDBOX_CPUS or 4)
+  --memory SIZE          RAM, e.g. 16G (default: SANDBOX_MEMORY or 8G)
+  --disk SIZE            Disk, e.g. 80G (default: SANDBOX_DISK or 40G)
 EOF
 }
 
@@ -90,17 +102,55 @@ EOF
 # Subcommand: up
 # ---------------------------------------------------------------------------
 _cmd_up() {
+    # Parse optional resource overrides; CLI flags take precedence over .env / defaults.
+    local cpus="$VM_CPUS" memory="$VM_MEMORY" disk="$VM_DISK"
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --cpus)
+                if [ $# -lt 2 ] || [ -z "${2:-}" ]; then
+                    echo "Error: --cpus requires a value" >&2
+                    exit 1
+                fi
+                cpus="$2"
+                shift 2
+                ;;
+            --memory)
+                if [ $# -lt 2 ] || [ -z "${2:-}" ]; then
+                    echo "Error: --memory requires a value" >&2
+                    exit 1
+                fi
+                memory="$2"
+                shift 2
+                ;;
+            --disk)
+                if [ $# -lt 2 ] || [ -z "${2:-}" ]; then
+                    echo "Error: --disk requires a value" >&2
+                    exit 1
+                fi
+                disk="$2"
+                shift 2
+                ;;
+            --)        shift; break ;;
+            -*)
+                echo "Unknown option: $1" >&2
+                echo "Run scripts/sandbox.sh --help for usage." >&2
+                exit 1
+                ;;
+            *) break ;;
+        esac
+    done
+
     echo "==> Checking VM state..."
     state=$(_vm_state)
 
     case "$state" in
         absent)
-            echo "==> Launching $VM_NAME..."
+            echo "==> Launching $VM_NAME (cpus=$cpus memory=$memory disk=$disk)..."
             multipass launch 24.04 \
                 --name "$VM_NAME" \
-                --cpus 4 \
-                --memory 8G \
-                --disk 40G \
+                --cpus "$cpus" \
+                --memory "$memory" \
+                --disk "$disk" \
                 --cloud-init "$DEV_DIR/substrate.yaml" \
                 --timeout 1800
             ;;
@@ -393,7 +443,8 @@ EOF
 # ---------------------------------------------------------------------------
 case "${1:-}" in
     up)
-        _cmd_up
+        shift
+        _cmd_up "$@"
         ;;
     down)
         _cmd_down
