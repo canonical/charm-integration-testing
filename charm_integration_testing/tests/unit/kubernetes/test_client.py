@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from kubernetes.client import ApiException, V1ObjectMeta, V1Pod, V1PodStatus  # type: ignore[import-untyped]
-from kubernetes_client import KubernetesBackend, KubernetesClient, PodStatus, PvcSnapshot
+from kubernetes_client import KubernetesBackend, KubernetesClient, PodStatus
 
 
 def create_sample_pod(
@@ -790,7 +790,6 @@ class TestKubernetesClientInit:
             # returns without raising once actual counts reach the desired replica count
 
 
-
 @dataclass
 class V1PvcSpecStub:
     storage_class_name: str | None
@@ -820,7 +819,7 @@ def create_pvc_stub(
     requested_storage: str | None = "1Gi",
     phase: str | None = "Bound",
 ) -> V1PvcStub:
-    """Helper to create a PVC stub for testing get_model_pvcs."""
+    """Helper to create a PVC stub for testing list_model_pvcs."""
     return V1PvcStub(
         metadata=V1ObjectMeta(name=name),
         spec=V1PvcSpecStub(
@@ -831,28 +830,21 @@ def create_pvc_stub(
     )
 
 
-class TestGetModelPvcs:
-    """Test suite for get_model_pvcs method."""
+class TestListModelPvcs:
+    """Test suite for list_model_pvcs method."""
 
-    def test_maps_pvc_fields_to_snapshot(self) -> None:
-        # GIVEN a namespace containing a single PVC
-        pvc = create_pvc_stub(name="data-postgresql-0", storage_class="csi-cephfs", requested_storage="1Gi")
-        backend_stub = KubernetesBackendStub(list_namespaced_pvcs_result=V1PvcListStub(items=[pvc]))
+    def test_returns_raw_pvcs_from_namespace(self) -> None:
+        # GIVEN a namespace containing two PVCs
+        first = create_pvc_stub(name="data-postgresql-0")
+        second = create_pvc_stub(name="data-postgresql-1")
+        backend_stub = KubernetesBackendStub(list_namespaced_pvcs_result=V1PvcListStub(items=[first, second]))
         client = KubernetesClient(backend=backend_stub)
 
         # WHEN listing the model's PVCs
-        snapshots = client.get_model_pvcs(model="test-model")
+        pvcs = client.list_model_pvcs(model="test-model")
 
-        # THEN each field is mapped onto a PvcSnapshot
-        assert snapshots == [
-            PvcSnapshot(
-                name="data-postgresql-0",
-                namespace="test-model",
-                storage_class="csi-cephfs",
-                requested_storage="1Gi",
-                phase="Bound",
-            )
-        ]
+        # THEN the raw API objects are returned unchanged
+        assert pvcs == [first, second]
 
     def test_empty_namespace_returns_empty_list(self) -> None:
         # GIVEN a namespace with no PVCs
@@ -860,24 +852,10 @@ class TestGetModelPvcs:
         client = KubernetesClient(backend=backend_stub)
 
         # WHEN listing the model's PVCs
-        snapshots = client.get_model_pvcs(model="test-model")
+        pvcs = client.list_model_pvcs(model="test-model")
 
         # THEN the result is empty
-        assert snapshots == []
-
-    def test_missing_storage_class_and_request_default_to_empty(self) -> None:
-        # GIVEN a PVC without a storage class or storage request
-        pvc = create_pvc_stub(storage_class=None, requested_storage=None, phase=None)
-        backend_stub = KubernetesBackendStub(list_namespaced_pvcs_result=V1PvcListStub(items=[pvc]))
-        client = KubernetesClient(backend=backend_stub)
-
-        # WHEN listing the model's PVCs
-        snapshots = client.get_model_pvcs(model="test-model")
-
-        # THEN the optional fields default to empty strings
-        assert snapshots[0].storage_class == ""
-        assert snapshots[0].requested_storage == ""
-        assert snapshots[0].phase == ""
+        assert pvcs == []
 
     def test_api_exception_propagates(self) -> None:
         # GIVEN a backend that raises on listing PVCs
@@ -886,4 +864,4 @@ class TestGetModelPvcs:
 
         # WHEN listing the model's PVCs THEN the ApiException propagates
         with pytest.raises(ApiException):
-            client.get_model_pvcs(model="test-model")
+            client.list_model_pvcs(model="test-model")

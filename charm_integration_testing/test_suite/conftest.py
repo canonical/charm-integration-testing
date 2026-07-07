@@ -34,10 +34,10 @@ from juju.resource_registry import (
     JujuResourceRegistryExtension,
 )
 from juju_jubilant import JubilantBackend
-from kubernetes.client import ApiException  # type: ignore[import-untyped]
 from kubernetes_client import KubernetesBackend, KubernetesClient
 from pytest import StashKey
 from resource_registry import ResourceRegistry, ResourceTeardownWarning
+from resource_tracking import StateResourceTracker
 from test_observer_client import TestObserverClient as TestObserverAPIClient
 from test_observer_client import TestObserverClientError
 from utils import generate_juju_name, normalize_string, normalize_string_multiline
@@ -47,7 +47,6 @@ from utils.juju_releases import (
 )
 
 from bundle_builder_x import UncompletableBundleError
-from test_suite.resource_tracking import StateResourceTracker
 from test_suite.scheduler.markers import read_state_marker
 from test_suite.scheduler.states import STATES_WITHOUT_EXISTING_CONTROLLER, STATES_WITHOUT_EXISTING_MODEL, State
 
@@ -854,7 +853,7 @@ def track_state_resources(
     state_resource_tracker: StateResourceTracker,
     logger: logging.Logger,
 ) -> Iterator[None]:
-    """Snapshot PVCs per scheduler state after each passing state-marked test.
+    """Snapshot resources per scheduler state after each passing state-marked test.
 
     Collection is deliberately best-effort and never fails the test: the
     resulting discrepancies are reported separately at the end of the suite.
@@ -875,16 +874,7 @@ def track_state_resources(
     if marker is None:
         return
 
-    for handle in session_resource_registry.registered_handles():
-        if not isinstance(handle, JujuModelHandle):
-            continue
-        try:
-            snapshots = kubernetes_client.get_model_pvcs(model=handle.model)
-        except ApiException as exc:
-            # Namespace may not exist for non-k8s models; skip silently at debug level.
-            logger.debug(f"Skipping PVC snapshot for model '{handle.model}': {exc}")
-            continue
-        state_resource_tracker.record(marker.provides, handle.model, frozenset(snapshots))
+    state_resource_tracker.collect(marker.provides, kubernetes_client, session_resource_registry, logger)
 
 
 @pytest.fixture
