@@ -20,7 +20,13 @@ from extensions import (
     UnsealVaultK8sJujuExtension,
     ValidatorInjectorExtension,
 )
-from juju import JujuBackend, JujuClient, JujuValidationError, JujuVersion, JujuWaitTimeoutError
+from juju import (
+    JujuBackend,
+    JujuClient,
+    JujuValidationError,
+    JujuVersion,
+    JujuWaitTimeoutError,
+)
 from juju.resource_registry import (
     JujuControllerHandle,
     JujuCrashdumpCollector,
@@ -45,6 +51,7 @@ from test_suite.scheduler.states import STATES_WITHOUT_EXISTING_CONTROLLER, STAT
 pytest_plugins = [
     "test_suite.scheduler.plugin",
     "test_suite.fixtures.controller_spec",
+    "test_suite.fixtures.integration_spec",
 ]
 
 
