@@ -52,7 +52,7 @@ class S3IntegratorMinIOBackendExtension(JujuExtension, ABC):
         logger: logging.Logger,
         minio_client_file: Path | None = None,
         minio_server_file: Path | None = None,
-    ):
+    ) -> None:
         self.juju = juju
         self.logger = logger
         self.minio_client_file = minio_client_file
