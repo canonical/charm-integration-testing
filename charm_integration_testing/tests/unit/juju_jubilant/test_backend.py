@@ -1435,7 +1435,7 @@ class TestJubilantBackend:
 
     class TestUnitIp:
         class Unit:
-            def __init__(self, address: str = '', public_address: str = '', leader: bool = False) -> None:
+            def __init__(self, address: str = "", public_address: str = "", leader: bool = False) -> None:
                 self.address = address
                 self.public_address = public_address
                 self.leader = leader
@@ -1456,7 +1456,9 @@ class TestJubilantBackend:
                     "machine-app": TestJubilantBackend.TestUnitIp.AppStatus(
                         {
                             "machine-app/0": TestJubilantBackend.TestUnitIp.Unit(public_address="10.1.0.1"),
-                            "machine-app/1": TestJubilantBackend.TestUnitIp.Unit(public_address="10.1.0.2", leader=True),
+                            "machine-app/1": TestJubilantBackend.TestUnitIp.Unit(
+                                public_address="10.1.0.2", leader=True
+                            ),
                         }
                     ),
                 }
