@@ -47,7 +47,7 @@ class BootstrapKillBackendStub(NullJujuBackend):
         controller: str,
         controller_constraints: dict[str, str],
         bootstrap_configuration: dict[str, str],
-        metadata_source: Any | None = None,
+        metadata_source: None = None,
         agent_version: str | None = None,
     ) -> None:
         self.bootstrapped.append(controller)
@@ -67,6 +67,18 @@ class BootstrapKillBackendStub(NullJujuBackend):
 
     def migrate_model(self, model_name: str, source_controller: str, target_controller: str) -> None:
         pass
+
+
+@dataclass
+class CloudTypeBackendStub(NullJujuBackend):
+    """Backend stub that controls is_k8s_model return value for collector tests."""
+
+    k8s_controllers: set[str] = field(default_factory=set)
+
+    def is_k8s_model(self, model: str) -> bool:
+        # model is "<controller>:controller"; extract the controller name
+        controller = model.split(":")[0]
+        return controller in self.k8s_controllers
 
 
 # ---------------------------------------------------------------------------
@@ -104,7 +116,7 @@ class TestJujuControllerHandle:
 
 class TestJujuCrashdumpCollectorSupports:
     def test_supports_controller_handle(self) -> None:
-        collector = JujuCrashdumpCollector(LoggerStub(), output_dir=None)
+        collector = JujuCrashdumpCollector(LoggerStub(), CloudTypeBackendStub(), output_dir=None)
         assert collector.supports(JujuControllerHandle(controller="ctrl")) is True
 
     def test_does_not_support_other_handle(self) -> None:
@@ -124,7 +136,7 @@ class TestJujuCrashdumpCollectorSupports:
             def path_segment(self) -> str:
                 return self.name
 
-        collector = JujuCrashdumpCollector(LoggerStub(), output_dir=None)
+        collector = JujuCrashdumpCollector(LoggerStub(), CloudTypeBackendStub(), output_dir=None)
         assert collector.supports(OtherHandle("other")) is False
 
 
@@ -132,100 +144,63 @@ class TestJujuCrashdumpCollectorMachine:
     def test_runs_juju_crashdump(self, tmp_path: Path) -> None:
         # GIVEN a machine cloud collector
         logger = LoggerStub()
-        collector = JujuCrashdumpCollector(logger, output_dir=tmp_path, kubeconfig_path=None)
+        backend = CloudTypeBackendStub()  # my-ctrl not in k8s_controllers -> machine
+        collector = JujuCrashdumpCollector(logger, backend, output_dir=tmp_path, kubeconfig_path=None)
         handle = JujuControllerHandle(controller="my-ctrl")
 
-        # Mock "juju show-controller" to return machine cloud
-        show_ctrl_result = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout='{"my-ctrl": {"details": {"cloud-name": "localhost"}}}', stderr=""
-        )
-        # Mock juju-crashdump to succeed
-        crashdump_result = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
-
-        def run_side_effect(*args: Any, **kwargs: Any) -> subprocess.CompletedProcess[str]:
-            if "show-controller" in args[0]:
-                return show_ctrl_result
-            # Simulate juju-crashdump creating the output file
-            # Find the --unit-dump-location argument and create the file
+        # WHEN juju-crashdump succeeds and creates the output file
+        def run_side_effect(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
             cmd = args[0]
+            assert isinstance(cmd, list)
             if "--unit-dump-location" in cmd:
-                idx = cmd.index("--unit-dump-location")
-                output_path = Path(cmd[idx + 1])
-                output_path.touch()
-            return crashdump_result
+                Path(cmd[cmd.index("--unit-dump-location") + 1]).touch()
+            return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
 
         with patch("subprocess.run", side_effect=run_side_effect) as mock_run:
             collector.collect(handle)
 
-        # Verify both calls were made
-        assert mock_run.call_count == 2
-        # Verify juju-crashdump was called (second call)
-        cmd = mock_run.call_args_list[1][0][0]
+        # THEN juju-crashdump was called once
+        assert mock_run.call_count == 1
+        cmd = mock_run.call_args[0][0]
         assert cmd[0] == "juju-crashdump"
         assert "my-ctrl:controller" in cmd
 
     def test_raises_on_nonzero_exit(self, tmp_path: Path) -> None:
         # GIVEN crashdump exits non-zero
-        collector = JujuCrashdumpCollector(LoggerStub(), output_dir=tmp_path, kubeconfig_path=None)
+        backend = CloudTypeBackendStub()
+        collector = JujuCrashdumpCollector(LoggerStub(), backend, output_dir=tmp_path, kubeconfig_path=None)
         handle = JujuControllerHandle(controller="my-ctrl")
 
-        show_ctrl_result = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout='{"my-ctrl": {"details": {"cloud-name": "localhost"}}}', stderr=""
-        )
         failed = subprocess.CompletedProcess(args=["juju-crashdump"], returncode=1, stdout="", stderr="err")
-
-        call_count = [0]
-
-        def run_side_effect(*args: Any, **kwargs: Any) -> subprocess.CompletedProcess[str]:
-            call_count[0] += 1
-            if "show-controller" in args[0]:
-                return show_ctrl_result
-            return failed
-
-        with patch("subprocess.run", side_effect=run_side_effect):
+        with patch("subprocess.run", return_value=failed):
             with pytest.raises(subprocess.CalledProcessError):
                 collector.collect(handle)
 
     def test_raises_when_tool_not_found(self, tmp_path: Path) -> None:
         # GIVEN juju-crashdump is not installed
-        collector = JujuCrashdumpCollector(LoggerStub(), output_dir=tmp_path, kubeconfig_path=None)
+        backend = CloudTypeBackendStub()
+        collector = JujuCrashdumpCollector(LoggerStub(), backend, output_dir=tmp_path, kubeconfig_path=None)
         handle = JujuControllerHandle(controller="my-ctrl")
 
-        show_ctrl_result = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout='{"my-ctrl": {"details": {"cloud-name": "localhost"}}}', stderr=""
-        )
-
-        def run_side_effect(*args: Any, **kwargs: Any) -> subprocess.CompletedProcess[str]:
-            if "show-controller" in args[0]:
-                return show_ctrl_result
-            raise FileNotFoundError("juju-crashdump not found")
-
-        with patch("subprocess.run", side_effect=run_side_effect):
+        with patch("subprocess.run", side_effect=FileNotFoundError("juju-crashdump not found")):
             with pytest.raises(FileNotFoundError):
                 collector.collect(handle)
 
     def test_raises_on_timeout(self, tmp_path: Path) -> None:
         # GIVEN crashdump times out
-        collector = JujuCrashdumpCollector(LoggerStub(), output_dir=tmp_path, kubeconfig_path=None)
+        backend = CloudTypeBackendStub()
+        collector = JujuCrashdumpCollector(LoggerStub(), backend, output_dir=tmp_path, kubeconfig_path=None)
         handle = JujuControllerHandle(controller="my-ctrl")
 
-        show_ctrl_result = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout='{"my-ctrl": {"details": {"cloud-name": "localhost"}}}', stderr=""
-        )
-
-        def run_side_effect(*args: Any, **kwargs: Any) -> subprocess.CompletedProcess[str]:
-            if "show-controller" in args[0]:
-                return show_ctrl_result
-            raise subprocess.TimeoutExpired(cmd="juju-crashdump", timeout=600)
-
-        with patch("subprocess.run", side_effect=run_side_effect):
+        with patch("subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="juju-crashdump", timeout=600)):
             with pytest.raises(subprocess.TimeoutExpired):
                 collector.collect(handle)
 
     def test_skips_when_output_dir_is_none(self) -> None:
         # GIVEN a collector with no output_dir configured
         logger = LoggerStub()
-        collector = JujuCrashdumpCollector(logger, output_dir=None, kubeconfig_path=None)
+        backend = CloudTypeBackendStub()
+        collector = JujuCrashdumpCollector(logger, backend, output_dir=None, kubeconfig_path=None)
         handle = JujuControllerHandle(controller="my-ctrl")
 
         with patch("subprocess.run") as mock_run:
@@ -239,28 +214,17 @@ class TestJujuCrashdumpCollectorK8s:
         # GIVEN a K8s controller collector
         logger = LoggerStub()
         kubeconfig = Path("/tmp/kubeconfig")
-        collector = JujuCrashdumpCollector(logger, output_dir=tmp_path, kubeconfig_path=kubeconfig)
+        backend = CloudTypeBackendStub(k8s_controllers={"my-ctrl"})
+        collector = JujuCrashdumpCollector(logger, backend, output_dir=tmp_path, kubeconfig_path=kubeconfig)
         handle = JujuControllerHandle(controller="my-ctrl")
 
-        # Mock "juju show-controller" to return K8s cloud
-        show_ctrl_result = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout='{"my-ctrl": {"details": {"cloud-name": "local-k8s"}}}', stderr=""
-        )
-        # Mock juju-k8s-crashdump to succeed
         k8s_result = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
-
-        def run_side_effect(*args: Any, **kwargs: Any) -> subprocess.CompletedProcess[str]:
-            if "show-controller" in args[0]:
-                return show_ctrl_result
-            return k8s_result
-
-        with patch("subprocess.run", side_effect=run_side_effect) as mock_run:
+        with patch("subprocess.run", return_value=k8s_result) as mock_run:
             collector.collect(handle)
 
-        # Verify both calls were made
-        assert mock_run.call_count == 2
-        # Verify juju-k8s-crashdump was called (second call)
-        cmd = mock_run.call_args_list[1][0][0]
+        # THEN juju-k8s-crashdump was called once
+        assert mock_run.call_count == 1
+        cmd = mock_run.call_args[0][0]
         assert cmd[0] == "juju-k8s-crashdump"
         assert str(kubeconfig.resolve()) in cmd
         assert "my-ctrl" in cmd
@@ -268,19 +232,11 @@ class TestJujuCrashdumpCollectorK8s:
     def test_raises_when_tool_not_found(self, tmp_path: Path) -> None:
         # GIVEN juju-k8s-crashdump is not installed
         kubeconfig = Path("/tmp/kubeconfig")
-        collector = JujuCrashdumpCollector(LoggerStub(), output_dir=tmp_path, kubeconfig_path=kubeconfig)
+        backend = CloudTypeBackendStub(k8s_controllers={"my-ctrl"})
+        collector = JujuCrashdumpCollector(LoggerStub(), backend, output_dir=tmp_path, kubeconfig_path=kubeconfig)
         handle = JujuControllerHandle(controller="my-ctrl")
 
-        show_ctrl_result = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout='{"my-ctrl": {"details": {"cloud-name": "local-k8s"}}}', stderr=""
-        )
-
-        def run_side_effect(*args: Any, **kwargs: Any) -> subprocess.CompletedProcess[str]:
-            if "show-controller" in args[0]:
-                return show_ctrl_result
-            raise FileNotFoundError("juju-k8s-crashdump not found")
-
-        with patch("subprocess.run", side_effect=run_side_effect):
+        with patch("subprocess.run", side_effect=FileNotFoundError("juju-k8s-crashdump not found")):
             with pytest.raises(FileNotFoundError):
                 collector.collect(handle)
 

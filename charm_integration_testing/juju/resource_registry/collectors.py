@@ -1,13 +1,13 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-import json
 import logging
 import subprocess  # nosec B404
 from pathlib import Path
 
 from resource_registry.protocols import ResourceHandle
 
+from ..backend import JujuBackend
 from .handles import JujuControllerHandle
 
 _JUJU_CRASHDUMP_TIMEOUT_SECONDS = 300
@@ -20,48 +20,24 @@ _SUBPROCESS_TIMEOUT_SECONDS = _JUJU_CRASHDUMP_TIMEOUT_SECONDS * 2
 class JujuCrashdumpCollector:
     """Collect controller logs using juju-crashdump or juju-k8s-crashdump.
 
-    Per-controller cloud detection: queries 'juju show-controller' to determine
-    whether each controller is Kubernetes-based or machine-based, then selects
+    Cloud type is determined per-controller by querying the backend, which selects
     the appropriate log collection tool independently for each controller.
     """
 
     def __init__(
         self,
         logger: logging.Logger,
+        backend: JujuBackend,
         output_dir: Path | None = None,
         kubeconfig_path: Path | None = None,
     ) -> None:
         self._logger = logger.getChild(type(self).__name__)
+        self._backend = backend
         self._output_dir = output_dir
         self._kubeconfig_path = kubeconfig_path
 
     def supports(self, handle: ResourceHandle) -> bool:
         return isinstance(handle, JujuControllerHandle)
-
-    def _is_k8s_controller(self, controller: str) -> bool:
-        """Determine if a controller is Kubernetes-based or machine-based.
-
-        Queries juju show-controller to detect the cloud type. Falls back to checking
-        kubeconfig availability if the query fails.
-        """
-        try:
-            result = subprocess.run(  # nosec B603, B607
-                ["juju", "show-controller", controller, "--format", "json"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            if result.returncode == 0:
-                data = json.loads(result.stdout)
-                controller_info = data.get(controller, {})
-                cloud = controller_info.get("details", {}).get("cloud-name", "")
-                # List of Kubernetes cloud names that Juju uses
-                return cloud.lower() in ["local-k8s", "kubernetes", "microk8s"]
-        except Exception as e:
-            self._logger.debug(f"Error querying controller type for {controller}: {e}")
-
-        # Fallback: assume k8s if kubeconfig is available, otherwise machine
-        return self._kubeconfig_path is not None
 
     def collect(self, handle: ResourceHandle) -> None:
         if not isinstance(handle, JujuControllerHandle):
@@ -73,8 +49,7 @@ class JujuCrashdumpCollector:
         output_dir = self._output_dir
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        # Determine the actual cloud type of this specific controller
-        if self._is_k8s_controller(handle.controller):
+        if self._backend.is_k8s_model(f"{handle.controller}:controller"):
             if self._kubeconfig_path is None:
                 raise ValueError(f"Controller '{handle.controller}' is K8s-based but kubeconfig_path not available")
             self._collect_k8s(handle.controller, output_dir / f"{handle.path_segment}.tar.gz")

@@ -104,6 +104,12 @@ def juju_backend(kubernetes_client: KubernetesClient | None) -> JujuBackend:
 
 
 @pytest.fixture(scope="session")
+def session_juju_backend() -> JujuBackend:
+    """Session-scoped Juju backend for resource registry operations (e.g. cloud type detection)."""
+    return JubilantBackend()
+
+
+@pytest.fixture(scope="session")
 def log_dir(request: pytest.FixtureRequest) -> Path | None:
     """Session-scoped log directory for resource registry output.
 
@@ -130,12 +136,13 @@ def kubeconfig_path() -> Path | None:
 def session_resource_registry(
     log_dir: Path | None,
     logger: logging.Logger,
+    session_juju_backend: JujuBackend,
     kubeconfig_path: Path | None,
 ) -> Iterator[ResourceRegistry]:
     """Session-scoped resource registry covering all workflow controllers."""
     registry = ResourceRegistry(
         global_collectors=[
-            JujuCrashdumpCollector(logger, output_dir=log_dir, kubeconfig_path=kubeconfig_path),
+            JujuCrashdumpCollector(logger, session_juju_backend, output_dir=log_dir, kubeconfig_path=kubeconfig_path),
         ],
         logger=logger,
     )
