@@ -82,6 +82,7 @@ class JujuCrashdumpCollector:
         result.check_returncode()
 
     def _collect_machine(self, controller: str, output_path: Path) -> None:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
         cmd = [
             "juju-crashdump",
             "--model",
@@ -93,8 +94,10 @@ class JujuCrashdumpCollector:
             str(_JUJU_CRASHDUMP_MAX_FILE_SIZE_BYTES),
             "--compression",
             "gz",
-            "--unit-dump-location",
-            str(output_path),
+            "-o",
+            str(output_path.parent),
+            "-u",
+            controller,
             "--as-root",
         ]
         self._logger.debug(f"Running {' '.join(str(c) for c in cmd)}")
@@ -115,6 +118,9 @@ class JujuCrashdumpCollector:
             if result.stderr:
                 self._logger.debug(f"juju-crashdump stderr:\n{result.stderr}")
         result.check_returncode()
-        # Verify the expected output file was created
-        if not output_path.exists():
-            raise FileNotFoundError(f"juju-crashdump succeeded but expected output file not found: {output_path}")
+        # juju-crashdump writes to <output_dir>/juju-crashdump-<controller>.tar.gz;
+        # rename to the caller's expected output_path.
+        generated = output_path.parent / f"juju-crashdump-{controller}.tar.gz"
+        if not generated.exists():
+            raise FileNotFoundError(f"juju-crashdump succeeded but expected output file not found: {generated}")
+        generated.rename(output_path)

@@ -163,18 +163,24 @@ class TestJujuCrashdumpCollectorMachine:
         def run_side_effect(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
             cmd = args[0]
             assert isinstance(cmd, list)
-            if "--unit-dump-location" in cmd:
-                Path(cmd[cmd.index("--unit-dump-location") + 1]).touch()
+            # Simulate juju-crashdump writing juju-crashdump-<uniq>.tar.gz to -o <dir>
+            if "-o" in cmd and "-u" in cmd:
+                output_dir = Path(cmd[cmd.index("-o") + 1])
+                uniq = cmd[cmd.index("-u") + 1]
+                (output_dir / f"juju-crashdump-{uniq}.tar.gz").touch()
             return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
 
         with patch("subprocess.run", side_effect=run_side_effect) as mock_run:
             collector.collect(handle)
 
-        # THEN juju-crashdump was called once
+        # THEN juju-crashdump was called once with the correct args
         assert mock_run.call_count == 1
         cmd = mock_run.call_args[0][0]
         assert cmd[0] == "juju-crashdump"
         assert "my-ctrl:controller" in cmd
+        assert "-o" in cmd
+        assert "-u" in cmd
+        assert cmd[cmd.index("-u") + 1] == "my-ctrl"
 
     def test_raises_on_nonzero_exit(self, tmp_path: Path) -> None:
         # GIVEN crashdump exits non-zero
