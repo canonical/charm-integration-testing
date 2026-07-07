@@ -11,17 +11,18 @@ from juju import JujuBackend, JujuExtension
 from validators.base.validator import ValidationResult
 from validators.runner import ValidatorRunnerResults
 
-proxy_env = " ".join(
+install_env = " ".join(
     [
         f"{var}={value}"
         for var, value in {
             "HTTP_PROXY": "$JUJU_CHARM_HTTP_PROXY",
             "HTTPS_PROXY": "$JUJU_CHARM_HTTPS_PROXY",
             "NO_PROXY": "$JUJU_CHARM_NO_PROXY",
+            "UV_NO_CACHE": "1",
         }.items()
     ]
 )
-remote_validators_path = "/var/lib/validators"
+remote_validators_path = "/var/lib/juju/validators"
 venv_runner = f"{remote_validators_path}/venv/bin/run_validators"
 uv_bin = f"{remote_validators_path}/uv"
 uv_url = "https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-unknown-linux-musl.tar.gz"
@@ -92,12 +93,11 @@ class ValidatorInjectorExtension(JujuExtension):
         for cmd, desc in [
             (f"chmod +x {uv_bin}", "make uv executable"),
             (
-                f"{proxy_env} {uv_bin} venv --python '>=3.10' {remote_validators_path}/venv",
+                f"{install_env} {uv_bin} venv --python '>=3.10' {remote_validators_path}/venv",
                 "create venv with python 3.10+",
             ),
             (
-                f"{proxy_env} {uv_bin} pip install --python {remote_validators_path}/venv"
-                f" {remote_validators_path}/packages/*",
+                f"{install_env} {uv_bin} pip install --python {remote_validators_path}/venv {remote_validators_path}/packages/*",
                 "install validator packages",
             ),
         ]:

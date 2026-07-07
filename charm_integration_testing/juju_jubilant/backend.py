@@ -434,7 +434,10 @@ class JubilantBackend(JujuCmdBackend):
         }
 
     def list_consumed_offers(self, model: str) -> dict[str, JujuConsumedOfferInfo]:
-        return {offer: JujuConsumedOfferInfo(url=info.url) for offer, info in self.status(model).app_endpoints.items()}
+        return {
+            offer: JujuConsumedOfferInfo(url=info.url, endpoints=frozenset(info.endpoints.keys()))
+            for offer, info in self.status(model).app_endpoints.items()
+        }
 
     def list_integrations(self, model: str) -> set[JujuIntegration]:
         # Juju status yaml format doesn't expose provider/requirer information or

@@ -430,6 +430,21 @@ class TestValidatorInjectorExtension:
             # THEN exactly three exec_unit calls were made
             assert len(juju.exec_calls) == 3
 
+        def test_uv_commands_include_uv_no_cache(self, extension: ValidatorInjectorExtension, juju: JujuStub) -> None:
+            # GIVEN all install commands succeed
+            juju.exec_responses.extend([_ok(), _ok(), _ok()])
+
+            # WHEN
+            extension._inject_validators("mymodel", "myapp/0")
+
+            # THEN the venv creation and pip install commands include UV_NO_CACHE=1
+            # exec_calls[0] is chmod +x (doesn't need UV_NO_CACHE)
+            # exec_calls[1] is uv venv, exec_calls[2] is uv pip install
+            venv_cmd = juju.exec_calls[1][2]
+            pip_cmd = juju.exec_calls[2][2]
+            assert "UV_NO_CACHE=1" in venv_cmd, f"UV_NO_CACHE not in venv command: {venv_cmd}"
+            assert "UV_NO_CACHE=1" in pip_cmd, f"UV_NO_CACHE not in pip install command: {pip_cmd}"
+
         def test_raises_when_apt_install_fails(self, extension: ValidatorInjectorExtension, juju: JujuStub) -> None:
             # GIVEN chmod +x uv fails
             juju.exec_responses.append(_fail(stderr="chmod error"))
