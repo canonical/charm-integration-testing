@@ -16,9 +16,8 @@
 #
 # All other provides: optional - each activates only on relation events;
 #   none cause BlockedStatus when absent.
-# listed: false -- OpenStack charms require a dedicated OpenStack substrate
-#   to deploy and test. They are excluded from automated bundle building to
-#   prevent pipeline congestion.
+# listed: false -- Excluded from automated bundle building (SQT-1081) to prevent
+# pipeline congestion; not currently covered by Charm QA.
 listed: false
 overrides:
 

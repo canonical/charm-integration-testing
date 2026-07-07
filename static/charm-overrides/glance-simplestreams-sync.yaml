@@ -9,9 +9,8 @@
 # nrpe-external-master (provides) - OPTIONAL: NRPE monitoring subordinate hook.
 # simplestreams-image-service (provides) - OPTIONAL: exposes the service to
 #   consumers; charm operates standalone.
-# listed: false -- OpenStack charms require a dedicated OpenStack substrate
-#   to deploy and test. They are excluded from automated bundle building to
-#   prevent pipeline congestion.
+# listed: false -- Excluded from automated bundle building (SQT-1081) to prevent
+# pipeline congestion; not currently covered by Charm QA.
 listed: false
 overrides:
   - provides:
