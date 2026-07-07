@@ -48,6 +48,20 @@ from .wait import (
 )
 
 
+def _skip_unreadable(dir_: str, names: list[str]) -> set[str]:
+    """Ignore function for shutil.copytree that skips files that cannot be read."""
+    skipped: set[str] = set()
+    for name in names:
+        path = pathlib.Path(dir_) / name
+        if path.is_file():
+            try:
+                with open(path, "rb") as _f:
+                    _f.read(1)
+            except OSError:
+                skipped.add(name)
+    return skipped
+
+
 class JubilantBackend(JujuCmdBackend):
     client: JubilantClient
 
@@ -408,7 +422,7 @@ class JubilantBackend(JujuCmdBackend):
             with tempfile.TemporaryDirectory(dir=home) as staging:
                 staged = pathlib.Path(staging) / source_path.name
                 if source_path.is_dir():
-                    shutil.copytree(source_path, staged)
+                    shutil.copytree(source_path, staged, ignore=_skip_unreadable)
                 else:
                     shutil.copy2(source_path, staged)
                 self.client.model(model).cli("scp", *options, str(staged), destination)
