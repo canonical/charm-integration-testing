@@ -28,6 +28,7 @@ from juju.resource_registry import (
     JujuResourceRegistryExtension,
 )
 from juju_jubilant import JubilantBackend
+from kubernetes_client import KubernetesBackend, KubernetesClient
 from pytest import StashKey
 from resource_registry import ResourceRegistry, ResourceTeardownWarning
 from test_observer_client import TestObserverClient as TestObserverAPIClient
@@ -115,6 +116,19 @@ def cloud_kubeconfigs() -> dict[str, Path]:
 @pytest.fixture(scope="session")
 def juju_backend(cloud_kubeconfigs: dict[str, Path]) -> JujuBackend:
     return JubilantBackend(cloud_kubeconfigs=cloud_kubeconfigs)
+
+
+@pytest.fixture(scope="session")
+def kubernetes_client(
+    cloud_kubeconfigs: dict[str, Path],
+    target_cloud: str,
+    logger: logging.Logger,
+) -> KubernetesClient | None:
+    """KubernetesClient for the target cloud, or None for machine clouds."""
+    path = cloud_kubeconfigs.get(target_cloud)
+    if path is None:
+        return None
+    return KubernetesClient(KubernetesBackend.k8s_client(kubeconfig=path), logger=logger)
 
 
 @pytest.fixture(scope="session")

@@ -124,4 +124,4 @@ class JujuCrashdumpCollector:
         generated = output_path.parent / f"juju-crashdump-{controller}.tar.gz"
         if not generated.exists():
             raise FileNotFoundError(f"juju-crashdump succeeded but expected output file not found: {generated}")
-        generated.rename(output_path)
+        generated.replace(output_path)

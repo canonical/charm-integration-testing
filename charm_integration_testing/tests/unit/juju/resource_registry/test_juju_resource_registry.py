@@ -47,7 +47,7 @@ class BootstrapKillBackendStub(NullJujuBackend):
         controller: str,
         controller_constraints: dict[str, str],
         bootstrap_configuration: dict[str, str],
-        metadata_source: None = None,
+        metadata_source: Path | None = None,
         agent_version: str | None = None,
     ) -> None:
         self.bootstrapped.append(controller)
