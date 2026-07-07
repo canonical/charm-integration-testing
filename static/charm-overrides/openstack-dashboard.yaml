@@ -16,6 +16,11 @@
 # certificates (requires) - OPTIONAL: TLS; charm runs without it.
 # websso-fid-service-provider (requires) - OPTIONAL: WebSSO FID; not in REQUIRED_INTERFACES.
 # application-dashboard (requires) - OPTIONAL: not in REQUIRED_INTERFACES (yoga+).
+# listed: false -- OpenStack charms require a dedicated OpenStack substrate
+#   to deploy and test. They are excluded from automated bundle building to
+#   prevent pipeline congestion.
+listed: false
+
 overrides:
   # queens-train: dashboard endpoint not yet present in `provides` metadata
   - criteria:

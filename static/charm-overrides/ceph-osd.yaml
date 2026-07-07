@@ -14,6 +14,11 @@
 #
 # nrpe-external-master (provides): optional - NRPE monitoring only;
 #   activates on relation events, no blocking when absent.
+# listed: false -- OpenStack charms require a dedicated OpenStack substrate
+#   to deploy and test. They are excluded from automated bundle building to
+#   prevent pipeline congestion.
+listed: false
+
 overrides:
   - requires:
       secrets-storage:

@@ -1,4 +1,9 @@
 ---
+# listed: false -- OpenStack charms require a dedicated OpenStack substrate
+#   to deploy and test. They are excluded from automated bundle building to
+#   prevent pipeline congestion.
+listed: false
+
 overrides:
   - requires:
       infoblox-neutron:  # Charm that offers it has been deleted https://github.com/openstack-charmers/charm-infoblox

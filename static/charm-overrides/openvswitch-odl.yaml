@@ -1,0 +1,7 @@
+---
+# openvswitch-odl: OpenStack Charmers charm.
+#
+# listed: false -- OpenStack charms require a dedicated OpenStack substrate
+#   to deploy and test. They are excluded from automated bundle building to
+#   prevent pipeline congestion.
+listed: false

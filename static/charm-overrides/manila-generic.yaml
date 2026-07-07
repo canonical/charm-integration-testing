@@ -1,3 +1,8 @@
 ---
 # nrpe-external-master does not exist in any published channel of manila-generic
+# listed: false -- OpenStack charms require a dedicated OpenStack substrate
+#   to deploy and test. They are excluded from automated bundle building to
+#   prevent pipeline congestion.
+listed: false
+
 overrides: []

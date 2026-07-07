@@ -12,6 +12,11 @@
 #
 # shared-db, amqp (requires) - REQUIRED: in REQUIRED_INTERFACES.
 # All other requires: optional - not in REQUIRED_INTERFACES; no BlockedStatus when absent.
+# listed: false -- OpenStack charms require a dedicated OpenStack substrate
+#   to deploy and test. They are excluded from automated bundle building to
+#   prevent pipeline congestion.
+listed: false
+
 overrides:
   # ── queens, rocky, stein, train ─────────────────────────────────────────────
   # identity-credentials (requires) not present until ussuri.

@@ -10,6 +10,11 @@
 # master (provides) - OPTIONAL: counterpart to slave; provided to a replica unit.
 # ha (requires) - OPTIONAL: connects to hacluster for HA; not needed standalone.
 # nrpe-external-master (provides) - OPTIONAL: NRPE monitoring subordinate hook.
+# listed: false -- OpenStack charms require a dedicated OpenStack substrate
+#   to deploy and test. They are excluded from automated bundle building to
+#   prevent pipeline congestion.
+listed: false
+
 overrides:
   - provides:
       master:

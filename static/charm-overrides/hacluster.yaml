@@ -11,6 +11,11 @@
 # juju-info, peer-availability (requires, scope: container) - subordinate attachment
 #   points; auto-satisfied by Juju when co-located with principal; not overridden.
 # pacemaker-remote (requires) - OPTIONAL: pacemaker-remote deployments only.
+# listed: false -- OpenStack charms require a dedicated OpenStack substrate
+#   to deploy and test. They are excluded from automated bundle building to
+#   prevent pipeline congestion.
+listed: false
+
 overrides:
   - provides:
       nrpe-external-master:

@@ -13,6 +13,11 @@
 # shared-db, amqp, identity-service, image-service, cloud-compute (requires) - REQUIRED.
 # placement (requires) - REQUIRED for Train+; not present in metadata on queens/rocky/stein.
 # All other requires: optional - not in REQUIRED_INTERFACES; checked only when present.
+# listed: false -- OpenStack charms require a dedicated OpenStack substrate
+#   to deploy and test. They are excluded from automated bundle building to
+#   prevent pipeline congestion.
+listed: false
+
 overrides:
   # queens, rocky, stein: placement endpoint not present in charm metadata.
   - criteria:
