@@ -71,9 +71,7 @@ class JubilantBackend(JujuCmdBackend):
             path = self._cloud_kubeconfigs.get(cloud)
             if path is None:
                 raise RuntimeError(f"No kubeconfig configured for cloud '{cloud}'")
-            self._kubernetes_clients[cloud] = KubernetesClient(
-                KubernetesBackend.k8s_client(kubeconfig=path)
-            )
+            self._kubernetes_clients[cloud] = KubernetesClient(KubernetesBackend.k8s_client(kubeconfig=path))
         return self._kubernetes_clients[cloud]
 
     @warn_performance(category=JujuStatusPerformanceWarning, threshold=timedelta(seconds=5))
@@ -594,9 +592,7 @@ class JubilantBackend(JujuCmdBackend):
             model_info = self.client.model(controller_model).show_model()
             k8s = self.get_kubernetes_client(model_info.cloud)
             controller_k8s_namespace = f"controller-{controller_name}"
-            k8s.restart_statefulset(
-                namespace=controller_k8s_namespace, statefulset_name="controller"
-            )
+            k8s.restart_statefulset(namespace=controller_k8s_namespace, statefulset_name="controller")
             k8s.wait_for_statefulset_restart(
                 namespace=controller_k8s_namespace, statefulset_name="controller", timeout_seconds=300
             )

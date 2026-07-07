@@ -108,7 +108,7 @@ def cloud_kubeconfigs() -> dict[str, Path]:
     result: dict[str, Path] = {}
     for key, val in os.environ.items():
         if key.startswith("KUBECONFIG_"):
-            cloud = key[len("KUBECONFIG_"):].lower().replace("_", "-")
+            cloud = key[len("KUBECONFIG_") :].lower().replace("_", "-")
             stripped = val.strip()
             if stripped:
                 result[cloud] = Path(stripped)

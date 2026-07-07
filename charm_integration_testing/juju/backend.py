@@ -387,4 +387,3 @@ class JujuBackend(ABC):
     def get_controller_kubeconfig(self, controller: str) -> Path | None:
         """Return the kubeconfig path for a K8s controller's cloud, or None for machine controllers."""
         raise NotImplementedError
-

@@ -352,4 +352,3 @@ class JujuCmdBackend(JujuBackend):
 
     def debug_log(self, model: str) -> str:
         raise NotImplementedError
-
