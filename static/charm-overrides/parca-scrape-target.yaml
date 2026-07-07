@@ -1,0 +1,16 @@
+---
+# Source: https://github.com/canonical/parca-scrape-target-operator
+#
+# The charm blocks with "No targets specified" when the targets config is empty
+# (the default).  The unit cannot reach ActiveStatus without at least one
+# host:port entry in targets.
+#
+# targets (config): provide a dummy scrape target so the unit reaches
+# ActiveStatus during integration testing.  The address does not need to be
+# reachable; the charm only validates format (host:port), not connectivity.
+# Applies to all published tracks (1, 2, 3.0, dev) which share the same
+# targets config key and default-empty behaviour.
+# See: https://github.com/canonical/charm-integration-testing/issues/702
+overrides:
+  - configs:
+      targets: ['127.0.0.1:7000']
