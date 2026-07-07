@@ -24,7 +24,7 @@ def strip_saas_from_bundle(bundle_yaml: str) -> str:
             rel for rel in base.get("relations", []) if not any(ep.split(":")[0] in saas_names for ep in rel)
         ]
     parts = [yaml.dump(base, default_flow_style=False, sort_keys=True)]
-    # Preserve any overlay documents (e.g. offers) unchanged.
+    # Re-serialize overlay documents (key order and formatting may change, but content is preserved).
     for doc in documents[1:]:
         parts.append(yaml.dump(doc, default_flow_style=False, sort_keys=True))
     return "---\n" + "---\n".join(parts) if len(parts) > 1 else parts[0]

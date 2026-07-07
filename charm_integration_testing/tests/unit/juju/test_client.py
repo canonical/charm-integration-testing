@@ -3,6 +3,7 @@
 
 from dataclasses import dataclass, field
 from datetime import timedelta
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -978,68 +979,68 @@ class DeployBundlesBackendStub(NullJujuBackend):
 
 
 class TestDeployBundles:
-    def test_juju3_deploys_full_bundle_in_phase2(self, tmp_path: pytest.TempPathFactory) -> None:
-        bundle_path = tmp_path / "bundle.yaml"  # type: ignore[operator]
+    def test_juju3_deploys_full_bundle_in_phase2(self, tmp_path: Path) -> None:
+        bundle_path = tmp_path / "bundle.yaml"
         bundle_path.write_text(_BUNDLE_WITH_OFFERS)
         backend = DeployBundlesBackendStub(juju_version=JujuVersion(3, 6, 0))
 
-        _client(backend).deploy_bundles([(bundle_path, "ctrl:model")], tmp_path)  # type: ignore[arg-type]
+        _client(backend).deploy_bundles([(bundle_path, "ctrl:model")], tmp_path)
 
         action_names = [c[0] for c in backend.calls]
         # Juju 3: phase 2 deploys the original full bundle, no remove_offers needed
         assert "remove_offers" not in action_names
         assert backend.calls[1] == ("deploy", "ctrl:model", str(bundle_path))
 
-    def test_juju4_strips_offers_in_phase2(self, tmp_path: pytest.TempPathFactory) -> None:
-        bundle_path = tmp_path / "bundle.yaml"  # type: ignore[operator]
+    def test_juju4_strips_offers_in_phase2(self, tmp_path: Path) -> None:
+        bundle_path = tmp_path / "bundle.yaml"
         bundle_path.write_text(_BUNDLE_WITH_OFFERS)
         backend = DeployBundlesBackendStub(juju_version=JujuVersion(4, 0, 0))
 
-        _client(backend).deploy_bundles([(bundle_path, "ctrl:model")], tmp_path)  # type: ignore[arg-type]
+        _client(backend).deploy_bundles([(bundle_path, "ctrl:model")], tmp_path)
 
         # Phase 1: stripped bundle (apps-only)
-        assert backend.calls[0] == ("deploy", "ctrl:model", str(tmp_path / "apps-only-bundle-0.yaml"))  # type: ignore[operator]
+        assert backend.calls[0] == ("deploy", "ctrl:model", str(tmp_path / "apps-only-bundle-0.yaml"))
         # Phase 2: offers-stripped bundle (not the original bundle path)
-        assert backend.calls[1] == ("deploy", "ctrl:model", str(tmp_path / "phase2-bundle-0.yaml"))  # type: ignore[operator]
+        assert backend.calls[1] == ("deploy", "ctrl:model", str(tmp_path / "phase2-bundle-0.yaml"))
         # No remove_offers calls
         assert "remove_offers" not in [c[0] for c in backend.calls]
 
-    def test_juju4_phase2_bundle_has_offers_stripped(self, tmp_path: pytest.TempPathFactory) -> None:
-        bundle_path = tmp_path / "bundle.yaml"  # type: ignore[operator]
+    def test_juju4_phase2_bundle_has_offers_stripped(self, tmp_path: Path) -> None:
+        bundle_path = tmp_path / "bundle.yaml"
         bundle_path.write_text(_BUNDLE_WITH_OFFERS)
         backend = DeployBundlesBackendStub(juju_version=JujuVersion(4, 0, 0))
 
-        _client(backend).deploy_bundles([(bundle_path, "ctrl:model")], tmp_path)  # type: ignore[arg-type]
+        _client(backend).deploy_bundles([(bundle_path, "ctrl:model")], tmp_path)
 
-        phase2_content = (tmp_path / "phase2-bundle-0.yaml").read_text()  # type: ignore[operator]
+        phase2_content = (tmp_path / "phase2-bundle-0.yaml").read_text()
         assert "glauth-k8s-offer" not in phase2_content
 
-    def test_juju4_simple_bundle_no_phase2_file(self, tmp_path: pytest.TempPathFactory) -> None:
-        bundle_path = tmp_path / "bundle.yaml"  # type: ignore[operator]
+    def test_juju4_simple_bundle_no_phase2_file(self, tmp_path: Path) -> None:
+        bundle_path = tmp_path / "bundle.yaml"
         bundle_path.write_text(_SIMPLE_BUNDLE)
         backend = DeployBundlesBackendStub(juju_version=JujuVersion(4, 0, 0))
 
-        _client(backend).deploy_bundles([(bundle_path, "ctrl:model")], tmp_path)  # type: ignore[arg-type]
+        _client(backend).deploy_bundles([(bundle_path, "ctrl:model")], tmp_path)
 
         # Phase 2 file is still written (just has nothing to strip)
         assert backend.calls[1][0] == "deploy"
 
-    def test_two_bundles_deploy_order(self, tmp_path: pytest.TempPathFactory) -> None:
-        bundle_a = tmp_path / "bundle_a.yaml"  # type: ignore[operator]
-        bundle_b = tmp_path / "bundle_b.yaml"  # type: ignore[operator]
+    def test_two_bundles_deploy_order(self, tmp_path: Path) -> None:
+        bundle_a = tmp_path / "bundle_a.yaml"
+        bundle_b = tmp_path / "bundle_b.yaml"
         bundle_a.write_text(_BUNDLE_WITH_OFFERS)
         bundle_b.write_text(_BUNDLE_WITH_OFFERS)
         backend = DeployBundlesBackendStub(juju_version=JujuVersion(4, 0, 0))
 
-        _client(backend).deploy_bundles(  # type: ignore[arg-type]
+        _client(backend).deploy_bundles(
             [(bundle_a, "ctrl:model-a"), (bundle_b, "ctrl:model-b")],
-            tmp_path,  # type: ignore[arg-type]
+            tmp_path,
         )
 
         # Phase 1: deploy model-a then model-b (stripped bundles)
-        assert backend.calls[0] == ("deploy", "ctrl:model-a", str(tmp_path / "apps-only-bundle-0.yaml"))  # type: ignore[operator]
-        assert backend.calls[1] == ("deploy", "ctrl:model-b", str(tmp_path / "apps-only-bundle-1.yaml"))  # type: ignore[operator]
+        assert backend.calls[0] == ("deploy", "ctrl:model-a", str(tmp_path / "apps-only-bundle-0.yaml"))
+        assert backend.calls[1] == ("deploy", "ctrl:model-b", str(tmp_path / "apps-only-bundle-1.yaml"))
         # Phase 2: offers-stripped bundles (no remove_offers, no reordering needed)
-        assert backend.calls[2] == ("deploy", "ctrl:model-a", str(tmp_path / "phase2-bundle-0.yaml"))  # type: ignore[operator]
-        assert backend.calls[3] == ("deploy", "ctrl:model-b", str(tmp_path / "phase2-bundle-1.yaml"))  # type: ignore[operator]
+        assert backend.calls[2] == ("deploy", "ctrl:model-a", str(tmp_path / "phase2-bundle-0.yaml"))
+        assert backend.calls[3] == ("deploy", "ctrl:model-b", str(tmp_path / "phase2-bundle-1.yaml"))
         assert "remove_offers" not in [c[0] for c in backend.calls]
