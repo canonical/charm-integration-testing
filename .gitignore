@@ -131,6 +131,7 @@ dmypy.json
 # minio client
 /mc
 /minio
+/static/minio
 
 # test artifacts
 /junit-*.xml
