@@ -1,6 +1,7 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import pytest
 from juju.bundle_utils import (
     parse_offer_names_from_bundle,
     parse_offers_from_bundle,
@@ -194,3 +195,51 @@ applications:
     assert "my-offer" not in result
     assert "annotations" in result
     assert "---" in result  # overlay retained because annotations remain
+
+
+# ---------------------------------------------------------------------------
+# Tests: input validation and defensive handling
+# ---------------------------------------------------------------------------
+
+
+def test_strip_saas_raises_on_empty_bundle() -> None:
+    with pytest.raises(ValueError, match="base bundle"):
+        strip_saas_from_bundle("")
+
+
+def test_strip_saas_raises_on_non_mapping_bundle() -> None:
+    with pytest.raises(ValueError, match="base bundle"):
+        strip_saas_from_bundle("- item1\n- item2\n")
+
+
+def test_strip_offers_raises_on_empty_bundle() -> None:
+    with pytest.raises(ValueError, match="base bundle"):
+        strip_offers_from_bundle("")
+
+
+def test_strip_offers_raises_on_non_mapping_bundle() -> None:
+    with pytest.raises(ValueError, match="base bundle"):
+        strip_offers_from_bundle("- item1\n- item2\n")
+
+
+def test_parse_offers_skips_non_dict_overlay() -> None:
+    bundle = """\
+applications:
+  myapp:
+    charm: myapp
+---
+- not_a_mapping
+"""
+    assert parse_offers_from_bundle(bundle) == {}
+
+
+def test_parse_offers_skips_null_app_entry() -> None:
+    bundle = """\
+applications:
+  myapp:
+    charm: myapp
+---
+applications:
+  myapp: null
+"""
+    assert parse_offers_from_bundle(bundle) == {}

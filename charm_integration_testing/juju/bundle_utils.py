@@ -24,8 +24,13 @@ def strip_saas_from_bundle(bundle_yaml: str) -> str:
     (where both models consume from each other) would deadlock: neither can be deployed first.
 
     Handles multi-document YAML (base bundle + overlay) produced when the bundle contains offers.
+
+    Raises:
+        ValueError: if *bundle_yaml* does not parse to at least one YAML mapping document.
     """
     documents = list(yaml.safe_load_all(bundle_yaml))
+    if not documents or not isinstance(documents[0], dict):
+        raise ValueError("bundle_yaml must contain at least one YAML mapping document as the base bundle")
     base = documents[0]
     saas_names = set(base.pop("saas", {}).keys())
     if saas_names:
@@ -36,7 +41,7 @@ def strip_saas_from_bundle(bundle_yaml: str) -> str:
     parts = [yaml.dump(base, default_flow_style=False, sort_keys=True)]
     # Re-serialize overlay documents (key order and formatting may change, but content is preserved).
     for doc in documents[1:]:
-        if not doc:
+        if not isinstance(doc, dict):
             continue
         parts.append(yaml.dump(doc, default_flow_style=False, sort_keys=True))
     return "---\n" + "---\n".join(parts) if len(parts) > 1 else parts[0]
@@ -57,13 +62,16 @@ def parse_offers_from_bundle(bundle_yaml: str) -> dict[str, OfferDetails]:
 
     Returns a dict mapping offer name to an :class:`OfferDetails` instance.
     Offers are declared in overlay documents under ``applications.<app>.offers``.
+    Non-dict overlay documents and non-dict application entries are silently skipped.
     """
     documents = list(yaml.safe_load_all(bundle_yaml))
     offers: dict[str, OfferDetails] = {}
     for doc in documents[1:]:
-        if not doc:
+        if not isinstance(doc, dict):
             continue
         for app_name, app_data in doc.get("applications", {}).items():
+            if not isinstance(app_data, dict):
+                continue
             for offer_name, offer_data in app_data.get("offers", {}).items():
                 offers[offer_name] = OfferDetails(
                     app=app_name,
@@ -82,15 +90,21 @@ def strip_offers_from_bundle(bundle_yaml: str) -> str:
     the saas sections in the base bundle.
 
     Overlay documents that become empty after stripping are dropped.
+
+    Raises:
+        ValueError: if *bundle_yaml* does not parse to at least one YAML mapping document.
     """
     documents = list(yaml.safe_load_all(bundle_yaml))
+    if not documents or not isinstance(documents[0], dict):
+        raise ValueError("bundle_yaml must contain at least one YAML mapping document as the base bundle")
     base = documents[0]
     parts = [yaml.dump(base, default_flow_style=False, sort_keys=True)]
     for doc in documents[1:]:
-        if not doc:
+        if not isinstance(doc, dict):
             continue
         for app_data in doc.get("applications", {}).values():
-            app_data.pop("offers", None)
+            if isinstance(app_data, dict):
+                app_data.pop("offers", None)
         # Drop the overlay entirely if it is now empty (no remaining keys).
         has_content = any(bool(app_data) for app_data in doc.get("applications", {}).values()) or any(
             k != "applications" for k in doc
