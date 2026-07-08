@@ -28,19 +28,20 @@ MINIO_CLIENT_INSTALL_K8S = "install -m 755 {staging_path} {client_path}"
 MINIO_CLIENT_SET_ALIAS = "{client_path} alias set local {address} {access_key} {secret_key}"
 MINIO_CLIENT_MAKE_BUCKET = "{client_path} mb local/{bucket}"
 MINIO_CLIENT_MAKE_PATH = "touch empty && {client_path} cp empty local/{bucket}/{path}/ && rm empty"
-MINIO_SERVER_DOWNLOAD = "https://github.com/minio/minio/releases/latest/download/minio"
+MINIO_SERVER_VERSION = "RELEASE.2025-10-15T17-29-55Z"
+MINIO_SERVER_DOWNLOAD = f"https://github.com/minio/minio/releases/download/{MINIO_SERVER_VERSION}/minio"
 MINIO_SERVER_STAGING_PATH = "/tmp/minio-server"  # nosec B108
 MINIO_SERVER_PATH = "/usr/local/bin/minio"
 MINIO_SERVER_INSTALL = "sudo install -m 755 {staging_path} {server_path}"
 MINIO_SERVER_DATA_DIR = "/home/ubuntu/minio-data"
 MINIO_SERVER_START = (
-    "sudo systemctl show minio-server.service --property=LoadState 2>/dev/null"
-    " | grep -q LoadState=loaded"
-    " && sudo systemctl restart minio-server.service"
-    " || sudo systemd-run --unit=minio-server"
+    "if sudo systemctl show minio-server.service --property=LoadState 2>/dev/null"
+    " | grep -q LoadState=loaded;"
+    " then sudo systemctl restart minio-server.service;"
+    " else sudo systemd-run --unit=minio-server"
     " -E MINIO_ROOT_USER={access_key}"
     " -E MINIO_ROOT_PASSWORD={secret_key}"
-    " {server_path} server {data_dir}"
+    " {server_path} server {data_dir}; fi"
 )
 
 
