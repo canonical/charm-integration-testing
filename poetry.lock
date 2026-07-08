@@ -844,14 +844,14 @@ PyYAML = "==6.*"
 
 [[package]]
 name = "kafka-python"
-version = "3.0.2"
+version = "3.0.7"
 description = "Pure Python client for Apache Kafka"
 optional = false
 python-versions = ">=3.8"
 groups = ["main"]
 files = [
-    {file = "kafka_python-3.0.2-py3-none-any.whl", hash = "sha256:8f674afff08d40c981db903b6eb8ae9f3652909081158921437ee80e465bd9c7"},
-    {file = "kafka_python-3.0.2.tar.gz", hash = "sha256:1921af12d8bc9e37843025b89c782d1c90498d80373af590aad45ba4fcfa6e77"},
+    {file = "kafka_python-3.0.7-py3-none-any.whl", hash = "sha256:37dde37c1ed6d4f77ce5164d92eab70fc5d0ed57e9f20a970dc776d0371d4025"},
+    {file = "kafka_python-3.0.7.tar.gz", hash = "sha256:24da5a3aa6f3dc421c74deee1b365d656b9dc54ab8e17a065b73ac4255a5254d"},
 ]
 
 [package.extras]
@@ -2481,6 +2481,9 @@ develop = true
 [package.dependencies]
 validators-base = "*"
 
+[package.extras]
+dev = ["validators-test-utils"]
+
 [package.source]
 type = "directory"
 url = "validators/grafana_dashboard"
@@ -2616,6 +2619,27 @@ type = "directory"
 url = "validators/opensearch_client"
 
 [[package]]
+name = "validators-parca-store"
+version = "0.1.0"
+description = "Validator for parca_store (gRPC) interface"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+grpcio = ">=1.60.0"
+validators-base = "*"
+
+[package.extras]
+dev = ["validators-test-utils"]
+
+[package.source]
+type = "directory"
+url = "validators/parca_store"
+
+[[package]]
 name = "validators-postgresql-client"
 version = "0.1.0"
 description = "Validator for postgresql_client interface"
@@ -2679,6 +2703,7 @@ validators-livepatch-pro-airgapped-server = "*"
 validators-loki-push-api = "*"
 validators-object-storage = "*"
 validators-opensearch-client = "*"
+validators-parca-store = "*"
 validators-postgresql-client = "*"
 validators-prometheus-scrape = "*"
 validators-s3 = "*"
@@ -2841,4 +2866,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<4.0"
-content-hash = "75cbbdbefcd1bd8e010cf0b37273de33f7a6c481e61d75e08e2454eb13ddace9"
+content-hash = "2143ee417f31360680a4a0e14736985b6355c839397b63c080eb62aba95b202f"
