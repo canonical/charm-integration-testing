@@ -1,7 +1,12 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-from juju.bundle_utils import parse_offer_names_from_bundle, parse_offers_from_bundle, strip_offers_from_bundle, strip_saas_from_bundle
+from juju.bundle_utils import (
+    parse_offer_names_from_bundle,
+    parse_offers_from_bundle,
+    strip_offers_from_bundle,
+    strip_saas_from_bundle,
+)
 
 # ---------------------------------------------------------------------------
 # Fixtures: sample bundle YAML

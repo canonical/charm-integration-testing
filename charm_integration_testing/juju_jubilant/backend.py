@@ -489,6 +489,9 @@ class JubilantBackend(JujuCmdBackend):
         return set(_json.loads(result).keys())
 
     def create_offer(self, model: str, app: str, endpoints: list[str], offer_name: str) -> None:
+        # On Juju 4+, ``juju offer`` fails if an offer with the same name already exists
+        # ("offer already exists, updating offers is not supported"). Treat that as a no-op
+        # so that deploy_bundles remains idempotent across re-runs.
         try:
             self.client.model(model).offer(app, endpoint=endpoints, name=offer_name)
         except jubilant.CLIError as e:

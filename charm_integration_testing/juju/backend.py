@@ -163,12 +163,7 @@ class JujuBackend(ABC):
 
     @abstractmethod
     def create_offer(self, model: str, app: str, endpoints: list[str], offer_name: str) -> None:
-        """Create an offer in *model* if it does not already exist.
-
-        On Juju 4+, ``juju offer`` is not idempotent and fails when an offer with the same
-        name already exists.  Implementations must tolerate the "already exists" error and
-        treat it as a no-op so that ``deploy_bundles`` can be re-run without failures.
-        """
+        """Create an offer exposing *endpoints* of *app* in *model* under *offer_name*."""
         raise NotImplementedError
 
     @abstractmethod
