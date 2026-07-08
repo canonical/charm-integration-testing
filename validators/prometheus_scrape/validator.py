@@ -56,9 +56,9 @@ class PrometheusScrapeValidator(BaseValidator):
             return self._fail_result(level, checks)
 
         unit_addresses = sorted(
-            addr
+            addr.strip()
             for unit in self.relation.units
-            if (addr := dict(self.relation.data[unit]).get("prometheus_scrape_unit_address", ""))
+            if (addr := dict(self.relation.data[unit]).get("prometheus_scrape_unit_address", "").strip())
         )
         targets, parse_errors = _extract_targets(scrape_jobs, unit_addresses=unit_addresses)
 
