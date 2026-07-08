@@ -173,8 +173,11 @@ class JujuClient:
         if juju4:
             for bundle_path, model_uri in bundles:
                 bundle_yaml = bundle_path.read_text(encoding="utf-8")
+                offers = parse_offers_from_bundle(bundle_yaml)
+                if not offers:
+                    continue
                 existing_offers = self.backend.list_offers(model_uri)
-                for offer_name, offer_info in parse_offers_from_bundle(bundle_yaml).items():
+                for offer_name, offer_info in offers.items():
                     if offer_name in existing_offers:
                         self.logger.info(f"Offer {offer_name} already exists in {model_uri}, skipping creation.")
                     else:
