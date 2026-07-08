@@ -17,9 +17,8 @@ All host operations go through a single entry point:
 | `scripts/sandbox.sh run 'task'` | Launch Copilot autonomously |
 | `scripts/sandbox.sh run --interactive` | Launch Copilot interactively |
 
-Skills (`/develop-validator`, `/test-validator`, `/setup-k8s`, `/setup-lxd`) are
-auto-discovered via `.agents/skills/` (a symlink to `development-sandbox/prompts/`).
-Use them inside any interactive Copilot session.
+Skills (`/develop-validator`, `/test-validator`, `/setup-k8s`, `/setup-lxd`, `/review-pr`) are
+auto-discovered via `.agents/skills/` at the repository root.
 
 ### VM-side
 
@@ -51,6 +50,7 @@ All tokens are optional. Set them in `development-sandbox/.env`
 
 - `SANDBOX_VM` overrides the Multipass VM name (default: `charm-qa-sandbox`).
 - `SANDBOX_MOUNT` overrides the VM-side mount path (default: `/project`). Set this to a unique path (e.g. `/project-fork`) when multiple repo clones share the same VM.
+- `SANDBOX_CPUS` / `SANDBOX_MEMORY` / `SANDBOX_DISK` override VM resources at creation time (defaults: `4`, `8G`, `40G`). These can be set via environment variables or CLI flags (`--cpus`, `--memory`, `--disk`) and apply only when creating a new VM.
 - `COPILOT_MODEL` overrides the Copilot model.
 - Inside the VM the project is accessible via `$PROJECT_ROOT` (set automatically by the sandbox tooling to the VM-side mount path).
 - Python dependencies are managed with Poetry.

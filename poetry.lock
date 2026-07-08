@@ -2469,6 +2469,26 @@ type = "directory"
 url = "validators/external_provider"
 
 [[package]]
+name = "validators-grafana-dashboard"
+version = "0.1.0"
+description = "Validator for grafana_dashboard interface"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+validators-base = "*"
+
+[package.extras]
+dev = ["validators-test-utils"]
+
+[package.source]
+type = "directory"
+url = "validators/grafana_dashboard"
+
+[[package]]
 name = "validators-http-interface"
 version = "0.1.0"
 description = "Validator for http interface"
@@ -2612,6 +2632,9 @@ develop = true
 grpcio = ">=1.60.0"
 validators-base = "*"
 
+[package.extras]
+dev = ["validators-test-utils"]
+
 [package.source]
 type = "directory"
 url = "validators/parca_store"
@@ -2673,6 +2696,7 @@ validators-base = "*"
 validators-config-server = "*"
 validators-cve-catalog = "*"
 validators-external-provider = "*"
+validators-grafana-dashboard = "*"
 validators-http-interface = "*"
 validators-kafka-client = "*"
 validators-livepatch-pro-airgapped-server = "*"
@@ -2842,4 +2866,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<4.0"
-content-hash = "47b3174455d590496a31e06c8d2bed3fd9927ba05deb4b03cfab84f51284e4c3"
+content-hash = "2143ee417f31360680a4a0e14736985b6355c839397b63c080eb62aba95b202f"

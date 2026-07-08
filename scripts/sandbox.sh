@@ -40,6 +40,9 @@ fi
 
 VM_NAME="${SANDBOX_VM:-charm-qa-sandbox}"
 VM_MOUNT="${SANDBOX_MOUNT:-/project}"
+VM_CPUS="${SANDBOX_CPUS:-4}"
+VM_MEMORY="${SANDBOX_MEMORY:-8G}"
+VM_DISK="${SANDBOX_DISK:-40G}"
 [[ "$VM_MOUNT" = /* ]] || { echo "ERROR: SANDBOX_MOUNT must be an absolute path: $VM_MOUNT" >&2; exit 1; }
 [[ "$VM_MOUNT" != *"'"* ]] || { echo "ERROR: SANDBOX_MOUNT must not contain single quotes: $VM_MOUNT" >&2; exit 1; }
 [[ "$VM_MOUNT" != *":"* ]] || { echo "ERROR: SANDBOX_MOUNT must not contain colons: $VM_MOUNT" >&2; exit 1; }
@@ -48,25 +51,22 @@ VM_MOUNT="${SANDBOX_MOUNT:-/project}"
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-_ensure_mounted() {
-    if ! multipass info "$VM_NAME" --format json \
-            | python3 -c "import sys,json; mounts=json.load(sys.stdin)['info'][sys.argv[1]].get('mounts',{}); exit(0 if sys.argv[2] in mounts else 1)" "$VM_NAME" "$VM_MOUNT" 2>/dev/null; then
-        echo "==> Mount '$VM_MOUNT' not found in VM — mounting $PROJECT_DIR -> $VM_MOUNT..."
-        multipass exec "$VM_NAME" -- bash -c "sudo mkdir -p '$VM_MOUNT' && sudo chown ubuntu:ubuntu '$VM_MOUNT'"
-        multipass mount "$PROJECT_DIR" "$VM_NAME:$VM_MOUNT"
-    fi
-}
-
 _vm_state() {
     multipass info "$VM_NAME" --format json 2>/dev/null \
         | python3 -c "import sys,json; print(json.load(sys.stdin)['info']['$VM_NAME']['state'])" 2>/dev/null \
         || echo "absent"
 }
 
+_is_mounted() {
+    multipass info "$VM_NAME" --format json 2>/dev/null \
+        | python3 -c "import sys,json; mounts=json.load(sys.stdin)['info'][sys.argv[1]].get('mounts',{}); exit(0 if sys.argv[2] in mounts else 1)" "$VM_NAME" "$VM_MOUNT" 2>/dev/null
+}
+
 _usage() {
     cat <<'EOF'
 Usage:
-  scripts/sandbox.sh up                        Create or resume the VM
+  scripts/sandbox.sh up [--cpus N] [--memory SIZE] [--disk SIZE]
+                                               Create or resume the VM
   scripts/sandbox.sh down                      Stop the VM (preserves state)
   scripts/sandbox.sh destroy                   Delete the VM permanently
   scripts/sandbox.sh shell                     Open a shell inside the VM
@@ -77,6 +77,9 @@ Usage:
 Environment (.env keys):
   SANDBOX_VM             VM name override (default: charm-qa-sandbox)
   SANDBOX_MOUNT          VM-side mount path (default: /project)
+  SANDBOX_CPUS           vCPU count for new VMs (default: 4)
+  SANDBOX_MEMORY         RAM for new VMs, e.g. 8G or 16G (default: 8G)
+  SANDBOX_DISK           Disk size for new VMs, e.g. 40G or 80G (default: 40G)
   GITHUB_TOKEN           Fine-grained PAT for gh CLI inside the VM
   COPILOT_GITHUB_TOKEN   Copilot AI auth token (default: gh auth token)
   COPILOT_MODEL          Copilot model (default: sonnet-4.6)
@@ -84,8 +87,14 @@ Environment (.env keys):
 Inside an interactive session use skill slash commands:
   /develop-validator     Develop a new charm integration validator
   /test-validator        Test an existing validator
+  /review-pr             Review and address pull request feedback
   /setup-k8s             Set up Canonical k8s substrate
   /setup-lxd             Set up LXD substrate
+
+VM resource flags (only applied when the VM does not yet exist):
+  --cpus N               vCPU count (default: SANDBOX_CPUS or 4)
+  --memory SIZE          RAM, e.g. 16G (default: SANDBOX_MEMORY or 8G)
+  --disk SIZE            Disk, e.g. 80G (default: SANDBOX_DISK or 40G)
 EOF
 }
 
@@ -93,17 +102,55 @@ EOF
 # Subcommand: up
 # ---------------------------------------------------------------------------
 _cmd_up() {
+    # Parse optional resource overrides; CLI flags take precedence over .env / defaults.
+    local cpus="$VM_CPUS" memory="$VM_MEMORY" disk="$VM_DISK"
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --cpus)
+                if [ $# -lt 2 ] || [ -z "${2:-}" ]; then
+                    echo "Error: --cpus requires a value" >&2
+                    exit 1
+                fi
+                cpus="$2"
+                shift 2
+                ;;
+            --memory)
+                if [ $# -lt 2 ] || [ -z "${2:-}" ]; then
+                    echo "Error: --memory requires a value" >&2
+                    exit 1
+                fi
+                memory="$2"
+                shift 2
+                ;;
+            --disk)
+                if [ $# -lt 2 ] || [ -z "${2:-}" ]; then
+                    echo "Error: --disk requires a value" >&2
+                    exit 1
+                fi
+                disk="$2"
+                shift 2
+                ;;
+            --)        shift; break ;;
+            -*)
+                echo "Unknown option: $1" >&2
+                echo "Run scripts/sandbox.sh --help for usage." >&2
+                exit 1
+                ;;
+            *) break ;;
+        esac
+    done
+
     echo "==> Checking VM state..."
     state=$(_vm_state)
 
     case "$state" in
         absent)
-            echo "==> Launching $VM_NAME..."
+            echo "==> Launching $VM_NAME (cpus=$cpus memory=$memory disk=$disk)..."
             multipass launch 24.04 \
                 --name "$VM_NAME" \
-                --cpus 4 \
-                --memory 8G \
-                --disk 40G \
+                --cpus "$cpus" \
+                --memory "$memory" \
+                --disk "$disk" \
                 --cloud-init "$DEV_DIR/substrate.yaml" \
                 --timeout 1800
             ;;
@@ -122,7 +169,11 @@ _cmd_up() {
 
     # Mount project if not already mounted
     echo "==> Checking project mount..."
-    _ensure_mounted
+    if ! _is_mounted; then
+        echo "==> Mounting $PROJECT_DIR -> $VM_MOUNT..."
+        multipass exec "$VM_NAME" -- bash -c "sudo mkdir -p '$VM_MOUNT' && sudo chown ubuntu:ubuntu '$VM_MOUNT'"
+        multipass mount "$PROJECT_DIR" "$VM_NAME:$VM_MOUNT"
+    fi
 
     # Set up Python venv with project packages (poetry manages the venv)
     echo "==> Installing Python dependencies via poetry..."
@@ -155,9 +206,6 @@ _cmd_up() {
             echo '==> @github/copilot: found.'
         fi
 
-        echo '==> Linking project skills to ~/.agents/skills...'
-        mkdir -p ~/.agents
-        ln -sfn '$VM_MOUNT/development-sandbox/prompts' ~/.agents/skills
 
         if ! command -v markdownlint-cli2 &>/dev/null; then
             echo '==> Installing markdownlint-cli2...'
@@ -301,10 +349,15 @@ _cmd_destroy() {
 # Subcommand: shell
 # ---------------------------------------------------------------------------
 _cmd_shell() {
-    _ensure_mounted
+    if ! _is_mounted; then
+        echo "==> Mount '$VM_MOUNT' not found — run 'scripts/sandbox.sh up' first to mount the project."
+        exit 1
+    fi
     _env_args=("PROJECT_ROOT=$VM_MOUNT")
     [ -n "${GITHUB_TOKEN:-}" ] && _env_args+=("GH_TOKEN=$GITHUB_TOKEN" "GITHUB_TOKEN=$GITHUB_TOKEN")
-    exec multipass exec "$VM_NAME" -- env "${_env_args[@]}" bash -lc "cd '$VM_MOUNT' && exec bash -l"
+    exec multipass exec "$VM_NAME" -- env "${_env_args[@]}" bash -lc "
+        cd '$VM_MOUNT' && exec bash -l
+    "
 }
 
 # ---------------------------------------------------------------------------
@@ -313,7 +366,6 @@ _cmd_shell() {
 _cmd_run() {
     COPILOT_MODEL="${COPILOT_MODEL:-sonnet-4.6}"
     _copilot_token="${COPILOT_GITHUB_TOKEN:-$_gh_token}"
-    _ensure_mounted
 
     INTERACTIVE=false
     while [ "$#" -gt 0 ]; do
@@ -347,10 +399,15 @@ EOF
 
     TASK="${*:-}"
 
+    if ! _is_mounted; then
+        echo "==> Mount '$VM_MOUNT' not found — run 'scripts/sandbox.sh up' first to mount the project."
+        exit 1
+    fi
+
     PROMPT_FILE=$(multipass exec "$VM_NAME" -- bash -c "mktemp /tmp/copilot-prompt-XXXXXX")
 
     {
-        cat "$DEV_DIR/prompts/system.md"
+        cat "$PROJECT_DIR/.agents/skills/system.md"
         if [ -n "$TASK" ]; then
             printf "\n\n---\n\nTask: %s\n" "$TASK"
         fi
@@ -363,7 +420,7 @@ EOF
         [ -n "${GITHUB_TOKEN:-}" ] && _env_args+=("GH_TOKEN=$GITHUB_TOKEN" "GITHUB_TOKEN=$GITHUB_TOKEN")
         _env_args+=("COPILOT_GITHUB_TOKEN=$_copilot_token" "COPILOT_MODEL=$COPILOT_MODEL" "PROJECT_ROOT=$VM_MOUNT")
         multipass exec "$VM_NAME" -- env "${_env_args[@]}" bash -lc "
-            cd '$VM_MOUNT'
+                cd '$VM_MOUNT'
             copilot --yolo -i \"$CONTEXT_MSG\"
             rm -f $PROMPT_FILE
         "
@@ -374,7 +431,7 @@ EOF
         [ -n "${GITHUB_TOKEN:-}" ] && _env_args+=("GH_TOKEN=$GITHUB_TOKEN" "GITHUB_TOKEN=$GITHUB_TOKEN")
         _env_args+=("COPILOT_GITHUB_TOKEN=$_copilot_token" "COPILOT_MODEL=$COPILOT_MODEL" "PROJECT_ROOT=$VM_MOUNT")
         multipass exec "$VM_NAME" -- env "${_env_args[@]}" bash -lc "
-            cd '$VM_MOUNT'
+                cd '$VM_MOUNT'
             copilot --yolo -p \"\$(cat $PROMPT_FILE)\"
             rm -f $PROMPT_FILE
         "
@@ -386,7 +443,8 @@ EOF
 # ---------------------------------------------------------------------------
 case "${1:-}" in
     up)
-        _cmd_up
+        shift
+        _cmd_up "$@"
         ;;
     down)
         _cmd_down

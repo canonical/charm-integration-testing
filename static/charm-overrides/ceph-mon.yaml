@@ -16,6 +16,9 @@
 #
 # All other provides: optional - each activates only on relation events;
 #   none cause BlockedStatus when absent.
+# listed: false -- Excluded from automated bundle building (SQT-1081) to prevent
+# pipeline congestion; not currently covered by Charm QA.
+listed: false
 overrides:
 
   # ── luminous, mimic, nautilus, octopus, pacific tracks ─────────────────────

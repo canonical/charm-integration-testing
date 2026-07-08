@@ -30,6 +30,7 @@ dependencies = [
     "validators-parca-store",
     "validators-external-provider",
     "validators-http-interface",
+    "validators-grafana-dashboard",
 ]
 
 [build-system]

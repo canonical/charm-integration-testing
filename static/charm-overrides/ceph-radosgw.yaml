@@ -29,6 +29,9 @@
 #     (consumed by OpenStack Glance for image storage). Leaving non-optional
 #     causes solver to add glance -> keystone -> full OpenStack stack.
 #   radosgw-user, s3: credential/access interfaces - charm runs without consumers.
+# listed: false -- Excluded from automated bundle building (SQT-1081) to prevent
+# pipeline congestion; not currently covered by Charm QA.
+listed: false
 overrides:
   # luminous, mimic, nautilus, octopus, pacific: no secondary, no primary, no s3
   - criteria:

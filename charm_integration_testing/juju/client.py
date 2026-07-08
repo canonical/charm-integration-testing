@@ -9,7 +9,12 @@ from validators.base import ValidationResult
 
 from .backend import JujuBackend
 from .extension import JujuExtension
-from .models import JujuApplicationInfo, JujuConsumedOfferInfo, JujuIntegration, JujuIntegrationApplication
+from .models import (
+    JujuApplicationInfo,
+    JujuConsumedOfferInfo,
+    JujuIntegration,
+    JujuIntegrationApplication,
+)
 from .version import JujuVersion
 
 
@@ -31,7 +36,12 @@ class JujuClient:
     logger: logging.Logger
     extensions: list[JujuExtension]
 
-    def __init__(self, backend: JujuBackend, logger: logging.Logger, extensions: list[JujuExtension] | None = None):
+    def __init__(
+        self,
+        backend: JujuBackend,
+        logger: logging.Logger,
+        extensions: list[JujuExtension] | None = None,
+    ):
         self.backend = backend
         self.logger = logger
         self.extensions = extensions or []
@@ -85,35 +95,21 @@ class JujuClient:
 
     def integrate(
         self,
-        application_1: str,
-        application_2: str,
-        endpoint_1: str,
-        endpoint_2: str,
+        endpoint_1: JujuIntegrationApplication,
+        endpoint_2: JujuIntegrationApplication,
         model: str = "default",
     ) -> None:
-        # Get targets
-        target_1 = JujuIntegrationApplication(application_1, endpoint_1)
-        target_2 = JujuIntegrationApplication(application_2, endpoint_2)
-
-        # Integrate
-        self.logger.info(f"Integrating {target_1} with {target_2}.")
-        self.backend.integrate(model, target_1, target_2)
+        self.logger.info(f"Integrating {endpoint_1} with {endpoint_2}.")
+        self.backend.integrate(model, endpoint_1, endpoint_2)
 
     def remove_integration(
         self,
-        application_1: str,
-        application_2: str,
-        endpoint_1: str,
-        endpoint_2: str,
+        endpoint_1: JujuIntegrationApplication,
+        endpoint_2: JujuIntegrationApplication,
         model: str = "default",
     ) -> None:
-        # Get targets
-        target_1 = JujuIntegrationApplication(application_1, endpoint_1)
-        target_2 = JujuIntegrationApplication(application_2, endpoint_2)
-
-        # Remove integration
-        self.logger.info(f"Removing integration between {target_1} and {target_2}.")
-        self.backend.remove_integration(model, target_1, target_2)
+        self.logger.info(f"Removing integration between {endpoint_1} and {endpoint_2}.")
+        self.backend.remove_integration(model, endpoint_1, endpoint_2)
 
     def deploy_bundle_file(
         self,
@@ -159,19 +155,16 @@ class JujuClient:
 
     def wait_for_removal_of_integration(
         self,
-        application_1: str,
-        application_2: str,
-        endpoint_1: str,
-        endpoint_2: str,
+        endpoint_1: JujuIntegrationApplication,
+        endpoint_2: JujuIntegrationApplication,
         model: str = "default",
         timeout: timedelta | None = None,
     ) -> None:
-        target_1 = JujuIntegrationApplication(application_1, endpoint_1)
-        target_2 = JujuIntegrationApplication(application_2, endpoint_2)
         self.logger.info(
-            f"{self._waiting_timeout_log(timeout)} for removal of integration between {target_1} and {target_2}."
+            f"{self._waiting_timeout_log(timeout)} for removal of integration between "
+            f"{endpoint_1} and {endpoint_2}."
         )
-        self.backend.wait_for_removal_of_integration(model, target_1, target_2, timeout)
+        self.backend.wait_for_removal_of_integration(model, endpoint_1, endpoint_2, timeout)
 
     def wait_for_removal_of_units(
         self, *applications: str, model: str = "default", timeout: timedelta | None = None
