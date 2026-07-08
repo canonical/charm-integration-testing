@@ -414,7 +414,7 @@ EOF
 
     # Validate the task argument for autonomous mode before any VM interaction.
     if [ "$INTERACTIVE" = "false" ]; then
-        [ -n "$TASK" ] || { echo "Usage: scripts/sandbox.sh run 'task description'"; exit 1; }
+        [ -n "$TASK" ] || { echo "Usage: scripts/sandbox.sh run 'task description'" >&2; exit 1; }
     fi
 
     if ! _is_mounted; then
@@ -440,7 +440,7 @@ EOF
         if [ -n "$TASK" ]; then
             printf "\n\n---\n\nTask: %s\n" "$TASK"
         fi
-    } | multipass exec "$VM_NAME" -- bash -c "cat > $PROMPT_FILE"
+    } | multipass exec "$VM_NAME" -- bash -c "cat > \"$PROMPT_FILE\""
 
     if [ "$INTERACTIVE" = "true" ]; then
         CONTEXT_MSG="Please read $PROMPT_FILE for project context, then await my instructions."
@@ -455,7 +455,7 @@ EOF
             [ -n \"\${SANDBOX_MCP_VM_CONFIG:-}\" ] && _mcp_extra=(--additional-mcp-config \"@\${SANDBOX_MCP_VM_CONFIG}\")
             _ec=0
             copilot --yolo \"\${_mcp_extra[@]}\" -i \"$CONTEXT_MSG\" || _ec=\$?
-            rm -f $PROMPT_FILE
+            rm -f \"$PROMPT_FILE\"
             exit \$_ec
         "
     else
@@ -469,8 +469,8 @@ EOF
             _mcp_extra=()
             [ -n \"\${SANDBOX_MCP_VM_CONFIG:-}\" ] && _mcp_extra=(--additional-mcp-config \"@\${SANDBOX_MCP_VM_CONFIG}\")
             _ec=0
-            copilot --yolo \"\${_mcp_extra[@]}\" -p \"\$(cat $PROMPT_FILE)\" || _ec=\$?
-            rm -f $PROMPT_FILE
+            copilot --yolo \"\${_mcp_extra[@]}\" -p \"\$(cat \"$PROMPT_FILE\")\" || _ec=\$?
+            rm -f \"$PROMPT_FILE\"
             exit \$_ec
         "
     fi
