@@ -37,7 +37,12 @@ class JujuClient:
     logger: logging.Logger
     extensions: list[JujuExtension]
 
-    def __init__(self, backend: JujuBackend, logger: logging.Logger, extensions: list[JujuExtension] | None = None):
+    def __init__(
+        self,
+        backend: JujuBackend,
+        logger: logging.Logger,
+        extensions: list[JujuExtension] | None = None,
+    ):
         self.backend = backend
         self.logger = logger
         self.extensions = extensions or []

@@ -29,6 +29,7 @@ dependencies = [
     "validators-azure-storage",
     "validators-external-provider",
     "validators-http-interface",
+    "validators-grafana-dashboard",
 ]
 
 [build-system]
