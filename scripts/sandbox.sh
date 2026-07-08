@@ -427,13 +427,17 @@ EOF
     if [ -n "${SANDBOX_MCP_CONFIG_FILE:-}" ]; then
         echo "==> Copying MCP config into VM..."
         _mcp_vm_file=$(multipass exec "$VM_NAME" -- bash -c "mktemp /tmp/mcp-config-XXXXXX.json")
-        # Guarantee cleanup even if set -euo pipefail causes an early exit.
+        # Install a preliminary trap for the MCP file in case PROMPT_FILE creation fails.
         # shellcheck disable=SC2064
         trap "multipass exec '$VM_NAME' -- rm -f '$_mcp_vm_file' 2>/dev/null || true" EXIT
         multipass exec "$VM_NAME" -- bash -c "cat > '$_mcp_vm_file'" < "$SANDBOX_MCP_CONFIG_FILE"
     fi
 
     PROMPT_FILE=$(multipass exec "$VM_NAME" -- bash -c "mktemp /tmp/copilot-prompt-XXXXXX")
+    # Update the EXIT trap to cover PROMPT_FILE as well. This replaces the MCP-only
+    # trap (if set) so both files are removed on any early exit due to set -euo pipefail.
+    # shellcheck disable=SC2064
+    trap "multipass exec '$VM_NAME' -- rm -f '$PROMPT_FILE' '$_mcp_vm_file' 2>/dev/null || true" EXIT
 
     {
         cat "$PROJECT_DIR/.agents/skills/system.md"
