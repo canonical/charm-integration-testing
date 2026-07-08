@@ -161,6 +161,21 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def list_offers(self, model: str) -> set[str]:
+        """Return the names of all offers defined in *model*."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def create_offer(self, model: str, app: str, endpoints: list[str], offer_name: str) -> None:
+        """Create an offer in *model* if it does not already exist.
+
+        On Juju 4+, ``juju offer`` is not idempotent and fails when an offer with the same
+        name already exists.  Implementations must tolerate the "already exists" error and
+        treat it as a no-op so that ``deploy_bundles`` can be re-run without failures.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
     def list_integrations(self, model: str) -> set[JujuIntegration]:
         raise NotImplementedError
 

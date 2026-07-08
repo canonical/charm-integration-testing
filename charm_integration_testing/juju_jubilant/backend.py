@@ -445,6 +445,22 @@ class JubilantBackend(JujuCmdBackend):
             offer_url = f"{controller}:admin/{model_name}.{name}"
             self.client.model(None).cli("remove-offer", "--yes", offer_url, include_model=False)
 
+    def list_offers(self, model: str) -> set[str]:
+        import json as _json
+
+        result = self.client.model(model).cli("offers", "--format=json")
+        if not result or not result.strip():
+            return set()
+        return set(_json.loads(result).keys())
+
+    def create_offer(self, model: str, app: str, endpoints: list[str], offer_name: str) -> None:
+        try:
+            self.client.model(model).offer(app, endpoint=endpoints, name=offer_name)
+        except jubilant.CLIError as e:
+            if "already exists" in e.stderr:
+                return
+            raise
+
     def list_integrations(self, model: str) -> set[JujuIntegration]:
         # Juju status yaml format doesn't expose provider/requirer information or
         # neighbor endpoint information, meaning the only way to get integrations

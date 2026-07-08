@@ -31,6 +31,12 @@ class NullJujuBackend(JujuBackend):
     def remove_offers(self, model: str, offer_names: list[str]) -> None:
         raise NotImplementedError
 
+    def list_offers(self, model: str) -> set[str]:
+        raise NotImplementedError
+
+    def create_offer(self, model: str, app: str, endpoints: list[str], offer_name: str) -> None:
+        raise NotImplementedError
+
     def list_integrations(self, model: str) -> set[JujuIntegration]:
         raise NotImplementedError
 

@@ -34,17 +34,30 @@ def parse_offer_names_from_bundle(bundle_yaml: str) -> set[str]:
     """Return the set of offer names defined in the bundle's overlay documents.
 
     Offers are declared in overlay documents (documents after the first) under
-    ``applications.<app>.offers``. This is used to identify which offers must be removed
-    before re-deploying on Juju 4+, where updating an existing offer is not supported.
+    ``applications.<app>.offers``. This is used to identify which offers must be created
+    before phase 2 on Juju 4+, where updating an existing offer is not supported.
+    """
+    return set(parse_offers_from_bundle(bundle_yaml).keys())
+
+
+def parse_offers_from_bundle(bundle_yaml: str) -> dict[str, dict]:
+    """Return offer details from the bundle's overlay documents.
+
+    Returns a dict mapping offer name to ``{"app": app_name, "endpoints": [ep, ...]}``.
+    Offers are declared in overlay documents under ``applications.<app>.offers``.
     """
     documents = list(yaml.safe_load_all(bundle_yaml))
-    offer_names: set[str] = set()
+    offers: dict[str, dict] = {}
     for doc in documents[1:]:
         if not doc:
             continue
-        for app_data in doc.get("applications", {}).values():
-            offer_names.update(app_data.get("offers", {}).keys())
-    return offer_names
+        for app_name, app_data in doc.get("applications", {}).items():
+            for offer_name, offer_data in app_data.get("offers", {}).items():
+                offers[offer_name] = {
+                    "app": app_name,
+                    "endpoints": list(offer_data.get("endpoints", [])),
+                }
+    return offers
 
 
 def strip_offers_from_bundle(bundle_yaml: str) -> str:

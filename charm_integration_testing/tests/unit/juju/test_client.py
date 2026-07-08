@@ -957,10 +957,11 @@ applications:
 
 @dataclass
 class DeployBundlesBackendStub(NullJujuBackend):
-    """Records deploy_bundle_file and remove_offers calls in order, returns a fixed CLI version."""
+    """Records deploy_bundle_file, list_offers, and create_offer calls; returns a fixed CLI version."""
 
     juju_version: JujuVersion = field(default_factory=lambda: JujuVersion(3, 6, 0))
     calls: list[tuple[str, ...]] = field(default_factory=list)
+    existing_offers: set[str] = field(default_factory=set)
 
     def cli_version(self) -> JujuVersion:
         return self.juju_version
@@ -977,6 +978,13 @@ class DeployBundlesBackendStub(NullJujuBackend):
     def remove_offers(self, model: str, offer_names: list[str]) -> None:
         self.calls.append(("remove_offers", model, *sorted(offer_names)))
 
+    def list_offers(self, model: str) -> set[str]:
+        self.calls.append(("list_offers", model))
+        return self.existing_offers
+
+    def create_offer(self, model: str, app: str, endpoints: list[str], offer_name: str) -> None:
+        self.calls.append(("create_offer", model, app, offer_name))
+
 
 class TestDeployBundles:
     def test_juju3_deploys_full_bundle_in_phase2(self, tmp_path: Path) -> None:
@@ -987,23 +995,52 @@ class TestDeployBundles:
         _client(backend).deploy_bundles([(bundle_path, "ctrl:model")], tmp_path)
 
         action_names = [c[0] for c in backend.calls]
-        # Juju 3: phase 2 deploys the original full bundle, no remove_offers needed
+        # Juju 3: phase 2 deploys the original full bundle; no offer management needed.
         assert "remove_offers" not in action_names
+        assert "create_offer" not in action_names
         assert backend.calls[1] == ("deploy", "ctrl:model", str(bundle_path))
 
-    def test_juju4_strips_offers_in_phase2(self, tmp_path: Path) -> None:
+    def test_juju4_creates_offers_between_phases(self, tmp_path: Path) -> None:
         bundle_path = tmp_path / "bundle.yaml"
         bundle_path.write_text(_BUNDLE_WITH_OFFERS)
         backend = DeployBundlesBackendStub(juju_version=JujuVersion(4, 0, 0))
 
         _client(backend).deploy_bundles([(bundle_path, "ctrl:model")], tmp_path)
 
-        # Phase 1: stripped bundle (apps-only)
+        action_names = [c[0] for c in backend.calls]
+        # Phase 1: apps-only bundle
         assert backend.calls[0] == ("deploy", "ctrl:model", str(tmp_path / "apps-only-bundle-0.yaml"))
-        # Phase 2: offers-stripped bundle (not the original bundle path)
-        assert backend.calls[1] == ("deploy", "ctrl:model", str(tmp_path / "phase2-bundle-0.yaml"))
-        # No remove_offers calls
-        assert "remove_offers" not in [c[0] for c in backend.calls]
+        # Between phases: list then create the offer
+        assert "list_offers" in action_names
+        assert "create_offer" in action_names
+        create_call = next(c for c in backend.calls if c[0] == "create_offer")
+        assert create_call[1] == "ctrl:model"
+        # Phase 2: offers-stripped bundle
+        assert backend.calls[-1] == ("deploy", "ctrl:model", str(tmp_path / "phase2-bundle-0.yaml"))
+        assert "remove_offers" not in action_names
+
+    def test_juju4_skips_create_offer_when_already_exists(self, tmp_path: Path) -> None:
+        bundle_path = tmp_path / "bundle.yaml"
+        bundle_path.write_text(_BUNDLE_WITH_OFFERS)
+        # Pre-populate existing offers so create_offer should not be called
+        backend = DeployBundlesBackendStub(
+            juju_version=JujuVersion(4, 0, 0),
+            existing_offers={"glauth-k8s-offer"},
+        )
+
+        _client(backend).deploy_bundles([(bundle_path, "ctrl:model")], tmp_path)
+
+        assert "create_offer" not in [c[0] for c in backend.calls]
+
+    def test_juju4_phase1_bundle_has_offers_stripped(self, tmp_path: Path) -> None:
+        bundle_path = tmp_path / "bundle.yaml"
+        bundle_path.write_text(_BUNDLE_WITH_OFFERS)
+        backend = DeployBundlesBackendStub(juju_version=JujuVersion(4, 0, 0))
+
+        _client(backend).deploy_bundles([(bundle_path, "ctrl:model")], tmp_path)
+
+        phase1_content = (tmp_path / "apps-only-bundle-0.yaml").read_text()
+        assert "glauth-k8s-offer" not in phase1_content
 
     def test_juju4_phase2_bundle_has_offers_stripped(self, tmp_path: Path) -> None:
         bundle_path = tmp_path / "bundle.yaml"
@@ -1014,16 +1051,6 @@ class TestDeployBundles:
 
         phase2_content = (tmp_path / "phase2-bundle-0.yaml").read_text()
         assert "glauth-k8s-offer" not in phase2_content
-
-    def test_juju4_simple_bundle_no_phase2_file(self, tmp_path: Path) -> None:
-        bundle_path = tmp_path / "bundle.yaml"
-        bundle_path.write_text(_SIMPLE_BUNDLE)
-        backend = DeployBundlesBackendStub(juju_version=JujuVersion(4, 0, 0))
-
-        _client(backend).deploy_bundles([(bundle_path, "ctrl:model")], tmp_path)
-
-        # Phase 2 file is still written (just has nothing to strip)
-        assert backend.calls[1][0] == "deploy"
 
     def test_two_bundles_deploy_order(self, tmp_path: Path) -> None:
         bundle_a = tmp_path / "bundle_a.yaml"
@@ -1037,10 +1064,11 @@ class TestDeployBundles:
             tmp_path,
         )
 
-        # Phase 1: deploy model-a then model-b (stripped bundles)
-        assert backend.calls[0] == ("deploy", "ctrl:model-a", str(tmp_path / "apps-only-bundle-0.yaml"))
-        assert backend.calls[1] == ("deploy", "ctrl:model-b", str(tmp_path / "apps-only-bundle-1.yaml"))
-        # Phase 2: offers-stripped bundles (no remove_offers, no reordering needed)
-        assert backend.calls[2] == ("deploy", "ctrl:model-a", str(tmp_path / "phase2-bundle-0.yaml"))
-        assert backend.calls[3] == ("deploy", "ctrl:model-b", str(tmp_path / "phase2-bundle-1.yaml"))
+        deploy_calls = [c for c in backend.calls if c[0] == "deploy"]
+        # Phase 1: deploy model-a then model-b (apps-only stripped bundles)
+        assert deploy_calls[0] == ("deploy", "ctrl:model-a", str(tmp_path / "apps-only-bundle-0.yaml"))
+        assert deploy_calls[1] == ("deploy", "ctrl:model-b", str(tmp_path / "apps-only-bundle-1.yaml"))
+        # Phase 2: offers-stripped bundles
+        assert deploy_calls[2] == ("deploy", "ctrl:model-a", str(tmp_path / "phase2-bundle-0.yaml"))
+        assert deploy_calls[3] == ("deploy", "ctrl:model-b", str(tmp_path / "phase2-bundle-1.yaml"))
         assert "remove_offers" not in [c[0] for c in backend.calls]

@@ -1,7 +1,7 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-from juju.bundle_utils import parse_offer_names_from_bundle, strip_offers_from_bundle, strip_saas_from_bundle
+from juju.bundle_utils import parse_offer_names_from_bundle, parse_offers_from_bundle, strip_offers_from_bundle, strip_saas_from_bundle
 
 # ---------------------------------------------------------------------------
 # Fixtures: sample bundle YAML
@@ -121,6 +121,26 @@ applications:
 """
     names = parse_offer_names_from_bundle(bundle)
     assert names == {"offer-one", "offer-two"}
+
+
+# ---------------------------------------------------------------------------
+# Tests: parse_offers_from_bundle
+# ---------------------------------------------------------------------------
+
+
+def test_parse_offers_from_bundle_returns_app_and_endpoints() -> None:
+    offers = parse_offers_from_bundle(CMR_BUNDLE_WITH_OFFERS)
+    assert "glauth-k8s" in offers
+    assert offers["glauth-k8s"]["app"] == "glauth-k8s"
+    assert offers["glauth-k8s"]["endpoints"] == ["glauth-auxiliary"]
+
+
+def test_parse_offers_from_bundle_empty_for_simple_bundle() -> None:
+    assert parse_offers_from_bundle(SIMPLE_BUNDLE) == {}
+
+
+def test_parse_offers_from_bundle_empty_for_target_bundle() -> None:
+    assert parse_offers_from_bundle(CMR_TARGET_BUNDLE) == {}
 
 
 # ---------------------------------------------------------------------------
