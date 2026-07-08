@@ -53,12 +53,12 @@ environments:
     cloud-type: k8s
     kubeconfig-secret: PROD_PS7_KUBECONFIG
     arch: amd64
-    bootstrap-config:
+    bootstrap-config: &ps7-bootstrap-config
       apt-http-proxy: "http://egress.ps7.internal:3128"
       apt-https-proxy: "http://egress.ps7.internal:3128"
       http-proxy: "http://egress.ps7.internal:3128"
       https-proxy: "http://egress.ps7.internal:3128"
-      no-proxy: "127.0.0.1,localhost,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.canonical.com,.launchpad.net,.internal,.jujucharms.com,.svc.cluster.local"
+      no-proxy: "127.0.0.1,localhost,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.internal,.svc.cluster.local"
       snap-http-proxy: "http://egress.ps7.internal:3128"
       snap-https-proxy: "http://egress.ps7.internal:3128"
     bootstrap-constraints: &ps7-model-constraints
@@ -68,7 +68,7 @@ environments:
       update-status-hook-interval: "2m"
       juju-http-proxy: "http://egress.ps7.internal:3128"
       juju-https-proxy: "http://egress.ps7.internal:3128"
-      juju-no-proxy: "127.0.0.1,localhost,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.canonical.com,.launchpad.net,.internal,.jujucharms.com,.svc.cluster.local"
+      juju-no-proxy: "127.0.0.1,localhost,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.internal,.svc.cluster.local"
       snap-http-proxy: "http://egress.ps7.internal:3128"
       snap-https-proxy: "http://egress.ps7.internal:3128"
   ps7-sqa-prod_charm_qa_kubernetes-2: *ps7-sqa-prod_charm_qa_kubernetes
@@ -79,14 +79,24 @@ environments:
     cloud-type: o7k
     novarc-secret: PROD_PS7_NOVARC
     arch: amd64
-    bootstrap-config:
-      apt-http-proxy: "http://egress.ps7.internal:3128"
-      apt-https-proxy: "http://egress.ps7.internal:3128"
-      http-proxy: "http://egress.ps7.internal:3128"
-      https-proxy: "http://egress.ps7.internal:3128"
-      no-proxy: "127.0.0.1,localhost,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.internal,.svc.cluster.local"
-      snap-http-proxy: "http://egress.ps7.internal:3128"
-      snap-https-proxy: "http://egress.ps7.internal:3128"
+    bootstrap-config: *ps7-bootstrap-config
     bootstrap-constraints: *ps7-model-constraints
     model-config: *ps7-model-config
   ps7-sqa-prod_charm_qa_openstack-2: *ps7-sqa-prod_charm_qa_openstack
+  # PS7 PROD LXD
+  ps7-sqa-prod_charm_qa_lxd-1: &ps7-sqa-prod_charm_qa_lxd
+    github-runner: ps7-sqa-runners
+    platform: machine
+    cloud-type: lxd
+    lxd-secret: PROD_PS7_LXD
+    arch: amd64
+    bootstrap-config: *ps7-bootstrap-config
+    bootstrap-constraints:
+      root-disk: '5G'
+      root-disk-source: "local"
+    model-config: *ps7-model-config
+  ps7-sqa-prod_charm_qa_lxd-2: *ps7-sqa-prod_charm_qa_lxd
+  ps7-sqa-prod_charm_qa_lxd-3: *ps7-sqa-prod_charm_qa_lxd
+  ps7-sqa-prod_charm_qa_lxd-4: *ps7-sqa-prod_charm_qa_lxd
+  ps7-sqa-prod_charm_qa_lxd-5: *ps7-sqa-prod_charm_qa_lxd
+  ps7-sqa-prod_charm_qa_lxd-6: *ps7-sqa-prod_charm_qa_lxd

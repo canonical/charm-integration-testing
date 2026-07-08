@@ -1,0 +1,57 @@
+---
+name: Setup LXD
+description: Setup a remote LXD environment for charm QA
+inputs:
+  lxd-creds:
+    description: >
+      YAML blob containing remote LXD credentials. Expected keys: endpoint,
+      server-cert, client-cert, client-key.
+    required: true
+  cloud-name:
+    description: Name to register the Juju cloud under.
+    required: true
+outputs:
+  cloud-name:
+    description: Name of the cloud created and bootstrapped to.
+    value: ${{ inputs.cloud-name }}
+runs:
+  using: composite
+  steps:
+    - name: Write LXD credentials
+      env:
+        LXD_CREDS: ${{ inputs.lxd-creds }}
+      shell: bash
+      run: |
+        mkdir -p $HOME/lxd
+        echo "${LXD_CREDS}" > $HOME/lxd/creds.yaml
+    - name: Add LXD Cloud
+      env:
+        CLOUD: ${{ inputs.cloud-name }}
+      shell: bash
+      run: |-
+        endpoint=$(yq '.endpoint' $HOME/lxd/creds.yaml)
+        server_cert=$(yq '.server-cert' $HOME/lxd/creds.yaml)
+        client_cert=$(yq '.client-cert' $HOME/lxd/creds.yaml)
+        client_key=$(yq '.client-key' $HOME/lxd/creds.yaml)
+        cat > $HOME/lxd/cloud.yaml << EOF
+        clouds:
+          ${CLOUD}:
+            type: lxd
+            auth-types: [certificate]
+            endpoint: ${endpoint}
+        EOF
+        cat > $HOME/lxd/credentials.yaml << EOF
+        credentials:
+          ${CLOUD}:
+            default-credential: ${CLOUD}-cert
+            ${CLOUD}-cert:
+              auth-type: certificate
+              client-cert: |
+        $(echo "${client_cert}" | sed 's/^/        /')
+              client-key: |
+        $(echo "${client_key}" | sed 's/^/        /')
+              server-cert: |
+        $(echo "${server_cert}" | sed 's/^/        /')
+        EOF
+        juju add-cloud "${CLOUD}" $HOME/lxd/cloud.yaml --client
+        juju add-credential "${CLOUD}" -f $HOME/lxd/credentials.yaml --client

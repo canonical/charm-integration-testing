@@ -19,6 +19,7 @@ on:
           - ps6-sqa-prod_charm_qa_openstack-1
           - ps7-sqa-prod_charm_qa_kubernetes-1
           - ps7-sqa-prod_charm_qa_openstack-1
+          - ps7-sqa-prod_charm_qa_lxd-1
       age_threshold:
         description: Age threshold in minutes (resources older than this will be deleted)
         type: number
@@ -43,6 +44,8 @@ on:
       PROD_PS7_KUBECONFIG:
         required: true
       PROD_PS7_NOVARC:
+        required: true
+      PROD_PS7_LXD:
         required: true
 jobs:
   cleanup-environment:
@@ -73,27 +76,31 @@ jobs:
         id: creds
         shell: bash
         env:
-          KUBECONFIG_SECRET_NAME: ${{ steps.env_info.outputs.kubeconfig-secret }}
-          NOVARC_SECRET_NAME: ${{ steps.env_info.outputs.novarc-secret }}
+          CREDENTIALS_SECRET_NAME: ${{ steps.env_info.outputs.credentials-secret }}
+          CLOUD_TYPE: ${{ steps.env_info.outputs.cloud-type }}
           STG_SQA_KUBECONFIG: ${{ secrets.STG_SQA_KUBECONFIG }}
           PROD_SQA_KUBECONFIG: ${{ secrets.PROD_SQA_KUBECONFIG }}
           PROD_SQA_NOVARC: ${{ secrets.PROD_SQA_NOVARC }}
           PROD_PS7_KUBECONFIG: ${{ secrets.PROD_PS7_KUBECONFIG }}
           PROD_PS7_NOVARC: ${{ secrets.PROD_PS7_NOVARC }}
+          PROD_PS7_LXD: ${{ secrets.PROD_PS7_LXD }}
         run: |
-          if [[ -n "${KUBECONFIG_SECRET_NAME}" ]]; then
+          if [[ "${CLOUD_TYPE}" == "k8s" && -n "${CREDENTIALS_SECRET_NAME}" ]]; then
             echo "kubernetes=true" >> $GITHUB_OUTPUT
-            echo "${!KUBECONFIG_SECRET_NAME}" > "kubeconfig"
+            echo "${!CREDENTIALS_SECRET_NAME}" > "kubeconfig"
             echo "KUBECONFIG=$(realpath kubeconfig)" >> $GITHUB_ENV
-          fi
-          if [[ -n "${NOVARC_SECRET_NAME}" ]]; then
+          elif [[ "${CLOUD_TYPE}" == "o7k" && -n "${CREDENTIALS_SECRET_NAME}" ]]; then
             echo "openstack=true" >> $GITHUB_OUTPUT
             # Extract environment variables from RC file (handles both "export VAR=..." and "VAR=..." formats)
             # Mask each secret value to prevent exposure in logs
-            echo "${!NOVARC_SECRET_NAME}" | grep -E '^(export )?OS_' | sed 's/^export //' | while IFS='=' read -r key value; do
+            echo "${!CREDENTIALS_SECRET_NAME}" | grep -E '^(export )?OS_' | sed 's/^export //' | while IFS='=' read -r key value; do
               echo "::add-mask::$value"
               echo "$key=$value" >> $GITHUB_ENV
             done
+          elif [[ "${CLOUD_TYPE}" == "lxd" && -n "${CREDENTIALS_SECRET_NAME}" ]]; then
+            echo "lxd=true" >> $GITHUB_OUTPUT
+            mkdir -p $HOME/lxd
+            echo "${!CREDENTIALS_SECRET_NAME}" > $HOME/lxd/creds.yaml
           fi
 
       ##################################################################################
@@ -342,4 +349,70 @@ jobs:
               echo "Deleting floating IP: $fip_id (age: $age_minutes minutes)"
               openstack floating ip delete "$fip_id" || true
             fi
+          done
+
+      ##################################################################################
+      #  _     __   _______  
+      # | |    \ \ / /  __ \ 
+      # | |     \ V /| |  | |
+      # | |      > < | |  | |
+      # | |____ / . \| |__| |
+      # |______/_/ \_\_____/ 
+      #
+      - name: Install lxd client
+        if: ${{ !cancelled() && steps.creds.outputs.lxd == 'true' }}
+        uses: ./.github/actions/install-with-retry
+        with:
+          command: sudo snap install lxd
+      - name: Set up LXD remote
+        if: ${{ !cancelled() && steps.creds.outputs.lxd == 'true' }}
+        shell: bash
+        run: |
+          endpoint=$(yq '.endpoint' $HOME/lxd/creds.yaml)
+          client_cert=$(yq '.client-cert' $HOME/lxd/creds.yaml)
+          client_key=$(yq '.client-key' $HOME/lxd/creds.yaml)
+          export LXD_CONF="$HOME/lxd/config"
+          mkdir -p "${LXD_CONF}"
+          echo "${client_cert}" > "${LXD_CONF}/client.crt"
+          echo "${client_key}" > "${LXD_CONF}/client.key"
+          chmod 600 "${LXD_CONF}/client.key"
+          lxc remote add charmqa "${endpoint}" --accept-certificate
+          echo "LXD_CONF=${LXD_CONF}" >> $GITHUB_ENV
+      - name: Find and delete instances older than age threshold
+        if: ${{ !cancelled() && steps.creds.outputs.lxd == 'true' }}
+        shell: bash
+        run: |
+          lxc list charmqa: --format json | jq --raw-output --argjson age "$AGE_THRESHOLD" '
+            .[] |
+            select(.name | test("^juju-")) |
+            select((now - (.created_at | fromdateiso8601)) > ($age * 60)) |
+            .name
+          ' | while read -r name; do
+            echo "Deleting instance: $name"
+            lxc delete --force "charmqa:${name}" || true
+          done
+      - name: Find and delete networks older than age threshold
+        if: ${{ !cancelled() && steps.creds.outputs.lxd == 'true' }}
+        shell: bash
+        run: |
+          lxc network list charmqa: --format json | jq --raw-output '
+            .[] |
+            select(.name | test("^juju-")) |
+            select(.managed == true) |
+            .name
+          ' | while read -r name; do
+            echo "Deleting network: $name"
+            lxc network delete "charmqa:${name}" || true
+          done
+      - name: Find and delete profiles older than age threshold
+        if: ${{ !cancelled() && steps.creds.outputs.lxd == 'true' }}
+        shell: bash
+        run: |-
+          lxc profile list charmqa: --format json | jq --raw-output '
+            .[] |
+            select(.name | test("^juju-")) |
+            .name
+          ' | while read -r name; do
+            echo "Deleting profile: $name"
+            lxc profile delete "charmqa:${name}" || true
           done
