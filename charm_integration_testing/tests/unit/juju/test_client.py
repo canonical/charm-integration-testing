@@ -975,9 +975,6 @@ class DeployBundlesBackendStub(NullJujuBackend):
     ) -> None:
         self.calls.append(("deploy", model, bundle))
 
-    def remove_offers(self, model: str, offer_names: list[str]) -> None:
-        self.calls.append(("remove_offers", model, *sorted(offer_names)))
-
     def list_offers(self, model: str) -> set[str]:
         self.calls.append(("list_offers", model))
         return self.existing_offers
@@ -996,7 +993,6 @@ class TestDeployBundles:
 
         action_names = [c[0] for c in backend.calls]
         # Juju 3: phase 2 deploys the original full bundle; no offer management needed.
-        assert "remove_offers" not in action_names
         assert "create_offer" not in action_names
         assert backend.calls[1] == ("deploy", "ctrl:model", str(bundle_path))
 
@@ -1017,7 +1013,6 @@ class TestDeployBundles:
         assert create_call[1] == "ctrl:model"
         # Phase 2: offers-stripped bundle
         assert backend.calls[-1] == ("deploy", "ctrl:model", str(tmp_path / "phase2-bundle-0.yaml"))
-        assert "remove_offers" not in action_names
 
     def test_juju4_skips_create_offer_when_already_exists(self, tmp_path: Path) -> None:
         bundle_path = tmp_path / "bundle.yaml"
@@ -1071,4 +1066,3 @@ class TestDeployBundles:
         # Phase 2: offers-stripped bundles
         assert deploy_calls[2] == ("deploy", "ctrl:model-a", str(tmp_path / "phase2-bundle-0.yaml"))
         assert deploy_calls[3] == ("deploy", "ctrl:model-b", str(tmp_path / "phase2-bundle-1.yaml"))
-        assert "remove_offers" not in [c[0] for c in backend.calls]

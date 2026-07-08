@@ -439,12 +439,6 @@ class JubilantBackend(JujuCmdBackend):
             for offer, info in self.status(model).app_endpoints.items()
         }
 
-    def remove_offers(self, model: str, offer_names: list[str]) -> None:
-        controller, model_name = model.split(":", 1)
-        for name in offer_names:
-            offer_url = f"{controller}:admin/{model_name}.{name}"
-            self.client.model(None).cli("remove-offer", "--yes", offer_url, include_model=False)
-
     def list_offers(self, model: str) -> set[str]:
         import json as _json
 

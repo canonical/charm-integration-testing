@@ -28,9 +28,6 @@ class NullJujuBackend(JujuBackend):
     def list_consumed_offers(self, model: str) -> dict[str, JujuConsumedOfferInfo]:
         raise NotImplementedError
 
-    def remove_offers(self, model: str, offer_names: list[str]) -> None:
-        raise NotImplementedError
-
     def list_offers(self, model: str) -> set[str]:
         raise NotImplementedError
 

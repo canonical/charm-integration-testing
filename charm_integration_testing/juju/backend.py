@@ -157,10 +157,6 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def remove_offers(self, model: str, offer_names: list[str]) -> None:
-        raise NotImplementedError
-
-    @abstractmethod
     def list_offers(self, model: str) -> set[str]:
         """Return the names of all offers defined in *model*."""
         raise NotImplementedError
