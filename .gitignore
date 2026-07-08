@@ -144,4 +144,4 @@ dmypy.json
 /uv
 
 # macos specific files
-.DS_Store
+.DS_Storegenerated-*-bundle.yaml

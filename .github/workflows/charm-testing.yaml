@@ -377,7 +377,8 @@ jobs:
         continue-on-error: true
         shell: bash
         env:
-          KUBECONFIG: ${{ steps.setup_target.outputs.kubeconfig_path }}
+          KUBECONFIG_target_cloud: ${{ steps.setup_target.outputs.kubeconfig_path }}
+          KUBECONFIG_neighbor_cloud: ${{ steps.setup_neighbor.outputs.kubeconfig_path }}
           target_cloud: ${{ steps.setup_target.outputs.cloud-name }}
           neighbor_cloud: ${{ steps.setup_neighbor.outputs.cloud-name }}
           charm_endpoint: ${{ inputs.charm_endpoint }}
@@ -448,7 +449,7 @@ jobs:
         continue-on-error: true
         shell: bash
         env:
-          KUBECONFIG: ${{ steps.setup_target.outputs.kubeconfig_path }}
+          KUBECONFIG_target_cloud: ${{ steps.setup_target.outputs.kubeconfig_path }}
           target_cloud: ${{ steps.setup_target.outputs.cloud-name }}
           charm_endpoint: ${{ inputs.charm_endpoint }}
           neighbor_endpoint: ${{ inputs.neighbor_endpoint }}

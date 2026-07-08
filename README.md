@@ -34,7 +34,7 @@ The following environment variables can be set for specific test scenarios:
 - `MINIO_SERVER_FILE`: Path to MinIO server binary (will be used when deploying minio on machine models with s3-integrator, otherwise will be downloaded)
 - `UV_FILE`: Path to a pre-downloaded `uv` binary (will be used when injecting validators, otherwise will be downloaded)
 - `UBUNTU_PRO_TOKEN`: Ubuntu Pro token (required for testing canonical-livepatch-server charms)
-- `KUBECONFIG`: Path to Kubeconfig to use for tests that use the kubernetes client
+- `KUBECONFIG_<cloud_name>`: Path to kubeconfig for a Kubernetes cloud registered in Juju. One variable per K8s cloud, where hyphens in the cloud name are replaced with underscores (e.g. `KUBECONFIG_microk8s=/home/user/.kube/microk8s.yaml`, `KUBECONFIG_local_k8s=/home/user/.kube/local-k8s.yaml`). Replaces the former single `KUBECONFIG` variable.
 
 ## Documentation
 
