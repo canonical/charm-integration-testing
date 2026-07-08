@@ -492,9 +492,11 @@ def _make_validator_with_unit_addresses(
     from validators.test_utils.stubs import UnitStub
 
     app = ApplicationStub()
-    units = frozenset(UnitStub(f"provider/{i}") for i in range(len(unit_addresses)))
-    unit_data = {unit: {"prometheus_scrape_unit_address": addr} for unit, addr in zip(units, unit_addresses)}
-    relation = RelationStub(name=endpoint, id=0, app=app, data={app: databag, **unit_data}, units=units)
+    ordered_units = [UnitStub(f"provider/{i}") for i in range(len(unit_addresses))]
+    unit_data = {unit: {"prometheus_scrape_unit_address": addr} for unit, addr in zip(ordered_units, unit_addresses)}
+    relation = RelationStub(
+        name=endpoint, id=0, app=app, data={app: databag, **unit_data}, units=frozenset(ordered_units)
+    )
     charm = cast(ops.CharmBase, make_charm_from_relation(relation, interface_name="prometheus_scrape"))
     return PrometheusScrapeValidator(charm, cast(ops.Relation, relation))
 
@@ -532,7 +534,7 @@ class TestWildcardHostResolution:
 
         result = validator.validate(level="simple")
 
-        # THEN: parse error is reported and validation fails (no proable targets)
+        # THEN: parse error is reported and validation fails (no probeable targets)
         assert result.status == "FAIL"
         parse_check = next((c for c in result.checks if c.name == "target_parsing"), None)
         assert parse_check is not None
