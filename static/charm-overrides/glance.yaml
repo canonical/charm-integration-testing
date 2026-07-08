@@ -13,6 +13,9 @@
 # shared-db, identity-service (requires) - REQUIRED: in REQUIRED_INTERFACES.
 # amqp (requires) - already optional: true upstream; no override needed.
 # All other requires: optional - none in REQUIRED_INTERFACES; no BlockedStatus when absent.
+# listed: false -- Excluded from automated bundle building (SQT-1081) to prevent
+# pipeline congestion; not currently covered by Charm QA.
+listed: false
 overrides:
   - provides:
       nrpe-external-master:
