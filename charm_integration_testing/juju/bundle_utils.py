@@ -92,9 +92,9 @@ def strip_offers_from_bundle(bundle_yaml: str) -> str:
         for app_data in doc.get("applications", {}).values():
             app_data.pop("offers", None)
         # Drop the overlay entirely if it is now empty (no remaining keys).
-        has_content = any(
-            bool(app_data) for app_data in doc.get("applications", {}).values()
-        ) or any(k != "applications" for k in doc)
+        has_content = any(bool(app_data) for app_data in doc.get("applications", {}).values()) or any(
+            k != "applications" for k in doc
+        )
         if has_content:
             parts.append(yaml.dump(doc, default_flow_style=False, sort_keys=True))
     return "---\n" + "---\n".join(parts) if len(parts) > 1 else parts[0]

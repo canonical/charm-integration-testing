@@ -152,6 +152,7 @@ class JujuClient:
             tmp_dir: Directory in which to write the transformed phase bundle files.
         """
         juju4 = self.cli_version() >= JujuVersion(4, 0, 0)
+        tmp_dir.mkdir(parents=True, exist_ok=True)
 
         # Phase 1: deploy apps without any offers or saas consumption.
         for i, (bundle_path, model_uri) in enumerate(bundles):
