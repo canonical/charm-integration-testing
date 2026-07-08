@@ -91,15 +91,7 @@ class ParcaStoreValidator(BaseValidator):
         if not schema_check.passed:
             return self._make_result(level="deep", checks=checks)
 
-        address = self.databag["remote-store-address"]
-        grpc_target = address.strip().split("://")[-1].strip()
-        insecure = self.databag.get("remote-store-insecure", "false").lower() == "true"
-        creds = self.resolve_secret("remote-store-bearer-token-secret", "remote-store-bearer-token")
-        token = creds.get("remote-store-bearer-token", "")
-
-        # 2. Parse the gRPC address.
-        parse_check, host, port = _parse_grpc_address(grpc_target)
-        checks.append(parse_check)
+        parse_check, host, port = _parse_grpc_address(address)
         if not parse_check.passed:
             return self._make_result(level="deep", checks=checks)
 
