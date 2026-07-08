@@ -340,8 +340,8 @@ def _scrape_and_parse_checks(targets: list[_ScrapeTarget]) -> list[ValidationChe
     """
     checks: list[ValidationCheck] = []
     for t in targets:
-        target_id = f"{t.host}:{t.port}"
-        url = f"{t.scheme}://{_host_for_url(t.host)}:{t.port}{t.metrics_path}"
+        target_id = f"{_host_for_url(t.host)}:{t.port}"
+        url = f"{t.scheme}://{target_id}{t.metrics_path}"
         check_name = f"scrape[{target_id}]"
         try:
             with urlopen(url, timeout=10) as resp:  # nosec B310
