@@ -174,17 +174,25 @@ def _tcp_ping_check(host: str, port: int) -> ValidationCheck:
 
 def _tls_prerequisite_check(host: str, port: int) -> ValidationCheck:
     """Verify that the endpoint presents a TLS handshake when insecure=false."""
+    import ipaddress
     import ssl
 
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
     try:
+        try:
+            ipaddress.ip_address(host)
+        except ValueError:
+            server_hostname: str | None = host
+        else:
+            server_hostname = None
+
         with socket.create_connection((host, port), timeout=_TCP_TIMEOUT) as raw:
-            with ctx.wrap_socket(raw, server_hostname=host):
+            with ctx.wrap_socket(raw, server_hostname=server_hostname):
                 pass
         return ValidationCheck(name="tls", passed=True, message="TLS handshake succeeded.")
-    except ssl.SSLError as exc:
+    except (ssl.SSLError, ValueError) as exc:
         return ValidationCheck(name="tls", passed=False, message=f"TLS handshake failed: {exc}")
     except OSError as exc:
         return ValidationCheck(name="tls", passed=False, message=f"TLS prerequisite check failed: {exc}")
