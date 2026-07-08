@@ -60,7 +60,7 @@ applications:
 def test_strip_saas_removes_saas_section() -> None:
     result = strip_saas_from_bundle(CMR_TARGET_BUNDLE)
     assert "saas:" not in result
-    assert "glauth-k8s:" not in result.split("applications:")[0]  # not in saas context
+    assert "glauth-k8s" not in result
 
 
 def test_strip_saas_removes_cross_model_relations() -> None:

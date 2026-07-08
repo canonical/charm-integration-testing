@@ -482,7 +482,7 @@ class JubilantBackend(JujuCmdBackend):
         }
 
     def list_offers(self, model: str) -> set[str]:
-        result = self.client.model(model).cli("offers", "--format=json")
+        result = self.client.model(model).cli("offers", "--format", "json")
         if not result or not result.strip():
             return set()
         return set(json.loads(result).keys())

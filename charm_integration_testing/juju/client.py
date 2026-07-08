@@ -138,7 +138,7 @@ class JujuClient:
         because ``juju offer`` is not idempotent — re-creating an existing offer fails.
 
         Between the phases (Juju 4+ only), any offers defined in the bundles are created
-        explicitly.  Offers that already exist are silently skipped, making this step safe
+        explicitly.  Offers that already exist are logged and skipped, making this step safe
         for re-runs (idempotent redeploy).
 
         Phase 2 re-deploys with the ``saas`` sections so that cross-model relations are
