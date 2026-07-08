@@ -91,9 +91,17 @@ class ParcaStoreValidator(BaseValidator):
         if not schema_check.passed:
             return self._make_result(level="deep", checks=checks)
 
+        address = self.databag["remote-store-address"]
+        insecure = self.databag.get("remote-store-insecure", "false").lower() == "true"
+        token = self.databag.get("remote-store-bearer-token", "")
+
+        # 2. Parse the gRPC address into host:port.
         parse_check, host, port = _parse_grpc_address(address)
+        checks.append(parse_check)
         if not parse_check.passed:
             return self._make_result(level="deep", checks=checks)
+
+        grpc_target = f"{host}:{port}"
 
         # 3. TCP reachability (fast-fail before gRPC dial).
         tcp_check = _tcp_ping_check(host, port)
