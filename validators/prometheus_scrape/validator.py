@@ -19,6 +19,8 @@ _SCRAPE_METADATA_REQUIRED_KEYS = ("model", "model_uuid", "application", "unit")
 _LABEL_NAME_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 # Hosts that are bind-all placeholders and cannot be used as scrape targets directly.
 _WILDCARD_HOSTS: frozenset[str] = frozenset({"*", "0.0.0.0"})  # nosec B104
+# Regex to detect a bare IPv6 address (not already bracketed).
+_IPV6_RE = re.compile(r"^[0-9a-fA-F:]+:[0-9a-fA-F:]*$")
 
 
 @dataclass
@@ -196,6 +198,17 @@ def _validate_scrape_jobs(scrape_jobs: list[dict[str, Any]]) -> ValidationCheck:
 # ---------------------------------------------------------------------------
 
 
+def _host_for_url(host: str) -> str:
+    """Wrap bare IPv6 addresses in square brackets for use in URLs.
+
+    ``urlparse`` stores the hostname without brackets (e.g. ``2001:db8::1``),
+    but RFC 3986 requires brackets when the address appears in a URL authority
+    component (``http://[2001:db8::1]:9104/``).  IPv4 addresses and hostnames
+    are returned unchanged.
+    """
+    return f"[{host}]" if _IPV6_RE.match(host) else host
+
+
 def _extract_targets(
     scrape_jobs: list[dict[str, Any]], unit_addresses: list[str] | None = None
 ) -> tuple[list[_ScrapeTarget], list[str]]:
@@ -240,7 +253,7 @@ def _extract_targets(
 
                     for resolved_host in resolved_hosts:
                         # Deduplicate on the full scrape URL
-                        scrape_url = f"{effective_scheme}://{resolved_host}:{port}{metrics_path}"
+                        scrape_url = f"{effective_scheme}://{_host_for_url(resolved_host)}:{port}{metrics_path}"
                         if scrape_url in seen:
                             continue
                         seen.add(scrape_url)
@@ -292,7 +305,7 @@ def _http_probe_check(targets: list[_ScrapeTarget]) -> ValidationCheck:
 
     errors: list[str] = []
     for t in targets:
-        url = f"{t.scheme}://{t.host}:{t.port}{t.metrics_path}"
+        url = f"{t.scheme}://{_host_for_url(t.host)}:{t.port}{t.metrics_path}"
         try:
             with urlopen(url, timeout=5) as resp:  # nosec B310
                 if resp.status != 200:
@@ -321,7 +334,7 @@ def _scrape_and_parse_checks(targets: list[_ScrapeTarget]) -> list[ValidationChe
     checks: list[ValidationCheck] = []
     for t in targets:
         target_id = f"{t.host}:{t.port}"
-        url = f"{t.scheme}://{target_id}{t.metrics_path}"
+        url = f"{t.scheme}://{_host_for_url(t.host)}:{t.port}{t.metrics_path}"
         check_name = f"scrape[{target_id}]"
         try:
             with urlopen(url, timeout=10) as resp:  # nosec B310

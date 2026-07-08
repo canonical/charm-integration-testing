@@ -596,3 +596,20 @@ class TestWildcardHostResolution:
         http_check = next(c for c in result.checks if c.name == "http_probe")
         assert http_check.passed
         assert "10.1.0.99" not in http_check.message
+
+    def test_ipv6_unit_address_is_bracketed_in_url(self) -> None:
+        # GIVEN a wildcard scrape job and a unit with an IPv6 address
+        validator = _make_validator_with_unit_addresses(WILDCARD_DATABAG, unit_addresses=["2001:db8::1"])
+
+        with patch(
+            "validators.prometheus_scrape.validator.urlopen",
+            return_value=_mock_http_response(200),
+        ) as mock_open:
+            result = validator.validate(level="simple")
+
+        # THEN: validation passes; the URL passed to urlopen brackets the IPv6 address
+        assert result.status == "PASS"
+        http_check = next(c for c in result.checks if c.name == "http_probe")
+        assert http_check.passed
+        called_url = mock_open.call_args[0][0]
+        assert called_url == "http://[2001:db8::1]:9104/metrics"
