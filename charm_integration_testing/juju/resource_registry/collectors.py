@@ -7,6 +7,8 @@ from pathlib import Path
 
 from resource_registry.protocols import ResourceHandle
 
+from juju.backend import JujuBackend
+
 from .handles import JujuControllerHandle
 
 _JUJU_CRASHDUMP_TIMEOUT_SECONDS = 300
@@ -19,20 +21,19 @@ _SUBPROCESS_TIMEOUT_SECONDS = _JUJU_CRASHDUMP_TIMEOUT_SECONDS * 2
 class JujuCrashdumpCollector:
     """Collect controller logs using juju-crashdump or juju-k8s-crashdump.
 
-    For Kubernetes substrates, set kubeconfig_path to the path of the kubeconfig
-    file; juju-k8s-crashdump will be used.  For machine/OpenStack substrates leave
-    kubeconfig_path as None; juju-crashdump will be used instead.
+    Cloud type and kubeconfig lookup are delegated to the backend, which is the
+    single source of truth for controller cloud configuration.
     """
 
     def __init__(
         self,
         logger: logging.Logger,
+        backend: JujuBackend,
         output_dir: Path | None = None,
-        kubeconfig_path: Path | None = None,
     ) -> None:
         self._logger = logger.getChild(type(self).__name__)
+        self._backend = backend
         self._output_dir = output_dir
-        self._kubeconfig_path = kubeconfig_path
 
     def supports(self, handle: ResourceHandle) -> bool:
         return isinstance(handle, JujuControllerHandle)
@@ -46,19 +47,18 @@ class JujuCrashdumpCollector:
 
         output_dir = self._output_dir
         output_dir.mkdir(parents=True, exist_ok=True)
+        output_path = output_dir / f"{handle.path_segment}.tar.gz"
 
-        if self._kubeconfig_path is not None:
-            self._collect_k8s(handle.controller, output_dir / f"{handle.path_segment}.tar.gz")
+        kubeconfig = self._backend.get_controller_kubeconfig(handle.controller)
+        if kubeconfig is not None:
+            self._collect_k8s(handle.controller, output_path, kubeconfig)
         else:
-            self._collect_machine(handle.controller, output_dir / f"{handle.path_segment}.tar.gz")
+            self._collect_machine(handle.controller, output_path)
 
-    def _collect_k8s(self, controller: str, output_path: Path) -> None:
-        kubeconfig_path = self._kubeconfig_path
-        if kubeconfig_path is None:
-            raise ValueError("kubeconfig_path must be set for Kubernetes crashdump collection")
+    def _collect_k8s(self, controller: str, output_path: Path, kubeconfig: Path) -> None:
         cmd = [
             "juju-k8s-crashdump",
-            str(kubeconfig_path.resolve()),
+            str(kubeconfig.resolve()),
             controller,
             "--output_path",
             str(output_path),
@@ -83,6 +83,7 @@ class JujuCrashdumpCollector:
         result.check_returncode()
 
     def _collect_machine(self, controller: str, output_path: Path) -> None:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
         cmd = [
             "juju-crashdump",
             "--model",
@@ -94,8 +95,10 @@ class JujuCrashdumpCollector:
             str(_JUJU_CRASHDUMP_MAX_FILE_SIZE_BYTES),
             "--compression",
             "gz",
-            "--unit-dump-location",
-            str(output_path),
+            "-o",
+            str(output_path.parent),
+            "-u",
+            controller,
             "--as-root",
         ]
         self._logger.debug(f"Running {' '.join(str(c) for c in cmd)}")
@@ -116,3 +119,9 @@ class JujuCrashdumpCollector:
             if result.stderr:
                 self._logger.debug(f"juju-crashdump stderr:\n{result.stderr}")
         result.check_returncode()
+        # juju-crashdump writes to <output_dir>/juju-crashdump-<controller>.tar.gz;
+        # rename to the caller's expected output_path.
+        generated = output_path.parent / f"juju-crashdump-{controller}.tar.gz"
+        if not generated.exists():
+            raise FileNotFoundError(f"juju-crashdump succeeded but expected output file not found: {generated}")
+        generated.replace(output_path)

@@ -283,14 +283,18 @@ def applications_are_removed(status: jubilant.Status, *application_args: str) ->
 def integrations_are_removed(
     status: jubilant.Status, *integrations_args: tuple[JujuIntegrationApplication, JujuIntegrationApplication]
 ) -> tuple[bool, JujuWaitState]:
-    existing_integrations = get_integrations(status)
-    integrations = integrations_args if integrations_args else existing_integrations
+    existing_integrations = {frozenset(i) for i in get_integrations(status)}
+    integrations = integrations_args if integrations_args else [tuple(i) for i in existing_integrations]
 
     noncompliant_applications: dict[str, JujuApplicationState | None] = {}
     for integration in integrations:
-        if integration in existing_integrations:
+        if frozenset(integration) in existing_integrations:
             for endpoint in integration:
-                noncompliant_applications[endpoint.application] = get_application_state(status, endpoint.application)
+                # Skip SAAS applications (consumed offers) - they're not local apps in this model
+                if endpoint.application in status.apps:
+                    noncompliant_applications[endpoint.application] = get_application_state(
+                        status, endpoint.application
+                    )
 
     return len(noncompliant_applications) == 0, JujuWaitState(
         message="waiting for integration removal",

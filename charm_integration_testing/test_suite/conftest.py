@@ -20,7 +20,13 @@ from extensions import (
     UnsealVaultK8sJujuExtension,
     ValidatorInjectorExtension,
 )
-from juju import JujuBackend, JujuClient, JujuValidationError, JujuVersion, JujuWaitTimeoutError
+from juju import (
+    JujuBackend,
+    JujuClient,
+    JujuValidationError,
+    JujuVersion,
+    JujuWaitTimeoutError,
+)
 from juju.resource_registry import (
     JujuControllerHandle,
     JujuCrashdumpCollector,
@@ -45,6 +51,7 @@ from test_suite.scheduler.states import STATES_WITHOUT_EXISTING_CONTROLLER, STAT
 pytest_plugins = [
     "test_suite.scheduler.plugin",
     "test_suite.fixtures.controller_spec",
+    "test_suite.fixtures.integration_spec",
 ]
 
 
@@ -98,9 +105,39 @@ def logger() -> logging.Logger:
     return logging.getLogger()
 
 
-@pytest.fixture
-def juju_backend(kubernetes_client: KubernetesClient | None) -> JujuBackend:
-    return JubilantBackend(kubernetes_client=kubernetes_client)
+@pytest.fixture(scope="session")
+def cloud_kubeconfigs() -> dict[str, Path]:
+    """Map of Juju cloud name to kubeconfig path, sourced from KUBECONFIG_<cloud> env vars.
+
+    Cloud name conventions: hyphens in Juju cloud names are represented as
+    underscores in env var names (e.g. KUBECONFIG_local_k8s for cloud local-k8s).
+    """
+    result: dict[str, Path] = {}
+    for key, val in os.environ.items():
+        if key.startswith("KUBECONFIG_"):
+            cloud = key[len("KUBECONFIG_") :].lower().replace("_", "-")
+            stripped = val.strip()
+            if stripped:
+                result[cloud] = Path(stripped)
+    return result
+
+
+@pytest.fixture(scope="session")
+def juju_backend(cloud_kubeconfigs: dict[str, Path]) -> JujuBackend:
+    return JubilantBackend(cloud_kubeconfigs=cloud_kubeconfigs)
+
+
+@pytest.fixture(scope="session")
+def kubernetes_client(
+    cloud_kubeconfigs: dict[str, Path],
+    target_cloud: str,
+    logger: logging.Logger,
+) -> KubernetesClient | None:
+    """KubernetesClient for the target cloud, or None for machine clouds."""
+    path = cloud_kubeconfigs.get(target_cloud)
+    if path is None:
+        return None
+    return KubernetesClient(KubernetesBackend.k8s_client(kubeconfig=path), logger=logger)
 
 
 @pytest.fixture(scope="session")
@@ -120,22 +157,15 @@ def log_dir(request: pytest.FixtureRequest) -> Path | None:
 
 
 @pytest.fixture(scope="session")
-def kubeconfig_path() -> Path | None:
-    raw = os.environ.get("KUBECONFIG")
-    stripped = None if raw is None else raw.strip() or None
-    return Path(stripped) if stripped is not None else None
-
-
-@pytest.fixture(scope="session")
 def session_resource_registry(
     log_dir: Path | None,
     logger: logging.Logger,
-    kubeconfig_path: Path | None,
+    juju_backend: JujuBackend,
 ) -> Iterator[ResourceRegistry]:
-    """Session-scoped resource registry for the main workflow controller."""
+    """Session-scoped resource registry covering all workflow controllers."""
     registry = ResourceRegistry(
         global_collectors=[
-            JujuCrashdumpCollector(logger, output_dir=log_dir, kubeconfig_path=kubeconfig_path),
+            JujuCrashdumpCollector(logger, juju_backend, output_dir=log_dir),
         ],
         logger=logger,
     )
@@ -932,16 +962,6 @@ def record_pipeline_version_execution_metadata(
 def _is_running_on_kubernetes(juju_backend: JujuBackend, model: str) -> None:
     if not juju_backend.is_k8s_model(model):
         pytest.skip("Not running on kubernetes.")
-
-
-@pytest.fixture
-def kubernetes_client(
-    logger: logging.Logger,
-    kubeconfig_path: Path | None,
-) -> KubernetesClient | None:
-    if kubeconfig_path:
-        return KubernetesClient(KubernetesBackend.k8s_client(kubeconfig=kubeconfig_path), logger=logger)
-    return None
 
 
 @pytest.fixture(scope="function")

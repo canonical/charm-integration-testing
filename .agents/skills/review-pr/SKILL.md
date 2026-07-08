@@ -86,7 +86,7 @@ with `******`. If the file you are editing contains such strings, the `edit`
 tool's `old_str` will not match. Use `python3` file I/O to read and rewrite
 those files directly instead.
 
-After editing, commit:
+After editing, re-run any validation commands the user has previously requested in this session (e.g. lint, unit tests, integration tests) and fix any failures before committing. Only then commit:
 
 ```bash
 git add <files>

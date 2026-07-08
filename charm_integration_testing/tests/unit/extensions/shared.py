@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from datetime import timedelta
+from pathlib import Path
 from typing import Any, Iterable
 
 from juju.backend import JujuBackend, JujuExecOutput, JujuTask
@@ -183,8 +184,7 @@ class NullJujuBackend(JujuBackend):
     def validate_application(self, model: str, application: str, level: str) -> dict[str, list[ValidationResult]]:
         raise NotImplementedError
 
-    @property
-    def kubernetes_client(self) -> KubernetesClient:
+    def get_kubernetes_client(self, cloud: str) -> KubernetesClient:
         raise NotImplementedError
 
     def kill_controller(self, controller: str) -> None:
@@ -212,6 +212,9 @@ class NullJujuBackend(JujuBackend):
         raise NotImplementedError
 
     def debug_log(self, model: str) -> str:
+        raise NotImplementedError
+
+    def get_controller_kubeconfig(self, controller: str) -> Path | None:
         raise NotImplementedError
 
 
