@@ -94,10 +94,8 @@ class ParcaStoreValidator(BaseValidator):
         address = self.databag["remote-store-address"]
         grpc_target = address.strip().split("://")[-1].strip()
         insecure = self.databag.get("remote-store-insecure", "false").lower() == "true"
-        token = self.databag.get("remote-store-bearer-token", "")
-        token = self.resolve_secret("remote-store-bearer-token-secret", "remote-store-bearer-token").get(
-            "remote-store-bearer-token", token
-        )
+        creds = self.resolve_secret("remote-store-bearer-token-secret", "remote-store-bearer-token")
+        token = creds.get("remote-store-bearer-token", "")
 
         # 2. Parse the gRPC address.
         parse_check, host, port = _parse_grpc_address(grpc_target)
