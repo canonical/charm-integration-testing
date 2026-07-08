@@ -15,6 +15,9 @@
 #   ceph-nfs/ceph-rgw-ready have real handlers but only block when a consumer
 #   is connected AND provisioning fails, not from absence.
 # All requires: already optional: true upstream; no override needed.
+# listed: false -- Excluded from automated bundle building (SQT-1081) to prevent
+# pipeline congestion; not currently covered by Charm QA.
+listed: false
 overrides:
 
   # -- latest, reef tracks -----------------------------------------------------

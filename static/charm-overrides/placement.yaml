@@ -11,6 +11,9 @@
 # amqp (requires) - OPTIONAL: not in required_relations; placement does not use messaging.
 # ha (requires, scope: container) - OPTIONAL: hacluster subordinate.
 # certificates (requires) - OPTIONAL: TLS; not required for functionality.
+# listed: false -- Excluded from automated bundle building (SQT-1081) to prevent
+# pipeline congestion; not currently covered by Charm QA.
+listed: false
 overrides:
   - requires:
       amqp:
