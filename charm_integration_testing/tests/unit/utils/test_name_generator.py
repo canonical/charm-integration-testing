@@ -55,7 +55,15 @@ class TestGenerateJujuNameFormat:
 
 
 class TestGenerateJujuNameUniqueness:
-    def test_uniqueness(self) -> None:
-        """Repeated calls produce different names."""
-        names = {generate_juju_name() for _ in range(20)}
-        assert len(names) > 1
+    def test_uniqueness(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Separate calls with different RNG state produce different names.
+
+        GIVEN secrets.choice is patched to return incrementing digits
+        WHEN generate_juju_name is called twice
+        THEN the two names differ
+        """
+        counter = iter(range(100))
+        monkeypatch.setattr("utils.name_generator.secrets.choice", lambda _: str(next(counter) % 10))
+        name_a = generate_juju_name()
+        name_b = generate_juju_name()
+        assert name_a != name_b
