@@ -613,3 +613,20 @@ class TestWildcardHostResolution:
         assert http_check.passed
         called_url = mock_open.call_args[0][0]
         assert called_url == "http://[2001:db8::1]:9104/metrics"
+
+    def test_ipv4_mapped_ipv6_unit_address_is_bracketed_in_url(self) -> None:
+        # GIVEN a wildcard scrape job and a unit with an IPv4-mapped IPv6 address
+        # (e.g. ::ffff:10.0.0.1) — these contain dots and were not matched by
+        # the original hex-only regex, producing invalid URLs.
+        validator = _make_validator_with_unit_addresses(WILDCARD_DATABAG, unit_addresses=["::ffff:10.0.0.1"])
+
+        with patch(
+            "validators.prometheus_scrape.validator.urlopen",
+            return_value=_mock_http_response(200),
+        ) as mock_open:
+            result = validator.validate(level="simple")
+
+        # THEN: the IPv4-mapped address is also bracketed correctly
+        assert result.status == "PASS"
+        called_url = mock_open.call_args[0][0]
+        assert called_url == "http://[::ffff:10.0.0.1]:9104/metrics"

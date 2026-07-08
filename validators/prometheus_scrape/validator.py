@@ -1,6 +1,7 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import ipaddress
 import json
 import re
 from dataclasses import dataclass, field
@@ -19,8 +20,6 @@ _SCRAPE_METADATA_REQUIRED_KEYS = ("model", "model_uuid", "application", "unit")
 _LABEL_NAME_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 # Hosts that are bind-all placeholders and cannot be used as scrape targets directly.
 _WILDCARD_HOSTS: frozenset[str] = frozenset({"*", "0.0.0.0"})  # nosec B104
-# Regex to detect a bare IPv6 address (not already bracketed).
-_IPV6_RE = re.compile(r"^[0-9a-fA-F:]+:[0-9a-fA-F:]*$")
 
 
 @dataclass
@@ -203,10 +202,16 @@ def _host_for_url(host: str) -> str:
 
     ``urlparse`` stores the hostname without brackets (e.g. ``2001:db8::1``),
     but RFC 3986 requires brackets when the address appears in a URL authority
-    component (``http://[2001:db8::1]:9104/``).  IPv4 addresses and hostnames
-    are returned unchanged.
+    component (``http://[2001:db8::1]:9104/``).  This includes all IPv6 forms:
+    standard, compressed, and IPv4-mapped (``::ffff:10.0.0.1``).  IPv4 addresses
+    and hostnames are returned unchanged.
     """
-    return f"[{host}]" if _IPV6_RE.match(host) else host
+    try:
+        if isinstance(ipaddress.ip_address(host), ipaddress.IPv6Address):
+            return f"[{host}]"
+    except ValueError:
+        pass
+    return host
 
 
 def _extract_targets(
