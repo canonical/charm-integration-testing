@@ -176,15 +176,15 @@ class JujuClient:
                 for offer_name, offer_info in parse_offers_from_bundle(bundle_yaml).items():
                     if offer_name not in existing_offers:
                         self.backend.create_offer(
-                            model_uri, offer_info["app"], offer_info["endpoints"], offer_name
+                            model_uri, offer_info.app, offer_info.endpoints, offer_name
                         )
 
         # Phase 2: re-deploy to establish cross-model relations via the saas sections.
         # On Juju 4+, strip offers from the bundles — the offers already exist from the
         # between-phase step and re-declaring them would fail.
         for i, (bundle_path, model_uri) in enumerate(bundles):
-            bundle_yaml = bundle_path.read_text(encoding="utf-8")
             if juju4:
+                bundle_yaml = bundle_path.read_text(encoding="utf-8")
                 phase2_yaml = strip_offers_from_bundle(bundle_yaml)
                 phase2_path = tmp_dir / f"phase2-bundle-{i}.yaml"
                 phase2_path.write_text(phase2_yaml, encoding="utf-8")

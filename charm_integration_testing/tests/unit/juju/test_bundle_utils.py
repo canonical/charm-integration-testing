@@ -136,8 +136,8 @@ applications:
 def test_parse_offers_from_bundle_returns_app_and_endpoints() -> None:
     offers = parse_offers_from_bundle(CMR_BUNDLE_WITH_OFFERS)
     assert "glauth-k8s" in offers
-    assert offers["glauth-k8s"]["app"] == "glauth-k8s"
-    assert offers["glauth-k8s"]["endpoints"] == ["glauth-auxiliary"]
+    assert offers["glauth-k8s"].app == "glauth-k8s"
+    assert offers["glauth-k8s"].endpoints == ["glauth-auxiliary"]
 
 
 def test_parse_offers_from_bundle_empty_for_simple_bundle() -> None:

@@ -3,9 +3,17 @@
 
 """Utilities for parsing and transforming Juju bundle YAML files."""
 
-from typing import Any
+import dataclasses
 
 import yaml
+
+
+@dataclasses.dataclass(frozen=True)
+class OfferDetails:
+    """Details of a single offer declared in a bundle overlay."""
+
+    app: str
+    endpoints: list[str]
 
 
 def strip_saas_from_bundle(bundle_yaml: str) -> str:
@@ -28,6 +36,8 @@ def strip_saas_from_bundle(bundle_yaml: str) -> str:
     parts = [yaml.dump(base, default_flow_style=False, sort_keys=True)]
     # Re-serialize overlay documents (key order and formatting may change, but content is preserved).
     for doc in documents[1:]:
+        if not doc:
+            continue
         parts.append(yaml.dump(doc, default_flow_style=False, sort_keys=True))
     return "---\n" + "---\n".join(parts) if len(parts) > 1 else parts[0]
 
@@ -42,23 +52,23 @@ def parse_offer_names_from_bundle(bundle_yaml: str) -> set[str]:
     return set(parse_offers_from_bundle(bundle_yaml).keys())
 
 
-def parse_offers_from_bundle(bundle_yaml: str) -> dict[str, dict[str, Any]]:
+def parse_offers_from_bundle(bundle_yaml: str) -> dict[str, OfferDetails]:
     """Return offer details from the bundle's overlay documents.
 
-    Returns a dict mapping offer name to ``{"app": app_name, "endpoints": [ep, ...]}``.
+    Returns a dict mapping offer name to an :class:`OfferDetails` instance.
     Offers are declared in overlay documents under ``applications.<app>.offers``.
     """
     documents = list(yaml.safe_load_all(bundle_yaml))
-    offers: dict[str, dict[str, Any]] = {}
+    offers: dict[str, OfferDetails] = {}
     for doc in documents[1:]:
         if not doc:
             continue
         for app_name, app_data in doc.get("applications", {}).items():
             for offer_name, offer_data in app_data.get("offers", {}).items():
-                offers[offer_name] = {
-                    "app": app_name,
-                    "endpoints": list(offer_data.get("endpoints", [])),
-                }
+                offers[offer_name] = OfferDetails(
+                    app=app_name,
+                    endpoints=list(offer_data.get("endpoints", [])),
+                )
     return offers
 
 
