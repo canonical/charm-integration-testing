@@ -174,10 +174,11 @@ class JujuClient:
                 bundle_yaml = bundle_path.read_text(encoding="utf-8")
                 existing_offers = self.backend.list_offers(model_uri)
                 for offer_name, offer_info in parse_offers_from_bundle(bundle_yaml).items():
-                    if offer_name not in existing_offers:
-                        self.backend.create_offer(
-                            model_uri, offer_info.app, offer_info.endpoints, offer_name
-                        )
+                    if offer_name in existing_offers:
+                        self.logger.info(f"Offer {offer_name} already exists in {model_uri}, skipping creation.")
+                    else:
+                        self.logger.info(f"Creating offer {offer_name} ({offer_info.app}) in {model_uri}.")
+                        self.backend.create_offer(model_uri, offer_info.app, offer_info.endpoints, offer_name)
 
         # Phase 2: re-deploy to establish cross-model relations via the saas sections.
         # On Juju 4+, strip offers from the bundles — the offers already exist from the

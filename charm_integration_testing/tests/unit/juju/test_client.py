@@ -933,13 +933,6 @@ class TestIntegrationMethods:
 # TestDeployBundles
 # ---------------------------------------------------------------------------
 
-_SIMPLE_BUNDLE = """\
-applications:
-  postgresql:
-    charm: postgresql
-    channel: 14/stable
-"""
-
 _BUNDLE_WITH_OFFERS = """\
 applications:
   glauth-k8s:
@@ -970,6 +963,7 @@ class DeployBundlesBackendStub(NullJujuBackend):
         self,
         model: str,
         bundle: str,
+        timeout: timedelta | None = None,
         trust: bool = False,
         force: bool = False,
     ) -> None:

@@ -494,7 +494,7 @@ class JubilantBackend(JujuCmdBackend):
         try:
             self.client.model(model).offer(app, endpoint=endpoints, name=offer_name)
         except jubilant.CLIError as e:
-            if "already exists" in e.stderr:
+            if "updating offers is not supported" in e.stderr.lower():
                 return
             raise
 
