@@ -275,3 +275,27 @@ def test_strip_offers_handles_null_applications_in_overlay() -> None:
     # Should not raise; null applications overlay is treated as empty and dropped
     result = strip_offers_from_bundle(bundle)
     assert "myapp" in result
+
+
+def test_parse_offers_skips_offer_with_missing_endpoints() -> None:
+    bundle = (
+        "applications:\n  myapp:\n    charm: myapp\n" "---\napplications:\n  myapp:\n    offers:\n      my-offer: {}\n"
+    )
+    assert parse_offers_from_bundle(bundle) == {}
+
+
+def test_parse_offers_skips_offer_with_string_endpoints() -> None:
+    # A scalar string for endpoints must not be iterated char-by-char
+    bundle = (
+        "applications:\n  myapp:\n    charm: myapp\n"
+        "---\napplications:\n  myapp:\n    offers:\n      my-offer:\n        endpoints: ep-a\n"
+    )
+    assert parse_offers_from_bundle(bundle) == {}
+
+
+def test_parse_offers_skips_offer_with_null_endpoints() -> None:
+    bundle = (
+        "applications:\n  myapp:\n    charm: myapp\n"
+        "---\napplications:\n  myapp:\n    offers:\n      my-offer:\n        endpoints: null\n"
+    )
+    assert parse_offers_from_bundle(bundle) == {}

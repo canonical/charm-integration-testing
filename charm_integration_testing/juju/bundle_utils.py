@@ -64,6 +64,7 @@ def parse_offers_from_bundle(bundle_yaml: str) -> dict[str, OfferDetails]:
     Returns a dict mapping offer name to an :class:`OfferDetails` instance.
     Offers are declared in overlay documents under ``applications.<app>.offers``.
     Non-dict overlay documents and non-dict application entries are silently skipped.
+    Offers whose ``endpoints`` field is absent or not a list are also skipped.
     """
     documents = list(yaml.safe_load_all(bundle_yaml))
     offers: dict[str, OfferDetails] = {}
@@ -82,9 +83,12 @@ def parse_offers_from_bundle(bundle_yaml: str) -> dict[str, OfferDetails]:
             for offer_name, offer_data in offers_raw.items():
                 if not isinstance(offer_data, dict):
                     continue
+                endpoints = offer_data.get("endpoints")
+                if not isinstance(endpoints, list):
+                    continue
                 offers[offer_name] = OfferDetails(
                     app=app_name,
-                    endpoints=list(offer_data.get("endpoints") or []),
+                    endpoints=endpoints,
                 )
     return offers
 
