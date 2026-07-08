@@ -45,7 +45,9 @@ class ParcaStoreValidator(BaseValidator):
     # ------------------------------------------------------------------
 
     def _validate_simple(self) -> ValidationResult:
-        """L1: Schema correctness, endpoint parse, TCP reachability, and TLS prerequisite when insecure=false."""
+        """L1: Schema correctness, endpoint parse, TCP reachability, and TLS prerequisite
+        when insecure=false.
+        """
         checks: list[ValidationCheck] = []
 
         if not self.relation_exists():
@@ -93,6 +95,9 @@ class ParcaStoreValidator(BaseValidator):
         grpc_target = address.strip().split("://")[-1].strip()
         insecure = self.databag.get("remote-store-insecure", "false").lower() == "true"
         token = self.databag.get("remote-store-bearer-token", "")
+        token = self.resolve_secret("remote-store-bearer-token-secret", "remote-store-bearer-token").get(
+            "remote-store-bearer-token", token
+        )
 
         # 2. Parse the gRPC address.
         parse_check, host, port = _parse_grpc_address(grpc_target)
@@ -155,7 +160,11 @@ def _parse_grpc_address(address: str) -> tuple[ValidationCheck, str, int]:
             raise ValueError(f"port {port} out of range")
     except Exception as exc:
         return (
-            ValidationCheck(name="parse", passed=False, message=f"Cannot parse gRPC address '{address}': {exc}"),
+            ValidationCheck(
+                name="parse",
+                passed=False,
+                message=f"Cannot parse gRPC address '{address}': {exc}",
+            ),
             "",
             0,
         )

@@ -8,7 +8,11 @@ import ops
 import pytest
 
 import validators.parca_store.validator as _parca_store_mod
-from validators.parca_store.validator import ParcaStoreValidator, _grpc_channel_ready_check, _parse_grpc_address
+from validators.parca_store.validator import (
+    ParcaStoreValidator,
+    _grpc_channel_ready_check,
+    _parse_grpc_address,
+)
 from validators.test_utils.helpers import make_charm_from_relation
 from validators.test_utils.stubs import (
     ApplicationStub,
