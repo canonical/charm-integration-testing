@@ -17,6 +17,9 @@
 # ha (requires, scope: container) - OPTIONAL: hacluster subordinate.
 # certificates (requires) - OPTIONAL: TLS.
 # nova-cell-compute (requires) - OPTIONAL: for cell registration.
+# listed: false -- Excluded from automated bundle building (SQT-1081) to prevent
+# pipeline congestion; not currently covered by Charm QA.
+listed: false
 overrides:
   # Rocky, Stein: identity-credentials not yet in required_relations.
   - criteria:
