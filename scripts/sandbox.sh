@@ -368,21 +368,6 @@ _cmd_run() {
     COPILOT_MODEL="${COPILOT_MODEL:-sonnet-4.6}"
     _copilot_token="${COPILOT_GITHUB_TOKEN:-$_gh_token}"
 
-    # Resolve MCP config: copy host file into a VM temp file if SANDBOX_MCP_CONFIG_FILE is set.
-    _mcp_vm_file=""
-    _mcp_cleanup=false
-    if [ -n "${SANDBOX_MCP_CONFIG_FILE:-}" ]; then
-        if [ ! -f "$SANDBOX_MCP_CONFIG_FILE" ]; then
-            echo "ERROR: SANDBOX_MCP_CONFIG_FILE not found: $SANDBOX_MCP_CONFIG_FILE" >&2
-            exit 1
-        fi
-        echo "==> Copying MCP config into VM..."
-        _mcp_vm_file=$(multipass exec "$VM_NAME" -- bash -c "mktemp /tmp/mcp-config-XXXXXX.json")
-        cat "$SANDBOX_MCP_CONFIG_FILE" \
-            | multipass exec "$VM_NAME" -- bash -c "cat > '$_mcp_vm_file'"
-        _mcp_cleanup=true
-    fi
-
     INTERACTIVE=false
     while [ "$#" -gt 0 ]; do
         case "$1" in
@@ -414,6 +399,25 @@ EOF
     done
 
     TASK="${*:-}"
+
+    # Resolve MCP config after option parsing so --help never touches the VM.
+    _mcp_vm_file=""
+    if [ -n "${SANDBOX_MCP_CONFIG_FILE:-}" ]; then
+        # Resolve relative paths against the project root for consistency.
+        if [[ "$SANDBOX_MCP_CONFIG_FILE" != /* ]]; then
+            SANDBOX_MCP_CONFIG_FILE="$PROJECT_DIR/$SANDBOX_MCP_CONFIG_FILE"
+        fi
+        if [ ! -f "$SANDBOX_MCP_CONFIG_FILE" ]; then
+            echo "ERROR: SANDBOX_MCP_CONFIG_FILE not found: $SANDBOX_MCP_CONFIG_FILE" >&2
+            exit 1
+        fi
+        echo "==> Copying MCP config into VM..."
+        _mcp_vm_file=$(multipass exec "$VM_NAME" -- bash -c "mktemp /tmp/mcp-config-XXXXXX.json")
+        # Guarantee cleanup even if set -euo pipefail causes an early exit.
+        # shellcheck disable=SC2064
+        trap "multipass exec '$VM_NAME' -- rm -f '$_mcp_vm_file' 2>/dev/null || true" EXIT
+        multipass exec "$VM_NAME" -- bash -c "cat > '$_mcp_vm_file'" < "$SANDBOX_MCP_CONFIG_FILE"
+    fi
 
     if ! _is_mounted; then
         echo "==> Mount '$VM_MOUNT' not found — run 'scripts/sandbox.sh up' first to mount the project."
@@ -457,11 +461,6 @@ EOF
             copilot --yolo \"\${_mcp_extra[@]}\" -p \"\$(cat $PROMPT_FILE)\"
             rm -f $PROMPT_FILE
         "
-    fi
-
-    # Clean up VM temp file created from SANDBOX_MCP_CONFIG_FILE
-    if [ "$_mcp_cleanup" = "true" ] && [ -n "$_mcp_vm_file" ]; then
-        multipass exec "$VM_NAME" -- rm -f "$_mcp_vm_file" 2>/dev/null || true
     fi
 }
 
