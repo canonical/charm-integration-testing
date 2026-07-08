@@ -93,10 +93,10 @@ def strip_offers_from_bundle(bundle_yaml: str) -> str:
     """Return bundle YAML with all offer definitions removed from overlay documents.
 
     This is used for the second deployment phase on Juju 4+, where ``juju offer`` is not
-    idempotent and fails if the offer already exists. The offers were already created in phase 1
-    so there is no need to re-declare them; stripping them lets the phase-2 deploy proceed
-    without touching the existing offers while still establishing the cross-model relations via
-    the saas sections in the base bundle.
+    idempotent and fails if the offer already exists. The offers were already created
+    explicitly between the phases so there is no need to re-declare them; stripping them
+    lets the phase-2 deploy proceed without touching the existing offers while still
+    establishing the cross-model relations via the saas sections in the base bundle.
 
     Overlay documents that become empty after stripping are dropped.
 
