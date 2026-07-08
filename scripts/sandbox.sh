@@ -412,14 +412,14 @@ EOF
         fi
     fi
 
+    # Validate the task argument for autonomous mode before any VM interaction.
+    if [ "$INTERACTIVE" = "false" ]; then
+        [ -n "$TASK" ] || { echo "Usage: scripts/sandbox.sh run 'task description'"; exit 1; }
+    fi
+
     if ! _is_mounted; then
         echo "==> Mount '$VM_MOUNT' not found — run 'scripts/sandbox.sh up' first to mount the project."
         exit 1
-    fi
-
-    # Validate the task argument for autonomous mode before doing any VM work.
-    if [ "$INTERACTIVE" = "false" ]; then
-        [ -n "$TASK" ] || { echo "Usage: scripts/sandbox.sh run 'task description'"; exit 1; }
     fi
 
     # All prerequisites met. Copy MCP config into the VM now.
