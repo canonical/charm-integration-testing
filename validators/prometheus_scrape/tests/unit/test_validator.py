@@ -13,6 +13,7 @@ from validators.test_utils.stubs import (
     ApplicationStub,
     RelationRoleStub,
     RelationStub,
+    UnitStub,
 )
 
 # ---------------------------------------------------------------------------
@@ -489,11 +490,11 @@ def _make_validator_with_unit_addresses(
     endpoint: str = "metrics-endpoint",
 ) -> PrometheusScrapeValidator:
     """Build a validator whose relation has per-unit prometheus_scrape_unit_address entries."""
-    from validators.test_utils.stubs import UnitStub
-
     app = ApplicationStub()
     ordered_units = [UnitStub(f"provider/{i}") for i in range(len(unit_addresses))]
-    unit_data = {unit: {"prometheus_scrape_unit_address": addr} for unit, addr in zip(ordered_units, unit_addresses)}
+    unit_data: dict[ApplicationStub | UnitStub | None, dict[str, str]] = {
+        unit: {"prometheus_scrape_unit_address": addr} for unit, addr in zip(ordered_units, unit_addresses)
+    }
     relation = RelationStub(
         name=endpoint, id=0, app=app, data={app: databag, **unit_data}, units=frozenset(ordered_units)
     )
