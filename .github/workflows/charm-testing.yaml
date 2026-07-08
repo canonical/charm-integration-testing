@@ -129,7 +129,6 @@ jobs:
       TEST_OBSERVER_API: ${{ inputs.test_observer_environment == 'production' && vars.PROD_TEST_OBSERVER_API || (inputs.test_observer_environment == 'staging' && vars.STG_TEST_OBSERVER_API || '') }}
       TEST_OBSERVER_TOKEN: ${{ inputs.test_observer_environment == 'production' && secrets.PROD_TEST_OBSERVER_TOKEN || (inputs.test_observer_environment == 'staging' && secrets.STG_TEST_OBSERVER_TOKEN || '') }}
       MINIO_CLIENT_FILE: ${{ github.workspace }}/static/mc
-      MINIO_SERVER_FILE: ${{ github.workspace }}/static/minio
       UV_FILE: ${{ github.workspace }}/static/uv
       UBUNTU_PRO_TOKEN: ${{ secrets.UBUNTU_PRO_TOKEN }}
       VALIDATORS_PATH: ${{ github.workspace }}/validators
@@ -165,11 +164,6 @@ jobs:
         uses: ./.github/actions/install-with-retry
         with:
           command: sudo snap install yq
-      - name: Download MinIO server binary
-        shell: bash
-        run: |
-          curl -fsSL https://github.com/minio/minio/releases/latest/download/minio.linux-amd64 -o ./static/minio
-          chmod +x ./static/minio
       - name: Get target environment info
         id: target_env_info
         uses: ./.github/actions/get-environment-info
