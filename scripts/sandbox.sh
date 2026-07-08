@@ -400,8 +400,7 @@ EOF
 
     TASK="${*:-}"
 
-    # Resolve MCP config after option parsing so --help never touches the VM.
-    _mcp_vm_file=""
+    # Resolve and validate SANDBOX_MCP_CONFIG_FILE path early — no VM work yet.
     if [ -n "${SANDBOX_MCP_CONFIG_FILE:-}" ]; then
         # Resolve relative paths against the project root for consistency.
         if [[ "$SANDBOX_MCP_CONFIG_FILE" != /* ]]; then
@@ -411,17 +410,27 @@ EOF
             echo "ERROR: SANDBOX_MCP_CONFIG_FILE not found: $SANDBOX_MCP_CONFIG_FILE" >&2
             exit 1
         fi
+    fi
+
+    if ! _is_mounted; then
+        echo "==> Mount '$VM_MOUNT' not found — run 'scripts/sandbox.sh up' first to mount the project."
+        exit 1
+    fi
+
+    # Validate the task argument for autonomous mode before doing any VM work.
+    if [ "$INTERACTIVE" = "false" ]; then
+        [ -n "$TASK" ] || { echo "Usage: scripts/sandbox.sh run 'task description'"; exit 1; }
+    fi
+
+    # All prerequisites met. Copy MCP config into the VM now.
+    _mcp_vm_file=""
+    if [ -n "${SANDBOX_MCP_CONFIG_FILE:-}" ]; then
         echo "==> Copying MCP config into VM..."
         _mcp_vm_file=$(multipass exec "$VM_NAME" -- bash -c "mktemp /tmp/mcp-config-XXXXXX.json")
         # Guarantee cleanup even if set -euo pipefail causes an early exit.
         # shellcheck disable=SC2064
         trap "multipass exec '$VM_NAME' -- rm -f '$_mcp_vm_file' 2>/dev/null || true" EXIT
         multipass exec "$VM_NAME" -- bash -c "cat > '$_mcp_vm_file'" < "$SANDBOX_MCP_CONFIG_FILE"
-    fi
-
-    if ! _is_mounted; then
-        echo "==> Mount '$VM_MOUNT' not found — run 'scripts/sandbox.sh up' first to mount the project."
-        exit 1
     fi
 
     PROMPT_FILE=$(multipass exec "$VM_NAME" -- bash -c "mktemp /tmp/copilot-prompt-XXXXXX")
@@ -448,7 +457,6 @@ EOF
             rm -f $PROMPT_FILE
         "
     else
-        [ -n "$TASK" ] || { echo "Usage: scripts/sandbox.sh run 'task description'"; exit 1; }
         # Build env var array, only including GH_TOKEN/GITHUB_TOKEN if they are actually set
         _env_args=()
         [ -n "${GITHUB_TOKEN:-}" ] && _env_args+=("GH_TOKEN=$GITHUB_TOKEN" "GITHUB_TOKEN=$GITHUB_TOKEN")
