@@ -1,4 +1,7 @@
 ---
+# listed: false -- Excluded from automated bundle building (SQT-1081) to prevent
+# pipeline congestion; not currently covered by Charm QA.
+listed: false
 overrides:
   - requires:
       infoblox-neutron:  # Charm that offers it has been deleted https://github.com/openstack-charmers/charm-infoblox
