@@ -3,12 +3,12 @@
 
 """Utilities for parsing and transforming Juju bundle YAML files."""
 
-import dataclasses
+from dataclasses import dataclass
 
 import yaml
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass(frozen=True)
 class OfferDetails:
     """Details of a single offer declared in a bundle overlay."""
 
