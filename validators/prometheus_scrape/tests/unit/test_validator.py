@@ -613,6 +613,8 @@ class TestWildcardHostResolution:
         assert http_check.passed
         called_url = mock_open.call_args[0][0]
         assert called_url == "http://[2001:db8::1]:9104/metrics"
+        # AND the success message also uses the bracketed form (unambiguous)
+        assert "[2001:db8::1]:9104" in http_check.message
 
     def test_ipv4_mapped_ipv6_unit_address_is_bracketed_in_url(self) -> None:
         # GIVEN a wildcard scrape job and a unit with an IPv4-mapped IPv6 address

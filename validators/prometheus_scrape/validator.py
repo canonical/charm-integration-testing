@@ -321,7 +321,9 @@ def _http_probe_check(targets: list[_ScrapeTarget]) -> ValidationCheck:
     if errors:
         return ValidationCheck(name="http_probe", passed=False, message="; ".join(errors))
     return ValidationCheck(
-        name="http_probe", passed=True, message=f"HTTP 200 OK from {targets[0].host}:{targets[0].port}."
+        name="http_probe",
+        passed=True,
+        message=f"HTTP 200 OK from {_host_for_url(targets[0].host)}:{targets[0].port}.",
     )
 
 
