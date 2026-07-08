@@ -83,6 +83,7 @@ Environment (.env keys):
   GITHUB_TOKEN           Fine-grained PAT for gh CLI inside the VM
   COPILOT_GITHUB_TOKEN   Copilot AI auth token (default: gh auth token)
   COPILOT_MODEL          Copilot model (default: sonnet-4.6)
+  SANDBOX_MCP_CONFIG_FILE  Path to an MCP server config JSON file on the host
 
 Inside an interactive session use skill slash commands:
   /develop-validator     Develop a new charm integration validator
@@ -367,6 +368,21 @@ _cmd_run() {
     COPILOT_MODEL="${COPILOT_MODEL:-sonnet-4.6}"
     _copilot_token="${COPILOT_GITHUB_TOKEN:-$_gh_token}"
 
+    # Resolve MCP config: copy host file into a VM temp file if SANDBOX_MCP_CONFIG_FILE is set.
+    _mcp_vm_file=""
+    _mcp_cleanup=false
+    if [ -n "${SANDBOX_MCP_CONFIG_FILE:-}" ]; then
+        if [ ! -f "$SANDBOX_MCP_CONFIG_FILE" ]; then
+            echo "ERROR: SANDBOX_MCP_CONFIG_FILE not found: $SANDBOX_MCP_CONFIG_FILE" >&2
+            exit 1
+        fi
+        echo "==> Copying MCP config into VM..."
+        _mcp_vm_file=$(multipass exec "$VM_NAME" -- bash -c "mktemp /tmp/mcp-config-XXXXXX.json")
+        cat "$SANDBOX_MCP_CONFIG_FILE" \
+            | multipass exec "$VM_NAME" -- bash -c "cat > '$_mcp_vm_file'"
+        _mcp_cleanup=true
+    fi
+
     INTERACTIVE=false
     while [ "$#" -gt 0 ]; do
         case "$1" in
@@ -419,9 +435,12 @@ EOF
         _env_args=()
         [ -n "${GITHUB_TOKEN:-}" ] && _env_args+=("GH_TOKEN=$GITHUB_TOKEN" "GITHUB_TOKEN=$GITHUB_TOKEN")
         _env_args+=("COPILOT_GITHUB_TOKEN=$_copilot_token" "COPILOT_MODEL=$COPILOT_MODEL" "PROJECT_ROOT=$VM_MOUNT")
+        [ -n "$_mcp_vm_file" ] && _env_args+=("SANDBOX_MCP_VM_CONFIG=$_mcp_vm_file")
         multipass exec "$VM_NAME" -- env "${_env_args[@]}" bash -lc "
                 cd '$VM_MOUNT'
-            copilot --yolo -i \"$CONTEXT_MSG\"
+            _mcp_extra=()
+            [ -n \"\${SANDBOX_MCP_VM_CONFIG:-}\" ] && _mcp_extra=(--additional-mcp-config \"@\${SANDBOX_MCP_VM_CONFIG}\")
+            copilot --yolo \"\${_mcp_extra[@]}\" -i \"$CONTEXT_MSG\"
             rm -f $PROMPT_FILE
         "
     else
@@ -430,11 +449,19 @@ EOF
         _env_args=()
         [ -n "${GITHUB_TOKEN:-}" ] && _env_args+=("GH_TOKEN=$GITHUB_TOKEN" "GITHUB_TOKEN=$GITHUB_TOKEN")
         _env_args+=("COPILOT_GITHUB_TOKEN=$_copilot_token" "COPILOT_MODEL=$COPILOT_MODEL" "PROJECT_ROOT=$VM_MOUNT")
+        [ -n "$_mcp_vm_file" ] && _env_args+=("SANDBOX_MCP_VM_CONFIG=$_mcp_vm_file")
         multipass exec "$VM_NAME" -- env "${_env_args[@]}" bash -lc "
                 cd '$VM_MOUNT'
-            copilot --yolo -p \"\$(cat $PROMPT_FILE)\"
+            _mcp_extra=()
+            [ -n \"\${SANDBOX_MCP_VM_CONFIG:-}\" ] && _mcp_extra=(--additional-mcp-config \"@\${SANDBOX_MCP_VM_CONFIG}\")
+            copilot --yolo \"\${_mcp_extra[@]}\" -p \"\$(cat $PROMPT_FILE)\"
             rm -f $PROMPT_FILE
         "
+    fi
+
+    # Clean up VM temp file created from SANDBOX_MCP_CONFIG_FILE
+    if [ "$_mcp_cleanup" = "true" ] && [ -n "$_mcp_vm_file" ]; then
+        multipass exec "$VM_NAME" -- rm -f "$_mcp_vm_file" 2>/dev/null || true
     fi
 }
 

@@ -55,3 +55,33 @@ All tokens are optional. Set them in `development-sandbox/.env`
 - Inside the VM the project is accessible via `$PROJECT_ROOT` (set automatically by the sandbox tooling to the VM-side mount path).
 - Python dependencies are managed with Poetry.
 - **Migrating from validator-development-sandbox:** rename `VALIDATOR_VM` to `SANDBOX_VM` and `VALIDATOR_SIGNING_KEY` to `SANDBOX_SIGNING_KEY` in your `.env`.
+
+## MCP servers
+
+To inject custom MCP servers into `sandbox.sh run` sessions, set `SANDBOX_MCP_CONFIG_FILE`
+in `development-sandbox/.env` to the path of an MCP server config JSON file on the host:
+
+```
+SANDBOX_MCP_CONFIG_FILE=development-sandbox/mcp.json
+```
+
+The file is copied into the VM and passed to Copilot via `--additional-mcp-config`.
+It is removed from the VM after the session ends.
+
+`development-sandbox/mcp.json` is gitignored, so creating it there is the recommended
+convention. The format is the standard Copilot MCP config:
+
+```json
+{
+  "mcpServers": {
+    "my-server": {
+      "command": "npx",
+      "args": ["-y", "@my/mcp-server"]
+    }
+  }
+}
+```
+
+MCP config applies to both `sandbox.sh run 'task'` and `sandbox.sh run --interactive`.
+It has no effect on `up`, `shell`, `down`, or `destroy`.
+
