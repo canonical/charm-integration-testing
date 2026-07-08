@@ -453,8 +453,10 @@ EOF
                 cd '$VM_MOUNT'
             _mcp_extra=()
             [ -n \"\${SANDBOX_MCP_VM_CONFIG:-}\" ] && _mcp_extra=(--additional-mcp-config \"@\${SANDBOX_MCP_VM_CONFIG}\")
-            copilot --yolo \"\${_mcp_extra[@]}\" -i \"$CONTEXT_MSG\"
+            _ec=0
+            copilot --yolo \"\${_mcp_extra[@]}\" -i \"$CONTEXT_MSG\" || _ec=\$?
             rm -f $PROMPT_FILE
+            exit \$_ec
         "
     else
         # Build env var array, only including GH_TOKEN/GITHUB_TOKEN if they are actually set
@@ -466,8 +468,10 @@ EOF
                 cd '$VM_MOUNT'
             _mcp_extra=()
             [ -n \"\${SANDBOX_MCP_VM_CONFIG:-}\" ] && _mcp_extra=(--additional-mcp-config \"@\${SANDBOX_MCP_VM_CONFIG}\")
-            copilot --yolo \"\${_mcp_extra[@]}\" -p \"\$(cat $PROMPT_FILE)\"
+            _ec=0
+            copilot --yolo \"\${_mcp_extra[@]}\" -p \"\$(cat $PROMPT_FILE)\" || _ec=\$?
             rm -f $PROMPT_FILE
+            exit \$_ec
         "
     fi
 }
