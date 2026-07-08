@@ -243,3 +243,35 @@ applications:
   myapp: null
 """
     assert parse_offers_from_bundle(bundle) == {}
+
+
+def test_strip_saas_handles_null_saas_value() -> None:
+    # A bundle with "saas: null" should not raise AttributeError
+    bundle = "applications:\n  myapp:\n    charm: myapp\nsaas: null\n"
+    result = strip_saas_from_bundle(bundle)
+    assert "saas" not in result
+
+
+def test_parse_offers_skips_null_applications_in_overlay() -> None:
+    bundle = "applications:\n  myapp:\n    charm: myapp\n---\napplications: null\n"
+    assert parse_offers_from_bundle(bundle) == {}
+
+
+def test_parse_offers_skips_null_offers_value() -> None:
+    bundle = "applications:\n  myapp:\n    charm: myapp\n" "---\napplications:\n  myapp:\n    offers: null\n"
+    assert parse_offers_from_bundle(bundle) == {}
+
+
+def test_parse_offers_skips_null_offer_data() -> None:
+    bundle = (
+        "applications:\n  myapp:\n    charm: myapp\n"
+        "---\napplications:\n  myapp:\n    offers:\n      my-offer: null\n"
+    )
+    assert parse_offers_from_bundle(bundle) == {}
+
+
+def test_strip_offers_handles_null_applications_in_overlay() -> None:
+    bundle = "applications:\n  myapp:\n    charm: myapp\n" "---\napplications: null\n"
+    # Should not raise; null applications overlay is treated as empty and dropped
+    result = strip_offers_from_bundle(bundle)
+    assert "myapp" in result

@@ -32,7 +32,8 @@ def strip_saas_from_bundle(bundle_yaml: str) -> str:
     if not documents or not isinstance(documents[0], dict):
         raise ValueError("bundle_yaml must contain at least one YAML mapping document as the base bundle")
     base = documents[0]
-    saas_names = set(base.pop("saas", {}).keys())
+    saas = base.pop("saas", None)
+    saas_names = set(saas.keys()) if isinstance(saas, dict) else set()
     if saas_names:
         # Cross-model relations reference the saas alias on one side; filter those out.
         base["relations"] = [
@@ -69,13 +70,21 @@ def parse_offers_from_bundle(bundle_yaml: str) -> dict[str, OfferDetails]:
     for doc in documents[1:]:
         if not isinstance(doc, dict):
             continue
-        for app_name, app_data in doc.get("applications", {}).items():
+        applications = doc.get("applications")
+        if not isinstance(applications, dict):
+            continue
+        for app_name, app_data in applications.items():
             if not isinstance(app_data, dict):
                 continue
-            for offer_name, offer_data in app_data.get("offers", {}).items():
+            offers_raw = app_data.get("offers")
+            if not isinstance(offers_raw, dict):
+                continue
+            for offer_name, offer_data in offers_raw.items():
+                if not isinstance(offer_data, dict):
+                    continue
                 offers[offer_name] = OfferDetails(
                     app=app_name,
-                    endpoints=list(offer_data.get("endpoints", [])),
+                    endpoints=list(offer_data.get("endpoints") or []),
                 )
     return offers
 
@@ -102,13 +111,14 @@ def strip_offers_from_bundle(bundle_yaml: str) -> str:
     for doc in documents[1:]:
         if not isinstance(doc, dict):
             continue
-        for app_data in doc.get("applications", {}).values():
+        applications = doc.get("applications")
+        if not isinstance(applications, dict):
+            applications = {}
+        for app_data in applications.values():
             if isinstance(app_data, dict):
                 app_data.pop("offers", None)
         # Drop the overlay entirely if it is now empty (no remaining keys).
-        has_content = any(bool(app_data) for app_data in doc.get("applications", {}).values()) or any(
-            k != "applications" for k in doc
-        )
+        has_content = any(bool(app_data) for app_data in applications.values()) or any(k != "applications" for k in doc)
         if has_content:
             parts.append(yaml.dump(doc, default_flow_style=False, sort_keys=True))
     return "---\n" + "---\n".join(parts) if len(parts) > 1 else parts[0]
