@@ -3,6 +3,8 @@
 
 """Utilities for parsing and transforming Juju bundle YAML files."""
 
+from typing import Any
+
 import yaml
 
 
@@ -40,14 +42,14 @@ def parse_offer_names_from_bundle(bundle_yaml: str) -> set[str]:
     return set(parse_offers_from_bundle(bundle_yaml).keys())
 
 
-def parse_offers_from_bundle(bundle_yaml: str) -> dict[str, dict]:
+def parse_offers_from_bundle(bundle_yaml: str) -> dict[str, dict[str, Any]]:
     """Return offer details from the bundle's overlay documents.
 
     Returns a dict mapping offer name to ``{"app": app_name, "endpoints": [ep, ...]}``.
     Offers are declared in overlay documents under ``applications.<app>.offers``.
     """
     documents = list(yaml.safe_load_all(bundle_yaml))
-    offers: dict[str, dict] = {}
+    offers: dict[str, dict[str, Any]] = {}
     for doc in documents[1:]:
         if not doc:
             continue

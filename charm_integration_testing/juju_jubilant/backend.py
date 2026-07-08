@@ -3,6 +3,7 @@
 
 
 import dataclasses
+import json
 import os
 import pathlib
 import re
@@ -481,12 +482,10 @@ class JubilantBackend(JujuCmdBackend):
         }
 
     def list_offers(self, model: str) -> set[str]:
-        import json as _json
-
         result = self.client.model(model).cli("offers", "--format=json")
         if not result or not result.strip():
             return set()
-        return set(_json.loads(result).keys())
+        return set(json.loads(result).keys())
 
     def create_offer(self, model: str, app: str, endpoints: list[str], offer_name: str) -> None:
         # On Juju 4+, ``juju offer`` fails if an offer with the same name already exists

@@ -155,7 +155,7 @@ def test_parse_offers_from_bundle_empty_for_target_bundle() -> None:
 
 def test_strip_offers_removes_offers_from_overlay() -> None:
     result = strip_offers_from_bundle(CMR_BUNDLE_WITH_OFFERS)
-    assert "glauth-k8s-offer" not in result
+    assert "offers:" not in result
 
 
 def test_strip_offers_keeps_base_bundle_unchanged() -> None:
