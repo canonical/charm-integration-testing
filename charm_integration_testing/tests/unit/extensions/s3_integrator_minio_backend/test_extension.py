@@ -11,6 +11,7 @@ import pytest
 from extensions.s3_integrator_minio_backend.extension import (
     MINIO_ACCESS_KEY,
     MINIO_BUCKET,
+    MINIO_CLIENT_INSTALL_K8S,
     MINIO_CLIENT_PATH,
     MINIO_CLIENT_STAGING_PATH,
     MINIO_PATH,
@@ -106,7 +107,8 @@ class TestS3IntegratorMinIOBackendExtension:
             ]
 
             assert any(
-                f"sudo install -m 755 {MINIO_CLIENT_STAGING_PATH} {MINIO_CLIENT_PATH}" in cmd
+                MINIO_CLIENT_INSTALL_K8S.format(staging_path=MINIO_CLIENT_STAGING_PATH, client_path=MINIO_CLIENT_PATH)
+                in cmd
                 for _, _, cmd in juju.ssh_calls
             )
 
@@ -162,7 +164,7 @@ class TestS3IntegratorMinIOBackendExtension:
             )
             assert any(f"mkdir -p {MINIO_SERVER_DATA_DIR}" in cmd for _, _, cmd in juju.ssh_calls)
             assert any(
-                "sudo systemd-run --unit=minio-server" in cmd and MINIO_SERVER_DATA_DIR in cmd
+                "sudo systemctl show minio-server.service --property=LoadState" in cmd and MINIO_SERVER_DATA_DIR in cmd
                 for _, _, cmd in juju.ssh_calls
             )
 
