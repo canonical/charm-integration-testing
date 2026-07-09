@@ -195,7 +195,7 @@ def _url_format_check(url: str) -> ValidationCheck:
 
 
 # ---------------------------------------------------------------------------
-# Pure helpers — deep level checks
+# Deep level checks
 # ---------------------------------------------------------------------------
 
 
