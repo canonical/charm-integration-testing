@@ -98,13 +98,23 @@ def _parse_ingress_url(databag: dict[str, str]) -> tuple[ValidationCheck, str]:
             "",
         )
 
+    if not isinstance(url, str):
+        return (
+            ValidationCheck(
+                name="schema",
+                passed=False,
+                message=f"'url' value must be a string, got {type(url).__name__}: {url!r}",
+            ),
+            "",
+        )
+
     return (
         ValidationCheck(
             name="schema",
             passed=True,
             message=f"Ingress URL found: {url!r}",
         ),
-        str(url),
+        url,
     )
 
 
