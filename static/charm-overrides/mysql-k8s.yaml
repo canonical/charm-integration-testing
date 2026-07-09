@@ -23,3 +23,9 @@ overrides:
       # replication must be same track/risk
       - 'bool(endpoint[replication]) => risks(charms(endpoint[replication])) == risks({self})
         and tracks(charms(endpoint[replication])) == tracks({self})'
+
+  # Track 8.4 has correct endpoint optionality, but we still need to enforce the replication constraint
+  - constraints:
+      # replication must be same track/risk
+      - 'bool(endpoint[replication]) => risks(charms(endpoint[replication])) == risks({self})
+        and tracks(charms(endpoint[replication])) == tracks({self})'
