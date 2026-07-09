@@ -235,6 +235,7 @@ class JujuStub(NullJujuBackend):
     unit_ips: dict[str, str] = field(default_factory=dict)
     removed: list[Any] = field(default_factory=list)
     waited_removal: list[Any] = field(default_factory=list)
+    is_k8s: bool = True
 
     # Implementation of methods mocking a JujuBackend
 
@@ -331,6 +332,10 @@ class JujuStub(NullJujuBackend):
     def unit_ip(self, model: str, unit: str) -> str:
         """Return the IP address of a unit"""
         return self.unit_ips[unit]
+
+    def is_k8s_model(self, model: str) -> bool:
+        """Return whether the model is a k8s model"""
+        return self.is_k8s
 
     def remove_applications(self, model: str, *applications: str) -> None:
         """Mock removing applications (captures call for verification)"""

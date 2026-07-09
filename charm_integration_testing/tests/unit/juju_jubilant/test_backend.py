@@ -1435,8 +1435,9 @@ class TestJubilantBackend:
 
     class TestUnitIp:
         class Unit:
-            def __init__(self, address: str, leader: bool = False) -> None:
+            def __init__(self, address: str = "", public_address: str = "", leader: bool = False) -> None:
                 self.address = address
+                self.public_address = public_address
                 self.leader = leader
 
         class AppStatus:
@@ -1448,10 +1449,18 @@ class TestJubilantBackend:
                 self.apps = {
                     "my-app": TestJubilantBackend.TestUnitIp.AppStatus(
                         {
-                            "my-app/0": TestJubilantBackend.TestUnitIp.Unit("10.0.0.1"),
-                            "my-app/1": TestJubilantBackend.TestUnitIp.Unit("10.0.0.2", leader=True),
+                            "my-app/0": TestJubilantBackend.TestUnitIp.Unit(address="10.0.0.1"),
+                            "my-app/1": TestJubilantBackend.TestUnitIp.Unit(address="10.0.0.2", leader=True),
                         }
-                    )
+                    ),
+                    "machine-app": TestJubilantBackend.TestUnitIp.AppStatus(
+                        {
+                            "machine-app/0": TestJubilantBackend.TestUnitIp.Unit(public_address="10.1.0.1"),
+                            "machine-app/1": TestJubilantBackend.TestUnitIp.Unit(
+                                public_address="10.1.0.2", leader=True
+                            ),
+                        }
+                    ),
                 }
 
         class StatusStub:
@@ -1492,6 +1501,28 @@ class TestJubilantBackend:
                 assert "my-app/99" in str(e)
             else:
                 assert False, "Expected KeyError"
+
+        def test_by_unit_id_public_address(self) -> None:
+            # GIVEN a machine unit that exposes public-address rather than address (LXD/OpenStack)
+            stub = self.StatusStub()
+            client = JubilantClientStub(client=stub)
+
+            # WHEN
+            ip = JubilantBackend(client).unit_ip("test-model", "machine-app/0")
+
+            # THEN the public address is returned
+            assert ip == "10.1.0.1"
+
+        def test_by_leader_public_address(self) -> None:
+            # GIVEN a machine unit leader that exposes public-address rather than address
+            stub = self.StatusStub()
+            client = JubilantClientStub(client=stub)
+
+            # WHEN
+            ip = JubilantBackend(client).unit_ip("test-model", "machine-app/leader")
+
+            # THEN the public address is returned
+            assert ip == "10.1.0.2"
 
     class TestListApplications:
         class StatusStub:
