@@ -13,6 +13,7 @@ from validators.test_utils.stubs import (
     ApplicationStub,
     RelationRoleStub,
     RelationStub,
+    UnitStub,
 )
 
 # ---------------------------------------------------------------------------
@@ -476,3 +477,158 @@ class TestPrometheusScrapeValidatorDeep:
         # THEN
         assert result.status == "FAIL"
         mock_urlopen.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Tests: wildcard host resolution
+# ---------------------------------------------------------------------------
+
+
+def _make_validator_with_unit_addresses(
+    databag: dict[str, str],
+    unit_addresses: list[str],
+    endpoint: str = "metrics-endpoint",
+) -> PrometheusScrapeValidator:
+    """Build a validator whose relation has per-unit prometheus_scrape_unit_address entries."""
+    app = ApplicationStub()
+    ordered_units = [UnitStub(f"provider/{i}") for i in range(len(unit_addresses))]
+    unit_data: dict[ApplicationStub | UnitStub | None, dict[str, str]] = {
+        unit: {"prometheus_scrape_unit_address": addr} for unit, addr in zip(ordered_units, unit_addresses)
+    }
+    relation = RelationStub(
+        name=endpoint, id=0, app=app, data={app: databag, **unit_data}, units=frozenset(ordered_units)
+    )
+    charm = cast(ops.CharmBase, make_charm_from_relation(relation, interface_name="prometheus_scrape"))
+    return PrometheusScrapeValidator(charm, cast(ops.Relation, relation))
+
+
+WILDCARD_SCRAPE_JOBS = json.dumps(
+    [{"metrics_path": "/metrics", "static_configs": [{"targets": ["*:9104"]}], "scheme": "http"}]
+)
+
+WILDCARD_DATABAG: dict[str, str] = {
+    "scrape_metadata": VALID_SCRAPE_METADATA,
+    "scrape_jobs": WILDCARD_SCRAPE_JOBS,
+}
+
+
+class TestWildcardHostResolution:
+    def test_wildcard_host_resolved_to_unit_address(self) -> None:
+        # GIVEN a scrape job with wildcard target "*:9104" and a unit with a known address
+        validator = _make_validator_with_unit_addresses(WILDCARD_DATABAG, unit_addresses=["10.1.0.187"])
+
+        with patch(
+            "validators.prometheus_scrape.validator.urlopen",
+            return_value=_mock_http_response(200),
+        ):
+            result = validator.validate(level="simple")
+
+        # THEN: validation passes and the probe URL uses the concrete unit address, not "*"
+        assert result.status == "PASS"
+        http_check = next(c for c in result.checks if c.name == "http_probe")
+        assert http_check.passed
+        assert "10.1.0.187" in http_check.message
+
+    def test_wildcard_host_no_unit_address_produces_parse_error(self) -> None:
+        # GIVEN a scrape job with "*:9104" but no unit databag entries
+        validator = _make_validator(WILDCARD_DATABAG)  # no units in relation
+
+        result = validator.validate(level="simple")
+
+        # THEN: parse error is reported and validation fails (no probeable targets)
+        assert result.status == "FAIL"
+        parse_check = next((c for c in result.checks if c.name == "target_parsing"), None)
+        assert parse_check is not None
+        assert not parse_check.passed
+        assert "wildcard" in parse_check.message.lower()
+
+    def test_wildcard_expanded_to_multiple_unit_addresses(self) -> None:
+        # GIVEN a scrape job with "*:9104" and two units with distinct addresses
+        validator = _make_validator_with_unit_addresses(WILDCARD_DATABAG, unit_addresses=["10.1.0.10", "10.1.0.11"])
+
+        with patch(
+            "validators.prometheus_scrape.validator.urlopen",
+            return_value=_mock_http_response(200, PROMETHEUS_TEXT_BODY),
+        ):
+            result = validator.validate(level="deep")
+
+        # THEN: both units are probed; both scrape checks pass
+        assert result.status == "PASS"
+        scrape_checks = [c for c in result.checks if c.name.startswith("scrape[")]
+        assert len(scrape_checks) == 2
+        check_names = {c.name for c in scrape_checks}
+        assert "scrape[10.1.0.10:9104]" in check_names
+        assert "scrape[10.1.0.11:9104]" in check_names
+
+    def test_zero_zero_host_also_resolved_as_wildcard(self) -> None:
+        # GIVEN "0.0.0.0:9104" — also a bind-all address that cannot be routed to
+        jobs = json.dumps(
+            [{"metrics_path": "/metrics", "static_configs": [{"targets": ["0.0.0.0:9104"]}], "scheme": "http"}]
+        )
+        databag = {"scrape_metadata": VALID_SCRAPE_METADATA, "scrape_jobs": jobs}
+        validator = _make_validator_with_unit_addresses(databag, unit_addresses=["10.1.0.42"])
+
+        with patch(
+            "validators.prometheus_scrape.validator.urlopen",
+            return_value=_mock_http_response(200),
+        ):
+            result = validator.validate(level="simple")
+
+        # THEN: probe uses the concrete unit address, not "0.0.0.0"
+        assert result.status == "PASS"
+        http_check = next(c for c in result.checks if c.name == "http_probe")
+        assert http_check.passed
+        assert "10.1.0.42" in http_check.message
+
+    def test_explicit_hostname_not_affected_by_unit_addresses(self) -> None:
+        # GIVEN a scrape job with an explicit hostname (not a wildcard)
+        # even if unit addresses are present, the explicit hostname is used as-is
+        validator = _make_validator_with_unit_addresses(VALID_DATABAG, unit_addresses=["10.1.0.99"])
+
+        with patch(
+            "validators.prometheus_scrape.validator.urlopen",
+            return_value=_mock_http_response(200),
+        ):
+            result = validator.validate(level="simple")
+
+        # THEN: the original hostname is preserved (not replaced by the unit address)
+        assert result.status == "PASS"
+        http_check = next(c for c in result.checks if c.name == "http_probe")
+        assert http_check.passed
+        assert "10.1.0.99" not in http_check.message
+
+    def test_ipv6_unit_address_is_bracketed_in_url(self) -> None:
+        # GIVEN a wildcard scrape job and a unit with an IPv6 address
+        validator = _make_validator_with_unit_addresses(WILDCARD_DATABAG, unit_addresses=["2001:db8::1"])
+
+        with patch(
+            "validators.prometheus_scrape.validator.urlopen",
+            return_value=_mock_http_response(200),
+        ) as mock_open:
+            result = validator.validate(level="simple")
+
+        # THEN: validation passes; the URL passed to urlopen brackets the IPv6 address
+        assert result.status == "PASS"
+        http_check = next(c for c in result.checks if c.name == "http_probe")
+        assert http_check.passed
+        called_url = mock_open.call_args[0][0]
+        assert called_url == "http://[2001:db8::1]:9104/metrics"
+        # AND the success message also uses the bracketed form (unambiguous)
+        assert "[2001:db8::1]:9104" in http_check.message
+
+    def test_ipv4_mapped_ipv6_unit_address_is_bracketed_in_url(self) -> None:
+        # GIVEN a wildcard scrape job and a unit with an IPv4-mapped IPv6 address
+        # (e.g. ::ffff:10.0.0.1) — these contain dots and were not matched by
+        # the original hex-only regex, producing invalid URLs.
+        validator = _make_validator_with_unit_addresses(WILDCARD_DATABAG, unit_addresses=["::ffff:10.0.0.1"])
+
+        with patch(
+            "validators.prometheus_scrape.validator.urlopen",
+            return_value=_mock_http_response(200),
+        ) as mock_open:
+            result = validator.validate(level="simple")
+
+        # THEN: the IPv4-mapped address is also bracketed correctly
+        assert result.status == "PASS"
+        called_url = mock_open.call_args[0][0]
+        assert called_url == "http://[::ffff:10.0.0.1]:9104/metrics"

@@ -32,6 +32,7 @@ validators-parca-store = { path = "./validators/parca_store", develop = true }
 validators-external-provider = { path = "./validators/external_provider", develop = true }
 validators-http-interface = { path = "./validators/http_interface", develop = true }
 validators-grafana-dashboard = { path = "./validators/grafana_dashboard", develop = true }
+validators-ingress = { path = "./validators/ingress", develop = true }
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]

@@ -1,6 +1,7 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import ipaddress
 import json
 import re
 from dataclasses import dataclass, field
@@ -17,6 +18,8 @@ from validators.base import (
 
 _SCRAPE_METADATA_REQUIRED_KEYS = ("model", "model_uuid", "application", "unit")
 _LABEL_NAME_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+# Hosts that are bind-all placeholders and cannot be used as scrape targets directly.
+_WILDCARD_HOSTS: frozenset[str] = frozenset({"*", "0.0.0.0"})  # nosec B104
 
 
 @dataclass
@@ -52,7 +55,12 @@ class PrometheusScrapeValidator(BaseValidator):
         if not jobs_check.passed:
             return self._fail_result(level, checks)
 
-        targets, parse_errors = _extract_targets(scrape_jobs)
+        unit_addresses = sorted(
+            addr
+            for unit in self.relation.units
+            if (addr := self.relation.data[unit].get("prometheus_scrape_unit_address", "").strip())
+        )
+        targets, parse_errors = _extract_targets(scrape_jobs, unit_addresses=unit_addresses)
 
         # Report any target parsing errors
         if parse_errors:
@@ -189,11 +197,34 @@ def _validate_scrape_jobs(scrape_jobs: list[dict[str, Any]]) -> ValidationCheck:
 # ---------------------------------------------------------------------------
 
 
-def _extract_targets(scrape_jobs: list[dict[str, Any]]) -> tuple[list[_ScrapeTarget], list[str]]:
+def _host_for_url(host: str) -> str:
+    """Wrap bare IPv6 addresses in square brackets for use in URLs.
+
+    ``urlparse`` stores the hostname without brackets (e.g. ``2001:db8::1``),
+    but RFC 3986 requires brackets when the address appears in a URL authority
+    component (``http://[2001:db8::1]:9104/``).  This includes all IPv6 forms:
+    standard, compressed, and IPv4-mapped (``::ffff:10.0.0.1``).  IPv4 addresses
+    and hostnames are returned unchanged.
+    """
+    try:
+        if isinstance(ipaddress.ip_address(host), ipaddress.IPv6Address):
+            return f"[{host}]"
+    except ValueError:
+        pass
+    return host
+
+
+def _extract_targets(
+    scrape_jobs: list[dict[str, Any]], unit_addresses: list[str] | None = None
+) -> tuple[list[_ScrapeTarget], list[str]]:
     """Return deduplicated scrape targets from all jobs and any parse errors.
 
     Deduplication is based on the fully resolved scrape URL (scheme+host+port+metrics_path).
     This ensures targets with different schemes or metrics paths are treated as distinct.
+
+    When a target uses a wildcard bind-all host (``*`` or ``0.0.0.0``), it is expanded
+    into one concrete target per entry in *unit_addresses*, using the per-unit
+    ``prometheus_scrape_unit_address`` values from the relation databag.
 
     Returns:
         tuple: (targets, parse_errors) where parse_errors is a list of error messages.
@@ -213,22 +244,35 @@ def _extract_targets(scrape_jobs: list[dict[str, Any]]) -> tuple[list[_ScrapeTar
                     # Parse target to get effective scheme, host, and port
                     effective_scheme, host, port = _parse_target(raw_target, job_scheme)
 
-                    # Deduplicate on the full scrape URL
-                    scrape_url = f"{effective_scheme}://{host}:{port}{metrics_path}"
-                    if scrape_url in seen:
-                        continue
-                    seen.add(scrape_url)
+                    # Expand wildcard bind-all hosts to concrete unit addresses
+                    if host in _WILDCARD_HOSTS:
+                        resolved_hosts = unit_addresses or []
+                        if not resolved_hosts:
+                            parse_errors.append(
+                                f"'{raw_target}': wildcard host requires unit address data"
+                                " (no prometheus_scrape_unit_address in relation databag)"
+                            )
+                            continue
+                    else:
+                        resolved_hosts = [host]
 
-                    targets.append(
-                        _ScrapeTarget(
-                            raw=raw_target,
-                            scheme=effective_scheme,  # Use the effective scheme, not job scheme
-                            host=host,
-                            port=port,
-                            metrics_path=metrics_path,
-                            labels=dict(sc_labels),
+                    for resolved_host in resolved_hosts:
+                        # Deduplicate on the full scrape URL
+                        scrape_url = f"{effective_scheme}://{_host_for_url(resolved_host)}:{port}{metrics_path}"
+                        if scrape_url in seen:
+                            continue
+                        seen.add(scrape_url)
+
+                        targets.append(
+                            _ScrapeTarget(
+                                raw=raw_target,
+                                scheme=effective_scheme,
+                                host=resolved_host,
+                                port=port,
+                                metrics_path=metrics_path,
+                                labels=dict(sc_labels),
+                            )
                         )
-                    )
                 except Exception as exc:
                     parse_errors.append(f"'{raw_target}': {exc}")
     return targets, parse_errors
@@ -266,7 +310,7 @@ def _http_probe_check(targets: list[_ScrapeTarget]) -> ValidationCheck:
 
     errors: list[str] = []
     for t in targets:
-        url = f"{t.scheme}://{t.host}:{t.port}{t.metrics_path}"
+        url = f"{t.scheme}://{_host_for_url(t.host)}:{t.port}{t.metrics_path}"
         try:
             with urlopen(url, timeout=5) as resp:  # nosec B310
                 if resp.status != 200:
@@ -277,7 +321,9 @@ def _http_probe_check(targets: list[_ScrapeTarget]) -> ValidationCheck:
     if errors:
         return ValidationCheck(name="http_probe", passed=False, message="; ".join(errors))
     return ValidationCheck(
-        name="http_probe", passed=True, message=f"HTTP 200 OK from {targets[0].host}:{targets[0].port}."
+        name="http_probe",
+        passed=True,
+        message=f"HTTP 200 OK from {_host_for_url(targets[0].host)}:{targets[0].port}.",
     )
 
 
@@ -294,7 +340,7 @@ def _scrape_and_parse_checks(targets: list[_ScrapeTarget]) -> list[ValidationChe
     """
     checks: list[ValidationCheck] = []
     for t in targets:
-        target_id = f"{t.host}:{t.port}"
+        target_id = f"{_host_for_url(t.host)}:{t.port}"
         url = f"{t.scheme}://{target_id}{t.metrics_path}"
         check_name = f"scrape[{target_id}]"
         try:
