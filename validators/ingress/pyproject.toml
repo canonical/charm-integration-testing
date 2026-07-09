@@ -1,0 +1,38 @@
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+[project]
+name = "validators-ingress"
+version = "0.1.0"
+description = "Validator for the ingress interface"
+authors = [
+    {name = "SQA Team", email = "solutionsqa@canonical.com"}
+]
+
+requires-python = ">=3.10"
+dependencies = [
+    "validators-base",
+    # pyyaml is required to decode the v1 (deprecated) YAML wire format for the ingress
+    # provider databag. It remains a mandatory dependency because a given deployment may
+    # still be running a v1 provider (e.g. older traefik-k8s), and the validator must
+    # detect this gracefully rather than crash with an ImportError at runtime.
+    "pyyaml>=6.0,<7.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "validators-test-utils",
+]
+
+[project.entry-points."endpoint_validators"]
+ingress = "validators.ingress:IngressValidator"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["validators.ingress"]
+
+[tool.setuptools.package-dir]
+"validators.ingress" = "."

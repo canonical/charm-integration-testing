@@ -31,6 +31,7 @@ dependencies = [
     "validators-external-provider",
     "validators-http-interface",
     "validators-grafana-dashboard",
+    "validators-ingress",
 ]
 
 [build-system]
