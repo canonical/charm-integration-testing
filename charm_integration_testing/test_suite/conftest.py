@@ -859,10 +859,15 @@ def resource_tracking_skips_by_application(request: pytest.FixtureRequest) -> di
     but resources are attributed to an *application* on the cluster, so the
     target/neighbor application names are mapped back to their charms here.
     """
-    overrides_raw = request.config.getoption("--charm-overrides", default=None)
+    overrides_raw = request.config.getoption("--charm-overrides")
     if not overrides_raw:
         return {}
-    skips_by_charm = load_resource_tracking_skips(Path(str(overrides_raw)))
+    assert isinstance(overrides_raw, str)
+    overrides_dir = Path(overrides_raw)
+    if not overrides_dir.is_absolute():
+        overrides_dir = Path(request.config.rootpath) / overrides_dir
+
+    skips_by_charm = load_resource_tracking_skips(overrides_dir.resolve())
     if not skips_by_charm:
         return {}
 
