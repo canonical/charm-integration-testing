@@ -561,10 +561,18 @@ class TestJubilantBackend:
             client = JubilantClientStub(client=stub)
             backend = JubilantBackend(client)
 
-            # WHEN wait_idle is called with a tight timeout
+            t0 = datetime(2025, 1, 1, 0, 0, 0)
+            # WHEN wait_idle is called with datetime mocked to jump past the timeout
             # THEN it times out because the agent is not idle
-            with pytest.raises(JujuWaitTimeoutError):
-                backend.wait_idle("test-model", timedelta(milliseconds=100), count=3)
+            with patch("juju_jubilant.backend.datetime") as mock_dt, patch("juju_jubilant.backend.time.sleep"):
+                mock_dt.now.side_effect = [
+                    t0,  # start
+                    t0,  # iteration_start, loop 1 — within timeout
+                    t0,  # elapsed, loop 1
+                    t0 + timedelta(seconds=1),  # iteration_start, loop 2 — past 100ms timeout
+                ]
+                with pytest.raises(JujuWaitTimeoutError):
+                    backend.wait_idle("test-model", timedelta(milliseconds=100), count=3)
 
     class TestWaitApplicationSettled:
         def test_application_settled(self) -> None:
