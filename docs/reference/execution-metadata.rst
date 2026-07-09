@@ -195,6 +195,10 @@ Failure Information
      - Interface name for an unfulfilled application endpoint. Collected when ``UnfulfilledEndpointsError`` is raised. Multiple values may be recorded.
      - No
      - ``postgresql_client``
+   * - ``resource:<resource_type>:<qualifier>``
+     - A Kubernetes resource discrepancy detected between two visits to the same scheduler state. Collected when ``ResourceDiscrepancyError`` is raised. ``<resource_type>`` identifies the tracked resource (e.g. ``pvc``) and ``<qualifier>`` is the drift kind, generically ``missing`` or ``extra`` (extensible per resource type). Run-specific context is carried in the value as ``state=<state> model=<model> <resource_type>=<name>`` followed by the resource's descriptive attributes. Multiple values may be recorded. See :doc:`../explanation/resource-tracking`.
+     - Yes
+     - ``state=deployed model=<model> pvc=<name> requested_storage=1Gi storage_class=csi-cephfs``
 
 Skip Information
 ~~~~~~~~~~~~~~~~
