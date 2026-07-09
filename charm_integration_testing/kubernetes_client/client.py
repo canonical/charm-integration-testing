@@ -72,23 +72,15 @@ class KubernetesClient:
             model: Model whose PVCs should be listed (used as the namespace name)
 
         Raises:
-            ApiException: If there is an error communicating with the Kubernetes API
+            ApiException: If there is an error communicating with the Kubernetes API.
+                The exception is propagated unlogged so best-effort callers (e.g. the
+                resource-tracking collector, which tolerates missing namespaces) can
+                decide how and at what level to record it.
 
         Returns:
             List of V1PersistentVolumeClaim objects, one per PVC in the namespace
         """
-        try:
-            pvcs = self.backend.core_v1_api.list_namespaced_persistent_volume_claim(model)
-        except ApiException as e:
-            # A missing namespace (404) is an expected, benign condition for
-            # best-effort callers (e.g. non-Kubernetes models); only genuinely
-            # unexpected failures are logged at error level.
-            if e.status == 404:
-                self.logger.debug(f"Namespace {model} not found while listing PVCs: {e}")
-            else:
-                self.logger.error(f"Failed to list PVCs in namespace {model}: {e}")
-            raise
-
+        pvcs = self.backend.core_v1_api.list_namespaced_persistent_volume_claim(model)
         self.logger.debug(f"Found {len(pvcs.items)} PVC(s) in namespace {model}")
         return list(pvcs.items)
 

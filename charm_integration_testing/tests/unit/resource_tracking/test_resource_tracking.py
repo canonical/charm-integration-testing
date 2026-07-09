@@ -160,6 +160,52 @@ class TestPvcSource:
         # THEN the application defaults to empty
         assert snapshots[0].application == ""
 
+    def test_none_spec_and_status_do_not_abort_collection(self) -> None:
+        # GIVEN a raw PVC whose optional spec/status subtrees are entirely None
+        raw = SimpleNamespace(
+            metadata=SimpleNamespace(name="data-0", labels=None),
+            spec=None,
+            status=None,
+        )
+        client = _FakeKubernetesClient([raw])
+
+        # WHEN the source collects snapshots
+        snapshots = PvcSource().collect(client, "test-model")  # type: ignore[arg-type]
+
+        # THEN the snapshot is produced with empty defaults instead of raising
+        assert snapshots == [
+            PvcSnapshot(
+                name="data-0",
+                namespace="test-model",
+                storage_class="",
+                requested_storage="",
+                phase="",
+            )
+        ]
+
+    def test_none_resources_default_requested_storage_to_empty(self) -> None:
+        # GIVEN a raw PVC whose spec has no resources block
+        raw = SimpleNamespace(
+            metadata=SimpleNamespace(name="data-0", labels=None),
+            spec=SimpleNamespace(storage_class_name="csi-cephfs", resources=None),
+            status=SimpleNamespace(phase="Bound"),
+        )
+        client = _FakeKubernetesClient([raw])
+
+        # WHEN the source collects snapshots
+        snapshots = PvcSource().collect(client, "test-model")  # type: ignore[arg-type]
+
+        # THEN requested_storage defaults to empty while other fields map through
+        assert snapshots == [
+            PvcSnapshot(
+                name="data-0",
+                namespace="test-model",
+                storage_class="csi-cephfs",
+                requested_storage="",
+                phase="Bound",
+            )
+        ]
+
 
 class TestStateResourceTracker:
     def test_record_accumulates_observations_in_order(self) -> None:

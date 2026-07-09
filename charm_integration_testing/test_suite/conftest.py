@@ -1006,9 +1006,10 @@ def record_failure_execution_metadata(
                     attributes = " ".join(
                         f"{key}={value}" for key, value in sorted(entry.snapshot.report_attributes().items())
                     )
+                    value = f"{detail} {attributes}" if attributes else detail
                     execution_metadata(
                         f"resource:{entry.resource_type}:{entry.qualifier}",
-                        normalize_string(f"{detail} {attributes}"),
+                        normalize_string(value),
                     )
 
 

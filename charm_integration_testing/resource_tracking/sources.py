@@ -38,14 +38,22 @@ class PvcSource:
 
     def collect(self, kubernetes_client: KubernetesClient, model: str) -> list[ResourceSnapshot]:
         pvcs = kubernetes_client.list_model_pvcs(model=model)
-        return [
-            PvcSnapshot(
-                name=pvc.metadata.name,
-                namespace=model,
-                storage_class=pvc.spec.storage_class_name or "",
-                requested_storage=(pvc.spec.resources.requests or {}).get("storage", ""),
-                phase=pvc.status.phase or "",
-                application=(pvc.metadata.labels or {}).get("app.kubernetes.io/name", ""),
+        snapshots: list[ResourceSnapshot] = []
+        for pvc in pvcs:
+            # ``spec``, ``spec.resources`` and ``status`` are optional on the raw
+            # Kubernetes objects and may be ``None``; guard each hop so a partially
+            # populated PVC does not abort collection for the whole model.
+            spec = pvc.spec
+            status = pvc.status
+            requests = spec.resources.requests if spec is not None and spec.resources is not None else None
+            snapshots.append(
+                PvcSnapshot(
+                    name=pvc.metadata.name,
+                    namespace=model,
+                    storage_class=(spec.storage_class_name if spec is not None else None) or "",
+                    requested_storage=(requests or {}).get("storage", ""),
+                    phase=(status.phase if status is not None else None) or "",
+                    application=(pvc.metadata.labels or {}).get("app.kubernetes.io/name", ""),
+                )
             )
-            for pvc in pvcs
-        ]
+        return snapshots
