@@ -108,7 +108,7 @@ Reply to each inline comment using the `gh api` tool with stdin input:
 ```bash
 gh api -X POST repos/canonical/charm-integration-testing/pulls/comments/<comment_id>/replies --input /dev/stdin <<EOF
 {
-  "body": "<your reply>\n\n> *This comment was posted by an AI assistant (GitHub Copilot) on behalf of the repository maintainer.*"
+  "body": "<your reply>\n\n> *This comment was posted by an AI assistant (GitHub Copilot) on behalf of the pull request author.*"
 }
 EOF
 ```
@@ -122,7 +122,7 @@ curl -s -X POST \
   -H "Authorization: token ${GH_TOKEN}" \
   -H "Content-Type: application/json" \
   "https://api.github.com/repos/canonical/charm-integration-testing/issues/<number>/comments" \
-  -d '{"body": "<your reply>\n\n> *This comment was posted by an AI assistant (GitHub Copilot) on behalf of the repository maintainer.*"}'
+  -d '{"body": "<your reply>\n\n> *This comment was posted by an AI assistant (GitHub Copilot) on behalf of the pull request author.*"}'
 ```
 
 ---
