@@ -40,7 +40,9 @@ def strip_saas_from_bundle(bundle_yaml: str) -> str:
             rel for rel in base.get("relations", []) if not any(ep.split(":")[0] in saas_names for ep in rel)
         ]
     parts = [yaml.dump(base, default_flow_style=False, sort_keys=True)]
-    # Re-serialize overlay documents (key order and formatting may change, but content is preserved).
+    # Re-serialize valid (dict) overlay documents; non-mapping documents are not valid
+    # bundle overlay syntax and are dropped. Key order and formatting may change, but
+    # the content of well-formed overlays is preserved.
     for doc in documents[1:]:
         if not isinstance(doc, dict):
             continue
