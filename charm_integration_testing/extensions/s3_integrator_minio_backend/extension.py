@@ -12,6 +12,7 @@ from subprocess import CalledProcessError  # nosec
 from juju import JujuBackend, JujuExtension
 
 MINIO_CHARM = "minio"
+UBUNTU_CHARM = "ubuntu"
 S3_INTEGRATOR_CHARM = "s3-integrator"
 MINIO_APPLICATION_NAME = "{s3_integrator_application}-minio"
 MINIO_ACCESS_KEY = "minio-access-key-for-testing"  # nosec B105
@@ -21,21 +22,46 @@ MINIO_BUCKET = "minio-bucket-for-testing"
 MINIO_ADDRESS = "http://{unit_ip}:9000"
 MINIO_CLIENT_DOWNLOAD = "https://dl.min.io/client/mc/release/linux-amd64/mc"
 MINIO_CLIENT_PATH = "/usr/local/bin/mc"
-MINIO_CLIENT_MAKE_EXECUTABLE = "chmod +x {client_path}"
+MINIO_CLIENT_STAGING_PATH = "/tmp/mc"  # nosec B108
+MINIO_CLIENT_INSTALL = "sudo install -m 755 {staging_path} {client_path}"
+MINIO_CLIENT_INSTALL_K8S = "install -m 755 {staging_path} {client_path}"
 MINIO_CLIENT_SET_ALIAS = "{client_path} alias set local {address} {access_key} {secret_key}"
 MINIO_CLIENT_MAKE_BUCKET = "{client_path} mb local/{bucket}"
 MINIO_CLIENT_MAKE_PATH = "touch empty && {client_path} cp empty local/{bucket}/{path}/ && rm empty"
+MINIO_SERVER_VERSION = "RELEASE.2025-10-15T17-29-55Z"
+MINIO_SERVER_DOWNLOAD = f"https://github.com/minio/minio/releases/download/{MINIO_SERVER_VERSION}/minio"
+MINIO_SERVER_STAGING_PATH = "/tmp/minio-server"  # nosec B108
+MINIO_SERVER_PATH = "/usr/local/bin/minio"
+MINIO_SERVER_INSTALL = "sudo install -m 755 {staging_path} {server_path}"
+MINIO_SERVER_DATA_DIR = "/home/ubuntu/minio-data"
+MINIO_SERVER_START = (
+    "if sudo systemctl show minio-server.service --property=LoadState 2>/dev/null"
+    " | grep -q LoadState=loaded;"
+    " then sudo systemctl restart minio-server.service;"
+    " else sudo systemd-run --unit=minio-server"
+    " -E MINIO_ROOT_USER={access_key}"
+    " -E MINIO_ROOT_PASSWORD={secret_key}"
+    " {server_path} server {data_dir}; fi"
+)
 
 
 class S3IntegratorMinIOBackendExtension(JujuExtension, ABC):
     juju: JujuBackend
     logger: logging.Logger
     minio_client_file: Path | None = None
+    minio_server_file: Path | None = None
 
-    def __init__(self, juju: JujuBackend, logger: logging.Logger, minio_client_file: Path | None = None):
+    def __init__(
+        self,
+        juju: JujuBackend,
+        logger: logging.Logger,
+        minio_client_file: Path | None = None,
+        minio_server_file: Path | None = None,
+    ) -> None:
         self.juju = juju
         self.logger = logger
         self.minio_client_file = minio_client_file
+        self.minio_server_file = minio_server_file
 
     def post_deploy(self, model: str) -> None:
         # Look for s3 integrator charms
@@ -77,6 +103,23 @@ class S3IntegratorMinIOBackendExtension(JujuExtension, ABC):
             self.logger.info(f"Application '{s3_integrator_application}' already has endpoint set, skipping")
             return
 
+        # Deploy minio backend appropriate for the model platform
+        if self.juju.is_k8s_model(model):
+            self._deploy_minio_charm(model, s3_integrator_application)
+        else:
+            self._deploy_minio_binary(model, s3_integrator_application)
+
+        # Setup MinIO client
+        self.setup_minio_client(model, s3_integrator_application)
+
+        # Create MinIO bucket
+        self.create_minio_bucket(model, s3_integrator_application)
+
+        # Authenticate s3 integrator with the bucket
+        self.authenticate_s3_integrator(model, s3_integrator_application)
+
+    def _deploy_minio_charm(self, model: str, s3_integrator_application: str) -> None:
+        """Deploy MinIO using the minio k8s charm."""
         # Deploy MinIO
         self.logger.info(
             f"Deploying MinIO application '{self.minio_application(s3_integrator_application)}' for s3 integrator '{s3_integrator_application}'"
@@ -104,14 +147,48 @@ class S3IntegratorMinIOBackendExtension(JujuExtension, ABC):
             self.logger.info(f"Waiting for application '{application}' units to be settled")
             self.juju.wait_application_settled(model, application, timedelta(minutes=10))
 
-        # Setup MinIO client
-        self.setup_minio_client(model, s3_integrator_application)
+    def _deploy_minio_binary(self, model: str, s3_integrator_application: str) -> None:
+        """Deploy MinIO by uploading its binary to an ubuntu machine charm, for non-k8s models."""
+        # Deploy ubuntu charm as the minio host
+        self.logger.info(
+            f"Deploying ubuntu application '{self.minio_application(s3_integrator_application)}' as minio host for s3 integrator '{s3_integrator_application}'"
+        )
+        self.juju.deploy_application(model, UBUNTU_CHARM, application=self.minio_application(s3_integrator_application))
 
-        # Create MinIO bucket
-        self.create_minio_bucket(model, s3_integrator_application)
+        # Wait for applications to be scaled
+        for application in (s3_integrator_application, self.minio_application(s3_integrator_application)):
+            self.logger.info(f"Waiting for application '{application}' to be scaled")
+            self.juju.wait_application_scaled(model, application, timedelta(minutes=10))
 
-        # Authenticate s3 integrator with the bucket
-        self.authenticate_s3_integrator(model, s3_integrator_application)
+        # Wait for units to settle
+        for application in (s3_integrator_application, self.minio_application(s3_integrator_application)):
+            self.logger.info(f"Waiting for application '{application}' units to be settled")
+            self.juju.wait_application_settled(model, application, timedelta(minutes=10))
+
+        # Install minio server binary
+        unit = self.minio_unit(s3_integrator_application)
+        minio_server_file = self.get_minio_server_file()
+        self.logger.info(f"Copying minio server binary to '{self.minio_application(s3_integrator_application)}'")
+        self.juju.scp(model, str(minio_server_file.resolve()), f"{unit}:{MINIO_SERVER_STAGING_PATH}")
+        self.juju.ssh(
+            model,
+            unit,
+            MINIO_SERVER_INSTALL.format(staging_path=MINIO_SERVER_STAGING_PATH, server_path=MINIO_SERVER_PATH),
+        )
+
+        # Create data directory and start the server via systemd-run
+        self.juju.ssh(model, unit, f"mkdir -p {MINIO_SERVER_DATA_DIR}")
+        self.logger.info(f"Starting minio server on '{self.minio_application(s3_integrator_application)}'")
+        self.juju.ssh(
+            model,
+            unit,
+            MINIO_SERVER_START.format(
+                access_key=MINIO_ACCESS_KEY,
+                secret_key=MINIO_SECRET_KEY,
+                server_path=MINIO_SERVER_PATH,
+                data_dir=MINIO_SERVER_DATA_DIR,
+            ),
+        )
 
     def minio_application(self, s3_integrator_application: str) -> str:
         return MINIO_APPLICATION_NAME.format(s3_integrator_application=s3_integrator_application)
@@ -126,18 +203,22 @@ class S3IntegratorMinIOBackendExtension(JujuExtension, ABC):
         # Get the MinIO client file path
         minio_client_file = self.get_minio_client_file()
 
-        # Copy client to the pod
+        # Copy client to a staging path writable by the ubuntu user
         self.logger.info(f"Copying the MinIO client to '{self.minio_application(s3_integrator_application)}'")
         self.juju.scp(
-            model, str(minio_client_file.resolve()), f"{self.minio_unit(s3_integrator_application)}:{MINIO_CLIENT_PATH}"
+            model,
+            str(minio_client_file.resolve()),
+            f"{self.minio_unit(s3_integrator_application)}:{MINIO_CLIENT_STAGING_PATH}",
         )
 
-        # Make client executable
-        self.logger.info(f"Mark MinIO client in '{self.minio_application(s3_integrator_application)}' as executable")
+        # Install to final path with correct permissions
+        # k8s containers run as root (no sudo); machine units need sudo for /usr/local/bin
+        self.logger.info(f"Installing MinIO client in '{self.minio_application(s3_integrator_application)}'")
+        install_cmd = MINIO_CLIENT_INSTALL_K8S if self.juju.is_k8s_model(model) else MINIO_CLIENT_INSTALL
         self.juju.ssh(
             model,
             self.minio_unit(s3_integrator_application),
-            MINIO_CLIENT_MAKE_EXECUTABLE.format(client_path=MINIO_CLIENT_PATH),
+            install_cmd.format(staging_path=MINIO_CLIENT_STAGING_PATH, client_path=MINIO_CLIENT_PATH),
         )
 
         # Set MinIO alias
@@ -155,6 +236,16 @@ class S3IntegratorMinIOBackendExtension(JujuExtension, ABC):
 
         # Return file
         return self.minio_client_file
+
+    def get_minio_server_file(self) -> Path:
+        # Only download if not downloaded
+        if self.minio_server_file is None:
+            self.logger.info("Downloading MinIO server")
+            file_path, _ = urllib.request.urlretrieve(MINIO_SERVER_DOWNLOAD, "minio")  # nosec B310
+            self.minio_server_file = Path(file_path)
+
+        # Return file
+        return self.minio_server_file
 
     def create_minio_bucket(self, model: str, s3_integrator_application: str) -> None:
         self.logger.info(

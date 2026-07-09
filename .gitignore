@@ -130,6 +130,15 @@ dmypy.json
 
 # minio client
 /mc
+/minio
+/static/minio
+
+# test artifacts
+/junit-*.xml
+/generated-*.mmd
+/generated-*.yaml
+/juju-crashdump-*.tar.gz
+/test-logs-*/
 
 # uv binary
 /uv
