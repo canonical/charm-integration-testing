@@ -47,7 +47,7 @@ def load_resource_tracking_skips(overrides_dir: Path) -> dict[str, frozenset[str
     for charm_file in sorted(overrides_dir.glob("*.yaml")):
         try:
             document = yaml.safe_load(charm_file.read_text(encoding="utf-8")) or {}
-        except (OSError, yaml.YAMLError) as exc:
+        except (OSError, yaml.YAMLError):
             LOGGER.debug("Skipping resource-tracking overrides for '%s'.", charm_file.name, exc_info=True)
             continue
 
