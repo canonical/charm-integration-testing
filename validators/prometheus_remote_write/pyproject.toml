@@ -1,0 +1,28 @@
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+[project]
+name = "validators-prometheus-remote-write"
+version = "0.1.0"
+description = "Validator for prometheus_remote_write interface"
+authors = [
+    {name = "SQA Team", email = "solutionsqa@canonical.com"}
+]
+
+requires-python = ">=3.10"
+dependencies = [
+    "validators-base",
+]
+
+[project.entry-points."endpoint_validators"]
+prometheus_remote_write = "validators.prometheus_remote_write:PrometheusRemoteWriteValidator"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["validators.prometheus_remote_write"]
+
+[tool.setuptools.package-dir]
+"validators.prometheus_remote_write" = "."

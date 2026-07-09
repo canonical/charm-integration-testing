@@ -33,6 +33,7 @@ validators-external-provider = { path = "./validators/external_provider", develo
 validators-http-interface = { path = "./validators/http_interface", develop = true }
 validators-grafana-dashboard = { path = "./validators/grafana_dashboard", develop = true }
 validators-ingress = { path = "./validators/ingress", develop = true }
+validators-prometheus-remote-write = { path = "./validators/prometheus_remote_write", develop = true }
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
