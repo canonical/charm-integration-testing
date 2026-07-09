@@ -151,6 +151,20 @@ class TestIngressValidatorSimple:
         assert not schema.passed
         assert "int" in schema.message
 
+    def test_fails_schema_when_url_value_is_falsy_non_string(self) -> None:
+        # GIVEN 'url' is a falsy non-string (e.g. 0 or false); must not report "missing or empty"
+        validator = _make_validator({"ingress": json.dumps({"url": 0})})
+
+        # WHEN
+        result = validator.validate(level="simple")
+
+        # THEN — type error, not a "missing or empty" error
+        assert result.status == "FAIL"
+        schema = next(c for c in result.checks if c.name == "schema")
+        assert not schema.passed
+        assert "int" in schema.message
+        assert "missing" not in schema.message
+
     def test_fails_url_format_when_scheme_is_invalid(self) -> None:
         # GIVEN ingress URL has unsupported scheme
         validator = _make_validator({"ingress": json.dumps({"url": "ftp://10.0.0.1/path"})})

@@ -87,23 +87,33 @@ def _parse_ingress_url(databag: dict[str, str]) -> tuple[ValidationCheck, str]:
             "",
         )
 
-    url = ingress_data.get("url", "")
-    if not url:
+    if "url" not in ingress_data:
         return (
             ValidationCheck(
                 name="schema",
                 passed=False,
-                message="'ingress' data decoded successfully but 'url' key is missing or empty.",
+                message="'ingress' data decoded successfully but 'url' key is missing.",
             ),
             "",
         )
 
+    url = ingress_data["url"]
     if not isinstance(url, str):
         return (
             ValidationCheck(
                 name="schema",
                 passed=False,
                 message=f"'url' value must be a string, got {type(url).__name__}: {url!r}",
+            ),
+            "",
+        )
+
+    if not url:
+        return (
+            ValidationCheck(
+                name="schema",
+                passed=False,
+                message="'ingress' data decoded successfully but 'url' value is empty.",
             ),
             "",
         )
