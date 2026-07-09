@@ -158,6 +158,15 @@ def _url_format_check(url: str) -> ValidationCheck:
             message=f"URL {url!r} has no valid hostname.",
         )
 
+    try:
+        _ = parsed.port  # raises ValueError for out-of-range or non-integer ports
+    except ValueError as exc:
+        return ValidationCheck(
+            name="url_format",
+            passed=False,
+            message=f"URL {url!r} has an invalid port: {exc}",
+        )
+
     return ValidationCheck(
         name="url_format",
         passed=True,
@@ -208,11 +217,14 @@ def _http_probe_check(url: str) -> ValidationCheck:
             message=f"HTTP GET {url} -> {status}.",
         )
     except HTTPError as exc:
-        # Any HTTP status code proves the ingress is active and routing traffic
+        # Any HTTP status code proves the ingress is active and routing traffic.
+        # HTTPError is also a file-like response object; close it to release the socket.
+        code = exc.code
+        exc.close()
         return ValidationCheck(
             name="http_probe",
             passed=True,
-            message=f"HTTP GET {url} -> {exc.code} (HTTP service reachable).",
+            message=f"HTTP GET {url} -> {code} (HTTP service reachable).",
         )
     except Exception as exc:
         return ValidationCheck(

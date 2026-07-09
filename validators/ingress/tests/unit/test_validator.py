@@ -151,6 +151,19 @@ class TestIngressValidatorSimple:
         assert not fmt.passed
         assert "ftp" in fmt.message
 
+    def test_fails_url_format_when_port_is_out_of_range(self) -> None:
+        # GIVEN ingress URL has an out-of-range port number
+        validator = _make_validator({"ingress": json.dumps({"url": "http://10.0.0.1:99999/path"})})
+
+        # WHEN
+        result = validator.validate(level="simple")
+
+        # THEN
+        assert result.status == "FAIL"
+        fmt = next(c for c in result.checks if c.name == "url_format")
+        assert not fmt.passed
+        assert "invalid port" in fmt.message
+
     def test_passes_simple_with_valid_v2_databag(self) -> None:
         # GIVEN valid v2 databag
         validator = _make_validator(VALID_V2_DATABAG)
@@ -262,6 +275,31 @@ class TestIngressValidatorDeep:
         assert result.status == "FAIL"
         probe = next(c for c in result.checks if c.name == "http_probe")
         assert not probe.passed
+
+    def test_http_probe_closes_http_error_response(self) -> None:
+        # GIVEN endpoint returns an HTTP error (HTTPError is also a file-like response)
+        validator = _make_validator(VALID_V2_DATABAG)
+
+        mock_exc = HTTPError(
+            "http://10.0.0.1/ingress-test-grafana-k8s",
+            503,
+            "Service Unavailable",
+            {},  # type: ignore[arg-type]
+            None,
+        )
+        mock_exc.close = MagicMock()
+
+        with (
+            patch("validators.ingress.validator._tcp_ping"),
+            patch("validators.ingress.validator.urlopen", side_effect=mock_exc),
+        ):
+            result = validator.validate(level="deep")
+
+        # THEN the response is closed to release the underlying socket
+        mock_exc.close.assert_called_once()
+        probe = next(c for c in result.checks if c.name == "http_probe")
+        assert probe.passed
+        assert "503" in probe.message
 
     def test_deep_skipped_for_uat_level(self) -> None:
         # GIVEN
