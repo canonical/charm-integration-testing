@@ -249,6 +249,7 @@ class TestPrometheusRemoteWriteValidatorSimple:
 
         with (
             patch("validators.prometheus_remote_write.validator._tcp_ping"),
+            patch("validators.prometheus_remote_write.validator.time.sleep"),
             patch(
                 "validators.prometheus_remote_write.validator.urlopen",
                 return_value=_mock_http_response(503, b"not ready"),

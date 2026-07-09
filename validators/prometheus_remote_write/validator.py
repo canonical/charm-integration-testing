@@ -175,13 +175,12 @@ def _http_ready_checks(endpoint_infos: list[dict[str, Any]]) -> list[ValidationC
     Prometheus may take a few seconds to become ready after startup, so the
     check retries with back-off before reporting failure (3 attempts, 3 s apart).
     """
-    import time
-
     checks: list[ValidationCheck] = []
     for info in endpoint_infos:
         url: str = info["url"]
         parsed = urlparse(url)
-        base = f"{parsed.scheme}://{parsed.netloc}"
+        path_prefix = parsed.path[: -len(_REMOTE_WRITE_PATH)]
+        base = f"{parsed.scheme}://{parsed.netloc}{path_prefix}"
         ready_url = f"{base}{_READY_PATH}"
         check_name = f"http_ready[{parsed.netloc}]"
         last_msg = ""
@@ -223,7 +222,8 @@ def _canary_checks(endpoint_infos: list[dict[str, Any]]) -> list[ValidationCheck
     for info in endpoint_infos:
         url: str = info["url"]
         parsed = urlparse(url)
-        base_url = f"{parsed.scheme}://{parsed.netloc}"
+        path_prefix = parsed.path[: -len(_REMOTE_WRITE_PATH)]
+        base_url = f"{parsed.scheme}://{parsed.netloc}{path_prefix}"
         check_name = f"canary[{parsed.netloc}]"
         probe_id = uuid.uuid4().hex[:12]
         timestamp_ms = int(time.time() * 1000)
@@ -289,6 +289,9 @@ def _query_canary(base_url: str, probe_id: str) -> bool:
     query_url = f"{base_url}/api/v1/query?query={quote(query)}"
     with urlopen(query_url, timeout=10) as resp:  # nosec B310
         body = json.loads(resp.read())
+    status = body.get("status")
+    if status != "success":
+        raise RuntimeError(f"Prometheus query returned status {status!r}: {body.get('error', '')}")
     result = body.get("data", {}).get("result", [])
     return bool(result)
 
