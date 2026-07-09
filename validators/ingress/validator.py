@@ -8,6 +8,8 @@ from urllib.error import HTTPError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
+import yaml  # pyyaml; required for v1 (deprecated YAML wire format) support
+
 from validators.base import (
     BaseValidator,
     ValidationCheck,
@@ -118,12 +120,10 @@ def _decode_ingress_field(raw: str) -> dict[str, Any] | None:
 
     # v1 (deprecated): YAML-encoded dict
     try:
-        import yaml  # pyyaml; guarded import so v2-only deployments don't require it
-
         decoded = yaml.safe_load(raw)
         if isinstance(decoded, dict):
             return decoded
-    except Exception:  # nosec B110
+    except (yaml.YAMLError, TypeError, ValueError):
         pass
 
     return None
@@ -151,11 +151,11 @@ def _url_format_check(url: str) -> ValidationCheck:
             passed=False,
             message=f"URL scheme {parsed.scheme!r} is not 'http' or 'https'.",
         )
-    if not parsed.netloc:
+    if not parsed.netloc or not parsed.hostname:
         return ValidationCheck(
             name="url_format",
             passed=False,
-            message=f"URL {url!r} has no host/netloc component.",
+            message=f"URL {url!r} has no valid hostname.",
         )
 
     return ValidationCheck(
