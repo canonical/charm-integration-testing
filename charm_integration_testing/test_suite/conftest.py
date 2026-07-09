@@ -37,7 +37,13 @@ from juju_jubilant import JubilantBackend
 from kubernetes_client import KubernetesBackend, KubernetesClient
 from pytest import StashKey
 from resource_registry import ResourceRegistry, ResourceTeardownWarning
-from resource_tracking import StateResourceTracker
+from resource_tracking import (
+    KubernetesResourceCollector,
+    ResourceCollector,
+    ResourceDiscrepancyError,
+    StateResourceTracker,
+    load_resource_tracking_skips,
+)
 from test_observer_client import TestObserverClient as TestObserverAPIClient
 from test_observer_client import TestObserverClientError
 from utils import generate_juju_name, normalize_string, normalize_string_multiline
@@ -845,12 +851,43 @@ def state_resource_tracker() -> StateResourceTracker:
     return StateResourceTracker()
 
 
+@pytest.fixture(scope="session")
+def resource_tracking_skips_by_application(request: pytest.FixtureRequest) -> dict[str, frozenset[str]]:
+    """Resolve per-charm ``resource_tracking.skip`` overrides to deployed applications.
+
+    Overrides are declared per *charm* in ``static/charm-overrides/<charm>.yaml``,
+    but resources are attributed to an *application* on the cluster, so the
+    target/neighbor application names are mapped back to their charms here.
+    """
+    overrides_raw = request.config.getoption("--charm-overrides", default=None)
+    if not overrides_raw:
+        return {}
+    skips_by_charm = load_resource_tracking_skips(Path(str(overrides_raw)))
+    if not skips_by_charm:
+        return {}
+
+    application_charms = {
+        request.config.getoption("--target-application", default=None): request.config.getoption(
+            "--target-charm", default=None
+        ),
+        request.config.getoption("--neighbor-application", default=None): request.config.getoption(
+            "--neighbor-charm", default=None
+        ),
+    }
+    return {
+        application: skips_by_charm[charm]
+        for application, charm in application_charms.items()
+        if application and charm and charm in skips_by_charm
+    }
+
+
 @pytest.fixture(autouse=True)
 def track_state_resources(
     request: pytest.FixtureRequest,
     kubernetes_client: KubernetesClient | None,
     session_resource_registry: ResourceRegistry,
     state_resource_tracker: StateResourceTracker,
+    resource_tracking_skips_by_application: dict[str, frozenset[str]],
     logger: logging.Logger,
 ) -> Iterator[None]:
     """Snapshot resources per scheduler state after each passing state-marked test.
@@ -863,15 +900,28 @@ def track_state_resources(
     # Only record when the environment state is known-good: the test must have a
     # state marker and must have passed (a failure or skip leaves the state
     # indeterminate, so the snapshot would be meaningless).
-    if kubernetes_client is None:
-        return
     if failure_message in request.node.stash or skipped_message in request.node.stash:
         return
     marker = read_state_marker(request.node)
     if marker is None:
         return
 
-    state_resource_tracker.collect(marker.provides, kubernetes_client, session_resource_registry, logger)
+    # Build a collector per available substrate.  Only Kubernetes is supported
+    # today, but adding an lxd/openstack collector here keeps the tracker itself
+    # substrate-agnostic.
+    collectors: list[ResourceCollector] = []
+    if kubernetes_client is not None:
+        collectors.append(
+            KubernetesResourceCollector(
+                kubernetes_client,
+                session_resource_registry,
+                resource_skips=resource_tracking_skips_by_application,
+            )
+        )
+    if not collectors:
+        return
+
+    state_resource_tracker.collect(marker.provides, collectors, logger)
 
 
 @pytest.fixture
@@ -945,6 +995,21 @@ def record_failure_execution_metadata(
                 execution_metadata("failure:build_bundle:unfulfilled_endpoint", f"{info.charm_name}:{info.endpoint}")
                 if info.interface:
                     execution_metadata("failure:build_bundle:unfulfilled_interface", info.interface)
+        elif isinstance(exc, ResourceDiscrepancyError):
+            # Only the generically-applicable dimensions (resource_type and
+            # qualifier) go in the key so downstream attachment rules can select
+            # on them; run-specific context (state, model, snapshot detail) is
+            # carried in the value.
+            for discrepancy in exc.discrepancies:
+                for entry in discrepancy.entries():
+                    detail = f"state={entry.state} model={entry.model} {entry.resource_type}={entry.snapshot.name}"
+                    attributes = " ".join(
+                        f"{key}={value}" for key, value in sorted(entry.snapshot.report_attributes().items())
+                    )
+                    execution_metadata(
+                        f"resource:{entry.resource_type}:{entry.qualifier}",
+                        normalize_string(f"{detail} {attributes}"),
+                    )
 
 
 @pytest.fixture

@@ -3,20 +3,35 @@
 
 """State-associated resource tracking for the test suite."""
 
-from .discrepancy import Discrepancy, ModelResourceDiscrepancy, calculate_discrepancies, diff_snapshots
+from .collectors import CollectedResources, KubernetesResourceCollector, ResourceCollector
+from .discrepancy import (
+    Discrepancy,
+    DiscrepancyEntry,
+    ModelResourceDiscrepancy,
+    ResourceDiscrepancyError,
+    calculate_discrepancies,
+    diff_snapshots,
+)
+from .overrides import load_resource_tracking_skips
 from .snapshot import PvcSnapshot, ResourceSnapshot
-from .sources import PvcSource, ResourceSource
+from .sources import KubernetesResourceSource, PvcSource
 from .tracker import ResourceObservation, StateResourceTracker
 
 __all__ = [
+    "CollectedResources",
     "Discrepancy",
+    "DiscrepancyEntry",
+    "KubernetesResourceCollector",
+    "KubernetesResourceSource",
     "ModelResourceDiscrepancy",
     "PvcSnapshot",
     "PvcSource",
+    "ResourceCollector",
+    "ResourceDiscrepancyError",
     "ResourceObservation",
     "ResourceSnapshot",
-    "ResourceSource",
     "StateResourceTracker",
     "calculate_discrepancies",
     "diff_snapshots",
+    "load_resource_tracking_skips",
 ]

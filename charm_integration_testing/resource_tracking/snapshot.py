@@ -33,6 +33,13 @@ class ResourceSnapshot(Protocol):
         """Human-readable resource name used in reports."""
 
     @property
+    def application(self) -> str:
+        """Owning Juju application, used to apply per-charm tracking overrides.
+
+        Empty when the resource cannot be attributed to an application.
+        """
+
+    @property
     def identity(self) -> tuple[str, ...]:
         """Stable identity used to diff snapshots across repeated state visits."""
 
@@ -53,6 +60,7 @@ class PvcSnapshot:
     storage_class: str
     requested_storage: str
     phase: str
+    application: str = ""
 
     resource_type: ClassVar[str] = "pvc"
 

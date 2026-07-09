@@ -11,15 +11,15 @@ gone ``missing`` or appeared ``extra`` on any later visit.
 
 :class:`Discrepancy` is a structural interface so that different resource
 scopes can carry their own attributes; :class:`ModelResourceDiscrepancy` is the
-model-scoped implementation used for Kubernetes resources.  Report keys are kept
-free of per-run identifiers (such as the model name) so they remain consistent
-across runs and can drive downstream attachment rules; run-specific context is
-carried in the value instead.
+model-scoped implementation used for Kubernetes resources.  Discrepancies expose
+*structured* data (:class:`DiscrepancyEntry`) rather than pre-formatted
+key-value strings: how that structure is normalised into execution metadata is a
+recording concern that belongs with the recorder, not here.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
@@ -29,15 +29,32 @@ from .snapshot import ResourceSnapshot
 from .tracker import ResourceObservation
 
 
+@dataclass(frozen=True)
+class DiscrepancyEntry:
+    """One drifted resource, in normalised structured form.
+
+    The fields are deliberately generic so downstream consumers can select on
+    broadly-applicable dimensions (``resource_type``, ``qualifier``) while
+    treating run-specific context (``state``, ``model``, the ``snapshot``
+    detail) as informational.
+    """
+
+    resource_type: str
+    qualifier: str
+    state: str
+    model: str
+    snapshot: ResourceSnapshot
+
+
 @runtime_checkable
 class Discrepancy(Protocol):
-    """A resource inconsistency that can render itself as report entries."""
+    """A resource inconsistency exposing structured, normalised domain data."""
 
-    def report_entries(self) -> Iterable[tuple[str, str]]:
-        """Yield stable ``(key, value)`` metadata entries describing this discrepancy."""
+    def entries(self) -> Iterable[DiscrepancyEntry]:
+        """Yield one :class:`DiscrepancyEntry` per drifted resource."""
 
     def summary(self) -> str:
-        """Return a one-line human-readable description for assertion messages."""
+        """Return a one-line human-readable description for failure messages."""
 
 
 @dataclass(frozen=True)
@@ -53,21 +70,41 @@ class ModelResourceDiscrepancy:
     missing: tuple[ResourceSnapshot, ...]
     extra: tuple[ResourceSnapshot, ...]
 
-    def report_entries(self) -> Iterable[tuple[str, str]]:
+    def entries(self) -> Iterable[DiscrepancyEntry]:
         for snapshot in self.missing:
-            yield f"resource:{snapshot.resource_type}:missing", self._describe(snapshot)
+            yield self._entry(snapshot, qualifier="missing")
         for snapshot in self.extra:
-            yield f"resource:{snapshot.resource_type}:extra", self._describe(snapshot)
+            yield self._entry(snapshot, qualifier="extra")
 
     def summary(self) -> str:
         parts = [f"{snapshot.resource_type}={snapshot.name} (missing)" for snapshot in self.missing]
         parts += [f"{snapshot.resource_type}={snapshot.name} (extra)" for snapshot in self.extra]
         return f"state={self.state.value} model={self.model}: " + ", ".join(parts)
 
-    def _describe(self, snapshot: ResourceSnapshot) -> str:
-        detail = f"state={self.state.value} model={self.model} {snapshot.resource_type}={snapshot.name}"
-        attributes = " ".join(f"{key}={value}" for key, value in sorted(snapshot.report_attributes().items()))
-        return f"{detail} {attributes}".rstrip()
+    def _entry(self, snapshot: ResourceSnapshot, qualifier: str) -> DiscrepancyEntry:
+        return DiscrepancyEntry(
+            resource_type=snapshot.resource_type,
+            qualifier=qualifier,
+            state=self.state.value,
+            model=self.model,
+            snapshot=snapshot,
+        )
+
+
+class ResourceDiscrepancyError(Exception):
+    """Raised when resource inconsistencies are detected across scheduler states.
+
+    Carries the structured :attr:`discrepancies` so the recording layer can
+    normalise them into execution metadata, keeping metadata formatting out of
+    the domain objects.
+    """
+
+    def __init__(self, discrepancies: Sequence[Discrepancy]) -> None:
+        self.discrepancies: tuple[Discrepancy, ...] = tuple(discrepancies)
+        message = "Resource inconsistencies detected across scheduler states:\n" + "\n".join(
+            discrepancy.summary() for discrepancy in self.discrepancies
+        )
+        super().__init__(message)
 
 
 def _sorted_by_identity(snapshots: Iterable[ResourceSnapshot]) -> tuple[ResourceSnapshot, ...]:

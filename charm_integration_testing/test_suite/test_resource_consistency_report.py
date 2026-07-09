@@ -8,34 +8,19 @@ after every state-marked test and never skips it when a state transition fails.
 It therefore runs once, irrespective of the pass/fail outcome of the rest of the
 suite.
 
-It reads the observations gathered by the ``track_state_resources`` fixture,
-computes discrepancies (resources that went missing or appeared unexpectedly on
-re-entry into a state), and emits them through the same ``execution_metadata``
-mechanism used for charm metadata so they land in the JUnit ``<properties>`` and
-are parsable the same way.  Metadata keys are deliberately free of per-run
-identifiers (such as the model name) so they stay consistent across runs and can
-drive downstream attachment rules; run-specific context lives in the value.
-
-Unlike charm metadata, a resource inconsistency is treated as a failure: the
-test asserts that no discrepancies were found, so the suite surfaces drift
-rather than merely recording it.
+It reads the observations gathered by the ``track_state_resources`` fixture and
+computes discrepancies.  When any are found it raises
+:class:`~resource_tracking.ResourceDiscrepancyError`, which both fails the test
+and carries the structured discrepancies.  The ``record_failure_execution_metadata``
+fixture in ``conftest.py`` picks that exception up and normalises the
+discrepancies into execution metadata, keeping metadata formatting out of the
+test and the domain objects.
 """
 
-from typing import Callable
-
-from resource_tracking import StateResourceTracker, calculate_discrepancies
+from resource_tracking import ResourceDiscrepancyError, StateResourceTracker, calculate_discrepancies
 
 
-def test_resource_consistency_report(
-    state_resource_tracker: StateResourceTracker,
-    execution_metadata: Callable[[str, str], None],
-) -> None:
+def test_resource_consistency_report(state_resource_tracker: StateResourceTracker) -> None:
     discrepancies = calculate_discrepancies(state_resource_tracker.observations())
-
-    for discrepancy in discrepancies:
-        for key, value in discrepancy.report_entries():
-            execution_metadata(key, value)
-
-    assert not discrepancies, "Resource inconsistencies detected across scheduler states:\n" + "\n".join(
-        discrepancy.summary() for discrepancy in discrepancies
-    )
+    if discrepancies:
+        raise ResourceDiscrepancyError(discrepancies)

@@ -10,6 +10,11 @@ the diffing of those observations into discrepancies lives in
 :mod:`resource_tracking.discrepancy`.  Keeping recording and calculation apart
 means the recorder stays a dumb, dependency-light store while the comparison
 logic can evolve independently.
+
+The tracker is substrate-agnostic: it delegates the *how* of gathering
+snapshots to :class:`~resource_tracking.collectors.ResourceCollector`
+implementations, so adding an ``lxd`` or ``openstack`` collector requires no
+change here.
 """
 
 from __future__ import annotations
@@ -18,14 +23,10 @@ import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from juju.resource_registry import JujuModelHandle
-from kubernetes.client import ApiException  # type: ignore[import-untyped]
-from kubernetes_client import KubernetesClient
-from resource_registry import ResourceRegistry
 from test_suite.scheduler.states import State
 
+from .collectors import ResourceCollector
 from .snapshot import ResourceSnapshot
-from .sources import PvcSource, ResourceSource
 
 
 @dataclass(frozen=True)
@@ -44,8 +45,7 @@ class StateResourceTracker:
     :func:`~resource_tracking.discrepancy.calculate_discrepancies` later diffs.
     """
 
-    def __init__(self, sources: Sequence[ResourceSource] | None = None) -> None:
-        self._sources: tuple[ResourceSource, ...] = tuple(sources) if sources is not None else (PvcSource(),)
+    def __init__(self) -> None:
         self._observations: list[ResourceObservation] = []
 
     def record(self, state: State, model: str, snapshots: frozenset[ResourceSnapshot]) -> None:
@@ -55,25 +55,17 @@ class StateResourceTracker:
     def collect(
         self,
         state: State,
-        kubernetes_client: KubernetesClient,
-        resource_registry: ResourceRegistry,
+        collectors: Sequence[ResourceCollector],
         logger: logging.Logger,
     ) -> None:
-        """Snapshot every registered model's resources and record them.
+        """Snapshot resources from every collector and record them for ``state``.
 
-        Collection is best-effort: a model whose namespace does not exist (e.g.
-        a non-Kubernetes model) is skipped rather than raising.
+        Collection is best-effort: each collector skips scopes it cannot query
+        rather than raising, so a partial substrate never fails the suite.
         """
-        for handle in resource_registry.registered_handles():
-            if not isinstance(handle, JujuModelHandle):
-                continue
-            snapshots: set[ResourceSnapshot] = set()
-            for source in self._sources:
-                try:
-                    snapshots.update(source.collect(kubernetes_client, handle.model))
-                except ApiException as exc:
-                    logger.debug(f"Skipping resource snapshot for model '{handle.model}': {exc}")
-            self.record(state, handle.model, frozenset(snapshots))
+        for collector in collectors:
+            for collected in collector.collect(logger):
+                self.record(state, collected.model, collected.snapshots)
 
     def observations(self) -> tuple[ResourceObservation, ...]:
         """Return all recorded observations, in the order they were recorded."""
