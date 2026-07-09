@@ -16,7 +16,7 @@ threads where possible.
 **Every comment you post must end with the following disclaimer on its own line:**
 
 ```
-> *This comment was posted by an AI assistant (GitHub Copilot) on behalf of the repository maintainer.*
+> *This comment was posted by an AI assistant (GitHub Copilot) on behalf of the pull request author.*
 ```
 
 This applies to all PR comment types: inline replies, general PR comments, and
