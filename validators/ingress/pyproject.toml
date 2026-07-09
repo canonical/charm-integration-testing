@@ -16,7 +16,7 @@ dependencies = [
     # provider databag. It remains a mandatory dependency because a given deployment may
     # still be running a v1 provider (e.g. older traefik-k8s), and the validator must
     # detect this gracefully rather than crash with an ImportError at runtime.
-    "pyyaml",
+    "pyyaml>=6.0,<7.0",
 ]
 
 [project.optional-dependencies]
