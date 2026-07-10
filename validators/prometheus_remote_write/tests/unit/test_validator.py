@@ -111,9 +111,7 @@ class TestPrometheusRemoteWriteValidatorGuards:
         # GIVEN a relation whose app is not in its data dict
         app = ApplicationStub()
         relation = RelationStub(name="send-remote-write", id=0, app=app, data={app: {}})
-        relation.app = ApplicationStub()  # different stub so relation_exists() returns False
-        # We need app=None to trigger the check
-        relation.app = None
+        relation.app = ApplicationStub()  # different stub not in data — relation_exists() returns False
         charm = cast(
             ops.CharmBase,
             make_charm_from_relation(relation, interface_name="prometheus_remote_write"),

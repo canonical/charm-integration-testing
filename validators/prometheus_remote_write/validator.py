@@ -27,7 +27,7 @@ class PrometheusRemoteWriteValidator(BaseValidator):
         if level not in ("simple", "deep"):
             return self._skipped_result_due_to_level(level)
 
-        if self.relation.app is None:
+        if not self.relation_exists():
             return self._error_result(level, f"No remote application on relation '{self.endpoint}'.")
 
         endpoint_infos, collection_errors = _collect_endpoint_infos(self.relation)
