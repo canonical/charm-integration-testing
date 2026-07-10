@@ -244,7 +244,7 @@ class TestPrometheusRemoteWriteValidatorSimple:
         assert "connection refused" in connect_check.message
 
     def test_fails_when_http_ready_returns_non_200(self) -> None:
-        # GIVEN TCP succeeds but /-/ready returns 503
+        # GIVEN TCP succeeds but /-/ready returns 503 (urlopen raises HTTPError for non-2xx)
         validator = _make_validator()
 
         with (
@@ -252,7 +252,7 @@ class TestPrometheusRemoteWriteValidatorSimple:
             patch("validators.prometheus_remote_write.validator.time.sleep"),
             patch(
                 "validators.prometheus_remote_write.validator.urlopen",
-                return_value=_mock_http_response(503, b"not ready"),
+                side_effect=_mock_http_error(503),
             ),
         ):
             result = validator.validate(level="simple")

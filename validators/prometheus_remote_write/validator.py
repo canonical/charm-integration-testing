@@ -190,12 +190,13 @@ def _http_ready_checks(endpoint_infos: list[dict[str, Any]]) -> list[ValidationC
                 time.sleep(3)
             try:
                 with urlopen(ready_url, timeout=5) as resp:  # nosec B310
-                    body = resp.read().decode("utf-8", errors="replace")
-                    if resp.status == 200:
-                        passed = True
-                        last_msg = f"Prometheus ready at {ready_url}."
-                        break
-                    last_msg = f"Unexpected response {resp.status} from {ready_url}: {body[:200]}"
+                    resp.read()
+                    passed = True
+                    last_msg = f"Prometheus ready at {ready_url}."
+                    break
+            except urllib.error.HTTPError as exc:
+                body = exc.read().decode("utf-8", errors="replace") if exc.fp else ""
+                last_msg = f"Unexpected response {exc.code} from {ready_url}: {body[:200]}"
             except Exception as exc:
                 last_msg = str(exc)
         checks.append(ValidationCheck(name=check_name, passed=passed, message=last_msg))
