@@ -283,7 +283,8 @@ def _push_canary(url: str, probe_id: str, timestamp_ms: int) -> None:
             if resp.status not in (200, 204):
                 raise RuntimeError(f"Unexpected push response: HTTP {resp.status}")
     except urllib.error.HTTPError as exc:
-        raise RuntimeError(f"Push rejected: HTTP {exc.code}") from exc
+        body = exc.read().decode("utf-8", errors="replace") if exc.fp else ""
+        raise RuntimeError(f"Push rejected: HTTP {exc.code}: {body[:200]}") from exc
 
 
 def _query_canary(base_url: str, probe_id: str) -> bool:
