@@ -182,7 +182,7 @@ def _http_ready_checks(endpoint_infos: list[dict[str, Any]]) -> list[ValidationC
         path_prefix = parsed.path[: -len(_REMOTE_WRITE_PATH)]
         base = f"{parsed.scheme}://{parsed.netloc}{path_prefix}"
         ready_url = f"{base}{_READY_PATH}"
-        check_name = f"http_ready[{parsed.netloc}]"
+        check_name = f"http_ready[{parsed.netloc}{path_prefix}]"
         last_msg = ""
         passed = False
         for attempt in range(3):
@@ -191,9 +191,11 @@ def _http_ready_checks(endpoint_infos: list[dict[str, Any]]) -> list[ValidationC
             try:
                 with urlopen(ready_url, timeout=5) as resp:  # nosec B310
                     resp.read()
-                    passed = True
-                    last_msg = f"Prometheus ready at {ready_url}."
-                    break
+                    if resp.status == 200:
+                        passed = True
+                        last_msg = f"Prometheus ready at {ready_url}."
+                        break
+                    last_msg = f"Unexpected status {resp.status} from {ready_url}."
             except urllib.error.HTTPError as exc:
                 body = exc.read().decode("utf-8", errors="replace") if exc.fp else ""
                 last_msg = f"Unexpected response {exc.code} from {ready_url}: {body[:200]}"
@@ -225,7 +227,7 @@ def _canary_checks(endpoint_infos: list[dict[str, Any]]) -> list[ValidationCheck
         parsed = urlparse(url)
         path_prefix = parsed.path[: -len(_REMOTE_WRITE_PATH)]
         base_url = f"{parsed.scheme}://{parsed.netloc}{path_prefix}"
-        check_name = f"canary[{parsed.netloc}]"
+        check_name = f"canary[{parsed.netloc}{path_prefix}]"
         probe_id = uuid.uuid4().hex[:12]
         timestamp_ms = int(time.time() * 1000)
 
