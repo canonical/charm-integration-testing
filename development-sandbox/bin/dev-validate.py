@@ -101,11 +101,7 @@ def main() -> None:
     if args.reinstall:
         logger.info("Removing remote validator venv on all units of '%s'...", args.app)
         is_k8s = backend.is_k8s_model(args.model)
-        rm_cmd = (
-            f"rm -rf {remote_validators_path}"
-            if is_k8s
-            else f"sudo rm -rf {remote_validators_path}"
-        )
+        rm_cmd = f"rm -rf {remote_validators_path}" if is_k8s else f"sudo rm -rf {remote_validators_path}"
         for unit in backend.application_units(args.model, args.app):
             logger.debug("  %s on %s", rm_cmd, unit)
             backend.ssh(args.model, unit, rm_cmd)
