@@ -349,7 +349,6 @@ class BundleBuilder:
         at least one new integration variable was created.
         """
         endpoint = domain.charms[charm_id].spec.endpoints[endpoint_name]
-        created_any = False
         for other_id, other_charm in enumerate(domain.charms):
             if other_id == charm_id:
                 continue
@@ -368,9 +367,9 @@ class BundleBuilder:
                         f"Connected existing charm {other_charm.spec.name}:{other_id} "
                         f"to {domain.charms[charm_id].spec.name}:{charm_id} via {endpoint_name}"
                     )
-                    created_any = True
-                break  # pair_charms_in_domain handles all compatible endpoint pairs at once
-        return created_any
+                    return True  # one at a time — let CEGIS re-evaluate
+                break  # this other charm has no new vars to contribute; try the next
+        return False
 
     def _handle_peer_channel_mismatch(
         self,
