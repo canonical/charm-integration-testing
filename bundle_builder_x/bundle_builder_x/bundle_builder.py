@@ -27,6 +27,7 @@ from .domain import (
     Domain,
     ModelRef,
     add_charm_to_domain,
+    pair_charms_in_domain,
 )
 from .domain_builder import DomainBuilder
 from .extract import extract_solution
@@ -287,33 +288,89 @@ class BundleBuilder:
     ) -> bool:
         """Expand the domain to satisfy an unfulfilled endpoint.
 
-        Tries the owning model first. If no same-platform charm can satisfy the
-        endpoint (e.g. a kubernetes charm requiring an interface that only a
-        machine charm provides), tries other models. Adding a provider to
-        another model creates a cross-model DomainCharmIntegration that the solver can activate on
-        the next iteration.
+        Priority order:
+        1. Pair the endpoint charm with any already-in-domain charm that can satisfy
+           it but hasn't been connected yet (no new charm vars introduced).
+        2. If nothing existing can help, add the single highest-priority new fulfilling
+           charm and connect it.
+
+        Tries the owning model first, then other models (for cross-model integrations).
         """
         owning_model = domain.charms[charm_id].model
 
-        charms = self._get_charms_for_endpoint(charm_id, endpoint_name, domain, owning_model)
+        # Step 1: connect any existing domain charm that fulfils the endpoint.
+        if self._connect_existing_for_endpoint(charm_id, endpoint_name, domain, owning_model):
+            return True
+        for other_model_ref in domain.models:
+            if other_model_ref == owning_model:
+                continue
+            if self._connect_existing_for_endpoint(charm_id, endpoint_name, domain, other_model_ref):
+                return True
+
+        # Step 2: no existing charm helped — add the best new candidate.
+        charms = sorted(
+            self._get_charms_for_endpoint(charm_id, endpoint_name, domain, owning_model),
+            key=lambda c: c.priority,
+            reverse=True,
+        )
         if not charms:
             self.logger.debug(
                 f"No charms found for endpoint {domain.charms[charm_id].spec.name}:{endpoint_name} "
                 f"in model '{owning_model.key}'"
             )
-        results = [self._add_charm_for_charm_id(charm, charm_id, domain, owning_model) for charm in charms]
+        for charm in charms:
+            if self._add_charm_for_charm_id(charm, charm_id, domain, owning_model):
+                return True
 
-        if not any(results):
-            for other_model_ref in domain.models:
-                if other_model_ref == owning_model:
-                    continue
-                other_charms = self._get_charms_for_endpoint(charm_id, endpoint_name, domain, other_model_ref)
-                other_results = [
-                    self._add_charm_for_charm_id(charm, charm_id, domain, other_model_ref) for charm in other_charms
-                ]
-                if any(other_results):
+        for other_model_ref in domain.models:
+            if other_model_ref == owning_model:
+                continue
+            other_charms = sorted(
+                self._get_charms_for_endpoint(charm_id, endpoint_name, domain, other_model_ref),
+                key=lambda c: c.priority,
+                reverse=True,
+            )
+            for charm in other_charms:
+                if self._add_charm_for_charm_id(charm, charm_id, domain, other_model_ref):
                     return True
-        return any(results)
+
+        return False
+
+    def _connect_existing_for_endpoint(
+        self,
+        charm_id: int,
+        endpoint_name: str,
+        domain: Domain,
+        target_model: ModelRef,
+    ) -> bool:
+        """Pair charm_id with any existing domain charm that can satisfy endpoint_name.
+
+        Only creates integration variables — never adds new charms.  Returns True if
+        at least one new integration variable was created.
+        """
+        endpoint = domain.charms[charm_id].spec.endpoints[endpoint_name]
+        created_any = False
+        for other_id, other_charm in enumerate(domain.charms):
+            if other_id == charm_id:
+                continue
+            if other_charm.model != target_model:
+                continue
+            # Check this other charm has a compatible endpoint.
+            for other_ep_name, other_ep in other_charm.spec.endpoints.items():
+                if other_ep.interface != endpoint.interface:
+                    continue
+                if endpoint.type == EndpointType.REQUIRES and other_ep.type != EndpointType.PROVIDES:
+                    continue
+                if endpoint.type == EndpointType.PROVIDES and other_ep.type != EndpointType.REQUIRES:
+                    continue
+                if pair_charms_in_domain(domain, charm_id, other_id):
+                    self.logger.debug(
+                        f"Connected existing charm {other_charm.spec.name}:{other_id} "
+                        f"to {domain.charms[charm_id].spec.name}:{charm_id} via {endpoint_name}"
+                    )
+                    created_any = True
+                break  # pair_charms_in_domain handles all compatible endpoint pairs at once
+        return created_any
 
     def _handle_peer_channel_mismatch(
         self,
