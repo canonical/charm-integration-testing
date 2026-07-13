@@ -207,6 +207,7 @@ class BundleBuilder:
             if self._handle_failed_assertion(tag, domain):
                 self.logger.info(f"Expanded domain to handle failed assertion tag: {tag}")
                 expanded = True
+                break  # one expansion per CEGIS iteration keeps the domain small
         if not expanded:
             raise UncompletableBundleError(unsat_core=tags)
 
@@ -308,32 +309,64 @@ class BundleBuilder:
                 return True
 
         # Step 2: no existing charm helped — add the best new candidate.
-        charms = sorted(
-            self._get_charms_for_endpoint(charm_id, endpoint_name, domain, owning_model),
-            key=lambda c: c.priority,
-            reverse=True,
-        )
-        if not charms:
+        # Fetch charm details lazily: sort candidates by local priority first, then
+        # fetch full metadata only for the top-ranked candidate that can be added.
+        # This avoids bulk-fetching all 50+ candidates just to pick one.
+        names = self._get_charms_for_endpoint(charm_id, endpoint_name, domain, owning_model)
+        if not names:
             self.logger.debug(
                 f"No charms found for endpoint {domain.charms[charm_id].spec.name}:{endpoint_name} "
                 f"in model '{owning_model.key}'"
             )
-        for charm in charms:
-            if self._add_charm_for_charm_id(charm, charm_id, domain, owning_model):
-                return True
+        if self._add_first_available_charm(names, charm_id, endpoint_name, domain, owning_model):
+            return True
 
         for other_model_ref in domain.models:
             if other_model_ref == owning_model:
                 continue
-            other_charms = sorted(
-                self._get_charms_for_endpoint(charm_id, endpoint_name, domain, other_model_ref),
-                key=lambda c: c.priority,
-                reverse=True,
-            )
-            for charm in other_charms:
-                if self._add_charm_for_charm_id(charm, charm_id, domain, other_model_ref):
-                    return True
+            other_names = self._get_charms_for_endpoint(charm_id, endpoint_name, domain, other_model_ref)
+            if self._add_first_available_charm(other_names, charm_id, endpoint_name, domain, other_model_ref):
+                return True
 
+        return False
+
+    def _add_first_available_charm(
+        self,
+        candidate_names: list[str],
+        charm_id: int,
+        endpoint_name: str,
+        domain: Domain,
+        model_ref: ModelRef,
+    ) -> bool:
+        """Fetch and add the first candidate from the priority-sorted list that succeeds.
+
+        Fetches full charm details one at a time (lazily) to avoid redundant network
+        calls for candidates that will never be used.
+        """
+        model = domain.models[model_ref]
+        endpoint = domain.charms[charm_id].spec.endpoints[endpoint_name]
+        ubuntu_version: str | None = (
+            domain.charms[charm_id].spec.ubuntu_version
+            if endpoint.scope == EndpointScope.CONTAINER
+            else None
+        )
+
+        for charm_name in candidate_names:
+            try:
+                charm = self.charmhub_client.charm_from_store(
+                    charm_name=charm_name,
+                    ubuntu_arch=model.arch,
+                    juju_version=model.juju_version,
+                    platform=model.platform,
+                    ubuntu_version=ubuntu_version,
+                )
+            except CharmReleaseNotFoundException:
+                self.logger.debug(
+                    f"Skipping {charm_name}: no compatible release for {model.platform}/{model.arch}"
+                )
+                continue
+            if self._add_charm_for_charm_id(charm, charm_id, domain, model_ref):
+                return True
         return False
 
     def _connect_existing_for_endpoint(
@@ -500,8 +533,12 @@ class BundleBuilder:
         endpoint_name: str,
         domain: Domain,
         target_model: ModelRef,
-    ) -> list[Charm]:
-        """Find charms that can fulfill an endpoint, compatible with target_model's platform/arch."""
+    ) -> list[str]:
+        """Find candidate charm names that can fulfill an endpoint, sorted by priority.
+
+        Returns names only (no network fetches beyond find_charms).  Full charm details
+        are fetched lazily by the caller so that only the chosen candidate pays the cost.
+        """
         model = domain.models[target_model]
         endpoint = domain.charms[charm_id].spec.endpoints[endpoint_name]
 
@@ -516,26 +553,12 @@ class BundleBuilder:
         elif endpoint.type == EndpointType.PROVIDES:
             fulfilling_charms = self.charmhub_client.find_charms(requires=endpoint.interface, platform=model.platform)
 
-        # For container-scoped endpoints the other charm must share the same base
-        ubuntu_version: str | None = None
-        if endpoint.scope == EndpointScope.CONTAINER:
-            ubuntu_version = domain.charms[charm_id].spec.ubuntu_version
-
-        results: list[Charm] = []
-        for charm_name in fulfilling_charms:
-            try:
-                results.append(
-                    self.charmhub_client.charm_from_store(
-                        charm_name=charm_name,
-                        ubuntu_arch=model.arch,
-                        juju_version=model.juju_version,
-                        platform=model.platform,
-                        ubuntu_version=ubuntu_version,
-                    )
-                )
-            except CharmReleaseNotFoundException:
-                self.logger.debug(f"Skipping {charm_name}: no compatible release for {model.platform}/{model.arch}")
-        return results
+        # Sort by local override priority (no network needed) so the best candidate is tried first.
+        return sorted(
+            fulfilling_charms,
+            key=lambda name: self.charmhub_client.overrides_client.get_charm_priority(name),
+            reverse=True,
+        )
 
     def _add_charm_for_application(
         self,

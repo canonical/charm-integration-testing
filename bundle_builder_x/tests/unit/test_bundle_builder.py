@@ -30,6 +30,13 @@ _JUJU = JujuVersion(major=3, minor=6, patch=0)
 _CHANNEL = CharmChannel(track="latest", risk="stable", branch="")
 
 
+class _FakeOverridesClient:
+    """Minimal stub for OverridesClient used in unit tests — always returns default priority."""
+
+    def get_charm_priority(self, charm: str) -> float:
+        return 1.0
+
+
 class _FakeCharmhubClient(CharmhubClient):
     """Minimal typed stub for CharmhubClient, used in BundleBuilder unit tests."""
 
@@ -48,6 +55,7 @@ class _FakeCharmhubClient(CharmhubClient):
             self._responses = repeat(charm_responses)
         self._find_result: set[str] = find_result if find_result is not None else set()
         self.charm_from_store_calls: list[dict[str, object]] = []
+        self.overrides_client = _FakeOverridesClient()
 
     def charm_from_store(
         self,
@@ -210,7 +218,7 @@ class TestHandleSubordinateBaseMismatch:
 
 
 class TestGetCharmsForEndpoint:
-    """BundleBuilder._get_charms_for_endpoint: ubuntu_version forwarding for container-scoped endpoints."""
+    """BundleBuilder._get_charms_for_endpoint and _add_first_available_charm: candidate selection."""
 
     def _domain_with_subordinate(self, ubuntu_version: str = "22.04") -> Domain:
         """Domain containing only a subordinate charm (requires juju-info, scope=container)."""
@@ -264,11 +272,10 @@ class TestGetCharmsForEndpoint:
         fake = _FakeCharmhubClient(charm_responses=ubuntu, find_result={"ubuntu"})
         builder = BundleBuilder(charmhub_client=fake)
 
-        # WHEN fetching charms to fulfill the subordinate's container-scoped endpoint
-        results = builder._get_charms_for_endpoint(0, "general-info", domain, ModelRef(name="m"))
+        # WHEN adding a candidate charm for the subordinate's container-scoped endpoint
+        builder._add_first_available_charm(["ubuntu"], 0, "general-info", domain, ModelRef(name="m"))
 
         # THEN charm_from_store is called with ubuntu_version matching the subordinate's base
-        assert results == [ubuntu]
         assert fake.charm_from_store_calls[0]["ubuntu_version"] == "22.04"
 
     def test_non_container_scope_passes_no_ubuntu_version(self) -> None:
@@ -278,8 +285,8 @@ class TestGetCharmsForEndpoint:
         fake = _FakeCharmhubClient(charm_responses=db, find_result={"database"})
         builder = BundleBuilder(charmhub_client=fake)
 
-        # WHEN fetching charms for the global-scoped endpoint
-        builder._get_charms_for_endpoint(charm_id, "db", domain, ModelRef(name="m"))
+        # WHEN adding a candidate charm for the global-scoped endpoint
+        builder._add_first_available_charm(["database"], charm_id, "db", domain, ModelRef(name="m"))
 
         # THEN charm_from_store is called with ubuntu_version=None (base irrelevant for global scope)
         assert fake.charm_from_store_calls[0]["ubuntu_version"] is None
@@ -293,11 +300,11 @@ class TestGetCharmsForEndpoint:
         )
         builder = BundleBuilder(charmhub_client=fake)
 
-        # WHEN fetching charms for the container-scoped endpoint
-        results = builder._get_charms_for_endpoint(0, "general-info", domain, ModelRef(name="m"))
+        # WHEN adding a candidate charm for the container-scoped endpoint but it's unavailable
+        result = builder._add_first_available_charm(["ubuntu"], 0, "general-info", domain, ModelRef(name="m"))
 
-        # THEN the charm is skipped and the result is empty
-        assert results == []
+        # THEN no charm is added
+        assert result is False
 
     def test_container_scope_returns_empty_on_non_machine_platform(self) -> None:
         # GIVEN a subordinate charm on a kubernetes model
@@ -323,7 +330,7 @@ class TestGetCharmsForEndpoint:
         fake = _FakeCharmhubClient(find_result={"ubuntu"})
         builder = BundleBuilder(charmhub_client=fake)
 
-        # WHEN fetching charms for the container-scoped endpoint on a non-machine model
+        # WHEN fetching candidate names for the container-scoped endpoint on a non-machine model
         results = builder._get_charms_for_endpoint(0, "general-info", domain, ModelRef(name="k8s"))
 
         # THEN no results are returned and no Charmhub queries were made
