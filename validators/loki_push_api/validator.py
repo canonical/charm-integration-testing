@@ -356,7 +356,7 @@ def _supports_query_api(base: str, ssl_ctx: ssl.SSLContext | None = None) -> boo
     labels_url = f"{base}/loki/api/v1/labels"
     try:
         with urlopen(labels_url, timeout=10, context=ssl_ctx) as resp:  # nosec B310
-            return bool(resp.status == 200)
+            return resp.status == 200
     except HTTPError as exc:
         if exc.code == 404:
             return False
