@@ -32,6 +32,7 @@ dependencies = [
     "validators-http-interface",
     "validators-grafana-dashboard",
     "validators-ingress",
+    "validators-prometheus-remote-write",
 ]
 
 [build-system]
