@@ -157,6 +157,16 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def list_offers(self, model: str) -> set[str]:
+        """Return the names of all offers defined in *model*."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def create_offer(self, model: str, app: str, endpoints: list[str], offer_name: str) -> None:
+        """Create an offer exposing *endpoints* of *app* in *model* under *offer_name*."""
+        raise NotImplementedError
+
+    @abstractmethod
     def list_integrations(self, model: str) -> set[JujuIntegration]:
         raise NotImplementedError
 

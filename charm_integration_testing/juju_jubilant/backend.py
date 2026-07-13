@@ -3,6 +3,7 @@
 
 
 import dataclasses
+import json
 import os
 import pathlib
 import re
@@ -479,6 +480,23 @@ class JubilantBackend(JujuCmdBackend):
             offer: JujuConsumedOfferInfo(url=info.url, endpoints=frozenset(info.endpoints.keys()))
             for offer, info in self.status(model).app_endpoints.items()
         }
+
+    def list_offers(self, model: str) -> set[str]:
+        result = self.client.model(model).cli("offers", "--format", "json")
+        if not result or not result.strip():
+            return set()
+        return set(json.loads(result).keys())
+
+    def create_offer(self, model: str, app: str, endpoints: list[str], offer_name: str) -> None:
+        # On Juju 4+, ``juju offer`` fails if an offer with the same name already exists
+        # ("offer already exists, updating offers is not supported"). Treat that as a no-op
+        # so that deploy_bundles remains idempotent across re-runs.
+        try:
+            self.client.model(model).offer(app, endpoint=endpoints, name=offer_name)
+        except jubilant.CLIError as e:
+            if "updating offers is not supported" in e.stderr.lower():
+                return
+            raise
 
     def list_integrations(self, model: str) -> set[JujuIntegration]:
         # Juju status yaml format doesn't expose provider/requirer information or

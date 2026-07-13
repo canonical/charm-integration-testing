@@ -352,3 +352,9 @@ class JujuCmdBackend(JujuBackend):
 
     def debug_log(self, model: str) -> str:
         raise NotImplementedError
+
+    def list_offers(self, model: str) -> set[str]:
+        raise NotImplementedError
+
+    def create_offer(self, model: str, app: str, endpoints: list[str], offer_name: str) -> None:
+        raise NotImplementedError

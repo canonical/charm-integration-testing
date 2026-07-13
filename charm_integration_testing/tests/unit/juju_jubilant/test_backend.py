@@ -2212,3 +2212,76 @@ class TestJubilantBackendDebugLog:
 
         # THEN the client's debug_log message from the client is returned
         assert log == "this is a debug log for model my-model"
+
+
+class TestJubilantBackendListOffers:
+    @dataclass
+    class CliStub:
+        result: str = ""
+
+        def cli(self, *args: str) -> str:
+            return self.result
+
+    def test_returns_empty_set_when_no_offers(self) -> None:
+        # GIVEN a backend whose CLI returns an empty string
+        stub = self.CliStub(result="")
+        backend = JubilantBackend(JubilantClientStub(client=stub))
+
+        # WHEN list_offers is called
+        result = backend.list_offers("ctrl:my-model")
+
+        # THEN an empty set is returned
+        assert result == set()
+
+    def test_parses_offer_names_from_json(self) -> None:
+        # GIVEN a backend whose CLI returns a JSON object with offer names as keys
+        stub = self.CliStub(result='{"my-offer": {}, "other-offer": {}}')
+        backend = JubilantBackend(JubilantClientStub(client=stub))
+
+        # WHEN list_offers is called
+        result = backend.list_offers("ctrl:my-model")
+
+        # THEN the offer names are returned as a set
+        assert result == {"my-offer", "other-offer"}
+
+
+class TestJubilantBackendCreateOffer:
+    @dataclass
+    class OfferStub:
+        calls: list[tuple[str, list[str], str]] = field(default_factory=list)
+        raise_stderr: str | None = None
+
+        def offer(self, app: str, endpoint: list[str], name: str) -> None:
+            self.calls.append((app, endpoint, name))
+            if self.raise_stderr is not None:
+                raise jubilant.CLIError(1, ["juju", "offer"], "", self.raise_stderr)
+
+    def test_delegates_to_jubilant_offer(self) -> None:
+        # GIVEN a backend with a stub that records offer() calls
+        stub = self.OfferStub()
+        backend = JubilantBackend(JubilantClientStub(client=stub))
+
+        # WHEN create_offer is called
+        backend.create_offer("ctrl:my-model", "myapp", ["endpoint1"], "my-offer")
+
+        # THEN the underlying offer() was called with the correct arguments
+        assert stub.calls == [("myapp", ["endpoint1"], "my-offer")]
+
+    def test_idempotent_when_offer_already_exists(self) -> None:
+        # GIVEN a backend whose offer() raises the Juju 4 "already exists" error
+        stub = self.OfferStub(raise_stderr='offer "my-offer" already exists, updating offers is not supported')
+        backend = JubilantBackend(JubilantClientStub(client=stub))
+
+        # WHEN create_offer is called
+        # THEN no exception is raised (treated as a no-op)
+        backend.create_offer("ctrl:my-model", "myapp", ["endpoint1"], "my-offer")
+
+    def test_reraises_unrelated_cli_errors(self) -> None:
+        # GIVEN a backend whose offer() raises an unrelated CLIError
+        stub = self.OfferStub(raise_stderr="permission denied")
+        backend = JubilantBackend(JubilantClientStub(client=stub))
+
+        # WHEN create_offer is called
+        # THEN the CLIError is re-raised
+        with pytest.raises(jubilant.CLIError):
+            backend.create_offer("ctrl:my-model", "myapp", ["endpoint1"], "my-offer")

@@ -29,6 +29,12 @@ class NullJujuBackend(JujuBackend):
     def list_consumed_offers(self, model: str) -> dict[str, JujuConsumedOfferInfo]:
         raise NotImplementedError
 
+    def list_offers(self, model: str) -> set[str]:
+        raise NotImplementedError
+
+    def create_offer(self, model: str, app: str, endpoints: list[str], offer_name: str) -> None:
+        raise NotImplementedError
+
     def list_integrations(self, model: str) -> set[JujuIntegration]:
         raise NotImplementedError
 

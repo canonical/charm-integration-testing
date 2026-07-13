@@ -3,6 +3,7 @@
 
 from dataclasses import dataclass, field
 from datetime import timedelta
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -926,3 +927,136 @@ class TestIntegrationMethods:
         _client(backend).wait_for_removal_of_integration(endpoint_1=_EP1, endpoint_2=_EP2, model=_MODEL)
 
         assert backend.wait_removal_calls == [(_MODEL, _EP1, _EP2, None)]
+
+
+# ---------------------------------------------------------------------------
+# TestDeployBundles
+# ---------------------------------------------------------------------------
+
+_BUNDLE_WITH_OFFERS = """\
+applications:
+  glauth-k8s:
+    charm: glauth-k8s
+    channel: latest/edge
+---
+applications:
+  glauth-k8s:
+    offers:
+      glauth-k8s-offer:
+        endpoints:
+        - glauth-auxiliary
+"""
+
+
+@dataclass
+class DeployBundlesBackendStub(NullJujuBackend):
+    """Records deploy_bundle_file, list_offers, and create_offer calls; returns a fixed CLI version."""
+
+    juju_version: JujuVersion = field(default_factory=lambda: JujuVersion(3, 6, 0))
+    calls: list[tuple[str, ...]] = field(default_factory=list)
+    existing_offers: set[str] = field(default_factory=set)
+
+    def cli_version(self) -> JujuVersion:
+        return self.juju_version
+
+    def deploy_bundle_file(
+        self,
+        model: str,
+        bundle: str,
+        timeout: timedelta | None = None,
+        trust: bool = False,
+        force: bool = False,
+    ) -> None:
+        self.calls.append(("deploy", model, bundle))
+
+    def list_offers(self, model: str) -> set[str]:
+        self.calls.append(("list_offers", model))
+        return self.existing_offers
+
+    def create_offer(self, model: str, app: str, endpoints: list[str], offer_name: str) -> None:
+        self.calls.append(("create_offer", model, app, offer_name))
+
+
+class TestDeployBundles:
+    def test_juju3_deploys_full_bundle_in_phase2(self, tmp_path: Path) -> None:
+        bundle_path = tmp_path / "bundle.yaml"
+        bundle_path.write_text(_BUNDLE_WITH_OFFERS)
+        backend = DeployBundlesBackendStub(juju_version=JujuVersion(3, 6, 0))
+
+        _client(backend).deploy_bundles([(bundle_path, "ctrl:model")], tmp_path)
+
+        action_names = [c[0] for c in backend.calls]
+        # Juju 3: phase 2 deploys the original full bundle; no offer management needed.
+        assert "create_offer" not in action_names
+        assert backend.calls[1] == ("deploy", "ctrl:model", str(bundle_path))
+
+    def test_juju4_creates_offers_between_phases(self, tmp_path: Path) -> None:
+        bundle_path = tmp_path / "bundle.yaml"
+        bundle_path.write_text(_BUNDLE_WITH_OFFERS)
+        backend = DeployBundlesBackendStub(juju_version=JujuVersion(4, 0, 0))
+
+        _client(backend).deploy_bundles([(bundle_path, "ctrl:model")], tmp_path)
+
+        action_names = [c[0] for c in backend.calls]
+        # Phase 1: apps-only bundle
+        assert backend.calls[0] == ("deploy", "ctrl:model", str(tmp_path / "apps-only-bundle-0.yaml"))
+        # Between phases: list then create the offer
+        assert "list_offers" in action_names
+        assert "create_offer" in action_names
+        create_call = next(c for c in backend.calls if c[0] == "create_offer")
+        assert create_call[1] == "ctrl:model"
+        # Phase 2: offers-stripped bundle
+        assert backend.calls[-1] == ("deploy", "ctrl:model", str(tmp_path / "phase2-bundle-0.yaml"))
+
+    def test_juju4_skips_create_offer_when_already_exists(self, tmp_path: Path) -> None:
+        bundle_path = tmp_path / "bundle.yaml"
+        bundle_path.write_text(_BUNDLE_WITH_OFFERS)
+        # Pre-populate existing offers so create_offer should not be called
+        backend = DeployBundlesBackendStub(
+            juju_version=JujuVersion(4, 0, 0),
+            existing_offers={"glauth-k8s-offer"},
+        )
+
+        _client(backend).deploy_bundles([(bundle_path, "ctrl:model")], tmp_path)
+
+        assert "create_offer" not in [c[0] for c in backend.calls]
+
+    def test_juju4_phase1_bundle_has_offers_stripped(self, tmp_path: Path) -> None:
+        bundle_path = tmp_path / "bundle.yaml"
+        bundle_path.write_text(_BUNDLE_WITH_OFFERS)
+        backend = DeployBundlesBackendStub(juju_version=JujuVersion(4, 0, 0))
+
+        _client(backend).deploy_bundles([(bundle_path, "ctrl:model")], tmp_path)
+
+        phase1_content = (tmp_path / "apps-only-bundle-0.yaml").read_text()
+        assert "glauth-k8s-offer" not in phase1_content
+
+    def test_juju4_phase2_bundle_has_offers_stripped(self, tmp_path: Path) -> None:
+        bundle_path = tmp_path / "bundle.yaml"
+        bundle_path.write_text(_BUNDLE_WITH_OFFERS)
+        backend = DeployBundlesBackendStub(juju_version=JujuVersion(4, 0, 0))
+
+        _client(backend).deploy_bundles([(bundle_path, "ctrl:model")], tmp_path)
+
+        phase2_content = (tmp_path / "phase2-bundle-0.yaml").read_text()
+        assert "glauth-k8s-offer" not in phase2_content
+
+    def test_two_bundles_deploy_order(self, tmp_path: Path) -> None:
+        bundle_a = tmp_path / "bundle_a.yaml"
+        bundle_b = tmp_path / "bundle_b.yaml"
+        bundle_a.write_text(_BUNDLE_WITH_OFFERS)
+        bundle_b.write_text(_BUNDLE_WITH_OFFERS)
+        backend = DeployBundlesBackendStub(juju_version=JujuVersion(4, 0, 0))
+
+        _client(backend).deploy_bundles(
+            [(bundle_a, "ctrl:model-a"), (bundle_b, "ctrl:model-b")],
+            tmp_path,
+        )
+
+        deploy_calls = [c for c in backend.calls if c[0] == "deploy"]
+        # Phase 1: deploy model-a then model-b (apps-only stripped bundles)
+        assert deploy_calls[0] == ("deploy", "ctrl:model-a", str(tmp_path / "apps-only-bundle-0.yaml"))
+        assert deploy_calls[1] == ("deploy", "ctrl:model-b", str(tmp_path / "apps-only-bundle-1.yaml"))
+        # Phase 2: offers-stripped bundles
+        assert deploy_calls[2] == ("deploy", "ctrl:model-a", str(tmp_path / "phase2-bundle-0.yaml"))
+        assert deploy_calls[3] == ("deploy", "ctrl:model-b", str(tmp_path / "phase2-bundle-1.yaml"))
