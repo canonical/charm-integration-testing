@@ -7,12 +7,20 @@ import ssl
 import time
 import uuid
 from typing import Any
+from urllib.error import HTTPError
 from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
 
 from validators.base import BaseValidator, ValidationCheck, ValidationLevel, ValidationResult
 
 _PUSH_PATH = "/loki/api/v1/push"
+
+
+def _base_url(push_url: str) -> str:
+    """Return the scheme+host(+prefix) portion of *push_url*, with the push path stripped."""
+    parsed = urlparse(push_url)
+    prefix = parsed.path[: -len(_PUSH_PATH)] if parsed.path.endswith(_PUSH_PATH) else ""
+    return f"{parsed.scheme}://{parsed.netloc}{prefix}"
 
 
 class LokiPushApiValidator(BaseValidator):
@@ -202,8 +210,7 @@ def _http_ready_checks(endpoint_infos: list[dict[str, Any]]) -> list[ValidationC
     for info in endpoint_infos:
         url: str = info["url"]
         parsed = urlparse(url)
-        prefix = parsed.path[: -len(_PUSH_PATH)] if parsed.path.endswith(_PUSH_PATH) else ""
-        base = f"{parsed.scheme}://{parsed.netloc}{prefix}"
+        base = _base_url(url)
         ready_url = f"{base}/ready"
         check_name = f"http_ready[{parsed.netloc}]"
         last_msg = ""
@@ -238,13 +245,23 @@ _CANARY_LABEL_KEY = "__validator_probe__"
 _CANARY_JOB = "validators-loki-push-api"
 # Wait for Loki to flush the ingested stream before querying.
 _INGEST_WAIT_S = 3
+# Bounded lookback window for the read-back query. Kept short (well under
+# typical Loki max-query-length limits) since the canary log was just pushed.
+_QUERY_WINDOW_S = 3600
 
 
 def _canary_checks(endpoint_infos: list[dict[str, Any]]) -> list[ValidationCheck]:
-    """Push a canary log entry to each endpoint then query it back.
+    """Push a canary log entry to each endpoint then, if possible, query it back.
+
+    The loki_push_api interface only guarantees a push endpoint — some
+    providers (e.g. grafana-agent-k8s) act as push-only forwarders and don't
+    expose any query API at all. Read-back verification is therefore
+    best-effort: query capability is detected generically (not by charm name)
+    via ``_supports_query_api`` before attempting the round trip. When no
+    query API is available, the check passes based on the push alone.
 
     Uses a unique per-run label value so concurrent runs don't cross-pollinate.
-    Returns one check per URL covering both the push and the query.
+    Returns one check per URL covering the push, and the query when supported.
     """
     checks: list[ValidationCheck] = []
     for info in endpoint_infos:
@@ -260,6 +277,28 @@ def _canary_checks(endpoint_infos: list[dict[str, Any]]) -> list[ValidationCheck
             _push_canary(url, probe_id, ssl_ctx)
         except Exception as exc:
             checks.append(ValidationCheck(name=check_name, passed=False, message=f"Push failed: {exc}"))
+            continue
+
+        base = _base_url(url)
+        try:
+            query_capable = _supports_query_api(base, ssl_ctx)
+        except Exception as exc:
+            checks.append(
+                ValidationCheck(name=check_name, passed=False, message=f"Query capability probe failed: {exc}")
+            )
+            continue
+
+        if not query_capable:
+            checks.append(
+                ValidationCheck(
+                    name=check_name,
+                    passed=True,
+                    message=(
+                        f"Canary log pushed to {url}. Provider does not expose a Loki query API "
+                        "(push-only forwarder); skipping read-back verification."
+                    ),
+                )
+            )
             continue
 
         time.sleep(_INGEST_WAIT_S)
@@ -306,13 +345,46 @@ def _push_canary(url: str, probe_id: str, ssl_ctx: ssl.SSLContext | None = None)
             raise RuntimeError(f"Unexpected push response: HTTP {resp.status}")
 
 
+def _supports_query_api(base: str, ssl_ctx: ssl.SSLContext | None = None) -> bool:
+    """Return True if *base* exposes a Loki query API.
+
+    Push-only forwarders (e.g. grafana-agent-k8s) return 404 for every
+    ``/loki/api/v1/query*`` route. Probe a lightweight, side-effect-free
+    endpoint (``/loki/api/v1/labels``) rather than assuming which provider
+    implementations do or don't support querying.
+    """
+    labels_url = f"{base}/loki/api/v1/labels"
+    try:
+        with urlopen(labels_url, timeout=10, context=ssl_ctx) as resp:  # nosec B310
+            return bool(resp.status == 200)
+    except HTTPError as exc:
+        if exc.code == 404:
+            return False
+        raise
+
+
 def _query_canary(push_url: str, probe_id: str, ssl_ctx: ssl.SSLContext | None = None) -> bool:
-    """Query Loki for the canary log line; return True if found."""
-    parsed = urlparse(push_url)
-    prefix = parsed.path[: -len(_PUSH_PATH)] if parsed.path.endswith(_PUSH_PATH) else ""
-    base = f"{parsed.scheme}://{parsed.netloc}{prefix}"
+    """Query Loki for the canary log line; return True if found.
+
+    Uses ``/loki/api/v1/query_range`` (not ``/loki/api/v1/query``): the latter
+    is an *instant query* endpoint that Loki rejects for log selectors ("log
+    queries are not supported as an instant query type"), whereas
+    ``query_range`` is the correct endpoint for retrieving log lines over a
+    bounded time window.
+    """
+    base = _base_url(push_url)
+    now_ns = time.time_ns()
+    start_ns = now_ns - _QUERY_WINDOW_S * 1_000_000_000
     logql = f'{{{_CANARY_LABEL_KEY}="{probe_id}"}}'
-    query_url = f"{base}/loki/api/v1/query?" + urlencode({"query": logql, "limit": "1", "direction": "BACKWARD"})
+    query_url = f"{base}/loki/api/v1/query_range?" + urlencode(
+        {
+            "query": logql,
+            "limit": "1",
+            "direction": "BACKWARD",
+            "start": str(start_ns),
+            "end": str(now_ns),
+        }
+    )
     with urlopen(query_url, timeout=10, context=ssl_ctx) as resp:  # nosec B310
         body = json.loads(resp.read())
     result_type = body.get("data", {}).get("resultType", "")
