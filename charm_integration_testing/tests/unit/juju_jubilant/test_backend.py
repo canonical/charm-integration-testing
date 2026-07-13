@@ -551,6 +551,29 @@ class TestJubilantBackend:
             # THEN status was called 3 times
             assert stub.call_count == 3
 
+        def test_wait_idle_requires_agent_idle(self) -> None:
+            # GIVEN a unit whose workload is active but agent is still executing
+            stub = StatusStub(
+                application_statuses={"target": "active"},
+                unit_workload_statuses={"target/0": "active"},
+                unit_juju_statuses={"target/0": "executing"},
+            )
+            client = JubilantClientStub(client=stub)
+            backend = JubilantBackend(client)
+
+            t0 = datetime(2025, 1, 1, 0, 0, 0)
+            # WHEN wait_idle is called with datetime mocked to jump past the timeout
+            # THEN it times out because the agent is not idle
+            with patch("juju_jubilant.backend.datetime") as mock_dt, patch("juju_jubilant.backend.time.sleep"):
+                mock_dt.now.side_effect = [
+                    t0,  # start
+                    t0,  # iteration_start, loop 1 — within timeout
+                    t0,  # elapsed, loop 1
+                    t0 + timedelta(seconds=1),  # iteration_start, loop 2 — past 100ms timeout
+                ]
+                with pytest.raises(JujuWaitTimeoutError):
+                    backend.wait_idle("test-model", timedelta(milliseconds=100), count=3)
+
     class TestWaitApplicationSettled:
         def test_application_settled(self) -> None:
             # GIVEN
