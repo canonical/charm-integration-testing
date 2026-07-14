@@ -34,8 +34,8 @@ Run these inside the VM after entering with `scripts/sandbox.sh shell` or by the
 ## Typical flow
 
 1. `scripts/sandbox.sh up` - provision or resume the VM.
-3. `scripts/sandbox.sh run --interactive` - use `/develop-validator` or `/test-validator` skills. The skills handle deploying charms and running quality gates.
-4. Review results in `development-sandbox/reports/<name>-<timestamp>/` (gitignored, persists on the host).
+2. `scripts/sandbox.sh run --interactive` - use `/develop-validator` or `/test-validator` skills. The skills handle deploying charms and running quality gates.
+3. Review results in `development-sandbox/reports/<name>-<timestamp>/` (gitignored, persists on the host).
 
 ## Token setup
 
