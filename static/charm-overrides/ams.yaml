@@ -1,4 +1,12 @@
 ---
+# Source: https://github.com/canonical/anbox-cloud-charms (charms/ams)
+#
+# provides.prometheus (all non-ops tracks): optional - legacy scrape endpoint;
+#   src/charm.py's _on_prometheus_changed/_on_prometheus_broken only re-emit
+#   config_changed / close a port, no Blocked/WaitingStatus tied to it. AMS
+#   reaches active with no prometheus relation; cos-agent is the current
+#   observability path (see tests/integration/test_lma.py: LMA integration is
+#   a separate opt-in test, not part of the base deployment).
 overrides:
   # -ops tracks lack grafana endpoint
   - criteria:
@@ -32,6 +40,8 @@ overrides:
     provides:
       grafana:
         optional: true
+      prometheus:
+        optional: true
   # 1.27-1.28: send-remote-write added, openfga not yet
   - criteria:
       - any_of:
@@ -45,6 +55,8 @@ overrides:
     provides:
       grafana:
         optional: true
+      prometheus:
+        optional: true
   # default (1.29+): all four endpoints
   - requires:
       lxd-cluster:
@@ -55,4 +67,6 @@ overrides:
         optional: true
     provides:
       grafana:
+        optional: true
+      prometheus:
         optional: true
