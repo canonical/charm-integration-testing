@@ -12,7 +12,7 @@
 #   not core LXD/registry management.
 # charm-tracing/cos-agent: optional - observability, no blocking.
 overrides:
-  # 1.22-ops: minimal variant, no agent/lxd/registry endpoints at all.
+  # 1.22-ops: minimal variant; no agent endpoint, but lxd-cluster/etcd may be integrated.
   - criteria:
       - track: '1.22-ops'
     requires:
