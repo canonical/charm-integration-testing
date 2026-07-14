@@ -23,7 +23,7 @@ write_files:
       # Define the cache parameters
       proxy_cache_path /var/cache/nginx/api_cache levels=1:2 keys_zone=api_cache:10m max_size=1g inactive=4h use_temp_path=off;
       server {
-          listen 8080;
+          listen 127.0.0.1:8080;
           server_name localhost;
 
           # Enable the cache
@@ -32,9 +32,10 @@ write_files:
           # CRITICAL: Allow caching for POST requests (used heavily by refresh endpoints)
           proxy_cache_methods GET HEAD POST;
 
-          # CRITICAL: Include the request body in the cache key so different refresh
-          # requests don't get served the same cached response.
-          proxy_cache_key "$scheme$proxy_host$request_uri|$request_body";
+          # CRITICAL: Include the request method and body in the cache key so
+          # GET/POST requests to the same URI don't collide, and different
+          # refresh requests don't get served the same cached response.
+          proxy_cache_key "$scheme$proxy_host$request_uri|$request_method|$request_body";
 
           # Cache successful 200 OK responses for 4 hours
           proxy_cache_valid 200 4h;
@@ -51,9 +52,6 @@ write_files:
               proxy_pass https://api.charmhub.io;
               proxy_set_header Host api.charmhub.io;
               proxy_ssl_server_name on;
-
-              # Ensure the content type is passed correctly for POST requests
-              proxy_set_header Content-Type application/json;
           }
 
           # -----------------------------------
@@ -65,15 +63,13 @@ write_files:
               proxy_pass https://api.snapcraft.io;
               proxy_set_header Host api.snapcraft.io;
               proxy_ssl_server_name on;
-
-              # Ensure the content type is passed correctly for POST requests
-              proxy_set_header Content-Type application/json;
           }
       }
 runcmd:
   - mkdir -p /project
   - chown ubuntu:ubuntu /project
   - mkdir -p /var/cache/nginx/api_cache
+  - chown -R www-data:www-data /var/cache/nginx/api_cache
   - ln -sf /etc/nginx/sites-available/api-cache /etc/nginx/sites-enabled/api-cache
   - rm -f /etc/nginx/sites-enabled/default
   - nginx -t
