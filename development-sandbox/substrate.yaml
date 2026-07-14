@@ -40,29 +40,38 @@ write_files:
           # Cache successful 200 OK responses for 4 hours
           proxy_cache_valid 200 4h;
 
-          # Add a header so you can debug if the cache was a HIT or MISS
-          add_header X-Proxy-Cache $upstream_cache_status;
+          # Add a header so you can debug if the cache was a HIT or MISS.
+          # "always" ensures it's present even on non-2xx/3xx upstream responses.
+          add_header X-Proxy-Cache $upstream_cache_status always;
 
           # -----------------------------------
           # Route 1: Charmhub API
           # -----------------------------------
           location /charmhub/ {
-              # Strip the /charmhub/ prefix before forwarding to the real API
-              rewrite ^/charmhub/(.*) /$1 break;
-              proxy_pass https://api.charmhub.io;
+              # Trailing slash on proxy_pass strips the /charmhub/ prefix
+              # before forwarding to the real API.
+              proxy_pass https://api.charmhub.io/;
               proxy_set_header Host api.charmhub.io;
               proxy_ssl_server_name on;
+
+              # Verify the upstream TLS certificate instead of trusting it blindly.
+              proxy_ssl_verify on;
+              proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;
           }
 
           # -----------------------------------
           # Route 2: Snapcraft API
           # -----------------------------------
           location /snapcraft/ {
-              # Strip the /snapcraft/ prefix before forwarding to the real API
-              rewrite ^/snapcraft/(.*) /$1 break;
-              proxy_pass https://api.snapcraft.io;
+              # Trailing slash on proxy_pass strips the /snapcraft/ prefix
+              # before forwarding to the real API.
+              proxy_pass https://api.snapcraft.io/;
               proxy_set_header Host api.snapcraft.io;
               proxy_ssl_server_name on;
+
+              # Verify the upstream TLS certificate instead of trusting it blindly.
+              proxy_ssl_verify on;
+              proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;
           }
       }
 runcmd:
@@ -74,9 +83,8 @@ runcmd:
   - rm -f /etc/nginx/sites-enabled/default
   - nginx -t
   - systemctl enable --now nginx
-  - systemctl reload nginx
 final_message: |-
   Sandbox base image ready.
   Run 'scripts/sandbox.sh up' on the host to finish provisioning.
-  nginx API cache listening on http://localhost:8080
+  nginx API cache listening on http://localhost:8080 (inside the VM)
   (proxies /charmhub/ -> api.charmhub.io, /snapcraft/ -> api.snapcraft.io)
