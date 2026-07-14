@@ -73,6 +73,11 @@ dependencies = [
     "validators-base",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "validators-test-utils",
+]
+
 [project.entry-points."endpoint_validators"]
 <interface_name> = "validators.<name>:MyValidatorClass"
 
@@ -83,6 +88,17 @@ build-backend = "setuptools.build_meta"
 
 The entry point key is the **Juju interface name** (e.g. `postgresql`, `mongodb_client`).
 The runner discovers validators by this key and matches them to charm relations.
+
+**Add `validators-test-utils` if your unit tests use it.** Most validator tests
+import stubs and helpers from `validators.test_utils` (`make_charm_from_relation`,
+`ApplicationStub`, `RelationRoleStub`, `RelationStub`, etc.) — when
+`tests/unit/test_validator.py` does this, declare `validators-test-utils` under
+`[project.optional-dependencies].dev`, and add `extras = ["dev"]` (or extend an
+existing `extras` list) to the package's entry in the root
+`$PROJECT_ROOT/pyproject.toml` under `[tool.poetry.dependencies]`. Forgetting
+this when the tests do use it is a recurring mistake — tests still pass locally
+because `validators-test-utils` is already installed elsewhere in the monorepo
+venv, masking that the package's own dependency graph is incomplete.
 
 **Naming convention:** the `[project] name` field always uses dashes, even when the
 directory or module uses underscores. For example, a validator in
@@ -168,6 +184,9 @@ under `validators/<name>/` with passing `dev-validate` output.
     - `authors` is `[{name = "SQA Team", email = "solutionsqa@canonical.com"}]`.
     - `requires-python = ">=3.10"`.
     - `validators-base` is in `dependencies`.
+    - If `tests/unit/test_validator.py` imports from `validators.test_utils`,
+      `validators-test-utils` is declared under `[project.optional-dependencies].dev`,
+      and the root `pyproject.toml` entry for this package includes `extras = ["dev"]`.
     - The entry-point key under `[project.entry-points."endpoint_validators"]`
       is the exact Juju interface name.
 
@@ -286,8 +305,12 @@ def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
 
 - `dev-validate` exits 0 with all checks PASS at the highest supported level.
 - The validator package has correct `pyproject.toml` with entry point.
+- If the unit tests import from `validators.test_utils`, `validators-test-utils`
+  is declared under `[project.optional-dependencies].dev` in the validator's own
+  `pyproject.toml`, and the root `pyproject.toml` entry includes `extras = ["dev"]`.
 - `validators/runner/pyproject.toml` includes `validators-<name>`.
-- Root `$PROJECT_ROOT/pyproject.toml` includes `validators-<name>` as a Poetry develop dependency.
+- Root `$PROJECT_ROOT/pyproject.toml` includes `validators-<name>` as a Poetry
+  develop dependency.
 - `./scripts/format.sh` exits 0 after all changes.
 - `./scripts/lint.sh` exits 0 after all changes.
 - Self-review complete: all structure, license, naming, and test coverage criteria met.
