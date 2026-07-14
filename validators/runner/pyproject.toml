@@ -16,6 +16,7 @@ dependencies = [
     "validators-base",
     "validators-s3",
     "validators-postgresql-client",
+    "validators-mysql-client",
     "validators-tracing[deep]",
     "validators-loki-push-api",
     "validators-object-storage",

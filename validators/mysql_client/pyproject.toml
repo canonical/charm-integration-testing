@@ -1,0 +1,35 @@
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+[project]
+name = "validators-mysql-client"
+version = "0.1.0"
+description = "Validator for mysql_client interface"
+authors = [
+    {name = "SQA Team", email = "solutionsqa@canonical.com"}
+]
+
+requires-python = ">=3.10"
+dependencies = [
+    "pymysql>=1.1.0",
+    "validators-base",
+]
+
+[project.optional-dependencies]
+dev = [
+    "types-PyMySQL>=1.1.0.20250516,<2",
+    "validators-test-utils",
+]
+
+[project.entry-points."endpoint_validators"]
+mysql_client = "validators.mysql_client:MySQLClientValidator"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["validators.mysql_client"]
+
+[tool.setuptools.package-dir]
+"validators.mysql_client" = "."
