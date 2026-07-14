@@ -34,9 +34,8 @@ Run these inside the VM after entering with `scripts/sandbox.sh shell` or by the
 ## Typical flow
 
 1. `scripts/sandbox.sh up` - provision or resume the VM.
-2. `scripts/sandbox.sh shell` - enter the VM and run `bin/setup-k8s.sh` (or `bin/setup-lxd.sh`) once to prepare the substrate, then bootstrap a Juju controller.
-3. `scripts/sandbox.sh run --interactive` - use `/develop-validator` or `/test-validator` skills. The skills handle deploying charms and running quality gates.
-4. Review results in `development-sandbox/reports/<name>-<timestamp>/` (gitignored, persists on the host).
+2. `scripts/sandbox.sh run --interactive` - use `/develop-validator` or `/test-validator` skills. The skills handle deploying charms and running quality gates.
+3. Review results in `development-sandbox/reports/<name>-<timestamp>/` (gitignored, persists on the host).
 
 ## Token setup
 
