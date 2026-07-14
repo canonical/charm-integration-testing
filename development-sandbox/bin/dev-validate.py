@@ -88,6 +88,7 @@ def main() -> None:
     try:
         from charm_integration_testing.extensions.validator_injection.extension import (
             ValidatorInjectorExtension,
+            remote_validators_path,
         )
         from charm_integration_testing.juju_jubilant.backend import JubilantBackend
     except ImportError as exc:
@@ -100,7 +101,7 @@ def main() -> None:
     if args.reinstall:
         logger.info("Removing remote validator venv on all units of '%s'...", args.app)
         is_k8s = backend.is_k8s_model(args.model)
-        rm_cmd = "rm -rf /var/lib/validators" if is_k8s else "sudo rm -rf /var/lib/validators"
+        rm_cmd = f"rm -rf {remote_validators_path}" if is_k8s else f"sudo rm -rf {remote_validators_path}"
         for unit in backend.application_units(args.model, args.app):
             logger.debug("  %s on %s", rm_cmd, unit)
             backend.ssh(args.model, unit, rm_cmd)
