@@ -24,7 +24,7 @@ overrides:
       use_embedded_etcd: [true, false]
     constraints:
       - 'not config[use_embedded_etcd] => bool(endpoint[etcd])'
-  # 1.24-ops: agent/lxd/registry added, no charm-tracing yet.
+  # 1.24-ops: agent endpoint added; no charm-tracing yet.
   - criteria:
       - track: '1.24-ops'
     requires:
