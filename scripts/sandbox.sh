@@ -17,6 +17,8 @@
 #   SANDBOX_VM            VM name override (default: charm-qa-sandbox)
 #   SANDBOX_MOUNT         VM-side mount path (default: /project)
 #   COPILOT_MODEL         Copilot model override (default: sonnet-4.6)
+#   CHARMHUB_API_URL      Override for bundle_builder_x's Charmhub API base URL
+#   SNAPCRAFT_API_URL     Override for bundle_builder_x's Snapcraft API base URL
 
 set -euo pipefail
 
@@ -83,6 +85,8 @@ Environment (.env keys):
   GITHUB_TOKEN           Fine-grained PAT for gh CLI inside the VM
   COPILOT_GITHUB_TOKEN   Copilot AI auth token (default: gh auth token)
   COPILOT_MODEL          Copilot model (default: sonnet-4.6)
+  CHARMHUB_API_URL       Override for bundle_builder_x's Charmhub API base URL
+  SNAPCRAFT_API_URL      Override for bundle_builder_x's Snapcraft API base URL
   SANDBOX_MCP_CONFIG_FILE  Path to an MCP server config JSON file on the host
 
 Inside an interactive session use skill slash commands:
@@ -356,6 +360,8 @@ _cmd_shell() {
     fi
     _env_args=("PROJECT_ROOT=$VM_MOUNT")
     [ -n "${GITHUB_TOKEN:-}" ] && _env_args+=("GH_TOKEN=$GITHUB_TOKEN" "GITHUB_TOKEN=$GITHUB_TOKEN")
+    [ -n "${CHARMHUB_API_URL:-}" ] && _env_args+=("CHARMHUB_API_URL=$CHARMHUB_API_URL")
+    [ -n "${SNAPCRAFT_API_URL:-}" ] && _env_args+=("SNAPCRAFT_API_URL=$SNAPCRAFT_API_URL")
     exec multipass exec "$VM_NAME" -- env "${_env_args[@]}" bash -lc "
         cd '$VM_MOUNT' && exec bash -l
     "
@@ -451,6 +457,8 @@ EOF
         # Build env var array, only including GH_TOKEN/GITHUB_TOKEN if they are actually set
         _env_args=()
         [ -n "${GITHUB_TOKEN:-}" ] && _env_args+=("GH_TOKEN=$GITHUB_TOKEN" "GITHUB_TOKEN=$GITHUB_TOKEN")
+        [ -n "${CHARMHUB_API_URL:-}" ] && _env_args+=("CHARMHUB_API_URL=$CHARMHUB_API_URL")
+        [ -n "${SNAPCRAFT_API_URL:-}" ] && _env_args+=("SNAPCRAFT_API_URL=$SNAPCRAFT_API_URL")
         _env_args+=("COPILOT_GITHUB_TOKEN=$_copilot_token" "COPILOT_MODEL=$COPILOT_MODEL" "PROJECT_ROOT=$VM_MOUNT")
         [ -n "$_mcp_vm_file" ] && _env_args+=("SANDBOX_MCP_VM_CONFIG=$_mcp_vm_file")
         multipass exec "$VM_NAME" -- env "${_env_args[@]}" bash -lc "
@@ -466,6 +474,8 @@ EOF
         # Build env var array, only including GH_TOKEN/GITHUB_TOKEN if they are actually set
         _env_args=()
         [ -n "${GITHUB_TOKEN:-}" ] && _env_args+=("GH_TOKEN=$GITHUB_TOKEN" "GITHUB_TOKEN=$GITHUB_TOKEN")
+        [ -n "${CHARMHUB_API_URL:-}" ] && _env_args+=("CHARMHUB_API_URL=$CHARMHUB_API_URL")
+        [ -n "${SNAPCRAFT_API_URL:-}" ] && _env_args+=("SNAPCRAFT_API_URL=$SNAPCRAFT_API_URL")
         _env_args+=("COPILOT_GITHUB_TOKEN=$_copilot_token" "COPILOT_MODEL=$COPILOT_MODEL" "PROJECT_ROOT=$VM_MOUNT")
         [ -n "$_mcp_vm_file" ] && _env_args+=("SANDBOX_MCP_VM_CONFIG=$_mcp_vm_file")
         multipass exec "$VM_NAME" -- env "${_env_args[@]}" bash -lc "
