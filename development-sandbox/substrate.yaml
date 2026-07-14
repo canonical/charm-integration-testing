@@ -22,7 +22,6 @@ write_files:
     content: |
       # Define the cache parameters
       proxy_cache_path /var/cache/nginx/api_cache levels=1:2 keys_zone=api_cache:10m max_size=1g inactive=4h use_temp_path=off;
-
       server {
           listen 8080;
           server_name localhost;
@@ -49,7 +48,6 @@ write_files:
           location /charmhub/ {
               # Strip the /charmhub/ prefix before forwarding to the real API
               rewrite ^/charmhub/(.*) /$1 break;
-
               proxy_pass https://api.charmhub.io;
               proxy_set_header Host api.charmhub.io;
               proxy_ssl_server_name on;
@@ -64,7 +62,6 @@ write_files:
           location /snapcraft/ {
               # Strip the /snapcraft/ prefix before forwarding to the real API
               rewrite ^/snapcraft/(.*) /$1 break;
-
               proxy_pass https://api.snapcraft.io;
               proxy_set_header Host api.snapcraft.io;
               proxy_ssl_server_name on;
