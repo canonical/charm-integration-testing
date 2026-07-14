@@ -83,6 +83,10 @@ runcmd:
   - rm -f /etc/nginx/sites-enabled/default
   - nginx -t
   - systemctl enable --now nginx
+  # nginx may already be running from package installation before this point,
+  # in which case "enable --now" is a no-op and won't pick up the site we just
+  # enabled. Reload explicitly so the new config is always loaded.
+  - systemctl reload nginx
 final_message: |-
   Sandbox base image ready.
   Run 'scripts/sandbox.sh up' on the host to finish provisioning.

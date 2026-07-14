@@ -56,7 +56,7 @@ All tokens are optional. Set them in `development-sandbox/.env`
 - Python dependencies are managed with Poetry.
 - **Migrating from validator-development-sandbox:** rename `VALIDATOR_VM` to `SANDBOX_VM` and `VALIDATOR_SIGNING_KEY` to `SANDBOX_SIGNING_KEY` in your `.env`.
 - **nginx API cache:** auto-provisioned via `substrate.yaml` cloud-init, listening on `http://localhost:8080` *inside the VM* (`/charmhub/`, `/snapcraft/`), caching responses for 4h.
-- `CHARMHUB_API_URL` / `SNAPCRAFT_API_URL`: override `bundle_builder_x`'s API base URLs, e.g. point at the nginx cache above. Passed through into the VM by `sandbox.sh`. See `.env.sample`.
+- `CHARMHUB_API_URL` / `SNAPCRAFT_API_URL`: override `bundle_builder_x`'s API base URLs, e.g. point at the nginx cache above. Passed through into the VM by `scripts/sandbox.sh`. See `.env.sample`.
 
 ## MCP servers
 
