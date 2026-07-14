@@ -71,7 +71,7 @@ class JujuClient:
         self,
         model: str = "default",
         timeout: timedelta | None = None,
-        count: int = 30,
+        count: int = 10,
         strict_timeout: bool = False,
     ) -> None:
         self.logger.info(f"{self._waiting_timeout_log(timeout)} to be idle.")
