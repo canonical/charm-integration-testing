@@ -73,15 +73,32 @@ class UnfulfilledEndpointInfo(BaseModel):
 class UnsupportedPlatformError(ValueError):
     """Exception raised when a charm is placed on a model whose platform its overrides disallow."""
 
-    def __init__(self, charm: str, model_platform: str, supported_platforms: list[str]):
+    def __init__(
+        self,
+        charm: str,
+        model_platform: str,
+        supported_platforms: list[str],
+        *,
+        model: str | None = None,
+        application: str | None = None,
+    ):
         self.charm = charm
         self.model_platform = model_platform
         self.supported_platforms = supported_platforms
-        super().__init__(
-            f"Charm '{charm}' supports platform(s) {supported_platforms!r}, "
-            f"but was placed on a model with platform '{model_platform}'."
-        )
+        self.model = model
+        self.application = application
 
+        context_bits: list[str] = []
+        if model is not None:
+            context_bits.append(f"model={model!r}")
+        if application is not None:
+            context_bits.append(f"application={application!r}")
+        context = f" ({', '.join(context_bits)})" if context_bits else ""
+
+        super().__init__(
+            f"Charm {charm!r}{context} supports platform(s) {supported_platforms!r}, "
+            f"but was placed on a model with platform {model_platform!r}."
+        )
 
 class UncompletableBundleError(ValueError):
     """Exception raised when bundle builder cannot generate a complete bundle from the base bundle"""
@@ -157,13 +174,15 @@ class BundleBuilder:
         """
         overrides_client = self.charmhub_client.overrides_client
         for model_spec in spec.models:
-            for app_spec in model_spec.applications.values():
+            for application, app_spec in model_spec.applications.items():
                 supported_platforms = overrides_client.get_charm_platform_overrides(app_spec.charm)
                 if supported_platforms is not None and model_spec.platform not in supported_platforms:
                     raise UnsupportedPlatformError(
                         charm=app_spec.charm,
                         model_platform=model_spec.platform,
                         supported_platforms=supported_platforms,
+                        model=model_spec.key,
+                        application=application,
                     )
 
     def _solve(self, domain: Domain) -> z3.ModelRef:

@@ -545,7 +545,7 @@ class _StubOverridesClient(OverridesClient):
         super().__init__()
         self._platforms_by_charm = platforms_by_charm
 
-    def _get_charm_global_overrides(self, charm: str) -> CharmGlobalOverrides:  # type: ignore[override]
+    def _get_charm_global_overrides(self, charm: str) -> CharmGlobalOverrides:
         return CharmGlobalOverrides(platforms=self._platforms_by_charm.get(charm))
 
 
