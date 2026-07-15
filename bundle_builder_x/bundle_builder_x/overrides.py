@@ -51,6 +51,13 @@ class CharmEndpointOverrides(BaseModel):
     features: set[str] = Field(default_factory=set)
 
 
+class CharmResourceTrackingOverrides(BaseModel):
+    # Resource *kinds* (e.g. ``pvc``) that the integration-test resource tracker
+    # should not flag as drift for this charm version.  Some charms legitimately
+    # leave resources behind across removals or scale events.
+    skip: set[str] = Field(default_factory=set)
+
+
 class CharmOverrides(BaseModel):
     criteria: list[CharmOverridesCriteria] = Field(default_factory=list)
     requires: dict[str, CharmEndpointOverrides] = Field(default_factory=dict)
@@ -60,6 +67,7 @@ class CharmOverrides(BaseModel):
     resources: dict[str, list[CharmResourceValue]] = Field(default_factory=dict)
     constraints: list[str] = Field(default_factory=list)
     assumes: list[str | dict[str, Any]] | None = None
+    resource_tracking: CharmResourceTrackingOverrides = Field(default_factory=CharmResourceTrackingOverrides)
 
     def meets(self, channel: CharmChannel) -> bool:
         return all(criterion.meets(channel) for criterion in self.criteria)
@@ -146,6 +154,9 @@ class OverridesClient:
 
     def get_charm_constraints_overrides(self, charm: str, channel: CharmChannel) -> list[str]:
         return self._get_charm_overrides(charm, channel).constraints
+
+    def get_charm_resource_tracking_skips(self, charm: str, channel: CharmChannel) -> frozenset[str]:
+        return frozenset(self._get_charm_overrides(charm, channel).resource_tracking.skip)
 
     def get_charm_assumes_overrides(self, charm: str, channel: CharmChannel) -> list[str | dict[str, Any]] | None:
         return self._get_charm_overrides(charm, channel).assumes

@@ -12,3 +12,4 @@ Contents
    bundle-builder-x-algorithm
    charm-priorities
    wait-conditions
+   resource-tracking

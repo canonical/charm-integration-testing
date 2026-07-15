@@ -37,6 +37,7 @@ from juju_jubilant import JubilantBackend
 from kubernetes_client import KubernetesBackend, KubernetesClient
 from pytest import StashKey
 from resource_registry import ResourceRegistry, ResourceTeardownWarning
+from resource_tracking import ResourceDiscrepancyError
 from test_observer_client import TestObserverClient as TestObserverAPIClient
 from test_observer_client import TestObserverClientError
 from utils import generate_juju_name, normalize_string, normalize_string_multiline
@@ -52,6 +53,7 @@ pytest_plugins = [
     "test_suite.scheduler.plugin",
     "test_suite.fixtures.controller_spec",
     "test_suite.fixtures.integration_spec",
+    "test_suite.fixtures.resource_tracking",
 ]
 
 
@@ -908,6 +910,22 @@ def record_failure_execution_metadata(
                 execution_metadata("failure:build_bundle:unfulfilled_endpoint", f"{info.charm_name}:{info.endpoint}")
                 if info.interface:
                     execution_metadata("failure:build_bundle:unfulfilled_interface", info.interface)
+        elif isinstance(exc, ResourceDiscrepancyError):
+            # Only the generically-applicable dimensions (resource_type and
+            # qualifier) go in the key so downstream attachment rules can select
+            # on them; run-specific context (state, model, snapshot detail) is
+            # carried in the value.
+            for discrepancy in exc.discrepancies:
+                for entry in discrepancy.entries():
+                    detail = f"state={entry.state} model={entry.model} {entry.resource_type}={entry.snapshot.name}"
+                    attributes = " ".join(
+                        f"{key}={value}" for key, value in sorted(entry.snapshot.report_attributes().items())
+                    )
+                    value = f"{detail} {attributes}" if attributes else detail
+                    execution_metadata(
+                        f"resource_discrepancy:{entry.resource_type}:{entry.qualifier}",
+                        normalize_string(value),
+                    )
 
 
 @pytest.fixture
