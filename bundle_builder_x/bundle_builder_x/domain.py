@@ -197,6 +197,123 @@ class Domain(BaseModel):
         return f"{prov_charm.spec.name}-{integration.provides_endpoint}-{interface}-offer".replace("_", "-")
 
 
+def _refresh_application_integration_mappings(domain: Domain) -> None:
+    """Update application-integration mappings to include any newly created charm integrations.
+
+    Re-scans all models each call because a newly created charm integration may complete
+    a mapping in any model (as either the local or the remote application). Already-linked
+    integration ids are skipped, so this is safe (and cheap) to call repeatedly.
+    """
+    for mc_model_ref, mc in domain.models.items():
+        for app_integration in mc.application_integrations:
+            is_cmr = app_integration.endpoint_1.model != app_integration.endpoint_2.model
+
+            for i_idx, integration in enumerate(domain.charm_integrations):
+                if i_idx in app_integration.charm_integration_ids:
+                    continue  # already linked
+
+                if domain.is_cross_model(integration) != is_cmr:
+                    continue
+
+                if not is_cmr:
+                    # Local integration: both charms must be in this model.
+                    if (
+                        domain.charms[integration.requires_charm_id].model != mc_model_ref
+                        or domain.charms[integration.provides_charm_id].model != mc_model_ref
+                    ):
+                        continue
+
+                    orderings = [
+                        (
+                            app_integration.endpoint_1.application,
+                            app_integration.endpoint_2.application,
+                            app_integration.endpoint_1.endpoint == integration.requires_endpoint
+                            and app_integration.endpoint_2.endpoint == integration.provides_endpoint,
+                        ),
+                        (
+                            app_integration.endpoint_2.application,
+                            app_integration.endpoint_1.application,
+                            app_integration.endpoint_2.endpoint == integration.requires_endpoint
+                            and app_integration.endpoint_1.endpoint == integration.provides_endpoint,
+                        ),
+                    ]
+
+                    for req_app, prov_app, matches in orderings:
+                        if not matches:
+                            continue
+                        req_has = (
+                            req_app in mc.applications
+                            and integration.requires_charm_id in mc.applications[req_app].charm_ids
+                        )
+                        prov_has = (
+                            prov_app in mc.applications
+                            and integration.provides_charm_id in mc.applications[prov_app].charm_ids
+                        )
+                        if req_has and prov_has:
+                            app_integration.charm_integration_ids[i_idx] = z3.Bool(
+                                f"app_integration"
+                                f"_{app_integration.endpoint_1.application}:{app_integration.endpoint_1.endpoint}"
+                                f"__{app_integration.endpoint_2.application}:{app_integration.endpoint_2.endpoint}"
+                                f"_maps_to_charm_integration"
+                                f"_{integration.requires_charm_id}:{integration.requires_endpoint}"
+                                f"__{integration.provides_charm_id}:{integration.provides_endpoint}"
+                            )
+                else:
+                    # CMR integration: identify local and remote endpoints.
+                    local_ep = (
+                        app_integration.endpoint_1
+                        if app_integration.endpoint_1.model == ModelRef()
+                        else app_integration.endpoint_2
+                    )
+                    remote_ep = (
+                        app_integration.endpoint_2
+                        if app_integration.endpoint_1.model == ModelRef()
+                        else app_integration.endpoint_1
+                    )
+                    remote_mc = domain.models.get(remote_ep.model)
+                    if remote_mc is None:
+                        continue  # external CMR - no DomainCharmIntegration exists
+
+                    # Match integration to this CMR by model names and endpoint names.
+                    req_model_ref = domain.charms[integration.requires_charm_id].model
+                    prov_model_ref = domain.charms[integration.provides_charm_id].model
+                    if (
+                        req_model_ref == mc_model_ref
+                        and integration.requires_endpoint == local_ep.endpoint
+                        and prov_model_ref == remote_ep.model
+                        and integration.provides_endpoint == remote_ep.endpoint
+                    ):
+                        local_charm_id = integration.requires_charm_id
+                        remote_charm_id = integration.provides_charm_id
+                    elif (
+                        prov_model_ref == mc_model_ref
+                        and integration.provides_endpoint == local_ep.endpoint
+                        and req_model_ref == remote_ep.model
+                        and integration.requires_endpoint == remote_ep.endpoint
+                    ):
+                        local_charm_id = integration.provides_charm_id
+                        remote_charm_id = integration.requires_charm_id
+                    else:
+                        continue
+                    if (
+                        local_ep.application not in mc.applications
+                        or local_charm_id not in mc.applications[local_ep.application].charm_ids
+                    ):
+                        continue
+                    if (
+                        remote_ep.application not in remote_mc.applications
+                        or remote_charm_id not in remote_mc.applications[remote_ep.application].charm_ids
+                    ):
+                        continue
+                    if i_idx not in app_integration.charm_integration_ids:
+                        app_integration.charm_integration_ids[i_idx] = z3.Bool(
+                            f"app_integration"
+                            f"_{local_ep.application}:{local_ep.endpoint}"
+                            f"__cmr__{remote_ep.model.key}_{remote_ep.application}:{remote_ep.endpoint}"
+                            f"__integration_{i_idx}"
+                        )
+
+
 def add_charm_to_domain(charm: Charm, domain: Domain, model_ref: ModelRef | None = None) -> int:
     # Resolve model_ref: default to the single model if not provided
     if model_ref is None:
@@ -361,113 +478,7 @@ def add_charm_to_domain(charm: Charm, domain: Domain, model_ref: ModelRef | None
         domain_app.charm_ids[charm_id] = z3.Bool(f"app_{application}_maps_to_charm_{charm.name}_{charm_id}")
 
     # Create integration-to-charm-integration mappings (unified local + CMR).
-    # Re-scan all models each call because a newly added charm may complete a mapping
-    # in any model (as either the local or the remote application).
-    for mc_model_ref, mc in domain.models.items():
-        for app_integration in mc.application_integrations:
-            is_cmr = app_integration.endpoint_1.model != app_integration.endpoint_2.model
-
-            for i_idx, integration in enumerate(domain.charm_integrations):
-                if domain.is_cross_model(integration) != is_cmr:
-                    continue
-
-                if not is_cmr:
-                    # Local integration: both charms must be in this model.
-                    if (
-                        domain.charms[integration.requires_charm_id].model != mc_model_ref
-                        or domain.charms[integration.provides_charm_id].model != mc_model_ref
-                    ):
-                        continue
-
-                    orderings = [
-                        (
-                            app_integration.endpoint_1.application,
-                            app_integration.endpoint_2.application,
-                            app_integration.endpoint_1.endpoint == integration.requires_endpoint
-                            and app_integration.endpoint_2.endpoint == integration.provides_endpoint,
-                        ),
-                        (
-                            app_integration.endpoint_2.application,
-                            app_integration.endpoint_1.application,
-                            app_integration.endpoint_2.endpoint == integration.requires_endpoint
-                            and app_integration.endpoint_1.endpoint == integration.provides_endpoint,
-                        ),
-                    ]
-
-                    for req_app, prov_app, matches in orderings:
-                        if not matches:
-                            continue
-                        req_has = (
-                            req_app in mc.applications
-                            and integration.requires_charm_id in mc.applications[req_app].charm_ids
-                        )
-                        prov_has = (
-                            prov_app in mc.applications
-                            and integration.provides_charm_id in mc.applications[prov_app].charm_ids
-                        )
-                        if req_has and prov_has:
-                            app_integration.charm_integration_ids[i_idx] = z3.Bool(
-                                f"app_integration"
-                                f"_{app_integration.endpoint_1.application}:{app_integration.endpoint_1.endpoint}"
-                                f"__{app_integration.endpoint_2.application}:{app_integration.endpoint_2.endpoint}"
-                                f"_maps_to_charm_integration"
-                                f"_{integration.requires_charm_id}:{integration.requires_endpoint}"
-                                f"__{integration.provides_charm_id}:{integration.provides_endpoint}"
-                            )
-                else:
-                    # CMR integration: identify local and remote endpoints.
-                    local_ep = (
-                        app_integration.endpoint_1
-                        if app_integration.endpoint_1.model == ModelRef()
-                        else app_integration.endpoint_2
-                    )
-                    remote_ep = (
-                        app_integration.endpoint_2
-                        if app_integration.endpoint_1.model == ModelRef()
-                        else app_integration.endpoint_1
-                    )
-                    remote_mc = domain.models.get(remote_ep.model)
-                    if remote_mc is None:
-                        continue  # external CMR - no DomainCharmIntegration exists
-
-                    # Match integration to this CMR by model names and endpoint names.
-                    req_model_ref = domain.charms[integration.requires_charm_id].model
-                    prov_model_ref = domain.charms[integration.provides_charm_id].model
-                    if (
-                        req_model_ref == mc_model_ref
-                        and integration.requires_endpoint == local_ep.endpoint
-                        and prov_model_ref == remote_ep.model
-                        and integration.provides_endpoint == remote_ep.endpoint
-                    ):
-                        local_charm_id = integration.requires_charm_id
-                        remote_charm_id = integration.provides_charm_id
-                    elif (
-                        prov_model_ref == mc_model_ref
-                        and integration.provides_endpoint == local_ep.endpoint
-                        and req_model_ref == remote_ep.model
-                        and integration.requires_endpoint == remote_ep.endpoint
-                    ):
-                        local_charm_id = integration.provides_charm_id
-                        remote_charm_id = integration.requires_charm_id
-                    else:
-                        continue
-                    if (
-                        local_ep.application not in mc.applications
-                        or local_charm_id not in mc.applications[local_ep.application].charm_ids
-                    ):
-                        continue
-                    if (
-                        remote_ep.application not in remote_mc.applications
-                        or remote_charm_id not in remote_mc.applications[remote_ep.application].charm_ids
-                    ):
-                        continue
-                    if i_idx not in app_integration.charm_integration_ids:
-                        app_integration.charm_integration_ids[i_idx] = z3.Bool(
-                            f"app_integration"
-                            f"_{local_ep.application}:{local_ep.endpoint}"
-                            f"__cmr__{remote_ep.model.key}_{remote_ep.application}:{remote_ep.endpoint}"
-                            f"__integration_{i_idx}"
-                        )
+    _refresh_application_integration_mappings(domain)
 
     return charm_id
 
@@ -523,13 +534,10 @@ def pair_charms_in_domain(domain: Domain, charm_a_id: int, charm_b_id: int) -> b
                 continue
 
             if same_model:
-                exists_var = z3.Bool(
-                    f"charm_integration_{prov_cid}:{prov_ep}__{req_cid}:{req_ep}_exists"
-                )
+                exists_var = z3.Bool(f"charm_integration_{prov_cid}:{prov_ep}__{req_cid}:{req_ep}_exists")
             else:
                 exists_var = z3.Bool(
-                    f"cmr__{prov_model.key}__{prov_cid}:{prov_ep}"
-                    f"__{req_model.key}__{req_cid}:{req_ep}__exists"
+                    f"cmr__{prov_model.key}__{prov_cid}:{prov_ep}" f"__{req_model.key}__{req_cid}:{req_ep}__exists"
                 )
 
             domain.charm_integrations.append(
@@ -547,110 +555,6 @@ def pair_charms_in_domain(domain: Domain, charm_a_id: int, charm_b_id: int) -> b
         return False
 
     # Update application-integration mappings to include any newly created vars.
-    for mc_model_ref, mc in domain.models.items():
-        for app_integration in mc.application_integrations:
-            is_cmr = app_integration.endpoint_1.model != app_integration.endpoint_2.model
-
-            for i_idx, integration in enumerate(domain.charm_integrations):
-                if i_idx in app_integration.charm_integration_ids:
-                    continue  # already linked
-
-                if domain.is_cross_model(integration) != is_cmr:
-                    continue
-
-                if not is_cmr:
-                    if (
-                        domain.charms[integration.requires_charm_id].model != mc_model_ref
-                        or domain.charms[integration.provides_charm_id].model != mc_model_ref
-                    ):
-                        continue
-
-                    orderings = [
-                        (
-                            app_integration.endpoint_1.application,
-                            app_integration.endpoint_2.application,
-                            app_integration.endpoint_1.endpoint == integration.requires_endpoint
-                            and app_integration.endpoint_2.endpoint == integration.provides_endpoint,
-                        ),
-                        (
-                            app_integration.endpoint_2.application,
-                            app_integration.endpoint_1.application,
-                            app_integration.endpoint_2.endpoint == integration.requires_endpoint
-                            and app_integration.endpoint_1.endpoint == integration.provides_endpoint,
-                        ),
-                    ]
-
-                    for req_app, prov_app, matches in orderings:
-                        if not matches:
-                            continue
-                        req_has = (
-                            req_app in mc.applications
-                            and integration.requires_charm_id in mc.applications[req_app].charm_ids
-                        )
-                        prov_has = (
-                            prov_app in mc.applications
-                            and integration.provides_charm_id in mc.applications[prov_app].charm_ids
-                        )
-                        if req_has and prov_has:
-                            app_integration.charm_integration_ids[i_idx] = z3.Bool(
-                                f"app_integration"
-                                f"_{app_integration.endpoint_1.application}:{app_integration.endpoint_1.endpoint}"
-                                f"__{app_integration.endpoint_2.application}:{app_integration.endpoint_2.endpoint}"
-                                f"_maps_to_charm_integration"
-                                f"_{integration.requires_charm_id}:{integration.requires_endpoint}"
-                                f"__{integration.provides_charm_id}:{integration.provides_endpoint}"
-                            )
-                else:
-                    local_ep = (
-                        app_integration.endpoint_1
-                        if app_integration.endpoint_1.model == ModelRef()
-                        else app_integration.endpoint_2
-                    )
-                    remote_ep = (
-                        app_integration.endpoint_2
-                        if app_integration.endpoint_1.model == ModelRef()
-                        else app_integration.endpoint_1
-                    )
-                    remote_mc = domain.models.get(remote_ep.model)
-                    if remote_mc is None:
-                        continue
-
-                    req_model_ref = domain.charms[integration.requires_charm_id].model
-                    prov_model_ref = domain.charms[integration.provides_charm_id].model
-                    if (
-                        req_model_ref == mc_model_ref
-                        and integration.requires_endpoint == local_ep.endpoint
-                        and prov_model_ref == remote_ep.model
-                        and integration.provides_endpoint == remote_ep.endpoint
-                    ):
-                        local_charm_id = integration.requires_charm_id
-                        remote_charm_id = integration.provides_charm_id
-                    elif (
-                        prov_model_ref == mc_model_ref
-                        and integration.provides_endpoint == local_ep.endpoint
-                        and req_model_ref == remote_ep.model
-                        and integration.requires_endpoint == remote_ep.endpoint
-                    ):
-                        local_charm_id = integration.provides_charm_id
-                        remote_charm_id = integration.requires_charm_id
-                    else:
-                        continue
-                    if (
-                        local_ep.application not in mc.applications
-                        or local_charm_id not in mc.applications[local_ep.application].charm_ids
-                    ):
-                        continue
-                    if (
-                        remote_ep.application not in remote_mc.applications
-                        or remote_charm_id not in remote_mc.applications[remote_ep.application].charm_ids
-                    ):
-                        continue
-                    if i_idx not in app_integration.charm_integration_ids:
-                        app_integration.charm_integration_ids[i_idx] = z3.Bool(
-                            f"app_integration"
-                            f"_{local_ep.application}:{local_ep.endpoint}"
-                            f"__cmr__{remote_ep.model.key}_{remote_ep.application}:{remote_ep.endpoint}"
-                            f"__integration_{i_idx}"
-                        )
+    _refresh_application_integration_mappings(domain)
 
     return True

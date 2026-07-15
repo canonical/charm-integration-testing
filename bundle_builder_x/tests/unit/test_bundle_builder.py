@@ -31,10 +31,17 @@ _CHANNEL = CharmChannel(track="latest", risk="stable", branch="")
 
 
 class _FakeOverridesClient:
-    """Minimal stub for OverridesClient used in unit tests — always returns default priority."""
+    """Minimal stub for OverridesClient used in unit tests.
+
+    Returns a per-charm priority from `priorities` (defaulting to 1.0 for any
+    charm not listed), so tests can exercise priority-based sorting.
+    """
+
+    def __init__(self, priorities: dict[str, float] | None = None) -> None:
+        self._priorities = priorities or {}
 
     def get_charm_priority(self, charm: str) -> float:
-        return 1.0
+        return self._priorities.get(charm, 1.0)
 
 
 class _FakeCharmhubClient(CharmhubClient):
@@ -44,6 +51,7 @@ class _FakeCharmhubClient(CharmhubClient):
         self,
         charm_responses: list[Charm | Exception] | Charm | Exception | None = None,
         find_result: set[str] | None = None,
+        priorities: dict[str, float] | None = None,
     ) -> None:
         # Bypass CharmhubClient.__init__ - no HTTP client needed for unit tests.
         if charm_responses is None:
@@ -55,7 +63,7 @@ class _FakeCharmhubClient(CharmhubClient):
             self._responses = repeat(charm_responses)
         self._find_result: set[str] = find_result if find_result is not None else set()
         self.charm_from_store_calls: list[dict[str, object]] = []
-        self.overrides_client = _FakeOverridesClient()
+        self.overrides_client = _FakeOverridesClient(priorities)
 
     def charm_from_store(
         self,
@@ -271,11 +279,16 @@ class TestGetCharmsForEndpoint:
         )
         fake = _FakeCharmhubClient(charm_responses=ubuntu, find_result={"ubuntu"})
         builder = BundleBuilder(charmhub_client=fake)
+        charms_before = len(domain.charms)
 
         # WHEN adding a candidate charm for the subordinate's container-scoped endpoint
-        builder._add_first_available_charm(["ubuntu"], 0, "general-info", domain, ModelRef(name="m"))
+        result = builder._add_first_available_charm(["ubuntu"], 0, "general-info", domain, ModelRef(name="m"))
 
-        # THEN charm_from_store is called with ubuntu_version matching the subordinate's base
+        # THEN the charm is added successfully and the domain grows by one charm
+        assert result is True
+        assert len(domain.charms) == charms_before + 1
+
+        # AND charm_from_store is called with ubuntu_version matching the subordinate's base
         assert fake.charm_from_store_calls[0]["ubuntu_version"] == "22.04"
 
     def test_non_container_scope_passes_no_ubuntu_version(self) -> None:
@@ -284,11 +297,16 @@ class TestGetCharmsForEndpoint:
         db = _make_charm("database", {"db": CharmEndpoint(type=EndpointType.PROVIDES, interface="pgsql")})
         fake = _FakeCharmhubClient(charm_responses=db, find_result={"database"})
         builder = BundleBuilder(charmhub_client=fake)
+        charms_before = len(domain.charms)
 
         # WHEN adding a candidate charm for the global-scoped endpoint
-        builder._add_first_available_charm(["database"], charm_id, "db", domain, ModelRef(name="m"))
+        result = builder._add_first_available_charm(["database"], charm_id, "db", domain, ModelRef(name="m"))
 
-        # THEN charm_from_store is called with ubuntu_version=None (base irrelevant for global scope)
+        # THEN the charm is added successfully and the domain grows by one charm
+        assert result is True
+        assert len(domain.charms) == charms_before + 1
+
+        # AND charm_from_store is called with ubuntu_version=None (base irrelevant for global scope)
         assert fake.charm_from_store_calls[0]["ubuntu_version"] is None
 
     def test_container_scope_skips_charm_when_base_not_available(self) -> None:
@@ -336,6 +354,22 @@ class TestGetCharmsForEndpoint:
         # THEN no results are returned and no Charmhub queries were made
         assert results == []
         assert fake.charm_from_store_calls == []
+
+    def test_candidates_sorted_by_priority_with_deterministic_tiebreak(self) -> None:
+        # GIVEN a global-scoped endpoint with candidates of mixed priority, including a tie
+        domain, charm_id = self._domain_with_global_endpoint()
+        fake = _FakeCharmhubClient(
+            find_result={"low", "high", "mid-b", "mid-a"},
+            priorities={"low": 0.0, "high": 2.0, "mid-b": 1.0, "mid-a": 1.0},
+        )
+        builder = BundleBuilder(charmhub_client=fake)
+
+        # WHEN fetching candidate names for the endpoint
+        results = builder._get_charms_for_endpoint(charm_id, "db", domain, ModelRef(name="m"))
+
+        # THEN results are ordered by descending priority, with same-priority
+        # candidates ("mid-a", "mid-b") broken deterministically by name ascending
+        assert results == ["high", "mid-a", "mid-b", "low"]
 
 
 def _make_charm_variant(revision: int, priority: float) -> Charm:
