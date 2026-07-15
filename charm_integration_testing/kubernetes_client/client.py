@@ -13,6 +13,7 @@ from kubernetes import watch
 from kubernetes.client import ApiException  # type: ignore[import-untyped]
 
 from kubernetes_client.backend import KubernetesBackend
+from kubernetes_client.extension import KubernetesExtension
 
 T = TypeVar("T")
 
@@ -27,6 +28,7 @@ class PodStatus(Enum):
 
 class KubernetesClient:
     backend: KubernetesBackend
+    extensions: list[KubernetesExtension]
 
     def __init__(
         self,
@@ -34,12 +36,14 @@ class KubernetesClient:
         logger: logging.Logger | None = None,
         default_timeout: timedelta = timedelta(minutes=5),
         default_delay: timedelta = timedelta(seconds=1),
+        extensions: list[KubernetesExtension] | None = None,
     ):
         self.backend = backend
         self.logger = logger or logging.getLogger(__name__)
 
         self.default_timeout = default_timeout
         self.default_delay = default_delay
+        self.extensions = extensions or []
 
     def get_charm_pods(
         self, application_name: str, model: str
@@ -197,6 +201,10 @@ class KubernetesClient:
             self.logger.error(f"Failed to delete pod {pod_name} in namespace {namespace}: {e}")
             raise
 
+        # Call extensions
+        for extension in self.extensions:
+            extension.post_delete_pod(namespace, pod_name)
+
     def restart_statefulset(self, namespace: str, statefulset_name: str) -> None:
         """
         Triggers a rollout restart of a StatefulSet by patching its pod template annotation.
@@ -227,6 +235,10 @@ class KubernetesClient:
                 f"Failed to start rollout restart for Statefulset: '{statefulset_name}' in namespace '{namespace}': {e}"
             )
             raise
+
+        # Call extensions
+        for extension in self.extensions:
+            extension.post_restart_statefulset(namespace, statefulset_name)
 
     def wait_for_statefulset_restart(self, namespace: str, statefulset_name: str, timeout_seconds: int = 300) -> None:
         """

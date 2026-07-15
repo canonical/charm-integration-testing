@@ -3,9 +3,11 @@
 
 from .backend import KubernetesBackend
 from .client import KubernetesClient, PodStatus
+from .extension import KubernetesExtension
 
 __all__ = [
     "KubernetesBackend",
     "KubernetesClient",
+    "KubernetesExtension",
     "PodStatus",
 ]
