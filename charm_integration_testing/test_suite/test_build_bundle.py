@@ -47,6 +47,14 @@ def test_build_bundle(
     overrides_client = OverridesClient(overrides=charm_overrides, logger=logger)
     charmhub_client = CharmhubClient(logger=logger, overrides_client=overrides_client)
 
+    charm_platform_overrides = overrides_client.get_charm_platform_overrides(neighbor_charm)
+    if charm_platform_overrides and neighbor_platform not in charm_platform_overrides:
+        pytest.fail(
+            f"Neighbor charm '{neighbor_charm}' requires platform(s) {charm_platform_overrides}, "
+            f"but '--neighbor-platform' is '{neighbor_platform}'. "
+            f"This test plan should run on a '{charm_platform_overrides[0]}' neighbor environment."
+        )
+
     target_app_spec = AppSpec(
         charm=target_charm,
         channel=target_channel,
