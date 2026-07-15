@@ -2,7 +2,6 @@
 # See LICENSE file for licensing details.
 
 import logging
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -20,7 +19,6 @@ from resource_tracking import (
     calculate_discrepancies,
     diff_snapshots,
 )
-from resource_tracking.overrides import load_resource_tracking_skips
 from resource_tracking.tracker import ResourceObservation
 from test_suite.scheduler.states import State
 from test_suite.test_resource_consistency_report import (
@@ -224,9 +222,9 @@ class TestStateResourceTracker:
 
     def test_collect_records_each_collectors_resources(self) -> None:
         # GIVEN two collectors each reporting resources for a model
-        tracker = StateResourceTracker()
         collector_a = _FakeCollector([CollectedResources("model-a", frozenset({_pvc("data-0")}))])
         collector_b = _FakeCollector([CollectedResources("model-b", frozenset())])
+        tracker = StateResourceTracker()
 
         # WHEN the tracker collects for a state
         tracker.collect(State.DEPLOYED, [collector_a, collector_b], _LOGGER)
@@ -288,55 +286,6 @@ class TestKubernetesResourceCollector:
         assert collected == [
             CollectedResources("test-model", frozenset({_pvc("data-neighbor-0", application="neighbor")}))
         ]
-
-
-class TestLoadResourceTrackingSkips:
-    def test_reads_skip_list_keyed_by_charm(self, tmp_path: Path) -> None:
-        # GIVEN an overrides file declaring a resource_tracking.skip section
-        (tmp_path / "postgresql-k8s.yaml").write_text(
-            "resource_tracking:\n  skip:\n    - pvc\noverrides: []\n",
-            encoding="utf-8",
-        )
-
-        # WHEN the skips are loaded
-        skips = load_resource_tracking_skips(tmp_path)
-
-        # THEN the skip list is keyed by the charm file stem
-        assert skips == {"postgresql-k8s": frozenset({"pvc"})}
-
-    def test_files_without_the_section_are_ignored(self, tmp_path: Path) -> None:
-        # GIVEN an overrides file with only solver overrides
-        (tmp_path / "mysql-k8s.yaml").write_text("overrides: []\n", encoding="utf-8")
-
-        # WHEN the skips are loaded
-        skips = load_resource_tracking_skips(tmp_path)
-
-        # THEN nothing is recorded for that charm
-        assert skips == {}
-
-    def test_malformed_files_are_skipped(self, tmp_path: Path) -> None:
-        # GIVEN one malformed file and one valid file
-        (tmp_path / "broken.yaml").write_text("resource_tracking: [unclosed\n", encoding="utf-8")
-        (tmp_path / "postgresql-k8s.yaml").write_text(
-            "resource_tracking:\n  skip:\n    - pvc\n",
-            encoding="utf-8",
-        )
-
-        # WHEN the skips are loaded
-        skips = load_resource_tracking_skips(tmp_path)
-
-        # THEN the malformed file is ignored and the valid one is kept
-        assert skips == {"postgresql-k8s": frozenset({"pvc"})}
-
-    def test_missing_directory_returns_empty(self, tmp_path: Path) -> None:
-        # GIVEN a directory that does not exist
-        missing = tmp_path / "does-not-exist"
-
-        # WHEN the skips are loaded
-        skips = load_resource_tracking_skips(missing)
-
-        # THEN an empty mapping is returned
-        assert skips == {}
 
 
 class TestDiffSnapshots:

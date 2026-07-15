@@ -1,11 +1,4 @@
 ---
-resource_tracking:
-  # postgresql-k8s (via Juju/Kubernetes) retains its `pgdata` PersistentVolumeClaims
-  # across application removal and scale-in events, so a leftover or re-created PVC
-  # is expected behaviour rather than a defect. Skip PVC tracking for this charm;
-  # other resource kinds remain tracked.
-  skip:
-    - pvc
 overrides:
     # postgresql-k8s does not officially support juju 4
     # https://github.com/canonical/postgresql-k8s-operator/issues/1464
@@ -25,6 +18,12 @@ overrides:
               - juju >= 4
     criteria:
       - track: '16'
+    # postgresql-k8s (via Juju/Kubernetes) retains its `pgdata` PersistentVolumeClaims
+    # across application removal and scale-in events, so a leftover or re-created PVC
+    # is expected behaviour rather than a defect. Skip PVC tracking; other kinds remain tracked.
+    resource_tracking: &resource_tracking
+      skip:
+        - pvc
     provides:
       database:
         limit: 1
@@ -39,6 +38,7 @@ overrides:
   - assumes: *assumes
     criteria:
       - track: '14'
+    resource_tracking: *resource_tracking
     provides:
       metrics-endpoint:
         optional: true
@@ -73,6 +73,7 @@ overrides:
   - assumes: *assumes
     criteria:
       - track: 'latest'
+    resource_tracking: *resource_tracking
     provides:
       db:
         limit: 1

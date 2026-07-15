@@ -12,7 +12,6 @@ from .discrepancy import (
     calculate_discrepancies,
     diff_snapshots,
 )
-from .overrides import load_resource_tracking_skips
 from .snapshot import PvcSnapshot, ResourceSnapshot
 from .sources import KubernetesResourceSource, PvcSource
 from .tracker import ResourceObservation, StateResourceTracker
@@ -33,5 +32,4 @@ __all__ = [
     "StateResourceTracker",
     "calculate_discrepancies",
     "diff_snapshots",
-    "load_resource_tracking_skips",
 ]

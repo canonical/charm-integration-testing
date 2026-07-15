@@ -50,8 +50,7 @@ class KubernetesResourceCollector:
     """Collects resource snapshots for every registered Kubernetes model.
 
     Resources can be excluded per application via ``resource_skips``: a mapping
-    of application name to the resource types that application opts out of (see
-    :func:`~resource_tracking.overrides.load_resource_tracking_skips`).  A
+    of application name to the resource types that application opts out of.  A
     snapshot is dropped when its owning application skips its resource type, so
     the same model can still track that resource type for other applications.
     """

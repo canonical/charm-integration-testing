@@ -49,10 +49,13 @@ stays small and substrate-agnostic:
   overrides`_). Adding an ``lxd`` or ``openstack`` collector requires no change
   to the tracker.
 
-**Overrides** (``resource_tracking.overrides``)
-  ``load_resource_tracking_skips()`` reads each ``static/charm-overrides/<charm>.yaml``
-  and returns, per charm, the resource kinds that charm opts out of tracking.
-  The result is resolved from charm to deployed application and passed to the
+**Overrides** (bundle-builder ``OverridesClient``)
+  A charm version opts out of tracking a resource kind under its ``overrides``
+  block in ``static/charm-overrides/<charm>.yaml``. The
+  ``resource_tracking_skips_by_application`` fixture reads each deployed
+  application's charm and channel from the live model via
+  ``juju_client.list_applications`` and looks up its ``resource_tracking.skip``
+  set through the bundle-builder ``OverridesClient``, which is passed to the
   collector (see `Per-charm tracking overrides`_).
 
 
@@ -109,7 +112,7 @@ it as a single ``resized`` discrepancy, drop ``requested_storage`` from
 ``identity`` and add a ``resized`` branch to ``diff_snapshots()`` that matches on
 name and compares the size. Because qualifiers flow untouched through
 ``ModelResourceDiscrepancy.entries()``, the recorder, and the metadata key
-(``resource:<resource_type>:<qualifier>``), no other component changes -- a new
+(``resource_discrepancy:<resource_type>:<qualifier>``), no other component changes -- a new
 qualifier simply becomes a new selectable value.
 
 Execution metadata format
@@ -117,7 +120,7 @@ Execution metadata format
 
 Resource discrepancies are recorded under keys of the form::
 
-   resource:<resource_type>:<qualifier>
+   resource_discrepancy:<resource_type>:<qualifier>
 
 where ``<qualifier>`` is a resource-specific drift kind -- generically
 ``missing`` or ``extra`` today, extensible per resource type (see
@@ -127,7 +130,7 @@ them. Run-specific context (the scheduler state, the model name, and descriptive
 resource attributes) is carried in the value instead of the key. For example, a
 leaked PVC is recorded as::
 
-   key:   resource:pvc:extra
+   key:   resource_discrepancy:pvc:extra
    value: state=deployed model=<model> pvc=<name> requested_storage=1Gi storage_class=csi-cephfs
 
 Because the model name is a per-run identifier it is intentionally kept out of
@@ -141,28 +144,36 @@ flag as drift. ``postgresql-k8s``, for example, retains its ``pgdata``
 PersistentVolumeClaims across application removal and scale-in events, so a
 leftover PVC is expected rather than a defect.
 
-A charm opts out of tracking a resource *kind* by adding a top-level
-``resource_tracking.skip`` section to its
+A charm version opts out of tracking a resource *kind* by adding a
+``resource_tracking.skip`` list to the matching ``overrides`` entry in its
 ``static/charm-overrides/<charm>.yaml`` file::
 
-   resource_tracking:
-     skip:
-       - pvc
    overrides:
-     ...
+     - criteria:
+         - track: '14'
+       resource_tracking:
+         skip:
+           - pvc
+       provides:
+         ...
 
-The key lives in the same file as the bundle-builder solver overrides but in a
-separate top-level section: the solver ignores ``resource_tracking`` and the
-loader (``resource_tracking.overrides.load_resource_tracking_skips``) ignores the
-solver's ``overrides`` list, so the two concerns stay decoupled.
+Because the section lives inside a per-version ``overrides`` entry, different
+tracks or risks of the same charm can declare different skips. Resolution reuses
+the bundle-builder machinery: the deployed application's charm and channel are
+read from the live model and the matching entry's skip set is looked up through
+``OverridesClient.get_charm_resource_tracking_skips()``, so the resource tracker
+and the solver share one source of truth for per-version overrides.
 
-Skips are declared per *charm*, but resources are attributed to an *application*
-on the cluster (a PVC carries an ``app.kubernetes.io/name`` label equal to the
-owning Juju application). The ``track_state_resources`` fixture therefore maps
-the deployed target and neighbor applications back to their charms before
-applying skips. As a result a skip is scoped to the owning application only: a
-model can still track the same resource kind for other applications, and a
-``pvc`` skip on ``postgresql-k8s`` never masks drift from a co-deployed charm.
+Skips are declared per *charm version*, but resources are attributed to an
+*application* on the cluster (a PVC carries an ``app.kubernetes.io/name`` label
+equal to the owning Juju application). The
+``resource_tracking_skips_by_application`` fixture therefore reads the deployed
+applications and their charms from the live models via
+``juju_client.list_applications`` -- rather than from hard-coded target/neighbor
+options -- so charms pulled in as dependencies are mapped the same way. As a
+result a skip is scoped to the owning application only: a model can still track
+the same resource kind for other applications, and a ``pvc`` skip on
+``postgresql-k8s`` never masks drift from a co-deployed charm.
 
 PersistentVolumeClaims: the reference resource
 ----------------------------------------------
@@ -217,10 +228,11 @@ kind is added without touching any of them. Following the PVC example:
 3. **Register the source** with ``KubernetesResourceCollector``. Add it to the
    default ``sources`` tuple in its constructor so it runs for every model.
 
-4. **(Optional) support opting out.** Nothing extra is needed: any charm can
-   already skip the new kind by adding its ``resource_type`` label under
-   ``resource_tracking.skip`` in ``static/charm-overrides/<charm>.yaml``, and the
-   collector's per-application filtering applies automatically.
+4. **(Optional) support opting out.** Nothing extra is needed: any charm version
+   can already skip the new kind by adding its ``resource_type`` label under
+   ``resource_tracking.skip`` in the matching ``overrides`` entry of
+   ``static/charm-overrides/<charm>.yaml``, and the collector's per-application
+   filtering applies automatically.
 
 5. **(Optional) define resource-specific drift.** The default ``missing`` /
    ``extra`` qualifiers cover appearance and disappearance. If the resource needs

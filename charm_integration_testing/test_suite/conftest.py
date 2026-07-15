@@ -42,7 +42,6 @@ from resource_tracking import (
     ResourceCollector,
     ResourceDiscrepancyError,
     StateResourceTracker,
-    load_resource_tracking_skips,
 )
 from test_observer_client import TestObserverClient as TestObserverAPIClient
 from test_observer_client import TestObserverClientError
@@ -52,7 +51,7 @@ from utils.juju_releases import (
     select_upgrade_target,
 )
 
-from bundle_builder_x import UncompletableBundleError
+from bundle_builder_x import CharmChannel, OverridesClient, UncompletableBundleError
 from test_suite.scheduler.markers import read_state_marker
 from test_suite.scheduler.states import STATES_WITHOUT_EXISTING_CONTROLLER, STATES_WITHOUT_EXISTING_MODEL, State
 
@@ -851,39 +850,65 @@ def state_resource_tracker() -> StateResourceTracker:
     return StateResourceTracker()
 
 
-@pytest.fixture(scope="session")
-def resource_tracking_skips_by_application(request: pytest.FixtureRequest) -> dict[str, frozenset[str]]:
-    """Resolve per-charm ``resource_tracking.skip`` overrides to deployed applications.
+def _resource_tracking_overrides_client(
+    request: pytest.FixtureRequest, logger: logging.Logger
+) -> OverridesClient | None:
+    """Build an :class:`OverridesClient` for ``--charm-overrides``, or ``None``.
 
-    Overrides are declared per *charm* in ``static/charm-overrides/<charm>.yaml``,
-    but resources are attributed to an *application* on the cluster, so the
-    target/neighbor application names are mapped back to their charms here.
+    Returns ``None`` when no overrides directory is configured or it does not
+    exist, so callers can treat "no overrides" as "no skips".
     """
     overrides_raw = request.config.getoption("--charm-overrides")
     if not overrides_raw:
-        return {}
+        return None
     assert isinstance(overrides_raw, str)
     overrides_dir = Path(overrides_raw)
     if not overrides_dir.is_absolute():
         overrides_dir = Path(request.config.rootpath) / overrides_dir
+    overrides_dir = overrides_dir.resolve()
+    if not overrides_dir.is_dir():
+        return None
+    return OverridesClient(overrides=overrides_dir, logger=logger)
 
-    skips_by_charm = load_resource_tracking_skips(overrides_dir.resolve())
-    if not skips_by_charm:
+
+@pytest.fixture
+def resource_tracking_skips_by_application(
+    request: pytest.FixtureRequest,
+    juju_client: JujuClient,
+    session_resource_registry: ResourceRegistry,
+    logger: logging.Logger,
+) -> dict[str, frozenset[str]]:
+    """Map each deployed application to the resource kinds it opts out of tracking.
+
+    Overrides are declared per *charm version* under ``overrides`` in
+    ``static/charm-overrides/<charm>.yaml``, but resources are attributed to an
+    *application* on the cluster.  The application-to-charm mapping is read from
+    the live models via ``juju_client.list_applications`` rather than from
+    hard-coded target/neighbor options, so charms pulled in as dependencies are
+    resolved the same way.  Resolution is best-effort: a model that cannot be
+    queried simply contributes no skips.
+    """
+    overrides_client = _resource_tracking_overrides_client(request, logger)
+    if overrides_client is None:
         return {}
 
-    application_charms = {
-        request.config.getoption("--target-application", default=None): request.config.getoption(
-            "--target-charm", default=None
-        ),
-        request.config.getoption("--neighbor-application", default=None): request.config.getoption(
-            "--neighbor-charm", default=None
-        ),
-    }
-    return {
-        application: skips_by_charm[charm]
-        for application, charm in application_charms.items()
-        if application and charm and charm in skips_by_charm
-    }
+    skips: dict[str, frozenset[str]] = {}
+    for handle in session_resource_registry.registered_handles():
+        if not isinstance(handle, JujuModelHandle):
+            continue
+        try:
+            applications = juju_client.list_applications(model=f"{handle.controller}:{handle.model}")
+        except Exception:
+            logger.debug("Could not list applications for model '%s'.", handle.model, exc_info=True)
+            continue
+        for application, info in applications.items():
+            if info.channel is None:
+                continue
+            channel = CharmChannel.model_validate(str(info.channel))
+            resolved = overrides_client.get_charm_resource_tracking_skips(info.charm, channel)
+            if resolved:
+                skips[application] = resolved
+    return skips
 
 
 @pytest.fixture(autouse=True)
@@ -1013,7 +1038,7 @@ def record_failure_execution_metadata(
                     )
                     value = f"{detail} {attributes}" if attributes else detail
                     execution_metadata(
-                        f"resource:{entry.resource_type}:{entry.qualifier}",
+                        f"resource_discrepancy:{entry.resource_type}:{entry.qualifier}",
                         normalize_string(value),
                     )
 
