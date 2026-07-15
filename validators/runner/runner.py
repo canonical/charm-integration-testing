@@ -76,16 +76,20 @@ def _configure_logging(log_dir: Path = LOG_DIR) -> None:
         existing_handler.close()
 
     log_file = log_dir / "validator.log"
+    formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
     try:
         log_dir.mkdir(parents=True, exist_ok=True)
-        handler: logging.Handler = RotatingFileHandler(log_file, maxBytes=LOG_MAX_BYTES, backupCount=LOG_BACKUP_COUNT)
+        handler: logging.Handler = RotatingFileHandler(
+            log_file, maxBytes=LOG_MAX_BYTES, backupCount=LOG_BACKUP_COUNT, encoding="utf-8"
+        )
     except OSError as exc:
         handler = logging.StreamHandler(sys.stderr)
+        handler.setFormatter(formatter)
         logger.addHandler(handler)
         logger.warning(f"Could not set up logging to {log_file}, falling back to stderr: {exc}")
         return
 
-    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    handler.setFormatter(formatter)
     logger.addHandler(handler)
 
 
@@ -109,8 +113,8 @@ class ValidatorRunner:
                     logger.warning(f"Entry point '{ep.name}' does not implement BaseValidator. Skipping.")
                     continue
                 validators.setdefault(ep.name, []).append(validator_cls)
-            except Exception as exc:
-                logger.error(f"Failed to load validator for '{ep.name}': {exc}")
+            except Exception:
+                logger.exception(f"Failed to load validator for '{ep.name}'")
         return validators
 
     def run(self, charm: CharmBase, level: ValidationLevel) -> ValidatorRunnerResults:

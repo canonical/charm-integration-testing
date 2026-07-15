@@ -13,6 +13,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterator, Optional, cast
@@ -112,16 +113,19 @@ class TestValidatorRunnerLoadValidators:
         # THEN
         assert validators == {}
 
-    def test_skips_entry_points_that_fail_to_load(self) -> None:
+    def test_skips_entry_points_that_fail_to_load(self, caplog: pytest.LogCaptureFixture) -> None:
         # GIVEN an entry point that raises on load
         entry_point = EntryPointStub(name="test-interface", _load_error=ImportError("missing dep"))
 
-        with patch("validators.runner.runner.entry_points", return_value=[entry_point]):
-            # WHEN
-            validators = ValidatorRunner._load_validators()
+        with caplog.at_level(logging.ERROR, logger="validators"):
+            with patch("validators.runner.runner.entry_points", return_value=[entry_point]):
+                # WHEN
+                validators = ValidatorRunner._load_validators()
 
-        # THEN
+        # THEN validators are skipped and the full traceback is captured, not just the message
         assert validators == {}
+        assert "Traceback" in caplog.text
+        assert "ImportError: missing dep" in caplog.text
 
     def test_loads_valid_validator(self) -> None:
         # GIVEN a well-formed entry point
@@ -332,12 +336,24 @@ class TestConfigureLogging:
 
     @pytest.fixture(autouse=True)
     def _clean_validators_logger(self) -> Iterator[None]:
+        # Snapshot full logger state up front so it can be restored exactly, not just
+        # the handlers - level/propagate are also mutated by _configure_logging() and
+        # must not leak into other test modules sharing this module-level logger.
+        original_level = logger.level
+        original_propagate = logger.propagate
+        original_handlers = list(logger.handlers)
+
         yield None
-        # Always run, even if the test body fails partway through, so handlers
-        # never leak onto the shared module-level "validators" logger.
+
+        # Always run, even if the test body fails partway through, so state never
+        # leaks onto the shared module-level "validators" logger.
         for handler in list(logger.handlers):
-            logger.removeHandler(handler)
-            handler.close()
+            if handler not in original_handlers:
+                logger.removeHandler(handler)
+                handler.close()
+        logger.handlers = original_handlers
+        logger.setLevel(original_level)
+        logger.propagate = original_propagate
 
     def test_writes_to_var_log_validators(self, tmp_path: Path) -> None:
         log_dir = tmp_path / "validators"
@@ -363,8 +379,10 @@ class TestConfigureLogging:
         runner._configure_logging(log_dir=log_dir)
         logger.warning("fallback message")
 
-        # THEN nothing raised, and the warning ends up on stderr instead
+        # THEN nothing raised, the warning ends up on stderr, and it's formatted
+        # consistently with the file handler (level/timestamp), not bare text
         captured = capsys.readouterr()
+        assert "WARNING" in captured.err
         assert "fallback message" in captured.err
 
     def test_stdout_remains_valid_json_after_logging_configured(self, tmp_path: Path) -> None:
