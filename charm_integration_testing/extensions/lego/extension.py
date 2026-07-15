@@ -3,6 +3,7 @@
 
 import logging
 from abc import ABC
+from subprocess import CalledProcessError  # nosec
 
 from juju import JujuBackend, JujuExtension
 
@@ -29,24 +30,37 @@ class LegoExtension(JujuExtension, ABC):
         self.logger = logger
 
     def post_deploy(self, model: str) -> None:
-        # Look for lego applications
-        for application in self.juju.list_applications(model):
-            if self.juju.application_charm(model, application) == LEGO_CHARM:
+        # Look for lego applications. list_applications() already returns each
+        # application's charm name, so no extra per-application lookup is needed.
+        for application, info in self.juju.list_applications(model).items():
+            if info.charm == LEGO_CHARM:
                 self.configure_lego(model, application)
 
     def configure_lego(self, model: str, application: str) -> None:
-        # Skip if already configured (e.g. by the operator or a previous run)
+        # Skip only if both plugin and plugin-config-secret-id are already configured
+        # (e.g. by the operator or a previous run). lego blocks if either is unset, so
+        # skipping on just one of them could leave the app blocked.
         config = self.juju.get_application_config(model, application)
-        if config.get("plugin-config-secret-id"):
-            self.logger.info(f"Application '{application}' already has plugin-config-secret-id set, skipping")
+        if config.get("plugin") and config.get("plugin-config-secret-id"):
+            self.logger.info(
+                f"Application '{application}' already has plugin and plugin-config-secret-id set, skipping"
+            )
             return
 
         self.logger.info(f"Configuring lego application '{application}' with dummy httpreq plugin config")
 
         # Create a secret carrying the (dummy) DNS provider endpoint and grant it to the
         # application, following the same add_secret/grant_secret pattern used by the
-        # unseal_vault extension.
+        # unseal_vault extension. Remove any pre-existing secret with the same
+        # deterministic name first, in case a previous run created it but failed before
+        # setting plugin-config-secret-id.
         secret_name = self.lego_plugin_config_secret_name(application)
+        try:
+            self.juju.remove_secret(model, secret_name)
+            self.logger.info(f"Removed existing secret '{secret_name}'")
+        except CalledProcessError as err:
+            self.logger.info(f"Ignoring failure to remove secret '{secret_name}': {err.stderr}")
+
         secret_id = self.juju.add_secret(model, secret_name, {HTTPREQ_ENDPOINT_CONFIG_KEY: DUMMY_HTTPREQ_ENDPOINT})
         self.juju.grant_secret(model, secret_name, application)
 
