@@ -66,6 +66,15 @@ def _configure_logging(log_dir: Path = LOG_DIR) -> None:
             can point logging elsewhere without touching module state.
     """
     logger.setLevel(logging.DEBUG)
+    # Never propagate to the root logger: some hosts (e.g. ops/charm frameworks) attach a
+    # stdout stream handler there, which would leak log records into the JSON-only stdout.
+    logger.propagate = False
+    # Idempotent: clear any handlers from a previous call so re-invoking this function
+    # (e.g. across tests, or multiple runs in the same process) doesn't duplicate log lines.
+    for existing_handler in list(logger.handlers):
+        logger.removeHandler(existing_handler)
+        existing_handler.close()
+
     log_file = log_dir / "validator.log"
     try:
         log_dir.mkdir(parents=True, exist_ok=True)

@@ -377,3 +377,26 @@ class TestConfigureLogging:
         # THEN stdout-bound output (the JSON blob) contains no log noise
         output = results.model_dump_json()
         assert output == '{"results":[]}'
+
+    def test_does_not_propagate_to_root_logger(self, tmp_path: Path) -> None:
+        log_dir = tmp_path / "validators"
+
+        # WHEN
+        runner._configure_logging(log_dir=log_dir)
+
+        # THEN records stay local to the "validators" logger and never reach the root
+        # logger, which some hosts (e.g. ops/charm frameworks) attach a stdout handler to
+        assert logger.propagate is False
+
+    def test_reconfiguring_does_not_duplicate_handlers_or_log_lines(self, tmp_path: Path) -> None:
+        log_dir = tmp_path / "validators"
+
+        # WHEN configured twice, as could happen across multiple runs in one process
+        runner._configure_logging(log_dir=log_dir)
+        runner._configure_logging(log_dir=log_dir)
+        logger.info("single message")
+
+        # THEN only one handler is attached, and the message appears exactly once
+        assert len(logger.handlers) == 1
+        log_contents = (log_dir / "validator.log").read_text()
+        assert log_contents.count("single message") == 1
