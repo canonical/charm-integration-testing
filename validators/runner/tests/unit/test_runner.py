@@ -14,14 +14,16 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from dataclasses import dataclass, field
-from typing import Optional, cast
+from pathlib import Path
+from typing import Iterator, Optional, cast
 from unittest.mock import patch
 
 import ops
 import pytest
 
 from validators.base import BaseValidator, ValidationLevel, ValidationResult
-from validators.runner.runner import ValidatorRunner, ValidatorRunnerResults
+from validators.runner import runner
+from validators.runner.runner import ValidatorRunner, ValidatorRunnerResults, logger
 from validators.test_utils.helpers import make_charm_from_relation
 from validators.test_utils.stubs import (
     RelationRoleStub,
@@ -323,3 +325,55 @@ class TestValidatorRunnerRun:
             assert len(results.results) == 1
             assert results.results[0].status == "PASS"
             assert results.results[0].role == role.value
+
+
+class TestConfigureLogging:
+    """Tests for the file logging set up on the "validators" logger."""
+
+    @pytest.fixture(autouse=True)
+    def _clean_validators_logger(self) -> Iterator[None]:
+        yield None
+        # Always run, even if the test body fails partway through, so handlers
+        # never leak onto the shared module-level "validators" logger.
+        for handler in list(logger.handlers):
+            logger.removeHandler(handler)
+            handler.close()
+
+    def test_writes_to_var_log_validators(self, tmp_path: Path) -> None:
+        log_dir = tmp_path / "validators"
+
+        # WHEN
+        runner._configure_logging(log_dir=log_dir)
+        logger.info("hello from validators")
+
+        # THEN the log directory and file are created, and the message is written
+        assert log_dir.is_dir()
+        assert (log_dir / "validator.log").exists()
+        assert "hello from validators" in (log_dir / "validator.log").read_text()
+
+    def test_falls_back_to_stderr_when_log_dir_not_writable(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # GIVEN a log_dir path that already exists as a regular file, so mkdir()
+        # deterministically fails with OSError regardless of the user running the test
+        log_dir = tmp_path / "validators"
+        log_dir.write_text("not a directory")
+
+        # WHEN
+        runner._configure_logging(log_dir=log_dir)
+        logger.warning("fallback message")
+
+        # THEN nothing raised, and the warning ends up on stderr instead
+        captured = capsys.readouterr()
+        assert "fallback message" in captured.err
+
+    def test_stdout_remains_valid_json_after_logging_configured(self, tmp_path: Path) -> None:
+        log_dir = tmp_path / "validators"
+
+        runner._configure_logging(log_dir=log_dir)
+        logger.info("some diagnostic noise")
+
+        results = ValidatorRunnerResults(results=[])
+        # THEN stdout-bound output (the JSON blob) contains no log noise
+        output = results.model_dump_json()
+        assert output == '{"results":[]}'
