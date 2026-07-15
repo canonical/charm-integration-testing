@@ -20,15 +20,11 @@ class VaultUnsealerStub(VaultUnsealer):
         self.calls.append((model, authorize_charm))
 
 
-class ConcreteUnsealVaultJujuExtension(GenericUnsealVaultJujuExtension):
-    """Concrete subclass since GenericUnsealVaultJujuExtension is abstract."""
-
-
 class TestGenericUnsealVaultJujuExtension:
     def test_post_deploy_initializes_and_authorizes(self) -> None:
         # GIVEN an extension wrapping a stub unsealer
         unsealer = VaultUnsealerStub()
-        extension = ConcreteUnsealVaultJujuExtension(unsealer)
+        extension = GenericUnsealVaultJujuExtension(unsealer)
 
         # WHEN post_deploy is called
         extension.post_deploy("test-model")
@@ -39,7 +35,7 @@ class TestGenericUnsealVaultJujuExtension:
     def test_post_scale_unseals_without_reauthorizing(self) -> None:
         # GIVEN an extension wrapping a stub unsealer
         unsealer = VaultUnsealerStub()
-        extension = ConcreteUnsealVaultJujuExtension(unsealer)
+        extension = GenericUnsealVaultJujuExtension(unsealer)
 
         # WHEN post_scale is called
         extension.post_scale("test-model")
@@ -50,7 +46,7 @@ class TestGenericUnsealVaultJujuExtension:
     def test_post_migrate_model_reunseals_without_reauthorizing(self) -> None:
         # GIVEN an extension wrapping a stub unsealer, mimicking a model that just migrated
         unsealer = VaultUnsealerStub()
-        extension = ConcreteUnsealVaultJujuExtension(unsealer)
+        extension = GenericUnsealVaultJujuExtension(unsealer)
 
         # WHEN post_migrate_model is called (e.g. after migrating between controllers)
         extension.post_migrate_model("test-model", source="source-ctrl", target="target-ctrl")

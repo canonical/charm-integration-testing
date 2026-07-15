@@ -24,9 +24,10 @@ class GenericUnsealVaultJujuExtension(JujuExtension, ABC):
         self.vault_unsealer.try_init_or_unseal_all_vaults(model, authorize_charm=False)
 
     def post_migrate_model(self, model: str, source: str, target: str) -> None:
-        # Model migration triggers a StatefulSet annotation update on k8s, restarting the
-        # vault pod. Vault comes back sealed, so it needs re-unsealing (it's already
-        # initialized and authorized, so authorize_charm=False mirrors post_scale).
+        # Migrating a model restarts the vault workload (e.g. a StatefulSet annotation
+        # update on k8s, or a unit relocation on machines). Vault comes back sealed, so
+        # it needs re-unsealing (it's already initialized and authorized, so
+        # authorize_charm=False mirrors post_scale).
         self.vault_unsealer.try_init_or_unseal_all_vaults(model, authorize_charm=False)
 
 
