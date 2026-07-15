@@ -35,6 +35,14 @@ class V1PodListStub:
 
 
 @dataclass
+class V1PvcListStub:
+    items: list[Any]
+    metadata: None = None
+    api_version: str = "v1"
+    kind: str = "V1PersistentVolumeClaimList"
+
+
+@dataclass
 class KubernetesBackendStub(KubernetesBackend):
     """Stub for KubernetesClient."""
 
@@ -48,6 +56,8 @@ class KubernetesBackendStub(KubernetesBackend):
     patch_stateful_set_last_body: dict[str, Any] | None = None
     read_stateful_set_result: "V1StatefulSetStub | None" = None
     read_stateful_set_raises: Exception | None = None
+    list_namespaced_pvcs_result: V1PvcListStub | None = None
+    list_namespaced_pvcs_raises: Exception | None = None
 
     def __post_init__(self) -> None:
         self.core_v1_api = self
@@ -58,6 +68,12 @@ class KubernetesBackendStub(KubernetesBackend):
             raise self.list_namespaced_pods_raises
         assert self.list_namespaced_pods_result is not None
         return self.list_namespaced_pods_result
+
+    def list_namespaced_persistent_volume_claim(self, namespace: str) -> V1PvcListStub:
+        if self.list_namespaced_pvcs_raises:
+            raise self.list_namespaced_pvcs_raises
+        assert self.list_namespaced_pvcs_result is not None
+        return self.list_namespaced_pvcs_result
 
     def read_namespaced_pod(self, pod_name: str, namespace: str) -> V1Pod:
         self.get_namespaced_pod_call_count += 1
@@ -772,3 +788,80 @@ class TestKubernetesClientInit:
 
             # THEN None counts are treated as 0 so the first event is skipped, and the method
             # returns without raising once actual counts reach the desired replica count
+
+
+@dataclass
+class V1PvcSpecStub:
+    storage_class_name: str | None
+    resources: "V1PvcResourcesStub"
+
+
+@dataclass
+class V1PvcResourcesStub:
+    requests: dict[str, str] | None
+
+
+@dataclass
+class V1PvcStatusStub:
+    phase: str | None
+
+
+@dataclass
+class V1PvcStub:
+    metadata: V1ObjectMeta
+    spec: V1PvcSpecStub
+    status: V1PvcStatusStub
+
+
+def create_pvc_stub(
+    name: str = "data-postgresql-0",
+    storage_class: str | None = "csi-cephfs",
+    requested_storage: str | None = "1Gi",
+    phase: str | None = "Bound",
+) -> V1PvcStub:
+    """Helper to create a PVC stub for testing list_model_pvcs."""
+    return V1PvcStub(
+        metadata=V1ObjectMeta(name=name),
+        spec=V1PvcSpecStub(
+            storage_class_name=storage_class,
+            resources=V1PvcResourcesStub(requests={"storage": requested_storage} if requested_storage else {}),
+        ),
+        status=V1PvcStatusStub(phase=phase),
+    )
+
+
+class TestListModelPvcs:
+    """Test suite for list_model_pvcs method."""
+
+    def test_returns_raw_pvcs_from_namespace(self) -> None:
+        # GIVEN a namespace containing two PVCs
+        first = create_pvc_stub(name="data-postgresql-0")
+        second = create_pvc_stub(name="data-postgresql-1")
+        backend_stub = KubernetesBackendStub(list_namespaced_pvcs_result=V1PvcListStub(items=[first, second]))
+        client = KubernetesClient(backend=backend_stub)
+
+        # WHEN listing the model's PVCs
+        pvcs = client.list_model_pvcs(model="test-model")
+
+        # THEN the raw API objects are returned unchanged
+        assert pvcs == [first, second]
+
+    def test_empty_namespace_returns_empty_list(self) -> None:
+        # GIVEN a namespace with no PVCs
+        backend_stub = KubernetesBackendStub(list_namespaced_pvcs_result=V1PvcListStub(items=[]))
+        client = KubernetesClient(backend=backend_stub)
+
+        # WHEN listing the model's PVCs
+        pvcs = client.list_model_pvcs(model="test-model")
+
+        # THEN the result is empty
+        assert pvcs == []
+
+    def test_api_exception_propagates(self) -> None:
+        # GIVEN a backend that raises on listing PVCs
+        backend_stub = KubernetesBackendStub(list_namespaced_pvcs_raises=ApiException(status=500))
+        client = KubernetesClient(backend=backend_stub)
+
+        # WHEN listing the model's PVCs THEN the ApiException propagates
+        with pytest.raises(ApiException):
+            client.list_model_pvcs(model="test-model")
