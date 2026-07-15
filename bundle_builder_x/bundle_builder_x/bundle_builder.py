@@ -353,9 +353,7 @@ class BundleBuilder:
         model = domain.models[model_ref]
         endpoint = domain.charms[charm_id].spec.endpoints[endpoint_name]
         ubuntu_version: str | None = (
-            domain.charms[charm_id].spec.ubuntu_version
-            if endpoint.scope == EndpointScope.CONTAINER
-            else None
+            domain.charms[charm_id].spec.ubuntu_version if endpoint.scope == EndpointScope.CONTAINER else None
         )
 
         for charm_name in candidate_names:
@@ -368,9 +366,7 @@ class BundleBuilder:
                     ubuntu_version=ubuntu_version,
                 )
             except CharmReleaseNotFoundException:
-                self.logger.debug(
-                    f"Skipping {charm_name}: no compatible release for {model.platform}/{model.arch}"
-                )
+                self.logger.debug(f"Skipping {charm_name}: no compatible release for {model.platform}/{model.arch}")
                 continue
             if self._add_charm_for_charm_id(charm, charm_id, domain, model_ref):
                 return True
