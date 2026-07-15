@@ -6,10 +6,11 @@
 from itertools import repeat
 from typing import Iterator
 
+import pytest
 import z3  # type: ignore[import-untyped]
 
 from bundle_builder_x.assertion_tags import CharmPayload, PeerChannelMismatchTag, SubordinateBaseMismatchTag
-from bundle_builder_x.bundle_builder import BundleBuilder
+from bundle_builder_x.bundle_builder import BundleBuilder, UnsupportedPlatformError
 from bundle_builder_x.charm import Charm, CharmChannel, CharmEndpoint, EndpointScope, EndpointType
 from bundle_builder_x.charmhub import CharmhubClient
 from bundle_builder_x.charmhub_http import CharmReleaseNotFoundException
@@ -22,6 +23,8 @@ from bundle_builder_x.domain import (
     add_charm_to_domain,
 )
 from bundle_builder_x.juju_version import JujuVersion
+from bundle_builder_x.overrides import CharmGlobalOverrides, OverridesClient
+from bundle_builder_x.spec import AppSpec, ModelSpec, SpecFile
 
 _JUJU = JujuVersion(major=3, minor=6, patch=0)
 _CHANNEL = CharmChannel(track="latest", risk="stable", branch="")
@@ -533,3 +536,84 @@ class TestMergeMismatchTags:
         assert result[2] is non_mismatch
         assert isinstance(result[3], PeerChannelMismatchTag)
         assert result[3].required_track == "antelope"
+
+
+class _StubOverridesClient(OverridesClient):
+    """OverridesClient returning fixed platform overrides per charm."""
+
+    def __init__(self, platforms_by_charm: dict[str, list[str] | None]) -> None:
+        super().__init__()
+        self._platforms_by_charm = platforms_by_charm
+
+    def _get_charm_global_overrides(self, charm: str) -> CharmGlobalOverrides:  # type: ignore[override]
+        return CharmGlobalOverrides(platforms=self._platforms_by_charm.get(charm))
+
+
+def _builder_with_platform_overrides(platforms_by_charm: dict[str, list[str] | None]) -> BundleBuilder:
+    fake = _FakeCharmhubClient()
+    fake.overrides_client = _StubOverridesClient(platforms_by_charm)
+    return BundleBuilder(charmhub_client=fake)
+
+
+def _single_model_spec(charm: str, platform: str) -> SpecFile:
+    return SpecFile(
+        models=[
+            ModelSpec(
+                name="m",
+                platform=platform,
+                applications={charm: AppSpec(charm=charm)},
+            )
+        ]
+    )
+
+
+class TestValidatePlatforms:
+    """BundleBuilder._validate_platforms."""
+
+    def test_raises_when_model_platform_not_in_overrides(self) -> None:
+        # GIVEN a charm whose overrides only allow the machine platform
+        builder = _builder_with_platform_overrides({"mysql": ["machine"]})
+        spec = _single_model_spec("mysql", platform="kubernetes")
+
+        # WHEN the charm is placed on a kubernetes model
+        # THEN validation fails with details about the mismatch
+        with pytest.raises(UnsupportedPlatformError) as exc_info:
+            builder._validate_platforms(spec)
+        error = exc_info.value
+        assert error.charm == "mysql"
+        assert error.model_platform == "kubernetes"
+        assert error.supported_platforms == ["machine"]
+
+    def test_passes_when_model_platform_in_overrides(self) -> None:
+        # GIVEN a charm whose overrides allow the model platform
+        builder = _builder_with_platform_overrides({"mysql": ["machine", "kubernetes"]})
+        spec = _single_model_spec("mysql", platform="kubernetes")
+
+        # WHEN validating
+        # THEN no error is raised
+        builder._validate_platforms(spec)
+
+    def test_passes_when_charm_has_no_platform_overrides(self) -> None:
+        # GIVEN a charm with no platform overrides
+        builder = _builder_with_platform_overrides({"mysql": None})
+        spec = _single_model_spec("mysql", platform="kubernetes")
+
+        # WHEN validating
+        # THEN no error is raised (any platform is acceptable)
+        builder._validate_platforms(spec)
+
+    def test_validates_all_models_and_applications(self) -> None:
+        # GIVEN a multi-model spec where one application violates its platform overrides
+        builder = _builder_with_platform_overrides({"good": ["kubernetes"], "bad": ["machine"]})
+        spec = SpecFile(
+            models=[
+                ModelSpec(name="k8s", platform="kubernetes", applications={"good": AppSpec(charm="good")}),
+                ModelSpec(name="other", platform="kubernetes", applications={"bad": AppSpec(charm="bad")}),
+            ]
+        )
+
+        # WHEN validating
+        # THEN the offending application is reported
+        with pytest.raises(UnsupportedPlatformError) as exc_info:
+            builder._validate_platforms(spec)
+        assert exc_info.value.charm == "bad"

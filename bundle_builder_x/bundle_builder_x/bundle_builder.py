@@ -70,6 +70,20 @@ class UnfulfilledEndpointInfo(BaseModel):
     interface: str | None
 
 
+class UnsupportedPlatformError(ValueError):
+    """Exception raised when a charm is placed on a model whose platform its overrides disallow."""
+
+    def __init__(self, charm: str, model_platform: str, supported_platforms: list[str]):
+        self.charm = charm
+        self.model_platform = model_platform
+        self.supported_platforms = supported_platforms
+        platform_list = ", ".join(supported_platforms)
+        super().__init__(
+            f"Charm '{charm}' supports platform(s) {platform_list}, "
+            f"but was placed on a model with platform '{model_platform}'."
+        )
+
+
 class UncompletableBundleError(ValueError):
     """Exception raised when bundle builder cannot generate a complete bundle from the base bundle"""
 
@@ -127,9 +141,28 @@ class BundleBuilder:
 
     def build(self, spec: SpecFile) -> Solution:
         """Build bundles for all models defined in a spec simultaneously."""
+        self._validate_platforms(spec)
         domain = self._domain_builder.build(spec)
         z3_model = self._solve(domain)
         return extract_solution(z3_model, domain, logger=self.logger)
+
+    def _validate_platforms(self, spec: SpecFile) -> None:
+        """Ensure every application is placed on a model whose platform its overrides allow.
+
+        A charm's platform overrides (when present) enumerate the platforms it is
+        expected to run on. Placing such a charm on a model with a different platform
+        cannot produce a deployable bundle, so fail fast with a clear error.
+        """
+        overrides_client = self.charmhub_client.overrides_client
+        for model_spec in spec.models:
+            for app_spec in model_spec.applications.values():
+                supported_platforms = overrides_client.get_charm_platform_overrides(app_spec.charm)
+                if supported_platforms is not None and model_spec.platform not in supported_platforms:
+                    raise UnsupportedPlatformError(
+                        charm=app_spec.charm,
+                        model_platform=model_spec.platform,
+                        supported_platforms=supported_platforms,
+                    )
 
     def _solve(self, domain: Domain) -> z3.ModelRef:
         # Iterative CEGIS loop: expand domain until satisfiable.
