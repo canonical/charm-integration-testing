@@ -77,9 +77,8 @@ class UnsupportedPlatformError(ValueError):
         self.charm = charm
         self.model_platform = model_platform
         self.supported_platforms = supported_platforms
-        platform_list = ", ".join(supported_platforms)
         super().__init__(
-            f"Charm '{charm}' supports platform(s) {platform_list}, "
+            f"Charm '{charm}' supports platform(s) {supported_platforms!r}, "
             f"but was placed on a model with platform '{model_platform}'."
         )
 
@@ -141,7 +140,10 @@ class BundleBuilder:
 
     def build(self, spec: SpecFile) -> Solution:
         """Build bundles for all models defined in a spec simultaneously."""
-        self._validate_platforms(spec)
+        try:
+            self._validate_platforms(spec)
+        except UnsupportedPlatformError as exc:
+            raise UncompletableBundleError(str(exc)) from exc
         domain = self._domain_builder.build(spec)
         z3_model = self._solve(domain)
         return extract_solution(z3_model, domain, logger=self.logger)
