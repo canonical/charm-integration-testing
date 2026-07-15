@@ -560,11 +560,13 @@ class BundleBuilder:
         elif endpoint.type == EndpointType.PROVIDES:
             fulfilling_charms = self.charmhub_client.find_charms(requires=endpoint.interface, platform=model.platform)
 
-        # Sort by local override priority (no network needed) so the best candidate is tried first.
+        # Sort by local override priority (no network needed) so the best candidate is tried
+        # first. `fulfilling_charms` is a set, whose iteration order is randomized per-process
+        # (PYTHONHASHSEED), so charms tied on priority need a deterministic tiebreaker — sort
+        # by name ascending — or repeated builds of the same spec can pick different charms.
         return sorted(
             fulfilling_charms,
-            key=lambda name: self.charmhub_client.overrides_client.get_charm_priority(name),
-            reverse=True,
+            key=lambda name: (-self.charmhub_client.overrides_client.get_charm_priority(name), name),
         )
 
     def _add_charm_for_application(
