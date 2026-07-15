@@ -79,7 +79,7 @@ class KubernetesResourceCollector:
                 except ApiException as exc:
                     # A model whose namespace does not exist (e.g. a non-Kubernetes
                     # model) is skipped rather than raising.
-                    logger.debug(f"Skipping resource snapshot for model '{handle.model}': {exc}")
+                    logger.debug("Skipping resource snapshot for model '%s'", handle.model, exc_info=exc)
             tracked = frozenset(snapshot for snapshot in snapshots if not self._is_skipped(snapshot))
             collected.append(CollectedResources(model=handle.model, snapshots=tracked))
         return collected

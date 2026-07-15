@@ -244,6 +244,6 @@ No change to ``StateResourceTracker``, ``calculate_discrepancies``,
 ``ModelResourceDiscrepancy``, ``test_resource_consistency_report``, or the
 ``record_failure_execution_metadata`` recorder is required: the new kind flows
 through the same generic path and is published under
-``resource:<new_resource_type>:<qualifier>``.
+``resource_discrepancy:<new_resource_type>:<qualifier>``.
 
 
