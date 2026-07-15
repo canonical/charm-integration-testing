@@ -202,7 +202,9 @@ def _refresh_application_integration_mappings(domain: Domain) -> None:
 
     Re-scans all models each call because a newly created charm integration may complete
     a mapping in any model (as either the local or the remote application). Already-linked
-    integration ids are skipped, so this is safe (and cheap) to call repeatedly.
+    integration ids are skipped, so repeated calls are safe, though runtime still scales
+    with the number of models, application integrations, and charm integrations in the
+    domain.
     """
     for mc_model_ref, mc in domain.models.items():
         for app_integration in mc.application_integrations:
@@ -305,13 +307,12 @@ def _refresh_application_integration_mappings(domain: Domain) -> None:
                         or remote_charm_id not in remote_mc.applications[remote_ep.application].charm_ids
                     ):
                         continue
-                    if i_idx not in app_integration.charm_integration_ids:
-                        app_integration.charm_integration_ids[i_idx] = z3.Bool(
-                            f"app_integration"
-                            f"_{local_ep.application}:{local_ep.endpoint}"
-                            f"__cmr__{remote_ep.model.key}_{remote_ep.application}:{remote_ep.endpoint}"
-                            f"__integration_{i_idx}"
-                        )
+                    app_integration.charm_integration_ids[i_idx] = z3.Bool(
+                        f"app_integration"
+                        f"_{local_ep.application}:{local_ep.endpoint}"
+                        f"__cmr__{remote_ep.model.key}_{remote_ep.application}:{remote_ep.endpoint}"
+                        f"__integration_{i_idx}"
+                    )
 
 
 def add_charm_to_domain(charm: Charm, domain: Domain, model_ref: ModelRef | None = None) -> int:
