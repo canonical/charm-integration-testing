@@ -30,7 +30,7 @@ _JUJU = JujuVersion(major=3, minor=6, patch=0)
 _CHANNEL = CharmChannel(track="latest", risk="stable", branch="")
 
 
-class _FakeOverridesClient:
+class _FakeOverridesClient(OverridesClient):
     """Minimal stub for OverridesClient used in unit tests.
 
     Returns a per-charm priority from `priorities` (defaulting to 1.0 for any
@@ -38,6 +38,7 @@ class _FakeOverridesClient:
     """
 
     def __init__(self, priorities: dict[str, float] | None = None) -> None:
+        super().__init__()
         self._priorities = priorities or {}
 
     def get_charm_priority(self, charm: str) -> float:
