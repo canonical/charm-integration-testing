@@ -64,6 +64,7 @@ class _FakeCharmhubClient(CharmhubClient):
             self._responses = repeat(charm_responses)
         self._find_result: set[str] = find_result if find_result is not None else set()
         self.charm_from_store_calls: list[dict[str, object]] = []
+        self.find_charms_calls: list[dict[str, object]] = []
         self.overrides_client = _FakeOverridesClient(priorities)
 
     def charm_from_store(
@@ -100,6 +101,7 @@ class _FakeCharmhubClient(CharmhubClient):
         requires: str | None = None,
         platform: str | None = None,
     ) -> set[str]:
+        self.find_charms_calls.append({"provides": provides, "requires": requires, "platform": platform})
         return self._find_result
 
 
@@ -401,6 +403,78 @@ def _domain_with_two_alternatives(
     id_a = add_charm_to_domain(_make_charm_variant(revision=1, priority=priority_a), domain, model_ref)
     id_b = add_charm_to_domain(_make_charm_variant(revision=2, priority=priority_b), domain, model_ref)
     return domain, id_a, id_b
+
+
+class TestExpandForEndpointContainerScope:
+    """BundleBuilder._expand_for_endpoint: container-scoped endpoints never span models."""
+
+    def _two_machine_model_domain_with_unresolved_subordinate(self) -> tuple[Domain, int]:
+        """m1 has an unresolved subordinate; m2 has an unrelated charm providing juju-info."""
+        domain = Domain()
+        m1, m2 = ModelRef(name="m1"), ModelRef(name="m2")
+        domain.models[m1] = DomainModel(
+            arch="amd64",
+            platform="machine",
+            juju_version=_JUJU,
+            applications={"nrpe": DomainApplication(charm="nrpe")},
+        )
+        domain.models[m2] = DomainModel(
+            arch="amd64",
+            platform="machine",
+            juju_version=_JUJU,
+            applications={"ubuntu": DomainApplication(charm="ubuntu")},
+        )
+        charm_id = add_charm_to_domain(
+            _make_charm(
+                "nrpe",
+                {
+                    "general-info": CharmEndpoint(
+                        type=EndpointType.REQUIRES, interface="juju-info", scope=EndpointScope.CONTAINER
+                    )
+                },
+            ),
+            domain,
+            m1,
+        )
+        add_charm_to_domain(
+            _make_charm(
+                "ubuntu",
+                {
+                    "juju-info": CharmEndpoint(
+                        type=EndpointType.PROVIDES, interface="juju-info", scope=EndpointScope.GLOBAL
+                    )
+                },
+            ),
+            domain,
+            m2,
+        )
+        return domain, charm_id
+
+    def test_does_not_connect_existing_charm_in_another_model(self) -> None:
+        # GIVEN a container-scoped endpoint unresolved in m1, and a compatible provider only in m2
+        domain, charm_id = self._two_machine_model_domain_with_unresolved_subordinate()
+        fake = _FakeCharmhubClient(find_result=set())
+        builder = BundleBuilder(charmhub_client=fake)
+        integrations_before = len(domain.charm_integrations)
+
+        # WHEN expanding the endpoint
+        result = builder._expand_for_endpoint(charm_id, "general-info", domain)
+
+        # THEN nothing is connected across models (container scope can't span models)
+        assert result is False
+        assert len(domain.charm_integrations) == integrations_before
+
+    def test_does_not_query_charmhub_for_other_models(self) -> None:
+        # GIVEN the same domain, with Charmhub returning no candidates
+        domain, charm_id = self._two_machine_model_domain_with_unresolved_subordinate()
+        fake = _FakeCharmhubClient(find_result=set())
+        builder = BundleBuilder(charmhub_client=fake)
+
+        # WHEN expanding the endpoint
+        builder._expand_for_endpoint(charm_id, "general-info", domain)
+
+        # THEN Charmhub is only queried once, for the owning model (m1) — never for m2
+        assert len(fake.find_charms_calls) == 1
 
 
 class TestOptimizeSolution:

@@ -213,8 +213,9 @@ class BundleBuilder:
                     # iteration would create O(N) extra integration variables and slow z3.
                     break
                 # Only integration variables were added (existing charms connected).
-                # Continue processing remaining tags: connecting existing charms is O(1)
-                # and safe to batch, reducing the total number of CEGIS iterations.
+                # Continue processing remaining tags: connecting existing charms adds no
+                # new charm variables (unlike step 2, which does), so it's cheaper to batch
+                # here than to re-run the full CEGIS loop once per connection.
         if not expanded:
             raise UncompletableBundleError(unsat_core=tags)
 
@@ -303,17 +304,22 @@ class BundleBuilder:
            charm and connect it.
 
         Tries the owning model first, then other models (for cross-model integrations).
+        Container-scoped endpoints are subordinate relations and can never span models,
+        so cross-model attempts are skipped entirely for them.
         """
         owning_model = domain.charms[charm_id].model
+        endpoint = domain.charms[charm_id].spec.endpoints[endpoint_name]
+        is_container_scoped = endpoint.scope == EndpointScope.CONTAINER
 
         # Step 1: connect any existing domain charm that fulfils the endpoint.
         if self._connect_existing_for_endpoint(charm_id, endpoint_name, domain, owning_model):
             return True
-        for other_model_ref in domain.models:
-            if other_model_ref == owning_model:
-                continue
-            if self._connect_existing_for_endpoint(charm_id, endpoint_name, domain, other_model_ref):
-                return True
+        if not is_container_scoped:
+            for other_model_ref in domain.models:
+                if other_model_ref == owning_model:
+                    continue
+                if self._connect_existing_for_endpoint(charm_id, endpoint_name, domain, other_model_ref):
+                    return True
 
         # Step 2: no existing charm helped — add the best new candidate.
         # Fetch charm details lazily: sort candidates by local priority first, then
@@ -328,12 +334,13 @@ class BundleBuilder:
         if self._add_first_available_charm(names, charm_id, endpoint_name, domain, owning_model):
             return True
 
-        for other_model_ref in domain.models:
-            if other_model_ref == owning_model:
-                continue
-            other_names = self._get_charms_for_endpoint(charm_id, endpoint_name, domain, other_model_ref)
-            if self._add_first_available_charm(other_names, charm_id, endpoint_name, domain, other_model_ref):
-                return True
+        if not is_container_scoped:
+            for other_model_ref in domain.models:
+                if other_model_ref == owning_model:
+                    continue
+                other_names = self._get_charms_for_endpoint(charm_id, endpoint_name, domain, other_model_ref)
+                if self._add_first_available_charm(other_names, charm_id, endpoint_name, domain, other_model_ref):
+                    return True
 
         return False
 
