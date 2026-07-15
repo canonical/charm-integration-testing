@@ -395,7 +395,7 @@ class BundleBuilder:
             if other_charm.model != target_model:
                 continue
             # Check this other charm has a compatible endpoint.
-            for other_ep_name, other_ep in other_charm.spec.endpoints.items():
+            for other_ep in other_charm.spec.endpoints.values():
                 if other_ep.interface != endpoint.interface:
                     continue
                 if endpoint.type == EndpointType.REQUIRES and other_ep.type != EndpointType.PROVIDES:

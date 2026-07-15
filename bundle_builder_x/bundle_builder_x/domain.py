@@ -499,6 +499,10 @@ def pair_charms_in_domain(domain: Domain, charm_a_id: int, charm_b_id: int) -> b
     same_model = model_a == model_b
 
     created_any = False
+    existing_keys = {
+        (i.requires_charm_id, i.requires_endpoint, i.provides_charm_id, i.provides_endpoint)
+        for i in domain.charm_integrations
+    }
     for ep_name_a, ep_a in charm_a.spec.endpoints.items():
         for ep_name_b, ep_b in charm_b.spec.endpoints.items():
             if ep_a.interface != ep_b.interface:
@@ -524,15 +528,10 @@ def pair_charms_in_domain(domain: Domain, charm_a_id: int, charm_b_id: int) -> b
                     continue
 
             # Skip if this integration variable already exists.
-            already = any(
-                i.requires_charm_id == req_cid
-                and i.requires_endpoint == req_ep
-                and i.provides_charm_id == prov_cid
-                and i.provides_endpoint == prov_ep
-                for i in domain.charm_integrations
-            )
-            if already:
+            key = (req_cid, req_ep, prov_cid, prov_ep)
+            if key in existing_keys:
                 continue
+            existing_keys.add(key)
 
             if same_model:
                 exists_var = z3.Bool(f"charm_integration_{prov_cid}:{prov_ep}__{req_cid}:{req_ep}_exists")
