@@ -418,3 +418,17 @@ class TestConfigureLogging:
         assert len(logger.handlers) == 1
         log_contents = (log_dir / "validator.log").read_text()
         assert log_contents.count("single message") == 1
+
+    def test_does_not_close_externally_attached_handlers(self, tmp_path: Path) -> None:
+        # GIVEN a host application has already attached its own handler to the
+        # "validators" logger before this module configures its own logging
+        external_handler = logging.NullHandler()
+        logger.addHandler(external_handler)
+
+        # WHEN
+        runner._configure_logging(log_dir=tmp_path / "validators")
+
+        # THEN the externally-attached handler is left untouched (not removed or closed),
+        # alongside the handler this module installs
+        assert external_handler in logger.handlers
+        assert len(logger.handlers) == 2

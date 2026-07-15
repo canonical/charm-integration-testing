@@ -52,6 +52,10 @@ LOG_BACKUP_COUNT = 3
 
 logger = logging.getLogger("validators")
 
+# Name used to tag handlers this module installs, so _configure_logging() can tell them
+# apart from handlers a host application may have already attached to the same logger.
+_MANAGED_HANDLER_NAME = "validators-runner-managed-handler"
+
 
 def _configure_logging(log_dir: Path = LOG_DIR) -> None:
     """Configure the "validators" logger to write to <log_dir>/validator.log.
@@ -69,11 +73,13 @@ def _configure_logging(log_dir: Path = LOG_DIR) -> None:
     # Never propagate to the root logger: some hosts (e.g. ops/charm frameworks) attach a
     # stdout stream handler there, which would leak log records into the JSON-only stdout.
     logger.propagate = False
-    # Idempotent: clear any handlers from a previous call so re-invoking this function
-    # (e.g. across tests, or multiple runs in the same process) doesn't duplicate log lines.
+    # Idempotent: clear only handlers this function previously installed (identified by
+    # name), so re-invoking it doesn't duplicate log lines but also doesn't clobber
+    # handlers a host application may have attached to this logger itself.
     for existing_handler in list(logger.handlers):
-        logger.removeHandler(existing_handler)
-        existing_handler.close()
+        if existing_handler.name == _MANAGED_HANDLER_NAME:
+            logger.removeHandler(existing_handler)
+            existing_handler.close()
 
     log_file = log_dir / "validator.log"
     formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -84,11 +90,13 @@ def _configure_logging(log_dir: Path = LOG_DIR) -> None:
         )
     except OSError as exc:
         handler = logging.StreamHandler(sys.stderr)
+        handler.set_name(_MANAGED_HANDLER_NAME)
         handler.setFormatter(formatter)
         logger.addHandler(handler)
         logger.warning(f"Could not set up logging to {log_file}, falling back to stderr: {exc}")
         return
 
+    handler.set_name(_MANAGED_HANDLER_NAME)
     handler.setFormatter(formatter)
     logger.addHandler(handler)
 
