@@ -12,8 +12,7 @@ from kubernetes import client as K8sClient  # type: ignore[import-untyped]
 from kubernetes import watch
 from kubernetes.client import ApiException  # type: ignore[import-untyped]
 
-from kubernetes_client.backend import KubernetesBackend
-from kubernetes_client.extension import KubernetesExtension
+from kubernetes_client.backend import KubernetesBackend, KubernetesExtension
 
 T = TypeVar("T")
 

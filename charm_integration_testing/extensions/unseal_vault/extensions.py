@@ -5,7 +5,7 @@ import logging
 from abc import ABC
 
 from juju import JujuBackend, JujuExtension
-from kubernetes_client import KubernetesExtension
+from kubernetes_client.backend import KubernetesExtension
 
 from .vault_client import VaultClientJujuExec, VaultClientJujuExecPebble
 from .vault_unsealer import CharmInfo, VaultUnsealer
@@ -36,15 +36,15 @@ class UnsealVaultJujuExtension(GenericUnsealVaultJujuExtension):
 
 
 class UnsealVaultK8sJujuExtension(GenericUnsealVaultJujuExtension, KubernetesExtension):
-    def __init__(self, juju: JujuBackend, logger: logging.Logger):
+    def __init__(self, juju: JujuBackend, logger: logging.Logger) -> None:
         super().__init__(VaultUnsealer(CharmInfo(name="vault-k8s"), VaultClientJujuExecPebble(juju), juju, logger))
 
-    def post_delete_pod(self, namespace: str, pod_name: str) -> None:
+    def post_delete_pod(self, namespace: str, _pod_name: str) -> None:
         # A deleted vault-k8s pod comes back sealed (Vault's in-memory unseal state is lost
         # on process restart). Re-unseal without re-authorizing, mirroring post_scale.
         self.vault_unsealer.try_init_or_unseal_all_vaults(namespace, authorize_charm=False)
 
-    def post_restart_statefulset(self, namespace: str, statefulset_name: str) -> None:
+    def post_restart_statefulset(self, namespace: str, _statefulset_name: str) -> None:
         # Same rationale as post_delete_pod: a StatefulSet rollout restarts every pod,
         # which seals vault-k8s again.
         self.vault_unsealer.try_init_or_unseal_all_vaults(namespace, authorize_charm=False)

@@ -2,11 +2,12 @@
 # See LICENSE file for licensing details.
 
 import logging
-from unittest.mock import MagicMock
 
 from extensions.unseal_vault.extensions import GenericUnsealVaultJujuExtension, UnsealVaultK8sJujuExtension
 from extensions.unseal_vault.vault_unsealer import VaultUnsealer
-from kubernetes_client import KubernetesExtension
+from kubernetes_client.backend import KubernetesExtension
+
+from ..shared import NullJujuBackend
 
 
 class VaultUnsealerStub(VaultUnsealer):
@@ -60,7 +61,7 @@ class TestGenericUnsealVaultJujuExtension:
 
 class TestUnsealVaultK8sJujuExtension:
     def _build_extension(self) -> UnsealVaultK8sJujuExtension:
-        extension = UnsealVaultK8sJujuExtension(MagicMock(), logging.getLogger("test"))
+        extension = UnsealVaultK8sJujuExtension(NullJujuBackend(), logging.getLogger("test"))
         extension.vault_unsealer = VaultUnsealerStub()
         return extension
 

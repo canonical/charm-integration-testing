@@ -2,9 +2,18 @@
 # See LICENSE file for licensing details.
 
 
+from abc import ABC
 from pathlib import Path
 
 from kubernetes import client, config  # type: ignore[import-untyped]
+
+
+class KubernetesExtension(ABC):
+    def post_delete_pod(self, namespace: str, pod_name: str) -> None:
+        pass
+
+    def post_restart_statefulset(self, namespace: str, statefulset_name: str) -> None:
+        pass
 
 
 class KubernetesBackend:
