@@ -23,7 +23,7 @@ class GenericUnsealVaultJujuExtension(JujuExtension, ABC):
     def post_scale(self, model: str) -> None:
         self.vault_unsealer.try_init_or_unseal_all_vaults(model, authorize_charm=False)
 
-    def post_migrate_model(self, model: str, source: str, target: str) -> None:
+    def post_migrate_model(self, model: str, _source: str, _target: str) -> None:
         # Migrating a model restarts the vault workload (e.g. a StatefulSet annotation
         # update on k8s, or a unit relocation on machines). Vault comes back sealed, so
         # it needs re-unsealing (it's already initialized and authorized, so

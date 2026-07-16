@@ -49,7 +49,7 @@ class TestGenericUnsealVaultJujuExtension:
         extension = GenericUnsealVaultJujuExtension(unsealer)
 
         # WHEN post_migrate_model is called (e.g. after migrating between controllers)
-        extension.post_migrate_model("test-model", source="source-ctrl", target="target-ctrl")
+        extension.post_migrate_model("test-model", "source-ctrl", "target-ctrl")
 
         # THEN the unsealer re-unseals vault without re-authorizing the already-authorized charm
         assert unsealer.calls == [("test-model", False)]
