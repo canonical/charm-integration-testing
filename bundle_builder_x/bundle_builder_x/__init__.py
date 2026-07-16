@@ -18,7 +18,6 @@ from .bundle_builder import (
     BundleBuilder,
     UncompletableBundleError,
     UnfulfilledEndpointInfo,
-    UnsupportedPlatformError,
 )
 from .charm import Charm, CharmChannel, CharmEndpoint, EndpointType
 from .charmhub import CharmhubClient
@@ -58,5 +57,4 @@ __all__ = [
     "Timeline",
     "UncompletableBundleError",
     "UnfulfilledEndpointInfo",
-    "UnsupportedPlatformError",
 ]

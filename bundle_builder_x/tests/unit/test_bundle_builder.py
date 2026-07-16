@@ -10,7 +10,7 @@ import pytest
 import z3  # type: ignore[import-untyped]
 
 from bundle_builder_x.assertion_tags import CharmPayload, PeerChannelMismatchTag, SubordinateBaseMismatchTag
-from bundle_builder_x.bundle_builder import BundleBuilder, UnsupportedPlatformError
+from bundle_builder_x.bundle_builder import BundleBuilder, UncompletableBundleError
 from bundle_builder_x.charm import Charm, CharmChannel, CharmEndpoint, EndpointScope, EndpointType
 from bundle_builder_x.charmhub import CharmhubClient
 from bundle_builder_x.charmhub_http import CharmReleaseNotFoundException
@@ -577,12 +577,12 @@ class TestValidatePlatforms:
 
         # WHEN the charm is placed on a kubernetes model
         # THEN validation fails with details about the mismatch
-        with pytest.raises(UnsupportedPlatformError) as exc_info:
+        with pytest.raises(UncompletableBundleError) as exc_info:
             builder._validate_platforms(spec)
-        error = exc_info.value
-        assert error.charm == "mysql"
-        assert error.model_platform == "kubernetes"
-        assert error.supported_platforms == ["machine"]
+        message = str(exc_info.value)
+        assert "mysql" in message
+        assert "kubernetes" in message
+        assert "machine" in message
 
     def test_passes_when_model_platform_in_overrides(self) -> None:
         # GIVEN a charm whose overrides allow the model platform
@@ -614,6 +614,6 @@ class TestValidatePlatforms:
 
         # WHEN validating
         # THEN the offending application is reported
-        with pytest.raises(UnsupportedPlatformError) as exc_info:
+        with pytest.raises(UncompletableBundleError) as exc_info:
             builder._validate_platforms(spec)
-        assert exc_info.value.charm == "bad"
+        assert "bad" in str(exc_info.value)
