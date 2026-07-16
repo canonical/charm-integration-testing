@@ -17,6 +17,13 @@ overrides:
       - 'bool(endpoint[client-cas]) or bool(endpoint[oauth]) => bool(endpoint[certificates])'
       - 'bool(endpoint[peer-cluster]) => config[roles] == "broker"'
       - 'not bool(endpoint[peer-cluster]) => config[roles] == "broker,controller"'
+      # A broker only knows how to reach a KRaft controller of the same track;
+      # a track-3 (ZooKeeper) peer-cluster-orchestrator has no 'controller' role
+      # and cannot serve as one, leaving the broker blocked with "application
+      # needs to be related with a KRaft controller".
+      # See: https://github.com/canonical/charm-integration-testing/issues/751
+      - 'bool(endpoint[peer-cluster]) => tracks(charms(endpoint[peer-cluster])) ==
+        tracks({self})'
 
   # latest/stable is on ubuntu/20.04 (EOL April 2025). It uses the old 'kafka'
   # interface name (renamed to 'kafka-client' in track 3). No public Charmhub
@@ -86,3 +93,9 @@ overrides:
       # See: https://github.com/canonical/charm-integration-testing/issues/309
       - "bool(endpoint[zookeeper]) => bool(endpoint[certificates])"
       - 'bool(endpoint[certificates]) == ("tls" in features(endpoint[zookeeper]))'
+      # peer-cluster-orchestrator's role semantics differ between tracks (e.g. only
+      # track-4 orchestrators can run KRaft controller mode), so a broker must only
+      # relate to an orchestrator of its own track.
+      # See: https://github.com/canonical/charm-integration-testing/issues/751
+      - 'bool(endpoint[peer-cluster]) => tracks(charms(endpoint[peer-cluster])) ==
+        tracks({self})'
