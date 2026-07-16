@@ -71,21 +71,25 @@ class TestUnsealVaultK8sJujuExtension:
     def test_post_delete_pod_reunseals_without_reauthorizing(self) -> None:
         # GIVEN an extension wrapping a stub unsealer, mimicking a vault-k8s pod deletion
         extension = self._build_extension()
+        unsealer = extension.vault_unsealer
+        assert isinstance(unsealer, VaultUnsealerStub)
 
         # WHEN post_delete_pod is called (e.g. after a pod is force-deleted by a test)
         extension.post_delete_pod("test-model", "vault-k8s-0")
 
         # THEN the unsealer re-unseals vault, using the namespace as the model, without
         # re-authorizing the already-authorized charm
-        assert extension.vault_unsealer.calls == [("test-model", False)]  # type: ignore[attr-defined]
+        assert unsealer.calls == [("test-model", False)]
 
     def test_post_restart_statefulset_reunseals_without_reauthorizing(self) -> None:
         # GIVEN an extension wrapping a stub unsealer, mimicking a statefulset rollout restart
         extension = self._build_extension()
+        unsealer = extension.vault_unsealer
+        assert isinstance(unsealer, VaultUnsealerStub)
 
         # WHEN post_restart_statefulset is called
         extension.post_restart_statefulset("test-model", "vault-k8s")
 
         # THEN the unsealer re-unseals vault, using the namespace as the model, without
         # re-authorizing the already-authorized charm
-        assert extension.vault_unsealer.calls == [("test-model", False)]  # type: ignore[attr-defined]
+        assert unsealer.calls == [("test-model", False)]
