@@ -100,6 +100,7 @@ class UnsupportedPlatformError(ValueError):
             f"but was placed on a model with platform {model_platform!r}."
         )
 
+
 class UncompletableBundleError(ValueError):
     """Exception raised when bundle builder cannot generate a complete bundle from the base bundle"""
 
