@@ -1,0 +1,30 @@
+---
+# Source: https://github.com/canonical/saml-integrator-operator
+#
+# Fixes: https://github.com/canonical/charm-integration-testing/issues/718
+#
+# saml (provides): REQUIRED - primary purpose of the charm.
+# entity_id (config): REQUIRED - CharmState.entity_id is Field(..., min_length=1) in
+#   charm_state.py; missing entity_id raises a ValidationError and the charm blocks
+#   with "invalid configuration: entity_id".
+# metadata (config): REQUIRED (in absence of `metadata_url`) - charm_state.py raises
+#   CharmConfigInvalidError("Either the metadata_url or the metadata need to be
+#   configured.") when both are unset. A static, self-contained synthetic IdP
+#   metadata document is used instead of `metadata_url` so the charm never needs to
+#   fetch a real (or fake) endpoint over the network; saml.py's SamlIntegrator only
+#   parses this XML lazily when a saml relation exists (see _update_relations).
+overrides:
+  - configs:
+      entity_id: ['https://saml-test.example.com']
+      metadata:
+        - |-
+          <?xml version="1.0"?>
+          <md:EntityDescriptor xmlns:md="urn:oasis:names:tc:SAML:2.0:metadata" entityID="https://saml-test.example.com">
+            <md:IDPSSODescriptor protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol">
+              <md:SingleSignOnService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect" Location="https://saml-test.example.com/sso"/>
+              <md:SingleLogoutService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect" Location="https://saml-test.example.com/slo"/>
+            </md:IDPSSODescriptor>
+          </md:EntityDescriptor>
+    constraints:
+      - 'set(config[entity_id])'
+      - 'set(config[metadata])'
