@@ -1,15 +1,60 @@
 ---
+# Source: https://github.com/canonical/anbox-cloud-charms (charms/ams)
+#
+# prometheus/grafana (provides): optional - legacy/secondary observability
+#   hooks, no Blocked/WaitingStatus; cos-agent is the current path.
+# etcd (requires): optional when config[use_embedded_etcd]=true - verified
+#   empirically on both charm generations (1.22, 1.29) with no etcd relation.
+# etcd-client/certificates (requires, 1.29+): alt to legacy etcd, backed by
+#   charmed etcd + TLS (src/etcd.py). Mutually exclusive with etcd - both
+#   present raises BlockedStatus (RelationConflictError in EtcdConsumer).
+# agent (requires): optional - anbox-stream-agent streaming integration,
+#   not core LXD/registry management.
+# charm-tracing/cos-agent: optional - observability, no blocking.
 overrides:
-  # -ops tracks lack grafana endpoint
+  # 1.22-ops: minimal variant; no agent endpoint, but lxd-cluster/etcd may be integrated.
   - criteria:
-      - any_of:
-          - track: '1.22-ops'
-          - track: '1.24-ops'
-          - track: '1.25-ops'
+      - track: '1.22-ops'
     requires:
       lxd-cluster:  # reached out to ams team, this should be a peer relation.
         optional: true
-  # 1.14-1.26 non-ops, latest: no send-remote-write or openfga yet
+      etcd:
+        optional: true
+    configs:
+      use_embedded_etcd: [true, false]
+    constraints:
+      - 'not config[use_embedded_etcd] => bool(endpoint[etcd])'
+  # 1.24-ops: agent endpoint added; no charm-tracing yet.
+  - criteria:
+      - track: '1.24-ops'
+    requires:
+      lxd-cluster:
+        optional: true
+      etcd:
+        optional: true
+      agent:
+        optional: true
+    configs:
+      use_embedded_etcd: [true, false]
+    constraints:
+      - 'not config[use_embedded_etcd] => bool(endpoint[etcd])'
+  # 1.25-ops: charm-tracing added.
+  - criteria:
+      - track: '1.25-ops'
+    requires:
+      lxd-cluster:
+        optional: true
+      etcd:
+        optional: true
+      agent:
+        optional: true
+      charm-tracing:
+        optional: true
+    configs:
+      use_embedded_etcd: [true, false]
+    constraints:
+      - 'not config[use_embedded_etcd] => bool(endpoint[etcd])'
+  # 1.14-1.18: no send-remote-write/openfga/agent/use_embedded_etcd yet.
   - criteria:
       - any_of:
           - track: '1.14'
@@ -17,22 +62,70 @@ overrides:
           - track: '1.16'
           - track: '1.17'
           - track: '1.18'
-          - track: '1.19'
-          - track: '1.20'
-          - track: '1.21'
-          - track: '1.22'
-          - track: '1.23'
-          - track: '1.24'
-          - track: '1.25'
-          - track: '1.26'
-          - track: 'latest'
     requires:
       lxd-cluster:
         optional: true
     provides:
       grafana:
         optional: true
-  # 1.27-1.28: send-remote-write added, openfga not yet
+      prometheus:
+        optional: true
+  # 1.19-1.21: use_embedded_etcd added, no agent endpoint yet.
+  - criteria:
+      - any_of:
+          - track: '1.19'
+          - track: '1.20'
+          - track: '1.21'
+    requires:
+      lxd-cluster:
+        optional: true
+      etcd:
+        optional: true
+    provides:
+      grafana:
+        optional: true
+      prometheus:
+        optional: true
+    configs:
+      use_embedded_etcd: [true, false]
+    constraints:
+      - 'not config[use_embedded_etcd] => bool(endpoint[etcd])'
+  # 1.22-1.26: agent endpoint added.
+  - criteria:
+      - any_of:
+          - track: '1.22'
+          - track: '1.23'
+          - track: '1.24'
+          - track: '1.25'
+          - track: '1.26'
+    requires:
+      lxd-cluster:
+        optional: true
+      etcd:
+        optional: true
+      agent:
+        optional: true
+    provides:
+      grafana:
+        optional: true
+      prometheus:
+        optional: true
+    configs:
+      use_embedded_etcd: [true, false]
+    constraints:
+      - 'not config[use_embedded_etcd] => bool(endpoint[etcd])'
+  # latest: no agent/use_embedded_etcd (etcd stays required).
+  - criteria:
+      - track: 'latest'
+    requires:
+      lxd-cluster:
+        optional: true
+    provides:
+      grafana:
+        optional: true
+      prometheus:
+        optional: true
+  # 1.27-1.28: send-remote-write, charm-tracing, cos-agent added.
   - criteria:
       - any_of:
           - track: '1.27'
@@ -42,10 +135,24 @@ overrides:
         optional: true
       send-remote-write:
         optional: true
+      etcd:
+        optional: true
+      agent:
+        optional: true
+      charm-tracing:
+        optional: true
     provides:
       grafana:
         optional: true
-  # default (1.29+): all four endpoints
+      prometheus:
+        optional: true
+      cos-agent:
+        optional: true
+    configs:
+      use_embedded_etcd: [true, false]
+    constraints:
+      - 'not config[use_embedded_etcd] => bool(endpoint[etcd])'
+  # default (1.29+): etcd-client/certificates added as alt to legacy etcd.
   - requires:
       lxd-cluster:
         optional: true
@@ -53,6 +160,26 @@ overrides:
         optional: true
       send-remote-write:
         optional: true
+      etcd:
+        optional: true
+      etcd-client:
+        optional: true
+      certificates:
+        optional: true
+      agent:
+        optional: true
+      charm-tracing:
+        optional: true
     provides:
       grafana:
         optional: true
+      prometheus:
+        optional: true
+      cos-agent:
+        optional: true
+    configs:
+      use_embedded_etcd: [true, false]
+    constraints:
+      - 'not config[use_embedded_etcd] => bool(endpoint[etcd]) or bool(endpoint[etcd-client])'
+      - 'not (bool(endpoint[etcd]) and bool(endpoint[etcd-client]))'
+      - 'bool(endpoint[etcd-client]) => bool(endpoint[certificates])'
