@@ -377,17 +377,25 @@ class TestConnectionDataSelection:
         # THEN the requirer reads the remote provider unit databag, not its own
         assert data == REMOTE_DATABAG
 
-    def test_requires_merges_multiple_provider_units_in_sorted_order(self) -> None:
-        # GIVEN two provider units whose databags overlap on 'host'
+    def test_requires_selects_single_complete_unit_without_merging(self) -> None:
+        # GIVEN two provider units where the lowest-sorted unit is incomplete and
+        # a higher-sorted unit publishes a complete, coherent databag
         app = ApplicationStub()
         provider_unit_0 = UnitStub("mysql/0")
         provider_unit_1 = UnitStub("mysql/1")
+        complete = {
+            "host": "10.0.0.2",
+            "port": "3306",
+            "user": "u1",
+            "password": "p1",
+            "database": "db1",
+        }
         relation = RelationStub(
             app=app,
             data={
                 app: {},
-                provider_unit_0: {"host": "10.0.0.1", "user": "shared-user"},
-                provider_unit_1: {"host": "10.0.0.2", "database": "shared-db"},
+                provider_unit_0: {"host": "10.0.0.1", "user": "u0"},
+                provider_unit_1: dict(complete),
             },
             name="mysql",
             id=0,
@@ -399,9 +407,58 @@ class TestConnectionDataSelection:
         # WHEN resolving the connection databag
         data = validator._connection_data()
 
-        # THEN fields from both units are merged, and the higher-sorted unit
-        # (mysql/1) wins on the conflicting 'host' key
-        assert data == {"host": "10.0.0.2", "user": "shared-user", "database": "shared-db"}
+        # THEN the complete unit databag is returned verbatim, with no fields
+        # merged in from the incomplete unit
+        assert data == complete
+
+    def test_requires_prefers_lowest_sorted_complete_unit(self) -> None:
+        # GIVEN two provider units that both publish complete but different databags
+        app = ApplicationStub()
+        provider_unit_0 = UnitStub("mysql/0")
+        provider_unit_1 = UnitStub("mysql/1")
+        first = {**VALID_DATABAG, "host": "10.0.0.1"}
+        second = {**VALID_DATABAG, "host": "10.0.0.2"}
+        relation = RelationStub(
+            app=app,
+            data={app: {}, provider_unit_0: dict(first), provider_unit_1: dict(second)},
+            name="mysql",
+            id=0,
+            units=frozenset({provider_unit_0, provider_unit_1}),
+        )
+        charm = make_charm_from_relation(relation, interface_name="mysql", role=RelationRoleStub.requires)
+        validator = MySQLValidator(cast(ops.CharmBase, charm), cast(ops.Relation, relation))
+
+        # WHEN resolving the connection databag
+        data = validator._connection_data()
+
+        # THEN the lowest-sorted unit (mysql/0) is chosen deterministically
+        assert data == first
+
+    def test_requires_falls_back_to_lowest_unit_when_none_complete(self) -> None:
+        # GIVEN two provider units that both publish incomplete databags
+        app = ApplicationStub()
+        provider_unit_0 = UnitStub("mysql/0")
+        provider_unit_1 = UnitStub("mysql/1")
+        relation = RelationStub(
+            app=app,
+            data={
+                app: {},
+                provider_unit_0: {"host": "10.0.0.1"},
+                provider_unit_1: {"user": "u1"},
+            },
+            name="mysql",
+            id=0,
+            units=frozenset({provider_unit_0, provider_unit_1}),
+        )
+        charm = make_charm_from_relation(relation, interface_name="mysql", role=RelationRoleStub.requires)
+        validator = MySQLValidator(cast(ops.CharmBase, charm), cast(ops.Relation, relation))
+
+        # WHEN resolving the connection databag
+        data = validator._connection_data()
+
+        # THEN the lowest-sorted unit's databag is returned unmerged, so the
+        # schema check surfaces a deterministic failure rather than a hybrid
+        assert data == {"host": "10.0.0.1"}
 
     def test_schema_ignores_application_databag(self) -> None:
         # GIVEN a provider whose *application* databag is complete but whose own

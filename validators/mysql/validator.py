@@ -243,16 +243,27 @@ class MySQLValidator(BaseValidator):
 
         The legacy ``mysql`` interface is unit scoped, so the connection details
         published by the provider live on a *unit* databag. When validating the
-        provider side we read our own unit databag; when validating the requirer
-        side we merge the remote provider unit databag(s).
+        provider side we read our own unit databag.
+
+        On the requirer side there may be several remote provider units. Because
+        each unit databag is a self-contained set of connection fields, we must
+        never merge them: combining fields from different units could silently
+        produce an invalid hybrid (e.g. ``host`` from one unit with credentials
+        from another). Instead we select a *single* databag deterministically:
+        the lowest-sorted remote unit whose databag publishes every required
+        field, falling back to the lowest-sorted unit's databag so an incomplete
+        deployment surfaces a deterministic schema failure.
         """
         if self.role == "provides":
             return dict(self.relation.data.get(self.charm.unit, {}))
 
-        merged: dict[str, str] = {}
-        for unit in sorted(self.relation.units, key=lambda u: u.name):
-            merged.update(self.relation.data.get(unit, {}))
-        return merged
+        databags = [
+            dict(self.relation.data.get(unit, {})) for unit in sorted(self.relation.units, key=lambda u: u.name)
+        ]
+        for databag in databags:
+            if all(str(databag.get(field, "")).strip() for field in _REQUIRED_FIELDS):
+                return databag
+        return databags[0] if databags else {}
 
     def _connect(self, data: dict[str, str]) -> "pymysql.connections.Connection":
         """Open a PyMySQL connection using the resolved connection fields."""
