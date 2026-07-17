@@ -173,7 +173,7 @@ def _validate_type(source_data: dict[str, Any]) -> ValidationCheck:
     return ValidationCheck(name="datasource_type", passed=True, message=f"OK ({datasource_type!r})")
 
 
-def _extract_datasource_url(databag: dict[str, str], relation: Any) -> tuple[ValidationCheck, str]:
+def _extract_datasource_url(databag: dict[str, str], relation: ops.Relation) -> tuple[ValidationCheck, str]:
     """Resolve the datasource URL from the app-level or per-unit databag.
 
     Prefers the application-level 'grafana_source_app_host' (stable, load-balanced
@@ -219,8 +219,12 @@ def _validate_auth_fields(source_data: dict[str, Any]) -> tuple[ValidationCheck,
     registering the datasource with Grafana ('basicAuth', 'basicAuthUser',
     'basicAuthPassword'), or an empty dict when basic auth is not configured.
     """
-    extra_fields = source_data.get("extra_fields") or {}
-    secure_extra_fields = source_data.get("secure_extra_fields") or {}
+    extra_fields = source_data.get("extra_fields")
+    secure_extra_fields = source_data.get("secure_extra_fields")
+    if extra_fields is None:
+        extra_fields = {}
+    if secure_extra_fields is None:
+        secure_extra_fields = {}
     if not isinstance(extra_fields, dict) or not isinstance(secure_extra_fields, dict):
         return (
             ValidationCheck(
