@@ -96,7 +96,6 @@ class PostgreSQLClientValidator(BaseValidator):
 
     def _validate_deep(self) -> ValidationResult:
         """L2: Read/Write capability with canary table (create, write, read-verify, cleanup)."""
-        start_time = time.monotonic()
         timeout_secs = 10
         checks: list[ValidationCheck] = []
 
@@ -123,6 +122,11 @@ class PostgreSQLClientValidator(BaseValidator):
             return self._make_result(level="deep", checks=checks)
 
         # --- 5. Connect ---
+        # Latency is timed from here, not from the top of the function, so that
+        # Juju secret/relation-data resolution (steps 1-4) - which can be slow for
+        # cross-model relations independent of the database itself - is not counted
+        # against the database round-trip budget below.
+        start_time = time.monotonic()
         try:
             conn = self._connect(uri)
             conn.autocommit = True
