@@ -26,10 +26,10 @@ from test_suite.test_resource_consistency_report import (
 )
 
 
-def _pvc(name: str, storage: str = "1Gi", application: str = "") -> PvcSnapshot:
+def _pvc(name: str, storage: str = "1Gi", application: str = "", namespace: str = "test-model") -> PvcSnapshot:
     return PvcSnapshot(
         name=name,
-        namespace="test-model",
+        namespace=namespace,
         storage_class="csi-cephfs",
         requested_storage=storage,
         phase="Bound",
@@ -248,7 +248,10 @@ class TestKubernetesResourceCollector:
         client = _FakeKubernetesClient([_raw_pvc("data-0")])
 
         # WHEN the collector gathers resources
-        collected = KubernetesResourceCollector(client, registry).collect(_LOGGER)  # type: ignore[arg-type]
+        collected = KubernetesResourceCollector(
+            {"test-controller": client},  # type: ignore[arg-type]
+            registry,  # type: ignore[arg-type]
+        ).collect(_LOGGER)
 
         # THEN only the model handle yields a snapshot set
         assert collected == [CollectedResources("test-model", frozenset({_pvc("data-0")}))]
@@ -259,7 +262,10 @@ class TestKubernetesResourceCollector:
         client = _RaisingKubernetesClient(ApiException(status=404))
 
         # WHEN the collector gathers resources
-        collected = KubernetesResourceCollector(client, registry).collect(_LOGGER)  # type: ignore[arg-type]
+        collected = KubernetesResourceCollector(
+            {"test-controller": client},  # type: ignore[arg-type]
+            registry,  # type: ignore[arg-type]
+        ).collect(_LOGGER)
 
         # THEN the model is still recorded, with an empty snapshot set
         assert collected == [CollectedResources("test-model", frozenset())]
@@ -277,7 +283,7 @@ class TestKubernetesResourceCollector:
 
         # WHEN the collector gathers resources
         collected = KubernetesResourceCollector(
-            client,  # type: ignore[arg-type]
+            {"test-controller": client},  # type: ignore[arg-type]
             registry,  # type: ignore[arg-type]
             resource_skips=resource_skips,
         ).collect(_LOGGER)
@@ -285,6 +291,53 @@ class TestKubernetesResourceCollector:
         # THEN only the skipping application's PVC is dropped
         assert collected == [
             CollectedResources("test-model", frozenset({_pvc("data-neighbor-0", application="neighbor")}))
+        ]
+
+    def test_each_controller_is_queried_against_its_own_cluster(self) -> None:
+        # GIVEN a CMR-style registry with models on two different Kubernetes controllers
+        registry = _FakeResourceRegistry(
+            [
+                JujuModelHandle(controller="target-controller", model="target-model"),
+                JujuModelHandle(controller="neighbor-controller", model="neighbor-model"),
+            ]
+        )
+        target_client = _FakeKubernetesClient([_raw_pvc("data-target-0")])
+        neighbor_client = _FakeKubernetesClient([_raw_pvc("data-neighbor-0")])
+
+        # WHEN the collector gathers resources using a per-controller client mapping
+        collected = KubernetesResourceCollector(
+            {"target-controller": target_client, "neighbor-controller": neighbor_client},  # type: ignore[arg-type]
+            registry,  # type: ignore[arg-type]
+        ).collect(_LOGGER)
+
+        # THEN each model is queried against its own controller's client
+        assert target_client.requested_model == "target-model"
+        assert neighbor_client.requested_model == "neighbor-model"
+        assert set(collected) == {
+            CollectedResources("target-model", frozenset({_pvc("data-target-0", namespace="target-model")})),
+            CollectedResources("neighbor-model", frozenset({_pvc("data-neighbor-0", namespace="neighbor-model")})),
+        }
+
+    def test_models_on_a_controller_without_a_kubernetes_client_are_skipped(self) -> None:
+        # GIVEN a CMR-style registry where the neighbor controller has no Kubernetes
+        # client (e.g. it is bootstrapped on OpenStack, not Kubernetes)
+        registry = _FakeResourceRegistry(
+            [
+                JujuModelHandle(controller="target-controller", model="target-model"),
+                JujuModelHandle(controller="neighbor-controller", model="neighbor-model"),
+            ]
+        )
+        target_client = _FakeKubernetesClient([_raw_pvc("data-target-0")])
+
+        # WHEN the collector gathers resources with only the target controller mapped
+        collected = KubernetesResourceCollector(
+            {"target-controller": target_client},  # type: ignore[arg-type]
+            registry,  # type: ignore[arg-type]
+        ).collect(_LOGGER)
+
+        # THEN only the target model is recorded; the non-Kubernetes neighbor is skipped entirely
+        assert collected == [
+            CollectedResources("target-model", frozenset({_pvc("data-target-0", namespace="target-model")}))
         ]
 
 

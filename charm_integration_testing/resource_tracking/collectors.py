@@ -49,6 +49,14 @@ class ResourceCollector(Protocol):
 class KubernetesResourceCollector:
     """Collects resource snapshots for every registered Kubernetes model.
 
+    A CMR run can span multiple Juju controllers, each potentially bootstrapped
+    on a different cloud (e.g. two Kubernetes clusters, or a Kubernetes target
+    with an OpenStack neighbor).  ``kubernetes_clients`` maps each Kubernetes
+    controller name to the client for its cloud, so every registered model is
+    queried against the cluster it actually lives on rather than always the
+    target's.  A controller absent from the mapping (e.g. it is not
+    Kubernetes-based) is simply skipped - its models contribute no snapshots.
+
     Resources can be excluded per application via ``resource_skips``: a mapping
     of application name to the resource types that application opts out of.  A
     snapshot is dropped when its owning application skips its resource type, so
@@ -57,12 +65,12 @@ class KubernetesResourceCollector:
 
     def __init__(
         self,
-        kubernetes_client: KubernetesClient,
+        kubernetes_clients: Mapping[str, KubernetesClient],
         resource_registry: ResourceRegistry,
         sources: Sequence[KubernetesResourceSource] | None = None,
         resource_skips: Mapping[str, frozenset[str]] | None = None,
     ) -> None:
-        self._kubernetes_client = kubernetes_client
+        self._kubernetes_clients = kubernetes_clients
         self._resource_registry = resource_registry
         self._sources: tuple[KubernetesResourceSource, ...] = tuple(sources) if sources is not None else (PvcSource(),)
         self._resource_skips: Mapping[str, frozenset[str]] = resource_skips if resource_skips is not None else {}
@@ -72,10 +80,15 @@ class KubernetesResourceCollector:
         for handle in self._resource_registry.registered_handles():
             if not isinstance(handle, JujuModelHandle):
                 continue
+            kubernetes_client = self._kubernetes_clients.get(handle.controller)
+            if kubernetes_client is None:
+                # The model's controller is not Kubernetes-based (or its client
+                # could not be resolved) - nothing to collect there.
+                continue
             snapshots: set[ResourceSnapshot] = set()
             for source in self._sources:
                 try:
-                    snapshots.update(source.collect(self._kubernetes_client, handle.model))
+                    snapshots.update(source.collect(kubernetes_client, handle.model))
                 except ApiException as exc:
                     # A model whose namespace does not exist (e.g. a non-Kubernetes
                     # model) is skipped rather than raising.
