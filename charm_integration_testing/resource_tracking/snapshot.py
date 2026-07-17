@@ -163,9 +163,9 @@ class ServiceSnapshot:
 class ConfigMapSnapshot:
     """Immutable point-in-time view of a single ConfigMap.
 
-    Only the presence and the set of ``data_keys`` form the identity; the values
-    are excluded because configuration content legitimately changes between
-    scheduler states.
+    The identity is ``(namespace, name)``; ``data_keys`` is tracked as an
+    attribute for reporting but is not part of the identity because the set of
+    keys can legitimately change between scheduler states.
     """
 
     name: str

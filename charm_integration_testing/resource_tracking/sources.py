@@ -69,7 +69,11 @@ def _rules(rules: Any) -> str:
     """Return a stable ``verbs:resources`` summary of RBAC policy rules."""
     if not rules:
         return ""
-    summaries = [f"{','.join(sorted(rule.verbs or []))}:{','.join(sorted(rule.resources or []))}" for rule in rules]
+    summaries = []
+    for rule in rules:
+        verbs = ",".join(sorted(rule.verbs or []))
+        resources = ",".join(sorted(rule.resources or []))
+        summaries.append(f"{verbs}:{resources}")
     return ";".join(sorted(summaries))
 
 
