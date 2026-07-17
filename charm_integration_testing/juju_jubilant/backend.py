@@ -639,6 +639,19 @@ class JubilantBackend(JujuCmdBackend):
             )
         return path
 
+    def get_kubernetes_client_for_controller(self, controller: str) -> KubernetesClient | None:
+        """Return a KubernetesClient for a K8s controller's cloud, or None for machine controllers.
+
+        Cloud type is determined by querying Juju (show_model().type), never by
+        whether a kubeconfig was supplied. Returning None unambiguously means the
+        controller is machine-based. Client construction is delegated to
+        ``get_kubernetes_client``, which caches per cloud.
+        """
+        if not self.is_k8s_controller(controller):
+            return None
+        model_info = self.client.model(f"{controller}:controller").show_model()
+        return self.get_kubernetes_client(model_info.cloud)
+
     def reboot_model_controller(self, model: str) -> None:
         controller_name = self.status(model).model.controller
         controller_model = f"{controller_name}:controller"

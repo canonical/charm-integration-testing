@@ -2,14 +2,11 @@
 # See LICENSE file for licensing details.
 
 import logging
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-import resource_tracking.collectors as collectors_module
 from juju.resource_registry import JujuControllerHandle, JujuModelHandle
 from kubernetes.client import ApiException  # type: ignore[import-untyped]
-from kubernetes_client import KubernetesBackend
 from resource_tracking import (
     CollectedResources,
     DiscrepancyEntry,
@@ -88,6 +85,21 @@ class _FakeResourceRegistry:
 
     def registered_handles(self) -> list[object]:
         return self._handles
+
+
+class _FakeJujuBackend:
+    """Stand-in exposing only the method KubernetesResourceCollector depends on."""
+
+    def __init__(
+        self, clients_by_controller: dict[str, object | None] | None = None, error: Exception | None = None
+    ) -> None:
+        self._clients_by_controller = clients_by_controller or {}
+        self._error = error
+
+    def get_kubernetes_client_for_controller(self, controller: str) -> object | None:
+        if self._error is not None:
+            raise self._error
+        return self._clients_by_controller.get(controller)
 
 
 class _FakeCollector:
@@ -249,10 +261,11 @@ class TestKubernetesResourceCollector:
             ]
         )
         client = _FakeKubernetesClient([_raw_pvc("data-0")])
+        backend = _FakeJujuBackend({"test-controller": client})
 
         # WHEN the collector gathers resources
         collected = KubernetesResourceCollector(
-            {"test-controller": client},  # type: ignore[dict-item]
+            backend,  # type: ignore[arg-type]
             registry,  # type: ignore[arg-type]
         ).collect(_LOGGER)
 
@@ -263,10 +276,11 @@ class TestKubernetesResourceCollector:
         # GIVEN a client whose PVC listing fails
         registry = _FakeResourceRegistry([JujuModelHandle(controller="test-controller", model="test-model")])
         client = _RaisingKubernetesClient(ApiException(status=404))
+        backend = _FakeJujuBackend({"test-controller": client})
 
         # WHEN the collector gathers resources
         collected = KubernetesResourceCollector(
-            {"test-controller": client},  # type: ignore[dict-item]
+            backend,  # type: ignore[arg-type]
             registry,  # type: ignore[arg-type]
         ).collect(_LOGGER)
 
@@ -282,11 +296,12 @@ class TestKubernetesResourceCollector:
                 _raw_pvc("data-neighbor-0", labels={"app.kubernetes.io/name": "neighbor"}),
             ]
         )
+        backend = _FakeJujuBackend({"test-controller": client})
         resource_skips = {"target": frozenset({"pvc"})}
 
         # WHEN the collector gathers resources
         collected = KubernetesResourceCollector(
-            {"test-controller": client},  # type: ignore[dict-item]
+            backend,  # type: ignore[arg-type]
             registry,  # type: ignore[arg-type]
             resource_skips=resource_skips,
         ).collect(_LOGGER)
@@ -306,10 +321,11 @@ class TestKubernetesResourceCollector:
         )
         target_client = _FakeKubernetesClient([_raw_pvc("data-target-0")])
         neighbor_client = _FakeKubernetesClient([_raw_pvc("data-neighbor-0")])
+        backend = _FakeJujuBackend({"target-controller": target_client, "neighbor-controller": neighbor_client})
 
-        # WHEN the collector gathers resources using a per-controller client mapping
+        # WHEN the collector gathers resources, resolving a client per controller dynamically
         collected = KubernetesResourceCollector(
-            {"target-controller": target_client, "neighbor-controller": neighbor_client},  # type: ignore[dict-item]
+            backend,  # type: ignore[arg-type]
             registry,  # type: ignore[arg-type]
         ).collect(_LOGGER)
 
@@ -331,10 +347,11 @@ class TestKubernetesResourceCollector:
             ]
         )
         target_client = _FakeKubernetesClient([_raw_pvc("data-target-0")])
+        backend = _FakeJujuBackend({"target-controller": target_client})
 
-        # WHEN the collector gathers resources with only the target controller mapped
+        # WHEN the collector gathers resources with only the target controller resolvable
         collected = KubernetesResourceCollector(
-            {"target-controller": target_client},  # type: ignore[dict-item]
+            backend,  # type: ignore[arg-type]
             registry,  # type: ignore[arg-type]
         ).collect(_LOGGER)
 
@@ -343,57 +360,19 @@ class TestKubernetesResourceCollector:
             CollectedResources("target-model", frozenset({_pvc("data-target-0", namespace="target-model")}))
         ]
 
-
-class TestKubernetesResourceCollectorBuild:
-    """KubernetesResourceCollector.build - resolves a client per registered controller."""
-
-    class _FakeJujuBackend:
-        """Stand-in exposing only the method build() depends on."""
-
-        def __init__(self, kubeconfig_by_controller: dict[str, Path | None]) -> None:
-            self._kubeconfig_by_controller = kubeconfig_by_controller
-
-        def get_controller_kubeconfig(self, controller: str) -> Path | None:
-            return self._kubeconfig_by_controller.get(controller)
-
-    def test_resolves_a_client_per_kubernetes_controller(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        # GIVEN two controllers, each with its own kubeconfig, and one non-Kubernetes
-        # controller that resolves to no kubeconfig at all
-        monkeypatch.setattr(KubernetesBackend, "k8s_client", staticmethod(lambda kubeconfig: kubeconfig))
-        monkeypatch.setattr(collectors_module, "KubernetesClient", lambda backend, logger: _FakeKubernetesClient([]))
-
-        registry = _FakeResourceRegistry(
-            [
-                JujuModelHandle(controller="target-controller", model="target-model"),
-                JujuModelHandle(controller="neighbor-controller", model="neighbor-model"),
-            ]
-        )
-        backend = self._FakeJujuBackend(
-            {
-                "target-controller": Path("/kube/target.yaml"),
-                "neighbor-controller": None,
-            }
-        )
-
-        # WHEN a collector is built from the backend
-        collector = KubernetesResourceCollector.build(backend, registry, _LOGGER)  # type: ignore[arg-type]
-
-        # THEN only the Kubernetes-based controller has a client
-        assert set(collector._kubernetes_clients) == {"target-controller"}
-
-    def test_kubeconfig_resolution_errors_contribute_no_client(self) -> None:
-        # GIVEN a controller whose kubeconfig lookup raises
-        class _RaisingJujuBackend:
-            def get_controller_kubeconfig(self, controller: str) -> None:
-                raise RuntimeError("controller unreachable")
-
+    def test_client_resolution_errors_are_skipped(self) -> None:
+        # GIVEN a backend whose client resolution raises (e.g. the controller is unreachable)
         registry = _FakeResourceRegistry([JujuModelHandle(controller="test-controller", model="test-model")])
+        backend = _FakeJujuBackend(error=RuntimeError("controller unreachable"))
 
-        # WHEN a collector is built from the backend
-        collector = KubernetesResourceCollector.build(_RaisingJujuBackend(), registry, _LOGGER)  # type: ignore[arg-type]
+        # WHEN the collector gathers resources
+        collected = KubernetesResourceCollector(
+            backend,  # type: ignore[arg-type]
+            registry,  # type: ignore[arg-type]
+        ).collect(_LOGGER)
 
-        # THEN no client is resolved for the failing controller
-        assert collector._kubernetes_clients == {}
+        # THEN the model is skipped entirely, same as an unresolvable controller
+        assert collected == []
 
 
 class TestDiffSnapshots:

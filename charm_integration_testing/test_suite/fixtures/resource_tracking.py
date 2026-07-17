@@ -129,10 +129,9 @@ def track_state_resources(
     # today, but adding an lxd/openstack collector here keeps the tracker itself
     # substrate-agnostic.
     collectors: list[ResourceCollector] = [
-        KubernetesResourceCollector.build(
+        KubernetesResourceCollector(
             juju_client.backend,
             session_resource_registry,
-            logger,
             resource_skips=resource_tracking_skips_by_application,
         )
     ]

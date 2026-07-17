@@ -16,13 +16,11 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Protocol
 
 from juju.backend import JujuBackend
 from juju.resource_registry import JujuModelHandle
 from kubernetes.client import ApiException  # type: ignore[import-untyped]
-from kubernetes_client import KubernetesBackend, KubernetesClient
 from resource_registry import ResourceRegistry
 
 from .snapshot import ResourceSnapshot
@@ -53,11 +51,12 @@ class KubernetesResourceCollector:
 
     A CMR run can span multiple Juju controllers, each potentially bootstrapped
     on a different cloud (e.g. two Kubernetes clusters, or a Kubernetes target
-    with an OpenStack neighbor).  ``kubernetes_clients`` maps each Kubernetes
-    controller name to the client for its cloud, so every registered model is
-    queried against the cluster it actually lives on rather than always the
-    target's.  A controller absent from the mapping (e.g. it is not
-    Kubernetes-based) is simply skipped - its models contribute no snapshots.
+    with an OpenStack neighbor).  Rather than resolving a client per controller
+    up front, ``collect`` asks ``juju_backend`` for a client for each model's
+    controller as it goes, so every registered model is queried against the
+    cluster it actually lives on rather than always the target's.  A controller
+    that is not Kubernetes-based (or whose client cannot be resolved) simply
+    contributes no snapshots.
 
     Resources can be excluded per application via ``resource_skips``: a mapping
     of application name to the resource types that application opts out of.  A
@@ -67,69 +66,30 @@ class KubernetesResourceCollector:
 
     def __init__(
         self,
-        kubernetes_clients: Mapping[str, KubernetesClient],
+        juju_backend: JujuBackend,
         resource_registry: ResourceRegistry,
         sources: Sequence[KubernetesResourceSource] | None = None,
         resource_skips: Mapping[str, frozenset[str]] | None = None,
     ) -> None:
-        self._kubernetes_clients = kubernetes_clients
+        self._juju_backend = juju_backend
         self._resource_registry = resource_registry
         self._sources: tuple[KubernetesResourceSource, ...] = tuple(sources) if sources is not None else (PvcSource(),)
         self._resource_skips: Mapping[str, frozenset[str]] = resource_skips if resource_skips is not None else {}
-
-    @classmethod
-    def build(
-        cls,
-        juju_backend: JujuBackend,
-        resource_registry: ResourceRegistry,
-        logger: logging.Logger,
-        sources: Sequence[KubernetesResourceSource] | None = None,
-        resource_skips: Mapping[str, frozenset[str]] | None = None,
-    ) -> "KubernetesResourceCollector":
-        """Build a collector, resolving a Kubernetes client for every registered controller.
-
-        A CMR run can involve multiple controllers across different clouds - e.g. a
-        target on one Kubernetes cluster and a neighbor on another, or a
-        target:openstack / neighbor:k8s split.  Rather than assuming every model
-        lives on the target's cluster, this scans every model currently registered
-        in ``resource_registry`` (covers target, neighbor, and any number of
-        additional controllers) and resolves a client per controller whose cloud
-        is Kubernetes-based, via ``juju_backend``.  A non-Kubernetes controller
-        (e.g. an OpenStack neighbor) simply gets no client.  Resolution is
-        best-effort: a controller that cannot be queried contributes no client.
-        """
-        controllers = {
-            handle.controller
-            for handle in resource_registry.registered_handles()
-            if isinstance(handle, JujuModelHandle)
-        }
-        clients_by_kubeconfig: dict[Path, KubernetesClient] = {}
-        kubernetes_clients: dict[str, KubernetesClient] = {}
-        for controller in controllers:
-            try:
-                kubeconfig = juju_backend.get_controller_kubeconfig(controller)
-            except Exception:
-                logger.debug("Could not resolve kubeconfig for controller '%s'.", controller, exc_info=True)
-                continue
-            if kubeconfig is None:
-                continue  # controller is not Kubernetes-based
-            kubeconfig = kubeconfig.expanduser().resolve()
-            if kubeconfig not in clients_by_kubeconfig:
-                clients_by_kubeconfig[kubeconfig] = KubernetesClient(
-                    KubernetesBackend.k8s_client(kubeconfig=kubeconfig), logger=logger
-                )
-            kubernetes_clients[controller] = clients_by_kubeconfig[kubeconfig]
-        return cls(kubernetes_clients, resource_registry, sources=sources, resource_skips=resource_skips)
 
     def collect(self, logger: logging.Logger) -> list[CollectedResources]:
         collected: list[CollectedResources] = []
         for handle in self._resource_registry.registered_handles():
             if not isinstance(handle, JujuModelHandle):
                 continue
-            kubernetes_client = self._kubernetes_clients.get(handle.controller)
+            try:
+                kubernetes_client = self._juju_backend.get_kubernetes_client_for_controller(handle.controller)
+            except Exception:
+                logger.debug(
+                    "Could not resolve Kubernetes client for controller '%s'.", handle.controller, exc_info=True
+                )
+                continue
             if kubernetes_client is None:
-                # The model's controller is not Kubernetes-based (or its client
-                # could not be resolved) - nothing to collect there.
+                # The model's controller is not Kubernetes-based - nothing to collect there.
                 continue
             snapshots: set[ResourceSnapshot] = set()
             for source in self._sources:
