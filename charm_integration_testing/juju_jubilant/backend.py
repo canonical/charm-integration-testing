@@ -647,9 +647,9 @@ class JubilantBackend(JujuCmdBackend):
         controller is machine-based. Client construction is delegated to
         ``get_kubernetes_client``, which caches per cloud.
         """
-        if not self.is_k8s_controller(controller):
-            return None
         model_info = self.client.model(f"{controller}:controller").show_model()
+        if model_info.type != "kubernetes":
+            return None
         return self.get_kubernetes_client(model_info.cloud)
 
     def reboot_model_controller(self, model: str) -> None:
