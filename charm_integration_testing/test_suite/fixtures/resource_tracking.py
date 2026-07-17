@@ -83,9 +83,11 @@ def kubernetes_clients_by_controller(
             continue
         if path is None:
             continue  # controller is not Kubernetes-based
+        path = path.expanduser().resolve()
         if path not in _kubernetes_client_cache:
             _kubernetes_client_cache[path] = KubernetesClient(
-                KubernetesBackend.k8s_client(kubeconfig=path), logger=logger
+                KubernetesBackend.k8s_client(kubeconfig=path),
+                logger=logger,
             )
         result[controller] = _kubernetes_client_cache[path]
     return result
