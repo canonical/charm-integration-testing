@@ -357,6 +357,47 @@ class TestPostgreSQLClientValidatorDeep:
         latency_check = next(c for c in result.checks if c.name == "latency")
         assert latency_check.passed
 
+    def test_deep_latency_excludes_credential_resolution_time(self) -> None:
+        # Regression test for: cross-model/secrets-based credential resolution
+        # (Juju secret-get) can be slow independent of the database itself, and
+        # must not be counted against the deep-validation latency budget.
+        # GIVEN credential resolution alone consumes more than the 10s timeout
+        # (simulated via a fake clock so the test runs instantly), but the
+        # database round trip itself is instantaneous.
+        validator = _make_validator(VALID_DATABAG)
+        cursor = CursorStub(fetchone_rows=[(42,), ("validator-probe",)])
+        conn = ConnStub(cursor_stub=cursor)
+
+        class FakeClock:
+            def __init__(self) -> None:
+                self._now = 0.0
+
+            def monotonic(self) -> float:
+                return self._now
+
+            def sleep(self, seconds: float) -> None:
+                self._now += seconds
+
+        fake_clock = FakeClock()
+        real_resolve_credentials = validator._resolve_credentials
+
+        def _slow_resolve_credentials() -> dict[str, str]:
+            fake_clock.sleep(11)  # simulate a slow Juju secret-get round trip
+            return real_resolve_credentials()
+
+        with (
+            patch.object(validator, "_resolve_credentials", side_effect=_slow_resolve_credentials),
+            patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn),
+            patch("validators.postgresql_client.validator.time", fake_clock),
+        ):
+            # WHEN
+            result = validator.validate(level="deep")
+
+        # THEN the latency check still passes because timing starts after
+        # credentials are resolved, not from the top of the function.
+        latency_check = next(c for c in result.checks if c.name == "latency")
+        assert latency_check.passed, latency_check.message
+
     def test_deep_sets_autocommit_before_any_cursor(self) -> None:
         # Regression test for: "set_session cannot be used inside a transaction"
         # GIVEN a connection that raises ProgrammingError if autocommit is set

@@ -13,6 +13,7 @@ from typing import Any, Callable, Iterator
 import pytest
 from extensions import (
     ConfigureLivepatchServerExtension,
+    LegoExtension,
     PostgresqlDatabaseReplicationExtension,
     PostgresqlK8sDatabaseReplicationExtension,
     S3IntegratorMinIOBackendExtension,
@@ -242,6 +243,7 @@ def juju_client(
         logger,
         extensions=[
             ConfigureLivepatchServerExtension(juju_backend, logger, ubuntu_pro_token),
+            LegoExtension(juju_backend, logger),
             PostgresqlDatabaseReplicationExtension(juju_backend, logger),
             PostgresqlK8sDatabaseReplicationExtension(juju_backend, logger),
             S3IntegratorMinIOBackendExtension(juju_backend, logger, minio_client_file, minio_server_file),
