@@ -280,11 +280,12 @@ class CharmhubClient:
             resources=self._get_charm_resources(charm_name, channel, metadata),
             assumes=self._get_charm_assumes(charm_name, metadata, channel),
             constraints=self._get_charm_constraints(charm_name, channel),
+            platforms=self.overrides_client.get_charm_platform_overrides(charm_name),
         )
 
     def _ensure_compatibility(self, charm: Charm, juju_version: JujuVersion | None, platform: str | None) -> Charm:
         if platform is not None:
-            supported_platforms = self.overrides_client.get_charm_platform_overrides(charm.name)
+            supported_platforms = charm.platforms
             if supported_platforms is not None and platform not in supported_platforms:
                 raise CharmReleaseNotFoundException(
                     f"Charm {charm.name} revision {charm.revision} in channel {charm.channel} supports "

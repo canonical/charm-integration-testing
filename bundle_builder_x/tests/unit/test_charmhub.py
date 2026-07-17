@@ -107,6 +107,117 @@ _EMPTY_CONFIG = CharmConfigSchema()
 
 class TestCharmhubClient:
     # ---------------------------------------------------------------------------
+    # TestBuildCharmPlatforms
+    # ---------------------------------------------------------------------------
+
+    class TestBuildCharmPlatforms:
+        """Charm.platforms is sourced from overrides at build time and consumed by
+        _ensure_compatibility, rather than each call site re-querying the overrides client.
+        """
+
+        def test_build_charm_populates_platforms_from_overrides(self) -> None:
+            # GIVEN an overrides client that restricts a charm to specific platforms
+            client = _client({"platforms": ["kubernetes"]})
+
+            # WHEN building a Charm from store metadata
+            charm = client._build_charm(
+                charm_name="ceph-mon",
+                channel=_CHANNEL,
+                revision=1,
+                ubuntu_version="22.04",
+                ubuntu_arch="amd64",
+                metadata=_METADATA_REQUIRES,
+                config_schema=_EMPTY_CONFIG,
+            )
+
+            # THEN the charm carries the overridden platforms
+            assert charm.platforms == ["kubernetes"]
+
+        def test_build_charm_platforms_is_none_without_overrides(self) -> None:
+            # GIVEN an overrides client with no platform override for the charm
+            client = _client({})
+
+            # WHEN building a Charm from store metadata
+            charm = client._build_charm(
+                charm_name="ceph-mon",
+                channel=_CHANNEL,
+                revision=1,
+                ubuntu_version="22.04",
+                ubuntu_arch="amd64",
+                metadata=_METADATA_REQUIRES,
+                config_schema=_EMPTY_CONFIG,
+            )
+
+            # THEN no platform restriction is recorded
+            assert charm.platforms is None
+
+    # ---------------------------------------------------------------------------
+    # TestEnsureCompatibility
+    # ---------------------------------------------------------------------------
+
+    class TestEnsureCompatibility:
+        """CharmhubClient._ensure_compatibility checks the requested platform against
+        charm.platforms directly - it does not re-query the overrides client.
+        """
+
+        def test_raises_when_platform_not_in_charm_platforms(self) -> None:
+            # GIVEN a built charm restricted to the kubernetes platform
+            client = _client({})
+            charm = client._build_charm(
+                charm_name="ceph-mon",
+                channel=_CHANNEL,
+                revision=1,
+                ubuntu_version="22.04",
+                ubuntu_arch="amd64",
+                metadata=_METADATA_REQUIRES,
+                config_schema=_EMPTY_CONFIG,
+            ).model_copy(update={"platforms": ["kubernetes"]})
+
+            # WHEN checking compatibility against the machine platform
+            # THEN it is rejected
+            with pytest.raises(CharmReleaseNotFoundException):
+                client._ensure_compatibility(charm, juju_version=None, platform="machine")
+
+        def test_passes_when_platform_in_charm_platforms(self) -> None:
+            # GIVEN a built charm that supports the machine platform
+            client = _client({})
+            charm = client._build_charm(
+                charm_name="ceph-mon",
+                channel=_CHANNEL,
+                revision=1,
+                ubuntu_version="22.04",
+                ubuntu_arch="amd64",
+                metadata=_METADATA_REQUIRES,
+                config_schema=_EMPTY_CONFIG,
+            ).model_copy(update={"platforms": ["machine"]})
+
+            # WHEN checking compatibility against the machine platform
+            result = client._ensure_compatibility(charm, juju_version=None, platform="machine")
+
+            # THEN the same charm is returned unchanged
+            assert result is charm
+
+        def test_passes_when_charm_platforms_is_none(self) -> None:
+            # GIVEN a built charm with no platform restriction (no override was provided)
+            client = _client({})
+            charm = client._build_charm(
+                charm_name="ceph-mon",
+                channel=_CHANNEL,
+                revision=1,
+                ubuntu_version="22.04",
+                ubuntu_arch="amd64",
+                metadata=_METADATA_REQUIRES,
+                config_schema=_EMPTY_CONFIG,
+            )
+            assert charm.platforms is None
+
+            # WHEN checking compatibility against any platform
+            result = client._ensure_compatibility(charm, juju_version=None, platform="kubernetes")
+
+            # THEN it is accepted
+            assert result is charm
+
+    # ---------------------------------------------------------------------------
     # TestChannelSupportsUbuntuVersion
     # ---------------------------------------------------------------------------
 
