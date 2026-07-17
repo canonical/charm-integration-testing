@@ -2,7 +2,9 @@
 # See LICENSE file for licensing details.
 
 import logging
+from pathlib import Path
 from types import SimpleNamespace
+from typing import Callable
 
 import pytest
 from juju.resource_registry import JujuControllerHandle, JujuModelHandle
@@ -75,6 +77,27 @@ class _RaisingKubernetesClient:
 
     def list_model_pvcs(self, model: str) -> list[SimpleNamespace]:
         raise self._error
+
+
+class _FakeJujuBackend:
+    """Stand-in exposing only the method KubernetesResourceCollector depends on."""
+
+    def __init__(self, kubeconfig_by_controller: dict[str, Path | None]) -> None:
+        self._kubeconfig_by_controller = kubeconfig_by_controller
+
+    def get_controller_kubeconfig(self, controller: str) -> Path | None:
+        return self._kubeconfig_by_controller.get(controller)
+
+
+def _client_factory(
+    clients_by_kubeconfig: dict[Path, object],
+) -> Callable[[Path, logging.Logger], object]:
+    """Build a KubernetesClientFactory that returns a fixed fake client per kubeconfig path."""
+
+    def factory(kubeconfig: Path, logger: logging.Logger) -> object:
+        return clients_by_kubeconfig[kubeconfig]
+
+    return factory
 
 
 class _FakeResourceRegistry:
@@ -245,12 +268,15 @@ class TestKubernetesResourceCollector:
                 JujuModelHandle(controller="test-controller", model="test-model"),
             ]
         )
+        kubeconfig = Path("/kube/test-controller.yaml")
         client = _FakeKubernetesClient([_raw_pvc("data-0")])
+        backend = _FakeJujuBackend({"test-controller": kubeconfig})
 
         # WHEN the collector gathers resources
         collected = KubernetesResourceCollector(
-            {"test-controller": client},  # type: ignore[dict-item]
+            backend,  # type: ignore[arg-type]
             registry,  # type: ignore[arg-type]
+            client_factory=_client_factory({kubeconfig: client}),  # type: ignore[arg-type]
         ).collect(_LOGGER)
 
         # THEN only the model handle yields a snapshot set
@@ -259,12 +285,15 @@ class TestKubernetesResourceCollector:
     def test_api_errors_are_skipped(self) -> None:
         # GIVEN a client whose PVC listing fails
         registry = _FakeResourceRegistry([JujuModelHandle(controller="test-controller", model="test-model")])
+        kubeconfig = Path("/kube/test-controller.yaml")
         client = _RaisingKubernetesClient(ApiException(status=404))
+        backend = _FakeJujuBackend({"test-controller": kubeconfig})
 
         # WHEN the collector gathers resources
         collected = KubernetesResourceCollector(
-            {"test-controller": client},  # type: ignore[dict-item]
+            backend,  # type: ignore[arg-type]
             registry,  # type: ignore[arg-type]
+            client_factory=_client_factory({kubeconfig: client}),  # type: ignore[arg-type]
         ).collect(_LOGGER)
 
         # THEN the model is still recorded, with an empty snapshot set
@@ -273,19 +302,22 @@ class TestKubernetesResourceCollector:
     def test_skips_are_scoped_to_the_owning_application(self) -> None:
         # GIVEN two PVCs owned by different applications, one of which skips PVCs
         registry = _FakeResourceRegistry([JujuModelHandle(controller="test-controller", model="test-model")])
+        kubeconfig = Path("/kube/test-controller.yaml")
         client = _FakeKubernetesClient(
             [
                 _raw_pvc("pgdata-target-0", labels={"app.kubernetes.io/name": "target"}),
                 _raw_pvc("data-neighbor-0", labels={"app.kubernetes.io/name": "neighbor"}),
             ]
         )
+        backend = _FakeJujuBackend({"test-controller": kubeconfig})
         resource_skips = {"target": frozenset({"pvc"})}
 
         # WHEN the collector gathers resources
         collected = KubernetesResourceCollector(
-            {"test-controller": client},  # type: ignore[dict-item]
+            backend,  # type: ignore[arg-type]
             registry,  # type: ignore[arg-type]
             resource_skips=resource_skips,
+            client_factory=_client_factory({kubeconfig: client}),  # type: ignore[arg-type]
         ).collect(_LOGGER)
 
         # THEN only the skipping application's PVC is dropped
@@ -301,13 +333,17 @@ class TestKubernetesResourceCollector:
                 JujuModelHandle(controller="neighbor-controller", model="neighbor-model"),
             ]
         )
+        target_kubeconfig = Path("/kube/target-controller.yaml")
+        neighbor_kubeconfig = Path("/kube/neighbor-controller.yaml")
         target_client = _FakeKubernetesClient([_raw_pvc("data-target-0")])
         neighbor_client = _FakeKubernetesClient([_raw_pvc("data-neighbor-0")])
+        backend = _FakeJujuBackend({"target-controller": target_kubeconfig, "neighbor-controller": neighbor_kubeconfig})
 
-        # WHEN the collector gathers resources using a per-controller client mapping
+        # WHEN the collector gathers resources, resolving a client per controller's kubeconfig
         collected = KubernetesResourceCollector(
-            {"target-controller": target_client, "neighbor-controller": neighbor_client},  # type: ignore[dict-item]
+            backend,  # type: ignore[arg-type]
             registry,  # type: ignore[arg-type]
+            client_factory=_client_factory({target_kubeconfig: target_client, neighbor_kubeconfig: neighbor_client}),  # type: ignore[arg-type]
         ).collect(_LOGGER)
 
         # THEN each model is queried against its own controller's client
@@ -327,18 +363,41 @@ class TestKubernetesResourceCollector:
                 JujuModelHandle(controller="neighbor-controller", model="neighbor-model"),
             ]
         )
+        target_kubeconfig = Path("/kube/target-controller.yaml")
         target_client = _FakeKubernetesClient([_raw_pvc("data-target-0")])
+        # The neighbor controller resolves to no kubeconfig at all.
+        backend = _FakeJujuBackend({"target-controller": target_kubeconfig, "neighbor-controller": None})
 
-        # WHEN the collector gathers resources with only the target controller mapped
+        # WHEN the collector gathers resources with only the target controller resolvable
         collected = KubernetesResourceCollector(
-            {"target-controller": target_client},  # type: ignore[dict-item]
+            backend,  # type: ignore[arg-type]
             registry,  # type: ignore[arg-type]
+            client_factory=_client_factory({target_kubeconfig: target_client}),  # type: ignore[arg-type]
         ).collect(_LOGGER)
 
         # THEN only the target model is recorded; the non-Kubernetes neighbor is skipped entirely
         assert collected == [
             CollectedResources("target-model", frozenset({_pvc("data-target-0", namespace="target-model")}))
         ]
+
+    def test_kubeconfig_resolution_errors_are_skipped(self) -> None:
+        # GIVEN a controller whose kubeconfig lookup raises (e.g. the controller was
+        # torn down mid-run)
+        class _RaisingJujuBackend:
+            def get_controller_kubeconfig(self, controller: str) -> Path | None:
+                raise RuntimeError("controller unreachable")
+
+        registry = _FakeResourceRegistry([JujuModelHandle(controller="test-controller", model="test-model")])
+
+        # WHEN the collector gathers resources
+        collected = KubernetesResourceCollector(
+            _RaisingJujuBackend(),  # type: ignore[arg-type]
+            registry,  # type: ignore[arg-type]
+        ).collect(_LOGGER)
+
+        # THEN the model contributes no snapshots at all (an unresolvable controller
+        # is treated the same as one that is not Kubernetes-based)
+        assert collected == []
 
 
 class TestDiffSnapshots:

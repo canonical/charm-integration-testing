@@ -21,7 +21,6 @@ from typing import Iterator
 import pytest
 from juju import JujuClient
 from juju.resource_registry import JujuModelHandle
-from kubernetes_client import KubernetesBackend, KubernetesClient
 from resource_registry import ResourceRegistry
 from resource_tracking import (
     KubernetesResourceCollector,
@@ -38,59 +37,6 @@ from test_suite.scheduler.markers import read_state_marker
 def state_resource_tracker() -> StateResourceTracker:
     """Session-scoped tracker of per-state resource baselines and discrepancies."""
     return StateResourceTracker()
-
-
-@pytest.fixture(scope="session")
-def _kubernetes_client_cache() -> dict[Path, KubernetesClient]:
-    """Session-scoped cache of Kubernetes clients keyed by kubeconfig path.
-
-    Avoids rebuilding a client for the same cloud when multiple controllers
-    (e.g. across CMR runs with several models) resolve to it.
-    """
-    return {}
-
-
-@pytest.fixture
-def kubernetes_clients_by_controller(
-    juju_client: JujuClient,
-    session_resource_registry: ResourceRegistry,
-    _kubernetes_client_cache: dict[Path, KubernetesClient],
-    logger: logging.Logger,
-) -> dict[str, KubernetesClient]:
-    """Map each registered Kubernetes controller to a client for its cloud.
-
-    A CMR run can involve multiple controllers across different clouds - e.g.
-    a target on one Kubernetes cluster and a neighbor on another, or a
-    target:openstack / neighbor:k8s split.  Rather than assuming every model
-    lives on the target's cluster, this scans every model currently registered
-    in the resource registry (covers target, neighbor, and any number of
-    additional controllers) and resolves a client per controller whose cloud is
-    Kubernetes-based.  A non-Kubernetes controller (e.g. an OpenStack neighbor)
-    is simply absent from the returned mapping.  Resolution is best-effort: a
-    controller that cannot be queried contributes no client.
-    """
-    controllers = {
-        handle.controller
-        for handle in session_resource_registry.registered_handles()
-        if isinstance(handle, JujuModelHandle)
-    }
-    result: dict[str, KubernetesClient] = {}
-    for controller in controllers:
-        try:
-            path = juju_client.backend.get_controller_kubeconfig(controller)
-        except Exception:
-            logger.debug("Could not resolve kubeconfig for controller '%s'.", controller, exc_info=True)
-            continue
-        if path is None:
-            continue  # controller is not Kubernetes-based
-        path = path.expanduser().resolve()
-        if path not in _kubernetes_client_cache:
-            _kubernetes_client_cache[path] = KubernetesClient(
-                KubernetesBackend.k8s_client(kubeconfig=path),
-                logger=logger,
-            )
-        result[controller] = _kubernetes_client_cache[path]
-    return result
 
 
 def _resource_tracking_overrides_client(
@@ -157,7 +103,7 @@ def resource_tracking_skips_by_application(
 @pytest.fixture(autouse=True)
 def track_state_resources(
     request: pytest.FixtureRequest,
-    kubernetes_clients_by_controller: dict[str, KubernetesClient],
+    juju_client: JujuClient,
     session_resource_registry: ResourceRegistry,
     state_resource_tracker: StateResourceTracker,
     resource_tracking_skips_by_application: dict[str, frozenset[str]],
@@ -181,17 +127,16 @@ def track_state_resources(
 
     # Build a collector per available substrate.  Only Kubernetes is supported
     # today, but adding an lxd/openstack collector here keeps the tracker itself
-    # substrate-agnostic.
-    collectors: list[ResourceCollector] = []
-    if kubernetes_clients_by_controller:
-        collectors.append(
-            KubernetesResourceCollector(
-                kubernetes_clients_by_controller,
-                session_resource_registry,
-                resource_skips=resource_tracking_skips_by_application,
-            )
+    # substrate-agnostic.  Kubeconfig lookup for each registered controller is
+    # delegated to the Juju backend and resolved dynamically inside the
+    # collector, rather than pre-computed here, so there is no controller/client
+    # mapping fixture that could drift out of date across a session.
+    collectors: list[ResourceCollector] = [
+        KubernetesResourceCollector(
+            juju_client.backend,
+            session_resource_registry,
+            resource_skips=resource_tracking_skips_by_application,
         )
-    if not collectors:
-        return
+    ]
 
     state_resource_tracker.collect(marker.provides, collectors, logger)
