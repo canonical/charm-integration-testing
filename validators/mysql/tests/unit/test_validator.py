@@ -402,3 +402,30 @@ class TestConnectionDataSelection:
         # THEN fields from both units are merged, and the higher-sorted unit
         # (mysql/1) wins on the conflicting 'host' key
         assert data == {"host": "10.0.0.2", "user": "shared-user", "database": "shared-db"}
+
+    def test_schema_ignores_application_databag(self) -> None:
+        # GIVEN a provider whose *application* databag is complete but whose own
+        # *unit* databag (the authoritative source for this interface) is missing
+        # required fields
+        app = ApplicationStub()
+        local_unit = UnitStub("mysql/0")
+        relation = RelationStub(
+            app=app,
+            data={app: dict(VALID_DATABAG), local_unit: {"host": "10.0.0.1"}},
+            name="mysql",
+            id=0,
+        )
+        charm = make_charm_from_relation(relation, interface_name="mysql", role=RelationRoleStub.provides)
+        charm.unit = local_unit
+        validator = MySQLValidator(cast(ops.CharmBase, charm), cast(ops.Relation, relation))
+
+        # WHEN validating at L1
+        result = validator.validate(level="simple")
+
+        # THEN the schema check fails on the unit databag despite the complete
+        # application databag
+        assert result.status == "FAIL"
+        schema = next(c for c in result.checks if c.name == "schema")
+        assert not schema.passed
+        for missing in ("user", "password", "database"):
+            assert missing in schema.message

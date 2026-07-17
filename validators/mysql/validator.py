@@ -85,7 +85,7 @@ class MySQLValidator(BaseValidator):
 
         data = self._connection_data()
 
-        schema_check = self.validate_schema(list(_REQUIRED_FIELDS), data)
+        schema_check = _check_schema(data)
         checks.append(schema_check)
         if not schema_check.passed:
             return self._make_result(level="simple", checks=checks)
@@ -136,7 +136,7 @@ class MySQLValidator(BaseValidator):
 
         data = self._connection_data()
 
-        schema_check = self.validate_schema(list(_REQUIRED_FIELDS), data)
+        schema_check = _check_schema(data)
         checks.append(schema_check)
         if not schema_check.passed:
             return self._make_result(level="deep", checks=checks)
@@ -234,12 +234,8 @@ class MySQLValidator(BaseValidator):
 
     def _check_relation_exists(self, level: ValidationLevel) -> ValidationResult | None:
         """Return an ERROR result if there is no remote application, else None."""
-        if self.relation.app is None:
-            return self._make_result(
-                status="ERROR",
-                level=level,
-                error=f"No remote application on relation '{self.endpoint}'.",
-            )
+        if not self.relation_exists():
+            return self._error_result(level, f"No remote application on relation '{self.endpoint}'.")
         return None
 
     def _connection_data(self) -> dict[str, str]:
@@ -284,6 +280,22 @@ def _resolve_port(data: dict[str, str]) -> int:
         return int(raw)
     except ValueError:
         return _DEFAULT_PORT
+
+
+def _check_schema(data: dict[str, str]) -> ValidationCheck:
+    """Validate the required fields are present on the unit-scoped databag.
+
+    Built directly from the unit-scoped connection ``data`` rather than
+    ``BaseValidator.validate_schema()``: that helper overlays the *application*
+    databag, which for this unit-scoped interface could let the schema check
+    pass on unrelated app-level fields while the unit databag is incomplete.
+    """
+    missing = [f for f in _REQUIRED_FIELDS if not str(data.get(f, "")).strip()]
+    return ValidationCheck(
+        name="schema",
+        passed=not missing,
+        message="OK" if not missing else f"Missing: {', '.join(missing)}",
+    )
 
 
 def _check_field_constraints(data: dict[str, str]) -> ValidationCheck:
