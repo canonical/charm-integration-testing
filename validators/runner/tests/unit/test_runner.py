@@ -13,15 +13,18 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import logging
 from dataclasses import dataclass, field
-from typing import Optional, cast
+from pathlib import Path
+from typing import Iterator, Optional, cast
 from unittest.mock import patch
 
 import ops
 import pytest
 
 from validators.base import BaseValidator, ValidationLevel, ValidationResult
-from validators.runner.runner import ValidatorRunner, ValidatorRunnerResults
+from validators.runner import runner
+from validators.runner.runner import ValidatorRunner, ValidatorRunnerResults, logger
 from validators.test_utils.helpers import make_charm_from_relation
 from validators.test_utils.stubs import (
     RelationRoleStub,
@@ -110,16 +113,19 @@ class TestValidatorRunnerLoadValidators:
         # THEN
         assert validators == {}
 
-    def test_skips_entry_points_that_fail_to_load(self) -> None:
+    def test_skips_entry_points_that_fail_to_load(self, caplog: pytest.LogCaptureFixture) -> None:
         # GIVEN an entry point that raises on load
         entry_point = EntryPointStub(name="test-interface", _load_error=ImportError("missing dep"))
 
-        with patch("validators.runner.runner.entry_points", return_value=[entry_point]):
-            # WHEN
-            validators = ValidatorRunner._load_validators()
+        with caplog.at_level(logging.ERROR, logger="validators"):
+            with patch("validators.runner.runner.entry_points", return_value=[entry_point]):
+                # WHEN
+                validators = ValidatorRunner._load_validators()
 
-        # THEN
+        # THEN validators are skipped and the full traceback is captured, not just the message
         assert validators == {}
+        assert "Traceback" in caplog.text
+        assert "ImportError: missing dep" in caplog.text
 
     def test_loads_valid_validator(self) -> None:
         # GIVEN a well-formed entry point
@@ -323,3 +329,106 @@ class TestValidatorRunnerRun:
             assert len(results.results) == 1
             assert results.results[0].status == "PASS"
             assert results.results[0].role == role.value
+
+
+class TestConfigureLogging:
+    """Tests for the file logging set up on the "validators" logger."""
+
+    @pytest.fixture(autouse=True)
+    def _clean_validators_logger(self) -> Iterator[None]:
+        # Snapshot full logger state up front so it can be restored exactly, not just
+        # the handlers - level/propagate are also mutated by _configure_logging() and
+        # must not leak into other test modules sharing this module-level logger.
+        original_level = logger.level
+        original_propagate = logger.propagate
+        original_handlers = list(logger.handlers)
+
+        yield None
+
+        # Always run, even if the test body fails partway through, so state never
+        # leaks onto the shared module-level "validators" logger.
+        for handler in list(logger.handlers):
+            if handler not in original_handlers:
+                logger.removeHandler(handler)
+                handler.close()
+        logger.handlers = original_handlers
+        logger.setLevel(original_level)
+        logger.propagate = original_propagate
+
+    def test_writes_to_var_log_validators(self, tmp_path: Path) -> None:
+        log_dir = tmp_path / "validators"
+
+        # WHEN
+        runner._configure_logging(log_dir=log_dir)
+        logger.info("hello from validators")
+
+        # THEN the log directory and file are created, and the message is written
+        assert log_dir.is_dir()
+        assert (log_dir / "validator.log").exists()
+        assert "hello from validators" in (log_dir / "validator.log").read_text()
+
+    def test_falls_back_to_stderr_when_log_dir_not_writable(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # GIVEN a log_dir path that already exists as a regular file, so mkdir()
+        # deterministically fails with OSError regardless of the user running the test
+        log_dir = tmp_path / "validators"
+        log_dir.write_text("not a directory")
+
+        # WHEN
+        runner._configure_logging(log_dir=log_dir)
+        logger.warning("fallback message")
+
+        # THEN nothing raised, the warning ends up on stderr, and it's formatted
+        # consistently with the file handler (level/timestamp), not bare text
+        captured = capsys.readouterr()
+        assert "WARNING" in captured.err
+        assert "fallback message" in captured.err
+
+    def test_stdout_remains_valid_json_after_logging_configured(self, tmp_path: Path) -> None:
+        log_dir = tmp_path / "validators"
+
+        runner._configure_logging(log_dir=log_dir)
+        logger.info("some diagnostic noise")
+
+        results = ValidatorRunnerResults(results=[])
+        # THEN stdout-bound output (the JSON blob) contains no log noise
+        output = results.model_dump_json()
+        assert output == '{"results":[]}'
+
+    def test_does_not_propagate_to_root_logger(self, tmp_path: Path) -> None:
+        log_dir = tmp_path / "validators"
+
+        # WHEN
+        runner._configure_logging(log_dir=log_dir)
+
+        # THEN records stay local to the "validators" logger and never reach the root
+        # logger, which some hosts (e.g. ops/charm frameworks) attach a stdout handler to
+        assert logger.propagate is False
+
+    def test_reconfiguring_does_not_duplicate_handlers_or_log_lines(self, tmp_path: Path) -> None:
+        log_dir = tmp_path / "validators"
+
+        # WHEN configured twice, as could happen across multiple runs in one process
+        runner._configure_logging(log_dir=log_dir)
+        runner._configure_logging(log_dir=log_dir)
+        logger.info("single message")
+
+        # THEN only one handler is attached, and the message appears exactly once
+        assert len(logger.handlers) == 1
+        log_contents = (log_dir / "validator.log").read_text()
+        assert log_contents.count("single message") == 1
+
+    def test_does_not_close_externally_attached_handlers(self, tmp_path: Path) -> None:
+        # GIVEN a host application has already attached its own handler to the
+        # "validators" logger before this module configures its own logging
+        external_handler = logging.NullHandler()
+        logger.addHandler(external_handler)
+
+        # WHEN
+        runner._configure_logging(log_dir=tmp_path / "validators")
+
+        # THEN the externally-attached handler is left untouched (not removed or closed),
+        # alongside the handler this module installs
+        assert external_handler in logger.handlers
+        assert len(logger.handlers) == 2
