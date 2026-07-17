@@ -89,7 +89,7 @@ def _hosts(spec: Any) -> str:
     rules = spec.rules if spec is not None else None
     if not rules:
         return ""
-    return ",".join(sorted(rule.host or "" for rule in rules))
+    return ",".join(sorted(rule.host for rule in rules if rule.host))
 
 
 class KubernetesResourceSource(Protocol):
@@ -123,7 +123,7 @@ class PvcSource:
                     storage_class=(spec.storage_class_name if spec is not None else None) or "",
                     requested_storage=(requests or {}).get("storage", ""),
                     phase=(status.phase if status is not None else None) or "",
-                    application=(pvc.metadata.labels or {}).get("app.kubernetes.io/name", ""),
+                    application=_application(pvc.metadata.labels),
                 )
             )
         return snapshots

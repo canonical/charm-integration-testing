@@ -55,7 +55,11 @@ def _listing(items: list[Any]) -> SimpleNamespace:
 class _FakeAppsApi:
     """Stand-in for AppsV1Api exposing only the list calls the sources use."""
 
-    def __init__(self, stateful_sets: list[Any] | None = None, deployments: list[Any] | None = None) -> None:
+    def __init__(
+        self,
+        stateful_sets: list[Any] | None = None,
+        deployments: list[Any] | None = None,
+    ) -> None:
         self._stateful_sets = stateful_sets or []
         self._deployments = deployments or []
         self.requested_model: str | None = None
@@ -131,11 +135,11 @@ def _client(apps: Any = None, core: Any = None) -> SimpleNamespace:
 
 
 def _patch_rbac(monkeypatch: pytest.MonkeyPatch, api: _FakeRbacApi) -> None:
-    monkeypatch.setattr(k8s_client, "RbacAuthorizationV1Api", lambda api_client: api)
+    monkeypatch.setattr(k8s_client, "RbacAuthorizationV1Api", lambda _api_client: api)
 
 
 def _patch_networking(monkeypatch: pytest.MonkeyPatch, api: _FakeNetworkingApi) -> None:
-    monkeypatch.setattr(k8s_client, "NetworkingV1Api", lambda api_client: api)
+    monkeypatch.setattr(k8s_client, "NetworkingV1Api", lambda _api_client: api)
 
 
 class TestStatefulSetSource:
