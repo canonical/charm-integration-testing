@@ -102,6 +102,7 @@ class _StubHttpClient(CharmhubHttpClient):
 _CHANNEL = CharmChannel(track="latest", risk="stable", branch="")
 _METADATA_REQUIRES = CharmMetadata(requires={"db": CharmMetadata.Endpoint(interface="pgsql")})
 _METADATA_PROVIDES = CharmMetadata(provides={"web": CharmMetadata.Endpoint(interface="http")})
+_METADATA_WITH_CONTAINERS = CharmMetadata(containers={"app": {"resource": "app-image"}})
 _EMPTY_CONFIG = CharmConfigSchema()
 
 
@@ -111,8 +112,9 @@ class TestCharmhubClient:
     # ---------------------------------------------------------------------------
 
     class TestBuildCharmPlatforms:
-        """Charm.platforms is sourced from overrides at build time and consumed by
-        _ensure_compatibility, rather than each call site re-querying the overrides client.
+        """Charm.platforms is sourced from overrides at build time when present, and
+        otherwise falls back to the charm's own metadata (mirrors _get_charm_assumes),
+        rather than each call site re-querying the overrides client.
         """
 
         def test_build_charm_populates_platforms_from_overrides(self) -> None:
@@ -130,11 +132,12 @@ class TestCharmhubClient:
                 config_schema=_EMPTY_CONFIG,
             )
 
-            # THEN the charm carries the overridden platforms
+            # THEN the charm carries the overridden platforms, not the metadata-derived ones
             assert charm.platforms == ["kubernetes"]
 
-        def test_build_charm_platforms_is_none_without_overrides(self) -> None:
-            # GIVEN an overrides client with no platform override for the charm
+        def test_build_charm_falls_back_to_machine_without_overrides_or_containers(self) -> None:
+            # GIVEN an overrides client with no platform override for the charm, and metadata
+            # with no `containers` block (a machine charm)
             client = _client({})
 
             # WHEN building a Charm from store metadata
@@ -148,8 +151,27 @@ class TestCharmhubClient:
                 config_schema=_EMPTY_CONFIG,
             )
 
-            # THEN no platform restriction is recorded
-            assert charm.platforms is None
+            # THEN the charm falls back to the machine platform
+            assert charm.platforms == ["machine"]
+
+        def test_build_charm_falls_back_to_kubernetes_when_metadata_has_containers(self) -> None:
+            # GIVEN an overrides client with no platform override for the charm, and metadata
+            # with a `containers` block (a Kubernetes sidecar charm)
+            client = _client({})
+
+            # WHEN building a Charm from store metadata
+            charm = client._build_charm(
+                charm_name="ceph-mon",
+                channel=_CHANNEL,
+                revision=1,
+                ubuntu_version="22.04",
+                ubuntu_arch="amd64",
+                metadata=_METADATA_WITH_CONTAINERS,
+                config_schema=_EMPTY_CONFIG,
+            )
+
+            # THEN the charm falls back to the kubernetes platform
+            assert charm.platforms == ["kubernetes"]
 
     # ---------------------------------------------------------------------------
     # TestEnsureCompatibility
@@ -198,7 +220,8 @@ class TestCharmhubClient:
             assert result is charm
 
         def test_passes_when_charm_platforms_is_none(self) -> None:
-            # GIVEN a built charm with no platform restriction (no override was provided)
+            # GIVEN a built charm with no platform restriction, e.g. a hand-constructed test
+            # double that never went through _get_charm_platforms
             client = _client({})
             charm = client._build_charm(
                 charm_name="ceph-mon",
@@ -208,7 +231,7 @@ class TestCharmhubClient:
                 ubuntu_arch="amd64",
                 metadata=_METADATA_REQUIRES,
                 config_schema=_EMPTY_CONFIG,
-            )
+            ).model_copy(update={"platforms": None})
             assert charm.platforms is None
 
             # WHEN checking compatibility against any platform

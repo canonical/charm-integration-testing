@@ -165,9 +165,12 @@ class Charm(BaseModel):
     resources: dict[str, list[CharmResourceValue]] = Field(default_factory=dict)
     assumes: CharmAssumesEntry = Field(default_factory=CharmAssumesEntry)
     constraints: list[AnyExpr] = Field(default_factory=list)
-    # Platforms (e.g. "machine", "kubernetes") this charm is known to support, sourced from
-    # charm platform overrides. `None` means no restriction is known (any platform is assumed
-    # compatible), as opposed to an empty list which would mean no platform is supported.
+    # Platforms (e.g. "machine", "kubernetes") this charm is known to support. Platform
+    # overrides win when present; otherwise this falls back to the charm's own metadata
+    # (a non-empty `containers` block means "kubernetes", its absence means "machine").
+    # `None` is reserved for charms built without going through `_get_charm_platforms`
+    # (e.g. hand-constructed test doubles); it means no restriction is known, as opposed
+    # to an empty list which would mean no platform is supported.
     platforms: list[str] | None = Field(default=None)
 
     def __repr__(self) -> str:
