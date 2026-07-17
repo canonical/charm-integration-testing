@@ -32,10 +32,10 @@ is integrated.
 import pytest
 
 from bundle_builder_x.bundle_builder import BundleBuilder, UncompletableBundleError
-from bundle_builder_x.charm import CharmEndpoint, EndpointType
-from bundle_builder_x.spec import AppSpec
+from bundle_builder_x.charm import Charm, CharmEndpoint, EndpointType
+from bundle_builder_x.spec import AppSpec, IntegrationSpec, ModelSpec
 
-from .conftest import CharmhubClientStub, build_single_model, make_charm
+from .conftest import JUJU_VERSION, CharmhubClientStub, build_multi_model, build_single_model, make_charm
 
 
 class TestCapabilityRequirements:
@@ -192,3 +192,110 @@ class TestCapabilityRequirements:
         charm_names = {a.charm.name for a in bundle.applications.values()}
         providers_added = charm_names & {"postgresql-a", "postgresql-b"}
         assert len(providers_added) >= 1
+
+
+class TestFeatureCoherenceCrossModelConsistency:
+    """SQT-1038 regression: feature coherence must be enforced the same way
+    regardless of whether an integration is local or cross-model.
+
+    Two charms that each unconditionally self-tag their own endpoint with a
+    feature the *other* endpoint doesn't declare (e.g. katib-db-manager's
+    "katib-service" tag vs. kfp-persistence's "kfp-api" tag) have mismatched,
+    mutually-exclusive feature requirements. That mismatch is a real modeling
+    conflict and must be rejected consistently in both topologies - it must
+    not silently succeed only because the integration happens to be cross-model.
+    """
+
+    @staticmethod
+    def _make_mismatched_charms() -> tuple[Charm, Charm]:
+        # Provider self-tags its endpoint with "provider-tag", unconditionally required.
+        provider = make_charm(
+            "provider-app",
+            endpoints={
+                "svc": CharmEndpoint(
+                    type=EndpointType.PROVIDES,
+                    interface="generic",
+                    optional=True,
+                    features=frozenset({"provider-tag"}),
+                ),
+            },
+            constraint_strs=['bool(endpoint[svc]) => "provider-tag" in features(endpoint[svc])'],
+        )
+        # Requirer self-tags its endpoint with a different, mutually exclusive tag.
+        requirer = make_charm(
+            "requirer-app",
+            endpoints={
+                "svc": CharmEndpoint(
+                    type=EndpointType.REQUIRES,
+                    interface="generic",
+                    optional=False,
+                    features=frozenset({"requirer-tag"}),
+                ),
+            },
+            constraint_strs=['bool(endpoint[svc]) => "requirer-tag" in features(endpoint[svc])'],
+        )
+        return provider, requirer
+
+    def test_mismatched_self_tags_fail_in_single_model(self) -> None:
+        # GIVEN two charms whose unconditional self-tag assertions conflict
+        provider, requirer = self._make_mismatched_charms()
+        builder = BundleBuilder(charmhub_client=CharmhubClientStub(provider, requirer))
+
+        # WHEN building both applications into the same model
+        # THEN the solver correctly rejects the mismatch
+        with pytest.raises(UncompletableBundleError):
+            build_single_model(
+                builder,
+                applications={
+                    "requirer": AppSpec(charm="requirer-app"),
+                    "provider": AppSpec(charm="provider-app"),
+                },
+                integrations=[
+                    IntegrationSpec(
+                        application="requirer",
+                        endpoint="svc",
+                        remote_application="provider",
+                        remote_endpoint="svc",
+                    ),
+                ],
+            )
+
+    def test_mismatched_self_tags_fail_across_models(self) -> None:
+        # GIVEN the same mismatched charms, but integrated across two separate models (CMR)
+        provider, requirer = self._make_mismatched_charms()
+        builder = BundleBuilder(charmhub_client=CharmhubClientStub(provider, requirer))
+
+        # WHEN building with the integration expressed as a cross-model relation
+        # THEN the solver must reject the mismatch just as it does in the single-model case -
+        # this must NOT silently succeed just because the integration is cross-model.
+        with pytest.raises(UncompletableBundleError):
+            build_multi_model(
+                builder,
+                [
+                    ModelSpec(
+                        name="target",
+                        controller="k8s",
+                        platform="kubernetes",
+                        juju=JUJU_VERSION,
+                        applications={"requirer": AppSpec(charm="requirer-app")},
+                        integrations=[
+                            IntegrationSpec(
+                                application="requirer",
+                                endpoint="svc",
+                                remote_model="neighbor",
+                                remote_controller="k8s",
+                                remote_application="provider",
+                                remote_endpoint="svc",
+                                offer_name="provider-offer",
+                            ),
+                        ],
+                    ),
+                    ModelSpec(
+                        name="neighbor",
+                        controller="k8s",
+                        platform="kubernetes",
+                        juju=JUJU_VERSION,
+                        applications={"provider": AppSpec(charm="provider-app")},
+                    ),
+                ],
+            )
