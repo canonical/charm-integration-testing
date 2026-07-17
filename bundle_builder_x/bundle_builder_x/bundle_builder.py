@@ -597,10 +597,16 @@ class BundleBuilder:
         domain: Domain,
         model_ref: ModelRef,
     ) -> bool:
-        # Check if this exact charm was already added for this charm_id
+        # If an identical charm is already anywhere in the domain, adding another copy
+        # via expansion contributes nothing new: any endpoint it could satisfy was
+        # already made available (and connectable) by the existing instance in step 1
+        # of _expand_for_endpoint. Without this check, a charm whose non-optional
+        # endpoints can never be fully satisfied (e.g. a genuine dependency cycle)
+        # causes the same charm to be re-added on every iteration, growing the domain
+        # without bound instead of failing fast.
         parent_charm = domain.charms[charm_id]
-        for added_charm_id in parent_charm.charms_added:
-            if domain.charms[added_charm_id].spec == charm:
+        for existing_charm in domain.charms:
+            if existing_charm.spec == charm and existing_charm.model == model_ref:
                 return False
 
         # Traverse the dependency chain to detect cycles
