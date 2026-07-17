@@ -298,3 +298,107 @@ class TestDeep:
         write = next(c for c in result.checks if c.name == "write_read_verify")
         assert not write.passed
         assert "did not match" in write.message
+
+
+# ---------------------------------------------------------------------------
+# Role-specific databag selection (_connection_data)
+#
+# The legacy ``mysql`` interface is unit scoped, so which databag carries the
+# connection details depends on the role:
+#   provides -> the provider's own *local* unit databag.
+#   requires -> the *remote* provider unit databag(s).
+# These tests plant distinguishable decoy data on the wrong databag so that a
+# regression in ``_connection_data`` (reading the wrong side) cannot pass by
+# coincidentally finding valid-looking fields.
+# ---------------------------------------------------------------------------
+
+
+LOCAL_DATABAG: dict[str, str] = {
+    "host": "10.0.0.1",
+    "port": "3306",
+    "user": "local-user",
+    "password": "local-password",
+    "database": "local-db",
+}
+
+REMOTE_DATABAG: dict[str, str] = {
+    "host": "10.0.0.2",
+    "port": "3307",
+    "user": "remote-user",
+    "password": "remote-password",
+    "database": "remote-db",
+}
+
+
+class TestConnectionDataSelection:
+    def test_provides_reads_local_unit_and_ignores_remote_units(self) -> None:
+        # GIVEN a provider whose own unit databag holds the real details while a
+        # remote unit databag holds decoy details
+        app = ApplicationStub()
+        local_unit = UnitStub("mysql/0")
+        remote_unit = UnitStub("wordpress/0")
+        relation = RelationStub(
+            app=app,
+            data={app: {}, local_unit: dict(LOCAL_DATABAG), remote_unit: dict(REMOTE_DATABAG)},
+            name="mysql",
+            id=0,
+            units=frozenset({remote_unit}),
+        )
+        charm = make_charm_from_relation(relation, interface_name="mysql", role=RelationRoleStub.provides)
+        charm.unit = local_unit
+        validator = MySQLValidator(cast(ops.CharmBase, charm), cast(ops.Relation, relation))
+
+        # WHEN resolving the connection databag
+        data = validator._connection_data()
+
+        # THEN the provider reads its own unit databag, not the remote one
+        assert data == LOCAL_DATABAG
+
+    def test_requires_reads_remote_provider_unit_and_ignores_local_unit(self) -> None:
+        # GIVEN a requirer whose own unit databag holds decoy details while the
+        # remote provider unit databag holds the real details
+        app = ApplicationStub()
+        local_unit = UnitStub("apache-guacamole/0")
+        provider_unit = UnitStub("mysql/0")
+        relation = RelationStub(
+            app=app,
+            data={app: {}, local_unit: dict(LOCAL_DATABAG), provider_unit: dict(REMOTE_DATABAG)},
+            name="mysql",
+            id=0,
+            units=frozenset({provider_unit}),
+        )
+        charm = make_charm_from_relation(relation, interface_name="mysql", role=RelationRoleStub.requires)
+        charm.unit = local_unit
+        validator = MySQLValidator(cast(ops.CharmBase, charm), cast(ops.Relation, relation))
+
+        # WHEN resolving the connection databag
+        data = validator._connection_data()
+
+        # THEN the requirer reads the remote provider unit databag, not its own
+        assert data == REMOTE_DATABAG
+
+    def test_requires_merges_multiple_provider_units_in_sorted_order(self) -> None:
+        # GIVEN two provider units whose databags overlap on 'host'
+        app = ApplicationStub()
+        provider_unit_0 = UnitStub("mysql/0")
+        provider_unit_1 = UnitStub("mysql/1")
+        relation = RelationStub(
+            app=app,
+            data={
+                app: {},
+                provider_unit_0: {"host": "10.0.0.1", "user": "shared-user"},
+                provider_unit_1: {"host": "10.0.0.2", "database": "shared-db"},
+            },
+            name="mysql",
+            id=0,
+            units=frozenset({provider_unit_0, provider_unit_1}),
+        )
+        charm = make_charm_from_relation(relation, interface_name="mysql", role=RelationRoleStub.requires)
+        validator = MySQLValidator(cast(ops.CharmBase, charm), cast(ops.Relation, relation))
+
+        # WHEN resolving the connection databag
+        data = validator._connection_data()
+
+        # THEN fields from both units are merged, and the higher-sorted unit
+        # (mysql/1) wins on the conflicting 'host' key
+        assert data == {"host": "10.0.0.2", "user": "shared-user", "database": "shared-db"}
