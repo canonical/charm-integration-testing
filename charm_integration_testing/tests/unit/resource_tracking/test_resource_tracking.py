@@ -249,7 +249,7 @@ class TestKubernetesResourceCollector:
 
         # WHEN the collector gathers resources
         collected = KubernetesResourceCollector(
-            {"test-controller": client},  # type: ignore[arg-type]
+            {"test-controller": client},  # type: ignore[dict-item]
             registry,  # type: ignore[arg-type]
         ).collect(_LOGGER)
 
@@ -263,7 +263,7 @@ class TestKubernetesResourceCollector:
 
         # WHEN the collector gathers resources
         collected = KubernetesResourceCollector(
-            {"test-controller": client},  # type: ignore[arg-type]
+            {"test-controller": client},  # type: ignore[dict-item]
             registry,  # type: ignore[arg-type]
         ).collect(_LOGGER)
 
@@ -283,7 +283,7 @@ class TestKubernetesResourceCollector:
 
         # WHEN the collector gathers resources
         collected = KubernetesResourceCollector(
-            {"test-controller": client},  # type: ignore[arg-type]
+            {"test-controller": client},  # type: ignore[dict-item]
             registry,  # type: ignore[arg-type]
             resource_skips=resource_skips,
         ).collect(_LOGGER)
@@ -306,7 +306,7 @@ class TestKubernetesResourceCollector:
 
         # WHEN the collector gathers resources using a per-controller client mapping
         collected = KubernetesResourceCollector(
-            {"target-controller": target_client, "neighbor-controller": neighbor_client},  # type: ignore[arg-type]
+            {"target-controller": target_client, "neighbor-controller": neighbor_client},  # type: ignore[dict-item]
             registry,  # type: ignore[arg-type]
         ).collect(_LOGGER)
 
@@ -331,7 +331,7 @@ class TestKubernetesResourceCollector:
 
         # WHEN the collector gathers resources with only the target controller mapped
         collected = KubernetesResourceCollector(
-            {"target-controller": target_client},  # type: ignore[arg-type]
+            {"target-controller": target_client},  # type: ignore[dict-item]
             registry,  # type: ignore[arg-type]
         ).collect(_LOGGER)
 
