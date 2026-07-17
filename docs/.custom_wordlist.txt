@@ -132,3 +132,11 @@ SCPs
 validator
 validators
 virtualenv
+dataclass
+hashable
+PVC
+PVCs
+PersistentVolumeClaim
+PersistentVolumeClaims
+trackable
+selectable

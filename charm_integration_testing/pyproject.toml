@@ -32,6 +32,7 @@ packages = [
     { include = "juju_jubilant" },
     { include = "kubernetes_client" },
     { include = "resource_registry" },
+    { include = "resource_tracking" },
     { include = "serializeable_dataclass" },
     { include = "test_suite" },
     { include = "utils" },
