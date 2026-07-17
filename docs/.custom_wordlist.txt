@@ -140,3 +140,10 @@ PersistentVolumeClaim
 PersistentVolumeClaims
 trackable
 selectable
+StatefulSet
+ReplicaSet
+ReplicaSets
+UIDs
+lifecycle
+rollout
+untracked
