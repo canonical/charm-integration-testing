@@ -84,7 +84,8 @@ class GrafanaDatasourceValidator(BaseValidator):
 
         type_check = _validate_type(source_data)
         checks.append(type_check)
-
+        if not type_check.passed:
+            return self._fail_result(level, checks)
         url_check, url = _extract_datasource_url(self.databag, self.relation)
         checks.append(url_check)
         if not url_check.passed:

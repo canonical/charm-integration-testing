@@ -87,7 +87,7 @@ class TestGrafanaDatasourceValidatorSimple:
         result = validator.validate(level="uat")
         assert result.status == "SKIPPED"
 
-    def test_error_when_relation_app_is_none(self) -> None:
+    def test_error_when_relation_app_databag_missing(self) -> None:
         app = ApplicationStub()
         relation = RelationStub(name="grafana-source", id=0, app=app, data={})
         del relation.data[app]
