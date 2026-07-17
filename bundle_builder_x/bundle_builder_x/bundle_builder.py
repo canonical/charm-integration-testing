@@ -293,50 +293,38 @@ class BundleBuilder:
     ) -> bool:
         """Expand the domain to satisfy an unfulfilled endpoint.
 
-        Priority order:
+        Priority order, tried across the owning model first and then other models
+        (skipped entirely for container-scoped endpoints, which can never span models):
         1. Pair the endpoint charm with any already-in-domain charm that can satisfy
            it but hasn't been connected yet (no new charm vars introduced).
         2. If nothing existing can help, add the single highest-priority new fulfilling
            charm and connect it.
-
-        Tries the owning model first, then other models (for cross-model integrations).
-        Container-scoped endpoints are subordinate relations and can never span models,
-        so cross-model attempts are skipped entirely for them.
         """
         owning_model = domain.charms[charm_id].model
         endpoint = domain.charms[charm_id].spec.endpoints[endpoint_name]
         is_container_scoped = endpoint.scope == EndpointScope.CONTAINER
+        models = (
+            [owning_model] if is_container_scoped else [owning_model, *(m for m in domain.models if m != owning_model)]
+        )
 
         # Step 1: connect any existing domain charm that fulfils the endpoint.
-        if self._connect_existing_for_endpoint(charm_id, endpoint_name, domain, owning_model):
-            return True
-        if not is_container_scoped:
-            for other_model_ref in domain.models:
-                if other_model_ref == owning_model:
-                    continue
-                if self._connect_existing_for_endpoint(charm_id, endpoint_name, domain, other_model_ref):
-                    return True
+        for model_ref in models:
+            if self._connect_existing_for_endpoint(charm_id, endpoint_name, domain, model_ref):
+                return True
 
         # Step 2: no existing charm helped — add the best new candidate.
         # Fetch charm details lazily: sort candidates by local priority first, then
         # fetch full metadata only for the top-ranked candidate that can be added.
         # This avoids bulk-fetching all 50+ candidates just to pick one.
-        names = self._get_charms_for_endpoint(charm_id, endpoint_name, domain, owning_model)
-        if not names:
-            self.logger.debug(
-                f"No charms found for endpoint {domain.charms[charm_id].spec.name}:{endpoint_name} "
-                f"in model '{owning_model.key}'"
-            )
-        if self._add_first_available_charm(names, charm_id, endpoint_name, domain, owning_model):
-            return True
-
-        if not is_container_scoped:
-            for other_model_ref in domain.models:
-                if other_model_ref == owning_model:
-                    continue
-                other_names = self._get_charms_for_endpoint(charm_id, endpoint_name, domain, other_model_ref)
-                if self._add_first_available_charm(other_names, charm_id, endpoint_name, domain, other_model_ref):
-                    return True
+        for model_ref in models:
+            names = self._get_charms_for_endpoint(charm_id, endpoint_name, domain, model_ref)
+            if not names:
+                self.logger.debug(
+                    f"No charms found for endpoint {domain.charms[charm_id].spec.name}:{endpoint_name} "
+                    f"in model '{model_ref.key}'"
+                )
+            if self._add_first_available_charm(names, charm_id, endpoint_name, domain, model_ref):
+                return True
 
         return False
 
