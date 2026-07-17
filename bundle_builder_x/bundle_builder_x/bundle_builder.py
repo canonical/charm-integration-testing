@@ -204,18 +204,14 @@ class BundleBuilder:
         expanded = False
         for tag in tags:
             self.logger.debug(f"Unsat core item: {tag}")
-            charms_before = len(domain.charms)
             if self._handle_failed_assertion(tag, domain):
                 self.logger.info(f"Expanded domain to handle failed assertion tag: {tag}")
                 expanded = True
-                if len(domain.charms) > charms_before:
-                    # A new charm was added — stop here; adding more charms in the same
-                    # iteration would create O(N) extra integration variables and slow z3.
-                    break
-                # Only integration variables were added (existing charms connected).
-                # Continue processing remaining tags: connecting existing charms adds no
-                # new charm variables (unlike step 2, which does), so it's cheaper to batch
-                # here than to re-run the full CEGIS loop once per connection.
+                # Stop after the first successful expansion and let z3 re-evaluate. This
+                # costs some extra CEGIS iterations for specs with many simultaneously
+                # resolvable existing-charm connections, but keeps this loop simple and
+                # avoids over-committing new charm variables before the next re-solve.
+                break
         if not expanded:
             raise UncompletableBundleError(unsat_core=tags)
 
