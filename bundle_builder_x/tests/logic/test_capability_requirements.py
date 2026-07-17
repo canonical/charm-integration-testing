@@ -219,7 +219,7 @@ class TestFeatureCoherenceCrossModelConsistency:
                     features=frozenset({"provider-tag"}),
                 ),
             },
-            constraint_strs=['"provider-tag" in features(endpoint[svc])'],
+            constraint_strs=['bool(endpoint[svc]) => "provider-tag" in features(endpoint[svc])'],
         )
         # Requirer self-tags its endpoint with a different, mutually exclusive tag.
         requirer = make_charm(
@@ -232,7 +232,7 @@ class TestFeatureCoherenceCrossModelConsistency:
                     features=frozenset({"requirer-tag"}),
                 ),
             },
-            constraint_strs=['"requirer-tag" in features(endpoint[svc])'],
+            constraint_strs=['bool(endpoint[svc]) => "requirer-tag" in features(endpoint[svc])'],
         )
         return provider, requirer
 
@@ -252,7 +252,10 @@ class TestFeatureCoherenceCrossModelConsistency:
                 },
                 integrations=[
                     IntegrationSpec(
-                        application="requirer", endpoint="svc", remote_application="provider", remote_endpoint="svc"
+                        application="requirer",
+                        endpoint="svc",
+                        remote_application="provider",
+                        remote_endpoint="svc",
                     ),
                 ],
             )
