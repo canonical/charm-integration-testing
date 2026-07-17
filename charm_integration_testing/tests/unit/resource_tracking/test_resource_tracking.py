@@ -2,11 +2,14 @@
 # See LICENSE file for licensing details.
 
 import logging
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import resource_tracking.collectors as collectors_module
 from juju.resource_registry import JujuControllerHandle, JujuModelHandle
 from kubernetes.client import ApiException  # type: ignore[import-untyped]
+from kubernetes_client import KubernetesBackend
 from resource_tracking import (
     CollectedResources,
     DiscrepancyEntry,
@@ -339,6 +342,58 @@ class TestKubernetesResourceCollector:
         assert collected == [
             CollectedResources("target-model", frozenset({_pvc("data-target-0", namespace="target-model")}))
         ]
+
+
+class TestKubernetesResourceCollectorBuild:
+    """KubernetesResourceCollector.build - resolves a client per registered controller."""
+
+    class _FakeJujuBackend:
+        """Stand-in exposing only the method build() depends on."""
+
+        def __init__(self, kubeconfig_by_controller: dict[str, Path | None]) -> None:
+            self._kubeconfig_by_controller = kubeconfig_by_controller
+
+        def get_controller_kubeconfig(self, controller: str) -> Path | None:
+            return self._kubeconfig_by_controller.get(controller)
+
+    def test_resolves_a_client_per_kubernetes_controller(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # GIVEN two controllers, each with its own kubeconfig, and one non-Kubernetes
+        # controller that resolves to no kubeconfig at all
+        monkeypatch.setattr(KubernetesBackend, "k8s_client", staticmethod(lambda kubeconfig: kubeconfig))
+        monkeypatch.setattr(collectors_module, "KubernetesClient", lambda backend, logger: _FakeKubernetesClient([]))
+
+        registry = _FakeResourceRegistry(
+            [
+                JujuModelHandle(controller="target-controller", model="target-model"),
+                JujuModelHandle(controller="neighbor-controller", model="neighbor-model"),
+            ]
+        )
+        backend = self._FakeJujuBackend(
+            {
+                "target-controller": Path("/kube/target.yaml"),
+                "neighbor-controller": None,
+            }
+        )
+
+        # WHEN a collector is built from the backend
+        collector = KubernetesResourceCollector.build(backend, registry, _LOGGER)  # type: ignore[arg-type]
+
+        # THEN only the Kubernetes-based controller has a client
+        assert set(collector._kubernetes_clients) == {"target-controller"}
+
+    def test_kubeconfig_resolution_errors_contribute_no_client(self) -> None:
+        # GIVEN a controller whose kubeconfig lookup raises
+        class _RaisingJujuBackend:
+            def get_controller_kubeconfig(self, controller: str) -> None:
+                raise RuntimeError("controller unreachable")
+
+        registry = _FakeResourceRegistry([JujuModelHandle(controller="test-controller", model="test-model")])
+
+        # WHEN a collector is built from the backend
+        collector = KubernetesResourceCollector.build(_RaisingJujuBackend(), registry, _LOGGER)  # type: ignore[arg-type]
+
+        # THEN no client is resolved for the failing controller
+        assert collector._kubernetes_clients == {}
 
 
 class TestDiffSnapshots:
