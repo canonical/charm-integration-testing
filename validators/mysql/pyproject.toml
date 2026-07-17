@@ -1,0 +1,38 @@
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+[project]
+name = "validators-mysql"
+version = "0.1.0"
+description = "Validator for the legacy mysql interface"
+authors = [
+    {name = "SQA Team", email = "solutionsqa@canonical.com"}
+]
+
+requires-python = ">=3.10"
+dependencies = [
+    # The 'rsa' extra pulls in 'cryptography', which pymysql needs to authenticate
+    # against MySQL 8.x servers using the default 'caching_sha2_password' plugin
+    # over a plaintext connection. Without it, connections fail at auth time.
+    "pymysql[rsa]>=1.1.0",
+    "validators-base",
+]
+
+[project.optional-dependencies]
+dev = [
+    "types-PyMySQL>=1.1.0.20250516,<2",
+    "validators-test-utils",
+]
+
+[project.entry-points."endpoint_validators"]
+mysql = "validators.mysql:MySQLValidator"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["validators.mysql"]
+
+[tool.setuptools.package-dir]
+"validators.mysql" = "."
