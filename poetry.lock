@@ -1809,6 +1809,9 @@ files = [
     {file = "pymysql-1.2.0.tar.gz", hash = "sha256:6c7b17ca686988104d7426c27895b455cdeea3e9d3ceb1270f0c3704fead8c33"},
 ]
 
+[package.dependencies]
+cryptography = {version = ">=46.0.7", optional = true, markers = "extra == \"rsa\""}
+
 [package.extras]
 ed25519 = ["PyNaCl (>=1.6.2)"]
 rsa = ["cryptography (>=46.0.7)"]
@@ -2605,6 +2608,29 @@ type = "directory"
 url = "validators/mongodb_client"
 
 [[package]]
+name = "validators-mysql"
+version = "0.1.0"
+description = "Validator for the legacy mysql interface"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+pymysql = {version = ">=1.1.0", extras = ["rsa"]}
+types-PyMySQL = {version = ">=1.1.0.20250516,<2", optional = true}
+validators-base = "*"
+validators-test-utils = {version = "*", optional = true}
+
+[package.extras]
+dev = ["types-PyMySQL (>=1.1.0.20250516,<2)", "validators-test-utils"]
+
+[package.source]
+type = "directory"
+url = "validators/mysql"
+
+[[package]]
 name = "validators-mysql-client"
 version = "0.1.0"
 description = "Validator for mysql_client interface"
@@ -2771,6 +2797,7 @@ validators-ingress = "*"
 validators-kafka-client = "*"
 validators-livepatch-pro-airgapped-server = "*"
 validators-loki-push-api = "*"
+validators-mysql = "*"
 validators-mysql-client = "*"
 validators-object-storage = "*"
 validators-opensearch-client = "*"
@@ -2938,4 +2965,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<4.0"
-content-hash = "ace4a7059b845eb5b1a4ad286ec405d35da16fce53dc0d5ca567d2973c78bccd"
+content-hash = "c010583d7aa14f2364c7b097948eec55444cbcb1a9b3e1dfdf071f15b0ab1d9a"
