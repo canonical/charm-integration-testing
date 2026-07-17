@@ -1,0 +1,16 @@
+---
+# Source: https://github.com/canonical/lego-operator
+#
+# One block covers all published tracks; the config options used here are stable across
+# generations. lego blocks (never reaches active) without a valid `email`, so the solver
+# must be given a value for it. `plugin` and `plugin-config-secret-id` (also required to
+# reach active - see src/charm.py `_validate_charm_config_options`) cannot be expressed
+# here because `plugin-config-secret-id` needs a live Juju secret URI that only exists after
+# deploy; that part is handled at runtime by the LegoExtension
+# (charm_integration_testing/extensions/lego), not by this static override.
+#
+# email (config): REQUIRED - `_validate_charm_config_options` returns "email address was
+#   not provided" and blocks when `email` is unset (canonical/lego-operator src/charm.py).
+overrides:
+  - configs:
+      email: [test@example.com]
