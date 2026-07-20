@@ -149,12 +149,14 @@ class BundleBuilder:
         for model_spec in spec.models:
             for application, app_spec in model_spec.applications.items():
                 supported_platforms = overrides_client.get_charm_platform_overrides(app_spec.charm)
-                if supported_platforms is not None and model_spec.platform not in supported_platforms:
-                    raise UncompletableBundleError(
-                        f"Charm {app_spec.charm!r} (model={model_spec.key!r}, application={application!r}) "
-                        f"supports platform(s) {supported_platforms!r}, but was placed on a model with "
-                        f"platform {model_spec.platform!r}."
-                    )
+                if supported_platforms is not None:
+                    supported_platforms = supported_platforms or ["machine"]
+                    if model_spec.platform not in supported_platforms:
+                        raise UncompletableBundleError(
+                            f"Charm {app_spec.charm!r} (model={model_spec.key!r}, application={application!r}) "
+                            f"supports platform(s) {supported_platforms!r}, but was placed on a model with "
+                            f"platform {model_spec.platform!r}."
+                        )
 
     def _solve(self, domain: Domain) -> z3.ModelRef:
         # Iterative CEGIS loop: expand domain until satisfiable.

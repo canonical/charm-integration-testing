@@ -845,7 +845,7 @@ class CharmhubClient:
         """
         platform_overrides = self.overrides_client.get_charm_platform_overrides(charm_name)
         if platform_overrides is not None:
-            return platform_overrides
+            return platform_overrides or ["machine"]
         return ["kubernetes"] if metadata.containers else ["machine"]
 
     def _get_assumes_entry(self, raw: str | dict[str, Any]) -> CharmAssumesEntry:
