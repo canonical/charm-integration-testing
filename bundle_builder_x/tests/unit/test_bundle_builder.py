@@ -543,10 +543,12 @@ class _StubOverridesClient(OverridesClient):
 
     def __init__(self, platforms_by_charm: dict[str, list[str] | None]) -> None:
         super().__init__()
-        self._platforms_by_charm = platforms_by_charm
+        self._overrides_by_charm = {
+            charm: CharmGlobalOverrides(platforms=platforms) for charm, platforms in platforms_by_charm.items()
+        }
 
-    def _get_charm_global_overrides(self, charm: str) -> CharmGlobalOverrides:  # type: ignore[override]
-        return CharmGlobalOverrides(platforms=self._platforms_by_charm.get(charm))
+    def get_charm_platform_overrides(self, charm: str) -> list[str] | None:
+        return self._overrides_by_charm.get(charm, CharmGlobalOverrides()).platforms
 
 
 def _builder_with_platform_overrides(platforms_by_charm: dict[str, list[str] | None]) -> BundleBuilder:
