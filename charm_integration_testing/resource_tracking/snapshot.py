@@ -80,3 +80,224 @@ class PvcSnapshot:
             "storage_class": self.storage_class,
             "requested_storage": self.requested_storage,
         }
+
+
+@dataclass(frozen=True)
+class StatefulSetSnapshot:
+    """Immutable point-in-time view of a single StatefulSet.
+
+    StatefulSets are how Juju runs sidecar k8s charms (one per application), so
+    the identity carries the declared ``replicas`` and container ``image`` -- the
+    spec fields that describe the intended workload -- while excluding the
+    volatile ``status`` (ready/updated replica counts) that merely reflects
+    rollout progress.
+    """
+
+    name: str
+    namespace: str
+    replicas: str
+    image: str
+    application: str = ""
+
+    resource_type: ClassVar[str] = "statefulset"
+
+    @property
+    def identity(self) -> tuple[str, str, str, str]:
+        return (self.namespace, self.name, self.replicas, self.image)
+
+    def report_attributes(self) -> dict[str, str]:
+        return {"replicas": self.replicas, "image": self.image}
+
+
+@dataclass(frozen=True)
+class DeploymentSnapshot:
+    """Immutable point-in-time view of a single Deployment.
+
+    Mirrors :class:`StatefulSetSnapshot`: the declared ``replicas`` and container
+    ``image`` form the identity, while transient rollout ``status`` is excluded.
+    """
+
+    name: str
+    namespace: str
+    replicas: str
+    image: str
+    application: str = ""
+
+    resource_type: ClassVar[str] = "deployment"
+
+    @property
+    def identity(self) -> tuple[str, str, str, str]:
+        return (self.namespace, self.name, self.replicas, self.image)
+
+    def report_attributes(self) -> dict[str, str]:
+        return {"replicas": self.replicas, "image": self.image}
+
+
+@dataclass(frozen=True)
+class ServiceSnapshot:
+    """Immutable point-in-time view of a single Service.
+
+    The identity excludes ``cluster_ip`` because it is reassigned when a service
+    is recreated; the stable ``service_type`` and ``ports`` describe the service
+    contract that callers depend on.
+    """
+
+    name: str
+    namespace: str
+    service_type: str
+    cluster_ip: str
+    ports: str
+    application: str = ""
+
+    resource_type: ClassVar[str] = "service"
+
+    @property
+    def identity(self) -> tuple[str, str, str, str]:
+        return (self.namespace, self.name, self.service_type, self.ports)
+
+    def report_attributes(self) -> dict[str, str]:
+        return {"type": self.service_type, "ports": self.ports}
+
+
+@dataclass(frozen=True)
+class ConfigMapSnapshot:
+    """Immutable point-in-time view of a single ConfigMap.
+
+    The identity is ``(namespace, name)``; ``data_keys`` is tracked as an
+    attribute for reporting but is not part of the identity because the set of
+    keys can legitimately change between scheduler states.
+    """
+
+    name: str
+    namespace: str
+    data_keys: str
+    application: str = ""
+
+    resource_type: ClassVar[str] = "configmap"
+
+    @property
+    def identity(self) -> tuple[str, str]:
+        return (self.namespace, self.name)
+
+    def report_attributes(self) -> dict[str, str]:
+        return {"data_keys": self.data_keys}
+
+
+@dataclass(frozen=True)
+class SecretSnapshot:
+    """Immutable point-in-time view of a single Secret.
+
+    The identity carries the ``secret_type`` but never the secret values, which
+    are excluded so rotation does not read as drift.
+    """
+
+    name: str
+    namespace: str
+    secret_type: str
+    data_keys: str
+    application: str = ""
+
+    resource_type: ClassVar[str] = "secret"
+
+    @property
+    def identity(self) -> tuple[str, str, str]:
+        return (self.namespace, self.name, self.secret_type)
+
+    def report_attributes(self) -> dict[str, str]:
+        return {"type": self.secret_type, "data_keys": self.data_keys}
+
+
+@dataclass(frozen=True)
+class ServiceAccountSnapshot:
+    """Immutable point-in-time view of a single ServiceAccount."""
+
+    name: str
+    namespace: str
+    application: str = ""
+
+    resource_type: ClassVar[str] = "serviceaccount"
+
+    @property
+    def identity(self) -> tuple[str, str]:
+        return (self.namespace, self.name)
+
+    def report_attributes(self) -> dict[str, str]:
+        return {}
+
+
+@dataclass(frozen=True)
+class RoleSnapshot:
+    """Immutable point-in-time view of a single RBAC Role."""
+
+    name: str
+    namespace: str
+    rules: str
+    application: str = ""
+
+    resource_type: ClassVar[str] = "role"
+
+    @property
+    def identity(self) -> tuple[str, str]:
+        return (self.namespace, self.name)
+
+    def report_attributes(self) -> dict[str, str]:
+        return {"rules": self.rules}
+
+
+@dataclass(frozen=True)
+class RoleBindingSnapshot:
+    """Immutable point-in-time view of a single RBAC RoleBinding."""
+
+    name: str
+    namespace: str
+    role_ref: str
+    subjects: str
+    application: str = ""
+
+    resource_type: ClassVar[str] = "rolebinding"
+
+    @property
+    def identity(self) -> tuple[str, str, str]:
+        return (self.namespace, self.name, self.role_ref)
+
+    def report_attributes(self) -> dict[str, str]:
+        return {"role_ref": self.role_ref, "subjects": self.subjects}
+
+
+@dataclass(frozen=True)
+class NetworkPolicySnapshot:
+    """Immutable point-in-time view of a single NetworkPolicy."""
+
+    name: str
+    namespace: str
+    policy_types: str
+    application: str = ""
+
+    resource_type: ClassVar[str] = "networkpolicy"
+
+    @property
+    def identity(self) -> tuple[str, str]:
+        return (self.namespace, self.name)
+
+    def report_attributes(self) -> dict[str, str]:
+        return {"policy_types": self.policy_types}
+
+
+@dataclass(frozen=True)
+class IngressSnapshot:
+    """Immutable point-in-time view of a single Ingress."""
+
+    name: str
+    namespace: str
+    ingress_class: str
+    hosts: str
+    application: str = ""
+
+    resource_type: ClassVar[str] = "ingress"
+
+    @property
+    def identity(self) -> tuple[str, str]:
+        return (self.namespace, self.name)
+
+    def report_attributes(self) -> dict[str, str]:
+        return {"ingress_class": self.ingress_class, "hosts": self.hosts}

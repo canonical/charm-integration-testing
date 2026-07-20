@@ -322,9 +322,11 @@ def add_charm_metadata_constraints(solver: z3.Solver, domain: Domain) -> None:
     # Coherence: when an integration exists, a feature can only be active on one endpoint
     # if the other endpoint also declares that feature.  This prevents endpoints with
     # non-overlapping feature sets from activating mismatched features.
+    # Applied uniformly to local and cross-model integrations: a relation's feature
+    # requirements don't change just because the two charms land in different models
+    # (see SQT-1038 - cross-model integrations previously skipped this check, letting
+    # the solver silently pair charms whose declared features didn't actually match).
     for integration in domain.charm_integrations:
-        if domain.is_cross_model(integration):
-            continue  # feature coherence is only enforced on local integrations
         req_ep = domain.charms[integration.requires_charm_id].endpoints[integration.requires_endpoint]
         prov_ep = domain.charms[integration.provides_charm_id].endpoints[integration.provides_endpoint]
         for f, f_var in req_ep.features.items():

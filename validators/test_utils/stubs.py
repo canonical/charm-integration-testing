@@ -104,6 +104,7 @@ class CharmBaseStub:
 
     meta: CharmMetaStub = field(default_factory=CharmMetaStub)
     model: ModelStub = field(default_factory=ModelStub)
+    unit: UnitStub = field(default_factory=lambda: UnitStub("app/0"))
 
     @property
     def requested_ids(self) -> list[str]:

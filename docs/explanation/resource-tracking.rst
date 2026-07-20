@@ -178,9 +178,11 @@ the same resource kind for other applications, and a ``pvc`` skip on
 PersistentVolumeClaims: the reference resource
 ----------------------------------------------
 
-PVCs are the first and, today, only tracked resource kind. They serve as the
-worked example for every moving part above, so a new resource kind can follow
-the same shape.
+PVCs are the reference tracked resource kind, and today the only one collected at
+runtime. They serve as the worked example for every moving part above, so a new
+resource kind can follow the same shape. Snapshot and source implementations for
+several further kinds also exist (see `Additional resource kinds`_); PVCs remain
+the only source registered in the collector's default tuple.
 
 ``PvcSnapshot`` (in ``resource_tracking.snapshot``) is a frozen, hashable
 dataclass with:
@@ -206,6 +208,112 @@ dataclass with:
 ``V1PersistentVolumeClaim`` onto a ``PvcSnapshot``, defaulting optional fields to
 empty strings and reading the owning application from the name label. It is
 registered as a default source of ``KubernetesResourceCollector``.
+
+Additional resource kinds
+-------------------------
+
+Beyond the PVC reference, snapshot types and sources are implemented for ten
+further Kubernetes kinds. These follow the exact shape described in `Adding a new
+resource kind`_: a frozen ``ResourceSnapshot`` in ``resource_tracking.snapshot``
+whose ``identity`` excludes volatile fields, plus a matching
+``KubernetesResourceSource`` in ``resource_tracking.sources`` that reads the
+owning application from the ``app.kubernetes.io/name`` label.
+
+.. note::
+
+   These kinds provide the *record* logic only. They are **not** yet registered
+   in ``KubernetesResourceCollector``'s default ``sources`` tuple, so at runtime
+   only PVCs are collected. Wiring them in (step 3 of `Adding a new resource
+   kind`_) is a deliberate follow-up. Some Kubernetes kinds are intentionally
+   *not* implemented at all because their lifecycle would read as drift on every
+   revisit; see `Deliberately untracked kinds`_.
+
+The collector instantiates only ``CoreV1Api`` and ``AppsV1Api`` on
+``KubernetesBackend``. Sources for the RBAC and networking kinds therefore build
+their API group from the shared ``backend.api_client`` inside the source, keeping
+the addition contained to the resource-tracking layer.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 18 22 30 30
+
+   * - Resource type
+     - Kubernetes API
+     - Identity (diffed fields)
+     - Notable exclusions / attributes
+   * - ``statefulset``
+     - ``apps/v1`` (``AppsV1Api``)
+     - ``(namespace, name, replicas, image)``
+     - Excludes rollout ``status``; how Juju runs sidecar charms.
+   * - ``deployment``
+     - ``apps/v1`` (``AppsV1Api``)
+     - ``(namespace, name, replicas, image)``
+     - Excludes rollout ``status``.
+   * - ``service``
+     - ``v1`` (``CoreV1Api``)
+     - ``(namespace, name, service_type, ports)``
+     - Excludes ``cluster_ip`` (reassigned on recreate).
+   * - ``configmap``
+     - ``v1`` (``CoreV1Api``)
+     - ``(namespace, name)``
+     - Records sorted ``data_keys`` only; values excluded.
+   * - ``secret``
+     - ``v1`` (``CoreV1Api``)
+     - ``(namespace, name, secret_type)``
+     - Records sorted ``data_keys`` only; values excluded so rotation is not drift.
+   * - ``serviceaccount``
+     - ``v1`` (``CoreV1Api``)
+     - ``(namespace, name)``
+     - Low-churn presence tracking.
+   * - ``role``
+     - ``rbac.authorization.k8s.io/v1`` (``RbacAuthorizationV1Api``)
+     - ``(namespace, name)``
+     - Summarises ``verbs:resources`` rules for the report.
+   * - ``rolebinding``
+     - ``rbac.authorization.k8s.io/v1`` (``RbacAuthorizationV1Api``)
+     - ``(namespace, name, role_ref)``
+     - Records ``kind/name`` role ref and sorted subjects.
+   * - ``networkpolicy``
+     - ``networking.k8s.io/v1`` (``NetworkingV1Api``)
+     - ``(namespace, name)``
+     - Records sorted ``policy_types``.
+   * - ``ingress``
+     - ``networking.k8s.io/v1`` (``NetworkingV1Api``)
+     - ``(namespace, name)``
+     - Records ``ingress_class`` and sorted ``hosts``.
+
+Deliberately untracked kinds
+----------------------------
+
+Some Kubernetes kinds are intentionally left untracked. Their identity is
+inherently volatile or their lifecycle is ephemeral, so the baseline-and-revisit
+diff (`Resource-specific discrepancy kinds`_) would flag spurious ``missing`` /
+``extra`` drift on every revisit to a state even when nothing is wrong.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 18 22 60
+
+   * - Resource type
+     - Kubernetes API
+     - Reason for exclusion
+   * - ``pod``
+     - ``v1`` (``CoreV1Api``)
+     - Names and UIDs churn on every reschedule for Deployment/ReplicaSet-owned
+       pods, and ``phase`` is transient. Only StatefulSet pods have stable
+       ordinal names, and those are already covered by tracking the owning
+       ``statefulset``.
+   * - ``replicaset``
+     - ``apps/v1`` (``AppsV1Api``)
+     - Deployment-owned ReplicaSets carry a hash suffix in their name that
+       changes on every template update, and superseded revisions are retained,
+       so the set churns constantly. The owning ``deployment`` captures the
+       meaningful state instead.
+   * - ``job``
+     - ``batch/v1`` (``BatchV1Api``)
+     - Jobs are ephemeral: they are created to run to completion and are often
+       garbage-collected afterwards, so a Job present on one visit to a state is
+       legitimately absent on the next.
 
 Adding a new resource kind
 --------------------------
