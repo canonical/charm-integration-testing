@@ -106,6 +106,17 @@ _METADATA_WITH_CONTAINERS = CharmMetadata(containers={"app": {"resource": "app-i
 _EMPTY_CONFIG = CharmConfigSchema()
 
 
+def _refresh_response_with_charm(name: str, revision: int, metadata: CharmMetadata) -> RefreshResponse:
+    """Build a successful RefreshResponse carrying charm metadata.
+
+    Bypasses the metadata-yaml/config-yaml string parsing (used to decode the real
+    Charmhub API response) via model_construct, since the fields here are already the
+    typed values that parsing would produce.
+    """
+    charm = RefreshResponse.Charm.model_construct(revision=revision, metadata=metadata, config=_EMPTY_CONFIG)
+    return RefreshResponse.model_construct(name=name, charm=charm, effective_channel=None, error=None)
+
+
 class TestCharmhubClient:
     # ---------------------------------------------------------------------------
     # TestBuildCharmPlatforms
@@ -239,6 +250,80 @@ class TestCharmhubClient:
 
             # THEN it is accepted
             assert result is charm
+
+    # ---------------------------------------------------------------------------
+    # TestCharmFromStorePlatformOverrides
+    # ---------------------------------------------------------------------------
+
+    class TestCharmFromStorePlatformOverrides:
+        """Platform-override enforcement in _ensure_compatibility() is exercised through
+        charm_from_store() end-to-end, not just by calling _ensure_compatibility directly
+        with a hand-built Charm (see TestEnsureCompatibility above).
+        """
+
+        def _client_and_stub(self, raw_overrides: dict[str, object]) -> CharmhubClient:
+            response = _refresh_response_with_charm("ceph-mon", revision=5, metadata=_METADATA_REQUIRES)
+
+            class _StubClient(_NullHttpClient):
+                def refresh(self, action: RefreshAction) -> RefreshResponse:
+                    return response
+
+            return CharmhubClient(
+                http_client=cast(CharmhubHttpClient, _StubClient()),
+                overrides_client=_StubOverridesClient(raw_overrides),
+            )
+
+        def test_raises_when_overrides_disallow_the_requested_platform(self) -> None:
+            # GIVEN an overrides client restricting the charm to kubernetes only
+            client = self._client_and_stub({"platforms": ["kubernetes"]})
+
+            # WHEN fetching the charm for the machine platform, which the overrides disallow
+            # THEN CharmReleaseNotFoundException is raised
+            with pytest.raises(CharmReleaseNotFoundException):
+                client.charm_from_store(
+                    charm_name="ceph-mon",
+                    ubuntu_arch="amd64",
+                    ubuntu_version="22.04",
+                    charm_track="latest",
+                    charm_risk="stable",
+                    platform="machine",
+                )
+
+        def test_passes_when_overrides_allow_the_requested_platform(self) -> None:
+            # GIVEN an overrides client that allows the machine platform
+            client = self._client_and_stub({"platforms": ["machine"]})
+
+            # WHEN fetching the charm for the machine platform
+            charm = client.charm_from_store(
+                charm_name="ceph-mon",
+                ubuntu_arch="amd64",
+                ubuntu_version="22.04",
+                charm_track="latest",
+                charm_risk="stable",
+                platform="machine",
+            )
+
+            # THEN it succeeds and carries the overridden platform
+            assert charm.platforms == ["machine"]
+
+        def test_passes_when_no_platform_overrides_exist(self) -> None:
+            # GIVEN an overrides client with no platform override, and metadata for a
+            # machine charm (no `containers` block)
+            client = self._client_and_stub({})
+
+            # WHEN fetching the charm for the machine platform, which the metadata-derived
+            # platform satisfies
+            charm = client.charm_from_store(
+                charm_name="ceph-mon",
+                ubuntu_arch="amd64",
+                ubuntu_version="22.04",
+                charm_track="latest",
+                charm_risk="stable",
+                platform="machine",
+            )
+
+            # THEN it succeeds
+            assert charm.platforms == ["machine"]
 
     # ---------------------------------------------------------------------------
     # TestChannelSupportsUbuntuVersion
