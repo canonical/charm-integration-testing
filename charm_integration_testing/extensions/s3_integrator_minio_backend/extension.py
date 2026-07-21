@@ -22,8 +22,10 @@ MINIO_BUCKET = "minio-bucket-for-testing"
 MINIO_ADDRESS = "http://{unit_ip}:9000"
 # Juju creates a k8s Service named after the application in the model's namespace
 # (which shares the model's name), so this hostname is stable across pod restarts
-# and model migrations, unlike the pod IP.
-MINIO_K8S_SERVICE_ADDRESS = "http://{service}.{namespace}.svc.cluster.local:9000"
+# and model migrations, unlike the pod IP. The suffix is deliberately just ".svc"
+# (not ".svc.cluster.local") so resolution relies on the pod's search domains
+# instead of assuming every cluster uses the default "cluster.local" domain.
+MINIO_K8S_SERVICE_ADDRESS = "http://{service}.{namespace}.svc:9000"
 MINIO_CLIENT_DOWNLOAD = "https://dl.min.io/client/mc/release/linux-amd64/mc"
 MINIO_CLIENT_PATH = "/usr/local/bin/mc"
 MINIO_CLIENT_STAGING_PATH = "/tmp/mc"  # nosec B108
@@ -200,12 +202,17 @@ class S3IntegratorMinIOBackendExtension(JujuExtension, ABC):
     def minio_unit(self, s3_integrator_application: str) -> str:
         return f"{self.minio_application(s3_integrator_application)}/leader"
 
+    def model_namespace(self, model: str) -> str:
+        # `model` may be a bare model name or a "controller:model-name" URI (as passed by
+        # JujuClient.deploy_bundles). The k8s namespace is always just the model-name segment.
+        return model.rpartition(":")[-1]
+
     def minio_address(self, model: str, s3_integrator_application: str) -> str:
         # For k8s models, use the stable Kubernetes Service DNS name rather than the pod IP,
         # since the pod (and its IP) can be recreated after events such as model migration.
         if self.juju.is_k8s_model(model):
             return MINIO_K8S_SERVICE_ADDRESS.format(
-                service=self.minio_application(s3_integrator_application), namespace=model
+                service=self.minio_application(s3_integrator_application), namespace=self.model_namespace(model)
             )
         return MINIO_ADDRESS.format(unit_ip=self.juju.unit_ip(model, self.minio_unit(s3_integrator_application)))
 
