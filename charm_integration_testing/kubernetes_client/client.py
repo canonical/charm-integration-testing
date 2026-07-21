@@ -131,7 +131,7 @@ class KubernetesClient:
 
     def wait_for_pod_recreation(
         self,
-        pod_name: str,
+        application_name: str,
         namespace: str,
         old_uid: str,
         target_status: PodStatus = PodStatus.RUNNING,
@@ -139,10 +139,16 @@ class KubernetesClient:
         delay: timedelta | None = None,
     ) -> K8sClient.V1Pod:
         """
-        Wait for a pod to be recreated with a new UID and reach the target status.
+        Wait for a pod belonging to `application_name` to be recreated with a new UID and reach the target status.
+
+        Re-discovers pods via the same `app.kubernetes.io/name` label lookup as `get_charm_pods`,
+        rather than re-reading a single fixed pod name. A StatefulSet-managed pod keeps a stable
+        name across recreation (e.g. `app-0`), but a Deployment-managed pod is recreated by its
+        ReplicaSet under an entirely new name (e.g. `app-<replicaset-hash>-<pod-hash>`), so waiting
+        on the old name would hang forever for Deployment-backed workloads.
 
         Args:
-            pod_name: Name of the pod to wait for
+            application_name: Name of the application whose pod was deleted
             namespace: Namespace where the pod is located
             old_uid: UID of the old pod (to detect recreation)
             target_status: Desired pod status (default: RUNNING)
@@ -155,34 +161,42 @@ class KubernetesClient:
         Raises:
             TimeoutError: If pod is not recreated within timeout
         """
-        self.logger.info(f"Waiting for pod {pod_name} to be recreated (old UID: {old_uid})")
+        self.logger.info(
+            f"Waiting for a pod of application '{application_name}' in namespace '{namespace}' "
+            f"to be recreated (old UID: {old_uid})"
+        )
 
         def check() -> K8sClient.V1Pod | None:
             try:
-                new_pod = self.backend.core_v1_api.read_namespaced_pod(pod_name, namespace)
-                if new_pod.metadata.uid == old_uid:
-                    return None
-
-                if PodStatus(new_pod.status.phase) == target_status:
-                    self.logger.info(
-                        f"Pod {pod_name} in namespace {namespace} recreated successfully with UID {new_pod.metadata.uid} "
-                        f"and status {target_status.value}"
-                    )
-                    return new_pod
-
-                self.logger.debug(
-                    f"Pod {pod_name} in namespace {namespace} recreated with new UID but status is {new_pod.status.phase}, "
-                    f"waiting for {target_status.value}"
-                )
-                return None
+                pods = self.get_charm_pods(application_name, namespace)
             except ApiException as e:
                 if e.status == 404:
                     return None
                 raise
 
+            for pod in pods:
+                if pod.metadata.uid == old_uid:
+                    continue
+
+                if PodStatus(pod.status.phase) == target_status:
+                    self.logger.info(
+                        f"Pod {pod.metadata.name} in namespace {namespace} recreated successfully with UID "
+                        f"{pod.metadata.uid} and status {target_status.value}"
+                    )
+                    return pod
+
+                self.logger.debug(
+                    f"Pod {pod.metadata.name} in namespace {namespace} recreated with new UID but status is "
+                    f"{pod.status.phase}, waiting for {target_status.value}"
+                )
+            return None
+
         return self.wait(
             check=check,
-            timeout_message=f"Pod {pod_name} in namespace {namespace} was not recreated or did not reach {target_status.value} status within timeout",
+            timeout_message=(
+                f"No pod of application '{application_name}' in namespace '{namespace}' was recreated or "
+                f"reached {target_status.value} status within timeout"
+            ),
             timeout=timeout,
             delay=delay,
         )

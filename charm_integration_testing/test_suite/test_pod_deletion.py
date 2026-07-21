@@ -29,7 +29,7 @@ def test_pod_deletion(
     # Wait for the pod to be deleted and a new one to be created
     kubernetes_client.wait_for_pod_recreation(
         namespace=model,
-        pod_name=pod_to_delete.metadata.name,
+        application_name=target_application,
         old_uid=pod_to_delete.metadata.uid,
         target_status=PodStatus.RUNNING,
         timeout=timedelta(minutes=15),
