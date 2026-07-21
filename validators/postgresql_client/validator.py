@@ -88,11 +88,10 @@ class PostgreSQLClientValidator(BaseValidator):
                     "role/privilege names (e.g. 'admin')."
                 ),
             )
-        roles = [t for t in tokens if t]
         return ValidationCheck(
             name="extra_user_roles",
             passed=True,
-            message=f"Roles: {', '.join(roles)}." if roles else "No roles requested.",
+            message=f"Roles: {', '.join(tokens)}.",
         )
 
     def _validate_simple(self) -> ValidationResult:

@@ -55,7 +55,7 @@ class KubernetesClient:
 
         Args:
             application_name: Name of the application to filter pods by
-            model: Model the application is deployed in
+            model: Model name the application is deployed in (used as the namespace name)
         Raises:
             ApiException: If there is an error communicating with the Kubernetes API
         Returns:
@@ -168,7 +168,7 @@ class KubernetesClient:
 
         def check() -> K8sClient.V1Pod | None:
             try:
-                pods = self.get_charm_pods(application_name, namespace)
+                pods = self.get_charm_pods(application_name, model=namespace)
             except ApiException as e:
                 if e.status == 404:
                     return None
