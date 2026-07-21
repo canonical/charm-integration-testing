@@ -1,5 +1,18 @@
 ---
-listed: true
+# Source: https://github.com/canonical/istio-beacon-k8s-operator
+#
+# listed: false -- Temporarily delisted (charm-integration-testing#455). The charm's
+# config-changed hook calls krm.reconcile() to list/watch gateways.gateway.networking.k8s.io
+# cluster-wide, but charmcraft.yaml declares no RBAC rules for that API group, so the
+# Juju-generated ClusterRole (granted via the bundle's unconditional trust: true) never
+# includes Gateway API permissions. The hook then fails with a 403 Forbidden
+# ApiError, regardless of --trust, blocking the charm and any principal charms related
+# to it over service-mesh (e.g. traefik-k8s, alertmanager-k8s, opentelemetry-collector-k8s
+# test_deploy runs). Same bug class as the still-open
+# https://github.com/canonical/istio-ingress-k8s-operator/issues/34. No RBAC-declaring
+# revision exists in any published track (1, 2, dev) as of this writing.
+# Re-list once upstream declares the required Gateway API RBAC rules.
+listed: false
 overrides:
   # provide-cmr-mesh only exists from track 2 onwards.
   - criteria:
