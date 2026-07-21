@@ -202,7 +202,7 @@ class S3IntegratorMinIOBackendExtension(JujuExtension, ABC):
     def minio_unit(self, s3_integrator_application: str) -> str:
         return f"{self.minio_application(s3_integrator_application)}/leader"
 
-    def model_namespace(self, model: str) -> str:
+    def _model_namespace(self, model: str) -> str:
         # `model` may be a bare model name or a "controller:model-name" URI (as passed by
         # JujuClient.deploy_bundles). The k8s namespace is always just the model-name segment.
         return model.rpartition(":")[-1]
@@ -212,7 +212,8 @@ class S3IntegratorMinIOBackendExtension(JujuExtension, ABC):
         # since the pod (and its IP) can be recreated after events such as model migration.
         if self.juju.is_k8s_model(model):
             return MINIO_K8S_SERVICE_ADDRESS.format(
-                service=self.minio_application(s3_integrator_application), namespace=self.model_namespace(model)
+                service=self.minio_application(s3_integrator_application),
+                namespace=self._model_namespace(model),
             )
         return MINIO_ADDRESS.format(unit_ip=self.juju.unit_ip(model, self.minio_unit(s3_integrator_application)))
 
