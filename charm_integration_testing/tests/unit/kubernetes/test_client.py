@@ -616,7 +616,7 @@ class TestKubernetesClientInit:
                     target_status=PodStatus.RUNNING,
                 )
 
-            assert "was recreated or reached Running status within timeout" in str(exc_info.value)
+assert "No pod of application 'test-pod' in namespace 'test-namespace' was recreated or reached Running status within timeout" in str(exc_info.value)
 
         @patch("kubernetes_client.client.sleep")
         def test_custom_target_status(self, mock_sleep: MagicMock) -> None:
