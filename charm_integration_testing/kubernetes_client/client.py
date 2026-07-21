@@ -5,7 +5,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from time import sleep
-from typing import Callable, TypeVar
+from typing import Callable, Collection, TypeVar
 
 from kubernetes import client as K8sClient  # type: ignore[import-untyped]
 from kubernetes import watch
@@ -133,13 +133,13 @@ class KubernetesClient:
         self,
         application_name: str,
         namespace: str,
-        old_uid: str,
+        existing_uids: Collection[str],
         target_status: PodStatus = PodStatus.RUNNING,
         timeout: timedelta | None = None,
         delay: timedelta | None = None,
     ) -> K8sClient.V1Pod:
         """
-        Wait for a pod belonging to `application_name` to be recreated with a new UID and reach the target status.
+        Wait for a genuinely new pod of `application_name` to appear and reach the target status.
 
         Re-discovers pods via the same `app.kubernetes.io/name` label lookup as `get_charm_pods`,
         rather than re-reading a single fixed pod name. A StatefulSet-managed pod keeps a stable
@@ -147,10 +147,16 @@ class KubernetesClient:
         ReplicaSet under an entirely new name (e.g. `app-<replicaset-hash>-<pod-hash>`), so waiting
         on the old name would hang forever for Deployment-backed workloads.
 
+        A pod is considered "recreated" only if its UID is absent from `existing_uids`. Passing
+        just the deleted pod's UID is not sufficient when the application has multiple replicas:
+        an untouched sibling pod would trivially have a different UID and be returned immediately,
+        even though no replacement for the deleted pod had actually appeared yet. Callers should
+        pass the UIDs of *all* pods observed for this application before the deletion.
+
         Args:
             application_name: Name of the application whose pod was deleted
             namespace: Namespace where the pod is located
-            old_uid: UID of the old pod (to detect recreation)
+            existing_uids: UIDs of all pods for this application observed before the deletion
             target_status: Desired pod status (default: RUNNING)
             timeout: Maximum time to wait
             delay: Delay between checks
@@ -162,8 +168,8 @@ class KubernetesClient:
             TimeoutError: If pod is not recreated within timeout
         """
         self.logger.info(
-            f"Waiting for a pod of application '{application_name}' in namespace '{namespace}' "
-            f"to be recreated (old UID: {old_uid})"
+            f"Waiting for a new pod of application '{application_name}' in namespace '{namespace}' "
+            f"to appear (existing UIDs: {sorted(existing_uids)})"
         )
 
         def check() -> K8sClient.V1Pod | None:
@@ -175,7 +181,7 @@ class KubernetesClient:
                 raise
 
             for pod in pods:
-                if pod.metadata.uid == old_uid:
+                if pod.metadata.uid in existing_uids:
                     continue
 
                 if PodStatus(pod.status.phase) == target_status:

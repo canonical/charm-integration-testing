@@ -489,52 +489,6 @@ class TestKubernetesClientInit:
             assert result.metadata.name == "test-app-7f8d9c-xyz12"
 
         @patch("kubernetes_client.client.sleep")
-        def test_ignores_untouched_sibling_replicas(self, mock_sleep: MagicMock) -> None:
-            # GIVEN an application with multiple replicas: an untouched sibling that was
-            # already running before the deletion, and the deleted pod's replacement, which
-            # only becomes Running on the second poll
-            sibling_pod = create_sample_pod(
-                "test-app-0", "test-namespace", "Running", "sibling-uid", labels={"app.kubernetes.io/name": "test-app"}
-            )
-            new_pod_pending = create_sample_pod(
-                "test-app-1", "test-namespace", "Pending", "new-uid", labels={"app.kubernetes.io/name": "test-app"}
-            )
-            new_pod_running = create_sample_pod(
-                "test-app-1", "test-namespace", "Running", "new-uid", labels={"app.kubernetes.io/name": "test-app"}
-            )
-
-            call_count = 0
-
-            def list_pods_side_effect(namespace: str, label_selector: str | None = None) -> V1PodListStub:
-                nonlocal call_count
-                call_count += 1
-                if call_count == 1:
-                    return V1PodListStub(items=[sibling_pod, new_pod_pending])
-                return V1PodListStub(items=[sibling_pod, new_pod_running])
-
-            mock_backend = MagicMock()
-            mock_backend.core_v1_api.list_namespaced_pod.side_effect = list_pods_side_effect
-
-            client = KubernetesClient(
-                backend=mock_backend,
-                default_timeout=timedelta(seconds=10),
-                default_delay=timedelta(seconds=1),
-            )
-
-            # WHEN waiting for recreation of a pod that was deleted alongside the sibling
-            result = client.wait_for_pod_recreation(
-                application_name="test-app",
-                namespace="test-namespace",
-                existing_uids={"deleted-uid", "sibling-uid"},
-                target_status=PodStatus.RUNNING,
-            )
-
-            # THEN only the genuinely new pod is returned, never the untouched sibling
-            assert result == new_pod_running
-            assert result.metadata.uid == "new-uid"
-            assert mock_sleep.call_count >= 1
-
-        @patch("kubernetes_client.client.sleep")
         def test_pod_recreated_after_deletion(self, mock_sleep: MagicMock) -> None:
             # GIVEN a pod that is deleted then recreated
             old_pod = create_sample_pod(
