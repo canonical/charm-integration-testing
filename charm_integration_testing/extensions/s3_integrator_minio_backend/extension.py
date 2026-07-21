@@ -20,6 +20,10 @@ MINIO_SECRET_KEY = "minio-secret-key-for-testing"  # nosec B105
 MINIO_PATH = "some-s3-path"
 MINIO_BUCKET = "minio-bucket-for-testing"
 MINIO_ADDRESS = "http://{unit_ip}:9000"
+# Juju creates a k8s Service named after the application in the model's namespace
+# (which shares the model's name), so this hostname is stable across pod restarts
+# and model migrations, unlike the pod IP.
+MINIO_K8S_SERVICE_ADDRESS = "http://{service}.{namespace}.svc.cluster.local:9000"
 MINIO_CLIENT_DOWNLOAD = "https://dl.min.io/client/mc/release/linux-amd64/mc"
 MINIO_CLIENT_PATH = "/usr/local/bin/mc"
 MINIO_CLIENT_STAGING_PATH = "/tmp/mc"  # nosec B108
@@ -197,6 +201,12 @@ class S3IntegratorMinIOBackendExtension(JujuExtension, ABC):
         return f"{self.minio_application(s3_integrator_application)}/leader"
 
     def minio_address(self, model: str, s3_integrator_application: str) -> str:
+        # For k8s models, use the stable Kubernetes Service DNS name rather than the pod IP,
+        # since the pod (and its IP) can be recreated after events such as model migration.
+        if self.juju.is_k8s_model(model):
+            return MINIO_K8S_SERVICE_ADDRESS.format(
+                service=self.minio_application(s3_integrator_application), namespace=model
+            )
         return MINIO_ADDRESS.format(unit_ip=self.juju.unit_ip(model, self.minio_unit(s3_integrator_application)))
 
     def setup_minio_client(self, model: str, s3_integrator_application: str) -> None:
