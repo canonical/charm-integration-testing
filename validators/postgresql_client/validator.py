@@ -76,16 +76,16 @@ class PostgreSQLClientValidator(BaseValidator):
         is exactly the kind of client-side payload that has previously been
         rejected by postgresql-k8s as "invalid role(s) for extra user roles".
         """
-        tokens = [r.strip() for r in roles_raw.split(",")]
-        malformed = [t for t in tokens if not t or not re.fullmatch(r"[a-z][a-z0-9_]*", t)]
+        tokens = [token.strip() for token in roles_raw.split(",")]
+        malformed = [t for t in tokens if not t or not re.fullmatch(r"[a-z_][a-z0-9_]*", t)]
         if malformed:
             return ValidationCheck(
                 name="extra_user_roles",
                 passed=False,
                 message=(
                     f"Malformed 'extra-user-roles' token(s): {malformed}. "
-                    "Remediation: ensure the client charm sends lowercase alphanumeric "
-                    "role/privilege names (e.g. 'admin')."
+                    "Remediation: ensure the client charm sends lowercase role/privilege identifiers "
+                    "(letters/digits/underscores; e.g. 'admin')."
                 ),
             )
         return ValidationCheck(
