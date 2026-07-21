@@ -2,7 +2,6 @@
 # See LICENSE file for licensing details.
 
 import logging
-import re
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from time import sleep
@@ -45,7 +44,15 @@ class KubernetesClient:
         self, application_name: str, model: str
     ) -> list[K8sClient.V1Pod]:  # multiple pods per a charm, depends on charm name and unit number
         """
-        Gets all pods in the specified namespace that match the given application name.
+        Gets all pods in the specified namespace that belong to the given application.
+
+        Filters server-side on Juju's standard Kubernetes name label
+        (``app.kubernetes.io/name``), which Juju sets on every pod regardless of
+        whether the charm's workload is deployed as a StatefulSet (pod names like
+        ``<app>-0``) or a Deployment (pod names like ``<app>-<replicaset-hash>-<pod-hash>``).
+        Matching on pod name patterns is unreliable across workload kinds; the label
+        is the stable identifier.
+
         Args:
             application_name: Name of the application to filter pods by
             model: Model the application is deployed in
@@ -54,10 +61,11 @@ class KubernetesClient:
         Returns:
             List of pods that match the given application name in the specified namespace
         """
-        pattern = re.compile(rf"^{re.escape(application_name)}(-\d+)$")
-        pods = self.backend.core_v1_api.list_namespaced_pod(model)  # juju creates a namespace for each model
-        matching_pods = [pod for pod in pods.items if pattern.match(pod.metadata.name)]
-        return matching_pods
+        pods = self.backend.core_v1_api.list_namespaced_pod(
+            model,  # juju creates a namespace for each model
+            label_selector=f"app.kubernetes.io/name={application_name}",
+        )
+        return list(pods.items)
 
     def list_model_pvcs(self, model: str) -> list[K8sClient.V1PersistentVolumeClaim]:
         """

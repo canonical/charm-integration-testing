@@ -13,6 +13,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import re
 import time
 import urllib.parse
 import uuid
@@ -29,6 +30,10 @@ from validators.base import (
 
 class PostgreSQLClientValidator(BaseValidator):
     def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
+        if self.role == "provides":
+            if level == "simple":
+                return self._validate_provides_simple()
+            return self._skipped_result_due_to_level(level)
         if self.role != "requires":
             return self._skipped_result_due_to_role(level, self.role)
         if level == "simple":
@@ -37,6 +42,58 @@ class PostgreSQLClientValidator(BaseValidator):
             return self._validate_deep()
         else:
             return self._skipped_result_due_to_level(level)
+
+    def _validate_provides_simple(self) -> ValidationResult:
+        """L1 (provides): verify the requirer's databag is well-formed.
+
+        Guards against regressions such as postgresql-k8s#443, where a client
+        charm's ``extra-user-roles`` value (e.g. ``admin``) was rejected by
+        the provider with ``invalid role(s) for extra user roles``. Catching
+        malformed/empty role tokens here gives a clear, early signal instead
+        of an opaque downstream "relation not ready" failure on the client.
+        """
+        checks: list[ValidationCheck] = []
+
+        error_result = self._check_relation_exists("simple")
+        if error_result:
+            return error_result
+
+        schema_check = self.validate_schema(["database"])
+        checks.append(schema_check)
+        if not schema_check.passed:
+            return self._make_result(level="simple", checks=checks)
+
+        if "extra-user-roles" in self.databag:
+            checks.append(self._check_extra_user_roles(self.databag["extra-user-roles"]))
+
+        return self._make_result(level="simple", checks=checks)
+
+    def _check_extra_user_roles(self, roles_raw: str) -> ValidationCheck:
+        """Validate that ``extra-user-roles`` tokens are non-empty and well-formed.
+
+        PostgreSQL role/privilege names are lowercase identifiers (e.g. ``admin``,
+        ``createdb``, ``createrole``, ``superuser``); a malformed or blank token
+        is exactly the kind of client-side payload that has previously been
+        rejected by postgresql-k8s as "invalid role(s) for extra user roles".
+        """
+        tokens = [r.strip() for r in roles_raw.split(",")]
+        malformed = [t for t in tokens if not t or not re.fullmatch(r"[a-z][a-z0-9_]*", t)]
+        if malformed:
+            return ValidationCheck(
+                name="extra_user_roles",
+                passed=False,
+                message=(
+                    f"Malformed 'extra-user-roles' token(s): {malformed}. "
+                    "Remediation: ensure the client charm sends lowercase alphanumeric "
+                    "role/privilege names (e.g. 'admin')."
+                ),
+            )
+        roles = [t for t in tokens if t]
+        return ValidationCheck(
+            name="extra_user_roles",
+            passed=True,
+            message=f"Roles: {', '.join(roles)}." if roles else "No roles requested.",
+        )
 
     def _validate_simple(self) -> ValidationResult:
         """L1: Connectivity & Auth with read-only canary query."""

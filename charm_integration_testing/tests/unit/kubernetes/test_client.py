@@ -18,10 +18,11 @@ def create_sample_pod(
     namespace: str = "default",
     phase: str = "Running",
     uid: str = "test-uid",
+    labels: dict[str, str] | None = None,
 ) -> V1Pod:
     """Helper to create a sample pod for testing."""
     return V1Pod(
-        metadata=V1ObjectMeta(name=name, namespace=namespace, uid=uid),
+        metadata=V1ObjectMeta(name=name, namespace=namespace, uid=uid, labels=labels),
         status=V1PodStatus(phase=phase),
     )
 
@@ -63,11 +64,18 @@ class KubernetesBackendStub(KubernetesBackend):
         self.core_v1_api = self
         self.apps_v1_api = self
 
-    def list_namespaced_pod(self, namespace: str) -> V1PodListStub:
+    def list_namespaced_pod(self, namespace: str, label_selector: str | None = None) -> V1PodListStub:
         if self.list_namespaced_pods_raises:
             raise self.list_namespaced_pods_raises
         assert self.list_namespaced_pods_result is not None
-        return self.list_namespaced_pods_result
+        if not label_selector:
+            return self.list_namespaced_pods_result
+        # Simulate the Kubernetes API's server-side `key=value` label filtering.
+        key, _, value = label_selector.partition("=")
+        matching = [
+            pod for pod in self.list_namespaced_pods_result.items if (pod.metadata.labels or {}).get(key) == value
+        ]
+        return V1PodListStub(items=matching)
 
     def list_namespaced_persistent_volume_claim(self, namespace: str) -> V1PvcListStub:
         if self.list_namespaced_pvcs_raises:
@@ -210,8 +218,8 @@ class TestKubernetesClientInit:
         """Test suite for get_charm_pods method."""
 
         def test_single_charm_pod(self) -> None:
-            # GIVEN a backend with a pod matching charm name
-            pod = create_sample_pod("postgresql-0", "test-model")
+            # GIVEN a backend with a pod matching charm name (StatefulSet-style name)
+            pod = create_sample_pod("postgresql-0", "test-model", labels={"app.kubernetes.io/name": "postgresql"})
             pod_list = V1PodListStub(items=[pod])
             backend_stub = KubernetesBackendStub(list_namespaced_pods_result=pod_list)
 
@@ -226,9 +234,9 @@ class TestKubernetesClientInit:
 
         def test_multiple_charm_pods(self) -> None:
             # GIVEN a backend with multiple pods matching charm name
-            pod1 = create_sample_pod("postgresql-0", "test-model")
-            pod2 = create_sample_pod("postgresql-1", "test-model")
-            pod3 = create_sample_pod("redis-0", "test-model")
+            pod1 = create_sample_pod("postgresql-0", "test-model", labels={"app.kubernetes.io/name": "postgresql"})
+            pod2 = create_sample_pod("postgresql-1", "test-model", labels={"app.kubernetes.io/name": "postgresql"})
+            pod3 = create_sample_pod("redis-0", "test-model", labels={"app.kubernetes.io/name": "redis"})
             pod_list = V1PodListStub(items=[pod1, pod2, pod3])
             backend_stub = KubernetesBackendStub(list_namespaced_pods_result=pod_list)
 
@@ -243,9 +251,28 @@ class TestKubernetesClientInit:
             assert pod2 in result
             assert pod3 not in result
 
+        def test_deployment_style_pod_names(self) -> None:
+            # GIVEN a Deployment-backed charm (e.g. argo-controller) whose pod names
+            # include a ReplicaSet hash suffix rather than a plain ordinal
+            pod1 = create_sample_pod(
+                "argo-controller-854bdf9d48-95lb9", "test-model", labels={"app.kubernetes.io/name": "argo-controller"}
+            )
+            pod2 = create_sample_pod("redis-0", "test-model", labels={"app.kubernetes.io/name": "redis"})
+            pod_list = V1PodListStub(items=[pod1, pod2])
+            backend_stub = KubernetesBackendStub(list_namespaced_pods_result=pod_list)
+
+            backend = KubernetesClient(backend=backend_stub)
+
+            # WHEN getting charm pods
+            result = backend.get_charm_pods("argo-controller", "test-model")
+
+            # THEN the Deployment-style pod is still found via its label
+            assert len(result) == 1
+            assert result[0] == pod1
+
         def test_no_matching_pods(self) -> None:
             # GIVEN a backend with no matching pods
-            pod = create_sample_pod("redis-0", "test-model")
+            pod = create_sample_pod("redis-0", "test-model", labels={"app.kubernetes.io/name": "redis"})
             pod_list = V1PodListStub(items=[pod])
             backend_stub = KubernetesBackendStub(list_namespaced_pods_result=pod_list)
 

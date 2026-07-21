@@ -118,7 +118,7 @@ class TestPostgreSQLClientValidatorSimple:
 
     @pytest.mark.parametrize(
         "role,should_skip",
-        [(RelationRoleStub.requires, False), (RelationRoleStub.provides, True), (RelationRoleStub.peer, True)],
+        [(RelationRoleStub.requires, False), (RelationRoleStub.provides, False), (RelationRoleStub.peer, True)],
     )
     def test_skips_based_on_role(self, role: RelationRoleStub, should_skip: bool) -> None:
         # GIVEN a validator with a non-requires role
@@ -130,6 +130,72 @@ class TestPostgreSQLClientValidatorSimple:
         # THEN
         assert (result.status == "SKIPPED") == should_skip
 
+
+class TestPostgreSQLClientValidatorProvides:
+    def test_fails_schema_check_when_database_missing(self) -> None:
+        # GIVEN a requirer databag missing the 'database' field
+        validator = _make_validator({"extra-user-roles": "admin"}, role=RelationRoleStub.provides)
+
+        # WHEN
+        result = validator.validate(level="simple")
+
+        # THEN
+        assert result.status == "FAIL"
+        schema = next(c for c in result.checks if c.name == "schema")
+        assert not schema.passed
+
+    def test_passes_when_extra_user_roles_absent(self) -> None:
+        # GIVEN a requirer databag with no 'extra-user-roles' field
+        validator = _make_validator({"database": "mydb"}, role=RelationRoleStub.provides)
+
+        # WHEN
+        result = validator.validate(level="simple")
+
+        # THEN
+        assert result.status == "PASS"
+        assert not any(c.name == "extra_user_roles" for c in result.checks)
+
+    def test_passes_with_valid_extra_user_roles(self) -> None:
+        # GIVEN a requirer databag with well-formed roles, e.g. 'admin'
+        validator = _make_validator(
+            {"database": "mydb", "extra-user-roles": "admin,createdb"}, role=RelationRoleStub.provides
+        )
+
+        # WHEN
+        result = validator.validate(level="simple")
+
+        # THEN
+        assert result.status == "PASS"
+        roles_check = next(c for c in result.checks if c.name == "extra_user_roles")
+        assert roles_check.passed
+        assert "admin" in roles_check.message
+        assert "createdb" in roles_check.message
+
+    def test_fails_with_malformed_extra_user_roles(self) -> None:
+        # GIVEN a requirer databag with an empty role token
+        validator = _make_validator({"database": "mydb", "extra-user-roles": "admin,"}, role=RelationRoleStub.provides)
+
+        # WHEN
+        result = validator.validate(level="simple")
+
+        # THEN
+        assert result.status == "FAIL"
+        roles_check = next(c for c in result.checks if c.name == "extra_user_roles")
+        assert not roles_check.passed
+
+    def test_returns_skipped_for_deep_level(self) -> None:
+        # GIVEN a provides-role validator
+        validator = _make_validator(VALID_DATABAG, role=RelationRoleStub.provides)
+
+        # WHEN
+        result = validator.validate(level="deep")
+
+        # THEN
+        assert result.status == "SKIPPED"
+        assert result.error is not None
+
+
+class TestPostgreSQLClientValidatorRequiresSimple:
     def test_fails_schema_check_when_required_fields_missing(self) -> None:
         # GIVEN a databag with all required fields absent
         validator = _make_validator({})
