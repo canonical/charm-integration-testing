@@ -3,6 +3,7 @@
 
 import logging
 import subprocess  # nosec B404
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -10,6 +11,23 @@ import pytest
 # TruffleHog exit codes
 TRUFFLEHOG_NO_FINDINGS = 0
 TRUFFLEHOG_FINDINGS_DETECTED = 1
+
+# Archive/compressed formats collected alongside plaintext logs (e.g. juju-crashdump
+# tarballs). TruffleHog decompresses and scans their contents natively, but doing so
+# can surface non-UTF-8 bytes from binary payloads in its own stdout, which crashes
+# `subprocess.run(..., text=True)` with a UnicodeDecodeError. Logs of interest are
+# always plaintext, so these formats are excluded from the scan entirely.
+TRUFFLEHOG_EXCLUDED_PATH_PATTERNS = [
+    r"\.tar\.gz$",
+    r"\.tgz$",
+    r"\.tar$",
+    r"\.tar\.bz2$",
+    r"\.zip$",
+    r"\.gz$",
+    r"\.bz2$",
+    r"\.xz$",
+    r"\.7z$",
+]
 
 
 # no state marker so it runs last
@@ -49,21 +67,28 @@ def test_logs_privacy_check(
     # Run TruffleHog
     logger.info("Running TruffleHog secret scanner")
 
-    trufflehog_cmd = [
-        "trufflehog",
-        "filesystem",
-        str(log_dir),
-    ]
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", prefix="trufflehog-exclude-") as exclude_file:
+        exclude_file.write("\n".join(TRUFFLEHOG_EXCLUDED_PATH_PATTERNS))
+        exclude_file.flush()
 
-    try:
-        result = subprocess.run(  # nosec B603
-            trufflehog_cmd,
-            capture_output=True,
-            text=True,
-            timeout=600,  # 10 minutes timeout for scanning
-        )
-    except subprocess.TimeoutExpired as e:
-        raise RuntimeError(f"TruffleHog scan timed out after {e.timeout}s (required for privacy check)") from e
+        trufflehog_cmd = [
+            "trufflehog",
+            "filesystem",
+            str(log_dir),
+            "--exclude-paths",
+            exclude_file.name,
+        ]
+
+        try:
+            result = subprocess.run(  # nosec B603
+                trufflehog_cmd,
+                capture_output=True,
+                text=True,
+                errors="replace",
+                timeout=600,  # 10 minutes timeout for scanning
+            )
+        except subprocess.TimeoutExpired as e:
+            raise RuntimeError(f"TruffleHog scan timed out after {e.timeout}s (required for privacy check)") from e
 
     # Get TruffleHog output
     trufflehog_output = result.stdout + result.stderr
