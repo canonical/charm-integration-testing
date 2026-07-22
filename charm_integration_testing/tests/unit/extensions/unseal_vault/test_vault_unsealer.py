@@ -266,6 +266,59 @@ class TestVaultUnsealer:
         assert "vault/0" in vault.unseals
         assert "vault/1" not in vault.unseals
 
+    def test_try_unseal_vault_skips_manual_unseal_for_auto_unseal_type(self) -> None:
+        # GIVEN a unit that finishes joining the raft cluster with a non-shamir (auto-unseal)
+        # seal type, which unseals itself and doesn't need (or have) a manual unseal key
+        juju = JujuStub(
+            units={"vault": ["vault/0"]},
+            secrets={
+                "vault-secret-application-vault-tokens": {"root-token": "abc", "unseal-key": "xyz"},
+            },
+        )
+        vault = VaultStub(sealed_units={"vault/0": True})
+
+        def status(_: str, unit: str) -> VaultStatus:
+            return VaultStatus(initialized=True, sealed=True, type="transit")
+
+        vault.status = status  # type: ignore
+        logger = LoggerStub()
+        charm = CharmInfo(name="vault")
+
+        # WHEN
+        VaultUnsealer(charm, vault, juju, logger).try_unseal_vault("test-model", "vault")
+
+        # THEN no manual unseal is attempted, since the unit will auto-unseal itself
+        assert vault.unseals == []
+
+    def test_try_unseal_vault_rechecks_sealed_status_after_waiting_for_initialization(self) -> None:
+        # GIVEN a unit that auto-unseals itself while it's still being waited on to finish
+        # joining the raft cluster
+        juju = JujuStub(
+            units={"vault": ["vault/0"]},
+            secrets={
+                "vault-secret-application-vault-tokens": {"root-token": "abc", "unseal-key": "xyz"},
+            },
+        )
+        vault = VaultStub()
+        checks = [
+            VaultStatus(initialized=False, sealed=True, type="transit"),
+            VaultStatus(initialized=True, sealed=False, type="transit"),
+        ]
+
+        def status(_: str, unit: str) -> VaultStatus:
+            return checks.pop(0)
+
+        vault.status = status  # type: ignore
+        logger = LoggerStub()
+        charm = CharmInfo(name="vault")
+
+        # WHEN
+        VaultUnsealer(charm, vault, juju, logger).try_unseal_vault("test-model", "vault")
+
+        # THEN no manual unseal is attempted, since the unit is no longer sealed
+        assert vault.unseals == []
+        assert checks == []
+
     def test_try_init_vault_authorizes_charm_by_default(self) -> None:
         # GIVEN
         juju = JujuStub(units={"vault": ["vault/leader"]})

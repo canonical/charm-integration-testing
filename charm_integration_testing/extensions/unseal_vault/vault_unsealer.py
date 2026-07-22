@@ -253,6 +253,22 @@ class VaultUnsealer:
                 )
                 continue
 
+            # The unit may have finished joining the raft cluster and auto-unsealed itself while
+            # we were waiting for it to become initialized, so re-check before proceeding.
+            if not status.sealed:
+                continue
+
+            # Non-shamir seal types (e.g. transit, awskms) auto-unseal themselves once
+            # initialized; we don't hold a valid unseal key for them, so manually unsealing
+            # would either hang waiting for an unseal message that never appears, or fail with
+            # an invalid key.
+            if status.type != "shamir":
+                self.logger.info(
+                    f"Skipping manual unseal for vault charm '{self.charm.name}' unit '{unit}': "
+                    f"seal type '{status.type}' auto-unseals itself"
+                )
+                continue
+
             # Wait for unseal message
             self.logger.info(f"Waiting for vault charm '{self.charm.name}' unit '{unit}' unseal message")
             self.juju.wait_for_unit_message(model, unit, self.charm.unseal_message, timedelta(minutes=10))
