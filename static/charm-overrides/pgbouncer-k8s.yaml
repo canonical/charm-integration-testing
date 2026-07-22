@@ -3,18 +3,33 @@ priority: 2.0
 # pgbouncer needs at least one of these to exit blocked state
 # (db and db-admin are legacy endpoints)
 # https://github.com/canonical/pgbouncer-operator/pull/548
+#
+# pgbouncer-k8s's provides (database/db/db-admin, interface postgresql_client/pgsql) and
+# its own requires (backend-database, interface postgresql_client) collide on the same
+# interface as a real Postgres backend (e.g. postgresql-k8s's `database`). Combined with
+# this charm's priority: 2.0 (which makes it cheaper for the solver to pick than a
+# priority-1.0 charm like postgresql-k8s - see docs/explanation/charm-priorities.rst),
+# the solver would happily satisfy one pgbouncer-k8s's backend-database with ANOTHER
+# pgbouncer-k8s instance instead of a real database, producing unbounded daisy-chains
+# of pgbouncer-k8s (see charm-integration-testing#726). The "pooled" feature below
+# forces every pgbouncer-k8s provides endpoint to declare itself as a connection pooler,
+# and forbids backend-database from connecting to anything that does - real database
+# charms (postgresql-k8s, etc.) never declare "pooled", so they remain valid backends.
 overrides:
   - provides:
       database:
         optional: true
-        features: [tls]
+        features: [tls, pooled]
       db:
         optional: true
-        features: [tls]
+        features: [tls, pooled]
       db-admin:
         optional: true
-        features: [tls]
+        features: [tls, pooled]
     requires:
+      backend-database:
+        optional: false
+        features: [pooled]
       certificates:
         optional: true
     constraints:
@@ -28,3 +43,9 @@ overrides:
       - '"tls" in features(endpoint[db-admin]) => bool(endpoint[certificates])'
       # Backend database must have the same risk
       - 'risks(charms(endpoint[backend-database])) == risks({self})'
+      # This charm's own provides endpoints are always pooled connections
+      - 'bool(endpoint[database]) => "pooled" in features(endpoint[database])'
+      - 'bool(endpoint[db]) => "pooled" in features(endpoint[db])'
+      - 'bool(endpoint[db-admin]) => "pooled" in features(endpoint[db-admin])'
+      # backend-database must resolve to a genuine database, never another pooler
+      - 'not ("pooled" in features(endpoint[backend-database]))'
