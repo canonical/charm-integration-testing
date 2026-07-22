@@ -227,7 +227,7 @@ class TestVaultUnsealer:
         vault = VaultStub(sealed_units={"vault/0": True, "vault/1": True})
         checks_before_initialized = [False, False, True]
 
-        def status(_: VaultClient, unit: str) -> VaultStatus:
+        def status(_: str, unit: str) -> VaultStatus:
             if unit == "vault/1":
                 return VaultStatus(initialized=checks_before_initialized.pop(0), sealed=True, type="shamir")
             return VaultStatus(initialized=True, sealed=True, type="shamir")

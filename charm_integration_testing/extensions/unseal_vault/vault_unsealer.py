@@ -247,6 +247,10 @@ class VaultUnsealer:
                 )
 
             if not status.initialized:
+                self.logger.info(
+                    f"Skipping vault charm '{self.charm.name}' unit '{unit}': "
+                    "still not initialized after waiting, will retry on next run"
+                )
                 continue
 
             # Wait for unseal message
@@ -268,8 +272,9 @@ class VaultUnsealer:
         remaining = timeout
         status = self.vault.status(model, unit)
         while not status.initialized and remaining.total_seconds() > 0:
-            remaining -= poll_interval
-            time.sleep(poll_interval.total_seconds())
+            sleep_for = min(poll_interval, remaining)
+            time.sleep(sleep_for.total_seconds())
+            remaining -= sleep_for
             status = self.vault.status(model, unit)
         return status
 
