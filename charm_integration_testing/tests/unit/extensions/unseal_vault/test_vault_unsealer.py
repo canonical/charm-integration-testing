@@ -266,6 +266,28 @@ class TestVaultUnsealer:
         assert "vault/0" in vault.unseals
         assert "vault/1" not in vault.unseals
 
+    def test_try_unseal_vault_prioritizes_already_initialized_units(self) -> None:
+        # GIVEN application_units() lists a still-joining unit before an already-initialized one
+        # (ordering isn't guaranteed by the Juju backend)
+        juju = JujuStub(
+            units={"vault": ["vault/1", "vault/0"]},
+            secrets={
+                "vault-secret-application-vault-tokens": {"root-token": "abc", "unseal-key": "xyz"},
+            },
+        )
+        vault = VaultStub(
+            initialized_units={"vault/0": True, "vault/1": False},
+            sealed_units={"vault/0": True, "vault/1": True},
+        )
+        logger = LoggerStub()
+        charm = CharmInfo(name="vault")
+
+        # WHEN
+        VaultUnsealer(charm, vault, juju, logger).try_unseal_vault("test-model", "vault")
+
+        # THEN the already-initialized unit is unsealed first, ahead of the still-joining one
+        assert vault.unseals[0] == "vault/0"
+
     def test_try_unseal_vault_skips_manual_unseal_for_auto_unseal_type(self) -> None:
         # GIVEN a unit that finishes joining the raft cluster with a non-shamir (auto-unseal)
         # seal type, which unseals itself and doesn't need (or have) a manual unseal key

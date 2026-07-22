@@ -229,9 +229,17 @@ class VaultUnsealer:
         # Get vault tokens
         tokens = self.get_vault_tokens(model, application)
 
+        # Fetch every unit's status upfront and process already-initialized units first.
+        # `application_units()` doesn't guarantee ordering, so without this a unit that's still
+        # joining the raft cluster could be checked first and block already-ready units behind
+        # its (up to 10 minute) wait.
+        units = self.juju.application_units(model, application)
+        unit_statuses = {unit: self.vault.status(model, unit) for unit in units}
+        ordered_units = sorted(units, key=lambda unit: not unit_statuses[unit].initialized)
+
         # Check each unit
-        for unit in self.juju.application_units(model, application):
-            status = self.vault.status(model, unit)
+        for unit in ordered_units:
+            status = unit_statuses[unit]
 
             # Already unsealed, nothing to do
             if not status.sealed:
