@@ -12,7 +12,7 @@ from typing import Literal
 from juju import JujuBackend
 from pydantic.dataclasses import dataclass
 
-from .vault_client import VaultClient, VaultTokenSecret
+from .vault_client import VaultClient, VaultStatus, VaultTokenSecret
 
 
 @dataclass
@@ -231,9 +231,22 @@ class VaultUnsealer:
 
         # Check each unit
         for unit in self.juju.application_units(model, application):
-            # Only attempt unseal if vault is initialized and sealed
             status = self.vault.status(model, unit)
-            if not (status.initialized and status.sealed):
+
+            # Already unsealed, nothing to do
+            if not status.sealed:
+                continue
+
+            # Non-leader units join the raft cluster in the background after being scaled up, so
+            # `initialized` may briefly still be false. Poll for it instead of giving up immediately,
+            # otherwise a slow-to-join unit is permanently skipped and never gets unsealed.
+            if not status.initialized:
+                self.logger.info(f"Waiting for vault charm '{self.charm.name}' unit '{unit}' to be initialized")
+                status = self.wait_for_vault_initialized(
+                    model, unit, timeout=timedelta(minutes=10), poll_interval=timedelta(seconds=10)
+                )
+
+            if not status.initialized:
                 continue
 
             # Wait for unseal message
@@ -243,6 +256,22 @@ class VaultUnsealer:
             # Unseal vault
             self.logger.info(f"Unsealing vault charm '{self.charm.name}' unit '{unit}'")
             self.vault.unseal(model, unit, tokens)
+
+    def wait_for_vault_initialized(
+        self, model: str, unit: str, timeout: timedelta, poll_interval: timedelta
+    ) -> VaultStatus:
+        """Poll a unit's vault status until it reports as initialized, or the timeout elapses.
+
+        Returns the last observed status, whether or not it became initialized in time, so
+        callers can decide how to proceed instead of aborting the whole unseal run.
+        """
+        remaining = timeout
+        status = self.vault.status(model, unit)
+        while not status.initialized and remaining.total_seconds() > 0:
+            remaining -= poll_interval
+            time.sleep(poll_interval.total_seconds())
+            status = self.vault.status(model, unit)
+        return status
 
     def authorize_vault_charm(self, model: str, application: str, tokens: VaultTokenSecret) -> None:
         # Log
