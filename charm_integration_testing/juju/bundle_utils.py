@@ -95,6 +95,30 @@ def parse_offers_from_bundle(bundle_yaml: str) -> dict[str, OfferDetails]:
     return offers
 
 
+def parse_charm_names_from_bundle(bundle_yaml: str) -> set[str]:
+    """Return the set of charm names deployed by the bundle's base document.
+
+    Only the base document (the first in a multi-document bundle) is inspected, since
+    overlay documents only add offers/config and do not declare new applications.
+    Application entries without a ``charm`` key, or whose ``charm`` value isn't a string,
+    are silently skipped.
+
+    Raises:
+        ValueError: if *bundle_yaml* does not parse to at least one YAML mapping document.
+    """
+    documents = list(yaml.safe_load_all(bundle_yaml))
+    if not documents or not isinstance(documents[0], dict):
+        raise ValueError("bundle_yaml must contain at least one YAML mapping document as the base bundle")
+    applications = documents[0].get("applications")
+    if not isinstance(applications, dict):
+        return set()
+    charm_names: set[str] = set()
+    for app_data in applications.values():
+        if isinstance(app_data, dict) and isinstance(app_data.get("charm"), str):
+            charm_names.add(app_data["charm"])
+    return charm_names
+
+
 def strip_offers_from_bundle(bundle_yaml: str) -> str:
     """Return bundle YAML with all offer definitions removed from overlay documents.
 

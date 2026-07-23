@@ -3,6 +3,7 @@
 
 import pytest
 from juju.bundle_utils import (
+    parse_charm_names_from_bundle,
     parse_offer_names_from_bundle,
     parse_offers_from_bundle,
     strip_offers_from_bundle,
@@ -220,6 +221,74 @@ def test_strip_offers_raises_on_empty_bundle() -> None:
 def test_strip_offers_raises_on_non_mapping_bundle() -> None:
     with pytest.raises(ValueError, match="base bundle"):
         strip_offers_from_bundle("- item1\n- item2\n")
+
+
+# ---------------------------------------------------------------------------
+# Tests: parse_charm_names_from_bundle
+# ---------------------------------------------------------------------------
+
+
+def test_parse_charm_names_finds_base_bundle_charms() -> None:
+    # GIVEN a simple bundle with a single application
+    # WHEN parsing the charm names
+    result = parse_charm_names_from_bundle(SIMPLE_BUNDLE)
+    # THEN the deployed charm is returned
+    assert result == {"postgresql"}
+
+
+def test_parse_charm_names_multiple_applications() -> None:
+    # GIVEN a bundle with two applications backed by different charms
+    bundle = """\
+applications:
+  postgresql-k8s:
+    charm: postgresql-k8s
+    channel: 14/stable
+  pgbouncer-k8s:
+    charm: pgbouncer-k8s
+    channel: 1/stable
+"""
+    # WHEN parsing the charm names
+    result = parse_charm_names_from_bundle(bundle)
+    # THEN both charms are returned
+    assert result == {"postgresql-k8s", "pgbouncer-k8s"}
+
+
+def test_parse_charm_names_ignores_overlay_documents() -> None:
+    # GIVEN a bundle with offers declared in an overlay document
+    # WHEN parsing the charm names
+    result = parse_charm_names_from_bundle(CMR_BUNDLE_WITH_OFFERS)
+    # THEN only the base document's application is returned
+    assert result == {"glauth-k8s"}
+
+
+def test_parse_charm_names_empty_for_missing_applications() -> None:
+    # GIVEN a bundle with no applications section
+    # WHEN parsing the charm names
+    result = parse_charm_names_from_bundle("relations: []\n")
+    # THEN an empty set is returned
+    assert result == set()
+
+
+def test_parse_charm_names_skips_entries_without_charm_key() -> None:
+    # GIVEN an application entry missing a charm key
+    bundle = """\
+applications:
+  myapp: {}
+"""
+    # WHEN parsing the charm names
+    result = parse_charm_names_from_bundle(bundle)
+    # THEN the entry is silently skipped
+    assert result == set()
+
+
+def test_parse_charm_names_raises_on_empty_bundle() -> None:
+    with pytest.raises(ValueError, match="base bundle"):
+        parse_charm_names_from_bundle("")
+
+
+def test_parse_charm_names_raises_on_non_mapping_bundle() -> None:
+    with pytest.raises(ValueError, match="base bundle"):
+        parse_charm_names_from_bundle("- item1\n- item2\n")
 
 
 def test_parse_offers_skips_non_dict_overlay() -> None:
