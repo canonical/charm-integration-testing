@@ -597,6 +597,29 @@ class TestJubilantBackend:
             with pytest.raises(JujuWaitTimeoutError):
                 backend.wait_application_settled("test-model", "my-app", timeout=timedelta(milliseconds=100))
 
+    class TestWaitApplicationWorkloadSettled:
+        def test_application_workload_settled(self) -> None:
+            # GIVEN
+            wait_stub = WaitStub()
+            backend = JubilantBackend()
+            backend.wait = wait_stub.wait
+
+            # WHEN
+            backend.wait_application_workload_settled("test-model", "my-app", timeout=timedelta(seconds=10))
+
+            # THEN wait was called
+            assert wait_stub.call_count == 1
+
+        def test_timeout(self) -> None:
+            # GIVEN
+            wait_stub = WaitStub(raise_timeout=True)
+            backend = JubilantBackend()
+            backend.wait = wait_stub.wait
+
+            # WHEN / THEN
+            with pytest.raises(JujuWaitTimeoutError):
+                backend.wait_application_workload_settled("test-model", "my-app", timeout=timedelta(milliseconds=100))
+
     class TestWaitApplicationScaled:
         def test_application_scaled(self) -> None:
             # GIVEN

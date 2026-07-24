@@ -204,6 +204,18 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def wait_application_workload_settled(self, model: str, application: str, timeout: timedelta | None) -> None:
+        """Wait until every unit's workload status reaches 'active' or 'blocked'.
+
+        Unlike wait_application_settled, this does not require the unit agent to be idle. Some
+        charms (e.g. vault-k8s awaiting manual init/unseal) legitimately spend long, repeated
+        stretches of time 'executing' hooks (e.g. update-status retries) while their workload
+        status is already settled on the terminal 'blocked' state, so requiring agent idleness
+        can time out even though the workload status itself is already actionable.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
     def wait_application_scaled(self, model: str, application: str, timeout: timedelta | None) -> None:
         raise NotImplementedError
 

@@ -56,6 +56,9 @@ class NullJujuBackend(JujuBackend):
     def wait_application_settled(self, model: str, application: str, timeout: timedelta | None) -> None:
         raise NotImplementedError
 
+    def wait_application_workload_settled(self, model: str, application: str, timeout: timedelta | None) -> None:
+        raise NotImplementedError
+
     def wait_application_scaled(self, model: str, application: str, timeout: timedelta | None) -> None:
         raise NotImplementedError
 
@@ -232,6 +235,7 @@ class JujuStub(NullJujuBackend):
     waited_messages: list[Any] = field(default_factory=list)
     waited_scaled: list[Any] = field(default_factory=list)
     waited_settled: list[Any] = field(default_factory=list)
+    waited_workload_settled: list[Any] = field(default_factory=list)
     integrations: list[Any] = field(default_factory=list)
     scp_calls: list[Any] = field(default_factory=list)
     ssh_calls: list[Any] = field(default_factory=list)
@@ -317,6 +321,10 @@ class JujuStub(NullJujuBackend):
     def wait_application_settled(self, model: str, application: str, timeout: timedelta | None) -> None:
         """Wait for application to settle (captures call for verification)"""
         self.waited_settled.append((model, application, str(timeout)))
+
+    def wait_application_workload_settled(self, model: str, application: str, timeout: timedelta | None) -> None:
+        """Wait for application workload status to settle (captures call for verification)"""
+        self.waited_workload_settled.append((model, application, str(timeout)))
 
     def wait_for_unit_message(self, model: str, unit: str, message: str, timeout: timedelta | None) -> None:
         """Wait for a specific message from a unit (captures call for verification)"""

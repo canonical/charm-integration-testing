@@ -157,9 +157,14 @@ class VaultUnsealer:
             self.logger.info(f"Vault charm '{self.charm.name}' application '{application}' has no units")
             return
 
-        # Wait for units to settle
+        # Wait for units' workload status to settle. We deliberately don't require the unit
+        # agent to be idle here: an uninitialized/unintegrated vault-k8s legitimately spends
+        # long, repeated stretches "executing" hooks (e.g. update-status retries against an
+        # unreachable Vault API) while its workload status is already the terminal "blocked"
+        # state waiting on the manual init/unseal step we're about to perform below. Requiring
+        # agent idleness here can time out even though the workload is already actionable.
         self.logger.info(f"Waiting for vault charm '{self.charm.name}' application '{application}' units to be settled")
-        self.juju.wait_application_settled(model, application, timedelta(minutes=10))
+        self.juju.wait_application_workload_settled(model, application, timedelta(minutes=10))
 
         # Try to initialize vault
         self.try_init_vault(model, application, authorize_charm)

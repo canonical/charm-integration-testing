@@ -31,6 +31,7 @@ class JujuStub(NullJujuBackend):
     charm_name: str = ""
     scaled_apps: list[str] = field(default_factory=list)
     settled_apps: list[str] = field(default_factory=list)
+    workload_settled_apps: list[str] = field(default_factory=list)
     units: dict[str, list[str]] = field(default_factory=dict)
     messages: list[tuple[str, str, timedelta | None]] = field(default_factory=list)
     secrets: dict[str, dict[str, str]] = field(default_factory=dict)
@@ -51,6 +52,9 @@ class JujuStub(NullJujuBackend):
 
     def wait_application_settled(self, model: str, app: str, timeout: timedelta | None) -> None:
         self.settled_apps.append(app)
+
+    def wait_application_workload_settled(self, model: str, app: str, timeout: timedelta | None) -> None:
+        self.workload_settled_apps.append(app)
 
     def application_units(self, model: str, app: str) -> list[str]:
         return self.units.get(app, [])
@@ -155,6 +159,8 @@ class TestVaultUnsealer:
 
         # THEN
         assert "vault" in juju.scaled_apps
+        assert "vault" in juju.workload_settled_apps
+        assert "vault" not in juju.settled_apps
         assert "vault/leader" in vault.inits
 
     def test_try_init_or_unseal_all_vaults_will_order_provider_first(self) -> None:
