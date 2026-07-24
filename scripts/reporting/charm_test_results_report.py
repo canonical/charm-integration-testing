@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
 """Generate interactive charm test reports from Test Observer PostgreSQL data."""
 
 from __future__ import annotations
@@ -223,7 +225,7 @@ def fetch_report_data(
         import psycopg
         from psycopg.rows import dict_row
     except ImportError as error:
-        raise RuntimeError("psycopg is required; install requirements.txt") from error
+        raise RuntimeError("psycopg is required; install it (e.g. pip install 'psycopg[binary]')") from error
 
     parameters = query_parameters(date_range, scope, top_test_cases, include_archived)
     with psycopg.connect(database_url, row_factory=dict_row) as connection:
