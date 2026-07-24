@@ -163,7 +163,9 @@ class VaultUnsealer:
         # unreachable Vault API) while its workload status is already the terminal "blocked"
         # state waiting on the manual init/unseal step we're about to perform below. Requiring
         # agent idleness here can time out even though the workload is already actionable.
-        self.logger.info(f"Waiting for vault charm '{self.charm.name}' application '{application}' units to be settled")
+        self.logger.info(
+            f"Waiting for vault charm '{self.charm.name}' application '{application}' units' workload status to be settled"
+        )
         self.juju.wait_application_workload_settled(model, application, timedelta(minutes=10))
 
         # Try to initialize vault

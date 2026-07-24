@@ -224,7 +224,6 @@ class JubilantBackend(JujuCmdBackend):
             lambda status: all_statuses_are_in(
                 status,
                 application,
-                application_statuses={"blocked", "active"},
                 unit_statuses={"blocked", "active"},
             ),
             timeout=timeout,
