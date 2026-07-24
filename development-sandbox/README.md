@@ -104,7 +104,7 @@ during the session. On each `run` invocation this:
    deliberately not `8080`, which the nginx API cache already uses inside the VM).
 3. Waits for its `/health` endpoint, then registers it with Copilot for this session only, via
    the same `--additional-mcp-config` mechanism as `SANDBOX_MCP_CONFIG_FILE`.
-4. Stops the server and removes `.test-observer-mcp/` when the session ends.
+4. Stops the server when the session ends (the `.test-observer-mcp/` clone remains on disk and is wiped before the next clone).
 
 Requires a host SSH key registered with GitHub with access to `canonical/test-observer-mcp`,
 and `TEST_OBSERVER_API_URL` (and optionally `TEST_OBSERVER_API_KEY` for write operations) in

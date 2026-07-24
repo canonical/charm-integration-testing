@@ -389,7 +389,7 @@ _cmd_shell() {
 # the same relative path.
 #
 # Sets the caller's _to_mcp_host_dir (host clone dir; kept after teardown so
-# the clone can be reused/inspected -- only the running server is stopped),
+# the clone can be inspected until the next run -- only the running server is stopped),
 # _to_mcp_dir (VM-side path, for teardown), and _to_mcp_vm_file (generated
 # MCP config JSON, for --additional-mcp-config) on success. Exits the script
 # on failure.
@@ -461,7 +461,7 @@ _start_test_observer_mcp() {
         PORT="$TEST_OBSERVER_MCP_PORT" \
         bash -c "cd '$_to_mcp_dir' && exec setsid ./scripts/run.sh" \
         < /dev/null > "$_to_mcp_host_dir/server.log" 2>&1 &
-    disown
+    disown || true
 
     # Confirm the background process actually launched before burning up to
     # 10 minutes on the health-check loop below. `go run`'s own PID is
