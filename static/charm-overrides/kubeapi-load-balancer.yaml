@@ -1,4 +1,15 @@
 ---
+# Source: https://github.com/charmed-kubernetes/charm-kubeapi-load-balancer
+#
+# loadbalancer (provides, tracks 1.23-1.27/1.28 non-edge): optional - legacy
+# reactive-era endpoint (interface public-address). No charm in the ecosystem
+# requires public-address (confirmed via openstack-integrator.yaml, which
+# documents the same dead interface); tracks 1.28/edge+ dropped this endpoint
+# entirely in favor of cos-agent, proving it was never load-bearing.
+# nrpe-external-master (provides, tracks 1.23-1.27/1.28 non-edge): optional -
+# legacy NRPE monitoring hook, same pattern as sibling CK charms
+# (kubernetes-worker.yaml, canal.yaml, etcd.yaml): additive observability,
+# not the charm's primary purpose.
 overrides:
   # 1.23-1.27 and 1.28 non-edge: ha only (cos-agent not yet available)
   - criteria:
@@ -11,6 +22,11 @@ overrides:
           - track: '1.28'
             none_of:
               - risk: 'edge'
+    provides:
+      loadbalancer:
+        optional: true
+      nrpe-external-master:
+        optional: true
     requires:
       ha:
         optional: true
