@@ -27,13 +27,20 @@ def test_pod_deletion(
     pod_to_delete = pods[0]
     kubernetes_client.delete_pod(namespace=model, pod_name=pod_to_delete.metadata.name)
 
-    # Wait for the pod to be deleted and a new one to be created. Passing every pre-existing
-    # UID (not just the deleted pod's) ensures an untouched sibling replica can't be mistaken
-    # for the deleted pod's replacement when the application has multiple replicas.
-    kubernetes_client.wait_for_pod_recreation(
+    # Wait for a new pod to be created. Passing every pre-existing UID (not just the deleted
+    # pod's) ensures an untouched sibling replica can't be mistaken for the deleted pod's
+    # replacement when the application has multiple replicas.
+    new_pod = kubernetes_client.wait_for_new_pod(
         namespace=model,
         application_name=target_application,
         existing_uids=existing_uids,
+        timeout=timedelta(minutes=15),
+    )
+
+    # Then wait for that specific new pod to become ready.
+    kubernetes_client.wait_for_pod_status(
+        pod_name=new_pod.metadata.name,
+        namespace=model,
         target_status=PodStatus.RUNNING,
         timeout=timedelta(minutes=15),
     )

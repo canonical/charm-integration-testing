@@ -132,17 +132,18 @@ class KubernetesClient:
 
             sleep(delay.total_seconds())
 
-    def wait_for_pod_recreation(
+    def wait_for_new_pod(
         self,
         application_name: str,
         namespace: str,
         existing_uids: Collection[str],
-        target_status: PodStatus = PodStatus.RUNNING,
         timeout: timedelta | None = None,
         delay: timedelta | None = None,
     ) -> K8sClient.V1Pod:
         """
-        Wait for a genuinely new pod of `application_name` to appear and reach the target status.
+        Wait for a genuinely new pod of `application_name` to appear, and return it (in whatever
+        status it currently has). Pair with `wait_for_pod_status` to also wait for that pod to
+        reach a target status.
 
         Re-discovers pods via the same `app.kubernetes.io/name` label lookup as `get_charm_pods`,
         rather than re-reading a single fixed pod name. A StatefulSet-managed pod keeps a stable
@@ -150,9 +151,9 @@ class KubernetesClient:
         ReplicaSet under an entirely new name (e.g. `app-<replicaset-hash>-<pod-hash>`), so waiting
         on the old name would hang forever for Deployment-backed workloads.
 
-        A pod is considered "recreated" only if its UID is absent from `existing_uids`. Passing
-        just the deleted pod's UID is not sufficient when the application has multiple replicas:
-        an untouched sibling pod would trivially have a different UID and be returned immediately,
+        A pod is considered "new" only if its UID is absent from `existing_uids`. Passing just the
+        deleted pod's UID is not sufficient when the application has multiple replicas: an
+        untouched sibling pod would trivially have a different UID and be returned immediately,
         even though no replacement for the deleted pod had actually appeared yet. Callers should
         pass the UIDs of *all* pods observed for this application before the deletion.
 
@@ -160,15 +161,14 @@ class KubernetesClient:
             application_name: Name of the application whose pod was deleted
             namespace: Namespace where the pod is located
             existing_uids: UIDs of all pods for this application observed before the deletion
-            target_status: Desired pod status (default: RUNNING)
             timeout: Maximum time to wait
             delay: Delay between checks
 
         Returns:
-            The recreated pod object
+            The new pod object
 
         Raises:
-            TimeoutError: If pod is not recreated within timeout
+            TimeoutError: If no new pod appears within timeout
         """
         self.logger.info(
             f"Waiting for a new pod of application '{application_name}' in namespace '{namespace}' "
@@ -184,27 +184,65 @@ class KubernetesClient:
                 raise
 
             for pod in pods:
-                if pod.metadata.uid in existing_uids:
-                    continue
-
-                if PodStatus(pod.status.phase) == target_status:
-                    self.logger.info(
-                        f"Pod {pod.metadata.name} in namespace {namespace} recreated successfully with UID "
-                        f"{pod.metadata.uid} and status {target_status.value}"
-                    )
+                if pod.metadata.uid not in existing_uids:
+                    self.logger.info(f"New pod {pod.metadata.name} in namespace {namespace} has UID {pod.metadata.uid}")
                     return pod
-
-                self.logger.debug(
-                    f"Pod {pod.metadata.name} in namespace {namespace} recreated with new UID but status is "
-                    f"{pod.status.phase}, waiting for {target_status.value}"
-                )
             return None
 
         return self.wait(
             check=check,
             timeout_message=(
-                f"No pod of application '{application_name}' in namespace '{namespace}' was recreated or "
-                f"reached {target_status.value} status within timeout"
+                f"No new pod of application '{application_name}' in namespace '{namespace}' appeared within timeout"
+            ),
+            timeout=timeout,
+            delay=delay,
+        )
+
+    def wait_for_pod_status(
+        self,
+        pod_name: str,
+        namespace: str,
+        target_status: PodStatus = PodStatus.RUNNING,
+        timeout: timedelta | None = None,
+        delay: timedelta | None = None,
+    ) -> K8sClient.V1Pod:
+        """
+        Wait for the named pod to reach `target_status`, and return it.
+
+        Reads the pod directly by name rather than re-listing by label, since by this point the
+        caller (e.g. after `wait_for_new_pod`) already knows exactly which pod it cares about.
+
+        Args:
+            pod_name: Name of the pod to poll
+            namespace: Namespace where the pod is located
+            target_status: Desired pod status (default: RUNNING)
+            timeout: Maximum time to wait
+            delay: Delay between checks
+
+        Returns:
+            The pod object once it reaches the target status
+
+        Raises:
+            TimeoutError: If the pod does not reach the target status within timeout
+        """
+
+        def check() -> K8sClient.V1Pod | None:
+            pod = self.backend.core_v1_api.read_namespaced_pod(pod_name, namespace)
+            if PodStatus(pod.status.phase) == target_status:
+                self.logger.info(f"Pod {pod_name} in namespace {namespace} reached status {target_status.value}")
+                return pod
+
+            self.logger.debug(
+                f"Pod {pod_name} in namespace {namespace} has status {pod.status.phase}, "
+                f"waiting for {target_status.value}"
+            )
+            return None
+
+        return self.wait(
+            check=check,
+            timeout_message=(
+                f"Pod '{pod_name}' in namespace '{namespace}' did not reach {target_status.value} status "
+                "within timeout"
             ),
             timeout=timeout,
             delay=delay,
