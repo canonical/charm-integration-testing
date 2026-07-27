@@ -234,8 +234,16 @@ class VaultUnsealer:
         # joining the raft cluster could be checked first and block already-ready units behind
         # its (up to 10 minute) wait.
         units = self.juju.application_units(model, application)
-        unit_statuses = {unit: self.vault.status(model, unit) for unit in units}
-        ordered_units = sorted(units, key=lambda unit: not unit_statuses[unit].initialized)
+        unit_statuses: dict[str, VaultStatus] = {}
+        for unit in units:
+            try:
+                unit_statuses[unit] = self.vault.status(model, unit)
+            except Exception as exc:
+                self.logger.info(
+                    f"Skipping vault charm '{self.charm.name}' unit '{unit}': failed to query status ({exc}), "
+                    "will retry on next run"
+                )
+        ordered_units = sorted(unit_statuses, key=lambda unit: not unit_statuses[unit].initialized)
 
         # Check each unit
         for unit in ordered_units:
