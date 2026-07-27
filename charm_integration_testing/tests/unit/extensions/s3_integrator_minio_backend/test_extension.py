@@ -122,7 +122,7 @@ class TestS3IntegratorMinIOBackendExtension:
                 "s3-app",
                 {
                     "path": MINIO_PATH,
-                    "endpoint": "http://10.0.0.1:9000",
+                    "endpoint": "http://s3-app-minio.test-model.svc:9000",
                     "bucket": MINIO_BUCKET,
                 },
             ) in juju.configured_applications
@@ -263,7 +263,7 @@ class TestS3IntegratorMinIOBackendExtension:
                 "s3-app",
                 {
                     "path": MINIO_PATH,
-                    "endpoint": "http://10.0.0.1:9000",
+                    "endpoint": "http://s3-app-minio.test-model.svc:9000",
                     "bucket": MINIO_BUCKET,
                 },
             ) in juju.configured_applications
@@ -384,10 +384,40 @@ class TestS3IntegratorMinIOBackendExtension:
             # THEN it returns the leader unit
             assert result == "s3-app-minio/leader"
 
-        def test_minio_address_builds_from_unit_ip(self, extension: S3IntegratorMinIOBackendExtension) -> None:
-            # GIVEN a known unit IP
+        def test_minio_address_uses_k8s_service_hostname_for_k8s_models(
+            self, extension: S3IntegratorMinIOBackendExtension, juju: JujuStub
+        ) -> None:
+            # GIVEN a k8s model
+            juju.is_k8s = True
+
             # WHEN minio_address is called
             result = extension.minio_address("test-model", "s3-app")
 
-            # THEN the URL is constructed correctly
+            # THEN the stable k8s Service DNS name is used instead of the pod IP, since the
+            # pod (and its IP) can change after events such as model migration
+            assert result == "http://s3-app-minio.test-model.svc:9000"
+
+        def test_minio_address_uses_model_name_segment_of_a_model_uri(
+            self, extension: S3IntegratorMinIOBackendExtension, juju: JujuStub
+        ) -> None:
+            # GIVEN a k8s model passed as a "controller:model-name" URI, as happens during
+            # JujuClient.deploy_bundles()
+            juju.is_k8s = True
+
+            # WHEN minio_address is called
+            result = extension.minio_address("test-controller:test-model", "s3-app")
+
+            # THEN only the model-name segment is used as the k8s namespace
+            assert result == "http://s3-app-minio.test-model.svc:9000"
+
+        def test_minio_address_builds_from_unit_ip_for_machine_models(
+            self, extension: S3IntegratorMinIOBackendExtension, juju: JujuStub
+        ) -> None:
+            # GIVEN a machine (non-k8s) model with a known unit IP
+            juju.is_k8s = False
+
+            # WHEN minio_address is called
+            result = extension.minio_address("test-model", "s3-app")
+
+            # THEN the URL is constructed from the unit IP
             assert result == "http://10.0.0.1:9000"
