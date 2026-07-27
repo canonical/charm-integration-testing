@@ -359,7 +359,22 @@ class BundleBuilder:
             except CharmReleaseNotFoundException:
                 self.logger.debug(f"Skipping {charm_name}: no compatible release for {model.platform}/{model.arch}")
                 continue
-            if self._add_charm_for_charm_id(charm, charm_id, domain, model_ref):
+            # find_charms() is a Charmhub metadata search and can return false positives (e.g.
+            # stale or loosely-matched entries) that don't actually declare a compatible
+            # endpoint. Verify before adding: without this, a bogus candidate can be re-added
+            # every iteration (it never connects, so the tag never clears) and the domain
+            # grows without bound instead of moving on to the next real candidate.
+            if not any(
+                other_ep.interface == endpoint.interface
+                and (
+                    (endpoint.type == EndpointType.REQUIRES and other_ep.type == EndpointType.PROVIDES)
+                    or (endpoint.type == EndpointType.PROVIDES and other_ep.type == EndpointType.REQUIRES)
+                )
+                for other_ep in charm.endpoints.values()
+            ):
+                self.logger.debug(f"Skipping {charm_name}: no endpoint compatible with {endpoint_name}")
+                continue
+            if self._add_charm_for_charm_id(charm, charm_id, domain, model_ref, endpoint_name=endpoint_name):
                 return True
         return False
 
@@ -602,18 +617,41 @@ class BundleBuilder:
         charm_id: int,
         domain: Domain,
         model_ref: ModelRef,
+        endpoint_name: str | None = None,
     ) -> bool:
-        # If an identical charm is already present in this model, adding another copy via
-        # expansion contributes nothing new: any endpoint it could satisfy was already made
-        # available (and connectable) by the existing instance in step 1 of
-        # _expand_for_endpoint. Without this check, a charm whose non-optional endpoints
-        # can never be fully satisfied (e.g. a genuine dependency cycle) causes the same
-        # charm to be re-added on every iteration, growing the domain without bound instead
-        # of failing fast. Scoped to model_ref (not domain-wide) because the same charm name
-        # added in a different model is a distinct, potentially useful application instance.
         parent_charm = domain.charms[charm_id]
-        for existing_charm in domain.charms:
-            if existing_charm.spec == charm and existing_charm.model == model_ref:
+
+        # If an identical charm is already present in this model, adding another copy is only
+        # blocked when it truly can't help: an existing instance's endpoint that could satisfy
+        # endpoint_name has no connection limit. An unlimited compatible endpoint can already
+        # serve any number of consumers, so a second instance offers nothing new — without this
+        # check, a charm whose non-optional endpoints can never be fully satisfied (e.g. a
+        # genuine dependency cycle) causes the same charm to be re-added on every iteration,
+        # growing the domain without bound instead of failing fast.
+        # But when the compatible endpoint IS limit-constrained, the existing instance may
+        # simply be at capacity (e.g. a database allowing only one consumer): a fresh, unconnected
+        # instance is then a legitimate and necessary way to serve another consumer, so a second
+        # instance of the same charm in the same model must be allowed in that case.
+        # Scoped to model_ref (not domain-wide) because the same charm name added in a
+        # different model is a distinct, potentially useful application instance.
+        existing_matches = [
+            existing for existing in domain.charms if existing.spec == charm and existing.model == model_ref
+        ]
+        if existing_matches:
+            if endpoint_name is None:
+                return False
+            target_endpoint = parent_charm.spec.endpoints[endpoint_name]
+            has_unlimited_compatible = any(
+                other_ep.interface == target_endpoint.interface
+                and other_ep.limit is None
+                and (
+                    (target_endpoint.type == EndpointType.REQUIRES and other_ep.type == EndpointType.PROVIDES)
+                    or (target_endpoint.type == EndpointType.PROVIDES and other_ep.type == EndpointType.REQUIRES)
+                )
+                for existing in existing_matches
+                for other_ep in existing.spec.endpoints.values()
+            )
+            if has_unlimited_compatible:
                 return False
 
         # Traverse the dependency chain to detect cycles
