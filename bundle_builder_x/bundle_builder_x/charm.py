@@ -168,10 +168,8 @@ class Charm(BaseModel):
     # Platforms (e.g. "machine", "kubernetes") this charm is known to support. Platform
     # overrides win when present; otherwise this falls back to the charm's own metadata
     # (a non-empty `containers` block means "kubernetes", its absence means "machine").
-    # `None` is reserved for charms built without going through `_get_charm_platforms`
-    # (e.g. hand-constructed test doubles); it means no restriction is known, as opposed
-    # to an empty list which would mean no platform is supported.
-    platforms: list[str] | None = Field(default=None)
+    # No default is provided: every Charm must state which platform(s) it supports.
+    platforms: list[str]
 
     def __repr__(self) -> str:
         return self.name

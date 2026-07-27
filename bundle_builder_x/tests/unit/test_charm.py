@@ -84,6 +84,7 @@ class TestCharmSubordinateField:
             ubuntu_version="22.04",
             ubuntu_arch="amd64",
             endpoints={},
+            platforms=["machine", "kubernetes"],
         )
         assert charm.subordinate is False
 
@@ -96,5 +97,6 @@ class TestCharmSubordinateField:
             ubuntu_arch="amd64",
             subordinate=True,
             endpoints={},
+            platforms=["machine", "kubernetes"],
         )
         assert charm.subordinate is True

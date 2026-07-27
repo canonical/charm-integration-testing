@@ -286,7 +286,7 @@ class CharmhubClient:
     def _ensure_compatibility(self, charm: Charm, juju_version: JujuVersion | None, platform: str | None) -> Charm:
         if platform is not None:
             supported_platforms = charm.platforms
-            if supported_platforms is not None and platform not in supported_platforms:
+            if platform not in supported_platforms:
                 raise CharmReleaseNotFoundException(
                     f"Charm {charm.name} revision {charm.revision} in channel {charm.channel} supports "
                     f"platform(s) {supported_platforms!r}, but platform {platform!r} was requested"

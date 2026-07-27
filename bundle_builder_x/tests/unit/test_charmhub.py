@@ -230,27 +230,6 @@ class TestCharmhubClient:
             # THEN the same charm is returned unchanged
             assert result is charm
 
-        def test_passes_when_charm_platforms_is_none(self) -> None:
-            # GIVEN a built charm with no platform restriction, e.g. a hand-constructed test
-            # double that never went through _get_charm_platforms
-            client = _client({})
-            charm = client._build_charm(
-                charm_name="ceph-mon",
-                channel=_CHANNEL,
-                revision=1,
-                ubuntu_version="22.04",
-                ubuntu_arch="amd64",
-                metadata=_METADATA_REQUIRES,
-                config_schema=_EMPTY_CONFIG,
-            ).model_copy(update={"platforms": None})
-            assert charm.platforms is None
-
-            # WHEN checking compatibility against any platform
-            result = client._ensure_compatibility(charm, juju_version=None, platform="kubernetes")
-
-            # THEN it is accepted
-            assert result is charm
-
     # ---------------------------------------------------------------------------
     # TestCharmFromStorePlatformOverrides
     # ---------------------------------------------------------------------------
