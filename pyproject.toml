@@ -31,6 +31,7 @@ validators-cve-catalog = { path = "./validators/cve_catalog", develop = true }
 validators-livepatch-pro-airgapped-server = { path = "./validators/livepatch_pro_airgapped_server", develop = true }
 validators-azure-storage = { path = "./validators/azure_storage", develop = true }
 validators-parca-store = { path = "./validators/parca_store", develop = true }
+validators-parca-scrape = { path = "./validators/parca_scrape", develop = true, extras = ["dev"] }
 validators-external-provider = { path = "./validators/external_provider", develop = true }
 validators-http-interface = { path = "./validators/http_interface", develop = true }
 validators-grafana-dashboard = { path = "./validators/grafana_dashboard", develop = true }

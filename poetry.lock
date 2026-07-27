@@ -2800,6 +2800,28 @@ type = "directory"
 url = "validators/opensearch_client"
 
 [[package]]
+name = "validators-parca-scrape"
+version = "0.1.0"
+description = "Validator for parca_scrape interface"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+markers = "python_version >= \"3.14\" or python_version <= \"3.13\""
+files = []
+develop = true
+
+[package.dependencies]
+validators-base = "*"
+validators-test-utils = {version = "*", optional = true}
+
+[package.extras]
+dev = ["validators-test-utils"]
+
+[package.source]
+type = "directory"
+url = "validators/parca_scrape"
+
+[[package]]
 name = "validators-parca-store"
 version = "0.1.0"
 description = "Validator for parca_store (gRPC) interface"
@@ -2913,6 +2935,7 @@ validators-mysql = "*"
 validators-mysql-client = "*"
 validators-object-storage = "*"
 validators-opensearch-client = "*"
+validators-parca-scrape = "*"
 validators-parca-store = "*"
 validators-postgresql-client = "*"
 validators-prometheus-remote-write = "*"
@@ -3084,4 +3107,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<4.0"
-content-hash = "7e555929bde5bd4a4c1c75c1b75494162ed77447ffd146cabae4e86eb3b89b1d"
+content-hash = "26310f8bbbb2fdb285058edb80178c1b174ba4bcc91b82da7eebe5b39758855d"

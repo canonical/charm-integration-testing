@@ -30,6 +30,7 @@ dependencies = [
     "validators-livepatch-pro-airgapped-server",
     "validators-azure-storage",
     "validators-parca-store",
+    "validators-parca-scrape",
     "validators-external-provider",
     "validators-http-interface",
     "validators-grafana-dashboard",
