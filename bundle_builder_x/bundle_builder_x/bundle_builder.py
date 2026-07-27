@@ -372,8 +372,12 @@ class BundleBuilder:
     ) -> bool:
         """Pair charm_id with any existing domain charm that can satisfy endpoint_name.
 
-        Only creates integration variables — never adds new charms.  Returns True if
-        at least one new integration variable was created.
+        Only creates integration variables — never adds new charms.  pair_charms_in_domain()
+        connects every compatible endpoint pair between the two charms in a single call, which
+        can create integrations unrelated to endpoint_name. Only report success once the
+        integration variable for this specific endpoint actually exists afterwards, so the
+        CEGIS loop doesn't spend an iteration believing this unsat-core tag was addressed when
+        it wasn't.
         """
         endpoint = domain.charms[charm_id].spec.endpoints[endpoint_name]
         for other_id, other_charm in enumerate(domain.charms):
@@ -381,22 +385,36 @@ class BundleBuilder:
                 continue
             if other_charm.model != target_model:
                 continue
+            if self._is_endpoint_connected_to(charm_id, endpoint_name, other_id, domain):
+                continue  # already connected to this candidate — no progress to be made here
             # Check this other charm has a compatible endpoint.
-            for other_ep in other_charm.spec.endpoints.values():
-                if other_ep.interface != endpoint.interface:
-                    continue
-                if endpoint.type == EndpointType.REQUIRES and other_ep.type != EndpointType.PROVIDES:
-                    continue
-                if endpoint.type == EndpointType.PROVIDES and other_ep.type != EndpointType.REQUIRES:
-                    continue
-                if pair_charms_in_domain(domain, charm_id, other_id):
-                    self.logger.debug(
-                        f"Connected existing charm {other_charm.spec.name}:{other_id} "
-                        f"to {domain.charms[charm_id].spec.name}:{charm_id} via {endpoint_name}"
-                    )
-                    return True  # one at a time — let CEGIS re-evaluate
-                break  # this other charm has no new vars to contribute; try the next
+            if not any(
+                other_ep.interface == endpoint.interface
+                and (
+                    (endpoint.type == EndpointType.REQUIRES and other_ep.type == EndpointType.PROVIDES)
+                    or (endpoint.type == EndpointType.PROVIDES and other_ep.type == EndpointType.REQUIRES)
+                )
+                for other_ep in other_charm.spec.endpoints.values()
+            ):
+                continue
+
+            pair_charms_in_domain(domain, charm_id, other_id)
+            if self._is_endpoint_connected_to(charm_id, endpoint_name, other_id, domain):
+                self.logger.debug(
+                    f"Connected existing charm {other_charm.spec.name}:{other_id} "
+                    f"to {domain.charms[charm_id].spec.name}:{charm_id} via {endpoint_name}"
+                )
+                return True  # one at a time — let CEGIS re-evaluate
         return False
+
+    @staticmethod
+    def _is_endpoint_connected_to(charm_id: int, endpoint_name: str, other_id: int, domain: Domain) -> bool:
+        """Check whether charm_id:endpoint_name already has an integration variable to other_id."""
+        return any(
+            (i.requires_charm_id, i.requires_endpoint, i.provides_charm_id) == (charm_id, endpoint_name, other_id)
+            or (i.provides_charm_id, i.provides_endpoint, i.requires_charm_id) == (charm_id, endpoint_name, other_id)
+            for i in domain.charm_integrations
+        )
 
     def _handle_peer_channel_mismatch(
         self,
@@ -585,13 +603,14 @@ class BundleBuilder:
         domain: Domain,
         model_ref: ModelRef,
     ) -> bool:
-        # If an identical charm is already anywhere in the domain, adding another copy
-        # via expansion contributes nothing new: any endpoint it could satisfy was
-        # already made available (and connectable) by the existing instance in step 1
-        # of _expand_for_endpoint. Without this check, a charm whose non-optional
-        # endpoints can never be fully satisfied (e.g. a genuine dependency cycle)
-        # causes the same charm to be re-added on every iteration, growing the domain
-        # without bound instead of failing fast.
+        # If an identical charm is already present in this model, adding another copy via
+        # expansion contributes nothing new: any endpoint it could satisfy was already made
+        # available (and connectable) by the existing instance in step 1 of
+        # _expand_for_endpoint. Without this check, a charm whose non-optional endpoints
+        # can never be fully satisfied (e.g. a genuine dependency cycle) causes the same
+        # charm to be re-added on every iteration, growing the domain without bound instead
+        # of failing fast. Scoped to model_ref (not domain-wide) because the same charm name
+        # added in a different model is a distinct, potentially useful application instance.
         parent_charm = domain.charms[charm_id]
         for existing_charm in domain.charms:
             if existing_charm.spec == charm and existing_charm.model == model_ref:

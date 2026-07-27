@@ -357,6 +357,7 @@ class TestGetCharmsForEndpoint:
         # THEN no results are returned and no Charmhub queries were made
         assert results == []
         assert fake.charm_from_store_calls == []
+        assert fake.find_charms_calls == []
 
     def test_candidates_sorted_by_priority_with_deterministic_tiebreak(self) -> None:
         # GIVEN a global-scoped endpoint with candidates of mixed priority, including a tie
