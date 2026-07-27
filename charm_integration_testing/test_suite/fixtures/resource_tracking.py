@@ -125,9 +125,9 @@ def track_state_resources(
     if marker is None:
         return
 
-    # Build a collector per available substrate.  Only Kubernetes is supported
-    # today, but adding an lxd/openstack collector here keeps the tracker itself
-    # substrate-agnostic.
+    # Build a collector per supported substrate. Only Kubernetes is supported today; the collector will
+    # skip models whose controllers are not Kubernetes-based.
+    # Adding an lxd/openstack collector here keeps the tracker itself substrate-agnostic.
     collectors: list[ResourceCollector] = [
         KubernetesResourceCollector(
             juju_client.backend,

@@ -105,7 +105,7 @@ class _FakeJujuBackend(NullJujuBackend):
             raise self._error
         # The fake clients stored here only duck-type the methods KubernetesResourceCollector
         # uses; cast rather than widen the override's return type to keep this a real JujuBackend.
-        return cast("KubernetesClient | None", self._clients_by_controller.get(controller))
+        return cast(KubernetesClient | None, self._clients_by_controller.get(controller))
 
 
 class _FakeCollector:
