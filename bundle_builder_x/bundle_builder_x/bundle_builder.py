@@ -374,7 +374,7 @@ class BundleBuilder:
             ):
                 self.logger.debug(f"Skipping {charm_name}: no endpoint compatible with {endpoint_name}")
                 continue
-            if self._add_charm_for_charm_id(charm, charm_id, domain, model_ref, endpoint_name=endpoint_name):
+            if self._add_charm_for_charm_id(charm, charm_id, domain, model_ref):
                 return True
         return False
 
@@ -617,42 +617,18 @@ class BundleBuilder:
         charm_id: int,
         domain: Domain,
         model_ref: ModelRef,
-        endpoint_name: str | None = None,
     ) -> bool:
-        parent_charm = domain.charms[charm_id]
-
-        # If an identical charm is already present in this model, adding another copy is only
-        # blocked when it truly can't help: an existing instance's endpoint that could satisfy
-        # endpoint_name has no connection limit. An unlimited compatible endpoint can already
-        # serve any number of consumers, so a second instance offers nothing new — without this
-        # check, a charm whose non-optional endpoints can never be fully satisfied (e.g. a
-        # genuine dependency cycle) causes the same charm to be re-added on every iteration,
-        # growing the domain without bound instead of failing fast.
-        # But when the compatible endpoint IS limit-constrained, the existing instance may
-        # simply be at capacity (e.g. a database allowing only one consumer): a fresh, unconnected
-        # instance is then a legitimate and necessary way to serve another consumer, so a second
-        # instance of the same charm in the same model must be allowed in that case.
+        # If an identical charm is already present in this model, don't add another copy: a
+        # charm whose non-optional endpoints can never be fully satisfied (e.g. a genuine
+        # dependency cycle) would otherwise be re-added on every iteration, growing the domain
+        # without bound instead of failing fast. Known limitation: this also blocks the rare,
+        # legitimate case where a limited connection endpoint (e.g. a database allowing only one
+        # consumer) genuinely needs a second instance to serve another consumer in the same
+        # model; that case is not currently supported.
         # Scoped to model_ref (not domain-wide) because the same charm name added in a
         # different model is a distinct, potentially useful application instance.
-        existing_matches = [
-            existing for existing in domain.charms if existing.spec == charm and existing.model == model_ref
-        ]
-        if existing_matches:
-            if endpoint_name is None:
-                return False
-            target_endpoint = parent_charm.spec.endpoints[endpoint_name]
-            has_unlimited_compatible = any(
-                other_ep.interface == target_endpoint.interface
-                and other_ep.limit is None
-                and (
-                    (target_endpoint.type == EndpointType.REQUIRES and other_ep.type == EndpointType.PROVIDES)
-                    or (target_endpoint.type == EndpointType.PROVIDES and other_ep.type == EndpointType.REQUIRES)
-                )
-                for existing in existing_matches
-                for other_ep in existing.spec.endpoints.values()
-            )
-            if has_unlimited_compatible:
-                return False
+        if any(existing.spec == charm and existing.model == model_ref for existing in domain.charms):
+            return False
 
         # Traverse the dependency chain to detect cycles
         # Walk backwards from charm_id through parents to see if the charm we're trying to add
@@ -683,7 +659,7 @@ class BundleBuilder:
         new_charm_id = add_charm_to_domain(charm, domain, model_ref)
 
         # Record that this charm was added for this charm_id
-        parent_charm.charms_added.append(new_charm_id)
+        domain.charms[charm_id].charms_added.append(new_charm_id)
         return True
 
     @staticmethod
