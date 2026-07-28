@@ -227,7 +227,12 @@ class KubernetesClient:
         """
 
         def check() -> K8sClient.V1Pod | None:
-            pod = self.backend.core_v1_api.read_namespaced_pod(pod_name, namespace)
+            try:
+                pod = self.backend.core_v1_api.read_namespaced_pod(pod_name, namespace)
+            except ApiException as e:
+                if e.status == 404:
+                    return None
+                raise
             if PodStatus(pod.status.phase) == target_status:
                 self.logger.info(f"Pod {pod_name} in namespace {namespace} reached status {target_status.value}")
                 return pod
