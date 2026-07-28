@@ -135,12 +135,17 @@ def kubernetes_client(
     cloud_kubeconfigs: dict[str, Path],
     target_cloud: str,
     logger: logging.Logger,
+    juju_backend: JujuBackend,
 ) -> KubernetesClient | None:
     """KubernetesClient for the target cloud, or None for machine clouds."""
     path = cloud_kubeconfigs.get(target_cloud)
     if path is None:
         return None
-    return KubernetesClient(KubernetesBackend.k8s_client(kubeconfig=path), logger=logger)
+    return KubernetesClient(
+        KubernetesBackend.k8s_client(kubeconfig=path),
+        logger=logger,
+        extensions=[UnsealVaultK8sJujuExtension(juju_backend, logger)],
+    )
 
 
 @pytest.fixture(scope="session")
