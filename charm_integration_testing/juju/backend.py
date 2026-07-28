@@ -200,18 +200,22 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def wait_application_settled(self, model: str, application: str, timeout: timedelta | None) -> None:
-        raise NotImplementedError
+    def wait_application_settled(
+        self, model: str, application: str, timeout: timedelta | None, successes: int | None = None
+    ) -> None:
+        """Wait until every unit's workload status reaches 'active'/'blocked' and its agent is idle.
 
-    @abstractmethod
-    def wait_application_workload_settled(self, model: str, application: str, timeout: timedelta | None) -> None:
-        """Wait until every unit's workload status reaches 'active' or 'blocked'.
+        ``successes`` controls how many consecutive checks must observe this state before it's
+        considered settled (backends that poll rather than watch for changes use this to avoid
+        treating a single flaky sample as truth). It defaults to a backend-specific value.
 
-        Unlike wait_application_settled, this does not require the unit agent to be idle. Some
-        charms (e.g. vault-k8s awaiting manual init/unseal) legitimately spend long, repeated
-        stretches of time 'executing' hooks (e.g. update-status retries) while their workload
-        status is already settled on the terminal 'blocked' state, so requiring agent idleness
-        can time out even though the workload status itself is already actionable.
+        Some charms (e.g. vault-k8s awaiting manual init/unseal) legitimately spend long, repeated
+        stretches of time with their agent 'executing' hooks (e.g. update-status retries against
+        a not-yet-configured backend) in between brief idle windows, while their workload status
+        is already settled on a terminal state. Callers dealing with such a charm should pass
+        ``successes=1`` rather than dropping the agent-idle requirement altogether: a single
+        observed idle sample is still real evidence the agent isn't permanently wedged, whereas
+        never requiring idleness at all would let a genuinely hung agent pass unnoticed.
         """
         raise NotImplementedError
 

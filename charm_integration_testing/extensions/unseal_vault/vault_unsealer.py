@@ -157,16 +157,17 @@ class VaultUnsealer:
             self.logger.info(f"Vault charm '{self.charm.name}' application '{application}' has no units")
             return
 
-        # Wait for units' workload status to settle. We deliberately don't require the unit
-        # agent to be idle here: an uninitialized/unintegrated vault-k8s legitimately spends
+        # Wait for units to settle. An uninitialized/unintegrated vault-k8s legitimately spends
         # long, repeated stretches "executing" hooks (e.g. update-status retries against an
-        # unreachable Vault API) while its workload status is already the terminal "blocked"
-        # state waiting on the manual init/unseal step we're about to perform below. Requiring
-        # agent idleness here can time out even though the workload is already actionable.
-        self.logger.info(
-            f"Waiting for vault charm '{self.charm.name}' application '{application}' units' workload status to be settled"
-        )
-        self.juju.wait_application_workload_settled(model, application, timedelta(minutes=10))
+        # unreachable Vault API) in between brief idle windows, while its workload status is
+        # already the terminal "blocked" state waiting on the manual init/unseal step we're about
+        # to perform below. We still require the agent to be observed idle at least once
+        # (successes=1) rather than dropping that requirement altogether: a single idle sample is
+        # real evidence the agent isn't permanently wedged, whereas ignoring agent status entirely
+        # would let a genuinely hung unit pass unnoticed. We just don't require several
+        # back-to-back idle samples, since retry backoff can make idle windows brief.
+        self.logger.info(f"Waiting for vault charm '{self.charm.name}' application '{application}' units to be settled")
+        self.juju.wait_application_settled(model, application, timedelta(minutes=10), successes=1)
 
         # Try to initialize vault
         self.try_init_vault(model, application, authorize_charm)

@@ -131,7 +131,7 @@ class TestPostgreSQLDatabaseReplicationExtension:
 
             # THEN applications are waited on for scaling and settling
             assert ("test-model", "postgresql-1", "0:10:00") in juju.waited_scaled
-            assert ("test-model", "postgresql-1", "0:10:00") in juju.waited_settled
+            assert ("test-model", "postgresql-1", "0:10:00", None) in juju.waited_settled
 
         def test_skips_when_no_integrations_exist(
             self, extension: GenericDatabaseReplicationExtension, juju: JujuStub
@@ -159,7 +159,7 @@ class TestPostgreSQLDatabaseReplicationExtension:
 
             # THEN application is waited on
             assert ("test-model", "postgresql-1", "0:10:00") in juju.waited_scaled
-            assert ("test-model", "postgresql-1", "0:10:00") in juju.waited_settled
+            assert ("test-model", "postgresql-1", "0:10:00", None) in juju.waited_settled
 
         def test_skips_when_no_units_exist(
             self, extension: GenericDatabaseReplicationExtension, juju: JujuStub
@@ -197,9 +197,9 @@ class TestPostgreSQLDatabaseReplicationExtension:
 
             # THEN both applications are waited on
             assert ("test-model", "postgresql-1", "0:10:00") in juju.waited_scaled
-            assert ("test-model", "postgresql-1", "0:10:00") in juju.waited_settled
+            assert ("test-model", "postgresql-1", "0:10:00", None) in juju.waited_settled
             assert ("test-model", "postgresql-2", "0:10:00") in juju.waited_scaled
-            assert ("test-model", "postgresql-2", "0:10:00") in juju.waited_settled
+            assert ("test-model", "postgresql-2", "0:10:00", None) in juju.waited_settled
 
             # AND replication configuration is applied
             assert len(juju.configured_applications) == 1

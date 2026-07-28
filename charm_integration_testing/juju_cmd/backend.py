@@ -148,7 +148,13 @@ class JujuCmdBackend(JujuBackend):
             else:
                 raise e
 
-    def wait_application_settled(self, model: str, application: str, timeout: timedelta | None) -> None:
+    def wait_application_settled(
+        self, model: str, application: str, timeout: timedelta | None, successes: int | None = None
+    ) -> None:
+        # `juju wait-for` watches the model's change stream and evaluates the query on every
+        # event, so it already reports success as soon as the condition is true for even a single
+        # event; there's no fixed-interval sampling to lose a brief idle window to. `successes` is
+        # accepted for interface parity with polling backends but has no effect here.
         unit_workload_status_settled = " || ".join(
             {f"unit.workload-status == '{status}'" for status in {"active", "blocked"}}
         )

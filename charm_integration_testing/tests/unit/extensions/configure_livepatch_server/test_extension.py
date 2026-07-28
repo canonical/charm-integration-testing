@@ -101,7 +101,7 @@ class TestConfigureLivepatchServerExtension:
             assert ("test-model", "livepatch", "0:10:00") in juju.waited_scaled
 
             # Wait for settling
-            assert ("test-model", "livepatch", "0:10:00") in juju.waited_settled
+            assert ("test-model", "livepatch", "0:10:00", None) in juju.waited_settled
 
             # Wait for configure message
             assert (

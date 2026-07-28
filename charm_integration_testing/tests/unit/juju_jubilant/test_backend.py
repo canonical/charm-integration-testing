@@ -234,6 +234,7 @@ class WaitStub:
 
     raise_timeout: bool = False
     call_count: int = 0
+    successes_seen: list[int | None] = field(default_factory=list)
 
     def wait(
         self,
@@ -246,6 +247,7 @@ class WaitStub:
         strict_timeout: bool = False,
     ) -> None:
         self.call_count += 1
+        self.successes_seen.append(successes)
         if self.raise_timeout:
             raise JujuWaitTimeoutError()
 
@@ -587,6 +589,19 @@ class TestJubilantBackend:
             # THEN wait was called
             assert wait_stub.call_count == 1
 
+        def test_application_settled_passes_successes_through(self) -> None:
+            # GIVEN a caller that only needs a single idle sample (e.g. a charm that flaps
+            # between "executing" and "idle" while blocked on manual intervention)
+            wait_stub = WaitStub()
+            backend = JubilantBackend()
+            backend.wait = wait_stub.wait
+
+            # WHEN
+            backend.wait_application_settled("test-model", "my-app", timeout=timedelta(seconds=10), successes=1)
+
+            # THEN the custom successes count reaches the underlying wait() call
+            assert wait_stub.successes_seen == [1]
+
         def test_timeout(self) -> None:
             # GIVEN
             wait_stub = WaitStub(raise_timeout=True)
@@ -596,29 +611,6 @@ class TestJubilantBackend:
             # WHEN / THEN
             with pytest.raises(JujuWaitTimeoutError):
                 backend.wait_application_settled("test-model", "my-app", timeout=timedelta(milliseconds=100))
-
-    class TestWaitApplicationWorkloadSettled:
-        def test_application_workload_settled(self) -> None:
-            # GIVEN
-            wait_stub = WaitStub()
-            backend = JubilantBackend()
-            backend.wait = wait_stub.wait
-
-            # WHEN
-            backend.wait_application_workload_settled("test-model", "my-app", timeout=timedelta(seconds=10))
-
-            # THEN wait was called
-            assert wait_stub.call_count == 1
-
-        def test_timeout(self) -> None:
-            # GIVEN
-            wait_stub = WaitStub(raise_timeout=True)
-            backend = JubilantBackend()
-            backend.wait = wait_stub.wait
-
-            # WHEN / THEN
-            with pytest.raises(JujuWaitTimeoutError):
-                backend.wait_application_workload_settled("test-model", "my-app", timeout=timedelta(milliseconds=100))
 
     class TestWaitApplicationScaled:
         def test_application_scaled(self) -> None:

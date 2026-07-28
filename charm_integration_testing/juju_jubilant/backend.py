@@ -205,7 +205,9 @@ class JubilantBackend(JujuCmdBackend):
             strict_timeout=strict_timeout,
         )
 
-    def wait_application_settled(self, model: str, application: str, timeout: timedelta | None) -> None:
+    def wait_application_settled(
+        self, model: str, application: str, timeout: timedelta | None, successes: int | None = None
+    ) -> None:
         self.wait(
             model,
             lambda status: all_statuses_are_in(
@@ -216,17 +218,7 @@ class JubilantBackend(JujuCmdBackend):
                 unit_agent_statuses={"idle"},
             ),
             timeout=timeout,
-        )
-
-    def wait_application_workload_settled(self, model: str, application: str, timeout: timedelta | None) -> None:
-        self.wait(
-            model,
-            lambda status: all_statuses_are_in(
-                status,
-                application,
-                unit_statuses={"blocked", "active"},
-            ),
-            timeout=timeout,
+            successes=successes,
         )
 
     def wait_application_scaled(self, model: str, application: str, timeout: timedelta | None) -> None:

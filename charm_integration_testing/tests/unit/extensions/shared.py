@@ -53,10 +53,9 @@ class NullJujuBackend(JujuBackend):
     ) -> None:
         raise NotImplementedError
 
-    def wait_application_settled(self, model: str, application: str, timeout: timedelta | None) -> None:
-        raise NotImplementedError
-
-    def wait_application_workload_settled(self, model: str, application: str, timeout: timedelta | None) -> None:
+    def wait_application_settled(
+        self, model: str, application: str, timeout: timedelta | None, successes: int | None = None
+    ) -> None:
         raise NotImplementedError
 
     def wait_application_scaled(self, model: str, application: str, timeout: timedelta | None) -> None:
@@ -235,7 +234,6 @@ class JujuStub(NullJujuBackend):
     waited_messages: list[Any] = field(default_factory=list)
     waited_scaled: list[Any] = field(default_factory=list)
     waited_settled: list[Any] = field(default_factory=list)
-    waited_workload_settled: list[Any] = field(default_factory=list)
     integrations: list[Any] = field(default_factory=list)
     scp_calls: list[Any] = field(default_factory=list)
     ssh_calls: list[Any] = field(default_factory=list)
@@ -318,13 +316,11 @@ class JujuStub(NullJujuBackend):
         """Wait for application to be scaled (captures call for verification)"""
         self.waited_scaled.append((model, application, str(timeout)))
 
-    def wait_application_settled(self, model: str, application: str, timeout: timedelta | None) -> None:
+    def wait_application_settled(
+        self, model: str, application: str, timeout: timedelta | None, successes: int | None = None
+    ) -> None:
         """Wait for application to settle (captures call for verification)"""
-        self.waited_settled.append((model, application, str(timeout)))
-
-    def wait_application_workload_settled(self, model: str, application: str, timeout: timedelta | None) -> None:
-        """Wait for application workload status to settle (captures call for verification)"""
-        self.waited_workload_settled.append((model, application, str(timeout)))
+        self.waited_settled.append((model, application, str(timeout), successes))
 
     def wait_for_unit_message(self, model: str, unit: str, message: str, timeout: timedelta | None) -> None:
         """Wait for a specific message from a unit (captures call for verification)"""
