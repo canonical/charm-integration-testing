@@ -2,11 +2,10 @@
 # See LICENSE file for licensing details.
 
 import logging
-import re
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from time import sleep
-from typing import Callable, TypeVar
+from typing import Callable, Collection, TypeVar
 
 from kubernetes import client as K8sClient  # type: ignore[import-untyped]
 from kubernetes import watch
@@ -48,19 +47,28 @@ class KubernetesClient:
         self, application_name: str, model: str
     ) -> list[K8sClient.V1Pod]:  # multiple pods per a charm, depends on charm name and unit number
         """
-        Gets all pods in the specified namespace that match the given application name.
+        Gets all pods in the specified namespace that belong to the given application.
+
+        Filters server-side on Juju's standard Kubernetes name label
+        (``app.kubernetes.io/name``), which Juju sets on every pod regardless of
+        whether the charm's workload is deployed as a StatefulSet (pod names like
+        ``<app>-0``) or a Deployment (pod names like ``<app>-<replicaset-hash>-<pod-hash>``).
+        Matching on pod name patterns is unreliable across workload kinds; the label
+        is the stable identifier.
+
         Args:
             application_name: Name of the application to filter pods by
-            model: Model the application is deployed in
+            model: Model name the application is deployed in (used as the namespace name)
         Raises:
             ApiException: If there is an error communicating with the Kubernetes API
         Returns:
             List of pods that match the given application name in the specified namespace
         """
-        pattern = re.compile(rf"^{re.escape(application_name)}(-\d+)$")
-        pods = self.backend.core_v1_api.list_namespaced_pod(model)  # juju creates a namespace for each model
-        matching_pods = [pod for pod in pods.items if pattern.match(pod.metadata.name)]
-        return matching_pods
+        pods = self.backend.core_v1_api.list_namespaced_pod(
+            model,  # juju creates a namespace for each model
+            label_selector=f"app.kubernetes.io/name={application_name}",
+        )
+        return list(pods.items)
 
     def list_model_pvcs(self, model: str) -> list[K8sClient.V1PersistentVolumeClaim]:
         """
@@ -124,60 +132,123 @@ class KubernetesClient:
 
             sleep(delay.total_seconds())
 
-    def wait_for_pod_recreation(
+    def wait_for_new_pod(
         self,
-        pod_name: str,
+        application_name: str,
         namespace: str,
-        old_uid: str,
-        target_status: PodStatus = PodStatus.RUNNING,
+        existing_uids: Collection[str],
         timeout: timedelta | None = None,
         delay: timedelta | None = None,
     ) -> K8sClient.V1Pod:
         """
-        Wait for a pod to be recreated with a new UID and reach the target status.
+        Wait for a genuinely new pod of `application_name` to appear, and return it (in whatever
+        status it currently has). Pair with `wait_for_pod_status` to also wait for that pod to
+        reach a target status.
+
+        Re-discovers pods via the same `app.kubernetes.io/name` label lookup as `get_charm_pods`,
+        rather than re-reading a single fixed pod name. A StatefulSet-managed pod keeps a stable
+        name across recreation (e.g. `app-0`), but a Deployment-managed pod is recreated by its
+        ReplicaSet under an entirely new name (e.g. `app-<replicaset-hash>-<pod-hash>`), so waiting
+        on the old name would hang forever for Deployment-backed workloads.
+
+        A pod is considered "new" only if its UID is absent from `existing_uids`. Passing just the
+        deleted pod's UID is not sufficient when the application has multiple replicas: an
+        untouched sibling pod would trivially have a different UID and be returned immediately,
+        even though no replacement for the deleted pod had actually appeared yet. Callers should
+        pass the UIDs of *all* pods observed for this application before the deletion.
 
         Args:
-            pod_name: Name of the pod to wait for
+            application_name: Name of the application whose pod was deleted
             namespace: Namespace where the pod is located
-            old_uid: UID of the old pod (to detect recreation)
-            target_status: Desired pod status (default: RUNNING)
+            existing_uids: UIDs of all pods for this application observed before the deletion
             timeout: Maximum time to wait
             delay: Delay between checks
 
         Returns:
-            The recreated pod object
+            The new pod object
 
         Raises:
-            TimeoutError: If pod is not recreated within timeout
+            TimeoutError: If no new pod appears within timeout
         """
-        self.logger.info(f"Waiting for pod {pod_name} to be recreated (old UID: {old_uid})")
+        self.logger.info(
+            f"Waiting for a new pod of application '{application_name}' in namespace '{namespace}' "
+            f"to appear (existing UIDs: {sorted(existing_uids)})"
+        )
 
         def check() -> K8sClient.V1Pod | None:
             try:
-                new_pod = self.backend.core_v1_api.read_namespaced_pod(pod_name, namespace)
-                if new_pod.metadata.uid == old_uid:
-                    return None
-
-                if PodStatus(new_pod.status.phase) == target_status:
-                    self.logger.info(
-                        f"Pod {pod_name} in namespace {namespace} recreated successfully with UID {new_pod.metadata.uid} "
-                        f"and status {target_status.value}"
-                    )
-                    return new_pod
-
-                self.logger.debug(
-                    f"Pod {pod_name} in namespace {namespace} recreated with new UID but status is {new_pod.status.phase}, "
-                    f"waiting for {target_status.value}"
-                )
-                return None
+                pods = self.get_charm_pods(application_name, model=namespace)
             except ApiException as e:
                 if e.status == 404:
                     return None
                 raise
 
+            for pod in pods:
+                if pod.metadata.uid not in existing_uids:
+                    self.logger.info(f"New pod {pod.metadata.name} in namespace {namespace} has UID {pod.metadata.uid}")
+                    return pod
+            return None
+
         return self.wait(
             check=check,
-            timeout_message=f"Pod {pod_name} in namespace {namespace} was not recreated or did not reach {target_status.value} status within timeout",
+            timeout_message=(
+                f"No new pod of application '{application_name}' in namespace '{namespace}' appeared within timeout"
+            ),
+            timeout=timeout,
+            delay=delay,
+        )
+
+    def wait_for_pod_status(
+        self,
+        pod_name: str,
+        namespace: str,
+        target_status: PodStatus = PodStatus.RUNNING,
+        timeout: timedelta | None = None,
+        delay: timedelta | None = None,
+    ) -> K8sClient.V1Pod:
+        """
+        Wait for the named pod to reach `target_status`, and return it.
+
+        Reads the pod directly by name rather than re-listing by label, since by this point the
+        caller (e.g. after `wait_for_new_pod`) already knows exactly which pod it cares about.
+
+        Args:
+            pod_name: Name of the pod to poll
+            namespace: Namespace where the pod is located
+            target_status: Desired pod status (default: RUNNING)
+            timeout: Maximum time to wait
+            delay: Delay between checks
+
+        Returns:
+            The pod object once it reaches the target status
+
+        Raises:
+            TimeoutError: If the pod does not reach the target status within timeout
+        """
+
+        def check() -> K8sClient.V1Pod | None:
+            try:
+                pod = self.backend.core_v1_api.read_namespaced_pod(pod_name, namespace)
+            except ApiException as e:
+                if e.status == 404:
+                    return None
+                raise
+            if PodStatus(pod.status.phase) == target_status:
+                self.logger.info(f"Pod {pod_name} in namespace {namespace} reached status {target_status.value}")
+                return pod
+
+            self.logger.debug(
+                f"Pod {pod_name} in namespace {namespace} has status {pod.status.phase}, "
+                f"waiting for {target_status.value}"
+            )
+            return None
+
+        return self.wait(
+            check=check,
+            timeout_message=(
+                f"Pod '{pod_name}' in namespace '{namespace}' did not reach {target_status.value} status "
+                "within timeout"
+            ),
             timeout=timeout,
             delay=delay,
         )
