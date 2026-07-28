@@ -48,6 +48,7 @@ The scheduler sees:
 
 from __future__ import annotations
 
+import copy
 import logging
 from collections import defaultdict
 
@@ -329,6 +330,51 @@ def _mark_as_injected(item: pytest.Item) -> None:
     item._nodeid = f"[injected] {original_name}"
 
 
+def _duplicate_item_for_repeat(item: pytest.Item, occurrence: int) -> pytest.Item:
+    """Build an independent duplicate of *item* for its *occurrence*-th scheduled run.
+
+    A bridging transition test may be scheduled more than once when the same
+    edge must be crossed several times (see ``_inject_bridge``), which means
+    the exact same ``pytest.Item`` object can appear multiple times in the
+    final plan. Running one ``Item`` object twice produces two test results
+    that share a single nodeid, and JUnit consumers (e.g. Test Observer)
+    compact same-nodeid results into a single test case, hiding one of the
+    runs (SQT-913 / GH-445).
+
+    A shallow copy keeps the duplicate on the same module/class/fixtures as
+    *item* while giving it its own ``name`` and ``nodeid``, distinguished by
+    *occurrence*. Real ``pytest.Function`` items cache a fixture request
+    that refers back to ``self`` at construction time (``_initrequest``); the
+    duplicate re-runs that step so it resolves and tears down its own
+    fixtures instead of aliasing the original item's.
+    """
+    duplicate = copy.copy(item)
+    suffix = f" (repeat {occurrence})"
+    duplicate.name = f"{item.name}{suffix}"
+    duplicate._nodeid = f"{item.nodeid}{suffix}"
+    initrequest = getattr(duplicate, "_initrequest", None)
+    if callable(initrequest):
+        initrequest()
+    return duplicate
+
+
+def _disambiguate_repeated_items(plan: list[pytest.Item]) -> list[pytest.Item]:
+    """Give every repeat occurrence of the same scheduled Item a unique nodeid.
+
+    The first occurrence of each item is left untouched; the second and later
+    occurrences are replaced with a distinct duplicate (see
+    ``_duplicate_item_for_repeat``) so each scheduled run is reported as its
+    own test case instead of being merged with the others.
+    """
+    occurrence_counts: dict[int, int] = defaultdict(int)
+    disambiguated: list[pytest.Item] = []
+    for item in plan:
+        occurrence_counts[id(item)] += 1
+        occurrence = occurrence_counts[id(item)]
+        disambiguated.append(item if occurrence == 1 else _duplicate_item_for_repeat(item, occurrence))
+    return disambiguated
+
+
 def _build_execution_plan(
     current_state: State,
     pure_clusters: dict[State, list[pytest.Item]],
@@ -602,4 +648,4 @@ def _build_execution_plan(
             if id(item) in final_injected_ids:
                 _mark_as_injected(item)
 
-    return plan
+    return _disambiguate_repeated_items(plan)
