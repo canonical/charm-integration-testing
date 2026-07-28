@@ -44,7 +44,7 @@ VM_NAME="${SANDBOX_VM:-charm-qa-sandbox}"
 VM_MOUNT="${SANDBOX_MOUNT:-/project}"
 VM_CPUS="${SANDBOX_CPUS:-4}"
 VM_MEMORY="${SANDBOX_MEMORY:-8G}"
-VM_DISK="${SANDBOX_DISK:-40G}"
+VM_DISK="${SANDBOX_DISK:-100G}"
 [[ "$VM_MOUNT" = /* ]] || { echo "ERROR: SANDBOX_MOUNT must be an absolute path: $VM_MOUNT" >&2; exit 1; }
 [[ "$VM_MOUNT" != *"'"* ]] || { echo "ERROR: SANDBOX_MOUNT must not contain single quotes: $VM_MOUNT" >&2; exit 1; }
 [[ "$VM_MOUNT" != *":"* ]] || { echo "ERROR: SANDBOX_MOUNT must not contain colons: $VM_MOUNT" >&2; exit 1; }
@@ -81,7 +81,14 @@ Environment (.env keys):
   SANDBOX_MOUNT          VM-side mount path (default: /project)
   SANDBOX_CPUS           vCPU count for new VMs (default: 4)
   SANDBOX_MEMORY         RAM for new VMs, e.g. 8G or 16G (default: 8G)
-  SANDBOX_DISK           Disk size for new VMs, e.g. 40G or 80G (default: 40G)
+  SANDBOX_DISK           Disk size for new VMs, e.g. 80G or 100G (default: 100G).
+                         Note: the Juju k8s controller's own storage PV
+                         reserves ~20G against the CSI capacity check
+                         regardless of actual usage, and base OS/tooling
+                         (containerd image cache, snaps) typically consumes
+                         another ~20-30G. A 40G disk leaves near-zero
+                         headroom for test charm storage once the
+                         controller is bootstrapped.
   GITHUB_TOKEN           Fine-grained PAT for gh CLI inside the VM
   COPILOT_GITHUB_TOKEN   Copilot AI auth token (default: gh auth token)
   COPILOT_MODEL          Copilot model (default: sonnet-4.6)
@@ -99,7 +106,7 @@ Inside an interactive session use skill slash commands:
 VM resource flags (only applied when the VM does not yet exist):
   --cpus N               vCPU count (default: SANDBOX_CPUS or 4)
   --memory SIZE          RAM, e.g. 16G (default: SANDBOX_MEMORY or 8G)
-  --disk SIZE            Disk, e.g. 80G (default: SANDBOX_DISK or 40G)
+  --disk SIZE            Disk, e.g. 80G (default: SANDBOX_DISK or 100G)
 EOF
 }
 
