@@ -839,14 +839,17 @@ class CharmhubClient:
         """Return the platform(s) this charm may be deployed to.
 
         Platform overrides win when present. Otherwise, fall back to the charm's own
-        metadata (mirrors ``_get_charm_assumes``): a non-empty ``containers`` block in
-        metadata.yaml is how Juju/Charmcraft identify a Kubernetes (sidecar) charm, and
-        its absence identifies a machine charm.
+        metadata (mirrors ``_get_charm_assumes``). Two independent metadata.yaml
+        conventions identify a Kubernetes (sidecar) charm: a non-empty ``containers``
+        block (current Charmcraft charms), or a legacy ``series: [kubernetes]`` entry
+        (pre-Charmcraft "reactive"/podspec charms, which predate ``containers``). The
+        absence of both identifies a machine charm.
         """
         platform_overrides = self.overrides_client.get_charm_platform_overrides(charm_name)
         if platform_overrides is not None:
             return platform_overrides or ["machine"]
-        return ["kubernetes"] if metadata.containers else ["machine"]
+        is_kubernetes = bool(metadata.containers) or "kubernetes" in metadata.series
+        return ["kubernetes"] if is_kubernetes else ["machine"]
 
     def _get_assumes_entry(self, raw: str | dict[str, Any]) -> CharmAssumesEntry:
         """Translate a raw charmhub assumes entry (wire format) into a domain CharmAssumesEntry."""
