@@ -5,9 +5,13 @@ description: >-
   external dependency (Charmhub, Test Observer, ...) was unreachable. A GitHub
   issue is used as the durable record of the outage: the first occurrence opens
   the issue and alerts Mattermost, later occurrences during the same outage only
-  add a comment (no repeat Mattermost alert), and recovery closes the issue and
-  sends a resolved notification. A GitHub Actions warning annotation is emitted
-  on every occurrence for local visibility regardless of Mattermost/issue state.
+  add a comment (no repeat Mattermost alert, but every occurrence is recorded in
+  the issue), and recovery closes the issue and sends a resolved notification.
+  A GitHub Actions warning annotation is emitted on every occurrence for local
+  visibility regardless of Mattermost/issue state. The `skipped` output lets
+  callers suppress sending this execution's junit data to Test Observer, since a
+  prevalidation skip is infra noise, not a meaningful test result, and is
+  already recorded in the outage issue instead.
 inputs:
   junit_xml:
     description: Path to the JUnit XML produced by the pytest run.
@@ -29,6 +33,15 @@ inputs:
     description: Label used to find/create the outage tracking issue.
     required: false
     default: external-dependency-outage
+outputs:
+  skipped:
+    description: >-
+      "true" if this run was skipped due to an unreachable external dependency,
+      "false" otherwise. Callers can use this to suppress posting this
+      execution's results/metadata to Test Observer, since a prevalidation
+      skip carries no meaningful test data and the failure is already tracked
+      in the outage issue.
+    value: ${{ steps.check.outputs.skipped }}
 runs:
   using: composite
   steps:

@@ -507,6 +507,7 @@ jobs:
           event_name: test_end
           detail: Tests finished.
       - name: Track external dependency outage
+        id: track_outage
         if: ${{ !cancelled() }}
         uses: ./.github/actions/track-external-dependency-outage
         with:
@@ -534,7 +535,7 @@ jobs:
             echo '```' >> $GITHUB_STEP_SUMMARY
           fi
       - name: Post execution metadata to Test Observer
-        if: ${{ env.TEST_OBSERVER_API != '' && inputs.execution_id != '' }}
+        if: ${{ env.TEST_OBSERVER_API != '' && inputs.execution_id != '' && steps.track_outage.outputs.skipped != 'true' }}
         uses: ./.github/actions/test-observer/post-execution-metadata
         with:
           test_observer_api: ${{ env.TEST_OBSERVER_API }}
@@ -542,7 +543,7 @@ jobs:
           test_execution_id: ${{ inputs.execution_id }}
           junit_xml: ${{ inputs.neighbor_environment != '' && steps.run_tests_cmr.outputs.junit_xml || steps.run_tests.outputs.junit_xml }}
       - name: Post results to Test Observer
-        if: ${{ env.TEST_OBSERVER_API != '' && inputs.execution_id != '' }}
+        if: ${{ env.TEST_OBSERVER_API != '' && inputs.execution_id != '' && steps.track_outage.outputs.skipped != 'true' }}
         uses: ./.github/actions/test-observer/post-results
         with:
           test_observer_api: ${{ env.TEST_OBSERVER_API }}
