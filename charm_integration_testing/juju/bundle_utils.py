@@ -106,10 +106,14 @@ def parse_charm_names_from_bundle(bundle_yaml: str) -> set[str]:
     Raises:
         ValueError: if *bundle_yaml* does not parse to at least one YAML mapping document.
     """
-    documents = list(yaml.safe_load_all(bundle_yaml))
-    if not documents or not isinstance(documents[0], dict):
+    loader = yaml.safe_load_all(bundle_yaml)
+    try:
+        base = next(loader)
+    except StopIteration:
+        raise ValueError("bundle_yaml must contain at least one YAML mapping document as the base bundle") from None
+    if not isinstance(base, dict):
         raise ValueError("bundle_yaml must contain at least one YAML mapping document as the base bundle")
-    applications = documents[0].get("applications")
+    applications = base.get("applications")
     if not isinstance(applications, dict):
         return set()
     charm_names: set[str] = set()
