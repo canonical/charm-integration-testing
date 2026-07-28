@@ -85,6 +85,9 @@ class CharmMetadata(BaseModel):
     provides: dict[str, Endpoint] = Field(default_factory=dict)
     assumes: list[str | dict[str, Any]] = Field(default_factory=list)
     resources: dict[str, Resource] = Field(default_factory=dict)
+    # A non-empty `containers` block in metadata.yaml is how Juju/Charmcraft identify a
+    # Kubernetes (sidecar) charm; its absence identifies a machine charm.
+    containers: dict[str, Any] = Field(default_factory=dict)
 
 
 class CharmConfigSchema(BaseModel):

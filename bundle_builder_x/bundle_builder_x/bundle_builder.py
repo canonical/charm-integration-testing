@@ -71,7 +71,13 @@ class UnfulfilledEndpointInfo(BaseModel):
 
 
 class UncompletableBundleError(ValueError):
-    """Exception raised when bundle builder cannot generate a complete bundle from the base bundle"""
+    """Exception raised when bundle builder cannot generate a complete bundle from the base bundle.
+
+    NOTE: This is the canonical failure exception for the bundle builder.
+    Raise it directly with a descriptive ``reason`` for any condition that prevents producing
+    a complete, valid bundle. Do not add new exception types unless callers must
+    programmatically distinguish that specific case.
+    """
 
     unsat_core: list[AssertionTag]
 
@@ -127,9 +133,30 @@ class BundleBuilder:
 
     def build(self, spec: SpecFile) -> Solution:
         """Build bundles for all models defined in a spec simultaneously."""
+        self._validate_platforms(spec)
         domain = self._domain_builder.build(spec)
         z3_model = self._solve(domain)
         return extract_solution(z3_model, domain, logger=self.logger)
+
+    def _validate_platforms(self, spec: SpecFile) -> None:
+        """Ensure every application is placed on a model whose platform its overrides allow.
+
+        A charm's platform overrides (when present) enumerate the platforms it is
+        expected to run on. Placing such a charm on a model with a different platform
+        cannot produce a deployable bundle, so fail fast with a clear error.
+        """
+        overrides_client = self.charmhub_client.overrides_client
+        for model_spec in spec.models:
+            for application, app_spec in model_spec.applications.items():
+                supported_platforms = overrides_client.get_charm_platform_overrides(app_spec.charm)
+                if supported_platforms is not None:
+                    supported_platforms = supported_platforms or ["machine"]
+                    if model_spec.platform not in supported_platforms:
+                        raise UncompletableBundleError(
+                            f"Charm {app_spec.charm!r} (model={model_spec.key!r}, application={application!r}) "
+                            f"supports platform(s) {supported_platforms!r}, but was placed on a model with "
+                            f"platform {model_spec.platform!r}."
+                        )
 
     def _solve(self, domain: Domain) -> z3.ModelRef:
         # Iterative CEGIS loop: expand domain until satisfiable.

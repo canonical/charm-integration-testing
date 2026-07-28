@@ -58,6 +58,7 @@ def _make_charm(
         ubuntu_arch="amd64",
         endpoints=endpoints or {},
         config_defaults=config_defaults or {},
+        platforms=["machine", "kubernetes"],
     )
 
 
