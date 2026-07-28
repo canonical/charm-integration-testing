@@ -98,10 +98,10 @@ def parse_offers_from_bundle(bundle_yaml: str) -> dict[str, OfferDetails]:
 def parse_charm_names_from_bundle(bundle_yaml: str) -> set[str]:
     """Return the set of charm names deployed by the bundle's base document.
 
-    Only the base document (the first in a multi-document bundle) is inspected, since
-    overlay documents only add offers/config and do not declare new applications.
-    Application entries without a ``charm`` key, or whose ``charm`` value isn't a string,
-    are silently skipped.
+    Only the base document (the first in a multi-document bundle) is inspected. In this repository,
+    overlay documents are used to declare offers/config for applications already present in the base bundle;
+    overlays that add or override applications are intentionally ignored.
+    Application entries without a ``charm`` key, or whose ``charm`` value isn't a string, are silently skipped.
 
     Raises:
         ValueError: if *bundle_yaml* does not parse to at least one YAML mapping document.
