@@ -165,6 +165,11 @@ class Charm(BaseModel):
     resources: dict[str, list[CharmResourceValue]] = Field(default_factory=dict)
     assumes: CharmAssumesEntry = Field(default_factory=CharmAssumesEntry)
     constraints: list[AnyExpr] = Field(default_factory=list)
+    # Platforms (e.g. "machine", "kubernetes") this charm is known to support. Platform
+    # overrides win when present; otherwise this falls back to the charm's own metadata
+    # (a non-empty `containers` block means "kubernetes", its absence means "machine").
+    # No default is provided: every Charm must state which platform(s) it supports.
+    platforms: list[str]
 
     def __repr__(self) -> str:
         return self.name

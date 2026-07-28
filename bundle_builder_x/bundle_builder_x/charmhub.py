@@ -280,9 +280,18 @@ class CharmhubClient:
             resources=self._get_charm_resources(charm_name, channel, metadata),
             assumes=self._get_charm_assumes(charm_name, metadata, channel),
             constraints=self._get_charm_constraints(charm_name, channel),
+            platforms=self._get_charm_platforms(charm_name, metadata),
         )
 
     def _ensure_compatibility(self, charm: Charm, juju_version: JujuVersion | None, platform: str | None) -> Charm:
+        if platform is not None:
+            supported_platforms = charm.platforms
+            if platform not in supported_platforms:
+                raise CharmReleaseNotFoundException(
+                    f"Charm {charm.name} revision {charm.revision} in channel {charm.channel} supports "
+                    f"platform(s) {supported_platforms!r}, but platform {platform!r} was requested"
+                )
+
         if juju_version is None and platform is None:
             return charm
         features = (
@@ -825,6 +834,19 @@ class CharmhubClient:
 
         # Return parsed assumes entry
         return CharmAssumesEntry(all_of=frozenset(self._get_assumes_entry(e) for e in assumes))
+
+    def _get_charm_platforms(self, charm_name: str, metadata: CharmMetadata) -> list[str]:
+        """Return the platform(s) this charm may be deployed to.
+
+        Platform overrides win when present. Otherwise, fall back to the charm's own
+        metadata (mirrors ``_get_charm_assumes``): a non-empty ``containers`` block in
+        metadata.yaml is how Juju/Charmcraft identify a Kubernetes (sidecar) charm, and
+        its absence identifies a machine charm.
+        """
+        platform_overrides = self.overrides_client.get_charm_platform_overrides(charm_name)
+        if platform_overrides is not None:
+            return platform_overrides or ["machine"]
+        return ["kubernetes"] if metadata.containers else ["machine"]
 
     def _get_assumes_entry(self, raw: str | dict[str, Any]) -> CharmAssumesEntry:
         """Translate a raw charmhub assumes entry (wire format) into a domain CharmAssumesEntry."""
