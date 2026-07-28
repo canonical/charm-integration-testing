@@ -48,6 +48,14 @@ from utils.juju_releases import (
 )
 
 from bundle_builder_x import UncompletableBundleError
+from bundle_builder_x.charmhub_http import CHARMHUB_API_URL_ENV, DEFAULT_CHARMHUB_API_URL
+from test_suite.prevalidation import (
+    check_charmhub_availability,
+    check_test_observer_availability,
+    format_unavailable_reason,
+    log_dependency_statuses,
+    unavailable_dependencies,
+)
 from test_suite.scheduler.states import STATES_WITHOUT_EXISTING_CONTROLLER, STATES_WITHOUT_EXISTING_MODEL, State
 
 pytest_plugins = [
@@ -106,6 +114,38 @@ def logger() -> logging.Logger:
     jubilant_logger_wait.setLevel(logging.WARNING)
 
     return logging.getLogger()
+
+
+@pytest.fixture(scope="session", autouse=True)
+def verify_external_dependencies(logger: logging.Logger) -> None:
+    """Skip the whole test session up front if an external dependency is unreachable.
+
+    Charmhub and Test Observer (when configured via ``TEST_OBSERVER_API`` and
+    ``TEST_OBSERVER_TOKEN``) are external systems this suite depends on. Their
+    availability is checked once, before any test runs; if either is down, the
+    entire session is skipped with a clear reason instead of individual tests
+    failing later with confusing network errors (e.g. deep inside
+    ``test_build_bundle``).
+
+    Being session-scoped and autouse, this fixture runs exactly once: pytest caches
+    the ``pytest.skip`` outcome and re-applies it to every subsequent test without
+    re-running the checks.
+
+    See: https://github.com/canonical/charm-integration-testing/issues/461
+    """
+    charmhub_api_url = os.environ.get(CHARMHUB_API_URL_ENV, DEFAULT_CHARMHUB_API_URL)
+    statuses = [check_charmhub_availability(charmhub_api_url)]
+
+    test_observer_api = os.environ.get("TEST_OBSERVER_API", "").strip()
+    test_observer_token = os.environ.get("TEST_OBSERVER_TOKEN", "").strip()
+    if test_observer_api and test_observer_token:
+        statuses.append(check_test_observer_availability(test_observer_api, test_observer_token))
+
+    log_dependency_statuses(logger, statuses)
+
+    unavailable = unavailable_dependencies(statuses)
+    if unavailable:
+        pytest.skip(format_unavailable_reason(unavailable))
 
 
 @pytest.fixture(scope="session")
