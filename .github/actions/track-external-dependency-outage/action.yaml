@@ -1,0 +1,141 @@
+---
+name: Track external dependency outage
+description: >-
+  Detect when the prevalidation fixture skipped the whole test session because an
+  external dependency (Charmhub, Test Observer, ...) was unreachable. A GitHub
+  issue is used as the durable record of the outage: the first occurrence opens
+  the issue and alerts Mattermost, later occurrences during the same outage only
+  add a comment (no repeat Mattermost alert), and recovery closes the issue and
+  sends a resolved notification. A GitHub Actions warning annotation is emitted
+  on every occurrence for local visibility regardless of Mattermost/issue state.
+inputs:
+  junit_xml:
+    description: Path to the JUnit XML produced by the pytest run.
+    required: true
+  github_token:
+    description: >-
+      Token with `issues: write` permission, used to manage the tracking issue.
+    required: true
+  mattermost_webhook_url:
+    description: >-
+      Incoming Mattermost webhook URL. Leave empty to skip Mattermost
+      notifications (the warning annotation and tracking issue are still managed).
+    required: false
+    default: ''
+  run_url:
+    description: URL of the GitHub Actions run, included in issue/Mattermost messages.
+    required: true
+  outage_label:
+    description: Label used to find/create the outage tracking issue.
+    required: false
+    default: external-dependency-outage
+runs:
+  using: composite
+  steps:
+    - name: Authenticate with GitHub CLI
+      shell: bash
+      env:
+        github_token: ${{ inputs.github_token }}
+      run: |
+        echo "${github_token}" | gh auth login --with-token
+    - name: Check JUnit output for the external dependency skip marker
+      id: check
+      shell: bash
+      env:
+        junit_xml: ${{ inputs.junit_xml }}
+        # Keep this in sync with EXTERNAL_DEPENDENCY_SKIP_MARKER in
+        # charm_integration_testing/test_suite/prevalidation.py.
+        skip_marker: external dependencies are unavailable
+      run: |
+        if [[ -f "${junit_xml}" ]] && grep -q "${skip_marker}" "${junit_xml}"; then
+          detail="$(grep -o "${skip_marker}[^\"<]*" "${junit_xml}" | head -n1)"
+          echo "skipped=true" >> "$GITHUB_OUTPUT"
+          echo "detail=${detail}" >> "$GITHUB_OUTPUT"
+        else
+          echo "skipped=false" >> "$GITHUB_OUTPUT"
+        fi
+    - name: Emit warning annotation
+      if: ${{ steps.check.outputs.skipped == 'true' }}
+      shell: bash
+      env:
+        detail: ${{ steps.check.outputs.detail }}
+      run: |
+        echo "::warning title=Tests skipped: external dependency unavailable::${detail}"
+    - name: Find open outage tracking issue
+      id: find_issue
+      shell: bash
+      env:
+        outage_label: ${{ inputs.outage_label }}
+      run: |
+        issue_number="$(gh issue list --state open --label "${outage_label}" --json number --jq '.[0].number // empty')"
+        echo "issue_number=${issue_number}" >> "$GITHUB_OUTPUT"
+    - name: Open or update outage tracking issue
+      id: track_outage
+      if: ${{ steps.check.outputs.skipped == 'true' }}
+      shell: bash
+      env:
+        detail: ${{ steps.check.outputs.detail }}
+        run_url: ${{ inputs.run_url }}
+        outage_label: ${{ inputs.outage_label }}
+        issue_number: ${{ steps.find_issue.outputs.issue_number }}
+      run: |
+        timestamp="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+        if [[ -z "${issue_number}" ]]; then
+          # No open tracking issue: this is a new outage. Open one and alert Mattermost.
+          issue_url="$(gh issue create \
+            --title "External dependency outage: tests are being skipped" \
+            --label "${outage_label}" \
+            --body "$(printf 'Tests started being skipped because an external dependency is unreachable.\n\n**Detail:** %s\n**First seen:** %s\n**Run:** %s\n\nThis issue will receive a comment on each subsequent skipped run while the outage continues, and will be closed automatically once dependencies are reachable again.' "${detail}" "${timestamp}" "${run_url}")")"
+          echo "is_new=true" >> "$GITHUB_OUTPUT"
+          echo "issue_url=${issue_url}" >> "$GITHUB_OUTPUT"
+        else
+          # Outage already tracked: record this occurrence without re-alerting Mattermost.
+          gh issue comment "${issue_number}" \
+            --body "$(printf 'Still skipping as of %s.\n\n**Detail:** %s\n**Run:** %s' "${timestamp}" "${detail}" "${run_url}")"
+          echo "is_new=false" >> "$GITHUB_OUTPUT"
+          echo "issue_url=$(gh issue view "${issue_number}" --json url --jq '.url')" >> "$GITHUB_OUTPUT"
+        fi
+    - name: Notify Mattermost of new outage
+      if: ${{ steps.check.outputs.skipped == 'true' && steps.track_outage.outputs.is_new == 'true' && inputs.mattermost_webhook_url != '' }}
+      shell: bash
+      env:
+        mattermost_webhook_url: ${{ inputs.mattermost_webhook_url }}
+        detail: ${{ steps.check.outputs.detail }}
+        issue_url: ${{ steps.track_outage.outputs.issue_url }}
+      run: |
+        payload=$(jq --null-input --compact-output \
+          --arg text "Charm integration tests are being skipped: ${detail}. Tracking: ${issue_url}" \
+          '{"text": $text}')
+        curl --fail-with-body --retry 3 --retry-delay 5 \
+          -X POST \
+          -H 'Content-Type: application/json' \
+          -d "${payload}" \
+          "${mattermost_webhook_url}"
+    - name: Close resolved outage tracking issue
+      id: close_outage
+      if: ${{ steps.check.outputs.skipped == 'false' && steps.find_issue.outputs.issue_number != '' }}
+      shell: bash
+      env:
+        issue_number: ${{ steps.find_issue.outputs.issue_number }}
+        run_url: ${{ inputs.run_url }}
+      run: |
+        timestamp="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+        issue_url="$(gh issue view "${issue_number}" --json url --jq '.url')"
+        gh issue close "${issue_number}" \
+          --comment "$(printf 'External dependencies are reachable again as of %s.\n\n**Run:** %s' "${timestamp}" "${run_url}")"
+        echo "issue_url=${issue_url}" >> "$GITHUB_OUTPUT"
+    - name: Notify Mattermost of recovery
+      if: ${{ steps.close_outage.outcome == 'success' && inputs.mattermost_webhook_url != '' }}
+      shell: bash
+      env:
+        mattermost_webhook_url: ${{ inputs.mattermost_webhook_url }}
+        issue_url: ${{ steps.close_outage.outputs.issue_url }}
+      run: |
+        payload=$(jq --null-input --compact-output \
+          --arg text "Charm integration tests: external dependencies are reachable again. Resolved: ${issue_url}" \
+          '{"text": $text}')
+        curl --fail-with-body --retry 3 --retry-delay 5 \
+          -X POST \
+          -H 'Content-Type: application/json' \
+          -d "${payload}" \
+          "${mattermost_webhook_url}"
