@@ -132,6 +132,7 @@ def make_charm(
         constraints=[parse_constraint(c) for c in (constraint_strs or [])],
         proxies=proxies or [],
         priority=priority,
+        platforms=["machine", "kubernetes"],
     )
 
 
