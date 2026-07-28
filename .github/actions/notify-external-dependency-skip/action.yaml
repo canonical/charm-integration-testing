@@ -1,0 +1,61 @@
+---
+name: Notify external dependency skip
+description: >-
+  Detect when the prevalidation fixture skipped the whole test session because an
+  external dependency (Charmhub, Test Observer, ...) was unreachable. When detected,
+  emit a GitHub Actions warning annotation and notify the team via Mattermost.
+inputs:
+  junit_xml:
+    description: Path to the JUnit XML produced by the pytest run.
+    required: true
+  mattermost_webhook_url:
+    description: >-
+      Incoming Mattermost webhook URL. Leave empty to skip the Mattermost
+      notification (the warning annotation is still emitted).
+    required: false
+    default: ''
+  run_url:
+    description: URL of the GitHub Actions run, included in the Mattermost message.
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Check JUnit output for the external dependency skip marker
+      id: check
+      shell: bash
+      env:
+        junit_xml: ${{ inputs.junit_xml }}
+        # Keep this in sync with EXTERNAL_DEPENDENCY_SKIP_MARKER in
+        # charm_integration_testing/test_suite/prevalidation.py.
+        skip_marker: external dependencies are unavailable
+      run: |
+        if [[ -f "${junit_xml}" ]] && grep -q "${skip_marker}" "${junit_xml}"; then
+          detail="$(grep -o "${skip_marker}[^\"<]*" "${junit_xml}" | head -n1)"
+          echo "skipped=true" >> "$GITHUB_OUTPUT"
+          echo "detail=${detail}" >> "$GITHUB_OUTPUT"
+        else
+          echo "skipped=false" >> "$GITHUB_OUTPUT"
+        fi
+    - name: Emit warning annotation
+      if: ${{ steps.check.outputs.skipped == 'true' }}
+      shell: bash
+      env:
+        detail: ${{ steps.check.outputs.detail }}
+      run: |
+        echo "::warning title=Tests skipped: external dependency unavailable::${detail}"
+    - name: Notify Mattermost
+      if: ${{ steps.check.outputs.skipped == 'true' && inputs.mattermost_webhook_url != '' }}
+      shell: bash
+      env:
+        mattermost_webhook_url: ${{ inputs.mattermost_webhook_url }}
+        detail: ${{ steps.check.outputs.detail }}
+        run_url: ${{ inputs.run_url }}
+      run: |
+        payload=$(jq --null-input --compact-output \
+          --arg text "Charm integration tests were skipped: ${detail}. See run: ${run_url}" \
+          '{"text": $text}')
+        curl --fail-with-body --retry 3 --retry-delay 5 \
+          -X POST \
+          -H 'Content-Type: application/json' \
+          -d "${payload}" \
+          "${mattermost_webhook_url}"

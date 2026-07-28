@@ -501,6 +501,13 @@ jobs:
           test_execution_id: ${{ inputs.execution_id }}
           event_name: test_end
           detail: Tests finished.
+      - name: Notify on external dependency skip
+        if: ${{ !cancelled() }}
+        uses: ./.github/actions/notify-external-dependency-skip
+        with:
+          junit_xml: ${{ inputs.neighbor_environment != '' && steps.run_tests_cmr.outputs.junit_xml || steps.run_tests.outputs.junit_xml }}
+          mattermost_webhook_url: ${{ secrets.MATTERMOST_WEBHOOK_URL }}
+          run_url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
       - name: Post bundles to github
         shell: bash
         continue-on-error: true

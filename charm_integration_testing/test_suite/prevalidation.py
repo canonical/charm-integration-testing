@@ -20,6 +20,11 @@ import requests
 #: Default timeout, in seconds, for a single dependency reachability probe.
 DEFAULT_DEPENDENCY_CHECK_TIMEOUT_SECONDS = 10.0
 
+#: Substring present in every skip reason produced by ``format_unavailable_reason``.
+#: CI uses this marker to detect the skip in JUnit output and alert the team
+#: (see ``.github/actions/notify-external-dependency-skip``). Keep the two in sync.
+EXTERNAL_DEPENDENCY_SKIP_MARKER = "external dependencies are unavailable"
+
 
 @dataclass(frozen=True)
 class DependencyStatus:
@@ -93,7 +98,7 @@ def unavailable_dependencies(statuses: list[DependencyStatus]) -> list[Dependenc
 def format_unavailable_reason(unavailable: list[DependencyStatus]) -> str:
     """Build a human-readable ``pytest.skip`` reason from unavailable dependency statuses."""
     details = "; ".join(f"{status.name} ({status.detail})" for status in unavailable)
-    return f"Skipping test session: external dependencies are unavailable: {details}"
+    return f"Skipping test session: {EXTERNAL_DEPENDENCY_SKIP_MARKER}: {details}"
 
 
 def log_dependency_statuses(logger: logging.Logger, statuses: list[DependencyStatus]) -> None:
