@@ -35,6 +35,7 @@ validators-parca-scrape = { path = "./validators/parca_scrape", develop = true, 
 validators-external-provider = { path = "./validators/external_provider", develop = true }
 validators-http-interface = { path = "./validators/http_interface", develop = true }
 validators-grafana-dashboard = { path = "./validators/grafana_dashboard", develop = true }
+validators-grafana-datasource = { path = "./validators/grafana_datasource", develop = true, extras = ["dev"] }
 validators-ingress = { path = "./validators/ingress", develop = true }
 validators-prometheus-remote-write = { path = "./validators/prometheus_remote_write", develop = true }
 

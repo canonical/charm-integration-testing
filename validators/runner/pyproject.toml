@@ -34,6 +34,7 @@ dependencies = [
     "validators-external-provider",
     "validators-http-interface",
     "validators-grafana-dashboard",
+    "validators-grafana-datasource",
     "validators-ingress",
     "validators-prometheus-remote-write",
 ]
