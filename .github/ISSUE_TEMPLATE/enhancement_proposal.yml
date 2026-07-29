@@ -28,19 +28,6 @@ body:
     validations:
       required: true
   - type: textarea
-    id: links
-    attributes:
-      label: Test Observer / GitHub Actions links
-      description: >
-        If this proposal is motivated by a specific Test Observer result or GitHub
-        Actions workflow
-        run, link it here for context.
-      placeholder: |
-        - Test Observer: https://test-observer...
-        - Workflow run: https://github.com/canonical/charm-integration-testing/actions/runs/...
-    validations:
-      required: false
-  - type: textarea
     id: what-needs-to-get-done
     attributes:
       label: What needs to get done?

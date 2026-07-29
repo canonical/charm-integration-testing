@@ -25,7 +25,10 @@ body:
     attributes:
       label: To Reproduce
       description: >
-        Please provide a step-by-step instruction of how to reproduce the behavior.
+        Please provide a step-by-step instruction of how to reproduce the behavior,
+        along with the environment it occurred in (e.g. Juju locally, on lxd, in
+        multipass, or some other platform; charms and channels involved; versions
+        of the juju snap, model controller, lxd, microk8s, and/or the validator/package).
         If this bug was found via CI, link the relevant Test Observer artefact/execution
         page and/or the GitHub Actions workflow run(s) so the failure can be traced
         back to its source.
@@ -35,18 +38,6 @@ body:
         3. Run the validator or test suite against the deployment
         Test Observer: https://test-observer...
         Workflow run: https://github.com/canonical/charm-integration-testing/actions/runs/...
-    validations:
-      required: true
-  - type: textarea
-    id: environment
-    attributes:
-      label: Environment
-      description: >
-        We need to know a bit more about the context in which the issue occurred.
-        - Are you running Juju locally, on lxd, in multipass or on some other platform?
-        - Which charms and channels are involved (e.g. `latest/edge` or similar)?
-        - Version of any applicable components, like the juju snap, the model controller,
-          lxd, microk8s, and/or the validator/package version.
     validations:
       required: true
   - type: textarea
