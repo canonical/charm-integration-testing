@@ -26,10 +26,15 @@ body:
       label: To Reproduce
       description: >
         Please provide a step-by-step instruction of how to reproduce the behavior.
+        If this bug was found via CI, link the relevant Test Observer artefact/execution
+        page and/or the GitHub Actions workflow run(s) so the failure can be traced
+        back to its source.
       placeholder: |
         1. `juju deploy ...`
         2. `juju integrate ...`
         3. Run the validator or test suite against the deployment
+        Test Observer: https://test-observer...
+        Workflow run: https://github.com/canonical/charm-integration-testing/actions/runs/...
     validations:
       required: true
   - type: textarea
@@ -44,20 +49,6 @@ body:
           lxd, microk8s, and/or the validator/package version.
     validations:
       required: true
-  - type: textarea
-    id: links
-    attributes:
-      label: Test Observer / GitHub Actions links
-      description: >
-        If this bug was found via CI, link the relevant Test Observer artefact/execution
-        page
-        and/or the GitHub Actions workflow run(s) so the failure can be traced back
-        to its source.
-      placeholder: |
-        - Test Observer: https://test-observer...
-        - Workflow run: https://github.com/canonical/charm-integration-testing/actions/runs/...
-    validations:
-      required: false
   - type: textarea
     id: logs
     attributes:
