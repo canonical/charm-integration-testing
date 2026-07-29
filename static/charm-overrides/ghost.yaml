@@ -1,0 +1,13 @@
+---
+# https://charmhub.io/ghost - reactive-framework charm, last published revision (20,
+# latest/stable) and its only other revision (17, latest/edge) both declare bases
+# ubuntu@14.04/ubuntu@16.04 exclusively (verified via the Charmhub API channel-map on
+# 2026-07-29). Both bases have been dropped from Juju's supported-base list, so `juju
+# deploy` now rejects the charm outright ("the charm defined bases ... not supported")
+# regardless of which model/base the rest of the bundle targets. There is no revision
+# on any channel that supports a currently-deployable base.
+#
+# Delisted so the solver never offers `ghost` as a candidate provider/requirer for an
+# interface (e.g. `mysql`) it would otherwise satisfy - selecting it always produces an
+# undeployable bundle. See: https://github.com/canonical/charm-integration-testing/issues/816
+listed: false
