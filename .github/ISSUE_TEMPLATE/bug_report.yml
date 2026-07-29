@@ -1,0 +1,77 @@
+---
+name: Bug Report
+description: File a bug report
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: >
+        Thanks for taking the time to fill out this bug report! Before submitting
+        your issue, please make
+        sure you are using the latest version of the affected package (e.g. a validator,
+        the test suite,
+        or bundle-builder-x) to make sure it's not already solved.
+  - type: textarea
+    id: bug-description
+    attributes:
+      label: Bug Description
+      description: >
+        If applicable, add screenshots or log excerpts to help explain the problem
+        you are facing.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: To Reproduce
+      description: >
+        Please provide a step-by-step instruction of how to reproduce the behavior.
+      placeholder: |
+        1. `juju deploy ...`
+        2. `juju integrate ...`
+        3. Run the validator or test suite against the deployment
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: >
+        We need to know a bit more about the context in which the issue occurred.
+        - Are you running Juju locally, on lxd, in multipass or on some other platform?
+        - Which charms and channels are involved (e.g. `latest/edge` or similar)?
+        - Version of any applicable components, like the juju snap, the model controller,
+          lxd, microk8s, and/or the validator/package version.
+    validations:
+      required: true
+  - type: textarea
+    id: links
+    attributes:
+      label: Test Observer / GitHub Actions links
+      description: >
+        If this bug was found via CI, link the relevant Test Observer artefact/execution
+        page
+        and/or the GitHub Actions workflow run(s) so the failure can be traced back
+        to its source.
+      placeholder: |
+        - Test Observer: https://test-observer...
+        - Workflow run: https://github.com/canonical/charm-integration-testing/actions/runs/...
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log output
+      description: >
+        Please copy and paste any relevant log output. This will be automatically
+        formatted into code, so no need for backticks.
+        Fetch the logs using `juju debug-log --replay` and/or the relevant pytest/validator
+        output. Additional details available
+        in the juju docs at https://documentation.ubuntu.com/juju/latest/howto/manage-logs/
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
