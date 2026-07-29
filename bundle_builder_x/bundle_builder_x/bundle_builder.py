@@ -618,16 +618,17 @@ class BundleBuilder:
         domain: Domain,
         model_ref: ModelRef,
     ) -> bool:
-        # If an identical charm is already present in this model, don't add another copy: a
-        # charm whose non-optional endpoints can never be fully satisfied (e.g. a genuine
-        # dependency cycle) would otherwise be re-added on every iteration, growing the domain
-        # without bound instead of failing fast. Known limitation: this also blocks the rare,
-        # legitimate case where a limited connection endpoint (e.g. a database allowing only one
-        # consumer) genuinely needs a second instance to serve another consumer in the same
-        # model; that case is not currently supported.
-        # Scoped to model_ref (not domain-wide) because the same charm name added in a
-        # different model is a distinct, potentially useful application instance.
-        if any(existing.spec == charm and existing.model == model_ref for existing in domain.charms):
+        parent_charm = domain.charms[charm_id]
+
+        # If this exact charm was already added to satisfy this same parent charm_id, adding
+        # another copy is a no-op: the parent already has an instance available to connect to.
+        # Scoped to charm_id (not the whole model) so that a different parent charm can still
+        # add its own instance of the same charm spec when it needs one (e.g. two independent
+        # consumers of a capacity-limited provider). Known limitation: a genuinely-unsatisfiable
+        # requirement (e.g. a dependency cycle, or a fetched candidate that can never actually
+        # connect) can still be re-added by different sibling parents across CEGIS iterations,
+        # since this check alone doesn't catch cross-parent duplication.
+        if any(domain.charms[added_id].spec == charm for added_id in parent_charm.charms_added):
             return False
 
         # Traverse the dependency chain to detect cycles
@@ -659,7 +660,7 @@ class BundleBuilder:
         new_charm_id = add_charm_to_domain(charm, domain, model_ref)
 
         # Record that this charm was added for this charm_id
-        domain.charms[charm_id].charms_added.append(new_charm_id)
+        parent_charm.charms_added.append(new_charm_id)
         return True
 
     @staticmethod
