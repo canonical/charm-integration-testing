@@ -319,10 +319,31 @@ JSON
         elif [ -t 0 ]; then
             read -r -p "  Register this signing key with GitHub now via the API? [y/N] " _register_key
             if [[ "$_register_key" =~ ^[Yy]$ ]]; then
-                if gh api user/ssh_signing_keys -f "title=sandbox-vm-signing ($VM_NAME)" -f "key=$_signing_pub" &>/dev/null; then
+                _register_err=$(gh api user/ssh_signing_keys -f "title=sandbox-vm-signing ($VM_NAME)" -f "key=$_signing_pub" 2>&1 >/dev/null) || true
+                if [ -z "$_register_err" ]; then
                     echo "==> Signing key registered with GitHub."
+                elif grep -qi 'missing.*scope\|write:ssh_signing_key\|admin:ssh_signing_key\|HTTP 403' <<< "$_register_err" \
+                    && [ -z "${GH_TOKEN:-}${GITHUB_TOKEN:-}" ]; then
+                    # The stored gh credential lacks the scope needed to manage
+                    # signing keys. Try to add it (only works for interactive
+                    # `gh auth login` credentials, not GH_TOKEN/GITHUB_TOKEN env vars).
+                    echo "==> Registration failed: token is missing the 'write:ssh_signing_key' scope."
+                    echo "    Detail: $_register_err"
+                    read -r -p "  Grant this scope now via 'gh auth refresh' and retry? [y/N] " _refresh_scope
+                    if [[ "$_refresh_scope" =~ ^[Yy]$ ]] && gh auth refresh -h github.com -s write:ssh_signing_key; then
+                        _register_err=$(gh api user/ssh_signing_keys -f "title=sandbox-vm-signing ($VM_NAME)" -f "key=$_signing_pub" 2>&1 >/dev/null) || true
+                        if [ -z "$_register_err" ]; then
+                            echo "==> Signing key registered with GitHub."
+                        else
+                            echo "==> Still failed to register signing key via API: $_register_err"
+                            echo "==> Add it manually at the URL above."
+                        fi
+                    else
+                        echo "==> Skipped. Add the key manually at the URL above if needed."
+                    fi
                 else
-                    echo "==> Failed to register signing key via API. Add it manually at the URL above."
+                    echo "==> Failed to register signing key via API: $_register_err"
+                    echo "==> Add it manually at the URL above."
                 fi
             else
                 echo "==> Skipped. Add the key manually at the URL above if needed."
