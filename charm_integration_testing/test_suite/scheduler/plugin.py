@@ -366,8 +366,7 @@ def _disambiguate_repeated_items(plan: list[pytest.Item]) -> list[pytest.Item]:
     occurrences are replaced with a distinct duplicate (see
     ``_duplicate_item_for_repeat``) so each scheduled run is reported as its
     own test case instead of being merged with the others.
-    """
-    occurrence_counts: dict[int, int] = defaultdict(int)
+    occurrence_counts: defaultdict[int, int] = defaultdict(int)
     disambiguated: list[pytest.Item] = []
     for item in plan:
         occurrence_counts[id(item)] += 1
