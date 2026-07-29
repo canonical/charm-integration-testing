@@ -14,7 +14,7 @@ jobs:
       max-parallel: 1
       matrix:
         params:
-          - target_environment: ps7-sqa-prod_charm_qa_kubernetes-1
+          - target_environment: ps6-sqa-stg_charm_qa_kubernetes-1
             target_charm: postgresql-k8s
             target_endpoint: certificates
             target_revision: 495

@@ -5,6 +5,6 @@ github-runners:
     debug-mode: ssh
     pip-proxy: "http://squid.internal:3128"
   ps7-sqa-runners:
-    labels: [self-hosted-linux-amd64-jammy-solqa-ps7]
+    labels: [self-hosted-linux-amd64-noble-solqa-ps7]
     debug-mode: tmate
     pip-proxy: ""
