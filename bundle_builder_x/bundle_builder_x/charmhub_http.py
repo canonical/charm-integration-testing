@@ -76,6 +76,9 @@ class CharmMetadata(BaseModel):
     # A non-empty `containers` block in metadata.yaml is how Juju/Charmcraft identify a
     # Kubernetes (sidecar) charm; its absence identifies a machine charm.
     containers: dict[str, Any] = Field(default_factory=dict)
+    # Legacy (pre-Charmcraft "reactive"/podspec) Kubernetes charms predate the `containers`
+    # block and instead mark themselves via `series: [kubernetes]` in metadata.yaml.
+    series: list[str] = Field(default_factory=list)
 
 
 class CharmConfigSchema(BaseModel):

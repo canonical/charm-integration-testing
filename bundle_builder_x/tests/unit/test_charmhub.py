@@ -103,6 +103,7 @@ _CHANNEL = CharmChannel(track="latest", risk="stable", branch="")
 _METADATA_REQUIRES = CharmMetadata(requires={"db": CharmMetadata.Endpoint(interface="pgsql")})
 _METADATA_PROVIDES = CharmMetadata(provides={"web": CharmMetadata.Endpoint(interface="http")})
 _METADATA_WITH_CONTAINERS = CharmMetadata(containers={"app": {"resource": "app-image"}})
+_METADATA_WITH_LEGACY_KUBERNETES_SERIES = CharmMetadata(series=["kubernetes"])
 _EMPTY_CONFIG = CharmConfigSchema()
 
 
@@ -178,6 +179,26 @@ class TestCharmhubClient:
                 ubuntu_version="22.04",
                 ubuntu_arch="amd64",
                 metadata=_METADATA_WITH_CONTAINERS,
+                config_schema=_EMPTY_CONFIG,
+            )
+
+            # THEN the charm falls back to the kubernetes platform
+            assert charm.platforms == ["kubernetes"]
+
+        def test_build_charm_falls_back_to_kubernetes_for_legacy_series_metadata(self) -> None:
+            # GIVEN an overrides client with no platform override for the charm, and metadata
+            # from a legacy (pre-Charmcraft) charm that predates the `containers` block and
+            # instead marks itself as Kubernetes via `series: [kubernetes]`
+            client = _client({})
+
+            # WHEN building a Charm from store metadata
+            charm = client._build_charm(
+                charm_name="minio",
+                channel=_CHANNEL,
+                revision=1,
+                ubuntu_version="22.04",
+                ubuntu_arch="amd64",
+                metadata=_METADATA_WITH_LEGACY_KUBERNETES_SERIES,
                 config_schema=_EMPTY_CONFIG,
             )
 
