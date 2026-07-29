@@ -323,8 +323,7 @@ JSON
                 _register_rc=$?
                 if [ $_register_rc -eq 0 ]; then
                     echo "==> Signing key registered with GitHub."
-                elif grep -qi 'missing.*scope\|write:ssh_signing_key\|admin:ssh_signing_key\|HTTP 403' <<< "$_register_err" \
-                    && [ -z "${GH_TOKEN:-}${GITHUB_TOKEN:-}" ]; then
+                elif grep -Eqi 'missing.*scope|write:ssh_signing_key|admin:ssh_signing_key|HTTP 403' <<< "$_register_err" \
                     # The stored gh credential lacks the scope needed to manage
                     # signing keys. Try to add it (only works for interactive
                     # `gh auth login` credentials, not GH_TOKEN/GITHUB_TOKEN env vars).
