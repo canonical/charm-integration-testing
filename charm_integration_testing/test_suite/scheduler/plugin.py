@@ -349,6 +349,7 @@ def _duplicate_item_for_repeat(item: pytest.Item, occurrence: int) -> pytest.Ite
     fixtures instead of aliasing the original item's.
     """
     duplicate = copy.copy(item)
+    duplicate._cit_original_item_id = getattr(item, "_cit_original_item_id", id(item))
     suffix = f" (repeat {occurrence})"
     duplicate.name = f"{item.name}{suffix}"
     duplicate._nodeid = f"{item.nodeid}{suffix}"
