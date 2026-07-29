@@ -311,6 +311,25 @@ JSON
     echo "==> Checking GitHub auth..."
     if gh auth token &>/dev/null; then
         echo "==> GitHub token available — Copilot will authenticate via GH_TOKEN."
+
+        # Offer to register the signing key with GitHub via the API instead
+        # of requiring the user to paste it in manually.
+        if gh api user/ssh_signing_keys --jq '.[].key' 2>/dev/null | grep -qF "$(awk '{print $1, $2}' <<< "$_signing_pub")"; then
+            echo "==> Signing key already registered with GitHub."
+        elif [ -t 0 ]; then
+            read -r -p "  Register this signing key with GitHub now via the API? [y/N] " _register_key
+            if [[ "$_register_key" =~ ^[Yy]$ ]]; then
+                if gh api user/ssh_signing_keys -f "title=sandbox-vm-signing ($VM_NAME)" -f "key=$_signing_pub" &>/dev/null; then
+                    echo "==> Signing key registered with GitHub."
+                else
+                    echo "==> Failed to register signing key via API. Add it manually at the URL above."
+                fi
+            else
+                echo "==> Skipped. Add the key manually at the URL above if needed."
+            fi
+        else
+            echo "==> Non-interactive shell — add the key manually at the URL above if needed."
+        fi
     else
         echo "==> Warning: 'gh auth token' returned nothing."
         echo "==>   Run: gh auth login   on this machine, then re-run scripts/sandbox.sh up."
