@@ -399,6 +399,48 @@ class TestJubilantBackend:
             # THEN we needed 6 calls (2 ready, 1 fail resets count, 3 ready to succeed)
             assert call_count == 6
 
+        def test_wait_tolerates_transient_migration_error(self) -> None:
+            # GIVEN status() raises a "migration in progress" CLIError once, then succeeds
+            stub = ModelExistsStub(
+                error_stderr="ERROR migration in progress for model test-model\n",
+                max_errors=1,
+            )
+            backend = JubilantBackend(JubilantClientStub(client=stub))
+
+            # WHEN wait is called with a ready condition that is immediately true
+            with patch("juju_jubilant.backend.time.sleep"):
+                backend.wait(
+                    "test-model",
+                    ready=lambda status: (True, JujuWaitState(message="ready")),
+                    timeout=timedelta(seconds=10),
+                    successes=1,
+                    delay=timedelta(milliseconds=10),
+                )
+
+            # THEN the transient error was swallowed and status was retried until success
+            assert stub.call_count == 2
+
+        def test_wait_reraises_unrelated_cli_error(self) -> None:
+            # GIVEN status() raises a CLIError unrelated to model availability
+            stub = ModelExistsStub(
+                error_stderr="ERROR connection to controller lost\n",
+                max_errors=0,
+            )
+            backend = JubilantBackend(JubilantClientStub(client=stub))
+
+            # WHEN / THEN the unrecognized CLIError propagates immediately
+            with pytest.raises(jubilant.CLIError):
+                backend.wait(
+                    "test-model",
+                    ready=lambda status: (True, JujuWaitState(message="ready")),
+                    timeout=timedelta(seconds=10),
+                    successes=1,
+                    delay=timedelta(milliseconds=10),
+                )
+
+            # AND status was only called once (no retries)
+            assert stub.call_count == 1
+
         def test_wait_extends_timeout_when_making_progress(self) -> None:
             # GIVEN a backend with mocked status
             stub = StatusStub()
