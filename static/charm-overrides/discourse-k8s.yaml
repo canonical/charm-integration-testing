@@ -1,8 +1,21 @@
 ---
+# Source: https://github.com/canonical/discourse-k8s-operator
+#
+# oauth (requires): optional - src/oauth_observer.py: OAuthObserver only builds
+# client_config when the relation exists (_generate_client_config); with no
+# relation, client_config stays None and get_oidc_env() returns {} (OIDC simply
+# disabled). SSO via OIDC is an additive integration, not the charm's primary
+# purpose (running Discourse), and the charm reaches active without it.
+# src/charm.py:_validate_configs() only blocks if the oauth relation *is*
+# present without force_https being true, mirroring the existing saml handling.
 overrides:
   - configs:
       external_hostname: ['discourse.example.com', null]
       force_https: [true, null]
+    requires:
+      oauth:
+        optional: true
     constraints:
       - 'bool(endpoint[saml]) => set(config[external_hostname])'
       - 'bool(endpoint[saml]) => set(config[force_https])'
+      - 'bool(endpoint[oauth]) => set(config[force_https])'
