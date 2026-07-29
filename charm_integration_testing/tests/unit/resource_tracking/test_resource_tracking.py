@@ -97,6 +97,25 @@ class _FakeCollector:
         return self._collected
 
 
+class _SequencedCollector:
+    """Stand-in ResourceCollector returning a different result on each call.
+
+    Used to simulate a substrate whose ``list`` calls only eventually become
+    consistent with reality, e.g. a PVC that briefly drops out of a snapshot
+    before re-appearing on a later query of the same live state.
+    """
+
+    def __init__(self, results: list[list[CollectedResources]]) -> None:
+        self._results = list(results)
+        self.call_count = 0
+
+    def collect(self, logger: logging.Logger) -> list[CollectedResources]:
+        self.call_count += 1
+        if not self._results:
+            raise AssertionError("_SequencedCollector exhausted its scripted results")
+        return self._results.pop(0) if len(self._results) > 1 else self._results[0]
+
+
 _LOGGER = logging.getLogger("test-resource-tracking")
 
 
@@ -234,6 +253,78 @@ class TestStateResourceTracker:
             ResourceObservation(State.DEPLOYED, "model-a", frozenset({_pvc("data-0")})),
             ResourceObservation(State.DEPLOYED, "model-b", frozenset()),
         )
+
+    def test_a_baseline_resource_transiently_missing_on_revisit_is_settled(self) -> None:
+        # GIVEN a tracker with a recorded baseline for a state/model containing a PVC, and a
+        # collector whose first re-collection transiently omits it (e.g. a substrate list call
+        # racing a resource that still exists) before a later re-collection includes it again
+        sleeps: list[float] = []
+        tracker = StateResourceTracker(max_settle_attempts=3, settle_delay_seconds=5.0, sleep=sleeps.append)
+        tracker.record(State.DEPLOYED, "model-a", frozenset({_pvc("pgdata-0")}))
+        collector = _SequencedCollector(
+            [
+                [CollectedResources("model-a", frozenset())],
+                [CollectedResources("model-a", frozenset({_pvc("pgdata-0")}))],
+            ]
+        )
+
+        # WHEN the tracker collects again for the same state/model
+        tracker.collect(State.DEPLOYED, [collector], _LOGGER)
+
+        # THEN the settled (second) snapshot is recorded rather than the transient empty one,
+        # so no false-positive discrepancy is produced, and the tracker only slept once
+        assert tracker.observations()[-1] == ResourceObservation(
+            State.DEPLOYED, "model-a", frozenset({_pvc("pgdata-0")})
+        )
+        assert calculate_discrepancies(tracker.observations()) == []
+        assert sleeps == [5.0]
+        assert collector.call_count == 2
+
+    def test_a_genuinely_missing_baseline_resource_is_still_reported_after_settle_attempts(self) -> None:
+        # GIVEN a tracker with a recorded baseline containing a PVC, and a collector that never
+        # sees that PVC again on any re-collection (a genuine, non-transient discrepancy)
+        sleeps: list[float] = []
+        tracker = StateResourceTracker(max_settle_attempts=3, settle_delay_seconds=1.0, sleep=sleeps.append)
+        tracker.record(State.DEPLOYED, "model-a", frozenset({_pvc("pgdata-0")}))
+        collector = _FakeCollector([CollectedResources("model-a", frozenset())])
+
+        # WHEN the tracker collects again for the same state/model
+        tracker.collect(State.DEPLOYED, [collector], _LOGGER)
+
+        # THEN the tracker exhausts its settle attempts and still records the resource as missing
+        assert tracker.observations()[-1] == ResourceObservation(State.DEPLOYED, "model-a", frozenset())
+        assert len(calculate_discrepancies(tracker.observations())) == 1
+        assert sleeps == [1.0, 1.0]
+
+    def test_first_visit_to_a_state_is_never_settled(self) -> None:
+        # GIVEN a tracker with no prior observations for a state/model
+        sleeps: list[float] = []
+        tracker = StateResourceTracker(sleep=sleeps.append)
+        collector = _FakeCollector([CollectedResources("model-a", frozenset())])
+
+        # WHEN the tracker collects for that state/model for the first time
+        tracker.collect(State.DEPLOYED, [collector], _LOGGER)
+
+        # THEN the baseline is recorded as-is, with no retries
+        assert tracker.observations() == (ResourceObservation(State.DEPLOYED, "model-a", frozenset()),)
+        assert sleeps == []
+
+    def test_extra_resources_on_revisit_do_not_trigger_settling(self) -> None:
+        # GIVEN a baseline with no resources, and a re-collection that finds a new one
+        sleeps: list[float] = []
+        tracker = StateResourceTracker(sleep=sleeps.append)
+        tracker.record(State.DEPLOYED, "model-a", frozenset())
+        collector = _FakeCollector([CollectedResources("model-a", frozenset({_pvc("pgdata-0")}))])
+
+        # WHEN the tracker collects again for that state/model
+        tracker.collect(State.DEPLOYED, [collector], _LOGGER)
+
+        # THEN the extra resource is recorded immediately without retrying: settling only
+        # guards against baseline resources disappearing, not new ones appearing
+        assert tracker.observations()[-1] == ResourceObservation(
+            State.DEPLOYED, "model-a", frozenset({_pvc("pgdata-0")})
+        )
+        assert sleeps == []
 
 
 class TestKubernetesResourceCollector:
