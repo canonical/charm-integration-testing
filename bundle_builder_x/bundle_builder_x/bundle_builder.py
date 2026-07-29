@@ -454,11 +454,17 @@ class BundleBuilder:
         if endpoint.scope == EndpointScope.CONTAINER and model.platform != "machine":
             return []
 
+        requesting_charm = domain.charms[charm_id].spec.name
+
         fulfilling_charms: set[str] = set()
         if endpoint.type == EndpointType.REQUIRES:
-            fulfilling_charms = self.charmhub_client.find_charms(provides=endpoint.interface, platform=model.platform)
+            fulfilling_charms = self.charmhub_client.find_charms(
+                provides=endpoint.interface, platform=model.platform, requesting_charm=requesting_charm
+            )
         elif endpoint.type == EndpointType.PROVIDES:
-            fulfilling_charms = self.charmhub_client.find_charms(requires=endpoint.interface, platform=model.platform)
+            fulfilling_charms = self.charmhub_client.find_charms(
+                requires=endpoint.interface, platform=model.platform, requesting_charm=requesting_charm
+            )
 
         # For container-scoped endpoints the other charm must share the same base
         ubuntu_version: str | None = None

@@ -48,6 +48,7 @@ class _FakeCharmhubClient(CharmhubClient):
             self._responses = repeat(charm_responses)
         self._find_result: set[str] = find_result if find_result is not None else set()
         self.charm_from_store_calls: list[dict[str, object]] = []
+        self.find_charms_calls: list[dict[str, object]] = []
 
     def charm_from_store(
         self,
@@ -82,7 +83,16 @@ class _FakeCharmhubClient(CharmhubClient):
         provides: str | None = None,
         requires: str | None = None,
         platform: str | None = None,
+        requesting_charm: str | None = None,
     ) -> set[str]:
+        self.find_charms_calls.append(
+            {
+                "provides": provides,
+                "requires": requires,
+                "platform": platform,
+                "requesting_charm": requesting_charm,
+            }
+        )
         return self._find_result
 
 
@@ -283,6 +293,20 @@ class TestGetCharmsForEndpoint:
 
         # THEN charm_from_store is called with ubuntu_version=None (base irrelevant for global scope)
         assert fake.charm_from_store_calls[0]["ubuntu_version"] is None
+
+    def test_forwards_requesting_charm_name_to_find_charms(self) -> None:
+        # GIVEN a charm ("app") with a global-scoped requires endpoint
+        domain, charm_id = self._domain_with_global_endpoint()
+        db = _make_charm("database", {"db": CharmEndpoint(type=EndpointType.PROVIDES, interface="pgsql")})
+        fake = _FakeCharmhubClient(charm_responses=db, find_result={"database"})
+        builder = BundleBuilder(charmhub_client=fake)
+
+        # WHEN fetching charms for the endpoint
+        builder._get_charms_for_endpoint(charm_id, "db", domain, ModelRef(name="m"))
+
+        # THEN find_charms is called with the requesting charm's own name, so the
+        # delisting filter can be relaxed if that charm is itself delisted
+        assert fake.find_charms_calls[0]["requesting_charm"] == "app"
 
     def test_container_scope_skips_charm_when_base_not_available(self) -> None:
         # GIVEN no principal charm exists at the subordinate's base

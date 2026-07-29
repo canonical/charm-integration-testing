@@ -163,7 +163,11 @@ class CharmhubClient:
         return result
 
     def find_charms(
-        self, provides: str | None = None, requires: str | None = None, platform: str | None = None
+        self,
+        provides: str | None = None,
+        requires: str | None = None,
+        platform: str | None = None,
+        requesting_charm: str | None = None,
     ) -> set[str]:
         # juju-info is implicitly provided by every machine charm and is never declared
         # explicitly in most charm metadata. The charmhub find API returns 0 results for
@@ -191,9 +195,21 @@ class CharmhubClient:
             ).items():
                 charms[charm] = platforms
 
-            # Remove charms with delisting overrides
+            # Remove charms with delisting overrides, unless the charm requesting this
+            # endpoint is itself delisted. Delisting exists to stop a bulky/low-priority
+            # charm family (e.g. OpenStack, SQT-1081) from being pulled in as an incidental
+            # dependency of unrelated bundles. But whole families of delisted charms are
+            # often mutually dependent - e.g. every OpenStack service charm (aodh, cinder,
+            # glance, ...) has a mandatory identity-service relation whose only real
+            # provider is keystone, and keystone is delisted right alongside them. If the
+            # requesting charm is already delisted, it is already excluded from every
+            # unrelated bundle, so letting it depend on other delisted charms adds no new
+            # congestion - and is frequently required for that charm's own
+            # test_build_bundle/test_deploy to complete at all. See issue #813.
             delisted = self.overrides_client.get_charm_delisting_overrides()
-            charms = {charm: platforms for charm, platforms in charms.items() if charm not in delisted}
+            requesting_charm_delisted = requesting_charm is not None and requesting_charm in delisted
+            if not requesting_charm_delisted:
+                charms = {charm: platforms for charm, platforms in charms.items() if charm not in delisted}
 
             # Add platform overrides
             for charm, platforms in self._find_charms_platform_overrides(set(charms.keys())).items():

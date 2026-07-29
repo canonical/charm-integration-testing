@@ -940,3 +940,46 @@ class TestCharmhubClient:
 
             # THEN the charm is still present
             assert "charm-a" in result
+
+        def test_delisted_charm_included_when_requester_is_also_delisted(self) -> None:
+            # GIVEN two mutually-dependent charms are both delisted (e.g. an OpenStack
+            # service charm and keystone, both excluded under SQT-1081)
+            client = self._find_client(
+                find_names=["charm-a", "charm-b"],
+                listed_by_charm={"charm-a": False, "charm-b": False},
+            )
+
+            # WHEN finding charms on behalf of a requester that is itself delisted
+            result = client.find_charms(requesting_charm="charm-b")
+
+            # THEN the delisted candidate is still returned - a delisted charm may
+            # depend on its delisted siblings without reintroducing congestion for
+            # unrelated bundles
+            assert result == {"charm-a", "charm-b"}
+
+        def test_delisted_charm_excluded_when_requester_is_not_delisted(self) -> None:
+            # GIVEN a delisted charm and a requester that is not delisted
+            client = self._find_client(
+                find_names=["charm-a", "charm-b"],
+                listed_by_charm={"charm-b": False},
+            )
+
+            # WHEN finding charms on behalf of a non-delisted requester
+            result = client.find_charms(requesting_charm="charm-a")
+
+            # THEN the delisted charm is still excluded - only a delisted requester
+            # is exempted from the delisting filter
+            assert result == {"charm-a"}
+
+        def test_no_requesting_charm_preserves_default_delisting_behaviour(self) -> None:
+            # GIVEN a delisted charm and no requesting_charm specified
+            client = self._find_client(
+                find_names=["charm-a", "charm-b"],
+                listed_by_charm={"charm-b": False},
+            )
+
+            # WHEN finding charms without a requester
+            result = client.find_charms()
+
+            # THEN the delisted charm is excluded, as before
+            assert result == {"charm-a"}
