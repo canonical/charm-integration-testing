@@ -71,6 +71,12 @@ _all_collected: list[pytest.Item] = []
 # re-injecting the same bridge item a second time does not double-prefix its name.
 _injected_item_ids: set[int] = set()
 
+# Maps a duplicate's object ID (see ``_duplicate_item_for_repeat``) back to the
+# object ID of the originating item it was copied from, so later per-occurrence
+# logic (e.g. applying injected-labeling to only the injected occurrence) can
+# still identify which scheduled item a duplicate came from.
+_duplicate_original_ids: dict[int, int] = {}
+
 # Set to the first transition item that fails at call-time.  Once non-None,
 # all subsequent state-marked tests are skipped because the environment state
 # is unknown. Pure test failures do NOT set this: they leave the state intact.
@@ -167,14 +173,15 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) ->
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int | pytest.ExitCode) -> None:
     """Reset module-level state so re-running pytest in the same process starts fresh.
 
-    The three globals below are populated during a session and must be cleared
+    The globals below are populated during a session and must be cleared
     when the session ends; otherwise a second ``pytest.main()`` call in the
     same Python process (e.g. from a test harness) would see stale data from
     the previous run.
     """
-    global _all_collected, _injected_item_ids, _failed_state_test
+    global _all_collected, _injected_item_ids, _duplicate_original_ids, _failed_state_test
     _all_collected.clear()
     _injected_item_ids.clear()
+    _duplicate_original_ids.clear()
     _failed_state_test = None
 
 
@@ -347,9 +354,14 @@ def _duplicate_item_for_repeat(item: pytest.Item, occurrence: int) -> pytest.Ite
     that refers back to ``self`` at construction time (``_initrequest``); the
     duplicate re-runs that step so it resolves and tears down its own
     fixtures instead of aliasing the original item's.
+
+    The duplicate's object ID is recorded in ``_duplicate_original_ids``,
+    pointing back to *item*'s original object ID (chasing through any prior
+    duplication), so later per-occurrence logic can still identify which
+    scheduled item a duplicate came from.
     """
     duplicate = copy.copy(item)
-    duplicate._cit_original_item_id = getattr(item, "_cit_original_item_id", id(item))
+    _duplicate_original_ids[id(duplicate)] = _duplicate_original_ids.get(id(item), id(item))
     suffix = f" (repeat {occurrence})"
     duplicate.name = f"{item.name}{suffix}"
     duplicate._nodeid = f"{item.nodeid}{suffix}"
@@ -366,6 +378,7 @@ def _disambiguate_repeated_items(plan: list[pytest.Item]) -> list[pytest.Item]:
     occurrences are replaced with a distinct duplicate (see
     ``_duplicate_item_for_repeat``) so each scheduled run is reported as its
     own test case instead of being merged with the others.
+    """
     occurrence_counts: defaultdict[int, int] = defaultdict(int)
     disambiguated: list[pytest.Item] = []
     for item in plan:

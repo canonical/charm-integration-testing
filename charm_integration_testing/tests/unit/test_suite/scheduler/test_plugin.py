@@ -153,6 +153,28 @@ class TestDuplicateItemForRepeat:
         # THEN each duplicate has its own, distinct nodeid
         assert second.nodeid != third.nodeid
 
+    def test_duplicate_records_original_item_id(self, make_item: Callable[..., pytest.Item]) -> None:
+        # GIVEN an item
+        item = make_item("test_foo")
+
+        # WHEN duplicated
+        duplicate = _duplicate_item_for_repeat(item, 2)
+
+        # THEN the duplicate's object ID maps back to the original item's ID
+        assert _plugin_module._duplicate_original_ids[id(duplicate)] == id(item)
+
+    def test_chained_duplicates_all_trace_back_to_the_original(self, make_item: Callable[..., pytest.Item]) -> None:
+        # GIVEN an item duplicated once, and then that duplicate duplicated again
+        item = make_item("test_foo")
+        first_duplicate = _duplicate_item_for_repeat(item, 2)
+
+        # WHEN a duplicate-of-a-duplicate is created (e.g. a third occurrence)
+        second_duplicate = _duplicate_item_for_repeat(first_duplicate, 3)
+
+        # THEN both duplicates trace back to the original item's ID, not an intermediate one
+        assert _plugin_module._duplicate_original_ids[id(first_duplicate)] == id(item)
+        assert _plugin_module._duplicate_original_ids[id(second_duplicate)] == id(item)
+
 
 class TestDisambiguateRepeatedItems:
     def test_single_occurrence_item_is_unchanged(self, make_item: Callable[..., pytest.Item]) -> None:
@@ -1081,3 +1103,10 @@ class TestPytestSessionFinish:
         _plugin_module._failed_state_test = make_item("test_deploy")
         pytest_sessionfinish(session=SimpleNamespace(), exitstatus=0)  # type: ignore[arg-type]
         assert _plugin_module._failed_state_test is None
+
+    def test_clears_duplicate_original_ids(self, make_item: Callable[..., pytest.Item]) -> None:
+        item = make_item("test_foo")
+        _duplicate_item_for_repeat(item, 2)
+        assert _plugin_module._duplicate_original_ids  # non-empty before
+        pytest_sessionfinish(session=SimpleNamespace(), exitstatus=0)  # type: ignore[arg-type]
+        assert _plugin_module._duplicate_original_ids == {}
