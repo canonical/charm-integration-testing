@@ -1,0 +1,24 @@
+---
+# containers-kubeapi-load-balancer: legacy Charmhub slug for the same charm
+# published today as kubeapi-load-balancer (source:
+# https://github.com/charmed-kubernetes/charm-kubeapi-load-balancer). Only a
+# single "latest" track is published here (last released 2021-12-16); its
+# metadata is identical to kubeapi-load-balancer's pre-1.28 legacy generation,
+# so the same evidence applies - see kubeapi-load-balancer.yaml for the
+# reasoning this mirrors.
+#
+# loadbalancer (provides): optional - legacy reactive-era endpoint (interface
+# public-address). No charm in the ecosystem requires public-address.
+# nrpe-external-master (provides): optional - legacy NRPE monitoring hook,
+# additive observability, not the charm's primary purpose.
+# ha (requires): optional - hacluster is globally delisted (SQT-1081); the
+# charm functions as a single-unit load balancer without HA clustering.
+overrides:
+  - provides:
+      loadbalancer:
+        optional: true
+      nrpe-external-master:
+        optional: true
+    requires:
+      ha:
+        optional: true

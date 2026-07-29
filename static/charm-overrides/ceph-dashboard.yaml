@@ -20,6 +20,18 @@
 # Optional provides:
 #   grafana-dashboard (grafana-dashboard): Grafana not discoverable on machine
 #     platform via Charmhub search API.
+#
+# listed: false -- ceph-dashboard's only required (non-optional) requires
+# endpoint, `dashboard` (interface ceph-dashboard), has exactly one Charmhub
+# provider: ceph-mon. ceph-mon is globally delisted (SQT-1081, see
+# ceph-mon.yaml) alongside every other ceph-mon subordinate (ceph-fs,
+# ceph-iscsi, ceph-radosgw, ceph-rbd-mirror), so ceph-dashboard can never be
+# completed by the solver either - it was missed from that original sweep.
+# Delisting here stops the solver from ever offering it as a candidate (e.g.
+# to satisfy someone else's optional grafana-dashboard endpoint), which would
+# otherwise fail later on ceph-dashboard's own unfulfillable `dashboard`
+# requirement. See: https://github.com/canonical/charm-integration-testing/issues/814
+listed: false
 overrides:
   - requires:
       alertmanager-service:
