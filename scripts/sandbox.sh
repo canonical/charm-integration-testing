@@ -319,8 +319,9 @@ JSON
         elif [ -t 0 ]; then
             read -r -p "  Register this signing key with GitHub now via the API? [y/N] " _register_key
             if [[ "$_register_key" =~ ^[Yy]$ ]]; then
-                _register_err=$(gh api user/ssh_signing_keys -f "title=sandbox-vm-signing ($VM_NAME)" -f "key=$_signing_pub" 2>&1 >/dev/null) || true
-                if [ -z "$_register_err" ]; then
+                _register_err=$(gh api user/ssh_signing_keys -f "title=sandbox-vm-signing ($VM_NAME)" -f "key=$_signing_pub" 2>&1 >/dev/null)
+                _register_rc=$?
+                if [ $_register_rc -eq 0 ]; then
                     echo "==> Signing key registered with GitHub."
                 elif grep -qi 'missing.*scope\|write:ssh_signing_key\|admin:ssh_signing_key\|HTTP 403' <<< "$_register_err" \
                     && [ -z "${GH_TOKEN:-}${GITHUB_TOKEN:-}" ]; then
