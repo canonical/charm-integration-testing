@@ -34,14 +34,9 @@ def test_model_controller_migration(
     # Wait until model is idle in new controller
     juju_client.idle_for_period(model=f"{temp_juju_controller}:{model}", timeout=timedelta(minutes=15))
 
-    # Workaround for https://github.com/juju/juju/issues/22114:
-    # The same CAAS-worker-restart bug that affects migrating back to the original
-    # controller also affects this forward migration to the temporary controller: the
-    # per-app CAAS workers don't restart automatically, so the {app}-application-config
-    # K8s secrets still point at the source controller's addresses. Without a restart,
-    # any operation that talks to the unit's operator pod (e.g. `juju exec`, used by
-    # validate_model) hangs until it times out. Restarting the controller forces the
-    # CAAS workers to restart and rewrite the secrets with the new controller's address.
+    # Workaround for https://github.com/juju/juju/issues/22114: CAAS workers don't
+    # restart after migration, so `juju exec` to the operator pod hangs. Same bug as
+    # the return leg below, just also needed here on the forward leg.
     juju_client.reboot_model_controller(model=f"{temp_juju_controller}:{model}")
     juju_client.idle_for_period(model=f"{temp_juju_controller}:{model}", timeout=timedelta(minutes=15))
 
