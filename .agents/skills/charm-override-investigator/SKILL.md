@@ -139,7 +139,7 @@ reported issue end-to-end. Do not conflate the two.
 
 **Before shipping an override as "the fix" for a reported failure, distinguish:**
 
-1. **Root-cause evidence** - source code, docs, or metadata proving *why* an endpoint is
+1. **Root-cause evidence** - source code, upstream docs, or upstream repo metadata (e.g. `charmcraft.yaml` / `metadata.yaml` in the charm's source repository) proving *why* an endpoint is
    required/optional. This is what makes the override itself correct.
 2. **Fix-efficacy evidence** - actual reproduction of the reported failure mode, before and
    after the change, in a way that would have caught it if the fix were wrong. This is what
