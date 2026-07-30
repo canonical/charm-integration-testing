@@ -65,7 +65,8 @@ class JujuStub(NullJujuBackend):
 
     def wait_for_unit_message(self, model: str, unit: str, message: str, timeout: timedelta | None) -> None:
         self.messages.append((unit, message, timeout))
-        if unit in self.unit_messages and self.unit_messages[unit] != message:
+        current = self.unit_messages.get(unit)
+        if current is not None and message.lower() not in current.lower():
             raise JujuWaitTimeoutError()
 
     def add_secret(self, model: str, name: str, content: dict[str, str]) -> str:
