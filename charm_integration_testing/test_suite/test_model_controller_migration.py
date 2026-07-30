@@ -4,7 +4,7 @@
 from datetime import timedelta
 
 import pytest
-from juju import JujuClient
+from juju import JujuBackend, JujuClient
 
 from .scheduler.states import State
 
@@ -12,6 +12,7 @@ from .scheduler.states import State
 @pytest.mark.state(requires=State.DEPLOYED, provides=State.DEPLOYED)
 def test_model_controller_migration(
     juju_client: JujuClient,
+    juju_backend: JujuBackend,
     target_controller: str,
     temp_juju_controller: str,
     model: str,
@@ -36,9 +37,11 @@ def test_model_controller_migration(
 
     # Workaround for https://github.com/juju/juju/issues/22114: CAAS workers don't
     # restart after migration, so `juju exec` to the operator pod hangs. Same bug as
-    # the return leg below, just also needed here on the forward leg.
-    juju_client.reboot_model_controller(model=f"{temp_juju_controller}:{model}")
-    juju_client.idle_for_period(model=f"{temp_juju_controller}:{model}", timeout=timedelta(minutes=15))
+    # the return leg below, just also needed here on the forward leg. Only affects
+    # Kubernetes controllers, so skip the disruptive reboot on machine clouds.
+    if juju_backend.is_k8s_controller(temp_juju_controller):
+        juju_client.reboot_model_controller(model=f"{temp_juju_controller}:{model}")
+        juju_client.idle_for_period(model=f"{temp_juju_controller}:{model}", timeout=timedelta(minutes=15))
 
     # Validate all applications and relations AFTER migration
     juju_client.validate_model(model=f"{temp_juju_controller}:{model}", level="deep")
@@ -59,9 +62,11 @@ def test_model_controller_migration(
     # original controller fail to restart, so the {app}-application-config K8s secrets
     # are never updated with the original controller's addresses. Restarting the
     # controller forces the CAAS workers to restart, which triggers Ensure() and
-    # rewrites the secrets before the temp controller is destroyed.
-    juju_client.reboot_model_controller(model=f"{target_controller}:{model}")
-    juju_client.idle_for_period(model=f"{target_controller}:{model}", timeout=timedelta(minutes=15))
+    # rewrites the secrets before the temp controller is destroyed. Only affects
+    # Kubernetes controllers, so skip the disruptive reboot on machine clouds.
+    if juju_backend.is_k8s_controller(target_controller):
+        juju_client.reboot_model_controller(model=f"{target_controller}:{model}")
+        juju_client.idle_for_period(model=f"{target_controller}:{model}", timeout=timedelta(minutes=15))
 
     # Validate all applications and relations AFTER second migration
     juju_client.validate_model(model=f"{target_controller}:{model}", level="deep")
