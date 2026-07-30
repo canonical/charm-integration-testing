@@ -19,6 +19,9 @@
 #   COPILOT_MODEL         Copilot model override (default: sonnet-4.6)
 #   CHARMHUB_API_URL      Override for bundle_builder_x's Charmhub API base URL
 #   SNAPCRAFT_API_URL     Override for bundle_builder_x's Snapcraft API base URL
+#   TEST_OBSERVER_API_URL   Test Observer API URL, required by --with-test-observer-mcp
+#   TEST_OBSERVER_API_KEY   Test Observer API key, optional (read-only tools work without it)
+#   TEST_OBSERVER_MCP_PORT  Port for the test-observer-mcp server inside the VM (default: 8090)
 
 set -euo pipefail
 
@@ -45,6 +48,8 @@ VM_MOUNT="${SANDBOX_MOUNT:-/project}"
 VM_CPUS="${SANDBOX_CPUS:-4}"
 VM_MEMORY="${SANDBOX_MEMORY:-8G}"
 VM_DISK="${SANDBOX_DISK:-40G}"
+TEST_OBSERVER_MCP_REPO="canonical/test-observer-mcp"
+TEST_OBSERVER_MCP_PORT="${TEST_OBSERVER_MCP_PORT:-8090}"
 [[ "$VM_MOUNT" = /* ]] || { echo "ERROR: SANDBOX_MOUNT must be an absolute path: $VM_MOUNT" >&2; exit 1; }
 [[ "$VM_MOUNT" != *"'"* ]] || { echo "ERROR: SANDBOX_MOUNT must not contain single quotes: $VM_MOUNT" >&2; exit 1; }
 [[ "$VM_MOUNT" != *":"* ]] || { echo "ERROR: SANDBOX_MOUNT must not contain colons: $VM_MOUNT" >&2; exit 1; }
@@ -74,6 +79,8 @@ Usage:
   scripts/sandbox.sh shell                     Open a shell inside the VM
   scripts/sandbox.sh run 'task description'    Autonomous Copilot mode
   scripts/sandbox.sh run --interactive         Interactive Copilot mode
+  scripts/sandbox.sh run --with-test-observer-mcp ...
+                                                Also launch test-observer-mcp for this session
   scripts/sandbox.sh --help                    Show this help
 
 Environment (.env keys):
@@ -88,6 +95,9 @@ Environment (.env keys):
   CHARMHUB_API_URL       Override for bundle_builder_x's Charmhub API base URL
   SNAPCRAFT_API_URL      Override for bundle_builder_x's Snapcraft API base URL
   SANDBOX_MCP_CONFIG_FILE  Path to an MCP server config JSON file on the host
+  TEST_OBSERVER_API_URL   Test Observer API URL, required by --with-test-observer-mcp
+  TEST_OBSERVER_API_KEY   Test Observer API key, optional (read-only tools work without it)
+  TEST_OBSERVER_MCP_PORT  Port for the test-observer-mcp server inside the VM (default: 8090)
 
 Inside an interactive session use skill slash commands:
   /develop-validator     Develop a new charm integration validator
@@ -368,6 +378,170 @@ _cmd_shell() {
 }
 
 # ---------------------------------------------------------------------------
+# Helper: clone (on the host, via SSH) and launch test-observer-mcp inside
+# the VM.
+#
+# Cloning happens on the host so it can use the host's own SSH agent/keys
+# (multipass VMs have no access to the host's SSH identity or agent). The
+# clone lands in a fixed directory under the project root, which is already
+# bind-mounted into the VM via `multipass mount`, so no separate transfer
+# step is needed -- the cloned tree is visible inside the VM immediately at
+# the same relative path.
+#
+# Sets the caller's _to_mcp_host_dir (host clone dir; kept after teardown so
+# the clone can be inspected until the next run -- only the running server is stopped),
+# _to_mcp_dir (VM-side path, for teardown), and _to_mcp_vm_file (generated
+# MCP config JSON, for --additional-mcp-config) on success. Exits the script
+# on failure.
+# ---------------------------------------------------------------------------
+_start_test_observer_mcp() {
+    echo "==> Cloning test-observer-mcp on the host (via SSH)..."
+    _to_mcp_host_dir="$PROJECT_DIR/.test-observer-mcp"
+    rm -rf "$_to_mcp_host_dir"
+    if ! git clone --depth 1 --quiet "git@github.com:${TEST_OBSERVER_MCP_REPO}.git" "$_to_mcp_host_dir"; then
+        echo "ERROR: Failed to clone canonical/test-observer-mcp on the host via SSH." >&2
+        echo "       Ensure your SSH key is added to ssh-agent and registered with GitHub." >&2
+        rm -rf "$_to_mcp_host_dir"
+        _to_mcp_host_dir=""
+        exit 1
+    fi
+    _to_mcp_dir="$VM_MOUNT/.test-observer-mcp"
+
+    echo "==> Installing Go toolchain for test-observer-mcp (if needed)..."
+    multipass exec "$VM_NAME" -- bash -c "cd '$_to_mcp_dir' && ./scripts/go/setup.sh"
+
+    # `go run` spawns the compiled server binary as a *child* process rather
+    # than exec'ing into it, so killing (or losing track of) a previous
+    # `go run` wrapper does not kill the server it launched -- that binary
+    # is orphaned and keeps holding $TEST_OBSERVER_MCP_PORT. A later `run`
+    # invocation then fails to bind the port and exits almost immediately,
+    # which surfaces as a confusing "process did not start" error with an
+    # empty-looking server.log. Proactively clear out anything left over
+    # from a previous session before starting a new one.
+    # `multipass exec` runs commands inside a login session managed by
+    # systemd-logind. Without lingering enabled for the user, logind kills
+    # every process in that session's cgroup (including anything started
+    # with `nohup`/`setsid`/`disown`) the moment the exec channel closes --
+    # so the server would be reaped right after being launched below, even
+    # though it appears to start fine while the launching call is still
+    # connected. Enabling lingering makes systemd keep the user's processes
+    # (and its user-manager instance) running independently of any session.
+    echo "==> Ensuring background processes can survive detached sessions (systemd linger)..."
+    multipass exec "$VM_NAME" -- bash -c "loginctl show-user ubuntu 2>/dev/null | grep -q '^Linger=yes' || sudo loginctl enable-linger ubuntu"
+
+    echo "==> Clearing any leftover test-observer-mcp process on port $TEST_OBSERVER_MCP_PORT..."
+    # The pkill patterns use a bracket around one character (e.g. '[c]md' instead
+    # of 'cmd') so the regex does not also match the literal pattern text
+    # embedded in this very `bash -c "..."` invocation's own argv -- without it,
+    # `pkill -f` would self-match and SIGKILL the shell running the cleanup
+    # before it reaches `true`, making `multipass exec` exit 255 and, combined
+    # with `set -e` in the outer script, abort the whole sandbox run.
+    multipass exec "$VM_NAME" -- bash -c "fuser -k ${TEST_OBSERVER_MCP_PORT}/tcp 2>/dev/null; pkill -9 -f '[c]md/server/main.go --dangerously-disable-auth' 2>/dev/null; pkill -9 -f '/[m]ain --dangerously-disable-auth' 2>/dev/null; true"
+
+    echo "==> Starting test-observer-mcp on port $TEST_OBSERVER_MCP_PORT..."
+    # Backgrounding the remote command from *inside* a non-interactive
+    # `bash -c` (e.g. `cmd & disown`) is racy: that shell returns -- closing
+    # multipass's exec channel -- almost immediately after backgrounding,
+    # often before the forked job has finished detaching, so the server
+    # frequently never actually starts even though the launch command itself
+    # reports success. Backgrounding the `multipass exec` client itself on
+    # the *host* side instead is reliable: the remote command runs in the
+    # foreground (from multipass's point of view), which is the same
+    # reliable mode used by the health checks below, while the host script
+    # doesn't block on it. `setsid` still gives the remote process its own
+    # session so it survives if the connection ever drops, and the systemd
+    # linger fix above keeps it alive regardless. The log is redirected via
+    # the host-side clone dir ($_to_mcp_host_dir) rather than the VM-side
+    # path ($_to_mcp_dir) since the redirect is evaluated by the host shell
+    # -- both paths point at the same underlying files thanks to the
+    # `multipass mount` bind mount.
+    multipass exec "$VM_NAME" -- env \
+        TEST_OBSERVER_API_URL="$TEST_OBSERVER_API_URL" \
+        TEST_OBSERVER_API_KEY="${TEST_OBSERVER_API_KEY:-}" \
+        PORT="$TEST_OBSERVER_MCP_PORT" \
+        bash -c "cd '$_to_mcp_dir' && exec setsid ./scripts/run.sh" \
+        < /dev/null > "$_to_mcp_host_dir/server.log" 2>&1 &
+    disown || true
+
+    # Confirm the background process actually launched before burning up to
+    # 10 minutes on the health-check loop below. `go run`'s own PID is
+    # nested several process layers below the `setsid`/`nohup` wrapper we
+    # just backgrounded (shell -> setsid -> nohup -> run.sh -> go run), so
+    # capturing and polling a single PID via `$!` is unreliable -- the
+    # wrapper layer we'd capture often exits right after forking even
+    # though the actual server keeps running. Polling for log output is a
+    # more direct signal: a real startup failure (bad shebang, missing
+    # script, port conflict, Go toolchain issue) writes to server.log
+    # almost immediately, so this still fails fast without depending on any
+    # particular PID staying alive.
+    echo "==> Verifying test-observer-mcp process started..."
+    _to_mcp_started=false
+    for _ in $(seq 1 5); do
+        sleep 2
+        if multipass exec "$VM_NAME" -- test -s "$_to_mcp_dir/server.log"; then
+            _to_mcp_started=true
+            break
+        fi
+    done
+    if [ "$_to_mcp_started" = "false" ]; then
+        echo "ERROR: test-observer-mcp process did not start (server.log is empty or missing)." >&2
+        if multipass exec "$VM_NAME" -- test -f "$_to_mcp_dir/server.log"; then
+            echo "Server log:" >&2
+            multipass exec "$VM_NAME" -- tail -n 50 "$_to_mcp_dir/server.log" >&2 || true
+        else
+            echo "Server log was never created at $_to_mcp_dir/server.log." >&2
+            multipass exec "$VM_NAME" -- ls -la "$_to_mcp_dir" >&2 || true
+        fi
+        echo "Hint: check for a stale process still bound to port $TEST_OBSERVER_MCP_PORT:" >&2
+        echo "  multipass exec $VM_NAME -- ss -ltnp | grep $TEST_OBSERVER_MCP_PORT" >&2
+        exit 1
+    fi
+    echo "==> test-observer-mcp is producing output; waiting for it to become healthy."
+
+    echo "==> Waiting for test-observer-mcp health check..."
+    # `./scripts/run.sh` invokes `go run`, which on first launch must fetch
+    # all Go module dependencies before the server starts listening. 120s
+    # (60 * 2s) was not enough time for that initial fetch to complete, so
+    # the health check was timing out spuriously. Allow up to 10 minutes.
+    _to_mcp_ready=false
+    for _ in $(seq 1 300); do
+        if multipass exec "$VM_NAME" -- curl -sf "http://localhost:$TEST_OBSERVER_MCP_PORT/health" >/dev/null 2>&1; then
+            _to_mcp_ready=true
+            break
+        fi
+        sleep 2
+    done
+    if [ "$_to_mcp_ready" = "false" ]; then
+        echo "ERROR: test-observer-mcp did not become healthy in time." >&2
+        if multipass exec "$VM_NAME" -- test -f "$_to_mcp_dir/server.log"; then
+            echo "Server log:" >&2
+            multipass exec "$VM_NAME" -- tail -n 50 "$_to_mcp_dir/server.log" >&2 || true
+        else
+            echo "Server log was never created at $_to_mcp_dir/server.log -- the process" >&2
+            echo "likely never started. Directory contents:" >&2
+            multipass exec "$VM_NAME" -- ls -la "$_to_mcp_dir" >&2 || true
+            echo "Process check (pgrep run.sh):" >&2
+            multipass exec "$VM_NAME" -- pgrep -af run.sh >&2 || true
+        fi
+        exit 1
+    fi
+    echo "==> test-observer-mcp is healthy."
+
+    _to_mcp_vm_file=$(multipass exec "$VM_NAME" -- mktemp /tmp/mcp-test-observer-XXXXXX.json)
+    multipass exec "$VM_NAME" -- bash -c "cat > '$_to_mcp_vm_file'" <<EOF
+{
+  "mcpServers": {
+    "test-observer": {
+      "type": "http",
+      "url": "http://localhost:$TEST_OBSERVER_MCP_PORT/mcp",
+      "tools": ["*"]
+    }
+  }
+}
+EOF
+}
+
+# ---------------------------------------------------------------------------
 # Subcommand: run
 # ---------------------------------------------------------------------------
 _cmd_run() {
@@ -375,10 +549,15 @@ _cmd_run() {
     _copilot_token="${COPILOT_GITHUB_TOKEN:-$_gh_token}"
 
     INTERACTIVE=false
+    WITH_TEST_OBSERVER_MCP=false
     while [ "$#" -gt 0 ]; do
         case "$1" in
             --interactive)
                 INTERACTIVE=true
+                shift
+                ;;
+            --with-test-observer-mcp)
+                WITH_TEST_OBSERVER_MCP=true
                 shift
                 ;;
             -h|--help)
@@ -386,6 +565,8 @@ _cmd_run() {
 Usage:
   scripts/sandbox.sh run 'task description'   autonomous mode
   scripts/sandbox.sh run --interactive        interactive mode
+  scripts/sandbox.sh run --with-test-observer-mcp ...
+                                               also launch test-observer-mcp for this session
 EOF
                 exit 0
                 ;;
@@ -418,6 +599,13 @@ EOF
         fi
     fi
 
+    # Fail fast on missing test-observer-mcp prerequisites before any VM work.
+    if [ "$WITH_TEST_OBSERVER_MCP" = "true" ] && [ -z "${TEST_OBSERVER_API_URL:-}" ]; then
+        echo "ERROR: TEST_OBSERVER_API_URL must be set (in development-sandbox/.env or the" >&2
+        echo "       environment) to use --with-test-observer-mcp." >&2
+        exit 1
+    fi
+
     # Validate the task argument for autonomous mode before any VM interaction.
     if [ "$INTERACTIVE" = "false" ]; then
         [ -n "$TASK" ] || { echo "Usage: scripts/sandbox.sh run 'task description'" >&2; exit 1; }
@@ -428,22 +616,39 @@ EOF
         exit 1
     fi
 
-    # All prerequisites met. Copy MCP config into the VM now.
+    # Tear down every resource this run may have created, regardless of which
+    # step failed. Safe to call at any point since all paths default to empty.
     _mcp_vm_file=""
+    _to_mcp_host_dir=""
+    _to_mcp_dir=""
+    _to_mcp_vm_file=""
+    PROMPT_FILE=""
+    _cleanup_run() {
+        _rm_args=()
+        [ -n "$PROMPT_FILE" ] && _rm_args+=("$PROMPT_FILE")
+        [ -n "$_mcp_vm_file" ] && _rm_args+=("$_mcp_vm_file")
+        [ -n "$_to_mcp_vm_file" ] && _rm_args+=("$_to_mcp_vm_file")
+        if [ "${#_rm_args[@]}" -gt 0 ]; then
+            multipass exec "$VM_NAME" -- rm -f "${_rm_args[@]}" 2>/dev/null || true
+        fi
+        if [ -n "$_to_mcp_dir" ]; then
+            multipass exec "$VM_NAME" -- bash -c "fuser -k ${TEST_OBSERVER_MCP_PORT}/tcp 2>/dev/null" 2>/dev/null || true
+        fi
+    }
+    trap _cleanup_run EXIT
+
+    # All prerequisites met. Copy MCP config into the VM now.
     if [ -n "${SANDBOX_MCP_CONFIG_FILE:-}" ]; then
         echo "==> Copying MCP config into VM..."
         _mcp_vm_file=$(multipass exec "$VM_NAME" -- bash -c "mktemp /tmp/mcp-config-XXXXXX.json")
-        # Install a preliminary trap for the MCP file in case PROMPT_FILE creation fails.
-        # shellcheck disable=SC2064
-        trap "multipass exec '$VM_NAME' -- rm -f '$_mcp_vm_file' 2>/dev/null || true" EXIT
         multipass exec "$VM_NAME" -- bash -c "cat > '$_mcp_vm_file'" < "$SANDBOX_MCP_CONFIG_FILE"
     fi
 
+    if [ "$WITH_TEST_OBSERVER_MCP" = "true" ]; then
+        _start_test_observer_mcp
+    fi
+
     PROMPT_FILE=$(multipass exec "$VM_NAME" -- bash -c "mktemp /tmp/copilot-prompt-XXXXXX")
-    # Update the EXIT trap to cover PROMPT_FILE as well. This replaces the MCP-only
-    # trap (if set) so both files are removed on any early exit due to set -euo pipefail.
-    # shellcheck disable=SC2064
-    trap "multipass exec '$VM_NAME' -- rm -f '$PROMPT_FILE' '$_mcp_vm_file' 2>/dev/null || true" EXIT
 
     {
         cat "$PROJECT_DIR/.agents/skills/system.md"
@@ -461,10 +666,12 @@ EOF
         [ -n "${SNAPCRAFT_API_URL:-}" ] && _env_args+=("SNAPCRAFT_API_URL=$SNAPCRAFT_API_URL")
         _env_args+=("COPILOT_GITHUB_TOKEN=$_copilot_token" "COPILOT_MODEL=$COPILOT_MODEL" "PROJECT_ROOT=$VM_MOUNT")
         [ -n "$_mcp_vm_file" ] && _env_args+=("SANDBOX_MCP_VM_CONFIG=$_mcp_vm_file")
+        [ -n "$_to_mcp_vm_file" ] && _env_args+=("SANDBOX_TO_MCP_VM_CONFIG=$_to_mcp_vm_file")
         multipass exec "$VM_NAME" -- env "${_env_args[@]}" bash -lc "
                 cd '$VM_MOUNT'
             _mcp_extra=()
-            [ -n \"\${SANDBOX_MCP_VM_CONFIG:-}\" ] && _mcp_extra=(--additional-mcp-config \"@\${SANDBOX_MCP_VM_CONFIG}\")
+            [ -n \"\${SANDBOX_MCP_VM_CONFIG:-}\" ] && _mcp_extra+=(--additional-mcp-config \"@\${SANDBOX_MCP_VM_CONFIG}\")
+            [ -n \"\${SANDBOX_TO_MCP_VM_CONFIG:-}\" ] && _mcp_extra+=(--additional-mcp-config \"@\${SANDBOX_TO_MCP_VM_CONFIG}\")
             _ec=0
             copilot --yolo \"\${_mcp_extra[@]}\" -i \"$CONTEXT_MSG\" || _ec=\$?
             rm -f \"$PROMPT_FILE\"
@@ -478,10 +685,12 @@ EOF
         [ -n "${SNAPCRAFT_API_URL:-}" ] && _env_args+=("SNAPCRAFT_API_URL=$SNAPCRAFT_API_URL")
         _env_args+=("COPILOT_GITHUB_TOKEN=$_copilot_token" "COPILOT_MODEL=$COPILOT_MODEL" "PROJECT_ROOT=$VM_MOUNT")
         [ -n "$_mcp_vm_file" ] && _env_args+=("SANDBOX_MCP_VM_CONFIG=$_mcp_vm_file")
+        [ -n "$_to_mcp_vm_file" ] && _env_args+=("SANDBOX_TO_MCP_VM_CONFIG=$_to_mcp_vm_file")
         multipass exec "$VM_NAME" -- env "${_env_args[@]}" bash -lc "
                 cd '$VM_MOUNT'
             _mcp_extra=()
-            [ -n \"\${SANDBOX_MCP_VM_CONFIG:-}\" ] && _mcp_extra=(--additional-mcp-config \"@\${SANDBOX_MCP_VM_CONFIG}\")
+            [ -n \"\${SANDBOX_MCP_VM_CONFIG:-}\" ] && _mcp_extra+=(--additional-mcp-config \"@\${SANDBOX_MCP_VM_CONFIG}\")
+            [ -n \"\${SANDBOX_TO_MCP_VM_CONFIG:-}\" ] && _mcp_extra+=(--additional-mcp-config \"@\${SANDBOX_TO_MCP_VM_CONFIG}\")
             _ec=0
             copilot --yolo \"\${_mcp_extra[@]}\" -p \"\$(cat \"$PROMPT_FILE\")\" || _ec=\$?
             rm -f \"$PROMPT_FILE\"
