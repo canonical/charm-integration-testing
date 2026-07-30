@@ -171,51 +171,20 @@ class VaultUnsealer:
         # Get leader unit
         leader_unit = f"{application}/leader"
 
-        # Check if vault is already initialized. Note this does NOT mean the charm is fully set
-        # up: initialization is only the first of three steps (init, unseal, authorize), and this
-        # method can be called more than once against the same vault - deploy_bundles() invokes
-        # post_deploy() once per deploy phase (e.g. twice on Juju 4+). If vault was already
-        # initialized by an earlier call, we must still check whether authorization is still
-        # pending below, rather than returning early and silently skipping it - see issue #797,
-        # where an early return here left the charm permanently stuck on "Please authorize charm".
+        # Determine current state up front. Initialization is only the first of three steps
+        # (init, unseal, authorize), and this method can be called more than once against the
+        # same vault - deploy_bundles() invokes post_deploy() once per deploy phase (e.g. twice
+        # on Juju 4+). See issue #797, where an early return on this check left the charm
+        # permanently stuck on "Please authorize charm" after a second call.
         already_initialized = self.vault.status(model, leader_unit).initialized
 
-        if not already_initialized:
-            should_auto_unseal = self.vault_app_should_auto_unseal(model, application)
-            if should_auto_unseal:
-                # Wait for auto-unseal to finish
-                self.logger.info(
-                    f"Waiting for vault charm '{self.charm.name}' unit '{leader_unit}' to accept auto-unseal"
-                )
-                self.wait_for_auto_unseal_acceptance(
-                    model, leader_unit, timeout=timedelta(minutes=10), poll_interval=timedelta(seconds=10)
-                )
-
-            # Wait for initialization message
-            self.logger.info(f"Waiting for vault charm '{self.charm.name}' unit '{leader_unit}' init message")
-            self.juju.wait_for_unit_message(model, leader_unit, self.charm.init_message, timedelta(minutes=10))
-
-            # Initialize vault
-            self.logger.info(f"Initializing vault charm '{self.charm.name}' unit '{leader_unit}'")
-            tokens = self.vault.init(model, leader_unit, will_auto_unseal=should_auto_unseal)
-
-            # Save the token as a secret
-            self.save_vault_tokens(model, application, tokens)
-
-            if not should_auto_unseal:
-                # Wait for unseal message
-                self.logger.info(f"Waiting for vault charm '{self.charm.name}' unit '{leader_unit}' unseal message")
-                self.juju.wait_for_unit_message(model, leader_unit, self.charm.unseal_message, timedelta(minutes=10))
-
-                # Unseal the leader
-                self.logger.info(f"Unsealing vault charm '{self.charm.name}' unit '{leader_unit}'")
-                self.vault.unseal(model, leader_unit, tokens)
-        else:
-            # Reuse the tokens a previous call already saved, so authorization below can still
-            # proceed using the same root token.
+        if already_initialized:
             self.logger.info(
                 f"Vault charm '{self.charm.name}' unit '{leader_unit}' is already initialized, skipping init/unseal"
             )
+            tokens = None
+        else:
+            tokens = self._init_and_unseal_vault(model, application, leader_unit)
 
         if not authorize_charm:
             self.logger.info(f"Skipping authorizing vault charm '{self.charm.name}' unit '{leader_unit}'")
@@ -231,11 +200,47 @@ class VaultUnsealer:
             )
             return
 
-        if already_initialized:
-            # Reuse the tokens a previous call already saved, so authorization below can still
-            # proceed using the same root token.
+        # Tokens are only read from the saved secret here, right before they're actually needed,
+        # so an already-authorized vault never triggers an unnecessary (and potentially failing,
+        # if the secret was since removed) secret read.
+        if tokens is None:
             tokens = self.get_vault_tokens(model, application)
 
+        self._authorize_vault(model, application, leader_unit, tokens)
+
+    def _init_and_unseal_vault(self, model: str, application: str, leader_unit: str) -> VaultTokenSecret:
+        """Run the init/unseal steps for a leader unit that isn't yet initialized."""
+        should_auto_unseal = self.vault_app_should_auto_unseal(model, application)
+        if should_auto_unseal:
+            # Wait for auto-unseal to finish
+            self.logger.info(f"Waiting for vault charm '{self.charm.name}' unit '{leader_unit}' to accept auto-unseal")
+            self.wait_for_auto_unseal_acceptance(
+                model, leader_unit, timeout=timedelta(minutes=10), poll_interval=timedelta(seconds=10)
+            )
+
+        # Wait for initialization message
+        self.logger.info(f"Waiting for vault charm '{self.charm.name}' unit '{leader_unit}' init message")
+        self.juju.wait_for_unit_message(model, leader_unit, self.charm.init_message, timedelta(minutes=10))
+
+        # Initialize vault
+        self.logger.info(f"Initializing vault charm '{self.charm.name}' unit '{leader_unit}'")
+        tokens = self.vault.init(model, leader_unit, will_auto_unseal=should_auto_unseal)
+
+        # Save the token as a secret
+        self.save_vault_tokens(model, application, tokens)
+
+        if not should_auto_unseal:
+            # Wait for unseal message
+            self.logger.info(f"Waiting for vault charm '{self.charm.name}' unit '{leader_unit}' unseal message")
+            self.juju.wait_for_unit_message(model, leader_unit, self.charm.unseal_message, timedelta(minutes=10))
+
+            # Unseal the leader
+            self.logger.info(f"Unsealing vault charm '{self.charm.name}' unit '{leader_unit}'")
+            self.vault.unseal(model, leader_unit, tokens)
+
+        return tokens
+
+    def _authorize_vault(self, model: str, application: str, leader_unit: str, tokens: VaultTokenSecret) -> None:
         # Wait for authorize message
         self.logger.info(f"Waiting for vault charm '{self.charm.name}' unit '{leader_unit}' authorize message")
         self.juju.wait_for_unit_message(model, leader_unit, self.charm.authorize_message, timedelta(minutes=10))
