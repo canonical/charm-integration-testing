@@ -125,6 +125,11 @@ jobs:
     name: Execute integration tests against the charms
     needs: determine-runner
     runs-on: ${{ fromJSON(needs.determine-runner.outputs.runner) }}
+    permissions:
+      contents: read
+      # Needed by track-external-dependency-outage to open/comment/close the
+      # outage tracking issue used to dedupe repeated Mattermost alerts.
+      issues: write
     env:
       TEST_OBSERVER_API: ${{ inputs.test_observer_environment == 'production' && vars.PROD_TEST_OBSERVER_API || (inputs.test_observer_environment == 'staging' && vars.STG_TEST_OBSERVER_API || '') }}
       TEST_OBSERVER_TOKEN: ${{ inputs.test_observer_environment == 'production' && secrets.PROD_TEST_OBSERVER_TOKEN || (inputs.test_observer_environment == 'staging' && secrets.STG_TEST_OBSERVER_TOKEN || '') }}
@@ -501,6 +506,15 @@ jobs:
           test_execution_id: ${{ inputs.execution_id }}
           event_name: test_end
           detail: Tests finished.
+      - name: Track external dependency outage
+        id: track_outage
+        if: ${{ !cancelled() }}
+        uses: ./.github/actions/track-external-dependency-outage
+        with:
+          junit_xml: ${{ inputs.neighbor_environment != '' && steps.run_tests_cmr.outputs.junit_xml || steps.run_tests.outputs.junit_xml }}
+          github_token: ${{ github.token }}
+          mattermost_webhook_url: ${{ secrets.MATTERMOST_WEBHOOK_URL }}
+          run_url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
       - name: Post bundles to github
         shell: bash
         continue-on-error: true
@@ -521,7 +535,7 @@ jobs:
             echo '```' >> $GITHUB_STEP_SUMMARY
           fi
       - name: Post execution metadata to Test Observer
-        if: ${{ env.TEST_OBSERVER_API != '' && inputs.execution_id != '' }}
+        if: ${{ env.TEST_OBSERVER_API != '' && inputs.execution_id != '' && steps.track_outage.outputs.skipped != 'true' }}
         uses: ./.github/actions/test-observer/post-execution-metadata
         with:
           test_observer_api: ${{ env.TEST_OBSERVER_API }}
@@ -529,7 +543,7 @@ jobs:
           test_execution_id: ${{ inputs.execution_id }}
           junit_xml: ${{ inputs.neighbor_environment != '' && steps.run_tests_cmr.outputs.junit_xml || steps.run_tests.outputs.junit_xml }}
       - name: Post results to Test Observer
-        if: ${{ env.TEST_OBSERVER_API != '' && inputs.execution_id != '' }}
+        if: ${{ env.TEST_OBSERVER_API != '' && inputs.execution_id != '' && steps.track_outage.outputs.skipped != 'true' }}
         uses: ./.github/actions/test-observer/post-results
         with:
           test_observer_api: ${{ env.TEST_OBSERVER_API }}
