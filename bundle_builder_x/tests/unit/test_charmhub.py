@@ -326,6 +326,76 @@ class TestCharmhubClient:
             assert charm.platforms == ["machine"]
 
     # ---------------------------------------------------------------------------
+    # TestAssumesUnsupportedFeatureOverride
+    # ---------------------------------------------------------------------------
+
+    class TestAssumesUnsupportedFeatureOverride:
+        """A charm can be marked as unsupported by our testing infrastructure by adding a
+        sentinel feature (e.g. ``openstack-unsupported``) to its ``assumes`` override. Since
+        ``_ensure_compatibility()`` only ever supplies the real ``juju``/``k8s-api`` features
+        (see ``_PLATFORM_FEATURES``), such a charm can never satisfy that assumes entry and
+        ``charm_from_store()`` always raises ``CharmReleaseNotFoundException`` for it -
+        immediately and clearly when it's requested directly, and silently (caught by
+        callers such as ``BundleBuilder._get_charms_for_endpoint``) when only considered as
+        a candidate neighbor. This replaces ad hoc delisting-filter exemptions (see #813).
+        """
+
+        def _client_with_raw_overrides(self, raw_overrides: dict[str, object]) -> CharmhubClient:
+            response = _refresh_response_with_charm("aodh", revision=5, metadata=_METADATA_REQUIRES)
+
+            class _StubClient(_NullHttpClient):
+                def refresh(self, action: RefreshAction) -> RefreshResponse:
+                    return response
+
+            return CharmhubClient(
+                http_client=cast(CharmhubHttpClient, _StubClient()),
+                overrides_client=_StubOverridesClient(raw_overrides),
+            )
+
+        def _client_with_assumes_override(self, feature: str) -> CharmhubClient:
+            return self._client_with_raw_overrides(
+                {"listed": False, "platforms": ["machine", "kubernetes"], "overrides": [{"assumes": [feature]}]}
+            )
+
+        @pytest.mark.parametrize("platform", ["machine", "kubernetes"])
+        def test_charm_from_store_raises_for_sentinel_unsupported_feature(self, platform: str) -> None:
+            # GIVEN a charm whose assumes override declares a sentinel feature that is never
+            # provided by our testing infrastructure
+            client = self._client_with_assumes_override("openstack-unsupported")
+
+            # WHEN fetching the charm directly (as a bundle-builder spec would for its own
+            # test target), for either platform
+            # THEN CharmReleaseNotFoundException is raised with a message identifying the
+            # unmet assumes constraint, rather than the charm silently building and later
+            # failing deep inside relation resolution
+            with pytest.raises(CharmReleaseNotFoundException, match="assumes constraints"):
+                client.charm_from_store(
+                    charm_name="aodh",
+                    ubuntu_arch="amd64",
+                    ubuntu_version="22.04",
+                    charm_track="latest",
+                    charm_risk="stable",
+                    platform=platform,
+                )
+
+        def test_charm_from_store_succeeds_without_the_sentinel_feature(self) -> None:
+            # GIVEN a charm with no assumes override at all
+            client = self._client_with_raw_overrides({})
+
+            # WHEN fetching the charm for the machine platform
+            charm = client.charm_from_store(
+                charm_name="aodh",
+                ubuntu_arch="amd64",
+                ubuntu_version="22.04",
+                charm_track="latest",
+                charm_risk="stable",
+                platform="machine",
+            )
+
+            # THEN it succeeds normally
+            assert charm.name == "aodh"
+
+    # ---------------------------------------------------------------------------
     # TestChannelSupportsUbuntuVersion
     # ---------------------------------------------------------------------------
 
