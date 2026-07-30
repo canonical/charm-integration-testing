@@ -408,14 +408,15 @@ class TestJubilantBackend:
             backend = JubilantBackend(JubilantClientStub(client=stub))
 
             # WHEN wait is called with a ready condition that is immediately true
-            with patch("juju_jubilant.backend.time.sleep"):
-                backend.wait(
-                    "test-model",
-                    ready=lambda status: (True, JujuWaitState(message="ready")),
-                    timeout=timedelta(seconds=10),
-                    successes=1,
-                    delay=timedelta(milliseconds=10),
-                )
+            # (delay is small enough that patching time.sleep isn't needed, matching
+            # the sibling tests in this class)
+            backend.wait(
+                "test-model",
+                ready=lambda status: (True, JujuWaitState(message="ready")),
+                timeout=timedelta(seconds=10),
+                successes=1,
+                delay=timedelta(milliseconds=10),
+            )
 
             # THEN the transient error was swallowed and status was retried until success
             assert stub.call_count == 2
