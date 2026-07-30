@@ -36,9 +36,7 @@ def test_model_controller_migration(
     juju_client.idle_for_period(model=f"{temp_juju_controller}:{model}", timeout=timedelta(minutes=15))
 
     # Workaround for https://github.com/juju/juju/issues/22114: CAAS workers don't
-    # restart after migration, so `juju exec` to the operator pod hangs. Same bug as
-    # the return leg below, just also needed here on the forward leg. Only affects
-    # Kubernetes controllers, so skip the disruptive reboot on machine clouds.
+    # restart after migration, hanging `juju exec`. K8s-only.
     if juju_backend.is_k8s_controller(temp_juju_controller):
         juju_client.reboot_model_controller(model=f"{temp_juju_controller}:{model}")
         juju_client.idle_for_period(model=f"{temp_juju_controller}:{model}", timeout=timedelta(minutes=15))
@@ -57,13 +55,8 @@ def test_model_controller_migration(
     # Wait until model is idle in old controller
     juju_client.idle_for_period(model=f"{target_controller}:{model}", timeout=timedelta(minutes=15))
 
-    # Workaround for https://github.com/juju/juju/issues/22114:
-    # After migrating back to the original controller, the per-app CAAS workers on the
-    # original controller fail to restart, so the {app}-application-config K8s secrets
-    # are never updated with the original controller's addresses. Restarting the
-    # controller forces the CAAS workers to restart, which triggers Ensure() and
-    # rewrites the secrets before the temp controller is destroyed. Only affects
-    # Kubernetes controllers, so skip the disruptive reboot on machine clouds.
+    # Workaround for https://github.com/juju/juju/issues/22114: CAAS workers on the
+    # original controller don't restart after the return migration. K8s-only.
     if juju_backend.is_k8s_controller(target_controller):
         juju_client.reboot_model_controller(model=f"{target_controller}:{model}")
         juju_client.idle_for_period(model=f"{target_controller}:{model}", timeout=timedelta(minutes=15))
