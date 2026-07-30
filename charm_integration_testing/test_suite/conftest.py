@@ -1007,6 +1007,7 @@ def temp_juju_controller(
     target_controller_bootstrap_metadata_source: Path | None,
     prefix: str,
     logger: logging.Logger,
+    session_resource_registry: ResourceRegistry,
 ) -> Iterator[str]:
     temp_controller_name = generate_juju_name(prefix)
     logger.info(f"Creating temporary fixture controller '{temp_controller_name}'.")
@@ -1018,9 +1019,22 @@ def temp_juju_controller(
         metadata_source=target_controller_bootstrap_metadata_source,
     )
 
+    # Register the temporary controller so its logs are collected before it is
+    # destroyed. This is the destination controller for model migration tests
+    # (test_model_controller_migration), and is exactly where migration
+    # failures need to be diagnosed from when the migrated model never
+    # appears or a migration worker panics - see issues #811, #734.
+    # Previously this controller was killed directly with no log collection,
+    # leaving no diagnostic trail for that class of failure.
+    temp_ctrl_handle = JujuControllerHandle(controller=temp_controller_name)
+    session_resource_registry.register(
+        handle=temp_ctrl_handle,
+        destroyer=lambda: juju_client.kill_controller(controller=temp_controller_name),
+    )
+
     yield temp_controller_name
     logger.info(f"Destroying temporary fixture controller '{temp_controller_name}'.")
-    juju_client.kill_controller(controller=temp_controller_name)
+    session_resource_registry.teardown(temp_ctrl_handle)
 
 
 @pytest.fixture
