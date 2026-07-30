@@ -313,8 +313,18 @@ JSON
         echo "==> GitHub token available — Copilot will authenticate via GH_TOKEN."
 
         # Offer to register the signing key with GitHub via the API instead
-        # of requiring the user to paste it in manually.
-        if gh api user/ssh_signing_keys --jq '.[].key' 2>/dev/null | grep -qF "$(awk '{print $1, $2}' <<< "$_signing_pub")"; then
+        # of requiring the user to paste it in manually. Capture stderr so a
+        # failed lookup (e.g. missing token scope) isn't silently treated as
+        # "key not found", which would otherwise prompt for registration on
+        # every run even when the key is already registered.
+        _existing_keys=""
+        _list_ok=1
+        _existing_keys=$(gh api user/ssh_signing_keys --jq '.[].key' 2>&1) || _list_ok=0
+
+        if [ "$_list_ok" -eq 0 ]; then
+            echo "==> Could not verify existing signing keys with GitHub: $_existing_keys"
+            echo "==> Skipping automatic registration check. Add the key manually at the URL above if needed."
+        elif grep -qF "$(awk '{print $1, $2}' <<< "$_signing_pub")" <<< "$_existing_keys"; then
             echo "==> Signing key already registered with GitHub."
         elif [ -t 0 ]; then
             read -r -p "  Register this signing key with GitHub now via the API? [y/N] " _register_key
