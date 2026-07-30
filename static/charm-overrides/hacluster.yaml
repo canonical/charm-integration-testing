@@ -21,3 +21,5 @@ overrides:
     requires:
       pacemaker-remote:
         optional: true
+    assumes:
+      - openstack-unsupported

@@ -47,6 +47,8 @@ overrides:
       # All connected OpenStack service charms must be on the same release track.
       - 'tracks(charms(endpoint[identity-service])) == tracks({self})'
       - 'risks(charms(endpoint[identity-service])) == risks({self})'
+    assumes:
+      - openstack-unsupported
   # ussuri-xena: dashboard endpoint present; application-dashboard not yet available
   - criteria:
       - any_of:
@@ -76,6 +78,8 @@ overrides:
       # All connected OpenStack service charms must be on the same release track.
       - 'tracks(charms(endpoint[identity-service])) == tracks({self})'
       - 'risks(charms(endpoint[identity-service])) == risks({self})'
+    assumes:
+      - openstack-unsupported
   # default (yoga, zed, 2023.1+, latest, and future tracks)
   - provides:
       nrpe-external-master:
@@ -101,3 +105,5 @@ overrides:
       # All connected OpenStack service charms must be on the same release track.
       - 'tracks(charms(endpoint[identity-service])) == tracks({self})'
       - 'risks(charms(endpoint[identity-service])) == risks({self})'
+    assumes:
+      - openstack-unsupported

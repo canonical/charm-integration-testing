@@ -83,7 +83,6 @@ class CharmhubClientStub(CharmhubClient):
         provides: str | None = None,
         requires: str | None = None,
         platform: str | None = None,
-        requesting_charm: str | None = None,
     ) -> set[str]:
         result: set[str] = set()
         for charms in self._by_name.values():

@@ -57,6 +57,8 @@ overrides:
       - 'risks(charms(endpoint[image-service])) == risks({self})'
       - 'tracks(charms(endpoint[cloud-compute])) == tracks({self})'
       - 'risks(charms(endpoint[cloud-compute])) == risks({self})'
+    assumes:
+      - openstack-unsupported
   # train: placement endpoint present in metadata and required; dashboard not yet present.
   - criteria:
       - track: train
@@ -96,6 +98,8 @@ overrides:
       - 'risks(charms(endpoint[cloud-compute])) == risks({self})'
       - 'tracks(charms(endpoint[placement])) == tracks({self})'
       - 'risks(charms(endpoint[placement])) == risks({self})'
+    assumes:
+      - openstack-unsupported
   # Default (ussuri and later): placement required; dashboard endpoint also present.
   - provides:
       nrpe-external-master:
@@ -135,3 +139,5 @@ overrides:
       - 'risks(charms(endpoint[cloud-compute])) == risks({self})'
       - 'tracks(charms(endpoint[placement])) == tracks({self})'
       - 'risks(charms(endpoint[placement])) == risks({self})'
+    assumes:
+      - openstack-unsupported

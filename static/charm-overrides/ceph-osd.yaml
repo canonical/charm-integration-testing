@@ -24,3 +24,5 @@ overrides:
     provides:
       nrpe-external-master:
         optional: true
+    assumes:
+      - openstack-unsupported

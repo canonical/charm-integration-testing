@@ -4,3 +4,6 @@
 # listed: false -- Excluded from automated bundle building (SQT-1081) to prevent
 # pipeline congestion; not currently covered by Charm QA.
 listed: false
+overrides:
+  - assumes:
+      - openstack-unsupported

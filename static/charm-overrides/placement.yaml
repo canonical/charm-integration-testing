@@ -28,3 +28,5 @@ overrides:
       - 'risks(charms(endpoint[identity-service])) == risks({self})'
       - 'tracks(charms(endpoint[placement])) == tracks({self})'
       - 'risks(charms(endpoint[placement])) == risks({self})'
+    assumes:
+      - openstack-unsupported

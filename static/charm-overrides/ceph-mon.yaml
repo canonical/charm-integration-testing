@@ -52,6 +52,8 @@ overrides:
       rbd-mirror:
         optional: true
 
+    assumes:
+      - openstack-unsupported
   # ── reef, quincy, squid and newer (default) ─────────────────────────────────
   # Adds cos-agent and metrics-endpoint to the provides set.
   - requires:
@@ -78,3 +80,5 @@ overrides:
         optional: true
       rbd-mirror:
         optional: true
+    assumes:
+      - openstack-unsupported

@@ -53,6 +53,8 @@ overrides:
       - 'tracks(charms(endpoint[cinder-volume-service])) == tracks({self})'
       - 'risks(charms(endpoint[cinder-volume-service])) == risks({self})'
 
+    assumes:
+      - openstack-unsupported
   # ── ussuri and later ─────────────────────────────────────────────────────────
   # identity-credentials (requires) added in ussuri.
   - criteria:
@@ -101,3 +103,5 @@ overrides:
         == risks({self})'
       - 'tracks(charms(endpoint[cinder-volume-service])) == tracks({self})'
       - 'risks(charms(endpoint[cinder-volume-service])) == risks({self})'
+    assumes:
+      - openstack-unsupported

@@ -24,3 +24,5 @@ overrides:
         optional: true
       slave:
         optional: true
+    assumes:
+      - openstack-unsupported

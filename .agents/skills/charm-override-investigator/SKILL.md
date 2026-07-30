@@ -439,3 +439,19 @@ If the bundle pulls in something unexpected, check whether that endpoint should 
 - Reactive research: `@when_not` + `status.blocked()` means required; only `@when` means optional
 - Subordinate principal-attachment endpoint (container scope) is always required
 - Version-track constraints are common for CNI, container-runtime, etcd
+
+**Charms that do not support our testing infrastructure:**
+- `listed: false` alone only hides a charm from being picked as an *incidental neighbor* in
+  unrelated bundles - it does not stop the charm from being built directly (e.g. as the
+  target of its own `test_build_bundle`).
+- If a charm's own mandatory (non-optional) endpoints can only be fulfilled by other
+  charms that are also excluded (e.g. the entire OpenStack family's `identity-service`/`ha`
+  endpoints, which only keystone/hacluster provide, and both are delisted under SQT-1081),
+  building it directly will still fail deep inside relation resolution with a confusing
+  "Cannot fulfill charm endpoints" error.
+- The correct fix is not to special-case the delisting filter. Add `assumes: [openstack-unsupported]`
+  (or another descriptive sentinel feature name) to every criteria block in that charm's
+  overrides. `_ensure_compatibility()` never supplies custom sentinel features (only `juju`
+  and `k8s-api` are ever satisfied), so `charm_from_store()` fails immediately and clearly
+  whenever the charm is requested directly, and is silently skipped when only being
+  considered as a candidate neighbor. See issue #813.

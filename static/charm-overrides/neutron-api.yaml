@@ -8,3 +8,5 @@ overrides:
         optional: true
       midonet:  # Charm that offers it has been deleted
         optional: true
+    assumes:
+      - openstack-unsupported

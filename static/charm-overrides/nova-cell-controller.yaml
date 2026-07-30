@@ -52,6 +52,8 @@ overrides:
         == tracks({self})'
       - 'bool(endpoint[cloud-compute]) => risks(charms(endpoint[cloud-compute])) ==
         risks({self})'
+    assumes:
+      - openstack-unsupported
   # Default (Train+): identity-credentials is in required_relations; not optional.
   - provides:
       cloud-controller:
@@ -75,3 +77,5 @@ overrides:
         == tracks({self})'
       - 'bool(endpoint[cloud-compute]) => risks(charms(endpoint[cloud-compute])) ==
         risks({self})'
+    assumes:
+      - openstack-unsupported

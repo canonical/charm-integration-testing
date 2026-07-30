@@ -11,7 +11,11 @@ overrides:
           - track: 'wallaby'
           - track: 'xena'
           - track: 'yoga'
+    assumes:
+      - openstack-unsupported
   # default (zed, 2023.1+, latest, and future tracks): nrpe-external-master
   - provides:
       nrpe-external-master:
         optional: true
+    assumes:
+      - openstack-unsupported

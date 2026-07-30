@@ -39,3 +39,5 @@ overrides:
       - 'risks(charms(endpoint[identity-service])) == risks({self})'
       - 'tracks(charms(endpoint[image-service])) == tracks({self})'
       - 'risks(charms(endpoint[image-service])) == risks({self})'
+    assumes:
+      - openstack-unsupported

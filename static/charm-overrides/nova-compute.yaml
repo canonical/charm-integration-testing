@@ -54,6 +54,8 @@ overrides:
       - 'risks(charms(endpoint[cloud-compute])) == risks({self})'
       - 'tracks(charms(endpoint[image-service])) == tracks({self})'
       - 'risks(charms(endpoint[image-service])) == risks({self})'
+    assumes:
+      - openstack-unsupported
   # Default (yoga and later): nova-vgpu endpoint is present in charm metadata.
   - provides:
       nrpe-external-master:
@@ -85,3 +87,5 @@ overrides:
       - 'risks(charms(endpoint[cloud-compute])) == risks({self})'
       - 'tracks(charms(endpoint[image-service])) == tracks({self})'
       - 'risks(charms(endpoint[image-service])) == risks({self})'
+    assumes:
+      - openstack-unsupported

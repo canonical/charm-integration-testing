@@ -62,6 +62,8 @@ overrides:
       radosgw-user:
         optional: true
 
+    assumes:
+      - openstack-unsupported
   # quincy: secondary added to requires; primary added to provides
   - criteria:
       - any_of:
@@ -75,6 +77,8 @@ overrides:
       primary:
         optional: true
 
+    assumes:
+      - openstack-unsupported
   # Fallback (reef+): s3 added to provides
   - requires:
       <<: *common_req
@@ -86,3 +90,5 @@ overrides:
         optional: true
       s3:
         optional: true
+    assumes:
+      - openstack-unsupported

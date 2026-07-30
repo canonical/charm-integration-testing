@@ -20,3 +20,5 @@ overrides:
         optional: true
       simplestreams-image-service:
         optional: true
+    assumes:
+      - openstack-unsupported
