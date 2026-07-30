@@ -28,5 +28,3 @@ overrides:
         optional: true
     assumes:
       - openstack-unsupported
-    assumes:
-      - openstack-unsupported

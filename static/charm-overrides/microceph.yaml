@@ -32,7 +32,6 @@ overrides:
         optional: true
       radosgw:
         optional: true
-
     assumes:
       - openstack-unsupported
   # -- squid and newer (default) -----------------------------------------------
