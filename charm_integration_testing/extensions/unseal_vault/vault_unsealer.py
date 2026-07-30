@@ -214,9 +214,8 @@ class VaultUnsealer:
             # Reuse the tokens a previous call already saved, so authorization below can still
             # proceed using the same root token.
             self.logger.info(
-                f"Vault charm '{self.charm.name}' unit '{leader_unit}' is already initialized, " "skipping init/unseal"
+                f"Vault charm '{self.charm.name}' unit '{leader_unit}' is already initialized, skipping init/unseal"
             )
-            tokens = self.get_vault_tokens(model, application)
 
         if not authorize_charm:
             self.logger.info(f"Skipping authorizing vault charm '{self.charm.name}' unit '{leader_unit}'")
@@ -231,6 +230,11 @@ class VaultUnsealer:
                 f"Vault charm '{self.charm.name}' unit '{leader_unit}' is not awaiting authorization, skipping"
             )
             return
+
+        if already_initialized:
+            # Reuse the tokens a previous call already saved, so authorization below can still
+            # proceed using the same root token.
+            tokens = self.get_vault_tokens(model, application)
 
         # Wait for authorize message
         self.logger.info(f"Waiting for vault charm '{self.charm.name}' unit '{leader_unit}' authorize message")
