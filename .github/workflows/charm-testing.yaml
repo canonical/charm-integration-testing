@@ -95,7 +95,7 @@ on:
 jobs:
   determine-runner:
     name: Determine GitHub Actions runner to use for the environment
-    runs-on: [self-hosted, solqa]
+    runs-on: [self-hosted-linux-amd64-noble-solqa-ps7]
     env:
       TEST_OBSERVER_API: ${{ inputs.test_observer_environment == 'production' && vars.PROD_TEST_OBSERVER_API || (inputs.test_observer_environment == 'staging' && vars.STG_TEST_OBSERVER_API || '') }}
       TEST_OBSERVER_TOKEN: ${{ inputs.test_observer_environment == 'production' && secrets.PROD_TEST_OBSERVER_TOKEN || (inputs.test_observer_environment == 'staging' && secrets.STG_TEST_OBSERVER_TOKEN || '') }}
