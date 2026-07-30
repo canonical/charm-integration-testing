@@ -3,6 +3,7 @@
 
 import logging
 from abc import ABC
+from datetime import timedelta
 
 from juju import JujuBackend, JujuExtension
 from kubernetes_client.backend import KubernetesExtension
@@ -28,10 +29,13 @@ class GenericUnsealVaultJujuExtension(JujuExtension, ABC):
         # update on k8s, or a unit relocation on machines). Vault comes back sealed, so
         # it needs re-unsealing (it's already initialized and authorized, so
         # authorize_charm=False mirrors post_scale).
-        # Query via the target controller explicitly: right after migration, the model
-        # is no longer reachable through the source controller's bare name, so a status
-        # check without the target controller prefix races the migration.
-        self.vault_unsealer.try_init_or_unseal_all_vaults(f"{target}:{model}", authorize_charm=False)
+        # Wait for the model to land on the target controller first: migrate_model()
+        # returns as soon as migration starts, so an immediate status query (whether via
+        # source or target) can race the actual move and fail with "not found" or
+        # "has been migrated to controller ...".
+        target_model = f"{target}:{model}"
+        self.vault_unsealer.juju.wait_for_model_to_exist(target_model, timeout=timedelta(minutes=15))
+        self.vault_unsealer.try_init_or_unseal_all_vaults(target_model, authorize_charm=False)
 
 
 class UnsealVaultJujuExtension(GenericUnsealVaultJujuExtension):
