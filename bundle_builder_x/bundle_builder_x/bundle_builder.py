@@ -2,6 +2,7 @@
 # See LICENSE file for licensing details.
 
 import logging
+from collections.abc import Iterable
 from datetime import timedelta
 from typing import cast
 
@@ -19,7 +20,7 @@ from .assertion_tags import (
     SubordinateBaseMismatchTag,
 )
 from .bundle import Solution
-from .charm import Charm, CharmChannel, EndpointScope, EndpointType
+from .charm import Charm, CharmChannel, CharmEndpoint, EndpointScope, EndpointType
 from .charmhub import CharmhubClient
 from .charmhub_http import CharmReleaseNotFoundException
 from .constraints import add_constraints
@@ -369,14 +370,7 @@ class BundleBuilder:
             # endpoint. Verify before adding: without this, a bogus candidate can be re-added
             # every iteration (it never connects, so the tag never clears) and the domain
             # grows without bound instead of moving on to the next real candidate.
-            if not any(
-                other_ep.interface == endpoint.interface
-                and (
-                    (endpoint.type == EndpointType.REQUIRES and other_ep.type == EndpointType.PROVIDES)
-                    or (endpoint.type == EndpointType.PROVIDES and other_ep.type == EndpointType.REQUIRES)
-                )
-                for other_ep in charm.endpoints.values()
-            ):
+            if not self._has_compatible_endpoint(endpoint, charm.endpoints.values()):
                 self.logger.debug(f"Skipping {charm_name}: no endpoint compatible with {endpoint_name}")
                 continue
             if self._add_charm_for_charm_id(charm, charm_id, domain, model_ref):
@@ -408,14 +402,7 @@ class BundleBuilder:
             if self._is_endpoint_connected_to(charm_id, endpoint_name, other_id, domain):
                 continue  # already connected to this candidate — no progress to be made here
             # Check this other charm has a compatible endpoint.
-            if not any(
-                other_ep.interface == endpoint.interface
-                and (
-                    (endpoint.type == EndpointType.REQUIRES and other_ep.type == EndpointType.PROVIDES)
-                    or (endpoint.type == EndpointType.PROVIDES and other_ep.type == EndpointType.REQUIRES)
-                )
-                for other_ep in other_charm.spec.endpoints.values()
-            ):
+            if not self._has_compatible_endpoint(endpoint, other_charm.spec.endpoints.values()):
                 continue
 
             pair_charms_in_domain(domain, charm_id, other_id)
@@ -459,6 +446,22 @@ class BundleBuilder:
                 if pair_charms_in_domain(domain, charm_id_a, charm_id_b):
                     connected = True
         return connected
+
+    @staticmethod
+    def _has_compatible_endpoint(endpoint: CharmEndpoint, other_endpoints: Iterable[CharmEndpoint]) -> bool:
+        """Check whether any of other_endpoints can semantically connect to endpoint.
+
+        Two endpoints are compatible when they share the same interface and have opposite
+        REQUIRES/PROVIDES directions.
+        """
+        return any(
+            other_ep.interface == endpoint.interface
+            and (
+                (endpoint.type == EndpointType.REQUIRES and other_ep.type == EndpointType.PROVIDES)
+                or (endpoint.type == EndpointType.PROVIDES and other_ep.type == EndpointType.REQUIRES)
+            )
+            for other_ep in other_endpoints
+        )
 
     @staticmethod
     def _is_endpoint_connected_to(charm_id: int, endpoint_name: str, other_id: int, domain: Domain) -> bool:
