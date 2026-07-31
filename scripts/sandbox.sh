@@ -12,13 +12,20 @@
 #   scripts/sandbox.sh --help        Show this help
 #
 # Environment / .env (optional, loaded from development-sandbox/.env):
-#   GITHUB_TOKEN          Fine-grained PAT for gh CLI inside the VM
-#   COPILOT_GITHUB_TOKEN  Override for Copilot AI auth (default: gh auth token)
-#   SANDBOX_VM            VM name override (default: charm-qa-sandbox)
-#   SANDBOX_MOUNT         VM-side mount path (default: /project)
-#   COPILOT_MODEL         Copilot model override (default: sonnet-4.6)
-#   CHARMHUB_API_URL      Override for bundle_builder_x's Charmhub API base URL
-#   SNAPCRAFT_API_URL     Override for bundle_builder_x's Snapcraft API base URL
+#   GITHUB_TOKEN               Fine-grained PAT for GitHub API access on the
+#                              host when provisioning the VM (e.g. registering
+#                              the signing key). Falls back to the host's
+#                              `gh auth token` if not set.
+#   SANDBOX_VAR_GITHUB_TOKEN   Fine-grained PAT for gh CLI inside the VM.
+#   SANDBOX_VAR_COPILOT_GITHUB_TOKEN  Override for Copilot AI auth inside the
+#                              VM (default: gh auth token)
+#   SANDBOX_VM                 VM name override (default: charm-qa-sandbox)
+#   SANDBOX_MOUNT               VM-side mount path (default: /project)
+#   SANDBOX_VAR_COPILOT_MODEL   Copilot model override (default: sonnet-4.6)
+#   SANDBOX_VAR_<NAME>          Any var with this prefix is passed into the VM
+#                              as <NAME> (prefix stripped), e.g.
+#                              SANDBOX_VAR_CHARMHUB_API_URL -> CHARMHUB_API_URL
+#                              inside the VM.
 
 set -euo pipefail
 
@@ -64,6 +71,26 @@ _is_mounted() {
         | python3 -c "import sys,json; mounts=json.load(sys.stdin)['info'][sys.argv[1]].get('mounts',{}); exit(0 if sys.argv[2] in mounts else 1)" "$VM_NAME" "$VM_MOUNT" 2>/dev/null
 }
 
+# Ingest every host env var prefixed with SANDBOX_VAR_, strip the prefix, and
+# append "NAME=value" entries onto the array named by $1 (nameref) for
+# passthrough into the VM via `multipass exec ... env ...`.
+# Example: SANDBOX_VAR_CHARMHUB_API_URL=... -> CHARMHUB_API_URL=... in the VM.
+# GITHUB_TOKEN, COPILOT_GITHUB_TOKEN and COPILOT_MODEL are excluded here since
+# they need special-cased handling (dual GH_TOKEN/GITHUB_TOKEN mapping and
+# host-side defaults) that callers apply explicitly.
+_collect_sandbox_vars() {
+    local -n _target="$1"
+    local _var _name
+    while IFS= read -r _var; do
+        [[ "$_var" == SANDBOX_VAR_?* ]] || continue
+        _name="${_var#SANDBOX_VAR_}"
+        case "$_name" in
+            GITHUB_TOKEN|COPILOT_GITHUB_TOKEN|COPILOT_MODEL) continue ;;
+        esac
+        _target+=("$_name=${!_var}")
+    done < <(compgen -e)
+}
+
 _usage() {
     cat <<'EOF'
 Usage:
@@ -82,11 +109,13 @@ Environment (.env keys):
   SANDBOX_CPUS           vCPU count for new VMs (default: 4)
   SANDBOX_MEMORY         RAM for new VMs, e.g. 8G or 16G (default: 8G)
   SANDBOX_DISK           Disk size for new VMs, e.g. 40G or 80G (default: 40G)
-  GITHUB_TOKEN           Fine-grained PAT for gh CLI inside the VM
-  COPILOT_GITHUB_TOKEN   Copilot AI auth token (default: gh auth token)
-  COPILOT_MODEL          Copilot model (default: sonnet-4.6)
-  CHARMHUB_API_URL       Override for bundle_builder_x's Charmhub API base URL
-  SNAPCRAFT_API_URL      Override for bundle_builder_x's Snapcraft API base URL
+  GITHUB_TOKEN           Fine-grained PAT for host-side GitHub API access
+                         when provisioning the VM (default: gh auth token)
+  SANDBOX_VAR_GITHUB_TOKEN  Fine-grained PAT for gh CLI inside the VM
+  SANDBOX_VAR_COPILOT_GITHUB_TOKEN  Copilot AI auth token (default: gh auth token)
+  SANDBOX_VAR_COPILOT_MODEL  Copilot model (default: sonnet-4.6)
+  SANDBOX_VAR_<NAME>     Passed into the VM as <NAME> (prefix stripped), e.g.
+                         SANDBOX_VAR_CHARMHUB_API_URL -> CHARMHUB_API_URL
   SANDBOX_MCP_CONFIG_FILE  Path to an MCP server config JSON file on the host
 
 Inside an interactive session use skill slash commands:
@@ -409,9 +438,8 @@ _cmd_shell() {
         exit 1
     fi
     _env_args=("PROJECT_ROOT=$VM_MOUNT")
-    [ -n "${GITHUB_TOKEN:-}" ] && _env_args+=("GH_TOKEN=$GITHUB_TOKEN" "GITHUB_TOKEN=$GITHUB_TOKEN")
-    [ -n "${CHARMHUB_API_URL:-}" ] && _env_args+=("CHARMHUB_API_URL=$CHARMHUB_API_URL")
-    [ -n "${SNAPCRAFT_API_URL:-}" ] && _env_args+=("SNAPCRAFT_API_URL=$SNAPCRAFT_API_URL")
+    [ -n "${SANDBOX_VAR_GITHUB_TOKEN:-}" ] && _env_args+=("GH_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN" "GITHUB_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN")
+    _collect_sandbox_vars _env_args
     exec multipass exec "$VM_NAME" -- env "${_env_args[@]}" bash -lc "
         cd '$VM_MOUNT' && exec bash -l
     "
@@ -421,8 +449,8 @@ _cmd_shell() {
 # Subcommand: run
 # ---------------------------------------------------------------------------
 _cmd_run() {
-    COPILOT_MODEL="${COPILOT_MODEL:-sonnet-4.6}"
-    _copilot_token="${COPILOT_GITHUB_TOKEN:-$_gh_token}"
+    COPILOT_MODEL="${SANDBOX_VAR_COPILOT_MODEL:-sonnet-4.6}"
+    _copilot_token="${SANDBOX_VAR_COPILOT_GITHUB_TOKEN:-$_gh_token}"
 
     INTERACTIVE=false
     while [ "$#" -gt 0 ]; do
@@ -505,12 +533,10 @@ EOF
     if [ "$INTERACTIVE" = "true" ]; then
         CONTEXT_MSG="Please read $PROMPT_FILE for project context, then await my instructions."
         # Build env var array, only including GH_TOKEN/GITHUB_TOKEN if they are actually set
-        _env_args=()
-        [ -n "${GITHUB_TOKEN:-}" ] && _env_args+=("GH_TOKEN=$GITHUB_TOKEN" "GITHUB_TOKEN=$GITHUB_TOKEN")
-        [ -n "${CHARMHUB_API_URL:-}" ] && _env_args+=("CHARMHUB_API_URL=$CHARMHUB_API_URL")
-        [ -n "${SNAPCRAFT_API_URL:-}" ] && _env_args+=("SNAPCRAFT_API_URL=$SNAPCRAFT_API_URL")
-        _env_args+=("COPILOT_GITHUB_TOKEN=$_copilot_token" "COPILOT_MODEL=$COPILOT_MODEL" "PROJECT_ROOT=$VM_MOUNT")
+        _env_args=("COPILOT_GITHUB_TOKEN=$_copilot_token" "COPILOT_MODEL=$COPILOT_MODEL" "PROJECT_ROOT=$VM_MOUNT")
+        [ -n "${SANDBOX_VAR_GITHUB_TOKEN:-}" ] && _env_args+=("GH_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN" "GITHUB_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN")
         [ -n "$_mcp_vm_file" ] && _env_args+=("SANDBOX_MCP_VM_CONFIG=$_mcp_vm_file")
+        _collect_sandbox_vars _env_args
         multipass exec "$VM_NAME" -- env "${_env_args[@]}" bash -lc "
                 cd '$VM_MOUNT'
             _mcp_extra=()
@@ -522,12 +548,10 @@ EOF
         "
     else
         # Build env var array, only including GH_TOKEN/GITHUB_TOKEN if they are actually set
-        _env_args=()
-        [ -n "${GITHUB_TOKEN:-}" ] && _env_args+=("GH_TOKEN=$GITHUB_TOKEN" "GITHUB_TOKEN=$GITHUB_TOKEN")
-        [ -n "${CHARMHUB_API_URL:-}" ] && _env_args+=("CHARMHUB_API_URL=$CHARMHUB_API_URL")
-        [ -n "${SNAPCRAFT_API_URL:-}" ] && _env_args+=("SNAPCRAFT_API_URL=$SNAPCRAFT_API_URL")
-        _env_args+=("COPILOT_GITHUB_TOKEN=$_copilot_token" "COPILOT_MODEL=$COPILOT_MODEL" "PROJECT_ROOT=$VM_MOUNT")
+        _env_args=("COPILOT_GITHUB_TOKEN=$_copilot_token" "COPILOT_MODEL=$COPILOT_MODEL" "PROJECT_ROOT=$VM_MOUNT")
+        [ -n "${SANDBOX_VAR_GITHUB_TOKEN:-}" ] && _env_args+=("GH_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN" "GITHUB_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN")
         [ -n "$_mcp_vm_file" ] && _env_args+=("SANDBOX_MCP_VM_CONFIG=$_mcp_vm_file")
+        _collect_sandbox_vars _env_args
         multipass exec "$VM_NAME" -- env "${_env_args[@]}" bash -lc "
                 cd '$VM_MOUNT'
             _mcp_extra=()
