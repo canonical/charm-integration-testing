@@ -93,38 +93,17 @@ on:
         options: [DEBUG, INFO, WARNING, ERROR]
         default: INFO
 jobs:
-  determine-runner:
-    name: Determine GitHub Actions runner to use for the environment
-    runs-on: [self-hosted, solqa]
-    env:
-      TEST_OBSERVER_API: ${{ inputs.test_observer_environment == 'production' && vars.PROD_TEST_OBSERVER_API || (inputs.test_observer_environment == 'staging' && vars.STG_TEST_OBSERVER_API || '') }}
-      TEST_OBSERVER_TOKEN: ${{ inputs.test_observer_environment == 'production' && secrets.PROD_TEST_OBSERVER_TOKEN || (inputs.test_observer_environment == 'staging' && secrets.STG_TEST_OBSERVER_TOKEN || '') }}
-    outputs:
-      runner: ${{ steps.pick.outputs.runner-labels }}
-      debug-mode: ${{ steps.pick.outputs.debug-mode }}
-      pip-proxy: ${{ steps.pick.outputs.pip-proxy }}
-    steps:
-      - name: Clone Repo
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with:
-          persist-credentials: false
-      - name: Pick runner
-        id: pick
-        uses: ./.github/actions/pick-runner
-        with:
-          target_environment: ${{ inputs.target_environment }}
-          neighbor_environment: ${{ inputs.neighbor_environment }}
-      - name: Trigger rerun on Test Observer if failure
-        if: ${{ failure() && env.TEST_OBSERVER_API != '' && inputs.execution_id != '' }}
-        uses: ./.github/actions/test-observer/trigger-rerun
-        with:
-          test_observer_api: ${{ env.TEST_OBSERVER_API }}
-          test_observer_token: ${{ env.TEST_OBSERVER_TOKEN }}
-          test_execution_id: ${{ inputs.execution_id }}
+  # NOTE: determine-runner and execute-charm-test were temporarily merged into a single
+  # job because only ps7 runners are in use, and running two jobs per workflow wastes a
+  # second runner slot for no benefit. To revert once more runner types are back in play,
+  # restore the separate `determine-runner` job (see git history) and change `runs-on`
+  # below back to `${{ fromJSON(needs.determine-runner.outputs.runner) }}` with
+  # `needs: determine-runner`, and change the `steps.pick.outputs.*` references
+  # throughout this job back to `needs.determine-runner.outputs.*`.
   execute-charm-test:
     name: Execute integration tests against the charms
-    needs: determine-runner
-    runs-on: ${{ fromJSON(needs.determine-runner.outputs.runner) }}
+    # runs-on: ${{ fromJSON(needs.determine-runner.outputs.runner) }}  # see NOTE above
+    runs-on: [self-hosted-linux-amd64-noble-solqa-ps7]
     env:
       TEST_OBSERVER_API: ${{ inputs.test_observer_environment == 'production' && vars.PROD_TEST_OBSERVER_API || (inputs.test_observer_environment == 'staging' && vars.STG_TEST_OBSERVER_API || '') }}
       TEST_OBSERVER_TOKEN: ${{ inputs.test_observer_environment == 'production' && secrets.PROD_TEST_OBSERVER_TOKEN || (inputs.test_observer_environment == 'staging' && secrets.STG_TEST_OBSERVER_TOKEN || '') }}
@@ -140,8 +119,14 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
+      - name: Pick runner
+        id: pick
+        uses: ./.github/actions/pick-runner
+        with:
+          target_environment: ${{ inputs.target_environment }}
+          neighbor_environment: ${{ inputs.neighbor_environment }}
       - name: Enable Debug Session
-        if: ${{ inputs.debug_sleep_after != 'none' && !cancelled() && needs.determine-runner.outputs.debug-mode == 'ssh' }}
+        if: ${{ inputs.debug_sleep_after != 'none' && !cancelled() && steps.pick.outputs.debug-mode == 'ssh' }}
         shell: bash
         env:
           SSH_IDS: ${{ inputs.debug_extra_ssh_imports }}
@@ -314,18 +299,18 @@ jobs:
           event_name: setup_neighbor_failed
           detail: Setup of neighbor cloud failed.
       - name: Debug Setup
-        if: ${{ inputs.debug_sleep_after == 'setup' && !cancelled() && needs.determine-runner.outputs.debug-mode == 'ssh' }}
+        if: ${{ inputs.debug_sleep_after == 'setup' && !cancelled() && steps.pick.outputs.debug-mode == 'ssh' }}
         shell: bash
         env:
           DEBUG_SLEEP_SECONDS: ${{ inputs.debug_sleep_seconds }}
         run: sleep ${DEBUG_SLEEP_SECONDS}
       - name: Debug Setup
-        if: ${{ inputs.debug_sleep_after == 'setup' && !cancelled() && needs.determine-runner.outputs.debug-mode == 'tmate' }}
+        if: ${{ inputs.debug_sleep_after == 'setup' && !cancelled() && steps.pick.outputs.debug-mode == 'tmate' }}
         uses: canonical/action-tmate@main  # zizmor: ignore[unpinned-uses] no releases in the repo
       - name: Install Repository
         shell: bash
         env:
-          PIP_PROXY: ${{ needs.determine-runner.outputs.pip-proxy }}
+          PIP_PROXY: ${{ steps.pick.outputs.pip-proxy }}
         run: |
           sudo apt-get update --quiet
           sudo apt-get install pipx --quiet --assume-yes
@@ -575,13 +560,13 @@ jobs:
           event_name: log_collection_finished
           detail: Log collection has completed.
       - name: Debug Post Log Collection
-        if: ${{ inputs.debug_sleep_after == 'log_collection' && !cancelled() && needs.determine-runner.outputs.debug-mode == 'ssh' }}
+        if: ${{ inputs.debug_sleep_after == 'log_collection' && !cancelled() && steps.pick.outputs.debug-mode == 'ssh' }}
         shell: bash
         env:
           DEBUG_SLEEP_SECONDS: ${{ inputs.debug_sleep_seconds }}
         run: sleep ${DEBUG_SLEEP_SECONDS}
       - name: Debug Post Log Collection
-        if: ${{ inputs.debug_sleep_after == 'log_collection' && !cancelled() && needs.determine-runner.outputs.debug-mode == 'tmate' }}
+        if: ${{ inputs.debug_sleep_after == 'log_collection' && !cancelled() && steps.pick.outputs.debug-mode == 'tmate' }}
         uses: canonical/action-tmate@main  # zizmor: ignore[unpinned-uses] no releases in the repo
       - name: Post links to Test Observer
         if: ${{ !cancelled() && steps.post_logs_to_swift.outcome == 'success' && env.TEST_OBSERVER_API != '' && inputs.execution_id != '' }}

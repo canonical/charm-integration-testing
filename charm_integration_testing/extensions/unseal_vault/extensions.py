@@ -3,6 +3,7 @@
 
 import logging
 from abc import ABC
+from datetime import timedelta
 
 from juju import JujuBackend, JujuExtension
 from kubernetes_client.backend import KubernetesExtension
@@ -23,12 +24,13 @@ class GenericUnsealVaultJujuExtension(JujuExtension, ABC):
     def post_scale(self, model: str) -> None:
         self.vault_unsealer.try_init_or_unseal_all_vaults(model, authorize_charm=False)
 
-    def post_migrate_model(self, model: str, _source: str, _target: str) -> None:
-        # Migrating a model restarts the vault workload (e.g. a StatefulSet annotation
-        # update on k8s, or a unit relocation on machines). Vault comes back sealed, so
-        # it needs re-unsealing (it's already initialized and authorized, so
-        # authorize_charm=False mirrors post_scale).
-        self.vault_unsealer.try_init_or_unseal_all_vaults(model, authorize_charm=False)
+    def post_migrate_model(self, model: str, _source: str, target: str) -> None:
+        # Vault comes back sealed after migration; re-unseal without re-authorizing.
+        # Wait for the model on the target controller first: migrate_model() returns
+        # as soon as migration starts, so an immediate query can race the move.
+        target_model = f"{target}:{model}"
+        self.vault_unsealer.juju.wait_for_model_to_exist(target_model, timeout=timedelta(minutes=15))
+        self.vault_unsealer.try_init_or_unseal_all_vaults(target_model, authorize_charm=False)
 
 
 class UnsealVaultJujuExtension(GenericUnsealVaultJujuExtension):

@@ -131,6 +131,46 @@ These are strict. Violations lead to incorrect overrides and PR rejections.
 
 ---
 
+## Reproducibility & Confidence Standard
+
+An override that fixes the solver's local decision (e.g. a delisting resolves cleanly in
+`OverridesClient`) is not automatically the same thing as confirmation that it fixes the
+reported issue end-to-end. Do not conflate the two.
+
+**Before shipping an override as "the fix" for a reported failure, distinguish:**
+
+1. **Root-cause evidence** - source code, upstream docs, or upstream repo metadata (e.g. `charmcraft.yaml` / `metadata.yaml` in the charm's source repository) proving *why* an endpoint is
+   required/optional. This is what makes the override itself correct.
+2. **Fix-efficacy evidence** - actual reproduction of the reported failure mode, before and
+   after the change, in a way that would have caught it if the fix were wrong. This is what
+   makes you confident the override *resolves the reported issue*.
+
+A solver-level repro against a minimal spec (`bundle-builder-x --spec ...`) or an
+`OverridesClient` delisting check **is** valid fix-efficacy evidence when it exercises the
+exact endpoint/criteria path the issue describes. It is **not** valid evidence for a failure
+mode that only manifests deeper in a multi-hop bundle, a live cluster, or a full test-plan run
+that this environment cannot reproduce (e.g. Charmhub `find` API gaps hiding a transitive
+consumer, or a race/timing condition only visible against a real controller).
+
+**If you cannot reproduce the reported failure mode with hard evidence in this environment:**
+
+- Do not ship a speculative override or code change and describe it as "the fix" - this is
+  guessing, not diagnosis, even if the reasoning sounds plausible.
+- State explicitly, in the PR description and to the user, which part of the failure you could
+  and could not reproduce, and why (e.g. API/tooling limitation, no live cluster access).
+- Prefer proposing or adding **instrumentation** instead: better logging, an assertion message,
+  a diagnostic script, or a request for the reporter/CI artifacts (crash dumps, controller logs,
+  `juju status` output) needed to triage further. Collecting the missing evidence is the
+  correct next step, not a guessed fix.
+- If root-cause evidence is solid (source code proves the endpoint's true optionality) but
+  end-to-end fix-efficacy cannot be verified here, say so plainly rather than implying full
+  confidence - e.g. "this corrects a metadata error confirmed by X; I could not reproduce the
+  full failing scenario in this sandbox to verify it end-to-end."
+- When in doubt, ask the user whether to proceed with a best-effort fix explicitly labeled as
+  unverified, or to first gather more diagnostic data.
+
+---
+
 ## Research Workflow
 
 ### Finding the source repository
