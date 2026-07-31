@@ -69,9 +69,13 @@ class PvcSnapshot:
         """Stable identity used to diff snapshots across state visits.
 
         Excludes ``name`` (Juju embeds a random per-provision component in it)
-        and ``phase`` (volatile). See :func:`~resource_tracking.discrepancy.diff_snapshots`
+        and ``phase`` (volatile), grouping by ``application`` instead. Falls back
+        to ``name`` when ``application`` is unknown, so unattributed PVCs aren't
+        collapsed together. See :func:`~resource_tracking.discrepancy.diff_snapshots`
         for how a count-based comparison still catches duplicates.
         """
+        if not self.application:
+            return (self.namespace, self.name, self.storage_class, self.requested_storage)
         return (self.namespace, self.application, self.storage_class, self.requested_storage)
 
     def report_attributes(self) -> dict[str, str]:

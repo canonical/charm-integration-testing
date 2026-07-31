@@ -365,6 +365,18 @@ class TestDiffSnapshots:
         assert qualifiers["extra"] == ()
         assert len(qualifiers["missing"]) == 1
 
+    def test_unattributed_pvcs_fall_back_to_name_and_are_not_grouped_together(self) -> None:
+        # GIVEN two unrelated PVCs of the same shape but without an owning application
+        baseline = frozenset({_pvc("data-0"), _pvc("data-1")})
+        current = frozenset({_pvc("data-0")})
+
+        # WHEN the two snapshot sets are diffed
+        qualifiers = diff_snapshots(baseline, current)
+
+        # THEN the missing one is still identified by name, rather than the pair being
+        # collapsed into one identity by shape alone
+        assert qualifiers == {"missing": (_pvc("data-1"),), "extra": ()}
+
 
 class TestCalculateDiscrepancies:
     def test_first_visit_records_baseline_without_discrepancy(self) -> None:
