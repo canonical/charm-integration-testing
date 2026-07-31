@@ -8,10 +8,12 @@ They validate that the full pipeline (spec -> domain -> solve -> extract)
 produces correct, deployable bundles.
 """
 
+import pytest
 import yaml
 
 from bundle_builder_x.bundle_builder import BundleBuilder
 from bundle_builder_x.charmhub import CharmhubClient
+from bundle_builder_x.charmhub_http import CharmReleaseNotFoundException
 from bundle_builder_x.snapstore import SnapstoreClient
 from bundle_builder_x.spec import SpecFile
 
@@ -238,3 +240,35 @@ def test_mermaid_export_contains_all_models(
     # THEN both models appear as subgraphs
     assert "subgraph infra" in mermaid
     assert "subgraph app-tier" in mermaid
+
+
+def test_openstack_charm_requested_directly_fails_with_clear_exception(
+    charmhub_client: CharmhubClient,
+    snapstore_client: SnapstoreClient,
+) -> None:
+    """OpenStack-family charms are marked ``openstack-unsupported`` via their real
+    ``assumes`` override (see #813): our testing infrastructure never provides that
+    sentinel feature, so building a bundle that directly requests one must fail fast
+    with ``CharmReleaseNotFoundException`` naming the unmet assumes constraint,
+    rather than the bundle silently building and failing later/differently deep
+    inside relation resolution.
+    """
+    # GIVEN a spec that directly requests "aodh", an OpenStack charm
+    spec = SpecFile.model_validate(
+        {
+            "models": [
+                {
+                    "name": "test-model",
+                    "platform": "machine",
+                    "applications": {"aodh": {"charm": "aodh"}},
+                }
+            ]
+        }
+    )
+
+    # WHEN building against the real Charmhub API and real override files
+    builder = BundleBuilder(charmhub_client=charmhub_client, snapstore_client=snapstore_client)
+
+    # THEN it fails fast with the expected exception, identifying the unmet assumes constraint
+    with pytest.raises(CharmReleaseNotFoundException, match="assumes constraints"):
+        builder.build(spec)

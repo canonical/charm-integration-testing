@@ -6,6 +6,7 @@ from typing import cast
 import pytest
 from pydantic.dataclasses import dataclass
 
+from bundle_builder_x.bundle_builder import BundleBuilder
 from bundle_builder_x.charm import CharmChannel, EndpointScope, EndpointType
 from bundle_builder_x.charmhub import CharmhubClient
 from bundle_builder_x.charmhub_http import (
@@ -22,6 +23,7 @@ from bundle_builder_x.charmhub_http import (
     UnparsableCharmException,
 )
 from bundle_builder_x.overrides import CharmGlobalOverrides, OverridesClient
+from bundle_builder_x.spec import AppSpec, ModelSpec, SpecFile
 
 # ---------------------------------------------------------------------------
 # Stubs
@@ -394,6 +396,42 @@ class TestCharmhubClient:
 
             # THEN it succeeds normally
             assert charm.name == "aodh"
+
+        def test_bundle_builder_fails_for_openstack_charm_requested_directly(self) -> None:
+            """End-to-end check that ``BundleBuilder.build()`` - not just
+            ``CharmhubClient.charm_from_store()`` in isolation - fails with a clear
+            ``CharmReleaseNotFoundException`` when a spec directly requests an
+            application backed by an OpenStack charm marked ``openstack-unsupported``.
+
+            The application-charm lookup in ``BundleBuilder._get_charm_for_application()``
+            is not wrapped in a try/except (unlike the candidate-neighbor lookups in
+            ``_get_charms_for_endpoint()``), so this exception is expected to propagate
+            all the way out of ``build()`` rather than being swallowed or surfacing as a
+            generic ``UncompletableBundleError``.
+            """
+            # GIVEN a real CharmhubClient (stubbed HTTP/overrides) where "aodh" is marked
+            # unsupported via the openstack-unsupported sentinel feature, wired into a
+            # real BundleBuilder
+            charmhub_client = self._client_with_assumes_override("openstack-unsupported")
+            builder = BundleBuilder(charmhub_client=charmhub_client)
+
+            # AND a spec that requests "aodh" directly as an application
+            spec = SpecFile(
+                models=[
+                    ModelSpec(
+                        name="m",
+                        platform="machine",
+                        juju="3.6.0",  # explicit version avoids a live Snapstore lookup
+                        applications={"aodh": AppSpec(charm="aodh", base="22.04", channel="latest/stable")},
+                    )
+                ]
+            )
+
+            # WHEN building the bundle
+            # THEN CharmReleaseNotFoundException propagates out of build(), identifying
+            # the unmet assumes constraint, instead of failing later/differently
+            with pytest.raises(CharmReleaseNotFoundException, match="assumes constraints"):
+                builder.build(spec)
 
     # ---------------------------------------------------------------------------
     # TestChannelSupportsUbuntuVersion
