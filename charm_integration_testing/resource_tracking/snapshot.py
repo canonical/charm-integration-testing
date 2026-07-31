@@ -68,11 +68,18 @@ class PvcSnapshot:
     def identity(self) -> tuple[str, str, str, str]:
         """Stable identity used to diff snapshots across state visits.
 
-        Excludes the volatile ``phase`` field so that a claim which is merely
-        transitioning (e.g. ``Pending`` vs ``Bound``) is not reported as a
-        different resource.
+        Excludes ``name``: Juju embeds a per-provision random component in every
+        K8s PVC name, so the same logical volume gets a different name each time
+        it is recreated (e.g. across a redeploy). Identity is keyed on the
+        declared storage *shape* instead (owning application, storage class,
+        requested size), with the volatile ``phase`` also excluded so a claim
+        merely transitioning (e.g. ``Pending`` vs ``Bound``) isn't reported as a
+        different resource. Because identity no longer includes ``name``,
+        :func:`~resource_tracking.discrepancy.diff_snapshots` compares snapshot
+        *counts* per identity rather than exact objects, so a genuine duplicate
+        (e.g. an orphaned volume left behind by a redeploy) is still detected.
         """
-        return (self.namespace, self.name, self.storage_class, self.requested_storage)
+        return (self.namespace, self.application, self.storage_class, self.requested_storage)
 
     def report_attributes(self) -> dict[str, str]:
         """Resource-specific ``key=value`` attributes for the report line."""

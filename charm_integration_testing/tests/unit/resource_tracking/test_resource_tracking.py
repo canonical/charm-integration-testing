@@ -290,15 +290,18 @@ class TestKubernetesResourceCollector:
 
 class TestDiffSnapshots:
     def test_missing_and_extra_are_grouped_by_qualifier(self) -> None:
-        # GIVEN a baseline PVC replaced by a different one
-        baseline = frozenset({_pvc("data-0")})
-        current = frozenset({_pvc("data-1")})
+        # GIVEN a baseline PVC replaced by one belonging to a different application
+        baseline = frozenset({_pvc("data-0", application="target")})
+        current = frozenset({_pvc("data-1", application="neighbor")})
 
         # WHEN the two snapshot sets are diffed
         qualifiers = diff_snapshots(baseline, current)
 
         # THEN the dropped PVC is 'missing' and the new one is 'extra'
-        assert qualifiers == {"missing": (_pvc("data-0"),), "extra": (_pvc("data-1"),)}
+        assert qualifiers == {
+            "missing": (_pvc("data-0", application="target"),),
+            "extra": (_pvc("data-1", application="neighbor"),),
+        }
 
     def test_identical_sets_yield_empty_qualifiers(self) -> None:
         # GIVEN two identical snapshot sets
@@ -312,15 +315,55 @@ class TestDiffSnapshots:
         assert not any(qualifiers.values())
 
     def test_qualifiers_are_sorted_by_identity(self) -> None:
-        # GIVEN a baseline that gains two extra PVCs out of identity order
+        # GIVEN a baseline that gains two extra PVCs, of different applications, out of identity order
         baseline: frozenset[PvcSnapshot] = frozenset()
-        current = frozenset({_pvc("data-1"), _pvc("data-0")})
+        current = frozenset({_pvc("data-1", application="target"), _pvc("data-0", application="neighbor")})
 
         # WHEN the sets are diffed
         qualifiers = diff_snapshots(baseline, current)
 
-        # THEN the extra PVCs are returned sorted by identity
-        assert qualifiers["extra"] == (_pvc("data-0"), _pvc("data-1"))
+        # THEN the extra PVCs are returned sorted by identity (here, by application)
+        assert qualifiers["extra"] == (
+            _pvc("data-0", application="neighbor"),
+            _pvc("data-1", application="target"),
+        )
+
+    def test_same_shape_different_name_yields_no_discrepancy(self) -> None:
+        # GIVEN a PVC recreated with a different Juju-generated name but the same
+        # application, storage class and requested size (e.g. a redeploy)
+        baseline = frozenset({_pvc("target-pgdata-666cffb0-target-0", application="target")})
+        current = frozenset({_pvc("target-pgdata-9e42ba4b-target-0", application="target")})
+
+        # WHEN the two snapshot sets are diffed
+        qualifiers = diff_snapshots(baseline, current)
+
+        # THEN identity (which excludes the volatile name) matches, so nothing is reported
+        assert qualifiers == {"missing": (), "extra": ()}
+
+    def test_extra_instance_of_the_same_shape_is_detected(self) -> None:
+        # GIVEN a baseline with one PVC and a later state with two of the same shape
+        # (e.g. an orphaned volume left behind alongside a freshly provisioned one)
+        baseline = frozenset({_pvc("data-0", application="target")})
+        current = frozenset({_pvc("data-0", application="target"), _pvc("data-1", application="target")})
+
+        # WHEN the two snapshot sets are diffed
+        qualifiers = diff_snapshots(baseline, current)
+
+        # THEN the duplicate instance is still caught as 'extra', by count, not by name
+        assert qualifiers["missing"] == ()
+        assert len(qualifiers["extra"]) == 1
+
+    def test_missing_instance_of_the_same_shape_is_detected(self) -> None:
+        # GIVEN a baseline with two PVCs of the same shape and a later state with only one
+        baseline = frozenset({_pvc("data-0", application="target"), _pvc("data-1", application="target")})
+        current = frozenset({_pvc("data-0", application="target")})
+
+        # WHEN the two snapshot sets are diffed
+        qualifiers = diff_snapshots(baseline, current)
+
+        # THEN the dropped instance is still caught as 'missing', by count, not by name
+        assert qualifiers["extra"] == ()
+        assert len(qualifiers["missing"]) == 1
 
 
 class TestCalculateDiscrepancies:
@@ -375,17 +418,17 @@ class TestCalculateDiscrepancies:
         assert discrepancies[0].extra == (_pvc("data-1"),)
 
     def test_missing_and_extra_reported_together(self) -> None:
-        # GIVEN a baseline PVC replaced by a different one on revisit
+        # GIVEN a baseline PVC replaced on revisit by one of a different application
         tracker = StateResourceTracker()
-        tracker.record(State.DEPLOYED, "test-model", frozenset({_pvc("data-0")}))
-        tracker.record(State.DEPLOYED, "test-model", frozenset({_pvc("data-1")}))
+        tracker.record(State.DEPLOYED, "test-model", frozenset({_pvc("data-0", application="target")}))
+        tracker.record(State.DEPLOYED, "test-model", frozenset({_pvc("data-1", application="neighbor")}))
 
         # WHEN discrepancies are calculated
         discrepancies = calculate_discrepancies(tracker.observations())
 
         # THEN both the missing and the extra PVC are reported in one discrepancy
-        assert discrepancies[0].missing == (_pvc("data-0"),)
-        assert discrepancies[0].extra == (_pvc("data-1"),)
+        assert discrepancies[0].missing == (_pvc("data-0", application="target"),)
+        assert discrepancies[0].extra == (_pvc("data-1", application="neighbor"),)
 
     def test_phase_change_alone_is_not_a_discrepancy(self) -> None:
         # GIVEN a baseline PVC that reappears in a different phase

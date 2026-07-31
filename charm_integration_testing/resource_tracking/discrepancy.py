@@ -108,26 +108,57 @@ class ResourceDiscrepancyError(Exception):
 
 
 def _sorted_by_identity(snapshots: Iterable[ResourceSnapshot]) -> tuple[ResourceSnapshot, ...]:
-    return tuple(sorted(snapshots, key=lambda snapshot: snapshot.identity))
+    return tuple(sorted(snapshots, key=lambda snapshot: (snapshot.identity, snapshot.name)))
+
+
+def _grouped_by_identity(
+    snapshots: Iterable[ResourceSnapshot],
+) -> dict[tuple[str, ...], list[ResourceSnapshot]]:
+    groups: dict[tuple[str, ...], list[ResourceSnapshot]] = {}
+    for snapshot in snapshots:
+        groups.setdefault(snapshot.identity, []).append(snapshot)
+    for group in groups.values():
+        group.sort(key=lambda snapshot: snapshot.name)
+    return groups
 
 
 def diff_snapshots(
     baseline: frozenset[ResourceSnapshot],
     current: frozenset[ResourceSnapshot],
 ) -> dict[str, tuple[ResourceSnapshot, ...]]:
-    """Compare a baseline snapshot set against a later one by resource identity.
+    """Compare a baseline snapshot multiset against a later one by resource identity.
 
     Returns a mapping of qualifier name to the snapshots exhibiting it.  Today
     the qualifiers are ``missing`` (in the baseline but gone) and ``extra`` (newly
     present).  Isolating this here keeps :func:`calculate_discrepancies` a thin
     orchestrator and gives a single place to add resource-specific qualifiers
     (e.g. a resized volume or a changed phase) without disturbing the diff loop.
+
+    Comparison is by *count per identity*, not by exact snapshot equality: some
+    identities (e.g. :class:`~resource_tracking.snapshot.PvcSnapshot`, whose
+    ``name`` carries a per-provision random component) can legitimately match
+    several distinct objects. A revisit with the same count for an identity is
+    not a discrepancy even if the underlying objects differ (e.g. a PVC
+    recreated with a new name); a revisit with a different count is, so a
+    genuine duplicate or dropped resource of the same shape is still caught.
     """
-    baseline_identities = {snapshot.identity for snapshot in baseline}
-    current_identities = {snapshot.identity for snapshot in current}
+    baseline_groups = _grouped_by_identity(baseline)
+    current_groups = _grouped_by_identity(current)
+
+    missing: list[ResourceSnapshot] = []
+    extra: list[ResourceSnapshot] = []
+    for identity in baseline_groups.keys() | current_groups.keys():
+        baseline_items = baseline_groups.get(identity, [])
+        current_items = current_groups.get(identity, [])
+        delta = len(baseline_items) - len(current_items)
+        if delta > 0:
+            missing.extend(baseline_items[-delta:])
+        elif delta < 0:
+            extra.extend(current_items[delta:])
+
     return {
-        "missing": _sorted_by_identity(s for s in baseline if s.identity not in current_identities),
-        "extra": _sorted_by_identity(s for s in current if s.identity not in baseline_identities),
+        "missing": _sorted_by_identity(missing),
+        "extra": _sorted_by_identity(extra),
     }
 
 
