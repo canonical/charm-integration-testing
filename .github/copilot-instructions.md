@@ -77,9 +77,9 @@ When asked to review a PR or diff:
 
 1. Start with findings, ordered by severity.
 2. For each finding, include:
-	- Why this is a style, maintainability, or process issue (see "Lessons From Past PR Reviews").
-	- The repository convention or principle being violated.
-	- A specific fix (or patch-style suggestion when practical).
+    - Why this is a style, maintainability, or process issue (see "Lessons From Past PR Reviews").
+    - The repository convention or principle being violated.
+    - A specific fix (or patch-style suggestion when practical).
 3. Keep summaries brief. Findings are primary.
 4. If no findings exist, explicitly state that.
 
