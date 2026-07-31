@@ -22,7 +22,7 @@
 #     platform via Charmhub search API.
 #
 # listed: false -- required `dashboard` endpoint's only provider, ceph-mon, is
-# globally delisted (SQT-1081); missed from that sweep. See issue #814.
+# globally delisted (SQT-1081); missed from that sweep. See issue GH-814.
 listed: false
 overrides:
   - requires:
