@@ -197,10 +197,24 @@ class TestDisambiguateRepeatedItems:
         # WHEN disambiguated
         result = _disambiguate_repeated_items([item, item])
 
-        # THEN the first occurrence is untouched, the second is a distinct duplicate
+        # THEN the first occurrence keeps its identity (relabeled in place), the
+        # second is a distinct duplicate, and each has a unique nodeid
         assert result[0] is item
         assert result[1] is not item
         assert result[0].nodeid != result[1].nodeid
+
+    def test_repeated_item_gets_structured_bracket_index_naming(self, make_item: Callable[..., pytest.Item]) -> None:
+        # GIVEN a plan where the same item object appears twice
+        item = make_item("test_upgrade_charm")
+        base_name = item.name
+
+        # WHEN disambiguated
+        result = _disambiguate_repeated_items([item, item])
+
+        # THEN every occurrence - including the first - is labeled with a
+        # structured "[occurrence]" index instead of an ad hoc "(repeat N)" suffix
+        assert result[0].name == f"{base_name}[1]"
+        assert result[1].name == f"{base_name}[2]"
 
     def test_three_occurrences_all_get_unique_nodeids(self, make_item: Callable[..., pytest.Item]) -> None:
         # GIVEN a plan where the same item object appears three times

@@ -337,7 +337,20 @@ def _mark_as_injected(item: pytest.Item) -> None:
     item._nodeid = f"[injected] {original_name}"
 
 
-def _duplicate_item_for_repeat(item: pytest.Item, occurrence: int) -> pytest.Item:
+def _label_occurrence(item: pytest.Item, base_name: str, base_nodeid: str, occurrence: int) -> None:
+    """Suffix *item*'s name/nodeid with a ``[occurrence]`` index, e.g. ``test_foo[2]``.
+
+    *base_name*/*base_nodeid* are the pre-existing (unsuffixed) name/nodeid to
+    build from, so repeated calls on the same item don't stack multiple
+    indices (e.g. ``test_foo[1][2]``).
+    """
+    item.name = f"{base_name}[{occurrence}]"
+    item._nodeid = f"{base_nodeid}[{occurrence}]"
+
+
+def _duplicate_item_for_repeat(
+    item: pytest.Item, occurrence: int, base_name: str | None = None, base_nodeid: str | None = None
+) -> pytest.Item:
     """Build an independent duplicate of *item* for its *occurrence*-th scheduled run.
 
     A bridging transition test may be scheduled more than once when the same
@@ -350,10 +363,17 @@ def _duplicate_item_for_repeat(item: pytest.Item, occurrence: int) -> pytest.Ite
 
     A shallow copy keeps the duplicate on the same module/class/fixtures as
     *item* while giving it its own ``name`` and ``nodeid``, distinguished by
-    *occurrence*. Real ``pytest.Function`` items cache a fixture request
-    that refers back to ``self`` at construction time (``_initrequest``); the
-    duplicate re-runs that step so it resolves and tears down its own
-    fixtures instead of aliasing the original item's.
+    a ``[occurrence]`` index (e.g. ``test_upgrade_charm[1]``,
+    ``test_upgrade_charm[2]``) so Test Observer shows a clean, structured
+    naming scheme instead of an ad hoc ``(repeat N)`` suffix. *base_name*/
+    *base_nodeid* default to *item*'s current name/nodeid, but callers that
+    have already relabeled *item* in place (see ``_disambiguate_repeated_items``)
+    should pass the pre-relabeling values explicitly so the index isn't
+    stacked on top of an earlier one (e.g. ``test_foo[1][2]``). Real
+    ``pytest.Function`` items cache a fixture request that refers back to
+    ``self`` at construction time (``_initrequest``); the duplicate re-runs
+    that step so it resolves and tears down its own fixtures instead of
+    aliasing the original item's.
 
     The duplicate's object ID is recorded in ``_duplicate_original_ids``,
     pointing back to *item*'s original object ID (chasing through any prior
@@ -362,9 +382,12 @@ def _duplicate_item_for_repeat(item: pytest.Item, occurrence: int) -> pytest.Ite
     """
     duplicate = copy.copy(item)
     _duplicate_original_ids[id(duplicate)] = _duplicate_original_ids.get(id(item), id(item))
-    suffix = f" (repeat {occurrence})"
-    duplicate.name = f"{item.name}{suffix}"
-    duplicate._nodeid = f"{item.nodeid}{suffix}"
+    _label_occurrence(
+        duplicate,
+        base_name if base_name is not None else item.name,
+        base_nodeid if base_nodeid is not None else item.nodeid,
+        occurrence,
+    )
     initrequest = getattr(duplicate, "_initrequest", None)
     if callable(initrequest):
         initrequest()
@@ -372,19 +395,41 @@ def _duplicate_item_for_repeat(item: pytest.Item, occurrence: int) -> pytest.Ite
 
 
 def _disambiguate_repeated_items(plan: list[pytest.Item]) -> list[pytest.Item]:
-    """Give every repeat occurrence of the same scheduled Item a unique nodeid.
+    """Give every occurrence of a repeated scheduled Item a unique, structured nodeid.
 
-    The first occurrence of each item is left untouched; the second and later
-    occurrences are replaced with a distinct duplicate (see
-    ``_duplicate_item_for_repeat``) so each scheduled run is reported as its
+    Items that are scheduled only once are left untouched. Items scheduled
+    more than once have every occurrence - including the first - labeled with
+    a ``[occurrence]`` index (e.g. ``test_upgrade_charm[1]``,
+    ``test_upgrade_charm[2]``): the first occurrence is relabeled in place,
+    and later occurrences are replaced with a distinct duplicate (see
+    ``_duplicate_item_for_repeat``), so each scheduled run is reported as its
     own test case instead of being merged with the others.
     """
+    total_occurrences: defaultdict[int, int] = defaultdict(int)
+    for item in plan:
+        total_occurrences[id(item)] += 1
+
+    base_names: dict[int, str] = {}
+    base_nodeids: dict[int, str] = {}
     occurrence_counts: defaultdict[int, int] = defaultdict(int)
     disambiguated: list[pytest.Item] = []
     for item in plan:
+        if total_occurrences[id(item)] == 1:
+            disambiguated.append(item)
+            continue
+
+        base_names.setdefault(id(item), item.name)
+        base_nodeids.setdefault(id(item), item.nodeid)
         occurrence_counts[id(item)] += 1
         occurrence = occurrence_counts[id(item)]
-        disambiguated.append(item if occurrence == 1 else _duplicate_item_for_repeat(item, occurrence))
+
+        if occurrence == 1:
+            _label_occurrence(item, base_names[id(item)], base_nodeids[id(item)], occurrence)
+            disambiguated.append(item)
+        else:
+            disambiguated.append(
+                _duplicate_item_for_repeat(item, occurrence, base_names[id(item)], base_nodeids[id(item)])
+            )
     return disambiguated
 
 
