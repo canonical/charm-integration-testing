@@ -83,6 +83,29 @@ def _skip_unreadable(dir_: str, names: list[str]) -> set[str]:
     return skipped
 
 
+class TransientModelUnavailabilityError(jubilant.CLIError):
+    """Raised by ``JubilantBackend.status`` when a model migration makes the model
+    temporarily unreachable.
+
+    A model migration briefly makes ``juju status`` fail even for a model that was
+    reachable moments before - either because the model hasn't finished importing
+    on the destination controller yet, or because it has since migrated away from
+    the controller being queried. Both are expected, transient states while a
+    migration is in flight (or has just completed), not real failures. Callers should
+    treat this as "not ready yet" and retry rather than propagate it as a genuine
+    failure.
+    """
+
+
+def _is_transient_model_unavailability_error(error: jubilant.CLIError, model: str) -> bool:
+    """Detect CLIErrors that mean "model temporarily unreachable due to migration"."""
+    err_msg = error.stderr.lower()
+    # e.stderr: 'ERROR model pytest-tmp-controller-n84qeh17:admin/debug-test-1 not found\n'
+    is_missing = "not found" in err_msg and all(p in err_msg for p in model.lower().split(":"))
+    is_migrating = "has been migrated to controller" in err_msg or "migration in progress" in err_msg
+    return is_missing or is_migrating
+
+
 class JubilantBackend(JujuCmdBackend):
     client: JubilantClient
 
@@ -111,7 +134,12 @@ class JubilantBackend(JujuCmdBackend):
 
     @warn_performance(category=JujuStatusPerformanceWarning, threshold=timedelta(seconds=5))
     def status(self, model: str) -> jubilant.Status:
-        return self.client.model(model).status()
+        try:
+            return self.client.model(model).status()
+        except jubilant.CLIError as e:
+            if _is_transient_model_unavailability_error(e, model):
+                raise TransientModelUnavailabilityError(e.returncode, e.cmd, e.output, e.stderr) from e
+            raise
 
     @warn_performance(category=JujuStatusPerformanceWarning, threshold=timedelta(seconds=5))
     def juju_status_text(self, model: str) -> str:
@@ -150,8 +178,23 @@ class JubilantBackend(JujuCmdBackend):
             if timeout_reached and (strict_timeout or success_count == 0):
                 break
 
-            # Get current status
-            status = self.status(model)
+            # Get current status. A model migration can transiently make status
+            # fail even for a model this loop previously observed successfully -
+            # e.g. while migrating away from, or being imported into, a
+            # controller. Treat that as "not ready yet" rather than aborting the
+            # wait, matching wait_for_model_to_exist's tolerance for the same
+            # condition. See issue #812.
+            try:
+                status = self.status(model)
+            except TransientModelUnavailabilityError as e:
+                noncompliant_wait_state = dataclasses.replace(
+                    last_wait_state,
+                    message=f"Model {model} temporarily unavailable during migration: {e.stderr.strip()}",
+                )
+                success_count = 0
+                elapsed = datetime.now() - iteration_start
+                time.sleep(max(0, (delay - elapsed).total_seconds()))
+                continue
 
             # Check for error condition
             if error is not None:
@@ -257,18 +300,8 @@ class JubilantBackend(JujuCmdBackend):
             try:
                 self.status(model)
                 return
-            except jubilant.CLIError as e:
-                # Validate that the error is specifically about the model being missing
-                # e.stderr: 'ERROR model pytest-tmp-controller-n84qeh17:admin/debug-test-1 not found\n'
-                err_msg = e.stderr.lower()
-                is_missing = "not found" in err_msg and all(p in err_msg for p in model.lower().split(":"))
-                is_migrating = "has been migrated to controller" in err_msg or "migration in progress" in err_msg
-
-                if is_missing or is_migrating:
-                    pass
-                else:
-                    # Re-raise if it's a different type of CLI error (e.g., connection lost)
-                    raise
+            except TransientModelUnavailabilityError:
+                pass
 
             elapsed = datetime.now() - iteration_start
             time.sleep(max(0, (delay - elapsed).total_seconds()))
