@@ -34,6 +34,7 @@ def _make_charm(
         ubuntu_version="22.04",
         ubuntu_arch="amd64",
         endpoints=endpoints or {},
+        platforms=["machine", "kubernetes"],
     )
 
 

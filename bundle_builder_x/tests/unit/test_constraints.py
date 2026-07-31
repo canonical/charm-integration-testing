@@ -29,6 +29,7 @@ def _make_charm(name: str, endpoints: dict[str, CharmEndpoint], ubuntu_version: 
         ubuntu_version=ubuntu_version,
         ubuntu_arch="amd64",
         endpoints=endpoints,
+        platforms=["machine", "kubernetes"],
     )
 
 

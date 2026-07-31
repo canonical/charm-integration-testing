@@ -23,14 +23,24 @@ def test_pod_deletion(
     pods = kubernetes_client.get_charm_pods(application_name=target_application, model=model)
     assert len(pods) > 0, f"No pods found in namespace {model} to delete."
 
+    existing_uids = {pod.metadata.uid for pod in pods}
     pod_to_delete = pods[0]
     kubernetes_client.delete_pod(namespace=model, pod_name=pod_to_delete.metadata.name)
 
-    # Wait for the pod to be deleted and a new one to be created
-    kubernetes_client.wait_for_pod_recreation(
+    # Wait for a new pod to be created. Passing every pre-existing UID (not just the deleted
+    # pod's) ensures an untouched sibling replica can't be mistaken for the deleted pod's
+    # replacement when the application has multiple replicas.
+    new_pod = kubernetes_client.wait_for_new_pod(
         namespace=model,
-        pod_name=pod_to_delete.metadata.name,
-        old_uid=pod_to_delete.metadata.uid,
+        application_name=target_application,
+        existing_uids=existing_uids,
+        timeout=timedelta(minutes=15),
+    )
+
+    # Then wait for that specific new pod to become ready.
+    kubernetes_client.wait_for_pod_status(
+        pod_name=new_pod.metadata.name,
+        namespace=model,
         target_status=PodStatus.RUNNING,
         timeout=timedelta(minutes=15),
     )

@@ -18,7 +18,7 @@ from extensions.unseal_vault.vault_client import (
     VaultTokenSecret,
 )
 from extensions.unseal_vault.vault_unsealer import CharmInfo, VaultUnsealer, order_apps_by_dependency
-from juju import JujuExecOutput
+from juju import JujuExecOutput, JujuWaitTimeoutError
 from juju.backend import JujuTask
 from juju.models import JujuApplicationInfo, JujuIntegration, JujuIntegrationApplication
 
@@ -39,6 +39,11 @@ class JujuStub(NullJujuBackend):
     integrations: set[JujuIntegration] = field(default_factory=set)
     exec_unit_calls: list[tuple[str, str, str]] = field(default_factory=list)
     exec_units_output: list[JujuExecOutput] = field(default_factory=list)
+    # Optional per-unit "current" workload message. When set for a unit, wait_for_unit_message
+    # raises JujuWaitTimeoutError unless the requested message matches, simulating a real charm
+    # that has moved past (or not yet reached) that message. Units not present here always
+    # succeed immediately, preserving existing tests' assumptions.
+    unit_messages: dict[str, str] = field(default_factory=dict)
 
     def list_applications(self, model: str) -> dict[str, JujuApplicationInfo]:
         return {app: JujuApplicationInfo(charm=self.charm_name, revision=0) for app in self.apps}
@@ -60,6 +65,9 @@ class JujuStub(NullJujuBackend):
 
     def wait_for_unit_message(self, model: str, unit: str, message: str, timeout: timedelta | None) -> None:
         self.messages.append((unit, message, timeout))
+        current = self.unit_messages.get(unit)
+        if current is not None and message.lower() not in current.lower():
+            raise JujuWaitTimeoutError()
 
     def add_secret(self, model: str, name: str, content: dict[str, str]) -> str:
         self.secrets[name] = content
@@ -180,9 +188,12 @@ class TestVaultUnsealer:
         assert "vault2/leader" in vault.inits
         assert vault.inits.index("vault2/leader") < vault.inits.index("vault1/leader")
 
-    def test_try_init_vault_skips_if_already_initialized(self) -> None:
+    def test_try_init_vault_skips_init_and_unseal_if_already_initialized(self) -> None:
         # GIVEN
-        juju = JujuStub(units={"vault": ["vault/leader"]})
+        juju = JujuStub(
+            units={"vault": ["vault/leader"]},
+            secrets={"vault-secret-application-vault-tokens": {"root-token": "abc", "unseal-key": "xyz"}},
+        )
         vault = VaultStub(initialized_units={"vault/leader": True})
         logger = LoggerStub()
         charm = CharmInfo(name="vault")
@@ -193,6 +204,50 @@ class TestVaultUnsealer:
         # THEN
         assert vault.inits == []
         assert vault.unseals == []
+
+    def test_try_init_vault_still_authorizes_if_already_initialized_but_not_authorized(self) -> None:
+        # Regression test for issue #797: deploy_bundles() invokes post_deploy() (and thus
+        # try_init_vault) once per deploy phase. If a prior call already initialized vault but
+        # authorization hasn't happened yet, this call must still complete it instead of
+        # silently no-oping.
+        # GIVEN
+        juju = JujuStub(
+            units={"vault": ["vault/leader"]},
+            secrets={"vault-secret-application-vault-tokens": {"root-token": "abc", "unseal-key": "xyz"}},
+        )
+        vault = VaultStub(initialized_units={"vault/leader": True})
+        logger = LoggerStub()
+        charm = CharmInfo(name="vault")
+
+        # WHEN
+        VaultUnsealer(charm, vault, juju, logger).try_init_vault("test-model", "vault")
+
+        # THEN
+        assert vault.inits == []
+        assert vault.unseals == []
+        assert ("vault/leader", "authorize-charm", {"secret-id": "secret-id"}) in juju.actions_run
+
+    def test_try_init_vault_does_not_re_authorize_if_already_authorized(self) -> None:
+        # GIVEN
+        juju = JujuStub(
+            units={"vault": ["vault/leader"]},
+            secrets={"vault-secret-application-vault-tokens": {"root-token": "abc", "unseal-key": "xyz"}},
+            # Simulate the charm having moved past the authorize message already (e.g. it's
+            # active now), so the cheap peek check should report "not awaiting authorization".
+            unit_messages={"vault/leader": "active"},
+        )
+        vault = VaultStub(initialized_units={"vault/leader": True})
+        logger = LoggerStub()
+        charm = CharmInfo(name="vault")
+
+        # WHEN
+        VaultUnsealer(charm, vault, juju, logger).try_init_vault("test-model", "vault")
+
+        # THEN
+        assert vault.inits == []
+        assert vault.unseals == []
+        for target, action, _ in juju.actions_run:
+            assert (target, action) != ("vault/leader", "authorize-charm")
 
     def test_try_unseal_vault_unseals_if_initialized_and_sealed(self) -> None:
         # GIVEN

@@ -50,6 +50,7 @@ def _make_charm(
         ubuntu_version="22.04",
         ubuntu_arch="amd64",
         endpoints=endpoints or {},
+        platforms=["machine", "kubernetes"],
     )
 
 
@@ -201,6 +202,7 @@ class TestAppIntegrationOrderingConstraint:
                 "join": CharmEndpoint(type=EndpointType.REQUIRES, interface="cluster", optional=True, limit=1),
             },
             constraints=[parse_constraint("not (bool(endpoint[control]) and bool(endpoint[join]))")],
+            platforms=["machine", "kubernetes"],
         )
         add_charm_to_domain(charm, domain, ModelRef(name="m"))
         add_charm_to_domain(charm, domain, ModelRef(name="m"))

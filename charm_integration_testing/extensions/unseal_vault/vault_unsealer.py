@@ -9,7 +9,7 @@ from functools import cmp_to_key
 from subprocess import CalledProcessError  # nosec
 from typing import Literal
 
-from juju import JujuBackend
+from juju import JujuBackend, JujuWaitTimeoutError
 from pydantic.dataclasses import dataclass
 
 from .vault_client import VaultClient, VaultStatus, VaultTokenSecret
@@ -171,10 +171,45 @@ class VaultUnsealer:
         # Get leader unit
         leader_unit = f"{application}/leader"
 
-        # Check if vault initialized is
-        if self.vault.status(model, leader_unit).initialized:
+        # Determine current state up front. Initialization is only the first of three steps
+        # (init, unseal, authorize), and this method can be called more than once against the
+        # same vault - deploy_bundles() invokes post_deploy() once per deploy phase (e.g. twice
+        # on Juju 4+). See issue #797, where an early return on this check left the charm
+        # permanently stuck on "Please authorize charm" after a second call.
+        already_initialized = self.vault.status(model, leader_unit).initialized
+
+        if already_initialized:
+            self.logger.info(
+                f"Vault charm '{self.charm.name}' unit '{leader_unit}' is already initialized, skipping init/unseal"
+            )
+            tokens = None
+        else:
+            tokens = self._init_and_unseal_vault(model, application, leader_unit)
+
+        if not authorize_charm:
+            self.logger.info(f"Skipping authorizing vault charm '{self.charm.name}' unit '{leader_unit}'")
             return
 
+        if already_initialized and not self._unit_awaiting_authorization(model, leader_unit):
+            # A previous call already completed authorization (or the whole setup); nothing left
+            # to do. Without this check we would otherwise either skip authorization entirely (the
+            # original bug) or block for up to 10 minutes waiting for a message that will never
+            # reappear once the charm has moved past it.
+            self.logger.info(
+                f"Vault charm '{self.charm.name}' unit '{leader_unit}' is not awaiting authorization, skipping"
+            )
+            return
+
+        # Tokens are only read from the saved secret here, right before they're actually needed,
+        # so an already-authorized vault never triggers an unnecessary (and potentially failing,
+        # if the secret was since removed) secret read.
+        if tokens is None:
+            tokens = self.get_vault_tokens(model, application)
+
+        self._authorize_vault(model, application, leader_unit, tokens)
+
+    def _init_and_unseal_vault(self, model: str, application: str, leader_unit: str) -> VaultTokenSecret:
+        """Run the init/unseal steps for a leader unit that isn't yet initialized."""
         should_auto_unseal = self.vault_app_should_auto_unseal(model, application)
         if should_auto_unseal:
             # Wait for auto-unseal to finish
@@ -203,16 +238,28 @@ class VaultUnsealer:
             self.logger.info(f"Unsealing vault charm '{self.charm.name}' unit '{leader_unit}'")
             self.vault.unseal(model, leader_unit, tokens)
 
-        if not authorize_charm:
-            self.logger.info(f"Skipping authorizing vault charm '{self.charm.name}' unit '{leader_unit}'")
-            return
+        return tokens
 
+    def _authorize_vault(self, model: str, application: str, leader_unit: str, tokens: VaultTokenSecret) -> None:
         # Wait for authorize message
         self.logger.info(f"Waiting for vault charm '{self.charm.name}' unit '{leader_unit}' authorize message")
         self.juju.wait_for_unit_message(model, leader_unit, self.charm.authorize_message, timedelta(minutes=10))
 
         # Authorize the charm
         self.authorize_vault_charm(model, application, tokens)
+
+    def _unit_awaiting_authorization(self, model: str, unit: str) -> bool:
+        """Cheaply check whether ``unit`` is currently displaying the authorize message.
+
+        Used only when vault was already initialized by a previous call, to distinguish "still
+        needs authorizing" from "already fully set up" without blocking for the full
+        wait_for_unit_message timeout in the (common, already-done) latter case.
+        """
+        try:
+            self.juju.wait_for_unit_message(model, unit, self.charm.authorize_message, timedelta(seconds=5))
+            return True
+        except JujuWaitTimeoutError:
+            return False
 
     def wait_for_auto_unseal_acceptance(
         self, model: str, unit: str, timeout: timedelta, poll_interval: timedelta

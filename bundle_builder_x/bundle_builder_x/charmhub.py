@@ -1,17 +1,5 @@
-# Copyright (C) 2026 Canonical Ltd
-
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
 
 import logging
 import re
@@ -280,9 +268,18 @@ class CharmhubClient:
             resources=self._get_charm_resources(charm_name, channel, metadata),
             assumes=self._get_charm_assumes(charm_name, metadata, channel),
             constraints=self._get_charm_constraints(charm_name, channel),
+            platforms=self._get_charm_platforms(charm_name, metadata),
         )
 
     def _ensure_compatibility(self, charm: Charm, juju_version: JujuVersion | None, platform: str | None) -> Charm:
+        if platform is not None:
+            supported_platforms = charm.platforms
+            if platform not in supported_platforms:
+                raise CharmReleaseNotFoundException(
+                    f"Charm {charm.name} revision {charm.revision} in channel {charm.channel} supports "
+                    f"platform(s) {supported_platforms!r}, but platform {platform!r} was requested"
+                )
+
         if juju_version is None and platform is None:
             return charm
         features = (
@@ -825,6 +822,22 @@ class CharmhubClient:
 
         # Return parsed assumes entry
         return CharmAssumesEntry(all_of=frozenset(self._get_assumes_entry(e) for e in assumes))
+
+    def _get_charm_platforms(self, charm_name: str, metadata: CharmMetadata) -> list[str]:
+        """Return the platform(s) this charm may be deployed to.
+
+        Platform overrides win when present. Otherwise, fall back to the charm's own
+        metadata (mirrors ``_get_charm_assumes``). Two independent metadata.yaml
+        conventions identify a Kubernetes (sidecar) charm: a non-empty ``containers``
+        block (current Charmcraft charms), or a legacy ``series: [kubernetes]`` entry
+        (pre-Charmcraft "reactive"/podspec charms, which predate ``containers``). The
+        absence of both identifies a machine charm.
+        """
+        platform_overrides = self.overrides_client.get_charm_platform_overrides(charm_name)
+        if platform_overrides is not None:
+            return platform_overrides or ["machine"]
+        is_kubernetes = bool(metadata.containers) or "kubernetes" in metadata.series
+        return ["kubernetes"] if is_kubernetes else ["machine"]
 
     def _get_assumes_entry(self, raw: str | dict[str, Any]) -> CharmAssumesEntry:
         """Translate a raw charmhub assumes entry (wire format) into a domain CharmAssumesEntry."""

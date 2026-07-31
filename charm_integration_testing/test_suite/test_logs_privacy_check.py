@@ -56,10 +56,15 @@ def test_logs_privacy_check(
     ]
 
     try:
+        # TruffleHog natively decompresses and scans archives (e.g. juju-crashdump
+        # tarballs) alongside plaintext logs. That can surface non-UTF-8 bytes from
+        # binary payloads in its own stdout; `errors="replace"` tolerates those bytes
+        # instead of crashing with a UnicodeDecodeError, without skipping any content.
         result = subprocess.run(  # nosec B603
             trufflehog_cmd,
             capture_output=True,
             text=True,
+            errors="replace",
             timeout=600,  # 10 minutes timeout for scanning
         )
     except subprocess.TimeoutExpired as e:

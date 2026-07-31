@@ -1,17 +1,5 @@
-# Copyright (C) 2026 Canonical Ltd
-
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
 
 import operator
 from enum import Enum
@@ -165,6 +153,11 @@ class Charm(BaseModel):
     resources: dict[str, list[CharmResourceValue]] = Field(default_factory=dict)
     assumes: CharmAssumesEntry = Field(default_factory=CharmAssumesEntry)
     constraints: list[AnyExpr] = Field(default_factory=list)
+    # Platforms (e.g. "machine", "kubernetes") this charm is known to support. Platform
+    # overrides win when present; otherwise this falls back to the charm's own metadata
+    # (a non-empty `containers` block means "kubernetes", its absence means "machine").
+    # No default is provided: every Charm must state which platform(s) it supports.
+    platforms: list[str]
 
     def __repr__(self) -> str:
         return self.name
