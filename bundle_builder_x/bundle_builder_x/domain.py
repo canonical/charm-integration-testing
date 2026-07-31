@@ -406,66 +406,14 @@ def add_charm_to_domain(charm: Charm, domain: Domain, model_ref: ModelRef | None
         )
     )
 
-    # Pair new charm with all existing charms
-    for other_charm_id, other_charm in enumerate(domain.charms):
-        if other_charm_id == charm_id:
-            continue
-        other_model = other_charm.model
-        same_model = other_model == model_ref
-
-        for endpoint_name, endpoint in charm.endpoints.items():
-            for other_endpoint_name, other_endpoint in other_charm.spec.endpoints.items():
-                if endpoint.interface != other_endpoint.interface:
-                    continue
-
-                # Determine semantic ordering
-                if endpoint.type == EndpointType.REQUIRES and other_endpoint.type == EndpointType.PROVIDES:
-                    req_charm_id, req_ep = charm_id, endpoint_name
-                    prov_charm_id, prov_ep = other_charm_id, other_endpoint_name
-                    req_model_ref, prov_model_ref = model_ref, other_model
-                elif endpoint.type == EndpointType.PROVIDES and other_endpoint.type == EndpointType.REQUIRES:
-                    req_charm_id, req_ep = other_charm_id, other_endpoint_name
-                    prov_charm_id, prov_ep = charm_id, endpoint_name
-                    req_model_ref, prov_model_ref = other_model, model_ref
-                else:
-                    continue
-
-                # Skip container-scoped integrations on non-machine models and across models.
-                # Container-scoped (subordinate) relations must be co-located with their principal;
-                # cross-model and kubernetes subordinate relations are not supported by Juju.
-                if endpoint.scope == EndpointScope.CONTAINER or other_endpoint.scope == EndpointScope.CONTAINER:
-                    if not same_model:
-                        continue
-                    req_platform = domain.models[req_model_ref].platform if req_model_ref in domain.models else None
-                    prov_platform = domain.models[prov_model_ref].platform if prov_model_ref in domain.models else None
-                    if req_platform != "machine" or prov_platform != "machine":
-                        continue
-
-                if same_model:
-                    domain.charm_integrations.append(
-                        DomainCharmIntegration(
-                            exists=z3.Bool(
-                                f"charm_integration_{prov_charm_id}:{prov_ep}__{req_charm_id}:{req_ep}_exists"
-                            ),
-                            requires_charm_id=req_charm_id,
-                            requires_endpoint=req_ep,
-                            provides_charm_id=prov_charm_id,
-                            provides_endpoint=prov_ep,
-                        )
-                    )
-                else:
-                    domain.charm_integrations.append(
-                        DomainCharmIntegration(
-                            exists=z3.Bool(
-                                f"cmr__{prov_model_ref.key}__{prov_charm_id}:{prov_ep}"
-                                f"__{req_model_ref.key}__{req_charm_id}:{req_ep}__exists"
-                            ),
-                            requires_charm_id=req_charm_id,
-                            requires_endpoint=req_ep,
-                            provides_charm_id=prov_charm_id,
-                            provides_endpoint=prov_ep,
-                        )
-                    )
+    # Note: integration variables against other domain charms are intentionally NOT created
+    # here. Eagerly pairing a new charm with every existing charm makes each charm addition
+    # cost O(domain size) new integration vars/constraints instead of O(1), which is the
+    # dominant driver of CEGIS blowup on specs with many charms. Callers that add a charm to
+    # satisfy a specific endpoint should pair it with just the relevant charm(s) via
+    # pair_charms_in_domain(); any other needed connections are discovered lazily by the CEGIS
+    # loop's existing-charm-connection step (_connect_existing_for_endpoint) on a later
+    # iteration, the same way it already handles connecting two pre-existing charms.
 
     # Create application-to-charm mappings for this model's constraints
     for application, domain_app in model.applications.items():

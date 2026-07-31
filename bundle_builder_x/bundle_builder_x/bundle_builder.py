@@ -269,7 +269,12 @@ class BundleBuilder:
                 model_ref = endpoint.model if endpoint.model.name is not None else app_integration_exists.model
                 charm = self._get_charm_for_application(endpoint.application, domain, model_ref)
                 results.append(self._add_charm_for_application(charm, endpoint.application, domain, model_ref))
-            return any(results)
+            if any(results):
+                return True
+            # Both applications' charms already exist in the domain (the additions above were
+            # no-ops) but may not be paired: add_charm_to_domain no longer eagerly connects a
+            # new charm against the rest of the domain, so pair them directly here.
+            return self._connect_apps_for_integration(app_integration_exists, domain)
 
         elif tag.kind == Assertions.ENDPOINT_COUNT_MATCHES_INTEGRATIONS:
             count_tag = cast(EndpointCountMatchesIntegrationsTag, tag)
@@ -421,6 +426,39 @@ class BundleBuilder:
                 )
                 return True  # one at a time — let CEGIS re-evaluate
         return False
+
+    @staticmethod
+    def _connect_apps_for_integration(
+        app_integration_exists: ApplicationIntegrationExistsTag,
+        domain: Domain,
+    ) -> bool:
+        """Pair the charms currently mapped to each side of a user-specified app integration.
+
+        add_charm_to_domain doesn't eagerly pair a new charm against the rest of the domain, so
+        two applications can each have their charm added (via _add_charm_for_application, one
+        no-op call per side) without ever being connected to each other. This handles that case
+        directly: for every candidate charm currently mapped to each application (usually one
+        each, but can be more if channel-mismatch resolution added variants), try pairing them.
+        """
+        endpoints = app_integration_exists.integration
+        if len(endpoints) != 2:
+            return False
+        ep_a, ep_b = endpoints
+        model_a = ep_a.model if ep_a.model.name is not None else app_integration_exists.model
+        model_b = ep_b.model if ep_b.model.name is not None else app_integration_exists.model
+        if model_a not in domain.models or model_b not in domain.models:
+            return False  # external CMR endpoint - nothing in-domain to pair
+
+        charm_ids_a = domain.models[model_a].applications[ep_a.application].charm_ids
+        charm_ids_b = domain.models[model_b].applications[ep_b.application].charm_ids
+        connected = False
+        for charm_id_a in charm_ids_a:
+            for charm_id_b in charm_ids_b:
+                if charm_id_a == charm_id_b:
+                    continue
+                if pair_charms_in_domain(domain, charm_id_a, charm_id_b):
+                    connected = True
+        return connected
 
     @staticmethod
     def _is_endpoint_connected_to(charm_id: int, endpoint_name: str, other_id: int, domain: Domain) -> bool:
@@ -658,6 +696,13 @@ class BundleBuilder:
             f"for charm {domain.charms[charm_id].spec.name}:{charm_id}"
         )
         new_charm_id = add_charm_to_domain(charm, domain, model_ref)
+
+        # Connect the new charm to the parent that needed it. add_charm_to_domain doesn't pair
+        # against other domain charms (that would cost O(domain size) integration vars per add),
+        # so without this the parent's requirement wouldn't be satisfied until a later CEGIS
+        # iteration lazily discovers the connection via _connect_existing_for_endpoint. Pairing
+        # immediately here avoids that wasted round-trip for the common case.
+        pair_charms_in_domain(domain, charm_id, new_charm_id)
 
         # Record that this charm was added for this charm_id
         parent_charm.charms_added.append(new_charm_id)
