@@ -134,13 +134,8 @@ def diff_snapshots(
     orchestrator and gives a single place to add resource-specific qualifiers
     (e.g. a resized volume or a changed phase) without disturbing the diff loop.
 
-    Comparison is by *count per identity*, not by exact snapshot equality: some
-    identities (e.g. :class:`~resource_tracking.snapshot.PvcSnapshot`, whose
-    ``name`` carries a per-provision random component) can legitimately match
-    several distinct objects. A revisit with the same count for an identity is
-    not a discrepancy even if the underlying objects differ (e.g. a PVC
-    recreated with a new name); a revisit with a different count is, so a
-    genuine duplicate or dropped resource of the same shape is still caught.
+    Compares by *count per identity*, not exact equality, since some identities
+    (e.g. PVCs with a randomised name) can match several distinct objects.
     """
     baseline_groups = _grouped_by_identity(baseline)
     current_groups = _grouped_by_identity(current)
