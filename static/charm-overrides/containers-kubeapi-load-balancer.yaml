@@ -1,0 +1,18 @@
+---
+# containers-kubeapi-load-balancer: legacy Charmhub slug for kubeapi-load-balancer
+# (source: https://github.com/charmed-kubernetes/charm-kubeapi-load-balancer).
+# Single "latest" track, pre-1.28 generation; same overrides as
+# kubeapi-load-balancer apply.
+#
+# loadbalancer (provides): optional - legacy reactive endpoint, unused ecosystem-wide.
+# nrpe-external-master (provides): optional - additive NRPE monitoring hook.
+# ha (requires): optional - hacluster is globally delisted (SQT-1081).
+overrides:
+  - provides:
+      loadbalancer:
+        optional: true
+      nrpe-external-master:
+        optional: true
+    requires:
+      ha:
+        optional: true
