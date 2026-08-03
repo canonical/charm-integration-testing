@@ -673,7 +673,7 @@ class TestJubilantBackend:
                 backend.wait_idle(["model-1"], timeout=timedelta(seconds=10), count=3)
 
             # THEN status was called at least 3 times (3 successes required)
-            assert stub.call_count >= 3
+            assert stub.call_count == 3
 
         def test_all_models_become_idle(self) -> None:
             # GIVEN two models each tracked by a separate stub (both report active)
@@ -701,8 +701,8 @@ class TestJubilantBackend:
                 backend.wait_idle(["model-1", "model-2"], timeout=timedelta(seconds=10), count=3)
 
             # THEN both models were polled at least 3 times
-            assert stub_1.call_count >= 3
-            assert stub_2.call_count >= 3
+            assert stub_1.call_count == 3
+            assert stub_2.call_count == 3
 
         def test_timeout_when_one_model_not_idle(self) -> None:
             # GIVEN model-1 is active but model-2 is never active

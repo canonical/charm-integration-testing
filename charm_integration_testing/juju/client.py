@@ -81,7 +81,7 @@ class JujuClient:
         self,
         models: list[str],
         timeout: timedelta | None = None,
-        count: int = 30,
+        count: int = 10,
         strict_timeout: bool = False,
     ) -> None:
         if not models:
