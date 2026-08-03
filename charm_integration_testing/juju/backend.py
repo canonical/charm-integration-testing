@@ -191,7 +191,7 @@ class JujuBackend(ABC):
     @abstractmethod
     def wait_idle(
         self,
-        model: str,
+        model: str | list[str],
         timeout: timedelta | None,
         count: int | None,
         strict_timeout: bool = False,

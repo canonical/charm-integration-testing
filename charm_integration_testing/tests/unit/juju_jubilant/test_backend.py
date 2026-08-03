@@ -234,10 +234,11 @@ class WaitStub:
 
     raise_timeout: bool = False
     call_count: int = 0
+    model_arguments: list[str | list[str]] = field(default_factory=list)
 
     def wait(
         self,
-        model: str,
+        model: str | list[str],
         ready: Callable[[jubilant.Status], tuple[bool, JujuWaitState]],
         error: Callable[[jubilant.Status], tuple[bool, JujuWaitState]] | None = None,
         timeout: timedelta | None = None,
@@ -246,6 +247,7 @@ class WaitStub:
         strict_timeout: bool = False,
     ) -> None:
         self.call_count += 1
+        self.model_arguments.append(model)
         if self.raise_timeout:
             raise JujuWaitTimeoutError()
 
@@ -530,6 +532,24 @@ class TestJubilantBackend:
             assert exc_info.value.wait_state.message == "not ready"
             assert not exc_info.value.wait_state.insufficient_status_checks
 
+        def test_wait_deduplicates_models(self) -> None:
+            # GIVEN a backend that returns a ready status for every model
+            stub = StatusStub()
+            client = JubilantClientStub(client=stub)
+            backend = JubilantBackend(client)
+
+            # WHEN wait is called with the same model more than once
+            backend.wait(
+                ["test-model", "test-model"],
+                ready=lambda status: (True, JujuWaitState(message="ready")),
+                timeout=timedelta(seconds=10),
+                successes=3,
+                delay=timedelta(0),
+            )
+
+            # THEN the model is polled only once per success
+            assert stub.call_count == 3
+
     class TestWaitIdle:
         def test_wait_idle(self) -> None:
             # GIVEN
@@ -616,6 +636,129 @@ class TestJubilantBackend:
                 ]
                 with pytest.raises(JujuWaitTimeoutError):
                     backend.wait_idle("test-model", timedelta(milliseconds=100), count=3)
+
+        def test_multiple_models_delegate_to_wait(self) -> None:
+            # GIVEN a backend with a stubbed wait method
+            wait_stub = WaitStub()
+            backend = JubilantBackend()
+            backend.wait = wait_stub.wait
+
+            # WHEN wait_idle is called with multiple models
+            backend.wait_idle(["model-1", "model-2"], timeout=timedelta(seconds=10), count=3)
+
+            # THEN both models are passed to the shared wait implementation
+            assert wait_stub.model_arguments == [["model-1", "model-2"]]
+
+        def test_empty_model_list_returns_immediately(self) -> None:
+            # GIVEN a backend
+            backend = JubilantBackend()
+
+            # WHEN wait_idle is called with an empty list
+            backend.wait_idle([], timeout=timedelta(seconds=10), count=3)
+
+            # THEN no error is raised (no status calls needed)
+
+        def test_single_model_list_completes(self) -> None:
+            # GIVEN a single active model
+            stub = StatusStub(
+                application_statuses={"app": "active"},
+                unit_workload_statuses={"app/0": "active"},
+                unit_juju_statuses={"app/0": "idle"},
+            )
+            client = JubilantClientStub(client=stub)
+            backend = JubilantBackend(client)
+
+            # WHEN wait_idle is called with one model in a list
+            with patch("juju_jubilant.backend.time.sleep"):
+                backend.wait_idle(["model-1"], timeout=timedelta(seconds=10), count=3)
+
+            # THEN status was called at least 3 times (3 successes required)
+            assert stub.call_count >= 3
+
+        def test_all_models_become_idle(self) -> None:
+            # GIVEN two models each tracked by a separate stub (both report active)
+            stub_1 = StatusStub(
+                application_statuses={"app": "active"},
+                unit_workload_statuses={"app/0": "active"},
+                unit_juju_statuses={"app/0": "idle"},
+            )
+            stub_2 = StatusStub(
+                application_statuses={"app": "active"},
+                unit_workload_statuses={"app/0": "active"},
+                unit_juju_statuses={"app/0": "idle"},
+            )
+
+            class TwoModelClientStub(JubilantClient):
+                def model(self, model: str | None) -> Any:
+                    if model == "model-1":
+                        return stub_1
+                    return stub_2
+
+            backend = JubilantBackend(TwoModelClientStub())
+
+            # WHEN
+            with patch("juju_jubilant.backend.time.sleep"):
+                backend.wait_idle(["model-1", "model-2"], timeout=timedelta(seconds=10), count=3)
+
+            # THEN both models were polled at least 3 times
+            assert stub_1.call_count >= 3
+            assert stub_2.call_count >= 3
+
+        def test_timeout_when_one_model_not_idle(self) -> None:
+            # GIVEN model-1 is active but model-2 is never active
+            stub_1 = StatusStub(
+                application_statuses={"app": "active"},
+                unit_workload_statuses={"app/0": "active"},
+                unit_juju_statuses={"app/0": "idle"},
+            )
+            stub_2 = StatusStub(
+                application_statuses={"app": "maintenance"}, unit_workload_statuses={"app/0": "maintenance"}
+            )
+
+            class TwoModelClientStub(JubilantClient):
+                def model(self, model: str | None) -> Any:
+                    if model == "model-1":
+                        return stub_1
+                    return stub_2
+
+            backend = JubilantBackend(TwoModelClientStub())
+            t0 = datetime(2025, 1, 1, 0, 0, 0)
+
+            # WHEN / THEN
+            with (
+                patch("juju_jubilant.backend.time.sleep"),
+                patch("juju_jubilant.backend.datetime") as mock_dt,
+                pytest.raises(JujuWaitTimeoutError) as exc_info,
+            ):
+                mock_dt.now.side_effect = [t0, t0, t0, t0 + timedelta(milliseconds=110)]
+                backend.wait_idle(["model-1", "model-2"], timeout=timedelta(milliseconds=100), count=1)
+
+            # THEN the error references the non-compliant model
+            error_str = str(exc_info.value)
+            assert "model-2" in error_str
+            assert "model-1" not in error_str
+            assert "model-2::app" in exc_info.value.wait_state.noncompliant_applications
+            assert stub_1.call_count == 1
+
+        def test_strict_timeout_is_enforced(self) -> None:
+            # GIVEN two models that never become idle
+            stub = StatusStub(
+                application_statuses={"app": "maintenance"}, unit_workload_statuses={"app/0": "maintenance"}
+            )
+            client = JubilantClientStub(client=stub)
+            backend = JubilantBackend(client)
+            t0 = datetime(2025, 1, 1, 0, 0, 0)
+
+            # WHEN wait_idle is called with multiple models and strict_timeout=True
+            with (
+                patch("juju_jubilant.backend.time.sleep"),
+                patch("juju_jubilant.backend.datetime") as mock_dt,
+                pytest.raises(JujuWaitTimeoutError),
+            ):
+                mock_dt.now.side_effect = [t0, t0, t0, t0 + timedelta(milliseconds=60)]
+                backend.wait_idle(
+                    ["model-1", "model-2"], timeout=timedelta(milliseconds=50), count=10, strict_timeout=True
+                )
 
     class TestWaitApplicationSettled:
         def test_application_settled(self) -> None:

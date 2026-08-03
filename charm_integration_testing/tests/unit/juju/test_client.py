@@ -1,6 +1,7 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import logging
 from dataclasses import dataclass, field
 from datetime import timedelta
 from pathlib import Path
@@ -78,6 +79,25 @@ class MigrateModelBackendStub(NullJujuBackend):
 
     def migrate_model(self, model_name: str, source_controller: str, target_controller: str) -> None:
         self.migrated_models.append((model_name, source_controller, target_controller))
+
+
+@dataclass
+class WaitIdleBackendStub(NullJujuBackend):
+    """Backend stub that records wait_idle calls."""
+
+    calls: list[tuple[str | list[str], timedelta | None, int | None, bool, list[str] | None]] = field(
+        default_factory=list
+    )
+
+    def wait_idle(
+        self,
+        model: str | list[str],
+        timeout: timedelta | None,
+        count: int | None,
+        strict_timeout: bool = False,
+        applications: list[str] | None = None,
+    ) -> None:
+        self.calls.append((model, timeout, count, strict_timeout, applications))
 
 
 class ExtensionStub(JujuExtension):
@@ -180,6 +200,25 @@ def _app_info(charm: str = "postgresql") -> JujuApplicationInfo:
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
+
+class TestJujuClientMultiModelIdleForPeriod:
+    def test_delegates_models_to_wait_idle(self) -> None:
+        # GIVEN a client with a backend that records idle waits
+        backend = WaitIdleBackendStub()
+        client = JujuClient(backend, logging.getLogger(__name__), [])
+        timeout = timedelta(minutes=5)
+
+        # WHEN waiting for multiple models to become idle
+        client.multi_model_idle_for_period(
+            ["controller-1:model-1", "controller-2:model-2"],
+            timeout=timeout,
+            count=4,
+            strict_timeout=True,
+        )
+
+        # THEN the model list is passed to the consolidated backend method
+        assert backend.calls == [(["controller-1:model-1", "controller-2:model-2"], timeout, 4, True, None)]
 
 
 class TestJujuValidationError:
