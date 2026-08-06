@@ -240,6 +240,7 @@ class WaitStub:
         self,
         model: str,
         ready: Callable[[jubilant.Status], tuple[bool, JujuWaitState]],
+        error: Callable[[jubilant.Status], tuple[bool, JujuWaitState]] | None = None,
         timeout: timedelta | None = None,
         successes: int | None = None,
         delay: timedelta | None = None,
@@ -350,6 +351,26 @@ class TestJubilantBackend:
             # THEN insufficient_status_checks is set
             assert exc_info.value.wait_state.insufficient_status_checks
             assert call_count < 100
+
+        def test_wait_with_error_callback(self) -> None:
+            # GIVEN a backend with mocked status
+            stub = StatusStub()
+            client = JubilantClientStub(client=stub)
+            backend = JubilantBackend(client)
+
+            # WHEN wait is called with an error condition that triggers
+            with pytest.raises(JujuWaitTimeoutError) as exc_info:
+                backend.wait(
+                    "test-model",
+                    ready=lambda status: (False, JujuWaitState(message="not ready")),
+                    error=lambda status: (True, JujuWaitState(message="error occurred")),
+                    timeout=timedelta(seconds=10),
+                    successes=3,
+                    delay=timedelta(milliseconds=10),
+                )
+
+            # THEN the error message is in the wait state
+            assert exc_info.value.wait_state.message == "error occurred"
 
         def test_wait_success_resets_on_failure(self) -> None:
             # GIVEN a backend with mocked status

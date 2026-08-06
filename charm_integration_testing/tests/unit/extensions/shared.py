@@ -1,10 +1,7 @@
-# Copyright 2025 Canonical Ltd.
-# See LICENSE file for licensing details.
-
 from dataclasses import dataclass, field
 from datetime import timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 from juju.backend import JujuBackend, JujuExecOutput, JujuTask
 from juju.models import JujuApplicationInfo, JujuConsumedOfferInfo, JujuIntegration, JujuIntegrationApplication
@@ -317,7 +314,7 @@ class JujuStub(NullJujuBackend):
         timeout: timedelta | None,
         count: int | None,
         strict_timeout: bool = False,
-        applications: list[str] | None = None,
+        applications: Iterable[str] | None = None,
     ) -> None:
         """Wait for model to become idle (captures call for verification)"""
         self.waited_idle.append((model, str(timeout), count, strict_timeout, applications))

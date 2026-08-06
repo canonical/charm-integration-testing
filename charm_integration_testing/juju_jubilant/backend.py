@@ -150,6 +150,7 @@ class JubilantBackend(JujuCmdBackend):
         self,
         model: str,
         ready: Callable[[jubilant.Status], tuple[bool, JujuWaitState]],
+        error: Callable[[jubilant.Status], tuple[bool, JujuWaitState]] | None = None,
         timeout: timedelta | None = None,
         successes: int | None = None,
         delay: timedelta | None = None,
@@ -178,8 +179,12 @@ class JubilantBackend(JujuCmdBackend):
             if timeout_reached and (strict_timeout or success_count == 0):
                 break
 
-            # A model migration can transiently make status fail even after this
-            # loop observed the model successfully. Treat it as not ready yet.
+            # Get current status. A model migration can transiently make status
+            # fail even for a model this loop previously observed successfully -
+            # e.g. while migrating away from, or being imported into, a
+            # controller. Treat that as "not ready yet" rather than aborting the
+            # wait, matching wait_for_model_to_exist's tolerance for the same
+            # condition. See issue #812.
             try:
                 status = self.status(model)
             except TransientModelUnavailabilityError as e:
@@ -192,6 +197,13 @@ class JubilantBackend(JujuCmdBackend):
                 time.sleep(max(0, (delay - elapsed).total_seconds()))
                 continue
 
+            # Check for error condition
+            if error is not None:
+                is_error, last_wait_state = error(status)
+                if is_error:
+                    raise JujuWaitTimeoutError(wait_state=last_wait_state)
+
+            # Check for ready condition
             is_ready, last_wait_state = ready(status)
             if is_ready:
                 success_count += 1
