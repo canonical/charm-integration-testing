@@ -191,11 +191,21 @@ class JujuBackend(ABC):
     @abstractmethod
     def wait_idle(
         self,
-        model: str | list[str],
+        model: str,
         timeout: timedelta | None,
         count: int | None,
         strict_timeout: bool = False,
         applications: list[str] | None = None,
+    ) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def wait_idle_multi_model(
+        self,
+        models: list[str],
+        timeout: timedelta | None,
+        count: int | None,
+        strict_timeout: bool = False,
     ) -> None:
         raise NotImplementedError
 

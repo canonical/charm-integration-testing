@@ -86,9 +86,13 @@ class JujuClient:
     ) -> None:
         if not models:
             return
-        model_list = ", ".join(f"'{m}'" for m in models)
-        self.logger.info(f"{self._waiting_timeout_log(timeout)} for models [{model_list}] to be idle.")
-        self.backend.wait_idle(model=models, timeout=timeout, count=count, strict_timeout=strict_timeout)
+        self.logger.info(f"{self._waiting_timeout_log(timeout)} for models {models} to be idle.")
+        self.backend.wait_idle_multi_model(
+            models=models,
+            timeout=timeout,
+            count=count,
+            strict_timeout=strict_timeout,
+        )
 
     def print_status(self, model: str = "default") -> None:
         separator = "-" * 80
