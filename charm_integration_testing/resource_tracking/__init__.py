@@ -14,10 +14,11 @@ from .discrepancy import (
     diff_snapshots,
 )
 from .snapshot import InconsistencyCheck, PvcSnapshot, ResourceSnapshot
-from .sources import KubernetesResourceSource, PvcSource
+from .sources import DEFAULT_KUBERNETES_SOURCES, KubernetesResourceSource, PvcSource
 from .tracker import ResourceObservation, StateResourceTracker
 
 __all__ = [
+    "DEFAULT_KUBERNETES_SOURCES",
     "CollectedResources",
     "Discrepancy",
     "DiscrepancyEntry",

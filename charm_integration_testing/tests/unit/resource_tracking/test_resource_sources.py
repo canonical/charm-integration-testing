@@ -28,10 +28,12 @@ from resource_tracking.snapshot import (
     StatefulSetSnapshot,
 )
 from resource_tracking.sources import (
+    DEFAULT_KUBERNETES_SOURCES,
     ConfigMapSource,
     DeploymentSource,
     IngressSource,
     NetworkPolicySource,
+    PvcSource,
     RoleBindingSource,
     RoleSource,
     SecretSource,
@@ -43,8 +45,8 @@ from resource_tracking.sources import (
 MODEL = "test-model"
 
 
-def _meta(name: str, labels: dict[str, str] | None = None) -> SimpleNamespace:
-    return SimpleNamespace(name=name, labels=labels)
+def _meta(name: str, labels: dict[str, str] | None = None, generate_name: str | None = None) -> SimpleNamespace:
+    return SimpleNamespace(name=name, labels=labels, generate_name=generate_name)
 
 
 def _listing(items: list[Any]) -> SimpleNamespace:
@@ -309,6 +311,64 @@ class TestSecretSource:
         # THEN the optional fields default to empty
         assert snapshots == [SecretSnapshot(name="blank", namespace=MODEL, secret_type="", data_keys="")]
 
+    def test_service_account_token_secrets_are_skipped(self) -> None:
+        # GIVEN a service-account-token Secret (volatile ``<sa>-token-XXXXX`` name)
+        raw = SimpleNamespace(
+            metadata=_meta("postgresql-token-ab12c", labels=None),
+            type="kubernetes.io/service-account-token",
+            data={"ca.crt": "Y2E=", "namespace": "bnM=", "token": "dG9r"},
+        )
+        client = _client(core=_FakeCoreApi(secrets=[raw]))
+
+        # WHEN the source collects snapshots
+        snapshots = SecretSource().collect(client, MODEL)  # type: ignore[arg-type]
+
+        # THEN the volatile-named token secret is not tracked
+        assert snapshots == []
+
+    def test_generate_name_secrets_are_skipped(self) -> None:
+        # GIVEN a Secret created with generateName (server-appended random suffix)
+        raw = SimpleNamespace(
+            metadata=_meta("ephemeral-x9k2p", labels=None, generate_name="ephemeral-"),
+            type="Opaque",
+            data={"token": "dG9r"},
+        )
+        client = _client(core=_FakeCoreApi(secrets=[raw]))
+
+        # WHEN the source collects snapshots
+        snapshots = SecretSource().collect(client, MODEL)  # type: ignore[arg-type]
+
+        # THEN the generated-name secret is not tracked
+        assert snapshots == []
+
+    def test_stable_secret_is_tracked_alongside_skipped_ones(self) -> None:
+        # GIVEN a stable Opaque secret and a volatile token secret in the same model
+        stable = SimpleNamespace(
+            metadata=_meta("postgresql.app", labels={"app.kubernetes.io/name": "postgresql"}),
+            type="Opaque",
+            data={"password": "cGFzcw=="},
+        )
+        token = SimpleNamespace(
+            metadata=_meta("postgresql-token-ab12c", labels=None),
+            type="kubernetes.io/service-account-token",
+            data={"token": "dG9r"},
+        )
+        client = _client(core=_FakeCoreApi(secrets=[stable, token]))
+
+        # WHEN the source collects snapshots
+        snapshots = SecretSource().collect(client, MODEL)  # type: ignore[arg-type]
+
+        # THEN only the stable secret is tracked
+        assert snapshots == [
+            SecretSnapshot(
+                name="postgresql.app",
+                namespace=MODEL,
+                secret_type="Opaque",
+                data_keys="password",
+                application="postgresql",
+            )
+        ]
+
 
 class TestServiceAccountSource:
     def test_maps_name_and_application(self) -> None:
@@ -474,3 +534,23 @@ class TestIngressSource:
 
         # THEN the optional fields default to empty
         assert snapshots == [IngressSnapshot(name="ing", namespace=MODEL, ingress_class="", hosts="")]
+
+
+class TestDefaultKubernetesSources:
+    def test_covers_every_source_kind(self) -> None:
+        # GIVEN the canonical source list used to drive live collection
+        # THEN it holds exactly one instance of each implemented source kind
+        assert {type(source) for source in DEFAULT_KUBERNETES_SOURCES} == {
+            PvcSource,
+            StatefulSetSource,
+            DeploymentSource,
+            ServiceSource,
+            ConfigMapSource,
+            SecretSource,
+            ServiceAccountSource,
+            RoleSource,
+            RoleBindingSource,
+            NetworkPolicySource,
+            IngressSource,
+        }
+        assert len(DEFAULT_KUBERNETES_SOURCES) == 11

@@ -24,6 +24,7 @@ from juju.resource_registry import JujuModelHandle
 from kubernetes_client import KubernetesClient
 from resource_registry import ResourceRegistry
 from resource_tracking import (
+    DEFAULT_KUBERNETES_SOURCES,
     KubernetesResourceCollector,
     ResourceCollector,
     StateResourceTracker,
@@ -135,6 +136,7 @@ def track_state_resources(
             KubernetesResourceCollector(
                 kubernetes_client,
                 session_resource_registry,
+                sources=DEFAULT_KUBERNETES_SOURCES,
                 resource_skips=resource_tracking_skips_by_application,
             )
         )

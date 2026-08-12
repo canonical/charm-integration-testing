@@ -39,9 +39,19 @@ stays small and substrate-agnostic:
 
 **Sources** (``resource_tracking.sources``)
   A ``KubernetesResourceSource`` maps one kind of raw Kubernetes object into
-  snapshots for a single model. ``PvcSource`` is the reference implementation.
-  These are Kubernetes-specific by design; other substrates supply their own
-  source interface.
+  snapshots for a single model. The canonical set collected when tracking runs
+  live is ``DEFAULT_KUBERNETES_SOURCES`` -- PVCs, StatefulSets, Deployments,
+  Services, ConfigMaps, Secrets, ServiceAccounts, Roles, RoleBindings,
+  NetworkPolicies, and Ingresses -- and is the single source of truth the test
+  suite passes to the collector, so a new kind becomes tracked by adding its
+  source to that tuple. ``SecretSource`` additionally drops Secrets whose name is
+  server-generated rather than declared (``metadata.generateName`` is set, or a
+  ``kubernetes.io/service-account-token`` Secret with its volatile
+  ``<sa>-token-XXXXX`` name), because such a Secret gets a different name every
+  time it is recreated and so cannot be diffed by ``(namespace, name)`` identity;
+  tracking it would report a spurious ``missing`` + ``extra`` on every
+  recreation. These sources are Kubernetes-specific by design; other substrates
+  supply their own source interface.
 
 **Collectors** (``resource_tracking.collectors``)
   A ``ResourceCollector`` gathers snapshots from one *substrate*.

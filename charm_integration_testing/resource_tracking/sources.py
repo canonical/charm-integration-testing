@@ -92,6 +92,28 @@ def _hosts(spec: Any) -> str:
     return ",".join(sorted(rule.host for rule in rules if rule.host))
 
 
+_SERVICE_ACCOUNT_TOKEN_SECRET_TYPE = "kubernetes.io/service-account-token"  # nosec B105
+
+
+def _has_volatile_name(secret: Any) -> bool:
+    """Return whether a Secret's name carries a volatile, non-reproducible component.
+
+    A Secret is not trackable by ``(namespace, name)`` identity when its name is
+    server-generated rather than declared, because the same logical secret gets a
+    different name each time it is recreated -- exactly the failure mode that made
+    volatile PVC names unusable as identity.  Two mechanisms produce such names:
+
+    * ``metadata.generateName`` is set, so the API server appends a random suffix.
+    * the Secret is a ``kubernetes.io/service-account-token``, which Kubernetes
+      auto-creates with a random ``<sa>-token-XXXXX`` name (and which carries a
+      fixed key set of no drift interest anyway).
+    """
+    metadata = secret.metadata
+    if metadata is not None and metadata.generate_name:
+        return True
+    return bool(secret.type == _SERVICE_ACCOUNT_TOKEN_SECRET_TYPE)
+
+
 class KubernetesResourceSource(Protocol):
     """Collects snapshots of a single Kubernetes resource kind for one model."""
 
@@ -217,6 +239,11 @@ class SecretSource:
         secrets = kubernetes_client.backend.core_v1_api.list_namespaced_secret(model)
         snapshots: list[ResourceSnapshot] = []
         for secret in secrets.items:
+            # Secrets with a server-generated name cannot be diffed by identity
+            # across state visits, so they are dropped rather than reported as
+            # spurious missing/extra on every recreation.
+            if _has_volatile_name(secret):
+                continue
             snapshots.append(
                 SecretSnapshot(
                     name=secret.metadata.name,
@@ -335,3 +362,22 @@ class IngressSource:
                 )
             )
         return snapshots
+
+
+# The full set of Kubernetes resource kinds tracked when the collector is driven
+# live.  Kept here as the single source of truth so the collector default and the
+# test-suite fixture cannot drift apart; a new kind becomes tracked by adding its
+# source to this tuple.
+DEFAULT_KUBERNETES_SOURCES: tuple[KubernetesResourceSource, ...] = (
+    PvcSource(),
+    StatefulSetSource(),
+    DeploymentSource(),
+    ServiceSource(),
+    ConfigMapSource(),
+    SecretSource(),
+    ServiceAccountSource(),
+    RoleSource(),
+    RoleBindingSource(),
+    NetworkPolicySource(),
+    IngressSource(),
+)
