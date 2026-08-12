@@ -365,9 +365,9 @@ class IngressSource:
 
 
 # The full set of Kubernetes resource kinds tracked when the collector is driven
-# live.  Kept here as the single source of truth so the collector default and the
-# test-suite fixture cannot drift apart; a new kind becomes tracked by adding its
-# source to this tuple.
+# live. Kept here as the single source of truth so call sites (e.g. the test-suite
+# fixture) and documentation cannot drift apart; a new kind becomes tracked by
+# adding its source to this tuple.
 DEFAULT_KUBERNETES_SOURCES: tuple[KubernetesResourceSource, ...] = (
     PvcSource(),
     StatefulSetSource(),

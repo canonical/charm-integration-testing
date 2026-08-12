@@ -170,21 +170,32 @@ def diff_snapshots(
     Qualifiers with no matching resources are omitted, so ``bool(result)`` is a
     truthy test for "some drift".
     """
-    baseline_by_identity = {snapshot.identity: snapshot for snapshot in baseline}
-    current_by_identity = {snapshot.identity: snapshot for snapshot in current}
+    baseline_by_key = {(s.resource_type, s.identity): s for s in baseline}
+    current_by_key = {(s.resource_type, s.identity): s for s in current}
 
     grouped: dict[str, list[QualifiedSnapshot]] = {"missing": [], "extra": []}
-    for identity, snapshot in baseline_by_identity.items():
-        if identity not in current_by_identity:
+    for key, snapshot in baseline_by_key.items():
+        if key not in current_by_key:
             grouped["missing"].append(QualifiedSnapshot(snapshot=snapshot))
-    for identity, snapshot in current_by_identity.items():
-        if identity not in baseline_by_identity:
+    for key, snapshot in current_by_key.items():
+        if key not in baseline_by_key:
             grouped["extra"].append(QualifiedSnapshot(snapshot=snapshot))
         else:
-            for qualifier, qualified in _modifications(baseline_by_identity[identity], snapshot):
+            for qualifier, qualified in _modifications(baseline_by_key[key], snapshot):
                 grouped.setdefault(qualifier, []).append(qualified)
 
-    return {qualifier: _sorted_by_identity(items) for qualifier, items in grouped.items() if items}
+    sorted_grouped = {
+        qualifier: tuple(sorted(items, key=lambda item: (item.snapshot.resource_type, item.snapshot.identity)))
+        for qualifier, items in grouped.items()
+        if items
+    }
+    ordered: dict[str, tuple[QualifiedSnapshot, ...]] = {}
+    for qualifier in ("missing", "extra"):
+        if qualifier in sorted_grouped:
+            ordered[qualifier] = sorted_grouped.pop(qualifier)
+    for qualifier in sorted(sorted_grouped):
+        ordered[qualifier] = sorted_grouped[qualifier]
+    return ordered
 
 
 def calculate_discrepancies(
