@@ -336,19 +336,19 @@ identity.
    * - ``secret``
      - ``v1`` (``CoreV1Api``)
      - ``type_changed`` (type), ``keys_changed`` (data_keys)
-     - Volatile-named secrets skipped; sorted ``data_keys`` only, values excluded so rotation is not drift.
+     - Volatile-named secrets skipped (``generateName``, service-account tokens, and unlabelled Juju secret-content revisions); sorted ``data_keys`` only, values excluded so rotation is not drift.
    * - ``serviceaccount``
      - ``v1`` (``CoreV1Api``)
      - None (presence only)
-     - Low-churn presence tracking.
+     - Low-churn presence tracking; volatile Juju secret-consumer accounts skipped.
    * - ``role``
      - ``rbac.authorization.k8s.io/v1`` (``RbacAuthorizationV1Api``)
      - ``rules_changed`` (rules)
-     - Summarises ``verbs:resources`` rules for the report.
+     - Summarises ``verbs:resources`` rules for the report; volatile Juju secret-consumer roles skipped.
    * - ``rolebinding``
      - ``rbac.authorization.k8s.io/v1`` (``RbacAuthorizationV1Api``)
      - ``role_ref_changed`` (role_ref), ``subjects_changed`` (subjects)
-     - Records ``kind/name`` role ref and sorted subjects.
+     - Records ``kind/name`` role ref and sorted subjects; volatile Juju secret-consumer bindings skipped.
    * - ``networkpolicy``
      - ``networking.k8s.io/v1`` (``NetworkingV1Api``)
      - ``policy_types_changed`` (policy_types)
@@ -357,6 +357,22 @@ identity.
      - ``networking.k8s.io/v1`` (``NetworkingV1Api``)
      - ``class_changed`` (ingress_class), ``hosts_changed`` (hosts)
      - Records ``ingress_class`` and sorted ``hosts``.
+
+Volatile instances within tracked kinds
+---------------------------------------
+
+Some individual objects are skipped even though their *kind* is tracked, because
+Juju names them with a volatile component that changes every time they are
+recreated. Diffing them by ``(namespace, name)`` identity would report spurious
+``missing`` / ``extra`` drift on every revisit, so the sources filter them out:
+
+* **Juju secret-consumer RBAC triad.** For each secret consumer Juju creates a
+  ``Role``, ``RoleBinding`` and ``ServiceAccount`` all named
+  ``juju-secret-consumer-<uuid>``; the embedded UUID is regenerated on recreate.
+* **Juju secret-content revisions.** Juju stores secret payloads as ``secret``
+  objects named ``<xid>-<revision>`` (a per-secret xid plus a rotating revision).
+  These are skipped only when unlabelled, so a charm-declared secret is never
+  dropped by a coincidental name match.
 
 Deliberately untracked kinds
 ----------------------------

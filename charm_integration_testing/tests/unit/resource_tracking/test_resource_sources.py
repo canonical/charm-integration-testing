@@ -369,6 +369,44 @@ class TestSecretSource:
             )
         ]
 
+    def test_juju_secret_content_revisions_are_skipped(self) -> None:
+        # GIVEN an unlabelled Juju secret-content revision (``<xid>-<revision>`` name)
+        raw = SimpleNamespace(
+            metadata=_meta("9j258vlfg9ccpjm2d8cg-1", labels=None),
+            type="Opaque",
+            data={"content": "dg=="},
+        )
+        client = _client(core=_FakeCoreApi(secrets=[raw]))
+
+        # WHEN the source collects snapshots
+        snapshots = SecretSource().collect(client, MODEL)  # type: ignore[arg-type]
+
+        # THEN the volatile content-revision secret is not tracked
+        assert snapshots == []
+
+    def test_labelled_secret_matching_content_pattern_is_tracked(self) -> None:
+        # GIVEN a charm-labelled secret whose name coincidentally matches the pattern
+        raw = SimpleNamespace(
+            metadata=_meta("9j258vlfg9ccpjm2d8cg-1", labels={"app.kubernetes.io/name": "postgresql"}),
+            type="Opaque",
+            data={"password": "cGFzcw=="},
+        )
+        client = _client(core=_FakeCoreApi(secrets=[raw]))
+
+        # WHEN the source collects snapshots
+        snapshots = SecretSource().collect(client, MODEL)  # type: ignore[arg-type]
+
+        # THEN the labelled secret is still tracked (label gate prevents a false drop)
+        assert snapshots == [
+            SecretSnapshot(
+                name="9j258vlfg9ccpjm2d8cg-1",
+                namespace=MODEL,
+                secret_type="Opaque",
+                data_keys="password",
+                application="postgresql",
+            )
+        ]
+
 
 class TestServiceAccountSource:
     def test_maps_name_and_application(self) -> None:
@@ -380,6 +418,20 @@ class TestServiceAccountSource:
         snapshots = ServiceAccountSource().collect(client, MODEL)  # type: ignore[arg-type]
 
         # THEN the snapshot records the name, namespace and application
+        assert snapshots == [ServiceAccountSnapshot(name="postgresql", namespace=MODEL, application="postgresql")]
+
+    def test_juju_secret_consumer_service_accounts_are_skipped(self) -> None:
+        # GIVEN a Juju secret-consumer ServiceAccount (volatile ``...-<uuid>`` name)
+        volatile = SimpleNamespace(
+            metadata=_meta("juju-secret-consumer-ac64e0e2-0c32-4e6c-a61f-ee8af9462d84", labels=None)
+        )
+        stable = SimpleNamespace(metadata=_meta("postgresql", labels={"app.kubernetes.io/name": "postgresql"}))
+        client = _client(core=_FakeCoreApi(service_accounts=[volatile, stable]))
+
+        # WHEN the source collects snapshots
+        snapshots = ServiceAccountSource().collect(client, MODEL)  # type: ignore[arg-type]
+
+        # THEN only the stable ServiceAccount is tracked
         assert snapshots == [ServiceAccountSnapshot(name="postgresql", namespace=MODEL, application="postgresql")]
 
 
@@ -417,6 +469,27 @@ class TestRoleSource:
 
         # THEN the rules summary is empty
         assert snapshots == [RoleSnapshot(name="empty", namespace=MODEL, rules="")]
+
+    def test_juju_secret_consumer_roles_are_skipped(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # GIVEN a Juju secret-consumer Role (volatile ``...-<uuid>`` name) and a stable Role
+        volatile = SimpleNamespace(
+            metadata=_meta("juju-secret-consumer-ac64e0e2-0c32-4e6c-a61f-ee8af9462d84", labels=None),
+            rules=[SimpleNamespace(verbs=["get"], resources=["secrets"])],
+        )
+        stable = SimpleNamespace(
+            metadata=_meta("postgresql", labels={"app.kubernetes.io/name": "postgresql"}),
+            rules=[SimpleNamespace(verbs=["get"], resources=["pods"])],
+        )
+        _patch_rbac(monkeypatch, _FakeRbacApi(roles=[volatile, stable]))
+        client = _client()
+
+        # WHEN the source collects snapshots
+        snapshots = RoleSource().collect(client, MODEL)  # type: ignore[arg-type]
+
+        # THEN only the stable Role is tracked
+        assert snapshots == [
+            RoleSnapshot(name="postgresql", namespace=MODEL, rules="get:pods", application="postgresql")
+        ]
 
 
 class TestRoleBindingSource:
@@ -458,6 +531,35 @@ class TestRoleBindingSource:
 
         # THEN the optional fields default to empty
         assert snapshots == [RoleBindingSnapshot(name="rb", namespace=MODEL, role_ref="", subjects="")]
+
+    def test_juju_secret_consumer_role_bindings_are_skipped(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # GIVEN a Juju secret-consumer RoleBinding (volatile ``...-<uuid>`` name) and a stable one
+        volatile = SimpleNamespace(
+            metadata=_meta("juju-secret-consumer-ac64e0e2-0c32-4e6c-a61f-ee8af9462d84", labels=None),
+            role_ref=SimpleNamespace(kind="Role", name="juju-secret-consumer-ac64e0e2-0c32-4e6c-a61f-ee8af9462d84"),
+            subjects=None,
+        )
+        stable = SimpleNamespace(
+            metadata=_meta("postgresql", labels={"app.kubernetes.io/name": "postgresql"}),
+            role_ref=SimpleNamespace(kind="Role", name="postgresql"),
+            subjects=[SimpleNamespace(kind="ServiceAccount", name="postgresql")],
+        )
+        _patch_rbac(monkeypatch, _FakeRbacApi(role_bindings=[volatile, stable]))
+        client = _client()
+
+        # WHEN the source collects snapshots
+        snapshots = RoleBindingSource().collect(client, MODEL)  # type: ignore[arg-type]
+
+        # THEN only the stable RoleBinding is tracked
+        assert snapshots == [
+            RoleBindingSnapshot(
+                name="postgresql",
+                namespace=MODEL,
+                role_ref="Role/postgresql",
+                subjects="ServiceAccount/postgresql",
+                application="postgresql",
+            )
+        ]
 
 
 class TestNetworkPolicySource:

@@ -15,6 +15,7 @@ Kubernetes resource kinds are supported by adding another source.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from typing import Any, Protocol
 
@@ -94,6 +95,30 @@ def _hosts(spec: Any) -> str:
 
 _SERVICE_ACCOUNT_TOKEN_SECRET_TYPE = "kubernetes.io/service-account-token"  # nosec B105
 
+# Juju creates a per-consumer RBAC triad -- a Role, RoleBinding and ServiceAccount
+# all named ``juju-secret-consumer-<uuid>`` -- to grant units access to secret
+# content. The embedded UUID changes every time the triad is recreated, so these
+# objects are not trackable by ``(namespace, name)`` identity and would otherwise
+# be reported as spurious missing/extra on every state revisit.
+_JUJU_MANAGED_RBAC_NAME_RE = re.compile(
+    r"^juju-secret-consumer-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$"
+)
+
+# Juju stores secret content as Kubernetes Secrets named ``<xid>-<revision>``,
+# where the 20-character xid (base32hex, ``0-9a-v``) is minted per secret and the
+# numeric suffix is the revision. Both parts are volatile across state visits.
+_JUJU_SECRET_CONTENT_NAME_RE = re.compile(r"^[0-9a-v]{20}-\d+$")
+
+
+def _is_juju_managed_rbac_name(name: str) -> bool:
+    """Return whether a name is a volatile Juju secret-consumer RBAC object."""
+    return bool(_JUJU_MANAGED_RBAC_NAME_RE.match(name))
+
+
+def _is_juju_secret_content_name(name: str) -> bool:
+    """Return whether a name is a volatile Juju secret-content revision."""
+    return bool(_JUJU_SECRET_CONTENT_NAME_RE.match(name))
+
 
 def _has_volatile_name(secret: Any) -> bool:
     """Return whether a Secret's name carries a volatile, non-reproducible component.
@@ -101,17 +126,23 @@ def _has_volatile_name(secret: Any) -> bool:
     A Secret is not trackable by ``(namespace, name)`` identity when its name is
     server-generated rather than declared, because the same logical secret gets a
     different name each time it is recreated -- exactly the failure mode that made
-    volatile PVC names unusable as identity.  Two mechanisms produce such names:
+    volatile PVC names unusable as identity.  Three mechanisms produce such names:
 
     * ``metadata.generateName`` is set, so the API server appends a random suffix.
     * the Secret is a ``kubernetes.io/service-account-token``, which Kubernetes
       auto-creates with a random ``<sa>-token-XXXXX`` name (and which carries a
       fixed key set of no drift interest anyway).
+    * the Secret holds Juju secret content, named ``<xid>-<revision>`` with a
+      per-secret xid and a rotating revision suffix (only skipped when the Secret
+      is unlabelled, so a charm-declared secret is never dropped by coincidence).
     """
     metadata = secret.metadata
     if metadata is not None and metadata.generate_name:
         return True
-    return bool(secret.type == _SERVICE_ACCOUNT_TOKEN_SECRET_TYPE)
+    if secret.type == _SERVICE_ACCOUNT_TOKEN_SECRET_TYPE:
+        return True
+    name = metadata.name if metadata is not None else ""
+    return not _application(metadata.labels if metadata is not None else None) and _is_juju_secret_content_name(name)
 
 
 class KubernetesResourceSource(Protocol):
@@ -263,6 +294,10 @@ class ServiceAccountSource:
         service_accounts = kubernetes_client.backend.core_v1_api.list_namespaced_service_account(model)
         snapshots: list[ResourceSnapshot] = []
         for service_account in service_accounts.items:
+            # Juju's per-consumer ServiceAccounts carry a volatile UUID name, so
+            # they cannot be diffed by identity across state visits.
+            if _is_juju_managed_rbac_name(service_account.metadata.name):
+                continue
             snapshots.append(
                 ServiceAccountSnapshot(
                     name=service_account.metadata.name,
@@ -286,6 +321,10 @@ class RoleSource:
         roles = rbac_api.list_namespaced_role(model)
         snapshots: list[ResourceSnapshot] = []
         for role in roles.items:
+            # Juju's per-consumer Roles carry a volatile UUID name, so they cannot
+            # be diffed by identity across state visits.
+            if _is_juju_managed_rbac_name(role.metadata.name):
+                continue
             snapshots.append(
                 RoleSnapshot(
                     name=role.metadata.name,
@@ -305,6 +344,10 @@ class RoleBindingSource:
         role_bindings = rbac_api.list_namespaced_role_binding(model)
         snapshots: list[ResourceSnapshot] = []
         for role_binding in role_bindings.items:
+            # Juju's per-consumer RoleBindings carry a volatile UUID name, so they
+            # cannot be diffed by identity across state visits.
+            if _is_juju_managed_rbac_name(role_binding.metadata.name):
+                continue
             role_ref = role_binding.role_ref
             snapshots.append(
                 RoleBindingSnapshot(
