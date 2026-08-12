@@ -16,6 +16,22 @@ from dataclasses import dataclass
 from typing import ClassVar, Mapping, Protocol, runtime_checkable
 
 
+@dataclass(frozen=True)
+class InconsistencyCheck:
+    """One resource-specific drift kind a snapshot type knows how to report.
+
+    ``qualifier`` is the drift label surfaced in reports (e.g. ``resized``);
+    ``attribute`` is the :meth:`ResourceSnapshot.report_attributes` key whose
+    change between two visits of the same logical resource constitutes that
+    drift.  Naming the *report attribute* (not the dataclass field) lets the
+    recorder render a uniform ``old->new`` diff without knowing any concrete
+    snapshot type.
+    """
+
+    qualifier: str
+    attribute: str
+
+
 @runtime_checkable
 class ResourceSnapshot(Protocol):
     """Structural contract a resource snapshot must satisfy to be tracked.
@@ -41,7 +57,21 @@ class ResourceSnapshot(Protocol):
 
     @property
     def identity(self) -> tuple[str, ...]:
-        """Stable identity used to diff snapshots across repeated state visits."""
+        """Stable logical identity: the fields that make this the *same* resource
+        across repeated state visits, so missing/extra can be diffed on it.
+
+        This is the resource's ``(namespace, name)`` -- deliberately free of
+        mutable spec fields, which are compared through :attr:`inconsistency_checks`
+        instead so an in-place change reads as a specific drift qualifier rather
+        than a missing/extra pair.
+        """
+
+    @property
+    def inconsistency_checks(self) -> tuple[InconsistencyCheck, ...]:
+        """Resource-specific drift kinds to check when this resource re-appears.
+
+        Empty when only presence (missing/extra) is meaningful for the type.
+        """
 
     def report_attributes(self) -> Mapping[str, str]:
         """Resource-specific ``key=value`` attributes for the report line."""
@@ -63,16 +93,22 @@ class PvcSnapshot:
     application: str = ""
 
     resource_type: ClassVar[str] = "pvc"
+    inconsistency_checks: ClassVar[tuple[InconsistencyCheck, ...]] = (
+        InconsistencyCheck(qualifier="resized", attribute="requested_storage"),
+        InconsistencyCheck(qualifier="storage_class_changed", attribute="storage_class"),
+    )
 
     @property
-    def identity(self) -> tuple[str, str, str, str]:
-        """Stable identity used to diff snapshots across state visits.
+    def identity(self) -> tuple[str, str]:
+        """Stable logical identity used to diff snapshots across state visits.
 
-        Excludes the volatile ``phase`` field so that a claim which is merely
-        transitioning (e.g. ``Pending`` vs ``Bound``) is not reported as a
-        different resource.
+        Carries only ``(namespace, name)``; the spec fields (``storage_class``,
+        ``requested_storage``) are compared through :attr:`inconsistency_checks`
+        so an in-place change reads as a ``resized``/``storage_class_changed``
+        qualifier, and the volatile ``phase`` is excluded so a claim that is
+        merely transitioning (e.g. ``Pending`` vs ``Bound``) is not reported.
         """
-        return (self.namespace, self.name, self.storage_class, self.requested_storage)
+        return (self.namespace, self.name)
 
     def report_attributes(self) -> dict[str, str]:
         """Resource-specific ``key=value`` attributes for the report line."""
@@ -100,10 +136,14 @@ class StatefulSetSnapshot:
     application: str = ""
 
     resource_type: ClassVar[str] = "statefulset"
+    inconsistency_checks: ClassVar[tuple[InconsistencyCheck, ...]] = (
+        InconsistencyCheck(qualifier="scaled", attribute="replicas"),
+        InconsistencyCheck(qualifier="image_changed", attribute="image"),
+    )
 
     @property
-    def identity(self) -> tuple[str, str, str, str]:
-        return (self.namespace, self.name, self.replicas, self.image)
+    def identity(self) -> tuple[str, str]:
+        return (self.namespace, self.name)
 
     def report_attributes(self) -> dict[str, str]:
         return {"replicas": self.replicas, "image": self.image}
@@ -114,7 +154,8 @@ class DeploymentSnapshot:
     """Immutable point-in-time view of a single Deployment.
 
     Mirrors :class:`StatefulSetSnapshot`: the declared ``replicas`` and container
-    ``image`` form the identity, while transient rollout ``status`` is excluded.
+    ``image`` are compared through :attr:`inconsistency_checks`, while transient
+    rollout ``status`` is excluded.
     """
 
     name: str
@@ -124,10 +165,14 @@ class DeploymentSnapshot:
     application: str = ""
 
     resource_type: ClassVar[str] = "deployment"
+    inconsistency_checks: ClassVar[tuple[InconsistencyCheck, ...]] = (
+        InconsistencyCheck(qualifier="scaled", attribute="replicas"),
+        InconsistencyCheck(qualifier="image_changed", attribute="image"),
+    )
 
     @property
-    def identity(self) -> tuple[str, str, str, str]:
-        return (self.namespace, self.name, self.replicas, self.image)
+    def identity(self) -> tuple[str, str]:
+        return (self.namespace, self.name)
 
     def report_attributes(self) -> dict[str, str]:
         return {"replicas": self.replicas, "image": self.image}
@@ -139,7 +184,8 @@ class ServiceSnapshot:
 
     The identity excludes ``cluster_ip`` because it is reassigned when a service
     is recreated; the stable ``service_type`` and ``ports`` describe the service
-    contract that callers depend on.
+    contract that callers depend on and are compared through
+    :attr:`inconsistency_checks`.
     """
 
     name: str
@@ -150,10 +196,14 @@ class ServiceSnapshot:
     application: str = ""
 
     resource_type: ClassVar[str] = "service"
+    inconsistency_checks: ClassVar[tuple[InconsistencyCheck, ...]] = (
+        InconsistencyCheck(qualifier="type_changed", attribute="type"),
+        InconsistencyCheck(qualifier="ports_changed", attribute="ports"),
+    )
 
     @property
-    def identity(self) -> tuple[str, str, str, str]:
-        return (self.namespace, self.name, self.service_type, self.ports)
+    def identity(self) -> tuple[str, str]:
+        return (self.namespace, self.name)
 
     def report_attributes(self) -> dict[str, str]:
         return {"type": self.service_type, "ports": self.ports}
@@ -163,9 +213,9 @@ class ServiceSnapshot:
 class ConfigMapSnapshot:
     """Immutable point-in-time view of a single ConfigMap.
 
-    The identity is ``(namespace, name)``; ``data_keys`` is tracked as an
-    attribute for reporting but is not part of the identity because the set of
-    keys can legitimately change between scheduler states.
+    The identity is ``(namespace, name)``; ``data_keys`` is compared through
+    :attr:`inconsistency_checks` so a change to the key set on re-entry into the
+    same state reads as a ``keys_changed`` qualifier.
     """
 
     name: str
@@ -174,6 +224,9 @@ class ConfigMapSnapshot:
     application: str = ""
 
     resource_type: ClassVar[str] = "configmap"
+    inconsistency_checks: ClassVar[tuple[InconsistencyCheck, ...]] = (
+        InconsistencyCheck(qualifier="keys_changed", attribute="data_keys"),
+    )
 
     @property
     def identity(self) -> tuple[str, str]:
@@ -187,8 +240,9 @@ class ConfigMapSnapshot:
 class SecretSnapshot:
     """Immutable point-in-time view of a single Secret.
 
-    The identity carries the ``secret_type`` but never the secret values, which
-    are excluded so rotation does not read as drift.
+    The identity is ``(namespace, name)``; the ``secret_type`` and the ``data_keys``
+    (key names only, never values, so rotation does not read as drift) are
+    compared through :attr:`inconsistency_checks`.
     """
 
     name: str
@@ -198,10 +252,14 @@ class SecretSnapshot:
     application: str = ""
 
     resource_type: ClassVar[str] = "secret"
+    inconsistency_checks: ClassVar[tuple[InconsistencyCheck, ...]] = (
+        InconsistencyCheck(qualifier="type_changed", attribute="type"),
+        InconsistencyCheck(qualifier="keys_changed", attribute="data_keys"),
+    )
 
     @property
-    def identity(self) -> tuple[str, str, str]:
-        return (self.namespace, self.name, self.secret_type)
+    def identity(self) -> tuple[str, str]:
+        return (self.namespace, self.name)
 
     def report_attributes(self) -> dict[str, str]:
         return {"type": self.secret_type, "data_keys": self.data_keys}
@@ -216,6 +274,7 @@ class ServiceAccountSnapshot:
     application: str = ""
 
     resource_type: ClassVar[str] = "serviceaccount"
+    inconsistency_checks: ClassVar[tuple[InconsistencyCheck, ...]] = ()
 
     @property
     def identity(self) -> tuple[str, str]:
@@ -235,6 +294,9 @@ class RoleSnapshot:
     application: str = ""
 
     resource_type: ClassVar[str] = "role"
+    inconsistency_checks: ClassVar[tuple[InconsistencyCheck, ...]] = (
+        InconsistencyCheck(qualifier="rules_changed", attribute="rules"),
+    )
 
     @property
     def identity(self) -> tuple[str, str]:
@@ -255,10 +317,14 @@ class RoleBindingSnapshot:
     application: str = ""
 
     resource_type: ClassVar[str] = "rolebinding"
+    inconsistency_checks: ClassVar[tuple[InconsistencyCheck, ...]] = (
+        InconsistencyCheck(qualifier="role_ref_changed", attribute="role_ref"),
+        InconsistencyCheck(qualifier="subjects_changed", attribute="subjects"),
+    )
 
     @property
-    def identity(self) -> tuple[str, str, str]:
-        return (self.namespace, self.name, self.role_ref)
+    def identity(self) -> tuple[str, str]:
+        return (self.namespace, self.name)
 
     def report_attributes(self) -> dict[str, str]:
         return {"role_ref": self.role_ref, "subjects": self.subjects}
@@ -274,6 +340,9 @@ class NetworkPolicySnapshot:
     application: str = ""
 
     resource_type: ClassVar[str] = "networkpolicy"
+    inconsistency_checks: ClassVar[tuple[InconsistencyCheck, ...]] = (
+        InconsistencyCheck(qualifier="policy_types_changed", attribute="policy_types"),
+    )
 
     @property
     def identity(self) -> tuple[str, str]:
@@ -294,6 +363,10 @@ class IngressSnapshot:
     application: str = ""
 
     resource_type: ClassVar[str] = "ingress"
+    inconsistency_checks: ClassVar[tuple[InconsistencyCheck, ...]] = (
+        InconsistencyCheck(qualifier="class_changed", attribute="ingress_class"),
+        InconsistencyCheck(qualifier="hosts_changed", attribute="hosts"),
+    )
 
     @property
     def identity(self) -> tuple[str, str]:

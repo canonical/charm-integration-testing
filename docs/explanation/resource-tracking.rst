@@ -25,10 +25,14 @@ stays small and substrate-agnostic:
   A ``ResourceSnapshot`` is an immutable description of one resource. Each
   snapshot exposes a ``resource_type`` (e.g. ``pvc``), a ``name``, an
   ``application`` (the owning Juju application, used to apply per-charm tracking
-  overrides), an ``identity`` (the fields that make it the "same" resource across
-  visits), and ``report_attributes()`` (descriptive fields recorded for humans).
-  ``identity`` deliberately excludes volatile fields (for example a PVC's
-  ``phase``) so that a transient status change is not mistaken for drift. The
+  overrides), an ``identity`` (its stable ``(namespace, name)``, the fields that
+  make it the "same" resource across visits), ``report_attributes()``
+  (descriptive fields recorded for humans), and ``inconsistency_checks`` (the
+  resource-specific in-place changes -- e.g. a PVC ``resized`` -- it knows how to
+  report). ``identity`` deliberately excludes both volatile fields (for example a
+  PVC's ``phase``) and mutable spec fields (compared through
+  ``inconsistency_checks`` instead), so a transient status change or an in-place
+  edit is not mistaken for one resource vanishing and another appearing. The
   tracker and discrepancy calculator depend only on this structural interface,
   never on a concrete type, so a new resource kind becomes trackable by adding a
   snapshot type that implements it.
@@ -91,7 +95,7 @@ Resource-specific discrepancy kinds
 
 *What* counts as a discrepancy can differ per resource type. Comparison happens
 in one place -- ``diff_snapshots()`` -- which groups drifted resources under
-*qualifiers*. Today two generic qualifiers exist:
+*qualifiers*. Two generic, presence-based qualifiers apply to every resource:
 
 ``missing``
   A resource present in the baseline that is gone on re-entry.
@@ -99,21 +103,68 @@ in one place -- ``diff_snapshots()`` -- which groups drifted resources under
 ``extra``
   A resource present on re-entry that was not in the baseline.
 
-These follow directly from each snapshot's ``identity``: two snapshots are the
-"same" resource only when their identities match, so a change to any identity
-field reads as one resource going ``missing`` and another appearing ``extra``.
+These follow from each snapshot's ``identity``, which is deliberately just the
+resource's stable ``(namespace, name)``: two snapshots are the "same" resource
+only when their identities match, so a resource that disappears is ``missing``
+and one that newly appears is ``extra``.
 
-A resource type can define its own notion of drift by choosing what its
-``identity`` includes and, if needed, by adding a qualifier. For example, a PVC
-that is resized in place has the same ``namespace`` and ``name`` but a different
-``requested_storage``; because ``requested_storage`` is part of ``PvcSnapshot``'s
-identity it is currently reported as ``missing`` + ``extra``. To instead report
-it as a single ``resized`` discrepancy, drop ``requested_storage`` from
-``identity`` and add a ``resized`` branch to ``diff_snapshots()`` that matches on
-name and compares the size. Because qualifiers flow untouched through
-``ModelResourceDiscrepancy.entries()``, the recorder, and the metadata key
-(``resource_discrepancy:<resource_type>:<qualifier>``), no other component changes -- a new
-qualifier simply becomes a new selectable value.
+Beyond presence, a resource can drift *in place* -- keeping its identity while a
+spec field changes. Each snapshot type declares the set of such changes it cares
+about as a list of ``InconsistencyCheck`` values in its ``inconsistency_checks``
+class attribute. A check names a *report attribute* and the *qualifier* to emit
+when that attribute differs between the baseline and the re-entry snapshot of the
+same resource. For example ``PvcSnapshot`` declares::
+
+   inconsistency_checks = (
+       InconsistencyCheck(qualifier="resized", attribute="requested_storage"),
+       InconsistencyCheck(qualifier="storage_class_changed", attribute="storage_class"),
+   )
+
+so a PVC that is resized in place is reported once as ``resized`` (carrying its
+before/after) rather than as a ``missing`` + ``extra`` pair. The full set of
+per-resource qualifiers is:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 80
+
+   * - Resource type
+     - Modification qualifiers
+   * - ``pvc``
+     - ``resized``, ``storage_class_changed``
+   * - ``statefulset`` / ``deployment``
+     - ``scaled``, ``image_changed``
+   * - ``service``
+     - ``type_changed``, ``ports_changed``
+   * - ``configmap``
+     - ``keys_changed``
+   * - ``secret``
+     - ``type_changed``, ``keys_changed``
+   * - ``role``
+     - ``rules_changed``
+   * - ``rolebinding``
+     - ``role_ref_changed``, ``subjects_changed``
+   * - ``networkpolicy``
+     - ``policy_types_changed``
+   * - ``ingress``
+     - ``class_changed``, ``hosts_changed``
+   * - ``serviceaccount``
+     - none (only ``missing`` / ``extra``)
+
+A resource type gains a new notion of drift simply by adding an
+``InconsistencyCheck`` (and, if the attribute is not already reported, a
+``report_attributes()`` entry to compare on). Because qualifiers flow untouched
+through ``ModelResourceDiscrepancy.entries()``, the recorder, and the metadata
+key (``resource_discrepancy:<resource_type>:<qualifier>``), no other component
+changes -- a new qualifier simply becomes a new selectable value.
+
+Adding a resource kind or check is intentionally cheap because the mutating
+tests are idempotent round-trips: scaling in then out, breaking then restoring an
+integration, deleting a pod and awaiting its replacement, or redeploying the same
+bundle all return the environment to the *same* state. Snapshots are recorded
+only after such a test passes and the model reaches idle, so re-entering a state
+must reproduce the baseline -- which means any qualifier that fires is genuine
+drift, never an expected mid-test change.
 
 Execution metadata format
 -------------------------
@@ -122,19 +173,27 @@ Resource discrepancies are recorded under keys of the form::
 
    resource_discrepancy:<resource_type>:<qualifier>
 
-where ``<qualifier>`` is a resource-specific drift kind -- generically
-``missing`` or ``extra`` today, extensible per resource type (see
-`Resource-specific discrepancy kinds`_). Only these generically-applicable
-dimensions appear in the key so that downstream attachment rules can select on
-them. Run-specific context (the scheduler state, the model name, and descriptive
-resource attributes) is carried in the value instead of the key. For example, a
-leaked PVC is recorded as::
+where ``<qualifier>`` is either a presence kind (``missing`` / ``extra``) or a
+resource-specific modification kind (see `Resource-specific discrepancy kinds`_).
+Only these generically-applicable dimensions appear in the key so that downstream
+attachment rules can select on them. Run-specific context (the scheduler state,
+the model name, and descriptive resource attributes) is carried in the value
+instead of the key. For a presence qualifier the value carries the resource's
+attributes whole; a leaked PVC is recorded as::
 
    key:   resource_discrepancy:pvc:extra
    value: state=deployed model=<model> pvc=<name> requested_storage=1Gi storage_class=csi-cephfs
 
+For a modification qualifier only the attributes that actually changed are
+emitted, as ``old->new``, so the drift is visible at a glance. A PVC that grew
+in place is recorded as::
+
+   key:   resource_discrepancy:pvc:resized
+   value: state=deployed model=<model> pvc=<name> requested_storage=1Gi->2Gi
+
 Because the model name is a per-run identifier it is intentionally kept out of
 the key; keys stay stable across runs while the value provides debugging detail.
+
 
 Per-charm tracking overrides
 ----------------------------

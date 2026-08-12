@@ -14,6 +14,7 @@ from resource_tracking import (
     ModelResourceDiscrepancy,
     PvcSnapshot,
     PvcSource,
+    QualifiedSnapshot,
     ResourceDiscrepancyError,
     StateResourceTracker,
     calculate_discrepancies,
@@ -35,6 +36,10 @@ def _pvc(name: str, storage: str = "1Gi", application: str = "") -> PvcSnapshot:
         phase="Bound",
         application=application,
     )
+
+
+def _qs(snapshot: PvcSnapshot, baseline: PvcSnapshot | None = None) -> QualifiedSnapshot:
+    return QualifiedSnapshot(snapshot=snapshot, baseline=baseline)
 
 
 def _raw_pvc(
@@ -290,7 +295,7 @@ class TestKubernetesResourceCollector:
 
 class TestDiffSnapshots:
     def test_missing_and_extra_are_grouped_by_qualifier(self) -> None:
-        # GIVEN a baseline PVC replaced by a different one
+        # GIVEN a baseline PVC replaced by a differently-named one
         baseline = frozenset({_pvc("data-0")})
         current = frozenset({_pvc("data-1")})
 
@@ -298,18 +303,17 @@ class TestDiffSnapshots:
         qualifiers = diff_snapshots(baseline, current)
 
         # THEN the dropped PVC is 'missing' and the new one is 'extra'
-        assert qualifiers == {"missing": (_pvc("data-0"),), "extra": (_pvc("data-1"),)}
+        assert qualifiers == {"missing": (_qs(_pvc("data-0")),), "extra": (_qs(_pvc("data-1")),)}
 
-    def test_identical_sets_yield_empty_qualifiers(self) -> None:
+    def test_identical_sets_yield_no_qualifiers(self) -> None:
         # GIVEN two identical snapshot sets
         snapshots = frozenset({_pvc("data-0")})
 
         # WHEN they are diffed
         qualifiers = diff_snapshots(snapshots, snapshots)
 
-        # THEN every qualifier is empty
-        assert qualifiers == {"missing": (), "extra": ()}
-        assert not any(qualifiers.values())
+        # THEN no qualifier is present at all (empty qualifiers are omitted)
+        assert qualifiers == {}
 
     def test_qualifiers_are_sorted_by_identity(self) -> None:
         # GIVEN a baseline that gains two extra PVCs out of identity order
@@ -320,7 +324,19 @@ class TestDiffSnapshots:
         qualifiers = diff_snapshots(baseline, current)
 
         # THEN the extra PVCs are returned sorted by identity
-        assert qualifiers["extra"] == (_pvc("data-0"), _pvc("data-1"))
+        assert qualifiers["extra"] == (_qs(_pvc("data-0")), _qs(_pvc("data-1")))
+
+    def test_in_place_change_is_a_modification_not_missing_extra(self) -> None:
+        # GIVEN a PVC that keeps its name but is resized in place
+        baseline = frozenset({_pvc("data-0", storage="1Gi")})
+        current = frozenset({_pvc("data-0", storage="2Gi")})
+
+        # WHEN the sets are diffed
+        qualifiers = diff_snapshots(baseline, current)
+
+        # THEN it reads as a single 'resized' qualifier carrying its baseline,
+        # never as a missing/extra pair
+        assert qualifiers == {"resized": (_qs(_pvc("data-0", storage="2Gi"), baseline=_pvc("data-0", storage="1Gi")),)}
 
 
 class TestCalculateDiscrepancies:
@@ -356,8 +372,7 @@ class TestCalculateDiscrepancies:
             ModelResourceDiscrepancy(
                 state=State.DEPLOYED,
                 model="test-model",
-                missing=(_pvc("data-1"),),
-                extra=(),
+                qualified={"missing": (_qs(_pvc("data-1")),)},
             )
         ]
 
@@ -371,11 +386,10 @@ class TestCalculateDiscrepancies:
         discrepancies = calculate_discrepancies(tracker.observations())
 
         # THEN the extra PVC is reported and nothing is missing
-        assert discrepancies[0].missing == ()
-        assert discrepancies[0].extra == (_pvc("data-1"),)
+        assert discrepancies[0].qualified == {"extra": (_qs(_pvc("data-1")),)}
 
     def test_missing_and_extra_reported_together(self) -> None:
-        # GIVEN a baseline PVC replaced by a different one on revisit
+        # GIVEN a baseline PVC replaced by a differently-named one on revisit
         tracker = StateResourceTracker()
         tracker.record(State.DEPLOYED, "test-model", frozenset({_pvc("data-0")}))
         tracker.record(State.DEPLOYED, "test-model", frozenset({_pvc("data-1")}))
@@ -384,8 +398,24 @@ class TestCalculateDiscrepancies:
         discrepancies = calculate_discrepancies(tracker.observations())
 
         # THEN both the missing and the extra PVC are reported in one discrepancy
-        assert discrepancies[0].missing == (_pvc("data-0"),)
-        assert discrepancies[0].extra == (_pvc("data-1"),)
+        assert discrepancies[0].qualified == {
+            "missing": (_qs(_pvc("data-0")),),
+            "extra": (_qs(_pvc("data-1")),),
+        }
+
+    def test_resized_pvc_is_reported_as_a_modification(self) -> None:
+        # GIVEN a baseline PVC resized in place on revisit
+        tracker = StateResourceTracker()
+        tracker.record(State.DEPLOYED, "test-model", frozenset({_pvc("data-0", storage="1Gi")}))
+        tracker.record(State.DEPLOYED, "test-model", frozenset({_pvc("data-0", storage="2Gi")}))
+
+        # WHEN discrepancies are calculated
+        discrepancies = calculate_discrepancies(tracker.observations())
+
+        # THEN a single 'resized' qualifier carries both baseline and current
+        assert discrepancies[0].qualified == {
+            "resized": (_qs(_pvc("data-0", storage="2Gi"), baseline=_pvc("data-0", storage="1Gi")),)
+        }
 
     def test_phase_change_alone_is_not_a_discrepancy(self) -> None:
         # GIVEN a baseline PVC that reappears in a different phase
@@ -436,14 +466,14 @@ class TestModelResourceDiscrepancyEntries:
         discrepancy = ModelResourceDiscrepancy(
             state=State.DEPLOYED,
             model="test-model",
-            missing=(snapshot,),
-            extra=(),
+            qualified={"missing": (_qs(snapshot),)},
         )
 
         # WHEN enumerating structured entries
         entries = list(discrepancy.entries())
 
-        # THEN the entry carries generic selectable dimensions plus run context
+        # THEN the entry carries generic selectable dimensions plus run context,
+        # with no baseline counterpart for a presence qualifier
         assert entries == [
             DiscrepancyEntry(
                 resource_type="pvc",
@@ -451,6 +481,7 @@ class TestModelResourceDiscrepancyEntries:
                 state="deployed",
                 model="test-model",
                 snapshot=snapshot,
+                baseline=None,
             )
         ]
 
@@ -460,8 +491,7 @@ class TestModelResourceDiscrepancyEntries:
         discrepancy = ModelResourceDiscrepancy(
             state=State.DEPLOYED,
             model="test-model",
-            missing=(),
-            extra=(snapshot,),
+            qualified={"extra": (_qs(snapshot),)},
         )
 
         # WHEN enumerating structured entries
@@ -475,6 +505,32 @@ class TestModelResourceDiscrepancyEntries:
                 state="deployed",
                 model="test-model",
                 snapshot=snapshot,
+                baseline=None,
+            )
+        ]
+
+    def test_modification_entry_carries_baseline(self) -> None:
+        # GIVEN a resized PVC discrepancy carrying both baseline and current
+        baseline = _pvc("data-0", storage="1Gi")
+        current = _pvc("data-0", storage="2Gi")
+        discrepancy = ModelResourceDiscrepancy(
+            state=State.DEPLOYED,
+            model="test-model",
+            qualified={"resized": (_qs(current, baseline=baseline),)},
+        )
+
+        # WHEN enumerating structured entries
+        entries = list(discrepancy.entries())
+
+        # THEN the entry exposes the drifted snapshot and its first-visit baseline
+        assert entries == [
+            DiscrepancyEntry(
+                resource_type="pvc",
+                qualifier="resized",
+                state="deployed",
+                model="test-model",
+                snapshot=current,
+                baseline=baseline,
             )
         ]
 
@@ -505,7 +561,6 @@ class TestResourceConsistencyReport:
             ModelResourceDiscrepancy(
                 state=State.DEPLOYED,
                 model="test-model",
-                missing=(_pvc("data-1"),),
-                extra=(),
+                qualified={"missing": (_qs(_pvc("data-1")),)},
             ),
         )

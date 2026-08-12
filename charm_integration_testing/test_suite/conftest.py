@@ -38,7 +38,7 @@ from juju_jubilant import JubilantBackend
 from kubernetes_client import KubernetesBackend, KubernetesClient
 from pytest import StashKey
 from resource_registry import ResourceRegistry, ResourceTeardownWarning
-from resource_tracking import ResourceDiscrepancyError
+from resource_tracking import DiscrepancyEntry, ResourceDiscrepancyError
 from test_observer_client import TestObserverClient as TestObserverAPIClient
 from test_observer_client import TestObserverClientError
 from utils import generate_juju_name, normalize_string, normalize_string_multiline
@@ -846,6 +846,25 @@ def record_charm_info_execution_metadata(
     _record_all()
 
 
+def _format_discrepancy_attributes(entry: DiscrepancyEntry) -> str:
+    """Render a discrepancy entry's descriptive attributes for its metadata value.
+
+    For modification qualifiers (``entry.baseline`` set) only the attributes that
+    actually changed are emitted, as ``key=old->new`` so a report shows what
+    drifted.  For presence qualifiers (``missing``/``extra``) the current
+    snapshot's attributes are emitted whole, since there is no counterpart.
+    """
+    current = entry.snapshot.report_attributes()
+    if entry.baseline is None:
+        return " ".join(f"{key}={value}" for key, value in sorted(current.items()))
+    baseline = entry.baseline.report_attributes()
+    return " ".join(
+        f"{key}={baseline.get(key, '')}->{value}"
+        for key, value in sorted(current.items())
+        if baseline.get(key) != value
+    )
+
+
 @pytest.fixture
 def record_failure_execution_metadata(
     request: pytest.FixtureRequest, execution_metadata: Callable[[str, str | int], None]
@@ -925,9 +944,7 @@ def record_failure_execution_metadata(
             for discrepancy in exc.discrepancies:
                 for entry in discrepancy.entries():
                     detail = f"state={entry.state} model={entry.model} {entry.resource_type}={entry.snapshot.name}"
-                    attributes = " ".join(
-                        f"{key}={value}" for key, value in sorted(entry.snapshot.report_attributes().items())
-                    )
+                    attributes = _format_discrepancy_attributes(entry)
                     value = f"{detail} {attributes}" if attributes else detail
                     execution_metadata(
                         f"resource_discrepancy:{entry.resource_type}:{entry.qualifier}",
