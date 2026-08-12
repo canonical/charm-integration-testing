@@ -147,3 +147,8 @@ UIDs
 lifecycle
 rollout
 untracked
+ConfigMaps
+NetworkPolicies
+RoleBindings
+ServiceAccounts
+StatefulSets
