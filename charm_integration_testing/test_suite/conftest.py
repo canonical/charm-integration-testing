@@ -851,8 +851,10 @@ def _format_discrepancy_attributes(entry: DiscrepancyEntry) -> str:
 
     For modification qualifiers (``entry.baseline`` set) only the attributes that
     actually changed are emitted, as ``key=old->new`` so a report shows what
-    drifted.  For presence qualifiers (``missing``/``extra``) the current
-    snapshot's attributes are emitted whole, since there is no counterpart.
+    drifted.  For presence qualifiers (``missing``/``extra``) ``entry.snapshot``'s
+    attributes are emitted whole -- for ``extra`` that is the re-entry snapshot,
+    for ``missing`` the first-visit snapshot, since the resource is absent on
+    re-entry.
     """
     current = entry.snapshot.report_attributes()
     if entry.baseline is None:

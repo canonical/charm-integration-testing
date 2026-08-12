@@ -247,11 +247,11 @@ the same resource kind for other applications, and a ``pvc`` skip on
 PersistentVolumeClaims: the reference resource
 ----------------------------------------------
 
-PVCs are the reference tracked resource kind, and today the only one collected at
-runtime. They serve as the worked example for every moving part above, so a new
-resource kind can follow the same shape. Snapshot and source implementations for
-several further kinds also exist (see `Additional resource kinds`_); PVCs remain
-the only source registered in the collector's default tuple.
+PVCs are the reference tracked resource kind and the worked example for every
+moving part above, so a new resource kind can follow the same shape. They are
+collected live alongside the other kinds listed under `Additional resource
+kinds`_; every kind is registered through ``DEFAULT_KUBERNETES_SOURCES`` (see
+below).
 
 ``PvcSnapshot`` (in ``resource_tracking.snapshot``) is a frozen, hashable
 dataclass with:
@@ -260,10 +260,13 @@ dataclass with:
   A ``ClassVar`` label; it is the ``<resource_type>`` segment of the execution
   metadata key.
 
-``identity`` = ``(namespace, name, storage_class, requested_storage)``
-  The fields that make a claim the "same" resource across visits. ``phase`` is
-  deliberately excluded so a claim merely transitioning between ``Pending`` and
-  ``Bound`` is not mistaken for drift.
+``identity`` = ``(namespace, name)``
+  The fields that make a claim the "same" resource across visits. The spec fields
+  (``storage_class``, ``requested_storage``) are excluded from identity and
+  compared through ``inconsistency_checks`` instead, so an in-place change reads
+  as a ``resized`` / ``storage_class_changed`` qualifier rather than a ``missing``
+  / ``extra`` pair; the volatile ``phase`` is excluded entirely so a claim merely
+  transitioning between ``Pending`` and ``Bound`` is not mistaken for drift.
 
 ``report_attributes()`` = ``storage_class`` and ``requested_storage``
   The descriptive fields appended to the metadata value for humans.
@@ -275,8 +278,9 @@ dataclass with:
 ``PvcSource`` (in ``resource_tracking.sources``) is the matching source. It calls
 ``kubernetes_client.list_model_pvcs(model)`` and maps each raw
 ``V1PersistentVolumeClaim`` onto a ``PvcSnapshot``, defaulting optional fields to
-empty strings and reading the owning application from the name label. It is
-registered as a default source of ``KubernetesResourceCollector``.
+empty strings and reading the owning application from the name label. It is one
+of the sources in ``DEFAULT_KUBERNETES_SOURCES``, the tuple the test suite passes
+to ``KubernetesResourceCollector``.
 
 Additional resource kinds
 -------------------------
@@ -284,23 +288,26 @@ Additional resource kinds
 Beyond the PVC reference, snapshot types and sources are implemented for ten
 further Kubernetes kinds. These follow the exact shape described in `Adding a new
 resource kind`_: a frozen ``ResourceSnapshot`` in ``resource_tracking.snapshot``
-whose ``identity`` excludes volatile fields, plus a matching
-``KubernetesResourceSource`` in ``resource_tracking.sources`` that reads the
-owning application from the ``app.kubernetes.io/name`` label.
+whose ``identity`` is ``(namespace, name)`` (spec drift is expressed through
+``inconsistency_checks``), plus a matching ``KubernetesResourceSource`` in
+``resource_tracking.sources`` that reads the owning application from the
+``app.kubernetes.io/name`` label.
 
 .. note::
 
-   These kinds provide the *record* logic only. They are **not** yet registered
-   in ``KubernetesResourceCollector``'s default ``sources`` tuple, so at runtime
-   only PVCs are collected. Wiring them in (step 3 of `Adding a new resource
-   kind`_) is a deliberate follow-up. Some Kubernetes kinds are intentionally
-   *not* implemented at all because their lifecycle would read as drift on every
-   revisit; see `Deliberately untracked kinds`_.
+   All ten kinds are registered in ``DEFAULT_KUBERNETES_SOURCES`` and collected
+   live alongside PVCs. Some Kubernetes kinds are intentionally *not* implemented
+   at all because their lifecycle would read as drift on every revisit; see
+   `Deliberately untracked kinds`_.
 
 The collector instantiates only ``CoreV1Api`` and ``AppsV1Api`` on
 ``KubernetesBackend``. Sources for the RBAC and networking kinds therefore build
 their API group from the shared ``backend.api_client`` inside the source, keeping
 the addition contained to the resource-tracking layer.
+
+Every kind uses a ``(namespace, name)`` identity; spec drift is surfaced through
+the per-type ``inconsistency_checks`` listed below rather than folded into
+identity.
 
 .. list-table::
    :header-rows: 1
@@ -308,47 +315,47 @@ the addition contained to the resource-tracking layer.
 
    * - Resource type
      - Kubernetes API
-     - Identity (diffed fields)
+     - Modification checks (qualifier / attribute)
      - Notable exclusions / attributes
    * - ``statefulset``
      - ``apps/v1`` (``AppsV1Api``)
-     - ``(namespace, name, replicas, image)``
+     - ``scaled`` (replicas), ``image_changed`` (image)
      - Excludes rollout ``status``; how Juju runs sidecar charms.
    * - ``deployment``
      - ``apps/v1`` (``AppsV1Api``)
-     - ``(namespace, name, replicas, image)``
+     - ``scaled`` (replicas), ``image_changed`` (image)
      - Excludes rollout ``status``.
    * - ``service``
      - ``v1`` (``CoreV1Api``)
-     - ``(namespace, name, service_type, ports)``
+     - ``type_changed`` (type), ``ports_changed`` (ports)
      - Excludes ``cluster_ip`` (reassigned on recreate).
    * - ``configmap``
      - ``v1`` (``CoreV1Api``)
-     - ``(namespace, name)``
+     - ``keys_changed`` (data_keys)
      - Records sorted ``data_keys`` only; values excluded.
    * - ``secret``
      - ``v1`` (``CoreV1Api``)
-     - ``(namespace, name, secret_type)``
-     - Records sorted ``data_keys`` only; values excluded so rotation is not drift.
+     - ``type_changed`` (type), ``keys_changed`` (data_keys)
+     - Volatile-named secrets skipped; sorted ``data_keys`` only, values excluded so rotation is not drift.
    * - ``serviceaccount``
      - ``v1`` (``CoreV1Api``)
-     - ``(namespace, name)``
+     - None (presence only)
      - Low-churn presence tracking.
    * - ``role``
      - ``rbac.authorization.k8s.io/v1`` (``RbacAuthorizationV1Api``)
-     - ``(namespace, name)``
+     - ``rules_changed`` (rules)
      - Summarises ``verbs:resources`` rules for the report.
    * - ``rolebinding``
      - ``rbac.authorization.k8s.io/v1`` (``RbacAuthorizationV1Api``)
-     - ``(namespace, name, role_ref)``
+     - ``role_ref_changed`` (role_ref), ``subjects_changed`` (subjects)
      - Records ``kind/name`` role ref and sorted subjects.
    * - ``networkpolicy``
      - ``networking.k8s.io/v1`` (``NetworkingV1Api``)
-     - ``(namespace, name)``
+     - ``policy_types_changed`` (policy_types)
      - Records sorted ``policy_types``.
    * - ``ingress``
      - ``networking.k8s.io/v1`` (``NetworkingV1Api``)
-     - ``(namespace, name)``
+     - ``class_changed`` (ingress_class), ``hosts_changed`` (hosts)
      - Records ``ingress_class`` and sorted ``hosts``.
 
 Deliberately untracked kinds
@@ -393,17 +400,19 @@ kind is added without touching any of them. Following the PVC example:
 
 1. **Add a snapshot type** in ``resource_tracking.snapshot``. Make it a frozen
    dataclass implementing ``ResourceSnapshot``: set ``resource_type`` to a short
-   label (e.g. ``service``), choose an ``identity`` tuple that excludes volatile
-   fields, return descriptive fields from ``report_attributes()``, and populate
-   ``application`` (empty if the resource cannot be attributed to an application).
+   label (e.g. ``service``), use a ``(namespace, name)`` ``identity``, return
+   descriptive fields from ``report_attributes()``, list any spec-drift
+   ``inconsistency_checks`` (see step 5), and populate ``application`` (empty if
+   the resource cannot be attributed to an application).
 
 2. **Add a source** in ``resource_tracking.sources`` implementing
    ``KubernetesResourceSource``. Query the raw objects via ``kubernetes_client``
    and map each onto the new snapshot type for the given model. Raise/propagate
    ``ApiException`` on query failure; the collector treats it as best-effort.
 
-3. **Register the source** with ``KubernetesResourceCollector``. Add it to the
-   default ``sources`` tuple in its constructor so it runs for every model.
+3. **Register the source** by adding it to ``DEFAULT_KUBERNETES_SOURCES`` in
+   ``resource_tracking.sources`` -- the single tuple the test suite passes to
+   ``KubernetesResourceCollector`` -- so it runs for every model.
 
 4. **(Optional) support opting out.** Nothing extra is needed: any charm version
    can already skip the new kind by adding its ``resource_type`` label under
@@ -413,8 +422,10 @@ kind is added without touching any of them. Following the PVC example:
 
 5. **(Optional) define resource-specific drift.** The default ``missing`` /
    ``extra`` qualifiers cover appearance and disappearance. If the resource needs
-   a richer notion of drift (for example a ``resized`` volume), adjust its
-   ``identity`` and add a qualifier in ``diff_snapshots()`` as described in
+   a richer notion of drift (for example a ``resized`` volume), add an
+   ``InconsistencyCheck`` -- pairing a qualifier with the ``report_attributes()``
+   key to compare -- to the snapshot's ``inconsistency_checks``; ``diff_snapshots()``
+   runs them generically, so no change to it is required. See
    `Resource-specific discrepancy kinds`_.
 
 No change to ``StateResourceTracker``, ``calculate_discrepancies``,

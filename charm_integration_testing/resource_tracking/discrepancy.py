@@ -41,9 +41,11 @@ class DiscrepancyEntry:
     treating run-specific context (``state``, ``model``, the ``snapshot``
     detail) as informational.
 
-    ``snapshot`` is the resource as observed on re-entry (the drifted state).
-    ``baseline`` is the first-visit snapshot of the *same* logical resource and
-    is only populated for modification qualifiers (e.g. ``resized``); for
+    ``snapshot`` is the concrete resource this entry describes.  For ``extra`` and
+    modification qualifiers it is the re-entry (drifted) snapshot; for ``missing``
+    it is the first-visit snapshot, since the resource is absent on re-entry.
+    ``baseline`` is the first-visit snapshot of the *same* logical resource and is
+    only populated for modification qualifiers (e.g. ``resized``); for
     ``missing``/``extra`` there is no counterpart, so it is ``None``.
     """
 
@@ -128,10 +130,6 @@ class ResourceDiscrepancyError(Exception):
             discrepancy.summary() for discrepancy in self.discrepancies
         )
         super().__init__(message)
-
-
-def _sorted_by_identity(qualified: Iterable[QualifiedSnapshot]) -> tuple[QualifiedSnapshot, ...]:
-    return tuple(sorted(qualified, key=lambda item: item.snapshot.identity))
 
 
 def _modifications(
