@@ -6,7 +6,7 @@ from typing import Literal
 
 import pytest
 import yaml
-from juju import JujuIntegrationApplication
+from juju import JujuIntegrationApplication, JujuModelHandle
 
 
 def _find_saas_alias(bundle_path: Path, local_app: str, local_ep: str, remote_ep: str) -> str | None:
@@ -95,6 +95,12 @@ def integration_model(
         assert neighbor_model is not None
         return neighbor_model
     return model
+
+
+@pytest.fixture
+def integration_model_ref(integration_controller: str, integration_model: str) -> JujuModelHandle:
+    """Explicit controller+model reference for the model that owns the integration."""
+    return JujuModelHandle(controller=integration_controller, model=integration_model)
 
 
 @pytest.fixture

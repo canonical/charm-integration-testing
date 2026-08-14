@@ -31,6 +31,10 @@ class JujuModelHandle:
     model: str
 
     @property
+    def uri(self) -> str:
+        return f"{self.controller}:{self.model}"
+    
+    @property
     def resource_id(self) -> str:
         return f"juju:model:{self.controller}:{self.model}"
 

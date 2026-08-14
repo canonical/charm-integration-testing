@@ -23,6 +23,7 @@ from .models import (
     JujuIntegration,
     JujuIntegrationApplication,
 )
+from .resource_registry.handles import JujuModelHandle
 from .version import JujuVersion
 
 __all__ = [
@@ -36,6 +37,7 @@ __all__ = [
     "JujuExtension",
     "JujuIntegration",
     "JujuIntegrationApplication",
+    "JujuModelHandle",
     "JujuPerformanceWarning",
     "JujuStatusPerformanceWarning",
     "JujuTask",

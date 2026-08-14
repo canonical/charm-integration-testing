@@ -87,7 +87,7 @@ def resource_tracking_skips_by_application(
         if not isinstance(handle, JujuModelHandle):
             continue
         try:
-            applications = juju_client.list_applications(model=f"{handle.controller}:{handle.model}")
+            applications = juju_client.list_applications(model=handle)
         except Exception:
             logger.debug("Could not list applications for model '%s'.", handle.model, exc_info=True)
             continue

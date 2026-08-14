@@ -5,10 +5,20 @@ from typing import Any, Iterable
 
 from juju.backend import JujuBackend, JujuExecOutput, JujuTask
 from juju.models import JujuApplicationInfo, JujuConsumedOfferInfo, JujuIntegration, JujuIntegrationApplication
+from juju.resource_registry.handles import JujuModelHandle
 from juju.version import JujuVersion
 from kubernetes_client import KubernetesClient
 
 from validators.base.validator import ValidationResult
+
+
+def _model_key(model: "JujuModelHandle | str") -> str:
+    """Normalize a model reference for recording/comparison in test stubs.
+
+    Accepts either the new JujuModelHandle or a plain str (still used by extensions
+    not yet migrated), so this shared stub keeps working for both during the migration.
+    """
+    return model.uri if isinstance(model, JujuModelHandle) else model
 
 
 class NullJujuBackend(JujuBackend):
@@ -160,9 +170,6 @@ class NullJujuBackend(JujuBackend):
     def add_model(self, controller: str, model: str, model_config: dict[str, str]) -> None:
         raise NotImplementedError
 
-    def switch(self, controller: str, model: str) -> None:
-        raise NotImplementedError
-
     def scp(self, model: str, source: str, destination: str) -> None:
         raise NotImplementedError
 
@@ -245,22 +252,24 @@ class JujuStub(NullJujuBackend):
 
     # Implementation of methods mocking a JujuBackend
 
-    def list_applications(self, model: str) -> dict[str, JujuApplicationInfo]:
+    def list_applications(self, model: "JujuModelHandle | str") -> dict[str, JujuApplicationInfo]:
         """Return list of application names in the model"""
         return {key: JujuApplicationInfo(charm=value, revision=0) for key, value in self.applications.items()}
 
-    def application_charm(self, model: str, application: str) -> str:
+    def application_charm(self, model: "JujuModelHandle | str", application: str) -> str:
         """Return the charm name for a given application"""
         return self.applications[application]
 
-    def integrate(self, model: str, target_1: JujuIntegrationApplication, target_2: JujuIntegrationApplication) -> None:
+    def integrate(
+        self, model: "JujuModelHandle | str", target_1: JujuIntegrationApplication, target_2: JujuIntegrationApplication
+    ) -> None:
         """Mock integrating two applications (captures call for verification)"""
         self.integrations.append(
-            (model, target_1.application, target_1.endpoint, target_2.application, target_2.endpoint)
+            (_model_key(model), target_1.application, target_1.endpoint, target_2.application, target_2.endpoint)
         )
 
     def integration_exists(
-        self, application1: str, endpoint1: str, application2: str, endpoint2: str, model: str
+        self, application1: str, endpoint1: str, application2: str, endpoint2: str, model: "JujuModelHandle | str"
     ) -> bool:
         """Check if an integration exists between two applications
 
@@ -268,7 +277,7 @@ class JujuStub(NullJujuBackend):
 
         """
         for m, app1, endp1, app2, endp2 in self.integrations:
-            if m != model:
+            if m != _model_key(model):
                 continue
             if application1 == app1 and endpoint1 == endp1 and application2 == app2 and endpoint2 == endp2:
                 return True
@@ -278,7 +287,7 @@ class JujuStub(NullJujuBackend):
 
     def deploy_application(
         self,
-        model: str,
+        model: "JujuModelHandle | str",
         charm: str,
         application: str | None = None,
         config: dict[str, Any] | None = None,
@@ -286,71 +295,77 @@ class JujuStub(NullJujuBackend):
         force: bool = False,
     ) -> None:
         """Mock deploying an application (captures call for verification)"""
-        self.deployed.append((model, charm, application))  # Ignoring config, trust, and force for simplicity
+        self.deployed.append((_model_key(model), charm, application))  # Ignoring config, trust, force for simplicity
 
-    def configure_application(self, model: str, application: str, values: dict[str, Any]) -> None:
+    def configure_application(self, model: "JujuModelHandle | str", application: str, values: dict[str, Any]) -> None:
         """Mock configuring an application (captures call for verification)"""
-        self.configured_applications.append((model, application, values))
+        self.configured_applications.append((_model_key(model), application, values))
 
-    def get_application_config(self, model: str, application: str) -> dict[str, Any]:
+    def get_application_config(self, model: "JujuModelHandle | str", application: str) -> dict[str, Any]:
         """Mock getting application configuration (returns empty dict for unset apps)"""
         for m, app, config in self.configured_applications:
-            if m == model and app == application:
+            if m == _model_key(model) and app == application:
                 return config
         return {}
 
     def wait_idle(
         self,
-        model: str,
+        model: "JujuModelHandle | str",
         timeout: timedelta | None,
         count: int | None,
         strict_timeout: bool = False,
         applications: Iterable[str] | None = None,
     ) -> None:
         """Wait for model to become idle (captures call for verification)"""
-        self.waited_idle.append((model, str(timeout), count, strict_timeout, applications))
+        self.waited_idle.append((_model_key(model), str(timeout), count, strict_timeout, applications))
 
-    def wait_application_scaled(self, model: str, application: str, timeout: timedelta | None) -> None:
+    def wait_application_scaled(self, model: "JujuModelHandle | str", application: str, timeout: timedelta | None) -> None:
         """Wait for application to be scaled (captures call for verification)"""
-        self.waited_scaled.append((model, application, str(timeout)))
+        self.waited_scaled.append((_model_key(model), application, str(timeout)))
 
-    def wait_application_settled(self, model: str, application: str, timeout: timedelta | None) -> None:
+    def wait_application_settled(
+        self, model: "JujuModelHandle | str", application: str, timeout: timedelta | None
+    ) -> None:
         """Wait for application to settle (captures call for verification)"""
-        self.waited_settled.append((model, application, str(timeout)))
+        self.waited_settled.append((_model_key(model), application, str(timeout)))
 
-    def wait_for_unit_message(self, model: str, unit: str, message: str, timeout: timedelta | None) -> None:
+    def wait_for_unit_message(
+        self, model: "JujuModelHandle | str", unit: str, message: str, timeout: timedelta | None
+    ) -> None:
         """Wait for a specific message from a unit (captures call for verification)"""
-        self.waited_messages.append((model, unit, message, str(timeout)))
+        self.waited_messages.append((_model_key(model), unit, message, str(timeout)))
 
-    def scp(self, model: str, source: str, destination: str) -> None:
+    def scp(self, model: "JujuModelHandle | str", source: str, destination: str) -> None:
         """Mock SCP file transfer (captures call for verification)"""
-        self.scp_calls.append((model, source, destination))
+        self.scp_calls.append((_model_key(model), source, destination))
 
-    def ssh(self, model: str, target: str, command: str) -> None:
+    def ssh(self, model: "JujuModelHandle | str", target: str, command: str) -> None:
         """Mock SSH command execution (captures call for verification)"""
-        self.ssh_calls.append((model, target, command))
+        self.ssh_calls.append((_model_key(model), target, command))
 
-    def run_action(self, model: str, unit: str, action: str, params: dict[str, Any]) -> JujuTask:
+    def run_action(self, model: "JujuModelHandle | str", unit: str, action: str, params: dict[str, Any]) -> JujuTask:
         """Mock running an action on a unit (captures call for verification)"""
-        self.actions.append((model, unit, action, params))
+        self.actions.append((_model_key(model), unit, action, params))
         return JujuTask("", 0, "", "", "")  # Return dummy value; we're not really using this (yet).
 
-    def unit_ip(self, model: str, unit: str) -> str:
+    def unit_ip(self, model: "JujuModelHandle | str", unit: str) -> str:
         """Return the IP address of a unit"""
         return self.unit_ips[unit]
 
-    def is_k8s_model(self, model: str) -> bool:
+    def is_k8s_model(self, model: "JujuModelHandle | str") -> bool:
         """Return whether the model is a k8s model"""
         return self.is_k8s
 
-    def remove_applications(self, model: str, *applications: str) -> None:
+    def remove_applications(self, model: "JujuModelHandle | str", *applications: str) -> None:
         """Mock removing applications (captures call for verification)"""
         for application in applications:
-            self.removed.append((model, application))
+            self.removed.append((_model_key(model), application))
 
-    def wait_for_removal(self, model: str, applications: list[str], timeout: timedelta | None) -> None:
+    def wait_for_removal(
+        self, model: "JujuModelHandle | str", applications: list[str], timeout: timedelta | None
+    ) -> None:
         """Mock waiting for application removal (captures call for verification)"""
-        self.waited_removal.append((model, applications, str(timeout)))
+        self.waited_removal.append((_model_key(model), applications, str(timeout)))
 
-    def num_units(self, model: str, application: str) -> int:
+    def num_units(self, model: "JujuModelHandle | str", application: str) -> int:
         return 0

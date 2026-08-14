@@ -5,7 +5,7 @@ from datetime import timedelta
 from pathlib import Path
 
 import pytest
-from juju import JujuClient
+from juju import JujuClient, JujuModelHandle
 
 from .scheduler.states import State
 
@@ -15,25 +15,21 @@ def test_deploy(
     juju_client: JujuClient,
     target_bundle: Path,
     neighbor_bundle: Path | None,
-    model: str,
-    target_controller: str,
-    neighbor_model: str | None,
-    neighbor_controller: str | None,
+    target_model_ref: JujuModelHandle,
+    neighbor_model_ref: JujuModelHandle | None,
     tmp_path: Path,
 ) -> None:
-    target_model_uri = f"{target_controller}:{model}"
-    all_bundles: list[tuple[Path, str]] = [(target_bundle, target_model_uri)]
+    all_bundles: list[tuple[Path, JujuModelHandle]] = [(target_bundle, target_model_ref)]
     if neighbor_bundle is not None:
-        assert neighbor_controller is not None
-        assert neighbor_model is not None
-        all_bundles.append((neighbor_bundle, f"{neighbor_controller}:{neighbor_model}"))
+        assert neighbor_model_ref is not None
+        all_bundles.append((neighbor_bundle, neighbor_model_ref))
 
     juju_client.deploy_bundles(all_bundles, tmp_path)
 
     # TODO: Add multi-model wait
     # https://github.com/canonical/charm-integration-testing/issues/515
-    for _, model_uri in all_bundles:
-        juju_client.idle_for_period(model=model_uri, timeout=timedelta(minutes=15))
+    for _, model_ref in all_bundles:
+        juju_client.idle_for_period(model=model_ref, timeout=timedelta(minutes=15))
 
-    for _, model_uri in all_bundles:
-        juju_client.validate_model(model=model_uri, level="deep")
+    for _, model_ref in all_bundles:
+        juju_client.validate_model(model=model_ref, level="deep")

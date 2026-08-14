@@ -6,6 +6,7 @@ from datetime import timedelta
 
 from extensions.unseal_vault.extensions import GenericUnsealVaultJujuExtension, UnsealVaultK8sJujuExtension
 from extensions.unseal_vault.vault_unsealer import VaultUnsealer
+from juju import JujuModelHandle
 from kubernetes_client.backend import KubernetesExtension
 
 from ..shared import NullJujuBackend
@@ -15,9 +16,9 @@ class JujuBackendStub(NullJujuBackend):
     """Stub JujuBackend that records wait_for_model_to_exist calls."""
 
     def __init__(self) -> None:
-        self.wait_calls: list[str] = []
+        self.wait_calls: list[JujuModelHandle] = []
 
-    def wait_for_model_to_exist(self, model: str, timeout: timedelta | None) -> None:
+    def wait_for_model_to_exist(self, model: JujuModelHandle, timeout: timedelta | None) -> None:
         self.wait_calls.append(model)
 
 
@@ -25,10 +26,10 @@ class VaultUnsealerStub(VaultUnsealer):
     """Stub VaultUnsealer that records calls instead of touching Juju/Vault."""
 
     def __init__(self, juju: JujuBackendStub | None = None) -> None:
-        self.calls: list[tuple[str, bool]] = []
+        self.calls: list[tuple[JujuModelHandle, bool]] = []
         self.juju = juju or JujuBackendStub()
 
-    def try_init_or_unseal_all_vaults(self, model: str, authorize_charm: bool = True) -> None:
+    def try_init_or_unseal_all_vaults(self, model: JujuModelHandle, authorize_charm: bool = True) -> None:
         self.calls.append((model, authorize_charm))
 
 
@@ -66,8 +67,9 @@ class TestGenericUnsealVaultJujuExtension:
 
         # THEN the extension waits for the model to land on the target controller before
         # re-unsealing vault there, without re-authorizing the already-authorized charm
-        assert juju_backend.wait_calls == ["target-ctrl:test-model"]
-        assert unsealer.calls == [("target-ctrl:test-model", False)]
+        target_model = JujuModelHandle(controller="target-ctrl", model="test-model")
+        assert juju_backend.wait_calls == [target_model]
+        assert unsealer.calls == [(target_model, False)]
 
 
 class TestUnsealVaultK8sJujuExtension:

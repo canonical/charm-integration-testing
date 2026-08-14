@@ -9,7 +9,7 @@ from datetime import timedelta
 from pathlib import Path
 from subprocess import CalledProcessError  # nosec
 
-from juju import JujuBackend, JujuExtension
+from juju import JujuBackend, JujuExtension, JujuModelHandle
 
 MINIO_CHARM = "minio"
 UBUNTU_CHARM = "ubuntu"
@@ -69,13 +69,13 @@ class S3IntegratorMinIOBackendExtension(JujuExtension, ABC):
         self.minio_client_file = minio_client_file
         self.minio_server_file = minio_server_file
 
-    def post_deploy(self, model: str) -> None:
+    def post_deploy(self, model: JujuModelHandle) -> None:
         # Look for s3 integrator charms
         for application in self.juju.list_applications(model):
             if self.juju.application_charm(model, application) == S3_INTEGRATOR_CHARM:
                 self.deploy_minio_s3_backend(model, application)
 
-    def pre_remove(self, model: str, *applications: str) -> None:
+    def pre_remove(self, model: JujuModelHandle, *applications: str) -> None:
         # Remove MinIO applications related to s3 integrator applications being removed
         all_applications = self.juju.list_applications(model)
         to_remove: list[str] = []
@@ -101,7 +101,7 @@ class S3IntegratorMinIOBackendExtension(JujuExtension, ABC):
         self.logger.info(f"Waiting for MinIO applications related to removed s3 integrators to be removed: {to_remove}")
         self.juju.wait_for_removal(model, to_remove, timeout=timedelta(minutes=15))
 
-    def deploy_minio_s3_backend(self, model: str, s3_integrator_application: str) -> None:
+    def deploy_minio_s3_backend(self, model: JujuModelHandle, s3_integrator_application: str) -> None:
         # Follows guide: https://discourse.charmhub.io/t/cos-lite-docs-set-up-minio-for-s3-testing/15211
 
         # Skip if already configured
@@ -124,7 +124,7 @@ class S3IntegratorMinIOBackendExtension(JujuExtension, ABC):
         # Authenticate s3 integrator with the bucket
         self.authenticate_s3_integrator(model, s3_integrator_application)
 
-    def _deploy_minio_charm(self, model: str, s3_integrator_application: str) -> None:
+    def _deploy_minio_charm(self, model: JujuModelHandle, s3_integrator_application: str) -> None:
         """Deploy MinIO using the minio k8s charm."""
         # Deploy MinIO
         self.logger.info(
@@ -153,7 +153,7 @@ class S3IntegratorMinIOBackendExtension(JujuExtension, ABC):
             self.logger.info(f"Waiting for application '{application}' units to be settled")
             self.juju.wait_application_settled(model, application, timedelta(minutes=10))
 
-    def _deploy_minio_binary(self, model: str, s3_integrator_application: str) -> None:
+    def _deploy_minio_binary(self, model: JujuModelHandle, s3_integrator_application: str) -> None:
         """Deploy MinIO by uploading its binary to an ubuntu machine charm, for non-k8s models."""
         # Deploy ubuntu charm as the minio host
         self.logger.info(
@@ -202,12 +202,11 @@ class S3IntegratorMinIOBackendExtension(JujuExtension, ABC):
     def minio_unit(self, s3_integrator_application: str) -> str:
         return f"{self.minio_application(s3_integrator_application)}/leader"
 
-    def _model_namespace(self, model: str) -> str:
-        # `model` may be a bare model name or a "controller:model-name" URI (as passed by
-        # JujuClient.deploy_bundles). The k8s namespace is always just the model-name segment.
-        return model.rpartition(":")[-1]
+    def _model_namespace(self, model: JujuModelHandle) -> str:
+        # The k8s namespace is always just the model-name segment, never the controller.
+        return model.model
 
-    def minio_address(self, model: str, s3_integrator_application: str) -> str:
+    def minio_address(self, model: JujuModelHandle, s3_integrator_application: str) -> str:
         # For k8s models, use the stable Kubernetes Service DNS name rather than the pod IP,
         # since the pod (and its IP) can be recreated after events such as model migration.
         if self.juju.is_k8s_model(model):
@@ -217,7 +216,7 @@ class S3IntegratorMinIOBackendExtension(JujuExtension, ABC):
             )
         return MINIO_ADDRESS.format(unit_ip=self.juju.unit_ip(model, self.minio_unit(s3_integrator_application)))
 
-    def setup_minio_client(self, model: str, s3_integrator_application: str) -> None:
+    def setup_minio_client(self, model: JujuModelHandle, s3_integrator_application: str) -> None:
         # Get the MinIO client file path
         minio_client_file = self.get_minio_client_file()
 
@@ -265,7 +264,7 @@ class S3IntegratorMinIOBackendExtension(JujuExtension, ABC):
         # Return file
         return self.minio_server_file
 
-    def create_minio_bucket(self, model: str, s3_integrator_application: str) -> None:
+    def create_minio_bucket(self, model: JujuModelHandle, s3_integrator_application: str) -> None:
         self.logger.info(
             f"Creating the MinIO bucket '{MINIO_BUCKET}' in '{self.minio_application(s3_integrator_application)}'"
         )
@@ -297,7 +296,7 @@ class S3IntegratorMinIOBackendExtension(JujuExtension, ABC):
             ),
         )
 
-    def authenticate_s3_integrator(self, model: str, s3_integrator_application: str) -> None:
+    def authenticate_s3_integrator(self, model: JujuModelHandle, s3_integrator_application: str) -> None:
         self.logger.info(
             f"Configuring s3 integrator '{s3_integrator_application}' to use '{self.minio_application(s3_integrator_application)}'"
         )
@@ -325,7 +324,11 @@ class S3IntegratorMinIOBackendExtension(JujuExtension, ABC):
         )
 
     def set_minio_alias(
-        self, model: str, s3_integrator_application: str, max_attempts: int = 3, retry_sleep_seconds: int = 10
+        self,
+        model: JujuModelHandle,
+        s3_integrator_application: str,
+        max_attempts: int = 3,
+        retry_sleep_seconds: int = 10,
     ) -> None:
         self.logger.info(f"Setting MinIO alias in '{self.minio_application(s3_integrator_application)}'")
         for attempt in range(max_attempts):

@@ -11,6 +11,7 @@ import jubilant
 import pytest
 import yaml
 from juju import CharmChannel, JujuConsumedOfferInfo, JujuIntegrationApplication, JujuWaitState, JujuWaitTimeoutError
+from juju.resource_registry.handles import JujuModelHandle
 from juju.version import JujuVersion
 from juju_jubilant.backend import JubilantBackend
 from juju_jubilant.client import JubilantClient
@@ -146,10 +147,10 @@ class TestJubilantClient:
         client = JubilantClient()
 
         # WHEN a model is requested
-        model = client.model("my-model")
+        model = client.model(JujuModelHandle(controller="test-controller", model="my-model"))
 
-        # THEN the jubilant.Juju has the model
-        assert model.model == "my-model"
+        # THEN the jubilant.Juju has the composed controller:model uri
+        assert model.model == "test-controller:my-model"
 
 
 @dataclass
@@ -411,7 +412,7 @@ class TestJubilantBackend:
             # (delay is small enough that patching time.sleep isn't needed, matching
             # the sibling tests in this class)
             backend.wait(
-                "test-model",
+                JujuModelHandle(controller="test-controller", model="test-model"),
                 ready=lambda status: (True, JujuWaitState(message="ready")),
                 timeout=timedelta(seconds=10),
                 successes=1,
@@ -782,14 +783,16 @@ class TestJubilantBackend:
         def test_retries_on_model_not_found_then_succeeds(self) -> None:
             # GIVEN a backend whose status() raises "not found" twice then succeeds
             stub = ModelExistsStub(
-                error_stderr="ERROR model my-model not found\n",
+                error_stderr="ERROR model test-controller:my-model not found\n",
                 max_errors=2,
             )
             backend = JubilantBackend(JubilantClientStub(client=stub))
 
             # WHEN wait_for_model_to_exist is called (sleep patched to avoid real delays)
             with patch("juju_jubilant.backend.time.sleep"):
-                backend.wait_for_model_to_exist("my-model", timeout=timedelta(seconds=10))
+                backend.wait_for_model_to_exist(
+                    JujuModelHandle(controller="test-controller", model="my-model"), timeout=timedelta(seconds=10)
+                )
 
             # THEN status was called three times (2 failures + 1 success)
             assert stub.call_count == 3
@@ -841,7 +844,7 @@ class TestJubilantBackend:
 
         def test_raises_juju_wait_timeout_error_on_timeout(self) -> None:
             # GIVEN a backend whose status() always raises "not found"
-            stub = ModelExistsStub(error_stderr="ERROR model my-model not found\n", max_errors=0)
+            stub = ModelExistsStub(error_stderr="ERROR model test-controller:my-model not found\n", max_errors=0)
             backend = JubilantBackend(JubilantClientStub(client=stub))
 
             t0 = datetime(2025, 1, 1, 0, 0, 0)
@@ -856,13 +859,15 @@ class TestJubilantBackend:
 
                 # THEN JujuWaitTimeoutError is raised and its message names the model
                 with pytest.raises(JujuWaitTimeoutError) as exc_info:
-                    backend.wait_for_model_to_exist("my-model", timeout=timedelta(seconds=30))
+                    backend.wait_for_model_to_exist(
+                        JujuModelHandle(controller="test-controller", model="my-model"), timeout=timedelta(seconds=30)
+                    )
 
             assert "my-model" in exc_info.value.wait_state.message
 
         def test_uses_default_timeout_when_none_given(self) -> None:
             # GIVEN a backend whose status() always raises "not found"
-            stub = ModelExistsStub(error_stderr="ERROR model my-model not found\n", max_errors=0)
+            stub = ModelExistsStub(error_stderr="ERROR model test-controller:my-model not found\n", max_errors=0)
             backend = JubilantBackend(JubilantClientStub(client=stub))
 
             t0 = datetime(2025, 1, 1, 0, 0, 0)
@@ -878,7 +883,9 @@ class TestJubilantBackend:
 
                 # THEN JujuWaitTimeoutError is raised, confirming the default timeout was used
                 with pytest.raises(JujuWaitTimeoutError) as exc_info:
-                    backend.wait_for_model_to_exist("my-model", timeout=None)
+                    backend.wait_for_model_to_exist(
+                        JujuModelHandle(controller="test-controller", model="my-model"), timeout=None
+                    )
 
             assert "my-model" in exc_info.value.wait_state.message
 

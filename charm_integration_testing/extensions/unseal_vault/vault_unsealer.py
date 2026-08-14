@@ -9,7 +9,7 @@ from functools import cmp_to_key
 from subprocess import CalledProcessError  # nosec
 from typing import Literal
 
-from juju import JujuBackend, JujuWaitTimeoutError
+from juju import JujuBackend, JujuModelHandle, JujuWaitTimeoutError
 from pydantic.dataclasses import dataclass
 
 from .vault_client import VaultClient, VaultTokenSecret
@@ -105,12 +105,12 @@ class VaultUnsealer:
         self.juju = juju
         self.logger = logger
 
-    def try_init_or_unseal_all_vaults(self, model: str, authorize_charm: bool = True) -> None:
+    def try_init_or_unseal_all_vaults(self, model: JujuModelHandle, authorize_charm: bool = True) -> None:
         # Look for vault charms
         for application in self.ordered_vaults(model):
             self.try_init_or_unseal_vault(model, application, authorize_charm)
 
-    def ordered_vaults(self, model: str) -> list[str]:
+    def ordered_vaults(self, model: JujuModelHandle) -> list[str]:
         # collect all vault apps
         vault_apps = sorted(
             (
@@ -140,14 +140,14 @@ class VaultUnsealer:
             )  # will log exception
             return vault_apps
 
-    def vault_app_should_auto_unseal(self, model: str, application: str) -> bool:
+    def vault_app_should_auto_unseal(self, model: JujuModelHandle, application: str) -> bool:
         for integration in self.juju.list_integrations(model):
             requirer = integration.requirer
             if requirer.application == application and requirer.endpoint == self.charm.auto_unseal_requirer_endpoint:
                 return True
         return False
 
-    def try_init_or_unseal_vault(self, model: str, application: str, authorize_charm: bool = True) -> None:
+    def try_init_or_unseal_vault(self, model: JujuModelHandle, application: str, authorize_charm: bool = True) -> None:
         # Wait for application to be scaled
         self.logger.info(f"Waiting for vault charm '{self.charm.name}' application '{application}' to be scaled")
         self.juju.wait_application_scaled(model, application, timedelta(minutes=10))
@@ -167,7 +167,7 @@ class VaultUnsealer:
         # Try to unseal any sealed units
         self.try_unseal_vault(model, application)
 
-    def try_init_vault(self, model: str, application: str, authorize_charm: bool = True) -> None:
+    def try_init_vault(self, model: JujuModelHandle, application: str, authorize_charm: bool = True) -> None:
         # Get leader unit
         leader_unit = f"{application}/leader"
 
@@ -208,7 +208,7 @@ class VaultUnsealer:
 
         self._authorize_vault(model, application, leader_unit, tokens)
 
-    def _init_and_unseal_vault(self, model: str, application: str, leader_unit: str) -> VaultTokenSecret:
+    def _init_and_unseal_vault(self, model: JujuModelHandle, application: str, leader_unit: str) -> VaultTokenSecret:
         """Run the init/unseal steps for a leader unit that isn't yet initialized."""
         should_auto_unseal = self.vault_app_should_auto_unseal(model, application)
         if should_auto_unseal:
@@ -240,7 +240,9 @@ class VaultUnsealer:
 
         return tokens
 
-    def _authorize_vault(self, model: str, application: str, leader_unit: str, tokens: VaultTokenSecret) -> None:
+    def _authorize_vault(
+        self, model: JujuModelHandle, application: str, leader_unit: str, tokens: VaultTokenSecret
+    ) -> None:
         # Wait for authorize message
         self.logger.info(f"Waiting for vault charm '{self.charm.name}' unit '{leader_unit}' authorize message")
         self.juju.wait_for_unit_message(model, leader_unit, self.charm.authorize_message, timedelta(minutes=10))
@@ -248,7 +250,7 @@ class VaultUnsealer:
         # Authorize the charm
         self.authorize_vault_charm(model, application, tokens)
 
-    def _unit_awaiting_authorization(self, model: str, unit: str) -> bool:
+    def _unit_awaiting_authorization(self, model: JujuModelHandle, unit: str) -> bool:
         """Cheaply check whether ``unit`` is currently displaying the authorize message.
 
         Used only when vault was already initialized by a previous call, to distinguish "still
@@ -262,7 +264,7 @@ class VaultUnsealer:
             return False
 
     def wait_for_auto_unseal_acceptance(
-        self, model: str, unit: str, timeout: timedelta, poll_interval: timedelta
+        self, model: JujuModelHandle, unit: str, timeout: timedelta, poll_interval: timedelta
     ) -> None:
         remaining = timeout
         while remaining.total_seconds() > 0:
@@ -272,7 +274,7 @@ class VaultUnsealer:
             time.sleep(poll_interval.total_seconds())
         raise TimeoutError(f"Timed out while waiting for '{self.charm.name}' unit {unit} to auto-unseal")
 
-    def try_unseal_vault(self, model: str, application: str) -> None:
+    def try_unseal_vault(self, model: JujuModelHandle, application: str) -> None:
         # Get vault tokens
         tokens = self.get_vault_tokens(model, application)
 
@@ -291,7 +293,7 @@ class VaultUnsealer:
             self.logger.info(f"Unsealing vault charm '{self.charm.name}' unit '{unit}'")
             self.vault.unseal(model, unit, tokens)
 
-    def authorize_vault_charm(self, model: str, application: str, tokens: VaultTokenSecret) -> None:
+    def authorize_vault_charm(self, model: JujuModelHandle, application: str, tokens: VaultTokenSecret) -> None:
         # Log
         self.logger.info(f"Authorizing vault charm '{self.charm.name}' application '{application}'")
 
@@ -318,7 +320,7 @@ class VaultUnsealer:
         # Remove the one time secret
         self.juju.remove_secret(model, self.vault_one_time_token_secret_name(application))
 
-    def save_vault_tokens(self, model: str, application: str, tokens: VaultTokenSecret) -> None:
+    def save_vault_tokens(self, model: JujuModelHandle, application: str, tokens: VaultTokenSecret) -> None:
         # See if vault-token already exists
         secret_name = self.vault_tokens_secret_name(application)
         try:
@@ -334,7 +336,7 @@ class VaultUnsealer:
             {key.replace("_", "-"): value for key, value in asdict(tokens).items()},
         )
 
-    def get_vault_tokens(self, model: str, application: str) -> VaultTokenSecret:
+    def get_vault_tokens(self, model: JujuModelHandle, application: str) -> VaultTokenSecret:
         # Parse the vault tokens
         return VaultTokenSecret(
             **{

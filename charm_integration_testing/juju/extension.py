@@ -5,18 +5,22 @@ from abc import ABC
 
 from validators.base import ValidationResult
 
+from .resource_registry.handles import JujuModelHandle
+
 
 class JujuExtension(ABC):
-    def post_deploy(self, model: str) -> None:
+    def post_deploy(self, model: JujuModelHandle) -> None:
         pass
 
-    def post_scale(self, model: str) -> None:
+    def post_scale(self, model: JujuModelHandle) -> None:
         pass
 
-    def pre_remove(self, model: str, *applications: str) -> None:
+    def pre_remove(self, model: JujuModelHandle, *applications: str) -> None:
         pass
 
-    def post_validate(self, model: str, application: str, level: str) -> dict[str, list[ValidationResult]]:
+    def post_validate(
+        self, model: JujuModelHandle, application: str, level: str
+    ) -> dict[str, list[ValidationResult]]:
         return {}
 
     def post_bootstrap_controller(self, controller: str) -> None:

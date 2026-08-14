@@ -4,7 +4,7 @@
 import logging
 from abc import ABC
 
-from juju import JujuBackend, JujuExtension
+from juju import JujuBackend, JujuExtension, JujuModelHandle
 
 from .database_client import PostgresqlDatabaseClient
 from .database_replicator import CharmInfo, DatabaseReplicator
@@ -16,7 +16,7 @@ class GenericDatabaseReplicationExtension(JujuExtension, ABC):
     def __init__(self, database_replicator: DatabaseReplicator) -> None:
         self.database_replicator = database_replicator
 
-    def post_deploy(self, model: str) -> None:
+    def post_deploy(self, model: JujuModelHandle) -> None:
         self.database_replicator.try_replicate_all_database_clusters(model)
 
 

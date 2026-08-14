@@ -14,6 +14,7 @@ from juju.models import (
     JujuApplicationInfo,
     JujuIntegrationApplication,
 )
+from juju.resource_registry.handles import JujuModelHandle
 from juju.version import JujuVersion
 
 from validators.base.validator import ValidationCheck, ValidationResult
@@ -436,7 +437,7 @@ class TestJujuClientValidateModel:
 
         # WHEN / THEN
         with pytest.raises(KeyError, match="myapp"):
-            client.application_revision("myapp", model="mymodel")
+            client.application_revision("myapp", model=JujuModelHandle(controller="ctrl", model="mymodel"))
 
     def test_delegates_wait_to_backend(self, logger: LoggerStub) -> None:
         # GIVEN a backend stub
@@ -574,8 +575,8 @@ class UpgradeModelBackendStub(NullJujuBackend):
 
     upgrade_model_calls: list[tuple[str, str | None]] = field(default_factory=list)
 
-    def upgrade_model(self, model: str, agent_version: str | None = None) -> None:
-        self.upgrade_model_calls.append((model, agent_version))
+    def upgrade_model(self, model: JujuModelHandle, agent_version: str | None = None) -> None:
+        self.upgrade_model_calls.append((model.uri, agent_version))
 
 
 class TestJujuClientUpgradeModel:
@@ -592,10 +593,10 @@ class TestJujuClientUpgradeModel:
         client = self._client(logger, backend)
 
         # WHEN
-        client.upgrade_model("mymodel", agent_version="4.0.5")
+        client.upgrade_model(JujuModelHandle(controller="ctrl", model="mymodel"), agent_version="4.0.5")
 
         # THEN the backend received the call with the correct arguments
-        assert ("mymodel", "4.0.5") in backend.upgrade_model_calls
+        assert ("ctrl:mymodel", "4.0.5") in backend.upgrade_model_calls
 
     def test_delegates_without_agent_version(self, logger: LoggerStub) -> None:
         # GIVEN a backend that records upgrade_model calls
@@ -603,10 +604,10 @@ class TestJujuClientUpgradeModel:
         client = self._client(logger, backend)
 
         # WHEN
-        client.upgrade_model("mymodel")
+        client.upgrade_model(JujuModelHandle(controller="ctrl", model="mymodel"))
 
         # THEN the backend received the call with None agent_version
-        assert ("mymodel", None) in backend.upgrade_model_calls
+        assert ("ctrl:mymodel", None) in backend.upgrade_model_calls
 
     def test_logs_model_and_version(self, logger: LoggerStub) -> None:
         # GIVEN a backend stub
@@ -614,7 +615,7 @@ class TestJujuClientUpgradeModel:
         client = self._client(logger, backend)
 
         # WHEN
-        client.upgrade_model("mymodel", agent_version="4.0.5")
+        client.upgrade_model(JujuModelHandle(controller="ctrl", model="mymodel"), agent_version="4.0.5")
 
         # THEN an info message mentioning the model and version was logged
         assert any("mymodel" in msg and "4.0.5" in msg for msg in logger.infos)
@@ -659,8 +660,8 @@ class TestJujuClientVersion:
 class DebugLogStub(NullJujuBackend):
     """Backend stub that offers debug_log."""
 
-    def debug_log(self, model: str) -> str:
-        return f"this is a debug log\nmessage\n{model}"
+    def debug_log(self, model: JujuModelHandle) -> str:
+        return f"this is a debug log\nmessage\n{model.uri}"
 
 
 class TestJujuClientDebugLog:
@@ -673,11 +674,11 @@ class TestJujuClientDebugLog:
         client = self._client(logger, backend)
 
         # WHEN
-        log = client.debug_log("mymodel")
+        log = client.debug_log(JujuModelHandle(controller="ctrl", model="mymodel"))
 
         # THEN the backend's debug_log method was called and returned the expected string
-        assert "Collecting debug log from model mymodel" in logger.infos
-        assert log == "this is a debug log\nmessage\nmymodel"
+        assert "Collecting debug log from model ctrl:mymodel" in logger.infos
+        assert log == "this is a debug log\nmessage\nctrl:mymodel"
 
 
 # ---------------------------------------------------------------------------
@@ -961,20 +962,20 @@ class DeployBundlesBackendStub(NullJujuBackend):
 
     def deploy_bundle_file(
         self,
-        model: str,
+        model: JujuModelHandle,
         bundle: str,
         timeout: timedelta | None = None,
         trust: bool = False,
         force: bool = False,
     ) -> None:
-        self.calls.append(("deploy", model, bundle))
+        self.calls.append(("deploy", model.uri, bundle))
 
-    def list_offers(self, model: str) -> set[str]:
-        self.calls.append(("list_offers", model))
+    def list_offers(self, model: JujuModelHandle) -> set[str]:
+        self.calls.append(("list_offers", model.uri))
         return self.existing_offers
 
-    def create_offer(self, model: str, app: str, endpoints: list[str], offer_name: str) -> None:
-        self.calls.append(("create_offer", model, app, offer_name))
+    def create_offer(self, model: JujuModelHandle, app: str, endpoints: list[str], offer_name: str) -> None:
+        self.calls.append(("create_offer", model.uri, app, offer_name))
 
 
 class TestDeployBundles:
@@ -983,7 +984,7 @@ class TestDeployBundles:
         bundle_path.write_text(_BUNDLE_WITH_OFFERS)
         backend = DeployBundlesBackendStub(juju_version=JujuVersion(3, 6, 0))
 
-        _client(backend).deploy_bundles([(bundle_path, "ctrl:model")], tmp_path)
+        _client(backend).deploy_bundles([(bundle_path, JujuModelHandle(controller="ctrl", model="model"))], tmp_path)
 
         action_names = [c[0] for c in backend.calls]
         # Juju 3: phase 2 deploys the original full bundle; no offer management needed.
@@ -995,7 +996,7 @@ class TestDeployBundles:
         bundle_path.write_text(_BUNDLE_WITH_OFFERS)
         backend = DeployBundlesBackendStub(juju_version=JujuVersion(4, 0, 0))
 
-        _client(backend).deploy_bundles([(bundle_path, "ctrl:model")], tmp_path)
+        _client(backend).deploy_bundles([(bundle_path, JujuModelHandle(controller="ctrl", model="model"))], tmp_path)
 
         action_names = [c[0] for c in backend.calls]
         # Phase 1: apps-only bundle
@@ -1017,7 +1018,7 @@ class TestDeployBundles:
             existing_offers={"glauth-k8s-offer"},
         )
 
-        _client(backend).deploy_bundles([(bundle_path, "ctrl:model")], tmp_path)
+        _client(backend).deploy_bundles([(bundle_path, JujuModelHandle(controller="ctrl", model="model"))], tmp_path)
 
         assert "create_offer" not in [c[0] for c in backend.calls]
 
@@ -1026,7 +1027,7 @@ class TestDeployBundles:
         bundle_path.write_text(_BUNDLE_WITH_OFFERS)
         backend = DeployBundlesBackendStub(juju_version=JujuVersion(4, 0, 0))
 
-        _client(backend).deploy_bundles([(bundle_path, "ctrl:model")], tmp_path)
+        _client(backend).deploy_bundles([(bundle_path, JujuModelHandle(controller="ctrl", model="model"))], tmp_path)
 
         phase1_content = (tmp_path / "apps-only-bundle-0.yaml").read_text()
         assert "glauth-k8s-offer" not in phase1_content
@@ -1036,7 +1037,7 @@ class TestDeployBundles:
         bundle_path.write_text(_BUNDLE_WITH_OFFERS)
         backend = DeployBundlesBackendStub(juju_version=JujuVersion(4, 0, 0))
 
-        _client(backend).deploy_bundles([(bundle_path, "ctrl:model")], tmp_path)
+        _client(backend).deploy_bundles([(bundle_path, JujuModelHandle(controller="ctrl", model="model"))], tmp_path)
 
         phase2_content = (tmp_path / "phase2-bundle-0.yaml").read_text()
         assert "glauth-k8s-offer" not in phase2_content
@@ -1049,7 +1050,10 @@ class TestDeployBundles:
         backend = DeployBundlesBackendStub(juju_version=JujuVersion(4, 0, 0))
 
         _client(backend).deploy_bundles(
-            [(bundle_a, "ctrl:model-a"), (bundle_b, "ctrl:model-b")],
+            [
+                (bundle_a, JujuModelHandle(controller="ctrl", model="model-a")),
+                (bundle_b, JujuModelHandle(controller="ctrl", model="model-b")),
+            ],
             tmp_path,
         )
 

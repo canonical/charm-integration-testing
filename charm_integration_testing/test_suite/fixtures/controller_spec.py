@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 import pytest
+from juju.resource_registry import JujuModelHandle
 from pydantic import TypeAdapter, ValidationError
 from utils import generate_juju_name
 
@@ -246,6 +247,12 @@ def target_controller(request: pytest.FixtureRequest, prefix: str) -> str:
     return generate_juju_name(prefix)
 
 
+@pytest.fixture(scope="session")
+def target_model_ref(target_controller: str, model: str) -> JujuModelHandle:
+    """Explicit controller+model reference for the target model."""
+    return JujuModelHandle(controller=target_controller, model=model)
+
+
 @pytest.fixture
 def target_model_config(request: pytest.FixtureRequest) -> dict[str, str]:
     """Juju model config for the target model, passed via ``--target-model-config``."""
@@ -327,6 +334,14 @@ def neighbor_model(request: pytest.FixtureRequest, is_cmr_test: bool, prefix: st
         assert isinstance(value, str)
         return value
     return generate_juju_name(prefix)
+
+
+@pytest.fixture(scope="session")
+def neighbor_model_ref(neighbor_controller: str | None, neighbor_model: str | None) -> JujuModelHandle | None:
+    """Explicit controller+model reference for the neighbor model. ``None`` in non-CMR tests."""
+    if neighbor_controller is None or neighbor_model is None:
+        return None
+    return JujuModelHandle(controller=neighbor_controller, model=neighbor_model)
 
 
 @pytest.fixture

@@ -3,7 +3,7 @@
 from datetime import timedelta
 
 import pytest
-from juju import JujuClient
+from juju import JujuClient, JujuModelHandle
 from kubernetes_client import KubernetesClient, PodStatus
 
 from .scheduler.states import State
@@ -15,6 +15,7 @@ def test_pod_deletion(
     _is_running_on_kubernetes: None,
     kubernetes_client: KubernetesClient | None,
     model: str,
+    target_model_ref: JujuModelHandle,
     target_application: str,
 ) -> None:
     if kubernetes_client is None:
@@ -46,7 +47,7 @@ def test_pod_deletion(
     )
 
     # Wait for return to idle
-    juju_client.idle_for_period(model=model, timeout=timedelta(minutes=15))
+    juju_client.idle_for_period(model=target_model_ref, timeout=timedelta(minutes=15))
 
     # Validate all applications and relations
-    juju_client.validate_model(model=model, level="simple")
+    juju_client.validate_model(model=target_model_ref, level="simple")

@@ -22,6 +22,7 @@ from extensions.s3_integrator_minio_backend.extension import (
     UBUNTU_CHARM,
     S3IntegratorMinIOBackendExtension,
 )
+from juju import JujuModelHandle
 
 from ..shared import JujuStub as JujuStubBase
 
@@ -30,6 +31,10 @@ from ..shared import JujuStub as JujuStubBase
 class JujuStub(JujuStubBase):
     applications: dict[str, str] = field(default_factory=lambda: {"s3-app": "s3-integrator"})
     unit_ips: dict[str, str] = field(default_factory=lambda: {"s3-app-minio/leader": "10.0.0.1"})
+
+
+_MODEL = JujuModelHandle(controller="ctrl", model="test-model")
+_MODEL_URI = "ctrl:test-model"
 
 
 class TestS3IntegratorMinIOBackendExtension:
@@ -47,10 +52,10 @@ class TestS3IntegratorMinIOBackendExtension:
         ) -> None:
             # GIVEN a model with an s3-integrator application
             # WHEN post_deploy is called
-            extension.post_deploy("test-model")
+            extension.post_deploy(_MODEL)
 
             # THEN minio is deployed
-            assert ("test-model", "minio", "s3-app-minio") in juju.deployed
+            assert (_MODEL_URI, "minio", "s3-app-minio") in juju.deployed
 
         def test_ignores_non_s3_integrator_apps(self, juju: JujuStub) -> None:
             # GIVEN a model with no s3-integrator applications
@@ -85,13 +90,13 @@ class TestS3IntegratorMinIOBackendExtension:
             extension.minio_client_file = Path("mc")
 
             # WHEN deploy_minio_s3_backend is called
-            extension.deploy_minio_s3_backend("test-model", "s3-app")
+            extension.deploy_minio_s3_backend(_MODEL, "s3-app")
 
             # THEN the minio charm is deployed and configured
-            assert ("test-model", "minio", "s3-app-minio") in juju.deployed
+            assert (_MODEL_URI, "minio", "s3-app-minio") in juju.deployed
 
             assert (
-                "test-model",
+                _MODEL_URI,
                 "s3-app-minio",
                 {
                     "access-key": MINIO_ACCESS_KEY,
@@ -99,11 +104,11 @@ class TestS3IntegratorMinIOBackendExtension:
                 },
             ) in juju.configured_applications
 
-            assert ("test-model", "s3-app", "0:10:00") in juju.waited_scaled
-            assert ("test-model", "s3-app-minio", "0:10:00") in juju.waited_scaled
+            assert (_MODEL_URI, "s3-app", "0:10:00") in juju.waited_scaled
+            assert (_MODEL_URI, "s3-app-minio", "0:10:00") in juju.waited_scaled
 
             assert juju.scp_calls == [
-                ("test-model", str(Path("mc").resolve()), f"s3-app-minio/leader:{MINIO_CLIENT_STAGING_PATH}")
+                (_MODEL_URI, str(Path("mc").resolve()), f"s3-app-minio/leader:{MINIO_CLIENT_STAGING_PATH}")
             ]
 
             assert any(
@@ -118,7 +123,7 @@ class TestS3IntegratorMinIOBackendExtension:
             assert any("&& rm empty" in cmd for _, _, cmd in juju.ssh_calls)
 
             assert (
-                "test-model",
+                _MODEL_URI,
                 "s3-app",
                 {
                     "path": MINIO_PATH,
@@ -128,7 +133,7 @@ class TestS3IntegratorMinIOBackendExtension:
             ) in juju.configured_applications
 
             assert (
-                "test-model",
+                _MODEL_URI,
                 "s3-app/leader",
                 "sync-s3-credentials",
                 {
@@ -211,7 +216,7 @@ class TestS3IntegratorMinIOBackendExtension:
             extension.minio_client_file = Path("mc")
 
             # WHEN set_minio_alias is called
-            extension.set_minio_alias("test-model", "s3-app", max_attempts=3, retry_sleep_seconds=0)
+            extension.set_minio_alias(_MODEL, "s3-app", max_attempts=3, retry_sleep_seconds=0)
 
             # THEN the alias command runs successfully
             assert any("/usr/local/bin/mc alias set local" in cmd for _, _, cmd in juju.ssh_calls)
@@ -229,7 +234,7 @@ class TestS3IntegratorMinIOBackendExtension:
 
             # WHEN set_minio_alias fails every attempt, THEN it errors
             with pytest.raises(CalledProcessError):
-                extension.set_minio_alias("test-model", "s3-app", max_attempts=3, retry_sleep_seconds=0)
+                extension.set_minio_alias(_MODEL, "s3-app", max_attempts=3, retry_sleep_seconds=0)
 
         def test_create_minio_bucket_creates_path(
             self, extension: S3IntegratorMinIOBackendExtension, juju: JujuStub
@@ -255,11 +260,11 @@ class TestS3IntegratorMinIOBackendExtension:
         ) -> None:
             # GIVEN a ready extension
             # WHEN authenticate_s3_integrator is called
-            extension.authenticate_s3_integrator("test-model", "s3-app")
+            extension.authenticate_s3_integrator(_MODEL, "s3-app")
 
             # THEN s3-integrator is configured with path, endpoint, and bucket
             assert (
-                "test-model",
+                _MODEL_URI,
                 "s3-app",
                 {
                     "path": MINIO_PATH,
@@ -270,7 +275,7 @@ class TestS3IntegratorMinIOBackendExtension:
 
             # AND credentials are synced
             assert (
-                "test-model",
+                _MODEL_URI,
                 "s3-app/leader",
                 "sync-s3-credentials",
                 {
@@ -391,23 +396,23 @@ class TestS3IntegratorMinIOBackendExtension:
             juju.is_k8s = True
 
             # WHEN minio_address is called
-            result = extension.minio_address("test-model", "s3-app")
+            result = extension.minio_address(_MODEL, "s3-app")
 
             # THEN the stable k8s Service DNS name is used instead of the pod IP, since the
             # pod (and its IP) can change after events such as model migration
             assert result == "http://s3-app-minio.test-model.svc:9000"
 
-        def test_minio_address_uses_model_name_segment_of_a_model_uri(
+        def test_minio_address_uses_model_name_segment_regardless_of_controller(
             self, extension: S3IntegratorMinIOBackendExtension, juju: JujuStub
         ) -> None:
-            # GIVEN a k8s model passed as a "controller:model-name" URI, as happens during
-            # JujuClient.deploy_bundles()
+            # GIVEN a k8s model whose controller differs from its model name
             juju.is_k8s = True
+            model = JujuModelHandle(controller="test-controller", model="test-model")
 
             # WHEN minio_address is called
-            result = extension.minio_address("test-controller:test-model", "s3-app")
+            result = extension.minio_address(model, "s3-app")
 
-            # THEN only the model-name segment is used as the k8s namespace
+            # THEN only the model-name segment is used as the k8s namespace (never the controller)
             assert result == "http://s3-app-minio.test-model.svc:9000"
 
         def test_minio_address_builds_from_unit_ip_for_machine_models(

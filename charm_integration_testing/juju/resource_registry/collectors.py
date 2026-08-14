@@ -1,15 +1,19 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+from __future__ import annotations
+
 import logging
 import subprocess  # nosec B404
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from resource_registry.protocols import ResourceHandle
 
-from juju.backend import JujuBackend
-
 from .handles import JujuControllerHandle
+
+if TYPE_CHECKING:
+    from juju.backend import JujuBackend
 
 _JUJU_CRASHDUMP_TIMEOUT_SECONDS = 300
 _JUJU_CRASHDUMP_MAX_FILE_SIZE_BYTES = 100_000_000

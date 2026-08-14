@@ -19,6 +19,7 @@ from juju import (
     JujuWaitTimeoutError,
 )
 from juju.backend import JujuStatusPerformanceWarning, warn_performance
+from juju.resource_registry.handles import JujuModelHandle
 
 from .cmd import CmdArg, CmdClient, CmdError
 from .structures import JujuModel, JujuSecretInfo, JujuStatus
@@ -34,40 +35,40 @@ class JujuCmdBackend(JujuBackend):
         return self.cmd_client.call(CmdArg(value="juju"), *args)
 
     @warn_performance(category=JujuStatusPerformanceWarning, threshold=timedelta(seconds=5))
-    def _status(self, model: str, *selectors: str) -> JujuStatus:
+    def _status(self, model: JujuModelHandle, *selectors: str) -> JujuStatus:
         return JujuStatus(
             **yaml.safe_load(
                 self._call_juju(
                     CmdArg(value="status"),
-                    CmdArg(name="model", value=model),
+                    CmdArg(name="model", value=model.uri),
                     CmdArg(name="format", value="yaml"),
                     *[CmdArg(value=selector) for selector in selectors],
                 )
             )
         )
 
-    def is_k8s_model(self, model: str) -> bool:
+    def is_k8s_model(self, model: JujuModelHandle) -> bool:
         return self.show_model(model).type == "kubernetes"
 
-    def show_model(self, model: str) -> JujuModel:
+    def show_model(self, model: JujuModelHandle) -> JujuModel:
         return JujuModel(
             **(
                 yaml.safe_load(
                     self._call_juju(
                         CmdArg(value="show-model"),
-                        CmdArg(value=model),
+                        CmdArg(value=model.uri),
                     )
-                )[model]
+                )[model.uri]
             )
         )
 
-    def scale_application(self, model: str, application: str, num: int) -> None:
+    def scale_application(self, model: JujuModelHandle, application: str, num: int) -> None:
         # Check if k8s model
         if self.is_k8s_model(model):
             # Call scale application
             self._call_juju(
                 CmdArg(value="scale-application"),
-                CmdArg(name="model", value=model),
+                CmdArg(name="model", value=model.uri),
                 CmdArg(value=application),
                 CmdArg(value=str(num)),
             )
@@ -81,22 +82,22 @@ class JujuCmdBackend(JujuBackend):
             if len(units) < num:
                 self._call_juju(
                     CmdArg(value="add-unit"),
-                    CmdArg(name="model", value=model),
+                    CmdArg(name="model", value=model.uri),
                     CmdArg(value=application),
                     CmdArg(value=str(num - len(units)), name="num-units"),
                 )
             elif len(units) > num:
                 self._call_juju(
                     CmdArg(value="remove-unit"),
-                    CmdArg(name="model", value=model),
+                    CmdArg(name="model", value=model.uri),
                     CmdArg(name="no-prompt"),
                     *[CmdArg(value=unit) for unit in units[num:]],
                 )
 
-    def num_units(self, model: str, application: str) -> int:
+    def num_units(self, model: JujuModelHandle, application: str) -> int:
         return len(self._status(model).applications[application].units)
 
-    def list_applications(self, model: str) -> dict[str, JujuApplicationInfo]:
+    def list_applications(self, model: JujuModelHandle) -> dict[str, JujuApplicationInfo]:
         status = self._status(model)
         return {
             app_name: JujuApplicationInfo(
@@ -106,7 +107,7 @@ class JujuCmdBackend(JujuBackend):
             for app_name, app in status.applications.items()
         }
 
-    def list_integrations(self, model: str) -> set[JujuIntegration]:
+    def list_integrations(self, model: JujuModelHandle) -> set[JujuIntegration]:
         status = self._status(model)
         return {
             JujuIntegration(
@@ -132,13 +133,15 @@ class JujuCmdBackend(JujuBackend):
             and application_2 == integration_1.integrated_application
         }
 
-    def _wait_for(self, model: str, scope: str, specifier: str, query: str, timeout: timedelta | None) -> None:
+    def _wait_for(
+        self, model: JujuModelHandle, scope: str, specifier: str, query: str, timeout: timedelta | None
+    ) -> None:
         try:
             self._call_juju(
                 CmdArg(value="wait-for"),
                 CmdArg(value=scope),
                 CmdArg(value=specifier),
-                CmdArg(name="model", value=model) if scope != "model" else CmdArg(),
+                CmdArg(name="model", value=model.uri) if scope != "model" else CmdArg(),
                 CmdArg(name="query", value=query),
                 *([CmdArg(name="timeout", value=f"{timeout.total_seconds()}s")] if timeout is not None else []),
             )
@@ -148,7 +151,7 @@ class JujuCmdBackend(JujuBackend):
             else:
                 raise e
 
-    def wait_application_settled(self, model: str, application: str, timeout: timedelta | None) -> None:
+    def wait_application_settled(self, model: JujuModelHandle, application: str, timeout: timedelta | None) -> None:
         unit_workload_status_settled = " || ".join(
             {f"unit.workload-status == '{status}'" for status in {"active", "blocked"}}
         )
@@ -161,7 +164,7 @@ class JujuCmdBackend(JujuBackend):
             timeout,
         )
 
-    def wait_application_scaled(self, model: str, application: str, timeout: timedelta | None) -> None:
+    def wait_application_scaled(self, model: JujuModelHandle, application: str, timeout: timedelta | None) -> None:
         # Wait for an application to reach it's desired scale
         # See https://github.com/juju/juju/blob/add3443726e40faebaba0103289c6660251fa1eb/cmd/juju/status/formatted.go#L239
         start_time = datetime.now(timezone.utc)
@@ -186,7 +189,7 @@ class JujuCmdBackend(JujuBackend):
 
         raise JujuWaitTimeoutError
 
-    def wait_for_unit_message(self, model: str, unit: str, message: str, timeout: timedelta | None) -> None:
+    def wait_for_unit_message(self, model: JujuModelHandle, unit: str, message: str, timeout: timedelta | None) -> None:
         # Loop until timeout
         start_time = datetime.now(timezone.utc)
         while timeout is None or datetime.now(timezone.utc) < start_time + timeout:
@@ -204,45 +207,52 @@ class JujuCmdBackend(JujuBackend):
 
         raise JujuWaitTimeoutError
 
-    def juju_status_text(self, model: str) -> str:
+    def juju_status_text(self, model: JujuModelHandle) -> str:
         return self._call_juju(
             CmdArg(value="status"),
-            CmdArg(name="model", value=model),
+            CmdArg(name="model", value=model.uri),
             CmdArg(name="integrations"),
         )
 
-    def integrate(self, model: str, target_1: JujuIntegrationApplication, target_2: JujuIntegrationApplication) -> None:
+    def integrate(
+        self, model: JujuModelHandle, target_1: JujuIntegrationApplication, target_2: JujuIntegrationApplication
+    ) -> None:
         self._call_juju(
             CmdArg(value="integrate"),
-            CmdArg(name="model", value=model),
+            CmdArg(name="model", value=model.uri),
             CmdArg(value=str(target_1)),
             CmdArg(value=str(target_2)),
         )
 
     def remove_integration(
-        self, model: str, target_1: JujuIntegrationApplication, target_2: JujuIntegrationApplication
+        self, model: JujuModelHandle, target_1: JujuIntegrationApplication, target_2: JujuIntegrationApplication
     ) -> None:
         self._call_juju(
             CmdArg(value="remove-relation"),
-            CmdArg(name="model", value=model),
+            CmdArg(name="model", value=model.uri),
             CmdArg(value=str(target_1)),
             CmdArg(value=str(target_2)),
         )
 
     def deploy_bundle_file(
-        self, model: str, bundle: str, timeout: timedelta | None = None, trust: bool = False, force: bool = False
+        self,
+        model: JujuModelHandle,
+        bundle: str,
+        timeout: timedelta | None = None,
+        trust: bool = False,
+        force: bool = False,
     ) -> None:
         raise NotImplementedError
 
-    def remove_applications(self, model: str, *applications: str) -> None:
+    def remove_applications(self, model: JujuModelHandle, *applications: str) -> None:
         self._call_juju(
             CmdArg(value="remove-application"),
-            CmdArg(name="model", value=model),
+            CmdArg(name="model", value=model.uri),
             CmdArg(name="no-prompt"),
             *[CmdArg(value=application) for application in applications],
         )
 
-    def wait_for_removal(self, model: str, applications: list[str], timeout: timedelta | None) -> None:
+    def wait_for_removal(self, model: JujuModelHandle, applications: list[str], timeout: timedelta | None) -> None:
         # Juju bug causes panic: https://github.com/juju/juju/issues/18785
         # name_checks = " && ".join([f"application.name != '{application}'" for application in applications])
         # self._wait_for(model, "model", model, f"len(applications) == 0 || forEach(applications, application => {name_checks})", timeout)
@@ -260,7 +270,7 @@ class JujuCmdBackend(JujuBackend):
 
     def wait_for_removal_of_integration(
         self,
-        model: str,
+        model: JujuModelHandle,
         target_1: JujuIntegrationApplication,
         target_2: JujuIntegrationApplication,
         timeout: timedelta | None,
@@ -281,29 +291,31 @@ class JujuCmdBackend(JujuBackend):
 
         raise JujuWaitTimeoutError
 
-    def wait_for_removal_of_units(self, model: str, applications: list[str], timeout: timedelta | None) -> None:
+    def wait_for_removal_of_units(
+        self, model: JujuModelHandle, applications: list[str], timeout: timedelta | None
+    ) -> None:
         name_checks = " && ".join([f"unit.application != '{application}'" for application in applications])
         self._wait_for(
-            model, "model", model, f"len(applications) == 0 || forEach(units, unit => {name_checks})", timeout
+            model, "model", model.uri, f"len(applications) == 0 || forEach(units, unit => {name_checks})", timeout
         )
 
-    def application_charm(self, model: str, application: str) -> str | None:
+    def application_charm(self, model: JujuModelHandle, application: str) -> str | None:
         return self._status(model).applications[application].charm
 
-    def application_units(self, model: str, application: str) -> list[str]:
+    def application_units(self, model: JujuModelHandle, application: str) -> list[str]:
         return list(self._status(model).applications[application].units.keys())
 
-    def exec_unit(self, model: str, unit: str, task: str, operator: bool = False) -> JujuExecOutput:
+    def exec_unit(self, model: JujuModelHandle, unit: str, task: str, operator: bool = False) -> JujuExecOutput:
         raise NotImplementedError
 
-    def add_secret(self, model: str, name: str, values: dict[str, str]) -> str:
+    def add_secret(self, model: JujuModelHandle, name: str, values: dict[str, str]) -> str:
         raise NotImplementedError
 
-    def read_secret(self, model: str, name_or_id: str) -> dict[str, str]:
+    def read_secret(self, model: JujuModelHandle, name_or_id: str) -> dict[str, str]:
         # Read the secret
         result = self._call_juju(
             CmdArg(value="show-secret"),
-            CmdArg(name="model", value=model),
+            CmdArg(name="model", value=model.uri),
             CmdArg(value=name_or_id),
             CmdArg(name="reveal"),
             CmdArg(name="format", value="yaml"),
@@ -315,21 +327,21 @@ class JujuCmdBackend(JujuBackend):
             raise ValueError(f"Secret '{name_or_id}' has no content.")
         return content_dict
 
-    def grant_secret(self, model: str, name_or_id: str, application: str) -> None:
+    def grant_secret(self, model: JujuModelHandle, name_or_id: str, application: str) -> None:
         # Authorize the application
         self._call_juju(
             CmdArg(value="grant-secret"),
-            CmdArg(name="model", value=model),
+            CmdArg(name="model", value=model.uri),
             CmdArg(value=name_or_id),
             CmdArg(value=application),
         )
 
-    def run_action(self, model: str, unit: str, action: str, arguments: dict[str, Any]) -> JujuTask:
+    def run_action(self, model: JujuModelHandle, unit: str, action: str, arguments: dict[str, Any]) -> JujuTask:
         # Run the action on the unit
         result = self._call_juju(
             CmdArg(value="run"),
             CmdArg(name="format", value="json"),
-            CmdArg(name="model", value=model),
+            CmdArg(name="model", value=model.uri),
             CmdArg(value=unit),
             CmdArg(value=action),
             *[CmdArg(value=f"{key}={value}") for key, value in arguments.items()],
@@ -344,17 +356,17 @@ class JujuCmdBackend(JujuBackend):
             output=unit_data.get("results", {}).get("output"),
         )
 
-    def remove_secret(self, model: str, name_or_id: str) -> None:
+    def remove_secret(self, model: JujuModelHandle, name_or_id: str) -> None:
         raise NotImplementedError
 
-    def version(self, model: str) -> JujuVersion:
+    def version(self, model: JujuModelHandle) -> JujuVersion:
         raise NotImplementedError
 
-    def debug_log(self, model: str) -> str:
+    def debug_log(self, model: JujuModelHandle) -> str:
         raise NotImplementedError
 
-    def list_offers(self, model: str) -> set[str]:
+    def list_offers(self, model: JujuModelHandle) -> set[str]:
         raise NotImplementedError
 
-    def create_offer(self, model: str, app: str, endpoints: list[str], offer_name: str) -> None:
+    def create_offer(self, model: JujuModelHandle, app: str, endpoints: list[str], offer_name: str) -> None:
         raise NotImplementedError
