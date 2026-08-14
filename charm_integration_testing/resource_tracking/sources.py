@@ -38,6 +38,13 @@ from .snapshot import (
 )
 
 
+# Juju assigns this sentinel port to an application's Service until the charm
+# opens its real ports.  It is not part of the service contract -- it appears
+# only while the workload settles --  it is filtered out to avoid 
+# ``ports_changed`` between a settling and a settled observation.
+_JUJU_PLACEHOLDER_PORT = 65535
+
+
 def _application(labels: Mapping[str, str] | None) -> str:
     """Return the owning application from the standard Kubernetes name label."""
     return (labels or {}).get("app.kubernetes.io/name", "")
@@ -54,11 +61,17 @@ def _images(spec: Any) -> str:
 
 
 def _ports(spec: Any) -> str:
-    """Return a stable, comma-joined ``port/protocol`` view of a service's ports."""
+    """Return a stable, comma-joined ``port/protocol`` view of a service's ports.
+
+    The Juju placeholder port is excluded so a Service observed before its
+    workload has opened its real ports reports no ports rather than the sentinel.
+    """
     ports = spec.ports if spec is not None else None
     if not ports:
         return ""
-    return ",".join(sorted(f"{port.port}/{port.protocol or 'TCP'}" for port in ports))
+    return ",".join(
+        sorted(f"{port.port}/{port.protocol or 'TCP'}" for port in ports if port.port != _JUJU_PLACEHOLDER_PORT)
+    )
 
 
 def _keys(data: Mapping[str, str] | None) -> str:

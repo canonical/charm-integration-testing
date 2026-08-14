@@ -26,10 +26,15 @@ class InconsistencyCheck:
     drift.  Naming the *report attribute* (not the dataclass field) lets the
     recorder render a uniform ``old->new`` diff without knowing any concrete
     snapshot type.
+
+    ``ignore_empty_transition`` suppresses the drift when either visit's value is
+    empty, so an attribute coming into existence (or observed before it settles)
+    is not mistaken for a change of an established value.
     """
 
     qualifier: str
     attribute: str
+    ignore_empty_transition: bool = False
 
 
 @runtime_checkable
@@ -185,7 +190,9 @@ class ServiceSnapshot:
     The identity excludes ``cluster_ip`` because it is reassigned when a service
     is recreated; the stable ``service_type`` and ``ports`` describe the service
     contract that callers depend on and are compared through
-    :attr:`inconsistency_checks`.
+    :attr:`inconsistency_checks`.  ``ports`` omits the Juju placeholder port, and
+    ``ports_changed`` ignores empty transitions, so a service seen before its
+    workload opens its real ports does not read as drift.
     """
 
     name: str
@@ -198,7 +205,7 @@ class ServiceSnapshot:
     resource_type: ClassVar[str] = "service"
     inconsistency_checks: ClassVar[tuple[InconsistencyCheck, ...]] = (
         InconsistencyCheck(qualifier="type_changed", attribute="type"),
-        InconsistencyCheck(qualifier="ports_changed", attribute="ports"),
+        InconsistencyCheck(qualifier="ports_changed", attribute="ports", ignore_empty_transition=True),
     )
 
     @property

@@ -246,6 +246,42 @@ class TestServiceSource:
         # THEN the optional fields default to empty
         assert snapshots == [ServiceSnapshot(name="svc", namespace=MODEL, service_type="", cluster_ip="", ports="")]
 
+    def test_juju_placeholder_port_is_excluded_from_ports(self) -> None:
+        # GIVEN a Service still carrying only Juju's placeholder port
+        raw = SimpleNamespace(
+            metadata=_meta("target", labels={"app.kubernetes.io/name": "target"}),
+            spec=SimpleNamespace(
+                type="ClusterIP",
+                cluster_ip="10.1.2.3",
+                ports=[SimpleNamespace(port=65535, protocol="TCP")],
+            ),
+        )
+        client = _client(core=_FakeCoreApi(services=[raw]))
+
+        # WHEN the source collects snapshots
+        snapshots = ServiceSource().collect(client, MODEL)  # type: ignore[arg-type]
+
+        # THEN the placeholder port is filtered out, leaving no ports
+        assert snapshots[0].ports == ""
+
+    def test_real_ports_are_kept_when_placeholder_is_absent(self) -> None:
+        # GIVEN a Service that has opened its real ports alongside no placeholder
+        raw = SimpleNamespace(
+            metadata=_meta("target", labels={"app.kubernetes.io/name": "target"}),
+            spec=SimpleNamespace(
+                type="ClusterIP",
+                cluster_ip="10.1.2.3",
+                ports=[SimpleNamespace(port=5432, protocol="TCP"), SimpleNamespace(port=8008, protocol="TCP")],
+            ),
+        )
+        client = _client(core=_FakeCoreApi(services=[raw]))
+
+        # WHEN the source collects snapshots
+        snapshots = ServiceSource().collect(client, MODEL)  # type: ignore[arg-type]
+
+        # THEN the real ports are retained
+        assert snapshots[0].ports == "5432/TCP,8008/TCP"
+
 
 class TestConfigMapSource:
     def test_records_sorted_keys_and_excludes_values_from_identity(self) -> None:

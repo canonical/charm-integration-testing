@@ -20,6 +20,7 @@ from resource_tracking import (
     calculate_discrepancies,
     diff_snapshots,
 )
+from resource_tracking.snapshot import ServiceSnapshot
 from resource_tracking.tracker import ResourceObservation
 from test_suite.scheduler.states import State
 from test_suite.test_resource_consistency_report import (
@@ -40,6 +41,16 @@ def _pvc(name: str, storage: str = "1Gi", application: str = "") -> PvcSnapshot:
 
 def _qs(snapshot: PvcSnapshot, baseline: PvcSnapshot | None = None) -> QualifiedSnapshot:
     return QualifiedSnapshot(snapshot=snapshot, baseline=baseline)
+
+
+def _service(name: str, ports: str, service_type: str = "ClusterIP") -> ServiceSnapshot:
+    return ServiceSnapshot(
+        name=name,
+        namespace="test-model",
+        service_type=service_type,
+        cluster_ip="10.1.2.3",
+        ports=ports,
+    )
 
 
 def _raw_pvc(
@@ -337,6 +348,36 @@ class TestDiffSnapshots:
         # THEN it reads as a single 'resized' qualifier carrying its baseline,
         # never as a missing/extra pair
         assert qualifiers == {"resized": (_qs(_pvc("data-0", storage="2Gi"), baseline=_pvc("data-0", storage="1Gi")),)}
+
+    def test_ports_appearing_from_empty_is_not_flagged(self) -> None:
+        # GIVEN a Service first seen without ports (placeholder filtered out) then
+        # observed with its real ports opened
+        baseline = frozenset({_service("target", ports="")})
+        current = frozenset({_service("target", ports="5432/TCP,8008/TCP")})
+
+        # WHEN the sets are diffed
+        qualifiers = diff_snapshots(baseline, current)
+
+        # THEN the empty->real transition is not reported as ports_changed
+        assert qualifiers == {}
+
+    def test_ports_change_between_real_sets_is_flagged(self) -> None:
+        # GIVEN a Service whose established port set changes
+        baseline = frozenset({_service("target", ports="5432/TCP,8008/TCP")})
+        current = frozenset({_service("target", ports="5432/TCP")})
+
+        # WHEN the sets are diffed
+        qualifiers = diff_snapshots(baseline, current)
+
+        # THEN the real change is reported as ports_changed
+        assert qualifiers == {
+            "ports_changed": (
+                QualifiedSnapshot(
+                    snapshot=_service("target", ports="5432/TCP"),
+                    baseline=_service("target", ports="5432/TCP,8008/TCP"),
+                ),
+            )
+        }
 
 
 class TestCalculateDiscrepancies:

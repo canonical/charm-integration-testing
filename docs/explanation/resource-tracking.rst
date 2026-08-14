@@ -328,7 +328,7 @@ identity.
    * - ``service``
      - ``v1`` (``CoreV1Api``)
      - ``type_changed`` (type), ``ports_changed`` (ports)
-     - Excludes ``cluster_ip`` (reassigned on recreate).
+     - Excludes ``cluster_ip`` (reassigned on recreate) and the Juju placeholder port; ``ports_changed`` ignores empty transitions so a service seen before its workload opens ports is not drift.
    * - ``configmap``
      - ``v1`` (``CoreV1Api``)
      - ``keys_changed`` (data_keys)

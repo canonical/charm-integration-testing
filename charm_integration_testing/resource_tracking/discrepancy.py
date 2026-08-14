@@ -147,8 +147,13 @@ def _modifications(
     baseline_attributes = baseline.report_attributes()
     current_attributes = current.report_attributes()
     for check in current.inconsistency_checks:
-        if baseline_attributes.get(check.attribute) != current_attributes.get(check.attribute):
-            yield check.qualifier, QualifiedSnapshot(snapshot=current, baseline=baseline)
+        baseline_value = baseline_attributes.get(check.attribute)
+        current_value = current_attributes.get(check.attribute)
+        if baseline_value == current_value:
+            continue
+        if check.ignore_empty_transition and (not baseline_value or not current_value):
+            continue
+        yield check.qualifier, QualifiedSnapshot(snapshot=current, baseline=baseline)
 
 
 def diff_snapshots(
