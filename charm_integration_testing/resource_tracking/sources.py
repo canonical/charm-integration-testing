@@ -39,7 +39,7 @@ from .snapshot import (
 
 # Juju assigns this sentinel port to an application's Service until the charm
 # opens its real ports.  It is not part of the service contract -- it appears
-# only while the workload settles --  it is filtered out to avoid 
+# only while the workload settles --  it is filtered out to avoid
 # ``ports_changed`` between a settling and a settled observation.
 _JUJU_PLACEHOLDER_PORT = 65535
 

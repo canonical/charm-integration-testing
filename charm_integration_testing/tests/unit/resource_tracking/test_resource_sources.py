@@ -262,7 +262,7 @@ class TestServiceSource:
         snapshots = ServiceSource().collect(client, MODEL)  # type: ignore[arg-type]
 
         # THEN the placeholder port is filtered out, leaving no ports
-        assert snapshots[0].ports == ""
+        assert snapshots[0].report_attributes()["ports"] == ""
 
     def test_real_ports_are_kept_when_placeholder_is_absent(self) -> None:
         # GIVEN a Service that has opened its real ports alongside no placeholder
@@ -280,7 +280,7 @@ class TestServiceSource:
         snapshots = ServiceSource().collect(client, MODEL)  # type: ignore[arg-type]
 
         # THEN the real ports are retained
-        assert snapshots[0].ports == "5432/TCP,8008/TCP"
+        assert snapshots[0].report_attributes()["ports"] == "5432/TCP,8008/TCP"
 
 
 class TestConfigMapSource:
