@@ -21,6 +21,7 @@ import pytest
 
 from bundle_builder_x.bundle_builder import BundleBuilder, UncompletableBundleError
 from bundle_builder_x.charm import Charm, CharmEndpoint, EndpointType
+from bundle_builder_x.domain import ModelRef
 from bundle_builder_x.spec import AppSpec, IntegrationSpec, ModelSpec
 
 from .conftest import JUJU_VERSION, CharmhubClientStub, build_multi_model, build_single_model, make_charm
@@ -270,8 +271,7 @@ class TestFeatureCoherenceCrossModelConsistency:
                             IntegrationSpec(
                                 application="requirer",
                                 endpoint="svc",
-                                remote_model="neighbor",
-                                remote_controller="k8s",
+                                remote_model=ModelRef(name="neighbor", controller="k8s"),
                                 remote_application="provider",
                                 remote_endpoint="svc",
                                 offer_name="provider-offer",

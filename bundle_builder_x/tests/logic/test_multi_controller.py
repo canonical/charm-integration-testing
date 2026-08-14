@@ -13,6 +13,7 @@ from pydantic.dataclasses import dataclass
 
 from bundle_builder_x.bundle_builder import BundleBuilder
 from bundle_builder_x.charm import CharmEndpoint, EndpointType
+from bundle_builder_x.domain import ModelRef
 from bundle_builder_x.spec import AppSpec, IntegrationSpec, ModelSpec, SpecFile
 
 from .conftest import JUJU_VERSION, CharmhubClientStub, build_multi_model, make_charm
@@ -123,7 +124,7 @@ class TestSpecFileMultiControllerRejected:
                         IntegrationSpec(
                             application="lxd-app",
                             endpoint="metrics",
-                            remote_model="prod",  # ambiguous: not in models_by_name
+                            remote_model=ModelRef(name="prod"),  # ambiguous: not in models_by_name
                             remote_application="k8s-app",
                             remote_endpoint="scrape",
                         ),
@@ -172,8 +173,7 @@ class TestSpecFileCMRWithFullKey:
                         IntegrationSpec(
                             application="lxd-app",
                             endpoint="metrics",
-                            remote_model="prod",
-                            remote_controller="k8s",
+                            remote_model=ModelRef(name="prod", controller="k8s"),  # full key disambiguates
                             remote_application="k8s-app",
                             remote_endpoint="scrape",
                             url="k8s:admin/prod.k8s-app-offer",
@@ -198,7 +198,7 @@ class TestSpecFileCMRWithFullKey:
                         IntegrationSpec(
                             application="my-app",
                             endpoint="metrics",
-                            remote_model="db-model",  # plain alias works when unambiguous
+                            remote_model=ModelRef(name="db-model"),  # plain alias works when unambiguous
                             remote_application="pg",
                             remote_endpoint="scrape",
                             url="lxd:admin/db-model.pg-offer",
@@ -299,8 +299,7 @@ class TestMultiControllerSolver:
                         IntegrationSpec(
                             application="app",
                             endpoint="db",
-                            remote_model="prod",
-                            remote_controller="lxd",
+                            remote_model=ModelRef(name="prod", controller="lxd"),  # full key disambiguates
                             remote_application="pg",
                             remote_endpoint="database",
                             offer_name="postgresql-offer",

@@ -56,7 +56,7 @@ def classify_integrations(
         remote_model = integration.remote_model
         if remote_model is None:
             raise ValueError("cross-model integration must have a remote_model")
-        remote_model_key = integration.remote_model_key or remote_model
+        remote_model_key = cast(str, integration.remote_model_key)  # includes controller if set
         offer_name = integration.resolved_offer_name()
 
         # Keep the user-supplied URL if provided; otherwise leave as None.

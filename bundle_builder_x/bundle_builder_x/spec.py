@@ -9,7 +9,9 @@ from pathlib import Path
 from typing import cast
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from .domain import ModelRef
 
 
 class AppSpec(BaseModel):
@@ -38,10 +40,17 @@ class IntegrationSpec(BaseModel):
     endpoint: str
     remote_application: str
     remote_endpoint: str
-    remote_model: str | None = None
-    remote_controller: str | None = None
+    remote_model: ModelRef | None = None
     offer_name: str | None = None
     url: str | None = None
+
+    @field_validator("remote_model", mode="before")
+    @classmethod
+    def _coerce_remote_model(cls, v: object) -> object:
+        """Coerce a string to a ModelRef for convenience in YAML spec files."""
+        if isinstance(v, str):
+            return ModelRef(name=v)
+        return v
 
     @property
     def is_cross_model(self) -> bool:
@@ -51,14 +60,12 @@ class IntegrationSpec(BaseModel):
     def remote_model_key(self) -> str | None:
         """Lookup key for the remote model in ``models_by_name``.
 
-        Returns ``controller/name`` when ``remote_controller`` is set, otherwise
-        the plain ``remote_model`` value.
+        Returns ``controller/name`` when remote model's ``controller`` is set, otherwise
+        the plain model name.
         """
         if self.remote_model is None:
             return None
-        if self.remote_controller is not None:
-            return f"{self.remote_controller}/{self.remote_model}"
-        return self.remote_model
+        return self.remote_model.key
 
     def resolved_offer_name(self) -> str:
         """Return the offer name, falling back to ``<remote_application>-offer``."""
@@ -194,7 +201,6 @@ class SpecFile(BaseModel):
                     seen_local.add(local_key)
                     continue
 
-                remote_model = cast(str, integration.remote_model)  # guaranteed by is_cross_model
                 remote_model_key = cast(str, integration.remote_model_key)  # includes controller if set
 
                 # A CMR whose remote_model resolves to the current model is nonsensical;
@@ -237,21 +243,21 @@ class SpecFile(BaseModel):
                     if integration.remote_application not in remote_model_spec.applications:
                         raise ValueError(
                             f"Model '{model_name}': cross-model integration references application "
-                            f"'{integration.remote_application}' in model '{remote_model}', "
+                            f"'{integration.remote_application}' in model '{remote_model_key}', "
                             f"but that application is not defined there"
                         )
                     # In-spec CMR: remote model must have controller set (unless url is provided explicitly)
                     if integration.url is None and remote_model_spec.controller is None:
                         raise ValueError(
                             f"Model '{model_name}': cross-model integration references model "
-                            f"'{remote_model}' which has no 'controller' set"
+                            f"'{remote_model_key}' which has no 'controller' set"
                         )
                 else:
                     # External CMR: url is required
                     if integration.url is None:
                         raise ValueError(
                             f"Model '{model_name}': cross-model integration to external model "
-                            f"'{remote_model}' requires a 'url' field"
+                            f"'{remote_model_key}' requires a 'url' field"
                         )
         return self
 
