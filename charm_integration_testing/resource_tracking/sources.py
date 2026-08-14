@@ -37,7 +37,6 @@ from .snapshot import (
     StatefulSetSnapshot,
 )
 
-
 # Juju assigns this sentinel port to an application's Service until the charm
 # opens its real ports.  It is not part of the service contract -- it appears
 # only while the workload settles --  it is filtered out to avoid 
