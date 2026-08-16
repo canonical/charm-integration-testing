@@ -56,8 +56,12 @@ class IntegrationSpec(BaseModel):
                 data["remote_model"] = {"name": remote_model, "controller": remote_controller}
             elif isinstance(remote_model, dict):
                 remote_model = dict(remote_model)
-                remote_model.setdefault("controller", remote_controller)
+                if remote_model.get("controller") is None:
+                    remote_model["controller"] = remote_controller
                 data["remote_model"] = remote_model
+            elif isinstance(remote_model, ModelRef):
+                if remote_model.controller is None:
+                    data["remote_model"] = remote_model.model_copy(update={"controller": remote_controller})
         return data
 
     @field_validator("remote_model", mode="before")
