@@ -67,7 +67,7 @@ def classify_integrations(
         # domain is keyed by model_spec.key (which may be controller/name).
         # Fall back to remote_model_key when remote_spec.name is None (unit tests that
         # construct ModelSpec directly without going through SpecFile validation).
-        remote_ref = ModelRef(name=remote_model_key)
+        remote_ref = remote_model
         if remote_model_key in all_models:
             remote_spec = all_models[remote_model_key]
             if remote_spec.name is not None:

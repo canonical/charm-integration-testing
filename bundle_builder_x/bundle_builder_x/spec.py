@@ -44,12 +44,35 @@ class IntegrationSpec(BaseModel):
     offer_name: str | None = None
     url: str | None = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def _merge_legacy_remote_controller(cls, data: object) -> object:
+        """Backward-compat: fold a legacy top-level ``remote_controller`` into ``remote_model.controller``."""
+        if isinstance(data, dict) and "remote_controller" in data:
+            data = dict(data)
+            remote_controller = data.pop("remote_controller")
+            remote_model = data.get("remote_model")
+            if isinstance(remote_model, str):
+                data["remote_model"] = {"name": remote_model, "controller": remote_controller}
+            elif isinstance(remote_model, dict):
+                remote_model = dict(remote_model)
+                remote_model.setdefault("controller", remote_controller)
+                data["remote_model"] = remote_model
+        return data
+
     @field_validator("remote_model", mode="before")
     @classmethod
     def _coerce_remote_model(cls, v: object) -> object:
         """Coerce a string to a ModelRef for convenience in YAML spec files."""
         if isinstance(v, str):
             return ModelRef(name=v)
+        return v
+
+    @field_validator("remote_model")
+    @classmethod
+    def _validate_remote_model_name(cls, v: ModelRef | None) -> ModelRef | None:
+        if v is not None and not v.name:
+            raise ValueError("remote_model must have a non-empty name")
         return v
 
     @property
