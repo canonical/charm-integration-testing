@@ -60,9 +60,7 @@ class TestTemporalExtension:
             )
 
             # Also, prepping some config for the airbyte-k8s app to mock its default config pointing to temporal
-            juju.configured_applications.append(
-                (self.test_model_uri, app_name, {"temporal-host": "temporal-k8s:7233"})
-            )
+            juju.configured_applications.append((self.test_model_uri, app_name, {"temporal-host": "temporal-k8s:7233"}))
 
             # GIVEN a model with an airbyte-k8s application
             juju.applications = {app_name: charm_name}

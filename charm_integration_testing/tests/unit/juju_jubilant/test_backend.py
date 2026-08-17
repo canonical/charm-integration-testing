@@ -766,7 +766,8 @@ class TestJubilantBackend:
 
             # THEN the timeout preserves details for every failing model
             assert (
-                exc_info.value.wait_state.message == f"waiting for models: [{model_1.uri}, {model_2.uri}] to become idle"
+                exc_info.value.wait_state.message
+                == f"waiting for models: [{model_1.uri}, {model_2.uri}] to become idle"
             )
             assert f"{model_1.uri}::app" in exc_info.value.wait_state.noncompliant_applications
             assert f"{model_2.uri}::app/0" in exc_info.value.wait_state.noncompliant_units

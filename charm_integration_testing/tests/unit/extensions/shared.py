@@ -328,7 +328,9 @@ class JujuStub(NullJujuBackend):
         """Wait for model to become idle (captures call for verification)"""
         self.waited_idle.append((_model_key(model), str(timeout), count, strict_timeout, applications))
 
-    def wait_application_scaled(self, model: "JujuModelHandle | str", application: str, timeout: timedelta | None) -> None:
+    def wait_application_scaled(
+        self, model: "JujuModelHandle | str", application: str, timeout: timedelta | None
+    ) -> None:
         """Wait for application to be scaled (captures call for verification)"""
         self.waited_scaled.append((_model_key(model), application, str(timeout)))
 

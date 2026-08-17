@@ -46,9 +46,7 @@ class ValidatorInjectorExtension(JujuExtension):
         self.juju = juju
         self.logger = logger.getChild("ValidatorInjectorExtension")
 
-    def post_validate(
-        self, model: JujuModelHandle, application: str, level: str
-    ) -> dict[str, list[ValidationResult]]:
+    def post_validate(self, model: JujuModelHandle, application: str, level: str) -> dict[str, list[ValidationResult]]:
         results: dict[str, list[ValidationResult]] = {}
         model_is_k8s = self.juju.is_k8s_model(model)
         for unit in self.juju.application_units(model, application):

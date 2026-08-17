@@ -18,9 +18,7 @@ class JujuExtension(ABC):
     def pre_remove(self, model: JujuModelHandle, *applications: str) -> None:
         pass
 
-    def post_validate(
-        self, model: JujuModelHandle, application: str, level: str
-    ) -> dict[str, list[ValidationResult]]:
+    def post_validate(self, model: JujuModelHandle, application: str, level: str) -> dict[str, list[ValidationResult]]:
         return {}
 
     def post_bootstrap_controller(self, controller: str) -> None:

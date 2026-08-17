@@ -238,9 +238,7 @@ class JujuClient:
         self.logger.info(f"Removing applications: {', '.join(applications)}.")
         self.backend.remove_applications(model, *applications)
 
-    def wait_for_removal(
-        self, *applications: str, model: JujuModelHandle, timeout: timedelta | None = None
-    ) -> None:
+    def wait_for_removal(self, *applications: str, model: JujuModelHandle, timeout: timedelta | None = None) -> None:
         self.logger.info(
             f"{self._waiting_timeout_log(timeout)} for removal of application(s) {', '.join(applications)}."
         )
@@ -432,9 +430,7 @@ class JujuClient:
             extension.post_bootstrap_controller(controller)
 
     def add_model(self, controller: str, model: str, model_config: dict[str, str]) -> None:
-        self.logger.info(
-            f"Creating model '{model}' with configuration '{model_config}' on controller '{controller}'."
-        )
+        self.logger.info(f"Creating model '{model}' with configuration '{model_config}' on controller '{controller}'.")
         self.backend.add_model(controller=controller, model=model, model_config=model_config)
 
         # Call extensions
