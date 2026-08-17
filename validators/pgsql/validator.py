@@ -53,7 +53,9 @@ class PgsqlValidator(BaseValidator):
         # --- 5. Connect ---
         try:
             conn = self._connect(data["master"])
-            checks.append(ValidationCheck(name="connect", passed=True, message=f"Connected to {data['host']}."))
+            checks.append(
+                ValidationCheck(name="connect", passed=True, message=f"Connected to {self._dsn_host(data['master'])}.")
+            )
         except Exception as exc:
             checks.append(ValidationCheck(name="connect", passed=False, message=str(exc)))
             return self._make_result(level="simple", checks=checks)
@@ -114,7 +116,9 @@ class PgsqlValidator(BaseValidator):
         try:
             conn = self._connect(data["master"])
             conn.autocommit = True
-            checks.append(ValidationCheck(name="connect", passed=True, message=f"Connected to {data['host']}."))
+            checks.append(
+                ValidationCheck(name="connect", passed=True, message=f"Connected to {self._dsn_host(data['master'])}.")
+            )
         except Exception as exc:
             checks.append(ValidationCheck(name="connect", passed=False, message=str(exc)))
             return self._make_result(level="deep", checks=checks)
@@ -246,6 +250,18 @@ class PgsqlValidator(BaseValidator):
             passed=False,
             message=f"DSN database '{dsn_db}' does not match databag 'database' field '{expected_db}'.",
         )
+
+    def _dsn_host(self, dsn: str) -> str:
+        """Return the host actually targeted by *dsn*, not the databag's generic `host` field.
+
+        The `host` field can point at a different address than the `master`/`standbys` DSN
+        (e.g. `host` is the endpoints address while `master` targets the primary), so
+        connect-result messages must reflect the DSN that was actually used.
+        """
+        try:
+            return str(psycopg2.extensions.parse_dsn(dsn).get("host", ""))
+        except Exception:
+            return ""
 
     def _check_relation_exists(self, level: ValidationLevel) -> ValidationResult | None:
         """Return an ERROR result if the remote app is absent, else None."""

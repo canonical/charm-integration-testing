@@ -169,6 +169,20 @@ class TestPgsqlValidatorSimple:
         db_check = next(c for c in result.checks if c.name == "database_consistency")
         assert db_check.passed
 
+    def test_connect_message_reports_master_dsn_host_not_databag_host(self) -> None:
+        # Regression test: `host` (generic/endpoints address) can differ from the host
+        # actually targeted by the `master` DSN (e.g. the primary). The connect-result
+        # message must reflect the DSN that was actually connected to.
+        validator = _make_validator(VALID_DATABAG)
+
+        with patch("validators.pgsql.validator.psycopg2.connect", return_value=ConnStub()):
+            result = validator.validate(level="simple")
+
+        connect_check = next(c for c in result.checks if c.name == "connect")
+        assert connect_check.passed
+        assert "postgresql-k8s-primary.svc.cluster.local" in connect_check.message
+        assert "postgresql-k8s-0.endpoints.svc.cluster.local" not in connect_check.message
+
     def test_fails_database_consistency_when_dsn_db_differs(self) -> None:
         # GIVEN a databag where `database` does not match the dbname in the master DSN
         databag = {**VALID_DATABAG, "database": "other_db"}
@@ -347,6 +361,22 @@ class TestPgsqlValidatorDeep:
         assert cleanup_check.passed
         latency_check = next(c for c in result.checks if c.name == "latency")
         assert latency_check.passed
+
+    def test_deep_connect_message_reports_master_dsn_host_not_databag_host(self) -> None:
+        # Regression test: `host` (generic/endpoints address) can differ from the host
+        # actually targeted by the `master` DSN (e.g. the primary). The connect-result
+        # message must reflect the DSN that was actually connected to.
+        validator = _make_validator(VALID_DATABAG)
+        cursor = CursorStub(fetchone_rows=[(42,), ("validator-probe",)])
+        conn = ConnStub(cursor_stub=cursor)
+
+        with patch("validators.pgsql.validator.psycopg2.connect", return_value=conn):
+            result = validator.validate(level="deep")
+
+        connect_check = next(c for c in result.checks if c.name == "connect")
+        assert connect_check.passed
+        assert "postgresql-k8s-primary.svc.cluster.local" in connect_check.message
+        assert "postgresql-k8s-0.endpoints.svc.cluster.local" not in connect_check.message
 
     def test_deep_latency_excludes_credential_resolution_time(self) -> None:
         # Regression test for: cross-model/secrets-based credential resolution
