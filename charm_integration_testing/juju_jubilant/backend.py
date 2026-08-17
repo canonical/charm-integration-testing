@@ -12,6 +12,7 @@ import stat
 import tempfile
 import time
 import warnings
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from typing import Any, Callable
 
@@ -231,6 +232,29 @@ class JubilantBackend(JujuCmdBackend):
             )
         raise JujuWaitTimeoutError(wait_state=noncompliant_wait_state)
 
+    @staticmethod
+    def _combine_wait_states(wait_states: dict[str, JujuWaitState]) -> JujuWaitState:
+        models = ", ".join(sorted(wait_states))
+        return JujuWaitState(
+            message=f"waiting for models: [{models}] to become idle",
+            insufficient_status_checks=any(state.insufficient_status_checks for state in wait_states.values()),
+            noncompliant_applications={
+                f"{model}::{application}": application_state
+                for model, state in wait_states.items()
+                for application, application_state in state.noncompliant_applications.items()
+            },
+            noncompliant_units={
+                f"{model}::{unit}": unit_state
+                for model, state in wait_states.items()
+                for unit, unit_state in state.noncompliant_units.items()
+            },
+            noncompliant_unit_agents={
+                f"{model}::{unit}": unit_agent_state
+                for model, state in wait_states.items()
+                for unit, unit_agent_state in state.noncompliant_unit_agents.items()
+            },
+        )
+
     def wait_idle(
         self,
         model: JujuModelHandle,
@@ -254,6 +278,38 @@ class JubilantBackend(JujuCmdBackend):
             successes=count,
             strict_timeout=strict_timeout,
         )
+
+    def wait_idle_multi_model(
+        self,
+        models: list[JujuModelHandle],
+        timeout: timedelta | None,
+        count: int | None,
+        strict_timeout: bool = False,
+    ) -> None:
+        unique_models = sorted(set(models), key=lambda m: m.uri)
+        if not unique_models:
+            return
+
+        timeout_wait_states: dict[str, JujuWaitState] = {}
+        with ThreadPoolExecutor(max_workers=len(unique_models)) as executor:
+            future_by_model = {
+                model: executor.submit(
+                    self.wait_idle,
+                    model=model,
+                    timeout=timeout,
+                    count=count,
+                    strict_timeout=strict_timeout,
+                )
+                for model in unique_models
+            }
+            for model, future in future_by_model.items():
+                try:
+                    future.result()
+                except JujuWaitTimeoutError as error:
+                    timeout_wait_states[model.uri] = error.wait_state
+
+        if timeout_wait_states:
+            raise JujuWaitTimeoutError(wait_state=self._combine_wait_states(timeout_wait_states))
 
     def wait_application_settled(self, model: JujuModelHandle, application: str, timeout: timedelta | None) -> None:
         self.wait(

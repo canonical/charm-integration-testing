@@ -81,6 +81,22 @@ class MigrateModelBackendStub(NullJujuBackend):
         self.migrated_models.append((model_name, source_controller, target_controller))
 
 
+@dataclass
+class WaitIdleBackendStub(NullJujuBackend):
+    """Backend stub that records multi-model idle waits."""
+
+    calls: list[tuple[list[str], timedelta | None, int | None, bool]] = field(default_factory=list)
+
+    def wait_idle_multi_model(
+        self,
+        models: list[str],
+        timeout: timedelta | None,
+        count: int | None,
+        strict_timeout: bool = False,
+    ) -> None:
+        self.calls.append((models, timeout, count, strict_timeout))
+
+
 class ExtensionStub(JujuExtension):
     """Extension that returns configurable validate results."""
 
@@ -181,6 +197,38 @@ def _app_info(charm: str = "postgresql") -> JujuApplicationInfo:
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
+
+class TestJujuClientMultiModelIdleForPeriod:
+    def test_delegates_models_to_wait_idle(self) -> None:
+        # GIVEN a client with a backend that records idle waits
+        backend = WaitIdleBackendStub()
+        client = JujuClient(backend, LoggerStub(), [])  # type: ignore[arg-type]
+        timeout = timedelta(minutes=5)
+
+        # WHEN waiting for multiple models to become idle
+        client.multi_model_idle_for_period(
+            ["controller-1:model-1", "controller-2:model-2"],
+            timeout=timeout,
+            count=4,
+            strict_timeout=True,
+        )
+
+        # THEN the model list is passed to the consolidated backend method
+        assert backend.calls == [(["controller-1:model-1", "controller-2:model-2"], timeout, 4, True)]
+
+    def test_empty_model_list_returns_without_logging_or_waiting(self) -> None:
+        # GIVEN a client with an empty model list
+        backend = WaitIdleBackendStub()
+        logger = LoggerStub()
+        client = JujuClient(backend, logger, [])  # type: ignore[arg-type]
+
+        # WHEN waiting for the models
+        client.multi_model_idle_for_period([])
+
+        # THEN nothing is logged or delegated
+        assert logger.infos == []
+        assert backend.calls == []
 
 
 class TestJujuValidationError:

@@ -4,6 +4,7 @@
 from dataclasses import field
 from datetime import datetime, timedelta
 from pathlib import Path
+from threading import Barrier
 from typing import Any, Callable
 from unittest.mock import patch
 
@@ -617,6 +618,187 @@ class TestJubilantBackend:
                 ]
                 with pytest.raises(JujuWaitTimeoutError):
                     backend.wait_idle("test-model", timedelta(milliseconds=100), count=3)
+
+        def test_all_models_become_idle(self) -> None:
+            # GIVEN two models each tracked by a separate stub (both report active)
+            stub_1 = StatusStub(
+                application_statuses={"app": "active"},
+                unit_workload_statuses={"app/0": "active"},
+                unit_juju_statuses={"app/0": "idle"},
+            )
+            stub_2 = StatusStub(
+                application_statuses={"app": "active"},
+                unit_workload_statuses={"app/0": "active"},
+                unit_juju_statuses={"app/0": "idle"},
+            )
+
+            class TwoModelClientStub(JubilantClient):
+                def model(self, model: JujuModelHandle | str | None) -> Any:
+                    model_name = model.model if isinstance(model, JujuModelHandle) else model
+                    if model_name == "model-1":
+                        return stub_1
+                    return stub_2
+
+            backend = JubilantBackend(TwoModelClientStub())
+            backend.default_delay = timedelta(0)
+
+            model_1 = JujuModelHandle(controller="test-controller", model="model-1")
+            model_2 = JujuModelHandle(controller="test-controller", model="model-2")
+
+            # WHEN waiting for both models
+            backend.wait_idle_multi_model([model_1, model_2], timeout=timedelta(seconds=10), count=3)
+
+            # THEN each single-model wait completes
+            assert stub_1.call_count == 3
+            assert stub_2.call_count == 3
+
+        def test_multi_model_wait_delegates_unique_models(self) -> None:
+            # GIVEN a backend that records single-model waits
+            calls: list[tuple[str, timedelta | None, int | None, bool]] = []
+
+            class RecordingBackend(JubilantBackend):
+                def wait_idle(
+                    self,
+                    model: JujuModelHandle,
+                    timeout: timedelta | None,
+                    count: int | None,
+                    strict_timeout: bool = False,
+                    applications: list[str] | None = None,
+                ) -> None:
+                    calls.append((model.uri, timeout, count, strict_timeout))
+
+            backend = RecordingBackend()
+            timeout = timedelta(seconds=10)
+            model_1 = JujuModelHandle(controller="test-controller", model="model-1")
+            model_2 = JujuModelHandle(controller="test-controller", model="model-2")
+
+            # WHEN waiting for models with a duplicate
+            backend.wait_idle_multi_model(
+                [model_2, model_1, model_2],
+                timeout=timeout,
+                count=4,
+                strict_timeout=True,
+            )
+
+            # THEN each unique model is delegated once with the same settings
+            assert sorted(calls) == [
+                (model_1.uri, timeout, 4, True),
+                (model_2.uri, timeout, 4, True),
+            ]
+
+        def test_empty_multi_model_wait_returns_immediately(self) -> None:
+            # GIVEN a backend
+            backend = JubilantBackend()
+
+            # WHEN waiting for no models
+            backend.wait_idle_multi_model([], timeout=timedelta(seconds=10), count=3)
+
+            # THEN no error is raised
+
+        def test_multi_model_wait_runs_single_model_waits_concurrently(self) -> None:
+            # GIVEN waits that only complete after both worker threads have started
+            workers_started = Barrier(2, timeout=5)
+
+            class ConcurrentBackend(JubilantBackend):
+                def wait_idle(
+                    self,
+                    model: JujuModelHandle,
+                    timeout: timedelta | None,
+                    count: int | None,
+                    strict_timeout: bool = False,
+                    applications: list[str] | None = None,
+                ) -> None:
+                    workers_started.wait()
+
+            backend = ConcurrentBackend()
+
+            # WHEN waiting for both models
+            backend.wait_idle_multi_model(
+                [
+                    JujuModelHandle(controller="test-controller", model="model-1"),
+                    JujuModelHandle(controller="test-controller", model="model-2"),
+                ],
+                timeout=timedelta(seconds=10),
+                count=3,
+            )
+
+            # THEN both workers reached the barrier concurrently
+            assert not workers_started.broken
+
+        def test_multi_model_wait_aggregates_timeouts(self) -> None:
+            # GIVEN multiple models whose single-model waits time out differently
+            class TimeoutBackend(JubilantBackend):
+                def wait_idle(
+                    self,
+                    model: JujuModelHandle,
+                    timeout: timedelta | None,
+                    count: int | None,
+                    strict_timeout: bool = False,
+                    applications: list[str] | None = None,
+                ) -> None:
+                    if model.model == "model-1":
+                        raise JujuWaitTimeoutError(
+                            JujuWaitState(
+                                message="not ready",
+                                noncompliant_applications={"app": None},
+                            )
+                        )
+                    raise JujuWaitTimeoutError(
+                        JujuWaitState(
+                            message="agent not idle",
+                            insufficient_status_checks=True,
+                            noncompliant_units={"app/0": None},
+                            noncompliant_unit_agents={"app/0": None},
+                        )
+                    )
+
+            backend = TimeoutBackend()
+            model_1 = JujuModelHandle(controller="test-controller", model="model-1")
+            model_2 = JujuModelHandle(controller="test-controller", model="model-2")
+
+            # WHEN waiting for both models
+            with pytest.raises(JujuWaitTimeoutError) as exc_info:
+                backend.wait_idle_multi_model(
+                    [model_1, model_2],
+                    timeout=timedelta(seconds=10),
+                    count=3,
+                )
+
+            # THEN the timeout preserves details for every failing model
+            assert (
+                exc_info.value.wait_state.message == f"waiting for models: [{model_1.uri}, {model_2.uri}] to become idle"
+            )
+            assert f"{model_1.uri}::app" in exc_info.value.wait_state.noncompliant_applications
+            assert f"{model_2.uri}::app/0" in exc_info.value.wait_state.noncompliant_units
+            assert f"{model_2.uri}::app/0" in exc_info.value.wait_state.noncompliant_unit_agents
+            assert exc_info.value.wait_state.insufficient_status_checks
+
+        def test_multi_model_wait_propagates_unexpected_errors(self) -> None:
+            # GIVEN a model whose single-model wait fails unexpectedly
+            class ErrorBackend(JubilantBackend):
+                def wait_idle(
+                    self,
+                    model: JujuModelHandle,
+                    timeout: timedelta | None,
+                    count: int | None,
+                    strict_timeout: bool = False,
+                    applications: list[str] | None = None,
+                ) -> None:
+                    if model.model == "model-2":
+                        raise RuntimeError("status failed")
+
+            backend = ErrorBackend()
+
+            # WHEN / THEN the unexpected error is not converted or swallowed
+            with pytest.raises(RuntimeError, match="status failed"):
+                backend.wait_idle_multi_model(
+                    [
+                        JujuModelHandle(controller="test-controller", model="model-1"),
+                        JujuModelHandle(controller="test-controller", model="model-2"),
+                    ],
+                    timeout=timedelta(seconds=10),
+                    count=3,
+                )
 
     class TestWaitApplicationSettled:
         def test_application_settled(self) -> None:

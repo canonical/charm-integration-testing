@@ -12,11 +12,11 @@ from kubernetes_client import KubernetesClient
 from validators.base.validator import ValidationResult
 
 
-def _model_key(model: "JujuModelHandle | str") -> str:
+def _model_key(model: JujuModelHandle | str) -> str:
     """Normalize a model reference for recording/comparison in test stubs.
 
-    Accepts either the new JujuModelHandle or a plain str (still used by extensions
-    not yet migrated), so this shared stub keeps working for both during the migration.
+    Accepts either the new JujuModelHandle or a plain str for legacy callers
+    that still pass a model name/URI.
     """
     return model.uri if isinstance(model, JujuModelHandle) else model
 
@@ -60,6 +60,15 @@ class NullJujuBackend(JujuBackend):
         count: int | None,
         strict_timeout: bool = False,
         applications: list[str] | None = None,
+    ) -> None:
+        raise NotImplementedError
+
+    def wait_idle_multi_model(
+        self,
+        models: list[str],
+        timeout: timedelta | None,
+        count: int | None,
+        strict_timeout: bool = False,
     ) -> None:
         raise NotImplementedError
 

@@ -78,6 +78,23 @@ class JujuClient:
         self.logger.info(f"{self._waiting_timeout_log(timeout)} to be idle.")
         self.backend.wait_idle(model=model, timeout=timeout, count=count, strict_timeout=strict_timeout)
 
+    def multi_model_idle_for_period(
+        self,
+        models: list[JujuModelHandle],
+        timeout: timedelta | None = None,
+        count: int = 10,
+        strict_timeout: bool = False,
+    ) -> None:
+        if not models:
+            return
+        self.logger.info(f"{self._waiting_timeout_log(timeout)} for models {models} to be idle.")
+        self.backend.wait_idle_multi_model(
+            models=models,
+            timeout=timeout,
+            count=count,
+            strict_timeout=strict_timeout,
+        )
+
     def print_status(self, model: JujuModelHandle) -> None:
         separator = "-" * 80
         info = f"Juju status for model '{model.uri}'"
