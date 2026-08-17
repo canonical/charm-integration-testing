@@ -12,15 +12,14 @@ from resource_tracking import (
     DiscrepancyEntry,
     KubernetesResourceCollector,
     ModelResourceDiscrepancy,
-    PvcSnapshot,
-    PvcSource,
     QualifiedSnapshot,
     ResourceDiscrepancyError,
     StateResourceTracker,
     calculate_discrepancies,
     diff_snapshots,
 )
-from resource_tracking.snapshot import ServiceSnapshot
+from resource_tracking.snapshot import PvcSnapshot, ServiceSnapshot
+from resource_tracking.sources import PvcSource
 from resource_tracking.tracker import ResourceObservation
 from test_suite.scheduler.states import State
 from test_suite.test_resource_consistency_report import (
@@ -173,6 +172,40 @@ class TestPvcSource:
 
         # THEN the application defaults to empty
         assert snapshots[0].application == ""
+
+    def test_volatile_volume_id_in_name_is_normalized(self) -> None:
+        # GIVEN a Juju charm-storage PVC whose name embeds a volatile 8-hex volume id
+        client = _FakeKubernetesClient([_raw_pvc("postgresql-k8s-pgdata-b0ba0188-postgresql-k8s-0")])
+
+        # WHEN the source collects snapshots
+        snapshots = PvcSource().collect(client, "test-model")  # type: ignore[arg-type]
+
+        # THEN the volume id is replaced with a placeholder, stabilising the name
+        assert snapshots[0].name == "postgresql-k8s-pgdata-<volume-id>-postgresql-k8s-0"
+
+    def test_different_volume_ids_normalize_to_the_same_identity(self) -> None:
+        # GIVEN the same logical claim seen across two visits with different volume ids
+        first = PvcSource().collect(
+            _FakeKubernetesClient([_raw_pvc("postgresql-k8s-pgdata-b0ba0188-postgresql-k8s-0")]),  # type: ignore[arg-type]
+            "test-model",
+        )[0]
+        second = PvcSource().collect(
+            _FakeKubernetesClient([_raw_pvc("postgresql-k8s-pgdata-81a553d9-postgresql-k8s-0")]),  # type: ignore[arg-type]
+            "test-model",
+        )[0]
+
+        # THEN the normalized identity matches, so it is not diffed as missing/extra
+        assert first.identity == second.identity
+
+    def test_name_without_a_volume_id_is_left_unchanged(self) -> None:
+        # GIVEN a PVC name that carries no 8-hex volume id
+        client = _FakeKubernetesClient([_raw_pvc("data-postgresql-0")])
+
+        # WHEN the source collects snapshots
+        snapshots = PvcSource().collect(client, "test-model")  # type: ignore[arg-type]
+
+        # THEN the name passes through untouched
+        assert snapshots[0].name == "data-postgresql-0"
 
     def test_none_spec_and_status_do_not_abort_collection(self) -> None:
         # GIVEN a raw PVC whose optional spec/status subtrees are entirely None

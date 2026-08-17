@@ -50,8 +50,11 @@ stays small and substrate-agnostic:
   ``<sa>-token-XXXXX`` name), because such a Secret gets a different name every
   time it is recreated and so cannot be diffed by ``(namespace, name)`` identity;
   tracking it would report a spurious ``missing`` + ``extra`` on every
-  recreation. These sources are Kubernetes-specific by design; other substrates
-  supply their own source interface.
+  recreation. ``PvcSource`` faces the same volatile-name problem but keeps the
+  claim trackable by *normalizing* the Juju volume id embedded in the PVC name to
+  a ``<volume-id>`` placeholder instead of dropping the resource. These sources
+  are Kubernetes-specific by design; other substrates supply their own source
+  interface.
 
 **Collectors** (``resource_tracking.collectors``)
   A ``ResourceCollector`` gathers snapshots from one *substrate*.
@@ -281,6 +284,19 @@ dataclass with:
 empty strings and reading the owning application from the name label. It is one
 of the sources in ``DEFAULT_KUBERNETES_SOURCES``, the tuple the test suite passes
 to ``KubernetesResourceCollector``.
+
+Juju provisions charm storage as PVCs whose name embeds a volatile 8-hex volume
+id -- the first block of the storage UUID -- between the storage label and the
+StatefulSet suffix, for example ``postgresql-k8s-pgdata-b0ba0188-postgresql-k8s-0``.
+That id is minted afresh whenever the claim is (re)provisioned, so two visits to
+the *same* logical storage would otherwise carry different names and be diffed as
+a spurious ``missing`` / ``extra`` pair. ``PvcSource`` therefore normalizes the
+volume id to a ``<volume-id>`` placeholder before building the snapshot, restoring
+a stable ``(namespace, name)`` identity. Unlike ``SecretSource``, which *drops*
+volatile-named Secrets outright (their content is not worth tracking), a PVC
+still carries meaningful drift (``resized``, ``storage_class_changed``), so its
+name is normalized rather than dropped.
+
 
 Additional resource kinds
 -------------------------

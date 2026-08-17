@@ -127,11 +127,11 @@ class PvcSnapshot:
 class StatefulSetSnapshot:
     """Immutable point-in-time view of a single StatefulSet.
 
-    StatefulSets are how Juju runs sidecar k8s charms (one per application), so
-    the identity carries the declared ``replicas`` and container ``image`` -- the
-    spec fields that describe the intended workload -- while excluding the
-    volatile ``status`` (ready/updated replica counts) that merely reflects
-    rollout progress.
+    StatefulSets are how Juju runs sidecar k8s charms (one per application). The
+    declared ``replicas`` and container ``image`` -- the spec fields that describe
+    the intended workload -- are compared through :attr:`inconsistency_checks`,
+    while the volatile ``status`` (ready/updated replica counts) that merely
+    reflects rollout progress is excluded.
     """
 
     name: str

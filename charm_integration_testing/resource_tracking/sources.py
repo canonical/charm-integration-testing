@@ -157,6 +157,26 @@ def _has_volatile_name(secret: Any) -> bool:
     return not _application(metadata.labels if metadata is not None else None) and _is_juju_secret_content_name(name)
 
 
+# Juju provisions charm storage as PersistentVolumeClaims whose name embeds an
+# 8-hex volume id -- the first block of the storage UUID -- between the storage
+# label and the StatefulSet suffix, e.g.
+# ``postgresql-k8s-pgdata-b0ba0188-postgresql-k8s-0``. That id is minted afresh
+# whenever the claim is (re)provisioned, so two visits to the *same* logical
+# storage carry different names and would be diffed as a spurious missing/extra
+# pair. Unlike volatile Secrets -- which are dropped outright because their
+# content is not worth tracking -- a PVC still carries meaningful drift
+# (``resized``, ``storage_class_changed``), so its name is normalized rather than
+# dropped: replacing the volume id with a placeholder restores a stable
+# ``(namespace, name)`` identity while keeping the claim trackable.
+_JUJU_PVC_VOLUME_ID_RE = re.compile(r"(?<=-)[0-9a-f]{8}(?=-)")
+_PVC_VOLUME_ID_PLACEHOLDER = "<volume-id>"
+
+
+def _normalize_pvc_name(name: str) -> str:
+    """Return a PVC name with its volatile Juju volume id replaced by a placeholder."""
+    return _JUJU_PVC_VOLUME_ID_RE.sub(_PVC_VOLUME_ID_PLACEHOLDER, name)
+
+
 class KubernetesResourceSource(Protocol):
     """Collects snapshots of a single Kubernetes resource kind for one model."""
 
@@ -183,7 +203,7 @@ class PvcSource:
             requests = spec.resources.requests if spec is not None and spec.resources is not None else None
             snapshots.append(
                 PvcSnapshot(
-                    name=pvc.metadata.name,
+                    name=_normalize_pvc_name(pvc.metadata.name),
                     namespace=model,
                     storage_class=(spec.storage_class_name if spec is not None else None) or "",
                     requested_storage=(requests or {}).get("storage", ""),
