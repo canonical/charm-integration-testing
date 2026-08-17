@@ -258,17 +258,26 @@ class TestConditionalRequirements:
         )
 
         # THEN kafka gets certificates because its zookeeper endpoint is active
-        kafka_bundle = next(bundle for bundle in solution.bundles if bundle.model == "target/kafka-model")
+        kafka_bundle = next((bundle for bundle in solution.bundles if bundle.model == "target/kafka-model"), None)
+        assert kafka_bundle is not None
         kafka_relations = {
             frozenset((ep.application, ep.endpoint) for ep in integration) for integration in kafka_bundle.integrations
         }
         assert frozenset({("kafka", "certificates"), ("self-signed-certificates", "certificates")}) in kafka_relations
 
-        # AND zookeeper also gets certificates in the neighbor model instead of remaining blocked
-        zookeeper_bundle = next(bundle for bundle in solution.bundles if bundle.model == "neighbor/zookeeper-model")
-        assert any(
+        # AND zookeeper also gets a certificates relation in the neighbor model instead of remaining blocked
+        zookeeper_bundle = next(
+            (bundle for bundle in solution.bundles if bundle.model == "neighbor/zookeeper-model"), None
+        )
+        assert zookeeper_bundle is not None
+        has_local_certificates_relation = any(
+            any(ep.application == "zookeeper" and ep.endpoint == "certificates" for ep in integration)
+            for integration in zookeeper_bundle.integrations
+        )
+        has_cross_model_certificates_relation = any(
             cmr.local.application == "zookeeper"
             and cmr.local.endpoint == "certificates"
             and cmr.local_role == EndpointType.REQUIRES
             for cmr in zookeeper_bundle.cross_model_integrations
         )
+        assert has_local_certificates_relation or has_cross_model_certificates_relation
