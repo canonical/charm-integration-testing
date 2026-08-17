@@ -15,6 +15,8 @@ from test_suite.scheduler import plugin as _plugin_module
 from test_suite.scheduler.graph import StateGraph, StateTransition
 from test_suite.scheduler.plugin import (
     _build_execution_plan,
+    _disambiguate_repeated_items,
+    _duplicate_item_for_repeat,
     _mark_as_injected,
     _UnreachableStateError,
     pytest_runtest_setup,
@@ -96,6 +98,147 @@ class TestMarkAsInjected:
         # THEN neither the name nor the nodeid changes (prefix not doubled)
         assert item.name == name_after_first
         assert item.nodeid == nodeid_after_first
+
+
+# ---------------------------------------------------------------------------
+# Tests for _duplicate_item_for_repeat and _disambiguate_repeated_items
+# ---------------------------------------------------------------------------
+
+
+class TestDuplicateItemForRepeat:
+    def test_duplicate_has_distinct_name_and_nodeid(self, make_item: Callable[..., pytest.Item]) -> None:
+        # GIVEN an item
+        item = make_item("test_foo")
+
+        # WHEN duplicated for its 2nd occurrence
+        duplicate = _duplicate_item_for_repeat(item, 2)
+
+        # THEN the duplicate's name and nodeid differ from the original's
+        assert duplicate.name != item.name
+        assert duplicate.nodeid != item.nodeid
+        assert duplicate.name.startswith(item.name)
+        assert duplicate.nodeid.startswith(item.nodeid)
+
+    def test_duplicate_is_not_the_same_object(self, make_item: Callable[..., pytest.Item]) -> None:
+        # GIVEN an item
+        item = make_item("test_foo")
+
+        # WHEN duplicated
+        duplicate = _duplicate_item_for_repeat(item, 2)
+
+        # THEN it is an independent object, not an alias
+        assert duplicate is not item
+
+    def test_original_item_is_unmodified(self, make_item: Callable[..., pytest.Item]) -> None:
+        # GIVEN an item with known name/nodeid
+        item = make_item("test_foo")
+        original_name = item.name
+        original_nodeid = item.nodeid
+
+        # WHEN duplicated
+        _duplicate_item_for_repeat(item, 2)
+
+        # THEN the original item's name/nodeid are untouched
+        assert item.name == original_name
+        assert item.nodeid == original_nodeid
+
+    def test_different_occurrences_produce_different_nodeids(self, make_item: Callable[..., pytest.Item]) -> None:
+        # GIVEN an item duplicated for two different occurrence numbers
+        item = make_item("test_foo")
+
+        # WHEN duplicated twice with different occurrence numbers
+        second = _duplicate_item_for_repeat(item, 2)
+        third = _duplicate_item_for_repeat(item, 3)
+
+        # THEN each duplicate has its own, distinct nodeid
+        assert second.nodeid != third.nodeid
+
+    def test_duplicate_records_original_item_id(self, make_item: Callable[..., pytest.Item]) -> None:
+        # GIVEN an item
+        item = make_item("test_foo")
+
+        # WHEN duplicated
+        duplicate = _duplicate_item_for_repeat(item, 2)
+
+        # THEN the duplicate's object ID maps back to the original item's ID
+        assert _plugin_module._duplicate_original_ids[id(duplicate)] == id(item)
+
+    def test_chained_duplicates_all_trace_back_to_the_original(self, make_item: Callable[..., pytest.Item]) -> None:
+        # GIVEN an item duplicated once, and then that duplicate duplicated again
+        item = make_item("test_foo")
+        first_duplicate = _duplicate_item_for_repeat(item, 2)
+
+        # WHEN a duplicate-of-a-duplicate is created (e.g. a third occurrence)
+        second_duplicate = _duplicate_item_for_repeat(first_duplicate, 3)
+
+        # THEN both duplicates trace back to the original item's ID, not an intermediate one
+        assert _plugin_module._duplicate_original_ids[id(first_duplicate)] == id(item)
+        assert _plugin_module._duplicate_original_ids[id(second_duplicate)] == id(item)
+
+
+class TestDisambiguateRepeatedItems:
+    def test_single_occurrence_item_is_unchanged(self, make_item: Callable[..., pytest.Item]) -> None:
+        # GIVEN a plan with each item appearing once
+        a = make_item("test_a")
+        b = make_item("test_b")
+
+        # WHEN disambiguated
+        result = _disambiguate_repeated_items([a, b])
+
+        # THEN both items pass through untouched (same objects, same nodeids)
+        assert result == [a, b]
+        assert result[0] is a
+        assert result[1] is b
+
+    def test_repeated_item_second_occurrence_is_duplicated(self, make_item: Callable[..., pytest.Item]) -> None:
+        # GIVEN a plan where the same item object appears twice
+        item = make_item("test_teardown")
+
+        # WHEN disambiguated
+        result = _disambiguate_repeated_items([item, item])
+
+        # THEN the first occurrence keeps its identity (relabeled in place), the
+        # second is a distinct duplicate, and each has a unique nodeid
+        assert result[0] is item
+        assert result[1] is not item
+        assert result[0].nodeid != result[1].nodeid
+
+    def test_repeated_item_gets_structured_bracket_index_naming(self, make_item: Callable[..., pytest.Item]) -> None:
+        # GIVEN a plan where the same item object appears twice
+        item = make_item("test_upgrade_charm")
+        base_name = item.name
+
+        # WHEN disambiguated
+        result = _disambiguate_repeated_items([item, item])
+
+        # THEN every occurrence - including the first - is labeled with a
+        # structured "[occurrence]" index instead of an ad hoc "(repeat N)" suffix
+        assert result[0].name == f"{base_name}[1]"
+        assert result[1].name == f"{base_name}[2]"
+
+    def test_three_occurrences_all_get_unique_nodeids(self, make_item: Callable[..., pytest.Item]) -> None:
+        # GIVEN a plan where the same item object appears three times
+        item = make_item("test_teardown")
+
+        # WHEN disambiguated
+        result = _disambiguate_repeated_items([item, item, item])
+
+        # THEN all three occurrences have distinct nodeids
+        assert len({occ.nodeid for occ in result}) == 3
+
+    def test_preserves_plan_order_and_length(self, make_item: Callable[..., pytest.Item]) -> None:
+        # GIVEN a plan mixing a repeated item with unique ones
+        a = make_item("test_a")
+        b = make_item("test_b")
+
+        # WHEN disambiguated
+        result = _disambiguate_repeated_items([a, b, a])
+
+        # THEN the length and relative order are preserved
+        assert len(result) == 3
+        assert result[0] is a
+        assert result[1] is b
+        assert result[2] is not a  # repeat of `a`, disambiguated
 
 
 # ---------------------------------------------------------------------------
@@ -468,6 +611,67 @@ class TestBuildExecutionPlan:
         assert plan.count(teardown_1) == 1
         assert plan.count(teardown_2) == 1
         assert redeploy in plan
+
+    def test_repeated_bridge_item_gets_unique_nodeid_per_occurrence(
+        self, make_item: Callable[..., pytest.Item]
+    ) -> None:
+        """Regression (SQT-913 / GH-445): a test scheduled more than once must not
+        report each run under the same nodeid, or JUnit consumers (Test Observer)
+        compact the separate runs into a single test case, hiding one of them.
+
+        ``teardown`` is user-selected to reach NEIGHBOR_ONLY, then consumed by
+        ``test_c``.  A second selected transition (``test_d``) still needs to
+        depart NEIGHBOR_ONLY, but the only way back there is via
+        ``old_revision -> deployed -> neighbor_only``, which re-crosses the
+        ``teardown`` edge as a plain bridge (its selected occurrence is already
+        scheduled) - injecting the exact same ``teardown`` Item object a second
+        time.
+        """
+        # GIVEN a graph where the only path back to NEIGHBOR_ONLY re-uses `teardown`
+        teardown = make_item("test_teardown")  # DEPLOYED -> NEIGHBOR_ONLY (the only candidate)
+        test_c = make_item("test_c")  # NEIGHBOR_ONLY -> DEPLOYED_WITH_OLD_REVISION
+        test_d = make_item("test_d")  # NEIGHBOR_ONLY -> DEPLOYED_WITH_UPGRADED_CONTROLLER
+        back_from_c = make_item("test_back_from_c")  # DEPLOYED_WITH_OLD_REVISION -> DEPLOYED
+
+        graph, all_transitions = _graph_and_all(
+            (State.DEPLOYED, State.NEIGHBOR_ONLY, teardown),
+            (State.NEIGHBOR_ONLY, State.DEPLOYED_WITH_OLD_REVISION, test_c),
+            (State.NEIGHBOR_ONLY, State.DEPLOYED_WITH_UPGRADED_CONTROLLER, test_d),
+            (State.DEPLOYED_WITH_OLD_REVISION, State.DEPLOYED, back_from_c),
+        )
+
+        # WHEN teardown, test_c, and test_d are all user-selected
+        plan = _build_execution_plan(
+            current_state=State.DEPLOYED,
+            pure_clusters=defaultdict(list),
+            selected_transitions=defaultdict(
+                list,
+                {
+                    StateTransition(State.DEPLOYED, State.NEIGHBOR_ONLY): [teardown],
+                    StateTransition(State.NEIGHBOR_ONLY, State.DEPLOYED_WITH_OLD_REVISION): [test_c],
+                    StateTransition(State.NEIGHBOR_ONLY, State.DEPLOYED_WITH_UPGRADED_CONTROLLER): [test_d],
+                },
+            ),
+            all_transitions=all_transitions,
+            full_graph=graph,
+        )
+
+        # THEN teardown is scheduled twice: once as the selected transition, once
+        # re-injected as a bridge to reach NEIGHBOR_ONLY again for test_d.
+        teardown_occurrences = [item for item in plan if "test_teardown" in item.name]
+        assert len(teardown_occurrences) == 2
+
+        # AND each occurrence has a distinct nodeid, so JUnit reports two separate
+        # test cases instead of compacting them into one.
+        assert len({item.nodeid for item in teardown_occurrences}) == 2
+
+        # AND the first occurrence is the original item, untouched in identity
+        first, second = teardown_occurrences
+        assert first is teardown
+
+        # AND the second occurrence is an independent object, not an alias of the first
+        assert second is not teardown
+        assert second is not first
 
     def test_unconnected_nodes_raises_unreachable_state_error(self, make_item: Callable[..., pytest.Item]) -> None:
         """Unconnected nodes: a state exists in the graph but is unreachable from current state.
@@ -913,3 +1117,10 @@ class TestPytestSessionFinish:
         _plugin_module._failed_state_test = make_item("test_deploy")
         pytest_sessionfinish(session=SimpleNamespace(), exitstatus=0)  # type: ignore[arg-type]
         assert _plugin_module._failed_state_test is None
+
+    def test_clears_duplicate_original_ids(self, make_item: Callable[..., pytest.Item]) -> None:
+        item = make_item("test_foo")
+        _duplicate_item_for_repeat(item, 2)
+        assert _plugin_module._duplicate_original_ids  # non-empty before
+        pytest_sessionfinish(session=SimpleNamespace(), exitstatus=0)  # type: ignore[arg-type]
+        assert _plugin_module._duplicate_original_ids == {}
