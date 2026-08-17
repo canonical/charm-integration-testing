@@ -406,14 +406,10 @@ def add_charm_to_domain(charm: Charm, domain: Domain, model_ref: ModelRef | None
         )
     )
 
-    # Note: integration variables against other domain charms are intentionally NOT created
-    # here. Eagerly pairing a new charm with every existing charm makes each charm addition
-    # cost O(domain size) new integration vars/constraints instead of O(1), which is the
-    # dominant driver of CEGIS blowup on specs with many charms. Callers that add a charm to
-    # satisfy a specific endpoint should pair it with just the relevant charm(s) via
-    # pair_charms_in_domain(); any other needed connections are discovered lazily by the CEGIS
-    # loop's existing-charm-connection step (_connect_existing_for_endpoint) on a later
-    # iteration, the same way it already handles connecting two pre-existing charms.
+    # Note: no integration vars against other domain charms are created here — eager pairing
+    # is O(domain size) per add and was the dominant driver of CEGIS blowup. Callers pair with
+    # the relevant charm(s) via pair_charms_in_domain(); other connections are discovered
+    # lazily by the CEGIS loop (_connect_existing_for_endpoint) on a later iteration.
 
     # Create application-to-charm mappings for this model's constraints
     for application, domain_app in model.applications.items():

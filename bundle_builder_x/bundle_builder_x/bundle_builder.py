@@ -208,10 +208,7 @@ class BundleBuilder:
             if self._handle_failed_assertion(tag, domain):
                 self.logger.info(f"Expanded domain to handle failed assertion tag: {tag}")
                 expanded = True
-                # Stop after the first successful expansion and let z3 re-evaluate. This
-                # costs some extra CEGIS iterations for specs with many simultaneously
-                # resolvable existing-charm connections, but keeps this loop simple and
-                # avoids over-committing new charm variables before the next re-solve.
+                # One expansion at a time, then let z3 re-evaluate.
                 break
         if not expanded:
             raise UncompletableBundleError(unsat_core=tags)
@@ -272,9 +269,8 @@ class BundleBuilder:
                 results.append(self._add_charm_for_application(charm, endpoint.application, domain, model_ref))
             if any(results):
                 return True
-            # Both applications' charms already exist in the domain (the additions above were
-            # no-ops) but may not be paired: add_charm_to_domain no longer eagerly connects a
-            # new charm against the rest of the domain, so pair them directly here.
+            # Both charms already exist but aren't paired (add_charm_to_domain no longer
+            # eagerly pairs); connect them directly.
             return self._connect_apps_for_integration(app_integration_exists, domain)
 
         elif tag.kind == Assertions.ENDPOINT_COUNT_MATCHES_INTEGRATIONS:
@@ -319,9 +315,6 @@ class BundleBuilder:
                 return True
 
         # Step 2: no existing charm helped — add the best new candidate.
-        # Fetch charm details lazily: sort candidates by local priority first, then
-        # fetch full metadata only for the top-ranked candidate that can be added.
-        # This avoids bulk-fetching all 50+ candidates just to pick one.
         for model_ref in models:
             names = self._get_charms_for_endpoint(charm_id, endpoint_name, domain, model_ref)
             if not names:
@@ -365,11 +358,8 @@ class BundleBuilder:
             except CharmReleaseNotFoundException:
                 self.logger.debug(f"Skipping {charm_name}: no compatible release for {model.platform}/{model.arch}")
                 continue
-            # find_charms() is a Charmhub metadata search and can return false positives (e.g.
-            # stale or loosely-matched entries) that don't actually declare a compatible
-            # endpoint. Verify before adding: without this, a bogus candidate can be re-added
-            # every iteration (it never connects, so the tag never clears) and the domain
-            # grows without bound instead of moving on to the next real candidate.
+            # find_charms() can return false positives (stale/loosely-matched); verify the
+            # endpoint is actually compatible or a bogus candidate gets re-added every iteration.
             if not self._has_compatible_endpoint(endpoint, charm.endpoints.values()):
                 self.logger.debug(f"Skipping {charm_name}: no endpoint compatible with {endpoint_name}")
                 continue
@@ -621,10 +611,8 @@ class BundleBuilder:
         elif endpoint.type == EndpointType.PROVIDES:
             fulfilling_charms = self.charmhub_client.find_charms(requires=endpoint.interface, platform=model.platform)
 
-        # Sort by local override priority (no network needed) so the best candidate is tried
-        # first. `fulfilling_charms` is a set, whose iteration order is randomized per-process
-        # (PYTHONHASHSEED), so charms tied on priority need a deterministic tiebreaker — sort
-        # by name ascending — or repeated builds of the same spec can pick different charms.
+        # Sort by priority, then name — `fulfilling_charms` is a set with per-process
+        # randomized order, so a deterministic tiebreak is needed for repeatable builds.
         return sorted(
             fulfilling_charms,
             key=lambda name: (-self.charmhub_client.overrides_client.get_charm_priority(name), name),
@@ -661,14 +649,11 @@ class BundleBuilder:
     ) -> bool:
         parent_charm = domain.charms[charm_id]
 
-        # If this exact charm was already added to satisfy this same parent charm_id, adding
-        # another copy is a no-op: the parent already has an instance available to connect to.
-        # Scoped to charm_id (not the whole model) so that a different parent charm can still
-        # add its own instance of the same charm spec when it needs one (e.g. two independent
-        # consumers of a capacity-limited provider). Known limitation: a genuinely-unsatisfiable
-        # requirement (e.g. a dependency cycle, or a fetched candidate that can never actually
-        # connect) can still be re-added by different sibling parents across CEGIS iterations,
-        # since this check alone doesn't catch cross-parent duplication.
+        # Dedup per parent charm_id: if this exact charm was already added for this parent,
+        # skip (it already has an instance to connect to). Scoped per-parent, not per-model,
+        # so a different parent can still add its own instance (e.g. two independent
+        # consumers of a capacity-limited provider). Known limitation: this doesn't catch
+        # duplication across sibling parents for a genuinely-unsatisfiable requirement.
         if any(domain.charms[added_id].spec == charm for added_id in parent_charm.charms_added):
             return False
 
@@ -700,11 +685,9 @@ class BundleBuilder:
         )
         new_charm_id = add_charm_to_domain(charm, domain, model_ref)
 
-        # Connect the new charm to the parent that needed it. add_charm_to_domain doesn't pair
-        # against other domain charms (that would cost O(domain size) integration vars per add),
-        # so without this the parent's requirement wouldn't be satisfied until a later CEGIS
-        # iteration lazily discovers the connection via _connect_existing_for_endpoint. Pairing
-        # immediately here avoids that wasted round-trip for the common case.
+        # Pair immediately with the parent — add_charm_to_domain doesn't pair against the rest
+        # of the domain (too costly per-add), so without this the connection would wait for a
+        # later CEGIS iteration to discover it lazily.
         pair_charms_in_domain(domain, charm_id, new_charm_id)
 
         # Record that this charm was added for this charm_id
