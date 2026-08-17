@@ -18,9 +18,9 @@ with a parent CA (such as self-signed-certificates).
 
 from bundle_builder_x.bundle_builder import BundleBuilder
 from bundle_builder_x.charm import CharmEndpoint, EndpointType
-from bundle_builder_x.spec import AppSpec, IntegrationSpec
+from bundle_builder_x.spec import AppSpec, IntegrationSpec, ModelSpec
 
-from .conftest import CharmhubClientStub, build_single_model, make_charm
+from .conftest import JUJU_VERSION, CharmhubClientStub, build_multi_model, build_single_model, make_charm
 
 
 class TestConditionalRequirements:
@@ -183,3 +183,92 @@ class TestConditionalRequirements:
         charm_names = {a.charm.name for a in bundle.applications.values()}
         assert "b-provider" in charm_names, "ep-a => ep-b should have triggered b-provider expansion"
         assert "c-provider" in charm_names, "ep-b => ep-c should have triggered c-provider expansion"
+
+    def test_cross_model_tls_requirement_expands_into_neighbor_model(self) -> None:
+        # GIVEN kafka and zookeeper in separate models with TLS gated behind certificates on both sides
+        kafka = make_charm(
+            "kafka-k8s",
+            endpoints={
+                "zookeeper": CharmEndpoint(
+                    type=EndpointType.REQUIRES,
+                    interface="zookeeper",
+                    optional=False,
+                    features=frozenset({"tls"}),
+                ),
+                "certificates": CharmEndpoint(type=EndpointType.REQUIRES, interface="certificates", optional=True),
+            },
+            constraint_strs=[
+                "bool(endpoint[zookeeper]) => bool(endpoint[certificates])",
+                'bool(endpoint[certificates]) == ("tls" in features(endpoint[zookeeper]))',
+            ],
+        )
+        zookeeper = make_charm(
+            "zookeeper-k8s",
+            endpoints={
+                "zookeeper": CharmEndpoint(
+                    type=EndpointType.PROVIDES,
+                    interface="zookeeper",
+                    optional=True,
+                    features=frozenset({"tls"}),
+                ),
+                "certificates": CharmEndpoint(type=EndpointType.REQUIRES, interface="certificates", optional=True),
+            },
+            constraint_strs=[
+                'bool(endpoint[certificates]) == ("tls" in features(endpoint[zookeeper]))',
+            ],
+        )
+        certificates = make_charm(
+            "self-signed-certificates",
+            endpoints={
+                "certificates": CharmEndpoint(type=EndpointType.PROVIDES, interface="certificates", optional=True),
+            },
+        )
+        builder = BundleBuilder(charmhub_client=CharmhubClientStub(kafka, zookeeper, certificates))
+
+        # WHEN building an explicit kafka -> zookeeper cross-model relation
+        solution = build_multi_model(
+            builder,
+            [
+                ModelSpec(
+                    name="kafka-model",
+                    controller="target",
+                    platform="kubernetes",
+                    juju=JUJU_VERSION,
+                    applications={"kafka": AppSpec(charm="kafka-k8s")},
+                    integrations=[
+                        IntegrationSpec(
+                            application="kafka",
+                            endpoint="zookeeper",
+                            remote_model="zookeeper-model",
+                            remote_controller="neighbor",
+                            remote_application="zookeeper",
+                            remote_endpoint="zookeeper",
+                            offer_name="zookeeper-offer",
+                        ),
+                    ],
+                ),
+                ModelSpec(
+                    name="zookeeper-model",
+                    controller="neighbor",
+                    platform="kubernetes",
+                    juju=JUJU_VERSION,
+                    applications={"zookeeper": AppSpec(charm="zookeeper-k8s")},
+                ),
+            ],
+        )
+
+        # THEN kafka gets certificates because its zookeeper endpoint is active
+        kafka_bundle = next(bundle for bundle in solution.bundles if bundle.model == "target/kafka-model")
+        kafka_relations = {
+            frozenset((ep.application, ep.endpoint) for ep in integration) for integration in kafka_bundle.integrations
+        }
+        assert frozenset({("kafka", "certificates"), ("self-signed-certificates", "certificates")}) in kafka_relations
+
+        # AND zookeeper also gets certificates in the neighbor model instead of remaining blocked
+        zookeeper_bundle = next(bundle for bundle in solution.bundles if bundle.model == "neighbor/zookeeper-model")
+        assert any(
+            cmr.local.application == "zookeeper"
+            and cmr.local.endpoint == "certificates"
+            and cmr.local_role == EndpointType.REQUIRES
+            for cmr in zookeeper_bundle.cross_model_integrations
+        )
