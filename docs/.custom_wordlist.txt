@@ -105,6 +105,8 @@ serialized
 Normalized
 normalized
 normalization
+normalizing
+normalizes
 stdout
 stderr
 xfail
