@@ -21,6 +21,7 @@ from bundle_builder_x.domain import (
     DomainModel,
     ModelRef,
     add_charm_to_domain,
+    pair_charms_in_domain,
 )
 from bundle_builder_x.juju_version import JujuVersion
 from bundle_builder_x.overrides import CharmGlobalOverrides, OverridesClient
@@ -506,6 +507,58 @@ class TestOptimizeSolution:
         # THEN the optimizer selects charm B (lower cost = preferred)
         assert z3.is_true(model.eval(domain.charms[id_b].exists, model_completion=True))
         assert not z3.is_true(model.eval(domain.charms[id_a].exists, model_completion=True))
+
+
+class TestAddCycleBreakingDuplicates:
+    """BundleBuilder._add_cycle_breaking_duplicates."""
+
+    def test_adds_one_duplicate_for_active_bidirectional_interface(self) -> None:
+        # GIVEN an active charm that both requires and provides one interface
+        domain = Domain()
+        model_ref = ModelRef(name="m")
+        domain.models[model_ref] = DomainModel(
+            arch="amd64",
+            platform="kubernetes",
+            juju_version=_JUJU,
+        )
+        dual_id = add_charm_to_domain(
+            _make_charm(
+                "dual",
+                {
+                    "mesh-in": CharmEndpoint(type=EndpointType.REQUIRES, interface="mesh", optional=True),
+                    "mesh-out": CharmEndpoint(type=EndpointType.PROVIDES, interface="mesh", optional=True),
+                },
+            ),
+            domain,
+            model_ref,
+        )
+        provider_id = add_charm_to_domain(
+            _make_charm(
+                "provider",
+                {"mesh-out": CharmEndpoint(type=EndpointType.PROVIDES, interface="mesh", optional=True)},
+            ),
+            domain,
+            model_ref,
+        )
+        pair_charms_in_domain(domain, dual_id, provider_id)
+        integration = next(
+            item
+            for item in domain.charm_integrations
+            if item.requires_charm_id == dual_id and item.provides_charm_id == provider_id
+        )
+        solver = z3.Solver()
+        solver.add(domain.charms[dual_id].exists, domain.charms[provider_id].exists, integration.exists)
+        assert solver.check() == z3.sat
+
+        # WHEN preparing the satisfiable domain for optimization
+        BundleBuilder._add_cycle_breaking_duplicates(domain, solver.model())
+
+        # THEN one duplicate is exposed and paired with the active charms
+        assert len(domain.charms) == 3
+        assert domain.charms[2].spec == domain.charms[dual_id].spec
+        assert any(
+            {item.requires_charm_id, item.provides_charm_id} == {provider_id, 2} for item in domain.charm_integrations
+        )
 
 
 class TestSolve:

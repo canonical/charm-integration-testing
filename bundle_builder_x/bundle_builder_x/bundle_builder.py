@@ -174,6 +174,7 @@ class BundleBuilder:
             if result == z3.sat:
                 self.logger.info("Problem is satisfiable")
                 model = solver.model()
+                self._add_cycle_breaking_duplicates(domain, model)
                 self.logger.info("Re-solving with optimization to minimize applications and integrations")
                 t_opt = self.timeline.on(f"iter{iteration}/optimize")
                 try:
@@ -399,6 +400,72 @@ class BundleBuilder:
                 )
                 return True  # one at a time — let CEGIS re-evaluate
         return False
+
+    @staticmethod
+    def _add_cycle_breaking_duplicates(domain: Domain, model: z3.ModelRef) -> None:
+        """Expose cheaper duplicate-charm solutions before optimizing.
+
+        Lazy expansion stops once the domain is satisfiable, but a smaller solution may
+        require a second instance of an active charm that both requires and provides the
+        same interface. Add one such candidate and pair it only with the active domain,
+        avoiding the eager all-candidate pairing that caused the original timeout.
+        """
+        active_charm_ids = [
+            charm_id
+            for charm_id, charm in enumerate(domain.charms)
+            if z3.is_true(model.eval(charm.exists, model_completion=True))
+        ]
+        active_interfaces: dict[int, set[str]] = {charm_id: set() for charm_id in active_charm_ids}
+        for integration in domain.charm_integrations:
+            if not z3.is_true(model.eval(integration.exists, model_completion=True)):
+                continue
+            interface = domain.integration_interface(integration)
+            active_interfaces.get(integration.requires_charm_id, set()).add(interface)
+            active_interfaces.get(integration.provides_charm_id, set()).add(interface)
+
+        duplicate_ids: list[int] = []
+        processed: list[int] = []
+        for charm_id in active_charm_ids:
+            charm = domain.charms[charm_id]
+            if any(
+                domain.charms[other_id].model == charm.model and domain.charms[other_id].spec == charm.spec
+                for other_id in processed
+            ):
+                continue
+            processed.append(charm_id)
+
+            requires = {
+                endpoint.interface
+                for endpoint in charm.spec.endpoints.values()
+                if endpoint.type == EndpointType.REQUIRES
+            }
+            provides = {
+                endpoint.interface
+                for endpoint in charm.spec.endpoints.values()
+                if endpoint.type == EndpointType.PROVIDES
+            }
+            if not active_interfaces[charm_id].intersection(requires, provides):
+                continue
+
+            equivalent_ids = [
+                other_id
+                for other_id, other in enumerate(domain.charms)
+                if other.model == charm.model and other.spec == charm.spec
+            ]
+            if sum(other_id in active_charm_ids for other_id in equivalent_ids) > 1:
+                continue
+
+            duplicate_id = next(
+                (other_id for other_id in equivalent_ids if other_id not in active_charm_ids),
+                None,
+            )
+            if duplicate_id is None:
+                duplicate_id = add_charm_to_domain(charm.spec, domain, charm.model)
+
+            for other_id in [*active_charm_ids, *duplicate_ids]:
+                if other_id != duplicate_id:
+                    pair_charms_in_domain(domain, duplicate_id, other_id)
+            duplicate_ids.append(duplicate_id)
 
     @staticmethod
     def _connect_apps_for_integration(
