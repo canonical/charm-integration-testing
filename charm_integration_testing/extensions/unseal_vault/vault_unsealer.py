@@ -305,9 +305,16 @@ class VaultUnsealer:
             # otherwise a slow-to-join unit is permanently skipped and never gets unsealed.
             if not status.initialized:
                 self.logger.info(f"Waiting for vault charm '{self.charm.name}' unit '{unit}' to be initialized")
-                status = self.wait_for_vault_initialized(
-                    model, unit, timeout=timedelta(minutes=10), poll_interval=timedelta(seconds=10)
-                )
+                try:
+                    status = self.wait_for_vault_initialized(
+                        model, unit, timeout=timedelta(minutes=10), poll_interval=timedelta(seconds=10)
+                    )
+                except Exception as exc:
+                    self.logger.info(
+                        f"Skipping vault charm '{self.charm.name}' unit '{unit}': failed while waiting for initialization ({exc}), "
+                        "will retry on next run"
+                    )
+                    continue
 
             if not status.initialized:
                 self.logger.info(
