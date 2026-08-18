@@ -54,10 +54,12 @@ class BackendStub(NullJujuBackend):
     app_list: dict[str, JujuApplicationInfo] = field(default_factory=dict)
     validate_results: dict[str, dict[str, list[ValidationResult]]] = field(default_factory=dict)
 
-    def list_applications(self, model: str) -> dict[str, JujuApplicationInfo]:
+    def list_applications(self, model: JujuModelHandle) -> dict[str, JujuApplicationInfo]:
         return self.app_list
 
-    def validate_application(self, model: str, application: str, level: str) -> dict[str, list[ValidationResult]]:
+    def validate_application(
+        self, model: JujuModelHandle, application: str, level: str
+    ) -> dict[str, list[ValidationResult]]:
         return self.validate_results.get(application, {})
 
 
@@ -85,11 +87,11 @@ class MigrateModelBackendStub(NullJujuBackend):
 class WaitIdleBackendStub(NullJujuBackend):
     """Backend stub that records multi-model idle waits."""
 
-    calls: list[tuple[list[str], timedelta | None, int | None, bool]] = field(default_factory=list)
+    calls: list[tuple[list[JujuModelHandle], timedelta | None, int | None, bool]] = field(default_factory=list)
 
     def wait_idle_multi_model(
         self,
-        models: list[str],
+        models: list[JujuModelHandle],
         timeout: timedelta | None,
         count: int | None,
         strict_timeout: bool = False,
@@ -103,7 +105,7 @@ class ExtensionStub(JujuExtension):
     def __init__(self, results: dict[str, dict[str, list[ValidationResult]]]) -> None:
         self.results = results
 
-    def post_validate(self, model: str, application: str, level: str) -> dict[str, list[ValidationResult]]:
+    def post_validate(self, model: JujuModelHandle, application: str, level: str) -> dict[str, list[ValidationResult]]:
         return self.results.get(application, {})
 
 
@@ -115,12 +117,12 @@ class RefreshBackendStub(NullJujuBackend):
 
     def refresh_application(
         self,
-        model: str,
+        model: JujuModelHandle,
         application: str,
         revision: int | None = None,
         channel: str | None = None,
     ) -> None:
-        self.refresh_calls.append((model, application, revision, channel))
+        self.refresh_calls.append((model.uri, application, revision, channel))
 
 
 @dataclass
@@ -134,7 +136,7 @@ class RevisionSequenceBackendStub(NullJujuBackend):
     application: str
     revisions: list[int | None]
 
-    def list_applications(self, model: str) -> dict[str, JujuApplicationInfo]:
+    def list_applications(self, model: JujuModelHandle) -> dict[str, JujuApplicationInfo]:
         revision = self.revisions.pop(0) if len(self.revisions) > 1 else self.revisions[0]
         if revision is None:
             return {}
@@ -207,15 +209,17 @@ class TestJujuClientMultiModelIdleForPeriod:
         timeout = timedelta(minutes=5)
 
         # WHEN waiting for multiple models to become idle
+        model_1 = JujuModelHandle(controller="controller-1", model="model-1")
+        model_2 = JujuModelHandle(controller="controller-2", model="model-2")
         client.multi_model_idle_for_period(
-            ["controller-1:model-1", "controller-2:model-2"],
+            [model_1, model_2],
             timeout=timeout,
             count=4,
             strict_timeout=True,
         )
 
         # THEN the model list is passed to the consolidated backend method
-        assert backend.calls == [(["controller-1:model-1", "controller-2:model-2"], timeout, 4, True)]
+        assert backend.calls == [([model_1, model_2], timeout, 4, True)]
 
     def test_empty_model_list_returns_without_logging_or_waiting(self) -> None:
         # GIVEN a client with an empty model list
@@ -264,13 +268,17 @@ class TestJujuClientValidateModel:
     ) -> JujuClient:
         return JujuClient(backend, logger, extensions or [])
 
+    @staticmethod
+    def _model() -> JujuModelHandle:
+        return JujuModelHandle(controller="ctrl", model="mymodel")
+
     def test_does_not_raise_when_no_applications(self, logger: LoggerStub) -> None:
         # GIVEN a model with no applications
         backend = BackendStub(app_list={})
         client = self._client(logger, backend)
 
         # WHEN / THEN (no exception)
-        client.validate_model("mymodel")
+        client.validate_model(self._model())
 
     def test_does_not_raise_when_all_pass(self, logger: LoggerStub) -> None:
         # GIVEN one application whose backend validation returns PASS
@@ -281,7 +289,7 @@ class TestJujuClientValidateModel:
         client = self._client(logger, backend)
 
         # WHEN / THEN (no exception)
-        client.validate_model("mymodel")
+        client.validate_model(self._model())
 
     def test_raises_when_backend_returns_fail(self, logger: LoggerStub) -> None:
         # GIVEN the backend returns a FAIL result
@@ -293,7 +301,7 @@ class TestJujuClientValidateModel:
 
         # WHEN / THEN
         with pytest.raises(JujuValidationError) as exc_info:
-            client.validate_model("mymodel")
+            client.validate_model(self._model())
         assert "myapp/0" in exc_info.value.failed_validations
 
     def test_raises_when_extension_returns_fail(self, logger: LoggerStub) -> None:
@@ -304,7 +312,7 @@ class TestJujuClientValidateModel:
 
         # WHEN / THEN
         with pytest.raises(JujuValidationError) as exc_info:
-            client.validate_model("mymodel")
+            client.validate_model(self._model())
         assert "myapp/0" in exc_info.value.failed_validations
 
     def test_merges_backend_and_extension_results_for_same_unit(self, logger: LoggerStub) -> None:
@@ -318,7 +326,7 @@ class TestJujuClientValidateModel:
 
         # WHEN
         with pytest.raises(JujuValidationError) as exc_info:
-            client.validate_model("mymodel")
+            client.validate_model(self._model())
 
         # THEN both failures are recorded under the same unit
         unit_failures = exc_info.value.failed_validations["myapp/0"]
@@ -336,7 +344,7 @@ class TestJujuClientValidateModel:
 
         # WHEN
         with pytest.raises(JujuValidationError) as exc_info:
-            client.validate_model("mymodel")
+            client.validate_model(self._model())
 
         # THEN only the failing result is in failed_validations
         unit_failures = exc_info.value.failed_validations["myapp/0"]
@@ -353,7 +361,7 @@ class TestJujuClientValidateModel:
 
         # WHEN
         with pytest.raises(JujuValidationError):
-            client.validate_model("mymodel")
+            client.validate_model(self._model())
 
         # THEN an error was logged mentioning the endpoint
         assert any("db" in e for e in logger.errors)
@@ -368,7 +376,7 @@ class TestJujuClientValidateModel:
 
         # WHEN
         with pytest.raises(JujuValidationError):
-            client.validate_model("mymodel")
+            client.validate_model(self._model())
 
         # THEN the check name and message are both logged
         assert any("connect" in e and "connection timed out" in e for e in logger.errors)
@@ -383,7 +391,7 @@ class TestJujuClientValidateModel:
 
         # WHEN
         with pytest.raises(JujuValidationError):
-            client.validate_model("mymodel")
+            client.validate_model(self._model())
 
         # THEN the error string is logged
         assert any("unexpected exception" in e for e in logger.errors)
@@ -397,7 +405,7 @@ class TestJujuClientValidateModel:
         client = self._client(logger, backend)
 
         # WHEN / THEN (no exception)
-        client.validate_model("mymodel")
+        client.validate_model(self._model())
 
         # THEN the application with no results is skipped with a log
         assert any("No validation results for application 'app1'" in info for info in logger.infos)
@@ -411,7 +419,7 @@ class TestJujuClientValidateModel:
         client = self._client(logger, backend)
 
         # WHEN / THEN (no exception)
-        client.validate_model("mymodel")
+        client.validate_model(self._model())
 
         # THEN the unit with no results is skipped with a log
         assert any("No validation results for unit 'myapp/0'" in info for info in logger.infos)
@@ -425,7 +433,7 @@ class TestJujuClientValidateModel:
         client = self._client(logger, backend)
 
         # WHEN / THEN (no exception)
-        client.validate_model("mymodel")
+        client.validate_model(self._model())
 
         # THEN the unit with all skipped results is skipped with a log
         assert any("Validation skipped for unit 'myapp/0'" in info for info in logger.infos)
@@ -439,7 +447,7 @@ class TestJujuClientValidateModel:
         client = self._client(logger, backend)
 
         # WHEN / THEN (no exception)
-        client.validate_model("mymodel")
+        client.validate_model(self._model())
 
         # THEN the unit is not skipped and validation passed is logged
         assert any("Validation passed for unit 'myapp/0'" in info for info in logger.infos)
@@ -451,10 +459,10 @@ class TestJujuClientValidateModel:
         client = self._client(logger, backend)
 
         # WHEN
-        client.refresh_application("myapp", revision=42, model="mymodel")
+        client.refresh_application("myapp", revision=42, model=self._model())
 
         # THEN the backend was called with revision and no channel
-        assert backend.refresh_calls == [("mymodel", "myapp", 42, None)]
+        assert backend.refresh_calls == [("ctrl:mymodel", "myapp", 42, None)]
 
     def test_delegates_to_backend_with_revision_and_channel(self, logger: LoggerStub) -> None:
         # GIVEN a backend that records refresh calls
@@ -462,10 +470,10 @@ class TestJujuClientValidateModel:
         client = self._client(logger, backend)
 
         # WHEN
-        client.refresh_application("myapp", revision=42, channel="latest/stable", model="mymodel")
+        client.refresh_application("myapp", revision=42, channel="latest/stable", model=self._model())
 
         # THEN the backend was called with both revision and channel
-        assert backend.refresh_calls == [("mymodel", "myapp", 42, "latest/stable")]
+        assert backend.refresh_calls == [("ctrl:mymodel", "myapp", 42, "latest/stable")]
 
     def test_returns_revision_for_known_application(self, logger: LoggerStub) -> None:
         # GIVEN an application with a known revision
@@ -473,7 +481,7 @@ class TestJujuClientValidateModel:
         client = self._client(logger, backend)
 
         # WHEN
-        result = client.application_revision("myapp", model="mymodel")
+        result = client.application_revision("myapp", model=self._model())
 
         # THEN
         assert result == 7
@@ -497,7 +505,7 @@ class TestJujuClientValidateModel:
         # (Detailed wait behavior is tested in juju_jubilant/test_backend.py)
         try:
             client.wait_for_application_revision(
-                "myapp", expected_revision=5, model="mymodel", timeout=timedelta(milliseconds=1)
+                "myapp", expected_revision=5, model=self._model(), timeout=timedelta(milliseconds=1)
             )
         except Exception:
             pass  # Backend stub doesn't fully implement wait - that's expected
@@ -676,7 +684,7 @@ class VersionBackendStub(NullJujuBackend):
     _version: str = "3.6.1"
     _cli_version: str = "3.6.1-ubuntu-amd64"
 
-    def version(self, model: str) -> JujuVersion:
+    def version(self, model: JujuModelHandle) -> JujuVersion:
         return JujuVersion.parse(self._version)
 
     def cli_version(self) -> JujuVersion:
@@ -696,7 +704,7 @@ class TestJujuClientVersion:
         backend = VersionBackendStub(_version="3.6.1")
         client = self._client(logger, backend)
 
-        assert client.version("mymodel") == JujuVersion(3, 6, 1)
+        assert client.version(JujuModelHandle(controller="ctrl", model="mymodel")) == JujuVersion(3, 6, 1)
 
     def test_delegates_cli_version_to_backend(self, logger: LoggerStub) -> None:
         backend = VersionBackendStub(_cli_version="3.6.1-ubuntu-amd64")
@@ -907,25 +915,29 @@ class TestJujuClientMigrateModelHooks:
 class IntegrationTrackingBackendStub(NullJujuBackend):
     """Backend stub that records integrate, remove_integration, and wait_for_removal_of_integration calls."""
 
-    integrate_calls: list[tuple[str, JujuIntegrationApplication, JujuIntegrationApplication]] = field(
+    integrate_calls: list[tuple[JujuModelHandle, JujuIntegrationApplication, JujuIntegrationApplication]] = field(
         default_factory=list
     )
-    remove_calls: list[tuple[str, JujuIntegrationApplication, JujuIntegrationApplication]] = field(default_factory=list)
-    wait_removal_calls: list[tuple[str, JujuIntegrationApplication, JujuIntegrationApplication, timedelta | None]] = (
-        field(default_factory=list)
+    remove_calls: list[tuple[JujuModelHandle, JujuIntegrationApplication, JujuIntegrationApplication]] = field(
+        default_factory=list
     )
+    wait_removal_calls: list[
+        tuple[JujuModelHandle, JujuIntegrationApplication, JujuIntegrationApplication, timedelta | None]
+    ] = field(default_factory=list)
 
-    def integrate(self, model: str, target_1: JujuIntegrationApplication, target_2: JujuIntegrationApplication) -> None:
+    def integrate(
+        self, model: JujuModelHandle, target_1: JujuIntegrationApplication, target_2: JujuIntegrationApplication
+    ) -> None:
         self.integrate_calls.append((model, target_1, target_2))
 
     def remove_integration(
-        self, model: str, target_1: JujuIntegrationApplication, target_2: JujuIntegrationApplication
+        self, model: JujuModelHandle, target_1: JujuIntegrationApplication, target_2: JujuIntegrationApplication
     ) -> None:
         self.remove_calls.append((model, target_1, target_2))
 
     def wait_for_removal_of_integration(
         self,
-        model: str,
+        model: JujuModelHandle,
         endpoint_1: JujuIntegrationApplication,
         endpoint_2: JujuIntegrationApplication,
         timeout: timedelta | None,
@@ -935,7 +947,7 @@ class IntegrationTrackingBackendStub(NullJujuBackend):
 
 _EP1 = JujuIntegrationApplication("target", "grafana-dashboards-consumer")
 _EP2 = JujuIntegrationApplication("neighbor-offer", "grafana-dashboard")
-_MODEL = "ctrl-a:model-a"
+_MODEL = JujuModelHandle(controller="ctrl-a", model="model-a")
 
 
 def _client(backend: NullJujuBackend) -> JujuClient:
