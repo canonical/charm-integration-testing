@@ -3,10 +3,20 @@
 
 """Unit tests for groundedness.py."""
 
+import logging
+
 from bundle_builder_x.charm import Charm, CharmChannel, CharmEndpoint, EndpointType
 from bundle_builder_x.charmhub import CharmhubClient
 from bundle_builder_x.charmhub_http import CharmReleaseNotFoundException
-from bundle_builder_x.domain import Domain, DomainApplication, DomainModel, ModelRef, add_charm_to_domain
+from bundle_builder_x.domain import (
+    Domain,
+    DomainApplication,
+    DomainApplicationEndpoint,
+    DomainApplicationIntegration,
+    DomainModel,
+    ModelRef,
+    add_charm_to_domain,
+)
 from bundle_builder_x.groundedness import find_unsatisfiable_endpoints, format_problems
 from bundle_builder_x.juju_version import JujuVersion
 from bundle_builder_x.overrides import OverridesClient
@@ -34,8 +44,8 @@ def _requires(interface: str, optional: bool = False, cyclic: bool = False) -> C
     return CharmEndpoint(type=EndpointType.REQUIRES, interface=interface, optional=optional, cyclic=cyclic)
 
 
-def _provides(interface: str, optional: bool = False) -> CharmEndpoint:
-    return CharmEndpoint(type=EndpointType.PROVIDES, interface=interface, optional=optional)
+def _provides(interface: str, optional: bool = False, cyclic: bool = False) -> CharmEndpoint:
+    return CharmEndpoint(type=EndpointType.PROVIDES, interface=interface, optional=optional, cyclic=cyclic)
 
 
 def _peers(interface: str, optional: bool = False) -> CharmEndpoint:
@@ -93,8 +103,6 @@ def _domain(seed: Charm) -> Domain:
 
 
 def _check(seed: Charm, catalog: dict[str, Charm]) -> list[str]:
-    import logging
-
     return find_unsatisfiable_endpoints(_FakeClient(catalog), _domain(seed), logging.getLogger("test"))
 
 
@@ -216,6 +224,95 @@ class TestFindUnsatisfiableEndpoints:
         # WHEN the spec is checked
         # THEN the endpoint is reported, since it can never reach its required count
         assert len(_check(seed, {"app-charm": seed})) == 1
+
+    def test_pinned_release_is_read_instead_of_the_default(self) -> None:
+        # GIVEN an application pinned to a revision whose endpoint is optional, while the
+        # default release of the same charm makes it non-optional and unprovidable
+        pinned = _charm("app-charm", db=_requires("db", optional=True))
+        default = _charm("app-charm", db=_requires("db"))
+
+        class _PinnedClient(_FakeClient):
+            def charm_from_store(
+                self,
+                charm_name: str,
+                ubuntu_arch: str,
+                juju_version: JujuVersion | None = None,
+                platform: str | None = None,
+                charm_track: str | None = None,
+                charm_risk: str | None = None,
+                charm_revision: int | None = None,
+                ubuntu_version: str | None = None,
+            ) -> Charm:
+                return pinned if charm_revision == 7 else default
+
+        domain = _domain(default)
+        domain.models[_MODEL].applications["app"].revision = 7
+
+        # GIVEN reading the default release instead would reject the spec
+        assert len(_check(default, {"app-charm": default})) == 1
+
+        # WHEN the spec is checked
+        problems = find_unsatisfiable_endpoints(
+            _PinnedClient({"app-charm": default}), domain, logging.getLogger("test")
+        )
+
+        # THEN the pinned release is what is judged, so the spec is not rejected
+        assert problems == []
+
+    def test_cyclic_partner_endpoint_discharges_the_obligation(self) -> None:
+        # GIVEN the only provider of 'db' also non-optionally requires 'db', but marks its
+        # provides side cyclic - as temporal-k8s/temporal-ui-k8s do in static/charm-overrides.
+        # add_charm_dependency_constraints skips the rank ordering when either side is
+        # cyclic, so the solver is free to close the loop.
+        seed = _charm("app-charm", db=_requires("db"))
+        mesh = _charm("mesh", need=_requires("db"), give=_provides("db", cyclic=True))
+
+        # GIVEN the same shape without the cyclic marker is rejected
+        plain = _charm("mesh", need=_requires("db"), give=_provides("db"))
+        assert len(_check(seed, {"app-charm": seed, "mesh": plain})) == 1
+
+        # WHEN the spec is checked
+        # THEN the cyclic partner keeps it satisfiable
+        assert _check(seed, {"app-charm": seed, "mesh": mesh}) == []
+
+    def test_external_cross_model_integration_satisfies_the_endpoint(self) -> None:
+        # GIVEN a non-optional requires with no provider anywhere in the catalogue,
+        # wired instead to an offer in a model outside the domain
+        seed = _charm("app-charm", db=_requires("db"))
+        domain = _domain(seed)
+        domain.models[_MODEL].application_integrations.append(
+            DomainApplicationIntegration(
+                endpoint_1=DomainApplicationEndpoint(application="app", endpoint="db"),
+                endpoint_2=DomainApplicationEndpoint(application="remote", endpoint="db", model=ModelRef(name="other")),
+                url="admin/other.remote",
+            )
+        )
+
+        # GIVEN the same spec without the cross-model integration is rejected
+        assert len(_check(seed, {"app-charm": seed})) == 1
+
+        # WHEN the spec is checked
+        problems = find_unsatisfiable_endpoints(_FakeClient({"app-charm": seed}), domain, logging.getLogger("test"))
+
+        # THEN the endpoint is left alone, since add_charm_constraints adds a count term for it
+        assert problems == []
+
+    def test_juju_info_is_never_reported(self) -> None:
+        # GIVEN a subordinate whose non-optional juju-info requirement no charm declares,
+        # because principals provide it implicitly rather than in metadata
+        seed = _charm("sub-charm", info=_requires("juju-info"))
+
+        # WHEN the spec is checked
+        # THEN it is not reported
+        assert _check(seed, {"sub-charm": seed}) == []
+
+    def test_missing_provider_says_so(self) -> None:
+        # GIVEN nothing at all provides the required interface
+        seed = _charm("app-charm", db=_requires("db"))
+
+        # WHEN the spec is checked
+        # THEN the message names the real cause rather than blaming a non-terminating chain
+        assert "no charm providing 'db' is available" in _check(seed, {"app-charm": seed})[0]
 
 
 class TestFormatProblems:

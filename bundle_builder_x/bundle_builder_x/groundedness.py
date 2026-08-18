@@ -1,3 +1,6 @@
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+
 """Static detection of specs that no bundle can satisfy.
 
 The CEGIS loop in :mod:`bundle_builder_x.bundle_builder` expands the domain whenever
@@ -32,11 +35,13 @@ structural class only, and stays silent about every other reason a spec might fa
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass, field
 
-from .charm import Charm, CharmEndpoint, EndpointType
+from .charm import JUJU_INFO_INTERFACE, Charm, CharmEndpoint, EndpointType
 from .charmhub import CharmhubClient
 from .charmhub_http import CharmReleaseNotFoundException, UnparsableCharmException
-from .domain import Domain
+from .domain import Domain, DomainApplication, DomainModel, ModelRef
+from .juju_version import JujuVersion
 
 # Upper bound on charms downloaded while proving unsatisfiability. On a spec large
 # enough to exhaust it the check abstains and the builder behaves as it did before.
@@ -47,6 +52,14 @@ _MAX_REPORTED_PROBLEMS = 5
 
 class _BudgetExhausted(Exception):
     """Exploration hit EXPLORE_BUDGET, so no verdict can be reached."""
+
+
+@dataclass
+class _Memo:
+    """Groundedness answers cached across every endpoint of a single check."""
+
+    grounded: set[str] = field(default_factory=set)
+    ungrounded: set[str] = field(default_factory=set)
 
 
 class _Catalog:
@@ -60,35 +73,61 @@ class _Catalog:
 
     def __init__(self, client: CharmhubClient, domain: Domain) -> None:
         self._client = client
-        models = list(domain.models.values())
-        self._platforms = sorted({model.platform for model in models})
-        self._arch = models[0].arch
-        self._juju_version = models[0].juju_version
+        # Every (platform, arch, juju version) the domain deploys on. A charm that
+        # resolves under any of them is treated as available: arch and Juju version
+        # are per-model, and juju_version additionally gates `assumes`, so testing
+        # only the first model would hide providers that other models can use.
+        self._targets = list({(m.platform, m.arch, m.juju_version) for m in domain.models.values()})
+        self._platforms = sorted({platform for platform, _, _ in self._targets})
         self._partners: dict[tuple[str, str], list[str]] = {}
-        # Seed the cache from the domain: DomainBuilder has already resolved the
-        # spec's own charms, so re-fetching them here would be a wasted round trip.
-        self._charms: dict[str, Charm | None] = {charm.spec.name: charm.spec for charm in domain.charms}
+        self._charms: dict[str, Charm | None] = {}
+
+    def seed_charm(self, model: DomainModel, app: DomainApplication) -> Charm | None:
+        """Resolve a spec application's charm exactly as the builder will resolve it.
+
+        Seed applications may pin a channel, revision or base, and endpoint overrides
+        are channel-dependent, so the pins have to be honoured here.  Reading a
+        different release could show an obligation the pinned one does not have, and
+        the check would then reject a spec the builder can solve.  Mirrors
+        BundleBuilder._get_charm_for_application.
+        """
+        try:
+            return self._client.charm_from_store(
+                charm_name=app.charm,
+                ubuntu_arch=model.arch,
+                charm_track=app.channel.track if app.channel else None,
+                charm_risk=app.channel.risk if app.channel else None,
+                charm_revision=app.revision,
+                ubuntu_version=app.base,
+                juju_version=model.juju_version,
+                platform=model.platform,
+            )
+        except (CharmReleaseNotFoundException, UnparsableCharmException):
+            return None
 
     def charm(self, name: str) -> Charm | None:
-        """Return the charm's metadata, or None if it is unavailable everywhere."""
+        """Return a candidate partner charm's metadata, or None if unavailable.
+
+        Partners carry no pins, matching how the builder discovers them.
+        """
         if name in self._charms:
             return self._charms[name]
         if len(self._charms) >= EXPLORE_BUDGET:
             raise _BudgetExhausted
         found: Charm | None = None
-        for platform in self._platforms:
-            found = self._fetch(name, platform)
+        for platform, arch, juju_version in self._targets:
+            found = self._fetch(name, platform, arch, juju_version)
             if found is not None:
                 break
         self._charms[name] = found
         return found
 
-    def _fetch(self, name: str, platform: str) -> Charm | None:
+    def _fetch(self, name: str, platform: str, arch: str, juju_version: JujuVersion | None) -> Charm | None:
         try:
             return self._client.charm_from_store(
                 charm_name=name,
-                ubuntu_arch=self._arch,
-                juju_version=self._juju_version,
+                ubuntu_arch=arch,
+                juju_version=juju_version,
                 platform=platform,
             )
         except (CharmReleaseNotFoundException, UnparsableCharmException):
@@ -112,76 +151,123 @@ class _Catalog:
         return len(self._charms)
 
 
+_COUNTERPART = {EndpointType.REQUIRES: EndpointType.PROVIDES, EndpointType.PROVIDES: EndpointType.REQUIRES}
+
+
+def _is_obligation(endpoint: CharmEndpoint, direction: EndpointType) -> bool:
+    """True if `endpoint` must be integrated, and by a partner that has to bottom out.
+
+    juju-info is excluded because every machine charm provides it implicitly without
+    declaring it (see CharmhubClient.find_charms), so the obligation is always
+    dischargeable and the partner set is the entire catalogue.
+    """
+    return (
+        endpoint.type == direction
+        and not endpoint.optional
+        and not endpoint.cyclic
+        and endpoint.interface != JUJU_INFO_INTERFACE
+    )
+
+
 def _obligations(charm: Charm, direction: EndpointType) -> list[CharmEndpoint]:
     """Endpoints of `charm` in `direction` that must be integrated to deploy it."""
-    return [ep for ep in charm.endpoints.values() if ep.type == direction and not ep.optional and not ep.cyclic]
+    return [ep for ep in charm.endpoints.values() if _is_obligation(ep, direction)]
 
 
-def _screen(catalog: _Catalog, name: str, direction: EndpointType) -> bool:
-    """Linear under-approximation of groundedness for `name`.
+def _closes_cycle(charm: Charm, obligation: CharmEndpoint) -> bool:
+    """True if `charm` can discharge `obligation` with an edge that carries no rank ordering.
 
-    Recurses only until one grounded partner is found per obligation, so a healthy
-    spec costs a handful of fetches however many alternatives Charmhub offers.
+    add_charm_dependency_constraints skips the rank assertion when *either* side of an
+    integration is cyclic, so such an edge may close a cycle.  The obligation is then
+    discharged outright and nothing beyond it has to bottom out -- which is exactly
+    what the repo's own overrides encode for pairs like temporal-k8s/temporal-ui-k8s.
+    """
+    counterpart = _COUNTERPART[obligation.type]
+    return any(
+        ep.type == counterpart and ep.interface == obligation.interface and ep.cyclic for ep in charm.endpoints.values()
+    )
+
+
+def _screen(catalog: _Catalog, endpoint: CharmEndpoint, direction: EndpointType, memo: _Memo) -> bool:
+    """Linear under-approximation of "some partner of `endpoint` is grounded".
+
+    Recurses only until one grounded partner is found, so a healthy spec costs the
+    seed charms plus roughly one partner per endpoint, however many alternatives
+    Charmhub offers.
 
     Charms on the current recursion stack count as not-yet-grounded, which is what
     makes this a *least* fixpoint: a charm can only be grounded by bottoming out,
     never by depending on itself.  Negative answers are therefore conditional on the
-    stack, and memoising them is what makes the search linear rather than
-    exponential -- at the cost of turning it into an under-approximation.  Callers
-    must confirm a negative result with :func:`_exact`.
+    stack, and memoising them is what keeps the search linear rather than
+    exponential -- at the cost of turning it into an under-approximation.  A negative
+    result must be confirmed with :func:`_exact` before it is acted on.
     """
-    grounded: set[str] = set()
-    ungrounded: set[str] = set()
 
-    def visit(name: str, stack: set[str]) -> bool:
-        if name in grounded:
+    def discharged(obligation: CharmEndpoint, stack: set[str]) -> bool:
+        for name in catalog.partners(obligation):
+            charm = catalog.charm(name)
+            if charm is None:
+                continue
+            if _closes_cycle(charm, obligation) or visit(name, charm, stack):
+                return True
+        return False
+
+    def visit(name: str, charm: Charm, stack: set[str]) -> bool:
+        if name in memo.grounded:
             return True
-        if name in ungrounded or name in stack:
-            return False
-        charm = catalog.charm(name)
-        if charm is None:
+        if name in memo.ungrounded or name in stack:
             return False
         stack.add(name)
         try:
-            ok = all(
-                any(visit(partner, stack) for partner in catalog.partners(endpoint))
-                for endpoint in _obligations(charm, direction)
-            )
+            ok = all(discharged(obligation, stack) for obligation in _obligations(charm, direction))
         finally:
             stack.discard(name)
-        (grounded if ok else ungrounded).add(name)
+        (memo.grounded if ok else memo.ungrounded).add(name)
         return ok
 
-    return visit(name, set())
+    return discharged(endpoint, set())
 
 
-def _exact(catalog: _Catalog, domain: Domain, direction: EndpointType) -> set[str]:
-    """Exact least fixpoint over the whole catalogue reachable from the spec.
+def _exact(catalog: _Catalog, seeds: list[Charm], direction: EndpointType) -> tuple[set[str], set[str]]:
+    """Exact least fixpoint of groundedness over every partner reachable from `seeds`.
 
-    Only reached once the screen has flagged something, i.e. when a spec is about to
-    be rejected, so the exhaustive exploration is never paid for by a healthy build.
+    Returns the grounded charm names, plus the interfaces on which some reachable
+    partner offers a cyclic endpoint -- an obligation on one of those is dischargeable
+    without bottoming out, so it is satisfied unconditionally.
+
+    Reached only once the screen has flagged something, i.e. when a spec is about to
+    be rejected, so a healthy build never pays for the exhaustive exploration.
+
+    Seed charms are deliberately absent from the result: they are pinned to a
+    specific release and are keyed by name, which two models could disagree on.
+    Callers decide a seed endpoint by asking whether any of its partners is grounded,
+    which is exactly the question :func:`_screen` answers.
     """
     reachable: dict[str, Charm] = {}
-    pending = [app.charm for model in domain.models.values() for app in model.applications.values()]
-    seen = set(pending)
+    pending: list[Charm] = list(seeds)
+    seen: set[str] = set()
     while pending:
-        name = pending.pop()
-        charm = catalog.charm(name)
-        if charm is None:
-            continue
-        reachable[name] = charm
-        for endpoint in _obligations(charm, direction):
-            for partner in catalog.partners(endpoint):
-                if partner not in seen:
-                    seen.add(partner)
-                    pending.append(partner)
+        for obligation in _obligations(pending.pop(), direction):
+            for partner in catalog.partners(obligation):
+                if partner in seen:
+                    continue
+                seen.add(partner)
+                charm = catalog.charm(partner)
+                if charm is not None:
+                    reachable[partner] = charm
+                    pending.append(charm)
 
+    # Index by the endpoint type that can satisfy an obligation in `direction`.
+    counterpart = _COUNTERPART[direction]
     providers: dict[str, set[str]] = {}
-    counterpart = EndpointType.PROVIDES if direction == EndpointType.REQUIRES else EndpointType.REQUIRES
+    unranked: set[str] = set()
     for name, charm in reachable.items():
         for endpoint in charm.endpoints.values():
-            if endpoint.type == counterpart:
-                providers.setdefault(endpoint.interface, set()).add(name)
+            if endpoint.type != counterpart:
+                continue
+            providers.setdefault(endpoint.interface, set()).add(name)
+            if endpoint.cyclic:
+                unranked.add(endpoint.interface)
 
     grounded: set[str] = set()
     changed = True
@@ -191,24 +277,44 @@ def _exact(catalog: _Catalog, domain: Domain, direction: EndpointType) -> set[st
             if name in grounded:
                 continue
             if all(
-                any(partner in grounded for partner in providers.get(endpoint.interface, ()))
-                for endpoint in _obligations(charm, direction)
+                obligation.interface in unranked
+                or any(partner in grounded for partner in providers.get(obligation.interface, ()))
+                for obligation in _obligations(charm, direction)
             ):
                 grounded.add(name)
                 changed = True
-    return grounded
+    return grounded, unranked
 
 
-def _describe(charm_name: str, endpoint_name: str, endpoint: CharmEndpoint, application: str) -> str:
+def _external_cmr_endpoints(domain: Domain) -> set[tuple[str, str]]:
+    """Local (application, endpoint) pairs wired to a model outside the domain.
+
+    add_charm_constraints adds a constant term to such an endpoint's count, so it can
+    reach its required count with no in-domain partner at all.  Groundedness reasons
+    only about in-domain charms, so these endpoints have to be left alone.  Mirrors
+    the cmr_counts construction in constraints.add_charm_constraints.
+    """
+    external: set[tuple[str, str]] = set()
+    for model in domain.models.values():
+        for integration in model.application_integrations:
+            model_1, model_2 = integration.endpoint_1.model, integration.endpoint_2.model
+            if model_1 == model_2:
+                continue  # local integration
+            if (model_1 if model_1 != ModelRef() else model_2) in domain.models:
+                continue  # in-domain CMR, whose count flows through integration.exists
+            local = integration.endpoint_1 if model_1 == ModelRef() else integration.endpoint_2
+            external.add((local.application, local.endpoint))
+    return external
+
+
+def _describe(charm_name: str, endpoint_name: str, endpoint: CharmEndpoint, application: str, orphan: bool) -> str:
     where = f"{charm_name}:{endpoint_name} (interface '{endpoint.interface}', application '{application}')"
-    if endpoint.type == EndpointType.REQUIRES:
-        return (
-            f"{where} can never be satisfied: every charm providing '{endpoint.interface}' itself "
-            f"non-optionally requires an interface that leads back to it, so no provider chain can terminate"
-        )
+    role, chain = ("providing", "provider") if endpoint.type == EndpointType.REQUIRES else ("requiring", "requirer")
+    if orphan:
+        return f"{where} can never be satisfied: no charm {role} '{endpoint.interface}' is available"
     return (
-        f"{where} can never be satisfied: every charm requiring '{endpoint.interface}' itself "
-        f"non-optionally provides an interface that leads back to it, so no requirer chain can terminate"
+        f"{where} can never be satisfied: every charm {role} '{endpoint.interface}' has a non-optional "
+        f"endpoint of its own that leads back to it, so no {chain} chain can terminate"
     )
 
 
@@ -219,39 +325,48 @@ def find_unsatisfiable_endpoints(client: CharmhubClient, domain: Domain, logger:
     satisfiable -- see the module docstring.
     """
     catalog = _Catalog(client, domain)
+    memo = _Memo()
+    external = _external_cmr_endpoints(domain)
     problems: list[str] = []
-    suspects: list[tuple[str, str, CharmEndpoint, str]] = []
+    seeds: list[Charm] = []
+    suspects: list[tuple[Charm, str, CharmEndpoint, str]] = []
 
     try:
         for model in domain.models.values():
             for application, app in model.applications.items():
-                charm = catalog.charm(app.charm)
+                charm = catalog.seed_charm(model, app)
                 if charm is None:
                     # An unavailable charm is reported by the normal expansion path.
                     continue
+                seeds.append(charm)
                 for endpoint_name, endpoint in charm.endpoints.items():
-                    if endpoint.optional or endpoint.cyclic:
+                    if (application, endpoint_name) in external:
                         continue
                     if endpoint.type == EndpointType.PEERS:
-                        # pair_charms_in_domain only ever pairs REQUIRES with PROVIDES, so a
-                        # non-optional peer endpoint never gets an integration variable and can
-                        # never reach its required count. If peer relations are ever modelled
-                        # properly, this branch must be removed with them.
-                        problems.append(
-                            f"{app.charm}:{endpoint_name} (interface '{endpoint.interface}', "
-                            f"application '{application}') is a non-optional peer endpoint, "
-                            f"which the solver can never integrate"
-                        )
-                    elif not _screen(catalog, app.charm, endpoint.type):
-                        suspects.append((app.charm, endpoint_name, endpoint, application))
+                        if not endpoint.optional and not endpoint.cyclic:
+                            # pair_charms_in_domain only ever pairs REQUIRES with PROVIDES, so a
+                            # non-optional peer endpoint never gets an integration variable and can
+                            # never reach its required count. If peer relations are ever modelled
+                            # properly, this branch must be removed with them.
+                            problems.append(
+                                f"{charm.name}:{endpoint_name} (interface '{endpoint.interface}', "
+                                f"application '{application}') is a non-optional peer endpoint, "
+                                f"which the solver can never integrate"
+                            )
+                    elif _is_obligation(endpoint, endpoint.type) and not _screen(
+                        catalog, endpoint, endpoint.type, memo
+                    ):
+                        suspects.append((charm, endpoint_name, endpoint, application))
 
         for direction in {endpoint.type for _, _, endpoint, _ in suspects}:
-            grounded = _exact(catalog, domain, direction)
-            problems.extend(
-                _describe(charm_name, endpoint_name, endpoint, application)
-                for charm_name, endpoint_name, endpoint, application in suspects
-                if endpoint.type == direction and charm_name not in grounded
-            )
+            grounded, unranked = _exact(catalog, seeds, direction)
+            for charm, endpoint_name, endpoint, application in suspects:
+                if endpoint.type != direction or endpoint.interface in unranked:
+                    continue
+                partners = catalog.partners(endpoint)
+                if any(partner in grounded for partner in partners):
+                    continue
+                problems.append(_describe(charm.name, endpoint_name, endpoint, application, orphan=not partners))
     except _BudgetExhausted:
         logger.info(f"Groundedness check explored {EXPLORE_BUDGET} charms without a verdict; skipping")
         return []

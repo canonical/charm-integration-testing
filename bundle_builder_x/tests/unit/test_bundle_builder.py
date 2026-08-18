@@ -514,7 +514,9 @@ class TestSolve:
     def test_returns_valid_solution(self) -> None:
         # GIVEN a domain with two charm alternatives
         domain, id_a, id_b = _domain_with_two_alternatives()
-        builder = BundleBuilder(charmhub_client=_FakeCharmhubClient())
+        # _solve resolves the spec's own charms up front to check they can be integrated,
+        # so the client has to serve "myapp" as well.
+        builder = BundleBuilder(charmhub_client=_FakeCharmhubClient(_make_charm_variant(revision=1, priority=1.0)))
 
         # WHEN _solve runs
         model = builder._solve(domain)
