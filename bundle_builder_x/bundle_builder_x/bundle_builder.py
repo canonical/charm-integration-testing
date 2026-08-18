@@ -208,8 +208,6 @@ class BundleBuilder:
             if self._handle_failed_assertion(tag, domain):
                 self.logger.info(f"Expanded domain to handle failed assertion tag: {tag}")
                 expanded = True
-                # One expansion at a time, then let z3 re-evaluate.
-                break
         if not expanded:
             raise UncompletableBundleError(unsat_core=tags)
 
@@ -309,13 +307,11 @@ class BundleBuilder:
             [owning_model] if is_container_scoped else [owning_model, *(m for m in domain.models if m != owning_model)]
         )
 
-        # Step 1: connect any existing domain charm that fulfils the endpoint.
+        # Exhaust the owning model (reuse, then add) before considering any other model,
+        # so a cheap local integration is always preferred over a cross-model one.
         for model_ref in models:
             if self._connect_existing_for_endpoint(charm_id, endpoint_name, domain, model_ref):
                 return True
-
-        # Step 2: no existing charm helped — add the best new candidate.
-        for model_ref in models:
             names = self._get_charms_for_endpoint(charm_id, endpoint_name, domain, model_ref)
             if not names:
                 self.logger.debug(
