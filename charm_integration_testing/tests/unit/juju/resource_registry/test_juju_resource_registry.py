@@ -78,10 +78,8 @@ class CrashdumpBackendStub(NullJujuBackend):
     k8s_controllers: set[str] = field(default_factory=set)
     kubeconfig: Path | None = None
 
-    def is_k8s_model(self, model: JujuModelHandle | str) -> bool:
-        model_uri = model.uri if isinstance(model, JujuModelHandle) else model
-        controller = model_uri.split(":")[0]
-        return controller in self.k8s_controllers
+    def is_k8s_model(self, model: JujuModelHandle) -> bool:
+        return model.controller in self.k8s_controllers
 
     def get_controller_kubeconfig(self, controller: str) -> Path | None:
         if controller not in self.k8s_controllers:
