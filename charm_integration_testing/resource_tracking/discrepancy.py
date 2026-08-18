@@ -201,20 +201,44 @@ def diff_snapshots(
     return ordered
 
 
+def _without_skipped(
+    snapshots: frozenset[ResourceSnapshot],
+    skips: Mapping[str, frozenset[str]],
+) -> frozenset[ResourceSnapshot]:
+    """Drop snapshots whose owning application opts out of their resource type.
+
+    ``skips`` maps application name to the resource types that application opts
+    out of.  Filtering here -- from a single, once-resolved map -- excludes a
+    skipped kind uniformly from the baseline and every re-entry, so a per-visit
+    resolution difference cannot make a skipped kind read as missing/extra drift.
+    """
+    return frozenset(
+        snapshot for snapshot in snapshots if snapshot.resource_type not in skips.get(snapshot.application, frozenset())
+    )
+
+
 def calculate_discrepancies(
     observations: Iterable[ResourceObservation],
+    skips: Mapping[str, frozenset[str]] | None = None,
 ) -> list[ModelResourceDiscrepancy]:
-    """Diff each state's later observations against its first (baseline) visit."""
+    """Diff each state's later observations against its first (baseline) visit.
+
+    ``skips`` maps each application to the resource kinds it opts out of tracking.
+    It is resolved once and applied uniformly to every observation, so a skipped
+    kind is excluded identically across every visit.
+    """
+    resolved_skips: Mapping[str, frozenset[str]] = skips if skips is not None else {}
     baselines: dict[tuple[State, str], frozenset[ResourceSnapshot]] = {}
     discrepancies: list[ModelResourceDiscrepancy] = []
 
     for observation in observations:
+        snapshots = _without_skipped(observation.snapshots, resolved_skips)
         key = (observation.state, observation.model)
         if key not in baselines:
-            baselines[key] = observation.snapshots
+            baselines[key] = snapshots
             continue
 
-        qualified = diff_snapshots(baselines[key], observation.snapshots)
+        qualified = diff_snapshots(baselines[key], snapshots)
         if qualified:
             discrepancies.append(
                 ModelResourceDiscrepancy(

@@ -20,7 +20,13 @@ test and the domain objects.
 from resource_tracking import ResourceDiscrepancyError, StateResourceTracker, calculate_discrepancies
 
 
-def test_resource_consistency_report(state_resource_tracker: StateResourceTracker) -> None:
-    discrepancies = calculate_discrepancies(state_resource_tracker.observations())
+def test_resource_consistency_report(
+    state_resource_tracker: StateResourceTracker,
+    resource_tracking_skips_by_application: dict[str, frozenset[str]],
+) -> None:
+    discrepancies = calculate_discrepancies(
+        state_resource_tracker.observations(),
+        skips=resource_tracking_skips_by_application,
+    )
     if discrepancies:
         raise ResourceDiscrepancyError(discrepancies)

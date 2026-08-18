@@ -61,10 +61,10 @@ stays small and substrate-agnostic:
   ``KubernetesResourceCollector`` iterates the registered Juju model handles,
   runs each source, and returns ``CollectedResources`` per model. Collection is
   best-effort: a scope that cannot be queried (for example a non-Kubernetes
-  model) is skipped rather than raising. The collector also drops snapshots
-  whose owning application opts out of a resource kind (see `Per-charm tracking
-  overrides`_). Adding an ``lxd`` or ``openstack`` collector requires no change
-  to the tracker.
+  model) is skipped rather than raising. Every observed snapshot is recorded
+  uniformly; per-charm opt-outs are *not* applied here but once at diff time (see
+  `Per-charm tracking overrides`_). Adding an ``lxd`` or ``openstack`` collector
+  requires no change to the tracker.
 
 **Overrides** (bundle-builder ``OverridesClient``)
   A charm version opts out of tracking a resource kind under its ``overrides``
@@ -72,8 +72,9 @@ stays small and substrate-agnostic:
   ``resource_tracking_skips_by_application`` fixture reads each deployed
   application's charm and channel from the live model via
   ``juju_client.list_applications`` and looks up its ``resource_tracking.skip``
-  set through the bundle-builder ``OverridesClient``, which is passed to the
-  collector (see `Per-charm tracking overrides`_).
+  set through the bundle-builder ``OverridesClient``. Each application is
+  resolved once and cached for the session, and the resolved map is applied at
+  diff time by ``calculate_discrepancies`` (see `Per-charm tracking overrides`_).
 
 
 **Tracker** (``resource_tracking.tracker``)
@@ -84,10 +85,13 @@ stays small and substrate-agnostic:
 
 **Discrepancies** (``resource_tracking.discrepancy``)
   ``calculate_discrepancies()`` treats the first observation of each (state,
-  model) as the baseline and diffs later visits against it by ``identity``. Each
-  ``ModelResourceDiscrepancy`` publishes *structured* data via ``entries()`` --
-  one ``DiscrepancyEntry`` per drifted resource -- rather than pre-formatted
-  strings. This keeps execution-metadata formatting out of the domain objects.
+  model) as the baseline and diffs later visits against it by ``identity``. It
+  first excludes any ``(application, resource_type)`` pairs the resolved skip map
+  opts out of, applying that single map uniformly to every observation so a
+  skipped kind cannot read as drift. Each ``ModelResourceDiscrepancy`` publishes
+  *structured* data via ``entries()`` -- one ``DiscrepancyEntry`` per drifted
+  resource -- rather than pre-formatted strings. This keeps execution-metadata
+  formatting out of the domain objects.
 
 Failure and reporting flow
 --------------------------
@@ -242,10 +246,17 @@ equal to the owning Juju application). The
 ``resource_tracking_skips_by_application`` fixture therefore reads the deployed
 applications and their charms from the live models via
 ``juju_client.list_applications`` -- rather than from hard-coded target/neighbor
-options -- so charms pulled in as dependencies are mapped the same way. As a
-result a skip is scoped to the owning application only: a model can still track
-the same resource kind for other applications, and a ``pvc`` skip on
-``postgresql-k8s`` never masks drift from a co-deployed charm.
+options -- so charms pulled in as dependencies are mapped the same way. Each
+application is resolved once and cached for the session, so a transient
+``list_applications`` failure on a later visit (surfaced at ``WARNING``) does not
+lose skip coverage already established. The resolved map is applied once, at diff
+time, inside ``calculate_discrepancies``: a skipped ``(application,
+resource_type)`` pair is excluded uniformly from the baseline and every
+re-entry, so a per-visit resolution difference cannot make a skipped kind read as
+``missing``/``extra`` drift. As a result a skip is scoped to the owning
+application only: a model can still track the same resource kind for other
+applications, and a ``pvc`` skip on ``postgresql-k8s`` never masks drift from a
+co-deployed charm.
 
 PersistentVolumeClaims: the reference resource
 ----------------------------------------------
@@ -449,8 +460,8 @@ kind is added without touching any of them. Following the PVC example:
 4. **(Optional) support opting out.** Nothing extra is needed: any charm version
    can already skip the new kind by adding its ``resource_type`` label under
    ``resource_tracking.skip`` in the matching ``overrides`` entry of
-   ``static/charm-overrides/<charm>.yaml``, and the collector's per-application
-   filtering applies automatically.
+   ``static/charm-overrides/<charm>.yaml``, and the diff-time per-application
+   filtering in ``calculate_discrepancies`` applies automatically.
 
 5. **(Optional) define resource-specific drift.** The default ``missing`` /
    ``extra`` qualifiers cover appearance and disappearance. If the resource needs

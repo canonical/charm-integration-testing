@@ -62,11 +62,25 @@ def _resource_tracking_overrides_client(
     return OverridesClient(overrides=overrides_dir, logger=logger)
 
 
+@pytest.fixture(scope="session")
+def _resource_tracking_skip_cache() -> dict[str, frozenset[str]]:
+    """Session-scoped accumulator of each application's resolved skip set.
+
+    Applications are resolved once, the first time they are seen, and cached
+    here for the rest of the run.  Caching makes the map immune to transient
+    ``list_applications`` failures on later visits and gives the end-of-suite
+    report a stable, fully-accumulated map even after applications have been
+    torn down.
+    """
+    return {}
+
+
 @pytest.fixture
 def resource_tracking_skips_by_application(
     request: pytest.FixtureRequest,
     juju_client: JujuClient,
     session_resource_registry: ResourceRegistry,
+    _resource_tracking_skip_cache: dict[str, frozenset[str]],
     logger: logging.Logger,
 ) -> dict[str, frozenset[str]]:
     """Map each deployed application to the resource kinds it opts out of tracking.
@@ -76,30 +90,30 @@ def resource_tracking_skips_by_application(
     *application* on the cluster.  The application-to-charm mapping is read from
     the live models via ``juju_client.list_applications`` rather than from
     hard-coded target/neighbor options, so charms pulled in as dependencies are
-    resolved the same way.  Resolution is best-effort: a model that cannot be
-    queried simply contributes no skips.
+    resolved the same way.  Each application is resolved once and cached across
+    the session, so a model that cannot be queried on some later visit does not
+    lose skip coverage already established for its applications.
     """
     overrides_client = _resource_tracking_overrides_client(request, logger)
     if overrides_client is None:
-        return {}
+        return _resource_tracking_skip_cache
 
-    skips: dict[str, frozenset[str]] = {}
     for handle in session_resource_registry.registered_handles():
         if not isinstance(handle, JujuModelHandle):
             continue
         try:
             applications = juju_client.list_applications(model=f"{handle.controller}:{handle.model}")
         except Exception:
-            logger.debug("Could not list applications for model '%s'.", handle.model, exc_info=True)
+            logger.warning("Could not list applications for model '%s'.", handle.model, exc_info=True)
             continue
         for application, info in applications.items():
-            if info.channel is None:
+            if application in _resource_tracking_skip_cache or info.channel is None:
                 continue
             channel = CharmChannel.model_validate(str(info.channel))
             resolved = overrides_client.get_charm_resource_tracking_skips(info.charm, channel)
             if resolved:
-                skips[application] = resolved
-    return skips
+                _resource_tracking_skip_cache[application] = resolved
+    return _resource_tracking_skip_cache
 
 
 @pytest.fixture(autouse=True)
@@ -115,6 +129,10 @@ def track_state_resources(
 
     Collection is deliberately best-effort and never fails the test: the
     resulting discrepancies are reported separately at the end of the suite.
+    Snapshots are recorded uniformly; per-charm skips are applied once at diff
+    time.  ``resource_tracking_skips_by_application`` is depended on here only to
+    accumulate each application's resolved skip set into the session cache as the
+    suite progresses, so the end-of-suite report has the full map.
     """
     yield
 
@@ -137,7 +155,6 @@ def track_state_resources(
                 kubernetes_client,
                 session_resource_registry,
                 sources=DEFAULT_KUBERNETES_SOURCES,
-                resource_skips=resource_tracking_skips_by_application,
             )
         )
     if not collectors:
