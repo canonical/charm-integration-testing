@@ -32,7 +32,6 @@ from .domain import (
 )
 from .domain_builder import DomainBuilder
 from .extract import extract_solution
-from .groundedness import find_unsatisfiable_endpoints, format_problems
 from .snapstore import SnapstoreClient
 from .spec import SpecFile
 from .timing import NullTimeline, Timeline
@@ -149,14 +148,6 @@ class BundleBuilder:
                         )
 
     def _solve(self, domain: Domain) -> z3.ModelRef:
-        # Reject the specs that can be proven unsatisfiable before solving. The loop
-        # below only terminates when it finds a model or the solver times out, so
-        # without this an unsatisfiable spec expands the domain indefinitely and ends
-        # in a timeout rather than an error naming the endpoint at fault.
-        problems = find_unsatisfiable_endpoints(self.charmhub_client, domain, self.logger)
-        if problems:
-            raise UncompletableBundleError(format_problems(problems))
-
         # Iterative CEGIS loop: expand domain until satisfiable.
         # Termination otherwise relies on the per-iteration solver timeout; there is no
         # hard iteration cap so that arbitrarily complex dependency graphs can converge.
