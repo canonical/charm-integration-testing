@@ -223,7 +223,7 @@ A single repo may contain multiple charms (e.g. `kfp-operators`, `cos-charms`). 
 4. For each endpoint in each generation, check source code and classify as Required, Optional, or Meaning-2-optional.
 5. Identify any constraints needed: at-least-one patterns, TLS implications, version-track matching, cyclic dependencies.
 6. Write the YAML following the schema in `bundle_builder_x/bundle_builder_x/overrides.py`.
-7. Add evidence comments for every non-obvious `optional: false` AND `optional: true` decision. The stated rule is that both directions require justification; the comment only needs to be one line but must cite source code, docs, or a domain expert statement.
+7. Add evidence comments for every non-obvious `optional: false` AND `optional: true` decision. Both directions require justification, but each comment must be exactly one line citing source code, docs, or a domain expert statement - see the Comment Budget rule in "File Format" below. Do not write multi-line paragraphs.
 8. Run self-validation checklist.
 9. Run the solver against a minimal single-charm spec and verify the bundle is realistic.
 10. For endpoints that qualify for Meaning 1: prepare upstream PR diff (with user permission).
@@ -263,7 +263,7 @@ Inspect the diagram: does the bundle contain the apps you would expect for a rea
 3. **Endpoint names** - every name exists in the charm's actual Charmhub metadata on the correct side (requires/provides)
 4. **Config keys** - every key in `configs:` exists in the charm's `config.yaml`
 5. **Criteria coverage** - every criteria block matches at least one published channel
-6. **Evidence present** - every `optional: false` has a source comment; every `optional: true` on a non-obvious endpoint has a reason
+6. **Evidence present and concise** - every `optional: false` has a one-line source comment; every `optional: true` on a non-obvious endpoint has a one-line reason. Multi-line comment blocks are a checklist failure, not a bonus - trim them.
 7. **No Meaning 2 misuse** - no endpoint marked `optional: true` solely to suppress solver sprawl
 8. **Realistic bundle** - solver run produces a bundle you would actually deploy (not a lone charm, not missing obvious dependencies)
 9. **Cross-reference** - compare patterns with similar overrides in `static/charm-overrides/`
@@ -390,8 +390,48 @@ overrides:
   ...
 ```
 
-Keep comments short. One line per notable endpoint decision. Full prose is not needed; just
-enough for a reviewer to verify the claim without re-reading all the source code.
+**Comment budget - this is a hard limit, not a suggestion:**
+
+- File header: at most 3-4 lines total (source link + one sentence on why criteria blocks
+  exist). Do not add a running narrative of migration history, revision numbers, or dates.
+- Per criteria block: at most 1-2 lines explaining what generation it covers and why the
+  boundary is where it is. Do not restate evidence already given elsewhere in the file.
+- Per endpoint: exactly one line, inline after the key. Not a paragraph, not a bullet list
+  of supporting facts, not a quote from source code.
+
+The evidence only needs to be *locatable*, not reproduced in full. Cite the file/function
+(`BlockedStatus in charm.py::_on_config_changed`) - do not paste the surrounding code, the
+revision numbers you checked, or a chronology of what changed when. A future maintainer who
+wants the full story can re-run the same Charmhub/source lookup you did; the comment's job is
+to point them in the right direction, not to be a standalone investigation report.
+
+**Bad (too long - do not do this):**
+
+```yaml
+      ceph-client:
+        optional: true
+        # DNSaaS (designate) integration is additive, not neutron-api's
+        # primary purpose. hooks/neutron_api_utils.py REQUIRED_INTERFACES
+        # only lists shared-db/amqp/identity-service; external-dns is only
+        # consulted via check_optional_relations() when relation_ids(
+        # 'external-dns') is already non-empty, and get_optional_interfaces()
+        # confirms it is not part of the mandatory set. No charm in the
+        # solver's search space currently provides the "designate" interface,
+        # which was causing UncompletableBundleError on the
+        # etcd:proxy/etcd-proxy/neutron-api:etcd-proxy test plan.
+        # Source: https://github.com/openstack/charm-neutron-api
+```
+
+**Good (one line, locatable evidence):**
+
+```yaml
+      ceph-client:
+        optional: true  # not in REQUIRED_INTERFACES; neutron_api_utils.py
+```
+
+If a decision genuinely needs more than one line to justify (e.g. a subtle Meaning 2
+constraint), put the longer reasoning in the PR description, not the file. The file should
+stay skimmable end-to-end in under a minute.
 
 ---
 
@@ -464,6 +504,8 @@ If the bundle pulls in something unexpected, check whether that endpoint should 
 8. **Confusing scope:container endpoints.** Subordinate attachment points are always required. Never mark them optional.
 
 9. **Writing evidence-free overrides.** If a future maintainer cannot verify why an endpoint is marked required or optional by reading the comment, the override is incomplete.
+
+10. **Writing evidence-bloated overrides.** A multi-line comment quoting source code, listing every revision number checked, or narrating the investigation is just as much a maintenance problem as no comment at all - it goes stale and nobody rereads it. One line, a pointer to the file/function, done. See the Comment Budget rule under "File Format".
 
 ---
 
