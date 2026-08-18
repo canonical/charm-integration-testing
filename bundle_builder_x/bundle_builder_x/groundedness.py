@@ -353,7 +353,7 @@ def find_unsatisfiable_endpoints(client: CharmhubClient, domain: Domain, logger:
     satisfiable -- see the module docstring.
     """
     catalog = _Catalog(client, domain)
-    memo = _Memo()
+    memos: dict[EndpointType, _Memo] = {}
     external = _external_cmr_endpoints(domain)
     problems: list[str] = []
     seeds: list[Charm] = []
@@ -389,7 +389,12 @@ def find_unsatisfiable_endpoints(client: CharmhubClient, domain: Domain, logger:
                         f"application '{application}') is a non-optional peer endpoint, "
                         f"which the solver can never integrate"
                     )
-            elif _is_obligation(endpoint, endpoint.type) and not _screen(catalog, endpoint, endpoint.type, memo):
+            elif _is_obligation(endpoint, endpoint.type) and not _screen(
+                catalog,
+                endpoint,
+                endpoint.type,
+                memos.setdefault(endpoint.type, _Memo()),
+            ):
                 suspects.append((charm, endpoint_name, endpoint, application))
 
         for direction in {endpoint.type for _, _, endpoint, _ in suspects}:

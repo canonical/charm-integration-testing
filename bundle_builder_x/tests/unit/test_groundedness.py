@@ -244,6 +244,37 @@ class TestFindUnsatisfiableEndpoints:
         # THEN the endpoint is reported, since it can never reach its required count
         assert len(_check(seed, {"app-charm": seed})) == 1
 
+    def test_screen_memo_is_scoped_to_endpoint_direction(self) -> None:
+        # GIVEN one partner is grounded when traversing requires endpoints, but not when
+        # traversing provides endpoints because it has an orphaned provides endpoint
+        requiring_seed = _charm("requiring-seed", db=_requires("db"))
+        providing_seed = _charm("providing-seed", metrics=_provides("metrics"))
+        partner = _charm(
+            "partner",
+            db=_provides("db", optional=True),
+            metrics=_requires("metrics", optional=True),
+            orphan=_provides("orphan"),
+        )
+        domain = _two_app_domain(requiring_seed, providing_seed)
+
+        # WHEN both seed directions are screened in one check
+        problems = find_unsatisfiable_endpoints(
+            _FakeClient(
+                {
+                    "requiring-seed": requiring_seed,
+                    "providing-seed": providing_seed,
+                    "partner": partner,
+                }
+            ),
+            domain,
+            logging.getLogger("test"),
+        )
+
+        # THEN the requires traversal cannot make the provides traversal reuse the
+        # wrong grounded answer, and the unsatisfiable provides endpoint is reported
+        assert len(problems) == 1
+        assert "providing-seed:metrics" in problems[0]
+
     def test_pinned_release_is_read_instead_of_the_default(self) -> None:
         # GIVEN an application pinned to a revision whose endpoint is optional, while the
         # default release of the same charm makes it non-optional and unprovidable
