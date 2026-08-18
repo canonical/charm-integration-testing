@@ -323,6 +323,8 @@ class BundleBuilder:
         """Expand the domain by fetching a peer charm variant on the required channel."""
         owning_model = domain.charms[tag.charm.charm_id].model
         model = domain.models[owning_model]
+        peer_model = domain.charms[tag.peer_charm_id].model
+        peer_model_spec = domain.models[peer_model]
         peer_channel = domain.charms[tag.peer_charm_id].spec.channel
         if tag.required_channel is not None:
             resolved = CharmChannel.model_validate(tag.required_channel)
@@ -333,18 +335,20 @@ class BundleBuilder:
             risk = tag.required_risk or None
         expanded = False
 
-        # Try fetching the peer charm at the required channel.
+        # Try fetching the peer charm at the required channel. The peer charm may live in a
+        # different model than the anchor charm (cross-model relation), so resolve it using
+        # its own model's arch/juju_version/platform and add it there.
         try:
             peer_charm = self.charmhub_client.charm_from_store(
                 charm_name=tag.peer_charm_name,
-                ubuntu_arch=model.arch,
-                juju_version=model.juju_version,
-                platform=model.platform,
+                ubuntu_arch=peer_model_spec.arch,
+                juju_version=peer_model_spec.juju_version,
+                platform=peer_model_spec.platform,
                 charm_track=track,
                 charm_risk=risk,
                 charm_revision=tag.required_revision,
             )
-            expanded |= self._add_charm_for_charm_id(peer_charm, tag.peer_charm_id, domain, owning_model)
+            expanded |= self._add_charm_for_charm_id(peer_charm, tag.peer_charm_id, domain, peer_model)
         except CharmReleaseNotFoundException:
             self.logger.debug(f"No release found for {tag.peer_charm_name} on {track}/{risk or '*'}")
 

@@ -3,6 +3,11 @@
 # When zookeeper is integrated (pre-track-4 and latest/* non-stable), certificates is also required.
 # Track 4 is KRaft mode - the zookeeper endpoint no longer exists.
 # See: https://github.com/canonical/charm-integration-testing/issues/408
+#
+# latest/stable's zookeeper endpoint must be pinned to a same-track (legacy)
+# zookeeper-k8s partner, or an unpinned CMR neighbor defaults to the
+# incompatible track-3 zookeeper-k8s and blocks waiting for certificates.
+# See: https://github.com/canonical/charm-integration-testing/issues/760
 overrides:
   - criteria:
       - track: '4'
@@ -41,6 +46,16 @@ overrides:
     requires:
       zookeeper:
         optional: false
+    constraints:
+      # zookeeper-k8s track 3 is a different implementation (rock-based, modern
+      # security model) than the legacy zookeeper-k8s 'latest' track this legacy
+      # kafka-k8s pairs with. Without this, the solver defaults an unpinned
+      # zookeeper-k8s neighbor to its published default channel (3/stable),
+      # producing an incompatible deployment where kafka-k8s never gets the
+      # certificates relation it would need with a track-3 partner and blocks.
+      # Same failure category as the peer-cluster track mismatch above.
+      # See: https://github.com/canonical/charm-integration-testing/issues/760
+      - 'tracks(charms(endpoint[zookeeper])) == tracks({self})'
 
   # latest/* (except stable): has kafka-client interface (like track 3) but fewer endpoints.
   # ubuntu/22.04, simpler endpoint set than track 3.
