@@ -58,8 +58,16 @@ class _BudgetExhausted(Exception):
 class _Memo:
     """Groundedness answers cached across every endpoint of a single check."""
 
-    grounded: set[str] = field(default_factory=set)
-    ungrounded: set[str] = field(default_factory=set)
+    grounded: set[_Partner] = field(default_factory=set)
+    ungrounded: set[_Partner] = field(default_factory=set)
+
+
+@dataclass(frozen=True)
+class _Partner:
+    """A discoverable charm name or one specific pinned seed release."""
+
+    name: str
+    seed_index: int | None = None
 
 
 class _Catalog:
@@ -79,7 +87,7 @@ class _Catalog:
         # only the first model would hide providers that other models can use.
         self._targets = list({(m.platform, m.arch, m.juju_version) for m in domain.models.values()})
         self._platforms = sorted({platform for platform, _, _ in self._targets})
-        self._partners: dict[tuple[str, str], list[str]] = {}
+        self._partners: dict[tuple[str, str], list[_Partner]] = {}
         self._charms: dict[str, Charm | None] = {}
         # Seed applications' own resolved charms. find_charms is filtered by the
         # `listed` override (see e.g. static/charm-overrides/cinder.yaml), which
@@ -89,10 +97,12 @@ class _Catalog:
         # cinder-lvm:storage-backend is only ever wired to an explicitly named
         # cinder, never one the builder finds on its own). Registering seeds here
         # makes them visible to partners() regardless of `listed`.
-        self._seeds: list[Charm] = []
+        self._seeds: list[tuple[_Partner, Charm]] = []
 
     def register_seed(self, charm: Charm) -> None:
-        self._seeds.append(charm)
+        partner = _Partner(charm.name, seed_index=len(self._seeds))
+        self._seeds.append((partner, charm))
+        self._partners.clear()
 
     def seed_charm(self, model: DomainModel, app: DomainApplication) -> Charm | None:
         """Resolve a spec application's charm exactly as the builder will resolve it.
@@ -117,11 +127,15 @@ class _Catalog:
         except (CharmReleaseNotFoundException, UnparsableCharmException):
             return None
 
-    def charm(self, name: str) -> Charm | None:
+    def charm(self, partner: _Partner) -> Charm | None:
         """Return a candidate partner charm's metadata, or None if unavailable.
 
-        Partners carry no pins, matching how the builder discovers them.
+        Discovered partners carry no pins, matching how the builder discovers them.
+        Seed partners retain the exact release resolved from their application pins.
         """
+        if partner.seed_index is not None:
+            return self._seeds[partner.seed_index][1]
+        name = partner.name
         if name in self._charms:
             return self._charms[name]
         if len(self._charms) >= EXPLORE_BUDGET:
@@ -145,23 +159,22 @@ class _Catalog:
         except (CharmReleaseNotFoundException, UnparsableCharmException):
             return None
 
-    def partners(self, endpoint: CharmEndpoint) -> list[str]:
+    def partners(self, endpoint: CharmEndpoint) -> list[_Partner]:
         """Return the charms that could sit on the other side of `endpoint`."""
         counterpart = _COUNTERPART[endpoint.type]
         side = "provides" if endpoint.type == EndpointType.REQUIRES else "requires"
         key = (side, endpoint.interface)
         if key not in self._partners:
-            names: list[str] = []
+            partners: list[_Partner] = []
             for platform in self._platforms:
                 for name in self._client.find_charms(**{side: endpoint.interface}, platform=platform):
-                    if name not in names:
-                        names.append(name)
-            for seed in self._seeds:
-                if seed.name not in names and any(
-                    ep.type == counterpart and ep.interface == endpoint.interface for ep in seed.endpoints.values()
-                ):
-                    names.append(seed.name)
-            self._partners[key] = names
+                    partner = _Partner(name)
+                    if partner not in partners:
+                        partners.append(partner)
+            for partner, seed in self._seeds:
+                if any(ep.type == counterpart and ep.interface == endpoint.interface for ep in seed.endpoints.values()):
+                    partners.append(partner)
+            self._partners[key] = partners
         return self._partners[key]
 
     @property
@@ -221,49 +234,47 @@ def _screen(catalog: _Catalog, endpoint: CharmEndpoint, direction: EndpointType,
     result must be confirmed with :func:`_exact` before it is acted on.
     """
 
-    def discharged(obligation: CharmEndpoint, stack: set[str]) -> bool:
-        for name in catalog.partners(obligation):
-            charm = catalog.charm(name)
+    def discharged(obligation: CharmEndpoint, stack: set[_Partner]) -> bool:
+        for partner in catalog.partners(obligation):
+            charm = catalog.charm(partner)
             if charm is None:
                 continue
-            if _closes_cycle(charm, obligation) or visit(name, charm, stack):
+            if _closes_cycle(charm, obligation) or visit(partner, charm, stack):
                 return True
         return False
 
-    def visit(name: str, charm: Charm, stack: set[str]) -> bool:
-        if name in memo.grounded:
+    def visit(partner: _Partner, charm: Charm, stack: set[_Partner]) -> bool:
+        if partner in memo.grounded:
             return True
-        if name in memo.ungrounded or name in stack:
+        if partner in memo.ungrounded or partner in stack:
             return False
-        stack.add(name)
+        stack.add(partner)
         try:
             ok = all(discharged(obligation, stack) for obligation in _obligations(charm, direction))
         finally:
-            stack.discard(name)
-        (memo.grounded if ok else memo.ungrounded).add(name)
+            stack.discard(partner)
+        (memo.grounded if ok else memo.ungrounded).add(partner)
         return ok
 
     return discharged(endpoint, set())
 
 
-def _exact(catalog: _Catalog, seeds: list[Charm], direction: EndpointType) -> tuple[set[str], set[str]]:
+def _exact(catalog: _Catalog, seeds: list[Charm], direction: EndpointType) -> tuple[set[_Partner], set[str]]:
     """Exact least fixpoint of groundedness over every partner reachable from `seeds`.
 
-    Returns the grounded charm names, plus the interfaces on which some reachable
-    partner offers a cyclic endpoint -- an obligation on one of those is dischargeable
-    without bottoming out, so it is satisfied unconditionally.
+    Returns the grounded partner identities, plus the interfaces on which some
+    reachable partner offers a cyclic endpoint -- an obligation on one of those is
+    dischargeable without bottoming out, so it is satisfied unconditionally.
 
     Reached only once the screen has flagged something, i.e. when a spec is about to
     be rejected, so a healthy build never pays for the exhaustive exploration.
 
-    Seed charms are deliberately absent from the result: they are pinned to a
-    specific release and are keyed by name, which two models could disagree on.
-    Callers decide a seed endpoint by asking whether any of its partners is grounded,
-    which is exactly the question :func:`_screen` answers.
+    Seed partners retain a distinct identity per application, so two applications
+    using different releases of the same charm cannot overwrite each other's metadata.
     """
-    reachable: dict[str, Charm] = {}
+    reachable: dict[_Partner, Charm] = {}
     pending: list[Charm] = list(seeds)
-    seen: set[str] = set()
+    seen: set[_Partner] = set()
     while pending:
         for obligation in _obligations(pending.pop(), direction):
             for partner in catalog.partners(obligation):
@@ -277,29 +288,28 @@ def _exact(catalog: _Catalog, seeds: list[Charm], direction: EndpointType) -> tu
 
     # Index by the endpoint type that can satisfy an obligation in `direction`.
     counterpart = _COUNTERPART[direction]
-    providers: dict[str, set[str]] = {}
+    providers: dict[str, set[_Partner]] = {}
     unranked: set[str] = set()
-    for name, charm in reachable.items():
+    for partner, charm in reachable.items():
         for endpoint in charm.endpoints.values():
             if endpoint.type != counterpart:
                 continue
-            providers.setdefault(endpoint.interface, set()).add(name)
+            providers.setdefault(endpoint.interface, set()).add(partner)
             if endpoint.cyclic:
                 unranked.add(endpoint.interface)
 
-    grounded: set[str] = set()
+    grounded: set[_Partner] = set()
     changed = True
     while changed:
         changed = False
-        for name, charm in reachable.items():
-            if name in grounded:
+        for partner, charm in reachable.items():
+            if partner in grounded:
                 continue
             if all(
-                obligation.interface in unranked
-                or any(partner in grounded for partner in providers.get(obligation.interface, ()))
+                obligation.interface in unranked or grounded.intersection(providers.get(obligation.interface, ()))
                 for obligation in _obligations(charm, direction)
             ):
-                grounded.add(name)
+                grounded.add(partner)
                 changed = True
     return grounded, unranked
 

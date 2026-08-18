@@ -354,6 +354,69 @@ class TestFindUnsatisfiableEndpoints:
         # THEN cinder-lvm's obligation is not rejected, since cinder is right there in the spec
         assert problems == []
 
+    def test_pinned_seed_partner_uses_its_resolved_release(self) -> None:
+        # GIVEN two applications pin different releases of the same charm, and only one
+        # pinned release provides db without introducing an ungrounded dependency
+        consumer = _charm("consumer", db=_requires("db"))
+        grounded_provider = _charm("provider", db=_provides("db"))
+        other_pinned_release = _charm("provider", metrics=_provides("metrics", optional=True))
+        default_provider = _charm("provider", db=_provides("db"), tls=_requires("tls"))
+
+        class _PinnedPartnerClient(_FakeClient):
+            def charm_from_store(
+                self,
+                charm_name: str,
+                ubuntu_arch: str,
+                juju_version: JujuVersion | None = None,
+                platform: str | None = None,
+                charm_track: str | None = None,
+                charm_risk: str | None = None,
+                charm_revision: int | None = None,
+                ubuntu_version: str | None = None,
+            ) -> Charm:
+                if charm_name == "provider" and charm_revision == 7:
+                    return grounded_provider
+                if charm_name == "provider" and charm_revision == 8:
+                    return other_pinned_release
+                if charm_name == "provider":
+                    return default_provider
+                return super().charm_from_store(
+                    charm_name,
+                    ubuntu_arch,
+                    juju_version,
+                    platform,
+                    charm_track,
+                    charm_risk,
+                    charm_revision,
+                    ubuntu_version,
+                )
+
+        domain = Domain()
+        domain.models[_MODEL] = DomainModel(
+            arch="amd64",
+            platform="machine",
+            juju_version=_JUJU,
+            ref=_MODEL,
+            applications={
+                "consumer": DomainApplication(charm=consumer.name),
+                "grounded": DomainApplication(charm=grounded_provider.name, revision=7),
+                "other-release": DomainApplication(charm=other_pinned_release.name, revision=8),
+            },
+        )
+        client = _PinnedPartnerClient(
+            {"consumer": consumer, "provider": default_provider},
+            unlisted={"provider"},
+        )
+
+        # GIVEN resolving the provider by name would use the ungrounded default release
+        assert len(_check(consumer, {"consumer": consumer, "provider": default_provider})) == 1
+
+        # WHEN the spec is checked
+        problems = find_unsatisfiable_endpoints(client, domain, logging.getLogger("test"))
+
+        # THEN the pinned, grounded release is retained as a distinct partner
+        assert problems == []
+
 
 class TestFormatProblems:
     """groundedness.format_problems."""
