@@ -200,7 +200,7 @@ overrides:
       - 'tracks(charms(endpoint[etcd])) <= tracks({self})'
 
   # ── 1.30+ tracks (ops-based rewrite; default block) ────────────────────────
-  # Also matches 1.29/candidate and 1.29/stable (still pre-rewrite, same endpoint shape).
+  # Also matches 1.29/candidate and 1.29/stable.
   # Dropped: ceph-storage, loadbalancer (old), vsphere.
   # Added in provides: cos-agent, tokens.
   # Dropped from provides: aws-iam, grafana, kube-api-endpoint,
