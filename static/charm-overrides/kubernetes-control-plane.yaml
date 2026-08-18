@@ -8,11 +8,14 @@
 # Evidence gathered from src/charm.py, src/cloud_integration.py,
 # src/encryption_at_rest.py (main branch, 2026-05-20).
 #
-# Four criteria blocks cover the four distinct endpoint generations:
-#   1.23:       legacy reactive charm, no external-cloud-provider
-#   1.24-1.28:  legacy reactive charm, adds external-cloud-provider
-#   1.29:       ops-based rewrite; stripped azure/gcp/keystone/openstack/vault-kv/ceph-client (landed in /edge, will reach /stable)
-#   1.30+:      ops-based rewrite; full endpoint set as landed in /stable
+# Five criteria blocks cover the five distinct endpoint generations:
+#   1.23:            legacy reactive charm, no external-cloud-provider
+#   1.24-1.28:       legacy reactive charm, adds external-cloud-provider
+# Five criteria blocks cover the five distinct endpoint generations:
+#   1.23:            legacy reactive charm, no external-cloud-provider
+#   1.24-1.28:       legacy reactive charm, adds external-cloud-provider
+#   1.29 edge/beta:  ops-based rewrite; stripped azure/gcp/keystone/openstack/vault-kv/ceph-client
+#   1.29 candidate/stable, 1.30+: legacy reactive charm, full endpoint set (confirmed live 2026-08-18)
 #
 # Truly required in 1.29+ (DO NOT mark optional):
 #   certificates  - assert self.certificates.relation in request_certificates()
@@ -158,12 +161,16 @@ overrides:
       # etcd peer must be on the same track.
       - 'tracks(charms(endpoint[etcd])) <= tracks({self})'
 
-  # ── 1.29 track (ops-based; deprecated endpoints stripped) ─────────────────
-  # azure, ceph-client, gcp, keystone-credentials, openstack, vault-kv were
-  # removed in 1.29/edge and will propagate to beta/stable. Apply the minimal
-  # endpoint set to all 1.29/* channels now rather than blocking on /stable.
+  # ── 1.29 edge/beta only (ops-based; deprecated endpoints stripped) ────────
+  # 1.29/candidate and /stable are still the pre-rewrite reactive charm (full
+  # legacy set incl. ceph-client) and fall through to the 1.30+ default block
+  # below. Do NOT widen this to all of 1.29 - see 1.30+ default block comment.
   - criteria:
-      - track: '1.29'
+      - all_of:
+          - track: '1.29'
+          - any_of:
+              - risk: edge
+              - risk: beta
     requires:
       aws:
         optional: true
@@ -193,6 +200,7 @@ overrides:
       - 'tracks(charms(endpoint[etcd])) <= tracks({self})'
 
   # ── 1.30+ tracks (ops-based rewrite; default block) ────────────────────────
+  # Also matches 1.29/candidate and 1.29/stable (still pre-rewrite, same endpoint shape).
   # Dropped: ceph-storage, loadbalancer (old), vsphere.
   # Added in provides: cos-agent, tokens.
   # Dropped from provides: aws-iam, grafana, kube-api-endpoint,
