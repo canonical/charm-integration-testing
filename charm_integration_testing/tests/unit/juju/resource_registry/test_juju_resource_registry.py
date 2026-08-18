@@ -58,9 +58,10 @@ class BootstrapKillBackendStub(NullJujuBackend):
     def add_model(self, controller: str, model: str, model_config: dict[str, str]) -> None:
         self.models_added.append((controller, model))
 
-    def juju_status_text(self, model: str) -> str:
-        self.status_calls.append(model)
-        return f"status for {model}"
+    def juju_status_text(self, model: JujuModelHandle | str) -> str:
+        model_uri = model.uri if isinstance(model, JujuModelHandle) else model
+        self.status_calls.append(model_uri)
+        return f"status for {model_uri}"
 
     def migrate_model(self, model_name: str, source_controller: str, target_controller: str) -> None:
         pass
@@ -77,8 +78,9 @@ class CrashdumpBackendStub(NullJujuBackend):
     k8s_controllers: set[str] = field(default_factory=set)
     kubeconfig: Path | None = None
 
-    def is_k8s_model(self, model: str) -> bool:
-        controller = model.split(":")[0]
+    def is_k8s_model(self, model: JujuModelHandle | str) -> bool:
+        model_uri = model.uri if isinstance(model, JujuModelHandle) else model
+        controller = model_uri.split(":")[0]
         return controller in self.k8s_controllers
 
     def get_controller_kubeconfig(self, controller: str) -> Path | None:
