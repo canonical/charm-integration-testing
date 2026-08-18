@@ -396,6 +396,31 @@ class TestVaultUnsealer:
         assert vault.unseals == []
         assert checks == []
 
+    def test_try_unseal_vault_skips_unit_when_status_raises(self) -> None:
+        # GIVEN two units where status() raises for the first but succeeds for the second
+        juju = JujuStub(
+            units={"vault": ["vault/0", "vault/1"]},
+            secrets={
+                "vault-secret-application-vault-tokens": {"root-token": "abc", "unseal-key": "xyz"},
+            },
+        )
+        vault = VaultStub()
+
+        def status(_: str, unit: str) -> VaultStatus:
+            if unit == "vault/0":
+                raise RuntimeError("connection refused")
+            return VaultStatus(initialized=True, sealed=True, type="shamir")
+
+        vault.status = status  # type: ignore
+        logger = LoggerStub()
+        charm = CharmInfo(name="vault")
+
+        # WHEN
+        VaultUnsealer(charm, vault, juju, logger).try_unseal_vault("test-model", "vault")
+
+        # THEN the failing unit is skipped and the healthy unit is still unsealed
+        assert vault.unseals == ["vault/1"]
+
     def test_try_init_vault_authorizes_charm_by_default(self) -> None:
         # GIVEN
         juju = JujuStub(units={"vault": ["vault/leader"]})
