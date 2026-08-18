@@ -210,10 +210,10 @@ A single repo may contain multiple charms (e.g. `kfp-operators`, `cos-charms`). 
 
 ## Resource Inconsistency Overrides (`resource_tracking.skip`)
 
-A third kind of override, unrelated to endpoint optionality, lives in the same
+A separate override mechanism, unrelated to endpoint optionality, lives in the same
 `static/charm-overrides/<charm>.yaml` files: the `resource_tracking.skip` block. It tells
-the integration-test resource tracker to *stop flagging a whole resource kind as drift* for
-one charm version.
+the integration-test resource tracker to stop flagging a whole resource kind as drift for
+a specific charm-version criteria block.
 
 ### Why it exists
 
@@ -326,8 +326,8 @@ add the override, validate with and without it, and confirm the expected result.
    provision the sandbox and install only the Kubernetes prerequisites (resource tracking is
    Kubernetes-only), using the existing skills rather than ad-hoc commands.
 
-   Before provisioning anything, **offer the user a choice** with a selectable prompt (the
-   ask-questions tool) - do not silently start a long, resource-heavy VM run:
+   Before provisioning anything, **offer the user a choice** — do not silently start a long,
+   resource-heavy VM run:
    - `Run validation on sandbox` - proceed with the provisioning and the without/with runs
      below.
    - `Do not run validation on sandbox` - stop after the research/evidence steps and hand back
