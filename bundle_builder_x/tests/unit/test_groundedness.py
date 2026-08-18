@@ -1,0 +1,230 @@
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+"""Unit tests for groundedness.py."""
+
+from bundle_builder_x.charm import Charm, CharmChannel, CharmEndpoint, EndpointType
+from bundle_builder_x.charmhub import CharmhubClient
+from bundle_builder_x.charmhub_http import CharmReleaseNotFoundException
+from bundle_builder_x.domain import Domain, DomainApplication, DomainModel, ModelRef, add_charm_to_domain
+from bundle_builder_x.groundedness import find_unsatisfiable_endpoints, format_problems
+from bundle_builder_x.juju_version import JujuVersion
+from bundle_builder_x.overrides import OverridesClient
+
+_JUJU = JujuVersion(major=3, minor=6, patch=0)
+_CHANNEL = CharmChannel(track="latest", risk="stable", branch="")
+_MODEL = ModelRef(name="m")
+
+
+def _charm(name: str, **endpoints: CharmEndpoint) -> Charm:
+    return Charm(
+        name=name,
+        channel=_CHANNEL,
+        revision=1,
+        ubuntu_version="24.04",
+        ubuntu_arch="amd64",
+        subordinate=False,
+        endpoints=endpoints,
+        priority=1.0,
+        platforms=["machine"],
+    )
+
+
+def _requires(interface: str, optional: bool = False, cyclic: bool = False) -> CharmEndpoint:
+    return CharmEndpoint(type=EndpointType.REQUIRES, interface=interface, optional=optional, cyclic=cyclic)
+
+
+def _provides(interface: str, optional: bool = False) -> CharmEndpoint:
+    return CharmEndpoint(type=EndpointType.PROVIDES, interface=interface, optional=optional)
+
+
+def _peers(interface: str, optional: bool = False) -> CharmEndpoint:
+    return CharmEndpoint(type=EndpointType.PEERS, interface=interface, optional=optional)
+
+
+class _FakeClient(CharmhubClient):
+    """Serves an in-memory catalogue, indexing providers/requirers by interface."""
+
+    def __init__(self, catalog: dict[str, Charm]) -> None:
+        self._catalog = catalog
+        self.overrides_client = OverridesClient()
+
+    def charm_from_store(
+        self,
+        charm_name: str,
+        ubuntu_arch: str,
+        juju_version: JujuVersion | None = None,
+        platform: str | None = None,
+        charm_track: str | None = None,
+        charm_risk: str | None = None,
+        charm_revision: int | None = None,
+        ubuntu_version: str | None = None,
+    ) -> Charm:
+        if charm_name not in self._catalog:
+            raise CharmReleaseNotFoundException(f"no such charm: {charm_name}")
+        return self._catalog[charm_name]
+
+    def find_charms(
+        self,
+        provides: str | None = None,
+        requires: str | None = None,
+        platform: str | None = None,
+    ) -> set[str]:
+        wanted = EndpointType.PROVIDES if provides is not None else EndpointType.REQUIRES
+        interface = provides if provides is not None else requires
+        return {
+            name
+            for name, charm in self._catalog.items()
+            if any(ep.type == wanted and ep.interface == interface for ep in charm.endpoints.values())
+        }
+
+
+def _domain(seed: Charm) -> Domain:
+    domain = Domain()
+    domain.models[_MODEL] = DomainModel(
+        arch="amd64",
+        platform="machine",
+        juju_version=_JUJU,
+        ref=_MODEL,
+        applications={"app": DomainApplication(charm=seed.name)},
+    )
+    add_charm_to_domain(seed, domain, _MODEL)
+    return domain
+
+
+def _check(seed: Charm, catalog: dict[str, Charm]) -> list[str]:
+    import logging
+
+    return find_unsatisfiable_endpoints(_FakeClient(catalog), _domain(seed), logging.getLogger("test"))
+
+
+class TestFindUnsatisfiableEndpoints:
+    """groundedness.find_unsatisfiable_endpoints."""
+
+    def test_terminating_provider_chain_is_satisfiable(self) -> None:
+        # GIVEN a charm requiring 'db', provided by a charm with no obligations of its own
+        seed = _charm("app-charm", db=_requires("db"))
+        catalog = {"app-charm": seed, "postgresql": _charm("postgresql", db=_provides("db"))}
+
+        # WHEN the spec is checked
+        # THEN no proof of unsatisfiability is found
+        assert _check(seed, catalog) == []
+
+    def test_mutually_dependent_providers_are_unsatisfiable(self) -> None:
+        # GIVEN the only provider of 'db' also non-optionally requires 'db', so every
+        # candidate partner reintroduces the same obligation
+        seed = _charm("app-charm", db=_requires("db"))
+        mesh = _charm("mesh", need=_requires("db"), give=_provides("db"))
+        catalog = {"app-charm": seed, "mesh": mesh}
+
+        # WHEN the spec is checked
+        problems = _check(seed, catalog)
+
+        # THEN the offending endpoint is reported
+        assert len(problems) == 1
+        assert "app-charm:db" in problems[0]
+        assert "'db'" in problems[0]
+
+    def test_missing_provider_is_unsatisfiable(self) -> None:
+        # GIVEN nothing at all provides the required interface
+        seed = _charm("app-charm", db=_requires("db"))
+
+        # WHEN the spec is checked
+        problems = _check(seed, {"app-charm": seed})
+
+        # THEN the endpoint is reported as unsatisfiable
+        assert len(problems) == 1
+        assert "app-charm:db" in problems[0]
+
+    def test_optional_endpoint_is_ignored(self) -> None:
+        # GIVEN the unprovidable endpoint is optional
+        seed = _charm("app-charm", db=_requires("db", optional=True))
+
+        # WHEN the spec is checked
+        # THEN it is not reported, since the solver may leave it unintegrated
+        assert _check(seed, {"app-charm": seed}) == []
+
+    def test_cyclic_endpoint_is_ignored(self) -> None:
+        # GIVEN the endpoint is flagged cyclic, exempting it from the rank ordering
+        seed = _charm("app-charm", db=_requires("db", cyclic=True))
+
+        # WHEN the spec is checked
+        # THEN it is not reported
+        assert _check(seed, {"app-charm": seed}) == []
+
+    def test_non_optional_peer_endpoint_is_unsatisfiable(self) -> None:
+        # GIVEN a non-optional peer endpoint, which never receives an integration variable
+        seed = _charm("app-charm", cluster=_peers("cluster"))
+
+        # WHEN the spec is checked
+        problems = _check(seed, {"app-charm": seed})
+
+        # THEN it is reported as impossible to integrate
+        assert len(problems) == 1
+        assert "peer endpoint" in problems[0]
+
+    def test_optional_peer_endpoint_is_ignored(self) -> None:
+        # GIVEN an optional peer endpoint
+        seed = _charm("app-charm", cluster=_peers("cluster", optional=True))
+
+        # WHEN the spec is checked
+        # THEN it is not reported
+        assert _check(seed, {"app-charm": seed}) == []
+
+    def test_alternative_grounded_provider_rescues_the_chain(self) -> None:
+        # GIVEN one provider of 'db' is self-referential but another terminates
+        seed = _charm("app-charm", db=_requires("db"))
+        catalog = {
+            "app-charm": seed,
+            "mesh": _charm("mesh", need=_requires("db"), give=_provides("db")),
+            "postgresql": _charm("postgresql", db=_provides("db")),
+        }
+
+        # WHEN the spec is checked
+        # THEN the spec is not rejected, because a terminating chain exists
+        assert _check(seed, catalog) == []
+
+    def test_provider_grounded_through_a_second_interface(self) -> None:
+        # GIVEN the provider of 'db' itself requires 'tls', which is satisfiable
+        seed = _charm("app-charm", db=_requires("db"))
+        catalog = {
+            "app-charm": seed,
+            "postgresql": _charm("postgresql", db=_provides("db"), tls=_requires("tls")),
+            "ca": _charm("ca", tls=_provides("tls")),
+        }
+
+        # WHEN the spec is checked
+        # THEN no proof of unsatisfiability is found
+        assert _check(seed, catalog) == []
+
+    def test_unsatisfiable_second_hop_is_reported(self) -> None:
+        # GIVEN the only provider of 'db' requires 'tls', which nothing provides
+        seed = _charm("app-charm", db=_requires("db"))
+        catalog = {
+            "app-charm": seed,
+            "postgresql": _charm("postgresql", db=_provides("db"), tls=_requires("tls")),
+        }
+
+        # WHEN the spec is checked
+        # THEN the seed endpoint is reported, since its chain cannot terminate
+        assert len(_check(seed, catalog)) == 1
+
+    def test_non_optional_provides_needs_a_requirer(self) -> None:
+        # GIVEN a charm that non-optionally provides an interface nothing requires
+        seed = _charm("app-charm", metrics=_provides("metrics"))
+
+        # WHEN the spec is checked
+        # THEN the endpoint is reported, since it can never reach its required count
+        assert len(_check(seed, {"app-charm": seed})) == 1
+
+
+class TestFormatProblems:
+    """groundedness.format_problems."""
+
+    def test_lists_every_problem_when_few(self) -> None:
+        assert format_problems(["a", "b"]) == "a; b"
+
+    def test_caps_the_listing_and_counts_the_rest(self) -> None:
+        formatted = format_problems([str(i) for i in range(8)])
+        assert formatted.startswith("0; 1; 2; 3; 4")
+        assert formatted.endswith("(and 3 more)")
