@@ -53,10 +53,16 @@ def _peers(interface: str, optional: bool = False) -> CharmEndpoint:
 
 
 class _FakeClient(CharmhubClient):
-    """Serves an in-memory catalogue, indexing providers/requirers by interface."""
+    """Serves an in-memory catalogue, indexing providers/requirers by interface.
 
-    def __init__(self, catalog: dict[str, Charm]) -> None:
+    `unlisted` mirrors the `listed: false` override (see e.g.
+    static/charm-overrides/cinder.yaml): those charms are fetchable directly but
+    excluded from find_charms, exactly like a real unlisted charm.
+    """
+
+    def __init__(self, catalog: dict[str, Charm], unlisted: set[str] | None = None) -> None:
         self._catalog = catalog
+        self._unlisted = unlisted or set()
         self.overrides_client = OverridesClient()
 
     def charm_from_store(
@@ -85,7 +91,8 @@ class _FakeClient(CharmhubClient):
         return {
             name
             for name, charm in self._catalog.items()
-            if any(ep.type == wanted and ep.interface == interface for ep in charm.endpoints.values())
+            if name not in self._unlisted
+            and any(ep.type == wanted and ep.interface == interface for ep in charm.endpoints.values())
         }
 
 
@@ -104,6 +111,18 @@ def _domain(seed: Charm) -> Domain:
 
 def _check(seed: Charm, catalog: dict[str, Charm]) -> list[str]:
     return find_unsatisfiable_endpoints(_FakeClient(catalog), _domain(seed), logging.getLogger("test"))
+
+
+def _two_app_domain(app_a: Charm, app_b: Charm) -> Domain:
+    domain = Domain()
+    domain.models[_MODEL] = DomainModel(
+        arch="amd64",
+        platform="machine",
+        juju_version=_JUJU,
+        ref=_MODEL,
+        applications={"a": DomainApplication(charm=app_a.name), "b": DomainApplication(charm=app_b.name)},
+    )
+    return domain
 
 
 class TestFindUnsatisfiableEndpoints:
@@ -313,6 +332,27 @@ class TestFindUnsatisfiableEndpoints:
         # WHEN the spec is checked
         # THEN the message names the real cause rather than blaming a non-terminating chain
         assert "no charm providing 'db' is available" in _check(seed, {"app-charm": seed})[0]
+
+    def test_unlisted_seed_still_grounds_another_seeds_obligation(self) -> None:
+        # GIVEN two applications explicitly named in the spec, where the only real-world
+        # provider of one's obligation is a charm the `listed: false` override (e.g.
+        # static/charm-overrides/cinder.yaml) excludes from find_charms. A seed is never
+        # discovered via find_charms - it is named explicitly - so it must still be
+        # usable as another seed's partner regardless of `listed`.
+        subordinate = _charm("cinder-lvm", storage=_provides("cinder-backend"))
+        principal = _charm("cinder", storage=_requires("cinder-backend", optional=True))
+        domain = _two_app_domain(subordinate, principal)
+
+        # WHEN checked against a client that hides "cinder" from find_charms, exactly as
+        # the real Charmhub client does for an unlisted charm
+        problems = find_unsatisfiable_endpoints(
+            _FakeClient({"cinder-lvm": subordinate, "cinder": principal}, unlisted={"cinder"}),
+            domain,
+            logging.getLogger("test"),
+        )
+
+        # THEN cinder-lvm's obligation is not rejected, since cinder is right there in the spec
+        assert problems == []
 
 
 class TestFormatProblems:

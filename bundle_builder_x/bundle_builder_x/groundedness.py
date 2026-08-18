@@ -81,6 +81,18 @@ class _Catalog:
         self._platforms = sorted({platform for platform, _, _ in self._targets})
         self._partners: dict[tuple[str, str], list[str]] = {}
         self._charms: dict[str, Charm | None] = {}
+        # Seed applications' own resolved charms. find_charms is filtered by the
+        # `listed` override (see e.g. static/charm-overrides/cinder.yaml), which
+        # excludes charms not meant for *automated discovery* -- but a seed
+        # application is never discovered, it is named explicitly in the spec, so
+        # it can still be the real-world partner for another seed's endpoint (e.g.
+        # cinder-lvm:storage-backend is only ever wired to an explicitly named
+        # cinder, never one the builder finds on its own). Registering seeds here
+        # makes them visible to partners() regardless of `listed`.
+        self._seeds: list[Charm] = []
+
+    def register_seed(self, charm: Charm) -> None:
+        self._seeds.append(charm)
 
     def seed_charm(self, model: DomainModel, app: DomainApplication) -> Charm | None:
         """Resolve a spec application's charm exactly as the builder will resolve it.
@@ -135,6 +147,7 @@ class _Catalog:
 
     def partners(self, endpoint: CharmEndpoint) -> list[str]:
         """Return the charms that could sit on the other side of `endpoint`."""
+        counterpart = _COUNTERPART[endpoint.type]
         side = "provides" if endpoint.type == EndpointType.REQUIRES else "requires"
         key = (side, endpoint.interface)
         if key not in self._partners:
@@ -143,6 +156,11 @@ class _Catalog:
                 for name in self._client.find_charms(**{side: endpoint.interface}, platform=platform):
                     if name not in names:
                         names.append(name)
+            for seed in self._seeds:
+                if seed.name not in names and any(
+                    ep.type == counterpart and ep.interface == endpoint.interface for ep in seed.endpoints.values()
+                ):
+                    names.append(seed.name)
             self._partners[key] = names
         return self._partners[key]
 
@@ -332,6 +350,7 @@ def find_unsatisfiable_endpoints(client: CharmhubClient, domain: Domain, logger:
     suspects: list[tuple[Charm, str, CharmEndpoint, str]] = []
 
     try:
+        seed_endpoints: list[tuple[Charm, str, CharmEndpoint, str]] = []
         for model in domain.models.values():
             for application, app in model.applications.items():
                 charm = catalog.seed_charm(model, app)
@@ -339,24 +358,29 @@ def find_unsatisfiable_endpoints(client: CharmhubClient, domain: Domain, logger:
                     # An unavailable charm is reported by the normal expansion path.
                     continue
                 seeds.append(charm)
+                catalog.register_seed(charm)
                 for endpoint_name, endpoint in charm.endpoints.items():
-                    if (application, endpoint_name) in external:
-                        continue
-                    if endpoint.type == EndpointType.PEERS:
-                        if not endpoint.optional and not endpoint.cyclic:
-                            # pair_charms_in_domain only ever pairs REQUIRES with PROVIDES, so a
-                            # non-optional peer endpoint never gets an integration variable and can
-                            # never reach its required count. If peer relations are ever modelled
-                            # properly, this branch must be removed with them.
-                            problems.append(
-                                f"{charm.name}:{endpoint_name} (interface '{endpoint.interface}', "
-                                f"application '{application}') is a non-optional peer endpoint, "
-                                f"which the solver can never integrate"
-                            )
-                    elif _is_obligation(endpoint, endpoint.type) and not _screen(
-                        catalog, endpoint, endpoint.type, memo
-                    ):
-                        suspects.append((charm, endpoint_name, endpoint, application))
+                    seed_endpoints.append((charm, endpoint_name, endpoint, application))
+
+        # Screening happens only once every seed is registered, so a seed's own
+        # endpoint can be found as a partner for another seed's obligation
+        # regardless of which one appears first in the spec (see register_seed).
+        for charm, endpoint_name, endpoint, application in seed_endpoints:
+            if (application, endpoint_name) in external:
+                continue
+            if endpoint.type == EndpointType.PEERS:
+                if not endpoint.optional and not endpoint.cyclic:
+                    # pair_charms_in_domain only ever pairs REQUIRES with PROVIDES, so a
+                    # non-optional peer endpoint never gets an integration variable and can
+                    # never reach its required count. If peer relations are ever modelled
+                    # properly, this branch must be removed with them.
+                    problems.append(
+                        f"{charm.name}:{endpoint_name} (interface '{endpoint.interface}', "
+                        f"application '{application}') is a non-optional peer endpoint, "
+                        f"which the solver can never integrate"
+                    )
+            elif _is_obligation(endpoint, endpoint.type) and not _screen(catalog, endpoint, endpoint.type, memo):
+                suspects.append((charm, endpoint_name, endpoint, application))
 
         for direction in {endpoint.type for _, _, endpoint, _ in suspects}:
             grounded, unranked = _exact(catalog, seeds, direction)
