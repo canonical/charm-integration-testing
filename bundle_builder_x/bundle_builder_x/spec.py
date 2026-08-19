@@ -9,9 +9,7 @@ from pathlib import Path
 from typing import cast
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-
-from .domain import ModelRef
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class AppSpec(BaseModel):
@@ -40,44 +38,18 @@ class IntegrationSpec(BaseModel):
     endpoint: str
     remote_application: str
     remote_endpoint: str
-    remote_model: ModelRef | None = None
+    remote_model: str | None = None
+    remote_controller: str | None = None
     offer_name: str | None = None
     url: str | None = None
 
-    @model_validator(mode="before")
-    @classmethod
-    def _merge_legacy_remote_controller(cls, data: object) -> object:
-        """Backward-compat: fold a legacy top-level ``remote_controller`` into ``remote_model.controller``."""
-        if isinstance(data, dict) and "remote_controller" in data:
-            data = dict(data)
-            remote_controller = data.pop("remote_controller")
-            remote_model = data.get("remote_model")
-            if isinstance(remote_model, str):
-                data["remote_model"] = {"name": remote_model, "controller": remote_controller}
-            elif isinstance(remote_model, dict):
-                remote_model = dict(remote_model)
-                if remote_model.get("controller") is None:
-                    remote_model["controller"] = remote_controller
-                data["remote_model"] = remote_model
-            elif isinstance(remote_model, ModelRef):
-                if remote_model.controller is None:
-                    data["remote_model"] = remote_model.model_copy(update={"controller": remote_controller})
-        return data
-
-    @field_validator("remote_model", mode="before")
-    @classmethod
-    def _coerce_remote_model(cls, v: object) -> object:
-        """Coerce a string to a ModelRef for convenience in YAML spec files."""
-        if isinstance(v, str):
-            return ModelRef(name=v)
-        return v
-
-    @field_validator("remote_model")
-    @classmethod
-    def _validate_remote_model_name(cls, v: ModelRef | None) -> ModelRef | None:
-        if v is not None and not v.name:
+    @model_validator(mode="after")
+    def _validate_remote_model_fields(self) -> IntegrationSpec:
+        if self.remote_controller is not None and self.remote_model is None:
+            raise ValueError("remote_controller requires remote_model to also be set")
+        if self.remote_model is not None and not self.remote_model:
             raise ValueError("remote_model must have a non-empty name")
-        return v
+        return self
 
     @property
     def is_cross_model(self) -> bool:
@@ -87,12 +59,14 @@ class IntegrationSpec(BaseModel):
     def remote_model_key(self) -> str | None:
         """Lookup key for the remote model in ``models_by_name``.
 
-        Returns ``controller/name`` when remote model's ``controller`` is set, otherwise
-        the plain model name.
+        Returns ``controller/name`` when ``remote_controller`` is set, otherwise
+        the plain ``remote_model`` value.
         """
         if self.remote_model is None:
             return None
-        return self.remote_model.key
+        if self.remote_controller is not None:
+            return f"{self.remote_controller}/{self.remote_model}"
+        return self.remote_model
 
     def resolved_offer_name(self) -> str:
         """Return the offer name, falling back to ``<remote_application>-offer``."""

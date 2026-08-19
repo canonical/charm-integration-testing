@@ -6,7 +6,6 @@ from pathlib import Path
 import pytest
 import yaml
 
-from bundle_builder_x.domain import ModelRef
 from bundle_builder_x.domain_builder import (
     applications_from_spec,
     classify_integrations,
@@ -56,6 +55,7 @@ class TestIntegrationSpec:
             application="db-proxy",
             endpoint="database",
             remote_model="model-b",
+            remote_controller="lxd",
             remote_application="postgresql",
             remote_endpoint="database",
             offer_name="postgresql-offer",
@@ -70,6 +70,7 @@ class TestIntegrationSpec:
             application="a",
             endpoint="e",
             remote_model="m",
+            remote_controller="ctrl",
             remote_application="b",
             remote_endpoint="e",
             offer_name="custom-offer",
@@ -83,14 +84,15 @@ class TestIntegrationSpec:
             application="a",
             endpoint="e",
             remote_model="m",
+            remote_controller="ctrl",
             remote_application="postgresql",
             remote_endpoint="database",
         )
         # THEN resolved_offer_name defaults to <remote_application>-offer
         assert spec.resolved_offer_name() == "postgresql-offer"
 
-    def test_remote_controller_merges_into_string_remote_model(self) -> None:
-        # GIVEN a legacy-style remote_model string plus a separate remote_controller
+    def test_remote_model_and_controller_are_stored(self) -> None:
+        # GIVEN a cross-model integration with both fields set
         spec = IntegrationSpec(
             application="a",
             endpoint="e",
@@ -99,77 +101,60 @@ class TestIntegrationSpec:
             remote_model="my-model",
             remote_controller="my-controller",
         )
-        # THEN remote_controller is folded into remote_model.controller
-        assert spec.remote_model is not None
-        assert spec.remote_model.name == "my-model"
-        assert spec.remote_model.controller == "my-controller"
+        # THEN both fields are kept as provided
+        assert spec.remote_model == "my-model"
+        assert spec.remote_controller == "my-controller"
 
-    def test_remote_controller_merges_into_mapping_remote_model(self) -> None:
-        # GIVEN remote_model as a mapping without a controller, plus remote_controller
+    def test_remote_model_alone_is_valid(self) -> None:
+        # GIVEN remote_model without remote_controller
+        # THEN validation succeeds; the controller is resolved later via model lookup or url
         spec = IntegrationSpec(
             application="a",
             endpoint="e",
             remote_application="b",
             remote_endpoint="e",
-            remote_model={"name": "my-model"},
-            remote_controller="my-controller",
+            remote_model="my-model",
         )
-        # THEN remote_controller fills in the missing controller
-        assert spec.remote_model is not None
-        assert spec.remote_model.controller == "my-controller"
+        assert spec.remote_model == "my-model"
+        assert spec.remote_controller is None
 
-    def test_remote_controller_does_not_override_existing_controller(self) -> None:
-        # GIVEN remote_model already has a controller that conflicts with remote_controller
-        spec = IntegrationSpec(
-            application="a",
-            endpoint="e",
-            remote_application="b",
-            remote_endpoint="e",
-            remote_model={"name": "my-model", "controller": "explicit-controller"},
-            remote_controller="ignored-controller",
-        )
-        # THEN the explicit controller on remote_model wins
-        assert spec.remote_model is not None
-        assert spec.remote_model.controller == "explicit-controller"
-
-    def test_remote_controller_merges_when_mapping_controller_is_explicit_none(self) -> None:
-        # GIVEN remote_model is a mapping with an explicit controller: null
-        spec = IntegrationSpec(
-            application="a",
-            endpoint="e",
-            remote_application="b",
-            remote_endpoint="e",
-            remote_model={"name": "my-model", "controller": None},
-            remote_controller="my-controller",
-        )
-        # THEN remote_controller still fills in the null controller
-        assert spec.remote_model is not None
-        assert spec.remote_model.controller == "my-controller"
-
-    def test_remote_controller_merges_into_modelref_instance(self) -> None:
-        # GIVEN remote_model passed as an already-constructed ModelRef with no controller
-        spec = IntegrationSpec(
-            application="a",
-            endpoint="e",
-            remote_application="b",
-            remote_endpoint="e",
-            remote_model=ModelRef(name="my-model"),
-            remote_controller="my-controller",
-        )
-        # THEN remote_controller is merged in
-        assert spec.remote_model is not None
-        assert spec.remote_model.controller == "my-controller"
+    def test_remote_controller_requires_remote_model(self) -> None:
+        # GIVEN remote_controller without remote_model
+        # THEN validation fails
+        with pytest.raises(ValueError, match="remote_controller requires remote_model"):
+            IntegrationSpec(
+                application="a",
+                endpoint="e",
+                remote_application="b",
+                remote_endpoint="e",
+                remote_controller="my-controller",
+            )
 
     def test_remote_model_rejects_empty_name(self) -> None:
-        # GIVEN remote_model with no name
+        # GIVEN remote_model with an empty name
+        # THEN validation fails
         with pytest.raises(ValueError, match="non-empty name"):
             IntegrationSpec(
                 application="a",
                 endpoint="e",
                 remote_application="b",
                 remote_endpoint="e",
-                remote_model={"controller": "my-controller"},
+                remote_model="",
+                remote_controller="my-controller",
             )
+
+    def test_remote_model_key_includes_controller(self) -> None:
+        # GIVEN a cross-model integration with both fields set
+        spec = IntegrationSpec(
+            application="a",
+            endpoint="e",
+            remote_application="b",
+            remote_endpoint="e",
+            remote_model="my-model",
+            remote_controller="my-controller",
+        )
+        # THEN remote_model_key is controller/name
+        assert spec.remote_model_key == "my-controller/my-model"
 
 
 class TestModelSpec:

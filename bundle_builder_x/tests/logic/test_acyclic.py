@@ -21,7 +21,6 @@ import pytest
 
 from bundle_builder_x.bundle_builder import BundleBuilder, UncompletableBundleError
 from bundle_builder_x.charm import CharmEndpoint, EndpointType
-from bundle_builder_x.domain import ModelRef
 from bundle_builder_x.spec import AppSpec, IntegrationSpec, ModelSpec
 
 from .conftest import JUJU_VERSION, CharmhubClientStub, build_multi_model, build_single_model, make_charm
@@ -273,7 +272,8 @@ class TestCrossModelAcyclicConstraints:
                         IntegrationSpec(
                             application="a",
                             endpoint="my-requires",
-                            remote_model=ModelRef(name="model-b"),
+                            remote_model="model-b",
+                            remote_controller="ctrl",
                             remote_application="b",
                             remote_endpoint="my-provides",
                             offer_name="vault-offer",
@@ -328,7 +328,7 @@ class TestCrossModelAcyclicConstraints:
                             IntegrationSpec(
                                 application="a",
                                 endpoint="my-requires",
-                                remote_model=ModelRef(name="model-b"),
+                                remote_model="model-b",
                                 remote_application="b",
                                 remote_endpoint="my-provides",
                                 offer_name="vault-offer",
@@ -344,7 +344,7 @@ class TestCrossModelAcyclicConstraints:
                             IntegrationSpec(
                                 application="b",
                                 endpoint="my-requires",
-                                remote_model=ModelRef(name="model-a"),
+                                remote_model="model-a",
                                 remote_application="a",
                                 remote_endpoint="my-provides",
                                 offer_name="vault-offer-reverse",
