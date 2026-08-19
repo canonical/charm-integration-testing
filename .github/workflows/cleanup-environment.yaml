@@ -47,7 +47,7 @@ on:
 jobs:
   cleanup-environment:
     name: Clean up any leftover artifacts from old Charm QA environments
-    runs-on: [self-hosted-linux-amd64-noble-private-endpoint-medium]
+    runs-on: [self-hosted-linux-amd64-noble-private-endpoint-small]
     env:
       AGE_THRESHOLD: ${{ inputs.age_threshold }}
     steps:
