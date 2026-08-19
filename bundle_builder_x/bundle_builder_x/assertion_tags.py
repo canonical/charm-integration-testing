@@ -203,14 +203,7 @@ class SubordinateBaseMismatchTag(AssertionTag):
 
 
 class IntegrationFeatureMismatchTag(AssertionTag):
-    """A relation whose two endpoints have declared, mutually-incompatible feature tags.
-
-    Covers all three ways the feature-coherence check (see SQT-1038) can fail: a feature
-    declared only on the requires side, only on the provides side, or declared on both sides
-    with values forced to disagree by other constraints. This is not resolvable by fetching a
-    different charm/channel - it reflects a genuinely unsupported pairing between the two
-    charms' endpoints.
-    """
+    """A relation whose two endpoints declared mutually-incompatible feature tags."""
 
     kind: Assertions = Assertions.INTEGRATION_FEATURE_MISMATCH
     requires: CharmEndpointPayload

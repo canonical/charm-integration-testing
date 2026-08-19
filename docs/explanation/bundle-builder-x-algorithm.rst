@@ -86,14 +86,8 @@ first):
 - ``PEER_CHANNEL_MISMATCH`` / ``SUBORDINATE_BASE_MISMATCH`` -- fetch compatible
   channel or base variants and pair them with the actual counterpart.
 - ``INTEGRATION_FEATURE_MISMATCH`` -- two integrated endpoints declared
-  mutually incompatible ``features:`` tags (see :doc:`/reference/constraint-dsl`).
-  This is not expandable: fetching a different charm or channel cannot make two
-  charms whose declared feature tags don't overlap compatible. It is a genuine,
-  unsupported pairing (the scheduler is not required to know which interface
-  candidates are semantically compatible; Juju itself allows the relation).
-  The tag is not acted on in ``_handle_failed_assertion`` and so remains in the
-  final unsat core, letting ``UncompletableBundleError.feature_mismatches``
-  describe exactly which endpoints and feature caused the failure.
+  incompatible ``features:`` tags (see :doc:`/reference/constraint-dsl`); not
+  expandable, so it remains in the unsat core.
 
 Candidate expansion is deliberately asymmetric:
 
@@ -152,7 +146,3 @@ Key properties
   are fixed so the chosen expansion path is repeatable.
 - **Failure diagnostics** -- when the problem is unsatisfiable, the unsat core is
   decoded into specific constraint tags so callers know exactly what went wrong.
-  Non-expandable tags (e.g. ``INTEGRATION_FEATURE_MISMATCH``) are surfaced via
-  typed properties on ``UncompletableBundleError`` (e.g. ``feature_mismatches``)
-  rather than only the generic fallback message, and are recorded as
-  test-execution metadata (see :doc:`/reference/execution-metadata`).

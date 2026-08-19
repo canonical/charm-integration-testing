@@ -196,11 +196,11 @@ Failure Information
      - No
      - ``postgresql_client``
    * - ``failure:build_bundle:feature_mismatch``
-     - Two integrated charm endpoints declared mutually incompatible ``features:`` tags (see :doc:`constraint-dsl`). Collected when ``UncompletableBundleError`` is raised with ``feature_mismatches`` populated. Packed as a single value (rather than split across separate keys) so that pairing information survives even when a run has multiple distinct mismatches. Format: ``<requires charm>:<requires endpoint>/<provides charm>:<provides endpoint>``. Multiple values may be recorded.
+     - Two integrated endpoints declared incompatible ``features:`` tags (see :doc:`constraint-dsl`). Format: ``<requires charm>:<requires endpoint>/<provides charm>:<provides endpoint>``. Multiple values may be recorded.
      - No
      - ``katib-controller:k8s-service-info/kfp-viz:kfp-viz``
    * - ``failure:build_bundle:feature_mismatch:feature``
-     - The feature name that could not be reconciled between the two endpoints in a feature mismatch. Collected alongside ``failure:build_bundle:feature_mismatch``, for coarse cross-run filtering/grouping (loses the endpoint pairing, same limitation as ``unfulfilled_interface``). Multiple values may be recorded.
+     - The feature name that could not be reconciled. Collected alongside ``failure:build_bundle:feature_mismatch``. Multiple values may be recorded.
      - No
      - ``katib-service``
    * - ``resource_discrepancy:<resource_type>:<qualifier>``
