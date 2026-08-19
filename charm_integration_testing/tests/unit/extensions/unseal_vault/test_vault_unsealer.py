@@ -270,6 +270,157 @@ class TestVaultUnsealer:
         assert "vault/0" in vault.unseals
         assert "vault/1" not in vault.unseals
 
+    def test_try_unseal_vault_waits_for_unit_to_finish_joining_raft_cluster(self) -> None:
+        # GIVEN a non-leader unit that only reports as initialized after a few status checks,
+        # simulating the delay of it auto-joining the raft cluster after being scaled up
+        juju = JujuStub(
+            units={"vault": ["vault/0", "vault/1"]},
+            secrets={
+                "vault-secret-application-vault-tokens": {"root-token": "abc", "unseal-key": "xyz"},
+            },
+        )
+        vault = VaultStub(sealed_units={"vault/0": True, "vault/1": True})
+        checks_before_initialized = [False, False, True]
+
+        def status(_: str, unit: str) -> VaultStatus:
+            if unit == "vault/1":
+                return VaultStatus(initialized=checks_before_initialized.pop(0), sealed=True, type="shamir")
+            return VaultStatus(initialized=True, sealed=True, type="shamir")
+
+        vault.status = status  # type: ignore
+        logger = LoggerStub()
+        charm = CharmInfo(name="vault")
+
+        # WHEN
+        VaultUnsealer(charm, vault, juju, logger).try_unseal_vault("test-model", "vault")
+
+        # THEN both units end up unsealed, once vault/1 finally reports as initialized
+        assert "vault/0" in vault.unseals
+        assert "vault/1" in vault.unseals
+        assert checks_before_initialized == []
+
+    def test_try_unseal_vault_skips_unit_that_never_finishes_joining_raft_cluster(self) -> None:
+        # GIVEN a non-leader unit that never reports as initialized
+        juju = JujuStub(
+            units={"vault": ["vault/0", "vault/1"]},
+            secrets={
+                "vault-secret-application-vault-tokens": {"root-token": "abc", "unseal-key": "xyz"},
+            },
+        )
+        vault = VaultStub(
+            initialized_units={"vault/0": True, "vault/1": False},
+            sealed_units={"vault/0": True, "vault/1": True},
+        )
+        logger = LoggerStub()
+        charm = CharmInfo(name="vault")
+
+        # WHEN
+        VaultUnsealer(charm, vault, juju, logger).try_unseal_vault("test-model", "vault")
+
+        # THEN the never-initialized unit is skipped, without blocking the other unit's unseal
+        assert "vault/0" in vault.unseals
+        assert "vault/1" not in vault.unseals
+
+    def test_try_unseal_vault_prioritizes_already_initialized_units(self) -> None:
+        # GIVEN application_units() lists a still-joining unit before an already-initialized one
+        # (ordering isn't guaranteed by the Juju backend)
+        juju = JujuStub(
+            units={"vault": ["vault/1", "vault/0"]},
+            secrets={
+                "vault-secret-application-vault-tokens": {"root-token": "abc", "unseal-key": "xyz"},
+            },
+        )
+        vault = VaultStub(
+            initialized_units={"vault/0": True, "vault/1": False},
+            sealed_units={"vault/0": True, "vault/1": True},
+        )
+        logger = LoggerStub()
+        charm = CharmInfo(name="vault")
+
+        # WHEN
+        VaultUnsealer(charm, vault, juju, logger).try_unseal_vault("test-model", "vault")
+
+        # THEN the already-initialized unit is unsealed first, ahead of the still-joining one
+        assert vault.unseals[0] == "vault/0"
+
+    def test_try_unseal_vault_skips_manual_unseal_for_auto_unseal_type(self) -> None:
+        # GIVEN a unit that finishes joining the raft cluster with a non-shamir (auto-unseal)
+        # seal type, which unseals itself and doesn't need (or have) a manual unseal key
+        juju = JujuStub(
+            units={"vault": ["vault/0"]},
+            secrets={
+                "vault-secret-application-vault-tokens": {"root-token": "abc", "unseal-key": "xyz"},
+            },
+        )
+        vault = VaultStub(sealed_units={"vault/0": True})
+
+        def status(_: str, unit: str) -> VaultStatus:
+            return VaultStatus(initialized=True, sealed=True, type="transit")
+
+        vault.status = status  # type: ignore
+        logger = LoggerStub()
+        charm = CharmInfo(name="vault")
+
+        # WHEN
+        VaultUnsealer(charm, vault, juju, logger).try_unseal_vault("test-model", "vault")
+
+        # THEN no manual unseal is attempted, since the unit will auto-unseal itself
+        assert vault.unseals == []
+
+    def test_try_unseal_vault_rechecks_sealed_status_after_waiting_for_initialization(self) -> None:
+        # GIVEN a unit that auto-unseals itself while it's still being waited on to finish
+        # joining the raft cluster
+        juju = JujuStub(
+            units={"vault": ["vault/0"]},
+            secrets={
+                "vault-secret-application-vault-tokens": {"root-token": "abc", "unseal-key": "xyz"},
+            },
+        )
+        vault = VaultStub()
+        checks = [
+            VaultStatus(initialized=False, sealed=True, type="transit"),
+            VaultStatus(initialized=True, sealed=False, type="transit"),
+        ]
+
+        def status(_: str, unit: str) -> VaultStatus:
+            return checks.pop(0)
+
+        vault.status = status  # type: ignore
+        logger = LoggerStub()
+        charm = CharmInfo(name="vault")
+
+        # WHEN
+        VaultUnsealer(charm, vault, juju, logger).try_unseal_vault("test-model", "vault")
+
+        # THEN no manual unseal is attempted, since the unit is no longer sealed
+        assert vault.unseals == []
+        assert checks == []
+
+    def test_try_unseal_vault_skips_unit_when_status_raises(self) -> None:
+        # GIVEN two units where status() raises for the first but succeeds for the second
+        juju = JujuStub(
+            units={"vault": ["vault/0", "vault/1"]},
+            secrets={
+                "vault-secret-application-vault-tokens": {"root-token": "abc", "unseal-key": "xyz"},
+            },
+        )
+        vault = VaultStub()
+
+        def status(_: str, unit: str) -> VaultStatus:
+            if unit == "vault/0":
+                raise RuntimeError("connection refused")
+            return VaultStatus(initialized=True, sealed=True, type="shamir")
+
+        vault.status = status  # type: ignore
+        logger = LoggerStub()
+        charm = CharmInfo(name="vault")
+
+        # WHEN
+        VaultUnsealer(charm, vault, juju, logger).try_unseal_vault("test-model", "vault")
+
+        # THEN the failing unit is skipped and the healthy unit is still unsealed
+        assert vault.unseals == ["vault/1"]
+
     def test_try_init_vault_authorizes_charm_by_default(self) -> None:
         # GIVEN
         juju = JujuStub(units={"vault": ["vault/leader"]})
@@ -284,6 +435,29 @@ class TestVaultUnsealer:
         assert ("vault/leader", "authorize-charm", {"secret-id": "secret-id"}) in juju.actions_run
 
     def test_try_init_vault_wont_authorize_charm_if_asked(self) -> None:
+        # A vault that is already initialized and only needs re-unsealing (e.g. after a pod
+        # restart) must not be re-authorized when authorize_charm=False.
+        # GIVEN
+        juju = JujuStub(
+            units={"vault": ["vault/leader"]},
+            secrets={"vault-secret-application-vault-tokens": {"root-token": "abc", "unseal-key": "xyz"}},
+        )
+        vault = VaultStub(initialized_units={"vault/leader": True})
+        logger = LoggerStub()
+        charm = CharmInfo(name="vault")
+
+        # WHEN
+        VaultUnsealer(charm, vault, juju, logger).try_init_vault("test-model", "vault", authorize_charm=False)
+
+        # THEN
+        for target, action, _ in juju.actions_run:
+            assert (target, action) != ("vault/leader", "authorize-charm")
+
+    def test_try_init_vault_authorizes_after_fresh_init_even_if_asked_not_to(self) -> None:
+        # Regression test for issue #854: a k8s vault scaled to 0 and back up comes back
+        # uninitialized. post_scale() calls try_init_vault with authorize_charm=False, but a
+        # freshly initialized vault must still be authorized or it stays blocked on "Please
+        # authorize charm". The skip only applies to already-initialized (resealed) vaults.
         # GIVEN
         juju = JujuStub(units={"vault": ["vault/leader"]})
         vault = VaultStub(initialized_units={"vault/leader": False})
@@ -294,8 +468,8 @@ class TestVaultUnsealer:
         VaultUnsealer(charm, vault, juju, logger).try_init_vault("test-model", "vault", authorize_charm=False)
 
         # THEN
-        for target, action, _ in juju.actions_run:
-            assert (target, action) != ("vault/leader", "authorize-charm")
+        assert "vault/leader" in vault.inits
+        assert ("vault/leader", "authorize-charm", {"secret-id": "secret-id"}) in juju.actions_run
 
     def test_authorize_vault_charm_runs_action_and_removes_secret(self) -> None:
         # GIVEN

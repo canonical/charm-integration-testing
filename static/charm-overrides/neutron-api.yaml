@@ -8,3 +8,5 @@ overrides:
         optional: true
       midonet:  # Charm that offers it has been deleted
         optional: true
+      external-dns:  # not in REQUIRED_INTERFACES; hooks/neutron_api_utils.py
+        optional: true
