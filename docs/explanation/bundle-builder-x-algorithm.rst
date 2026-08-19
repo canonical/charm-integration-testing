@@ -3,8 +3,8 @@ The bundle builder X algorithm
 
 Bundle builder X uses an SMT solver (`Z3 <https://github.com/Z3Prover/z3>`_) to resolve charm
 compatibility constraints, replacing the earlier graph-traversal approach.
-Instead of exploring a search tree of possible bundles, the solver encodes the entire
-problem as a set of logical constraints and finds a satisfying assignment directly.
+The builder encodes the currently known domain as logical constraints, then expands that
+domain incrementally from solver diagnostics until it finds a satisfying assignment.
 
 Why a solver?
 -------------
@@ -27,10 +27,11 @@ How it works
 
 The build loop has three phases that repeat until the problem is satisfiable:
 
-1. **Domain construction** -- The spec file names applications and their charms.
-   Charm metadata is fetched from Charmhub (with local overrides applied on top).
-   Each charm, its endpoints, and its config options become part of the "domain",
-   the set of Z3 variables and their possible values.
+1. **Domain construction** -- The spec file defines models, applications, and
+   integrations. These declarations become the initial domain. Charm metadata is
+   fetched from Charmhub (with local overrides applied on top) as the domain expands.
+   Each introduced charm, its endpoints, and its config options add Z3 variables and
+   possible values to the domain.
 
 2. **Constraint generation** -- Constraints are added to the solver for every
    rule the bundle must satisfy:
@@ -49,9 +50,9 @@ The build loop has three phases that repeat until the problem is satisfiable:
    ``unsat``, the unsat core (the minimal set of conflicting constraints) is
    decoded to determine what went wrong. The builder then expands the domain,
    typically by fetching a new charm that can fulfill an unsatisfied endpoint,
-   and loops back to step 2. If the problem is ``sat``, an optimization pass
-   minimizes the number of applications and integrations, and the result is
-   extracted into concrete ``Bundle`` objects.
+   and loops back to step 2. If the problem is ``sat``, the builder exposes a
+   bounded set of quality-improving alternatives, runs an optimization pass, and
+   extracts the result into concrete ``Bundle`` objects.
 
 .. mermaid::
 
@@ -59,7 +60,8 @@ The build loop has three phases that repeat until the problem is satisfiable:
        A[Parse spec file] --> B[Build initial domain]
        B --> C[Generate constraints]
        C --> D{Satisfiable?}
-       D -- yes --> E[Optimize & extract solution]
+       D -- yes --> E[Prepare bounded optimization domain]
+       E --> H[Optimize & extract solution]
        D -- no --> F[Decode unsat core]
        F --> G[Expand domain]
        G --> C
@@ -77,18 +79,51 @@ first):
 - ``APPLICATION_INTEGRATION_EXISTS`` -- an explicit integration references
   applications not yet in the domain. Fetch them.
 - ``CHARM_ENDPOINT_NON_OPTIONAL`` -- a charm has a non-optional endpoint
-  with no compatible charm in the domain. Search Charmhub for a charm that
-  provides or requires the matching interface and add it.
-- ``ENDPOINT_COUNT_MATCHES_INTEGRATIONS`` / ``PEER_CHANNEL_MISMATCH`` --
-  structural mismatches that indicate a constraint conflict.
+  with no compatible charm in the domain. Reuse an existing compatible charm
+  where possible; otherwise search Charmhub for a matching charm.
+- ``ENDPOINT_COUNT_MATCHES_INTEGRATIONS`` -- an endpoint needs another
+  integration. It uses the same reuse-and-search process.
+- ``PEER_CHANNEL_MISMATCH`` / ``SUBORDINATE_BASE_MISMATCH`` -- fetch compatible
+  channel or base variants and pair them with the actual counterpart.
+
+Candidate expansion is deliberately asymmetric:
+
+- For a user-requested application, all compatible direct candidates are exposed
+  so optimization can compare the immediate alternatives.
+- For a transitive dependency, only the first viable candidate is added. This
+  prevents every common interface from recursively adding its entire
+  dependency closure.
+
+Candidates are sorted by charm priority and then name. Each new candidate is
+initially paired only with its parent charm; it is not eagerly paired against
+the whole domain.
 
 Pairs of ``PEER_CHANNEL_MISMATCH`` tags for the same (anchor, peer) charm
 pair are merged before processing so that track and risk constraints are
 resolved together in a single step, rather than one dimension at a time.
 
-This loop is bounded (default 100 iterations). If the domain cannot be
-expanded further and the problem is still unsatisfiable, the builder raises
-``UncompletableBundleError`` with the decoded unsat core.
+There is no hard iteration limit: valid dependency graphs may require an
+arbitrary number of expansion steps. Each solver call has a timeout. If the
+domain cannot be expanded further and the problem is still unsatisfiable, the
+builder raises ``UncompletableBundleError`` with the decoded unsat core.
+
+Optimization preparation
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+Feasibility expansion creates only the charms and integrations needed to reach
+a satisfying assignment. Before optimization, the builder adds a bounded set of
+alternatives that can produce a smaller bundle:
+
+- Active charms are paired with each other so one provider can serve multiple
+  active consumers.
+- Channel and base replacement variants are paired with the active neighbours
+  of the charm they replace.
+- One additional equivalent charm instance is exposed when it can break a
+  bidirectional-interface cycle or satisfy parallel required endpoints that
+  cannot share one charm-pair relation.
+
+This preparation operates on the satisfiable graph rather than recursively
+expanding every candidate dependency tree.
 
 Key properties
 --------------
@@ -99,9 +134,12 @@ Key properties
 - **Cross-model relations** -- both in-spec and external CMRs are supported.
 - **Optimization pass** -- after a satisfying assignment is found, the builder
   first attempts a ``z3.Optimize`` pass (configurable timeout, default 1 minute)
-  to find a globally optimal solution in one shot. If that times out, it falls
-  back to iterative descent: a ``z3.Solver`` loop that minimizes charm cost first
-  (phase 1), then integration count with charm cost fixed (phase 2), each step
-  issuing a single SAT query with a tighter bound.
+  to find the optimal solution within the bounded domain. If that times out, it
+  falls back to iterative descent: a ``z3.Solver`` loop that minimizes charm cost
+  first (phase 1), integration count with charm cost fixed (phase 2), and total
+  unit count with both earlier costs fixed (phase 3). Each step issues a SAT query
+  with a tighter bound.
+- **Repeatable expansion** -- candidate ordering and the feasibility solver seed
+  are fixed so the chosen expansion path is repeatable.
 - **Failure diagnostics** -- when the problem is unsatisfiable, the unsat core is
   decoded into specific constraint tags so callers know exactly what went wrong.
