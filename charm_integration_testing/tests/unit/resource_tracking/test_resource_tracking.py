@@ -77,19 +77,36 @@ class _FakeKubernetesClient:
         self._pvcs = pvcs
         self.requested_model: str | None = None
 
+    def namespace_exists(self, model: str) -> bool:
+        return True
+
     def list_model_pvcs(self, model: str) -> list[SimpleNamespace]:
         self.requested_model = model
         return self._pvcs
 
 
 class _RaisingKubernetesClient:
-    """Stand-in whose PVC listing always raises, to exercise error handling."""
+    """Stand-in whose PVC listing always raises, to exercise error handling.
+
+    The namespace exists, so the collector runs the source; the failure models a
+    transient per-kind list error rather than a missing namespace.
+    """
 
     def __init__(self, error: Exception) -> None:
         self._error = error
 
+    def namespace_exists(self, model: str) -> bool:
+        return True
+
     def list_model_pvcs(self, model: str) -> list[SimpleNamespace]:
         raise self._error
+
+
+class _NoNamespaceKubernetesClient:
+    """Stand-in whose model namespace does not exist (a non-Kubernetes model)."""
+
+    def namespace_exists(self, model: str) -> bool:
+        return False
 
 
 class _FakeResourceRegistry:
@@ -207,6 +224,36 @@ class TestPvcSource:
         # THEN the name passes through untouched
         assert snapshots[0].name == "data-postgresql-0"
 
+    def test_only_the_volume_id_segment_is_normalized_when_name_has_two_hex_segments(self) -> None:
+        # GIVEN a name carrying an earlier hex-like segment as well as the real volume id
+        first = PvcSource().collect(
+            _FakeKubernetesClient([_raw_pvc("deadbeef-pgdata-b0ba0188-postgresql-k8s-0")]),  # type: ignore[arg-type]
+            "test-model",
+        )[0]
+        second = PvcSource().collect(
+            _FakeKubernetesClient([_raw_pvc("deadbeef-pgdata-81a553d9-postgresql-k8s-0")]),  # type: ignore[arg-type]
+            "test-model",
+        )[0]
+
+        # THEN only the trailing volume id is replaced; the earlier hex segment is preserved
+        assert first.name == "deadbeef-pgdata-<volume-id>-postgresql-k8s-0"
+        # AND the same logical claim across visits still normalizes to one identity
+        assert first.identity == second.identity
+
+    def test_distinct_claims_sharing_a_volume_id_position_do_not_collapse(self) -> None:
+        # GIVEN two claims that differ only in an earlier hex-like segment
+        first = PvcSource().collect(
+            _FakeKubernetesClient([_raw_pvc("deadbeef-pgdata-b0ba0188-postgresql-k8s-0")]),  # type: ignore[arg-type]
+            "test-model",
+        )[0]
+        second = PvcSource().collect(
+            _FakeKubernetesClient([_raw_pvc("cafed00d-pgdata-b0ba0188-postgresql-k8s-0")]),  # type: ignore[arg-type]
+            "test-model",
+        )[0]
+
+        # THEN the preserved earlier segment keeps them as distinct identities
+        assert first.identity != second.identity
+
     def test_none_spec_and_status_do_not_abort_collection(self) -> None:
         # GIVEN a raw PVC whose optional spec/status subtrees are entirely None
         raw = SimpleNamespace(
@@ -303,15 +350,26 @@ class TestKubernetesResourceCollector:
         assert collected == [CollectedResources("test-model", frozenset({_pvc("data-0")}))]
 
     def test_api_errors_are_skipped(self) -> None:
-        # GIVEN a client whose PVC listing fails
+        # GIVEN a model whose namespace exists but whose PVC listing transiently fails
         registry = _FakeResourceRegistry([JujuModelHandle(controller="test-controller", model="test-model")])
-        client = _RaisingKubernetesClient(ApiException(status=404))
+        client = _RaisingKubernetesClient(ApiException(status=500))
 
         # WHEN the collector gathers resources
         collected = KubernetesResourceCollector(client, registry).collect(_LOGGER)  # type: ignore[arg-type]
 
         # THEN the model is still recorded, with an empty snapshot set
         assert collected == [CollectedResources("test-model", frozenset())]
+
+    def test_models_without_a_namespace_are_skipped(self) -> None:
+        # GIVEN a model whose namespace does not exist (e.g. a machine model)
+        registry = _FakeResourceRegistry([JujuModelHandle(controller="test-controller", model="machine-model")])
+        client = _NoNamespaceKubernetesClient()
+
+        # WHEN the collector gathers resources
+        collected = KubernetesResourceCollector(client, registry).collect(_LOGGER)  # type: ignore[arg-type]
+
+        # THEN no observation is recorded for the non-Kubernetes model
+        assert collected == []
 
     def test_collects_every_snapshot_uniformly(self) -> None:
         # GIVEN two PVCs owned by different applications

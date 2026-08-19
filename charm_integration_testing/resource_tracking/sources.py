@@ -159,7 +159,7 @@ def _has_volatile_name(secret: Any) -> bool:
 
 # Juju provisions charm storage as PersistentVolumeClaims whose name embeds an
 # 8-hex volume id -- the first block of the storage UUID -- between the storage
-# label and the StatefulSet suffix, e.g.
+# label and the StatefulSet pod suffix, e.g.
 # ``postgresql-k8s-pgdata-b0ba0188-postgresql-k8s-0``. That id is minted afresh
 # whenever the claim is (re)provisioned, so two visits to the *same* logical
 # storage carry different names and would be diffed as a spurious missing/extra
@@ -168,13 +168,27 @@ def _has_volatile_name(secret: Any) -> bool:
 # (``resized``, ``storage_class_changed``), so its name is normalized rather than
 # dropped: replacing the volume id with a placeholder restores a stable
 # ``(namespace, name)`` identity while keeping the claim trackable.
-_JUJU_PVC_VOLUME_ID_RE = re.compile(r"(?<=-)[0-9a-f]{8}(?=-)")
+#
+# The whole name is anchored -- ``<storage-label>-<volume-id>-<pod-suffix>`` with
+# the ``<pod-suffix>`` being the StatefulSet ``<name>-<ordinal>`` -- and the
+# ``<prefix>`` is greedy so the volume id binds to the 8-hex block immediately
+# preceding the pod suffix. This rewrites only that block, so a name that happens
+# to contain an earlier 8-hex-like segment (e.g. a hex-like storage label) does
+# not have that segment collapsed too, which would otherwise make two distinct
+# claims look identical.
+_JUJU_PVC_NAME_RE = re.compile(r"^(?P<prefix>.+)-[0-9a-f]{8}-(?P<suffix>[a-z0-9]+(?:-[a-z0-9]+)*-\d+)$")
 _PVC_VOLUME_ID_PLACEHOLDER = "<volume-id>"
 
 
 def _normalize_pvc_name(name: str) -> str:
-    """Return a PVC name with its volatile Juju volume id replaced by a placeholder."""
-    return _JUJU_PVC_VOLUME_ID_RE.sub(_PVC_VOLUME_ID_PLACEHOLDER, name)
+    """Return a PVC name with its volatile Juju volume id replaced by a placeholder.
+
+    Names that do not match the Juju storage PVC shape are returned unchanged.
+    """
+    match = _JUJU_PVC_NAME_RE.match(name)
+    if match is None:
+        return name
+    return f"{match.group('prefix')}-{_PVC_VOLUME_ID_PLACEHOLDER}-{match.group('suffix')}"
 
 
 class KubernetesResourceSource(Protocol):

@@ -29,7 +29,10 @@ class InconsistencyCheck:
 
     ``ignore_empty_transition`` suppresses the drift when either visit's value is
     empty, so an attribute coming into existence (or observed before it settles)
-    is not mistaken for a change of an established value.
+    is not mistaken for a change of an established value.  It is currently used
+    only for a Service's ``ports`` (which carry the Juju placeholder port until
+    the workload opens its real ports); resource kinds with similar settling
+    behaviour (e.g. Ingress or RBAC) should consider it as they are added.
     """
 
     qualifier: str

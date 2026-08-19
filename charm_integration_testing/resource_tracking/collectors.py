@@ -70,13 +70,20 @@ class KubernetesResourceCollector:
         for handle in self._resource_registry.registered_handles():
             if not isinstance(handle, JujuModelHandle):
                 continue
+            # A model without a namespace is not backed by this cluster (e.g. a
+            # machine model); skip it up front rather than issuing a failing list
+            # call for every configured source.
+            if not self._kubernetes_client.namespace_exists(handle.model):
+                logger.debug("Skipping non-Kubernetes model '%s'", handle.model)
+                continue
             snapshots: set[ResourceSnapshot] = set()
             for source in self._sources:
                 try:
                     snapshots.update(source.collect(self._kubernetes_client, handle.model))
                 except ApiException as exc:
-                    # A model whose namespace does not exist (e.g. a non-Kubernetes
-                    # model) is skipped rather than raising.
+                    # A source whose list call fails on an existing namespace is
+                    # skipped rather than raising, so one flaky kind does not abort
+                    # collection for the whole model.
                     logger.debug("Skipping resource snapshot for model '%s'", handle.model, exc_info=exc)
             collected.append(CollectedResources(model=handle.model, snapshots=frozenset(snapshots)))
         return collected

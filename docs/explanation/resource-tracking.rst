@@ -175,6 +175,20 @@ through ``ModelResourceDiscrepancy.entries()``, the recorder, and the metadata
 key (``resource_discrepancy:<resource_type>:<qualifier>``), no other component
 changes -- a new qualifier simply becomes a new selectable value.
 
+.. note::
+
+   An ``InconsistencyCheck`` also accepts an ``ignore_empty_transition`` flag
+   (default ``False``). When set, the check suppresses the drift whenever *either*
+   visit's value is empty, so an attribute coming into existence -- or observed
+   before it settles -- is not mistaken for a change of an already-established
+   value. It is currently used only for a Service's ``ports``, which carry the
+   Juju placeholder port until the workload opens its real ports. Future
+   developers adding a resource kind whose attribute settles asynchronously after
+   the object first appears (for example an Ingress whose ``hosts`` or an RBAC
+   object whose rules populate a moment later) should set this flag on the
+   affected check; leave it ``False`` for attributes that are fully populated the
+   instant the resource exists, so a genuine change is still reported.
+
 Adding a resource kind or check is intentionally cheap because the mutating
 tests are idempotent round-trips: scaling in then out, breaking then restoring an
 integration, deleting a pod and awaiting its replacement, or redeploying the same
@@ -468,7 +482,10 @@ kind is added without touching any of them. Following the PVC example:
    a richer notion of drift (for example a ``resized`` volume), add an
    ``InconsistencyCheck`` -- pairing a qualifier with the ``report_attributes()``
    key to compare -- to the snapshot's ``inconsistency_checks``; ``diff_snapshots()``
-   runs them generically, so no change to it is required. See
+   runs them generically, so no change to it is required. Set
+   ``ignore_empty_transition=True`` on a check whose attribute settles
+   asynchronously after the object appears (as a Service's ``ports`` do) so an
+   empty-to-populated transition is not reported as drift. See
    `Resource-specific discrepancy kinds`_.
 
 No change to ``StateResourceTracker``, ``calculate_discrepancies``,
