@@ -200,7 +200,7 @@ Failure Information
      - No
      - ``katib-controller:k8s-service-info/kfp-viz:kfp-viz``
    * - ``failure:build_bundle:feature_mismatch:feature``
-     - The feature name that could not be reconciled between the two endpoints in a feature mismatch. Collected alongside ``failure:build_bundle:feature_mismatch``, for coarse cross-run filtering/grouping (loses the endpoint pairing, same tradeoff as ``unfulfilled_interface``). Multiple values may be recorded.
+     - The feature name that could not be reconciled between the two endpoints in a feature mismatch. Collected alongside ``failure:build_bundle:feature_mismatch``, for coarse cross-run filtering/grouping (loses the endpoint pairing, same limitation as ``unfulfilled_interface``). Multiple values may be recorded.
      - No
      - ``katib-service``
    * - ``resource_discrepancy:<resource_type>:<qualifier>``
