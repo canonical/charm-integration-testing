@@ -37,6 +37,7 @@ dependencies = [
     "validators-grafana-datasource",
     "validators-ingress",
     "validators-prometheus-remote-write",
+    "validators-alertmanager-dispatch",
 ]
 
 [build-system]
