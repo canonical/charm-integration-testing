@@ -350,6 +350,19 @@ JSON
         _list_ok=1
         _existing_keys=$(gh api user/ssh_signing_keys --jq '.[].key' 2>&1) || _list_ok=0
 
+        # Listing signing keys needs the 'admin:ssh_signing_key' scope. If the
+        # gh token lacks it, offer to grant it via `gh auth refresh` (with the
+        # user's consent) and retry rather than bailing out.
+        if [ "$_list_ok" -eq 0 ] && [ -t 0 ] \
+            && grep -Eqi 'admin:ssh_signing_key|missing.*scope|HTTP 40[34]' <<< "$_existing_keys"; then
+            echo "==> Your gh token is missing the 'admin:ssh_signing_key' scope, which is"
+            echo "    needed to verify/register the VM signing key with GitHub."
+            read -r -p "  Grant this scope now via 'gh auth refresh'? [y/N] " _refresh_list
+            if [[ "$_refresh_list" =~ ^[Yy]$ ]] && gh auth refresh -h github.com -s admin:ssh_signing_key; then
+                _existing_keys=$(gh api user/ssh_signing_keys --jq '.[].key' 2>&1) && _list_ok=1
+            fi
+        fi
+
         if [ "$_list_ok" -eq 0 ]; then
             echo "==> Could not verify existing signing keys with GitHub: $_existing_keys"
             echo "==> Skipping automatic registration check. Add the key manually at the URL above if needed."
@@ -364,8 +377,9 @@ JSON
                     echo "==> Signing key registered with GitHub."
                 elif grep -Eqi 'missing.*scope|write:ssh_signing_key|admin:ssh_signing_key|HTTP 403' <<< "$_register_err"; then
                     # The stored gh credential lacks the scope needed to manage
-                    # signing keys. Try to add it (only works for interactive
-                    # `gh auth login` credentials, not GH_TOKEN/GITHUB_TOKEN env vars).
+                    # signing keys. Offer to grant it and retry (only works for
+                    # interactive `gh auth login` credentials, not
+                    # GH_TOKEN/GITHUB_TOKEN env vars).
                     echo "==> Registration failed: token is missing the 'write:ssh_signing_key' scope."
                     echo "    Detail: $_register_err"
                     read -r -p "  Grant this scope now via 'gh auth refresh' and retry? [y/N] " _refresh_scope
@@ -392,7 +406,7 @@ JSON
         fi
     else
         echo "==> Warning: 'gh auth token' returned nothing."
-        echo "==>   Run: gh auth login   on this machine, then re-run scripts/sandbox.sh up."
+        echo "==>   Run: gh auth login -s admin:ssh_signing_key   on this machine, then re-run scripts/sandbox.sh up."
     fi
 
     echo ""

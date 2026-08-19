@@ -42,7 +42,7 @@ Run these inside the VM after entering with `scripts/sandbox.sh shell` or by the
 All tokens are optional. Set them in `development-sandbox/.env`
 (gitignored, copy from `.env.sample`).
 
-- `GITHUB_TOKEN`: fine-grained PAT for host-side GitHub API calls when provisioning the VM (e.g. registering the VM signing key). Optional - falls back to the host's `gh auth token` if not set.
+- `GITHUB_TOKEN`: fine-grained PAT for host-side GitHub API calls when provisioning the VM (e.g. registering the VM signing key). Optional - falls back to the host's `gh auth token` if not set. Automatic signing-key verification and registration require the `admin:ssh_signing_key` scope; if your `gh` login lacks it, `sandbox.sh up` warns and asks for your consent before running `gh auth refresh` to grant it (or add the key manually at <https://github.com/settings/ssh>).
 - `SANDBOX_VAR_GITHUB_TOKEN`: fine-grained PAT passed to the `gh` CLI inside the VM (as both `GH_TOKEN` and `GITHUB_TOKEN`). If not set, `gh` CLI inside the VM uses whatever auth is already present there. Recommended permissions: Contents (read), Pull requests (read and write); Repository access: All repositories.
 - `SANDBOX_VAR_COPILOT_GITHUB_TOKEN`: Copilot AI auth token inside the VM. Defaults to `gh auth token` on the host.
 
