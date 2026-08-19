@@ -103,7 +103,7 @@ jobs:
   execute-charm-test:
     name: Execute integration tests against the charms
     # runs-on: ${{ fromJSON(needs.determine-runner.outputs.runner) }}  # see NOTE above
-    runs-on: [self-hosted-linux-amd64-noble-private-endpoint-small]
+    runs-on: [self-hosted, linux, amd64]
     env:
       TEST_OBSERVER_API: ${{ inputs.test_observer_environment == 'production' && vars.PROD_TEST_OBSERVER_API || (inputs.test_observer_environment == 'staging' && vars.STG_TEST_OBSERVER_API || '') }}
       TEST_OBSERVER_TOKEN: ${{ inputs.test_observer_environment == 'production' && secrets.PROD_TEST_OBSERVER_TOKEN || (inputs.test_observer_environment == 'staging' && secrets.STG_TEST_OBSERVER_TOKEN || '') }}
