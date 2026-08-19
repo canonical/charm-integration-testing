@@ -4,6 +4,7 @@
 from dataclasses import field
 from datetime import datetime, timedelta
 from pathlib import Path
+from threading import Barrier
 from typing import Any, Callable
 from unittest.mock import patch
 
@@ -399,6 +400,49 @@ class TestJubilantBackend:
             # THEN we needed 6 calls (2 ready, 1 fail resets count, 3 ready to succeed)
             assert call_count == 6
 
+        def test_wait_tolerates_transient_migration_error(self) -> None:
+            # GIVEN status() raises a "migration in progress" CLIError once, then succeeds
+            stub = ModelExistsStub(
+                error_stderr="ERROR migration in progress for model test-model\n",
+                max_errors=1,
+            )
+            backend = JubilantBackend(JubilantClientStub(client=stub))
+
+            # WHEN wait is called with a ready condition that is immediately true
+            # (delay is small enough that patching time.sleep isn't needed, matching
+            # the sibling tests in this class)
+            backend.wait(
+                "test-model",
+                ready=lambda status: (True, JujuWaitState(message="ready")),
+                timeout=timedelta(seconds=10),
+                successes=1,
+                delay=timedelta(milliseconds=10),
+            )
+
+            # THEN the transient error was swallowed and status was retried until success
+            assert stub.call_count == 2
+
+        def test_wait_reraises_unrelated_cli_error(self) -> None:
+            # GIVEN status() raises a CLIError unrelated to model availability
+            stub = ModelExistsStub(
+                error_stderr="ERROR connection to controller lost\n",
+                max_errors=0,
+            )
+            backend = JubilantBackend(JubilantClientStub(client=stub))
+
+            # WHEN / THEN the unrecognized CLIError propagates immediately
+            with pytest.raises(jubilant.CLIError):
+                backend.wait(
+                    "test-model",
+                    ready=lambda status: (True, JujuWaitState(message="ready")),
+                    timeout=timedelta(seconds=10),
+                    successes=1,
+                    delay=timedelta(milliseconds=10),
+                )
+
+            # AND status was only called once (no retries)
+            assert stub.call_count == 1
+
         def test_wait_extends_timeout_when_making_progress(self) -> None:
             # GIVEN a backend with mocked status
             stub = StatusStub()
@@ -573,6 +617,171 @@ class TestJubilantBackend:
                 ]
                 with pytest.raises(JujuWaitTimeoutError):
                     backend.wait_idle("test-model", timedelta(milliseconds=100), count=3)
+
+        def test_all_models_become_idle(self) -> None:
+            # GIVEN two models each tracked by a separate stub (both report active)
+            stub_1 = StatusStub(
+                application_statuses={"app": "active"},
+                unit_workload_statuses={"app/0": "active"},
+                unit_juju_statuses={"app/0": "idle"},
+            )
+            stub_2 = StatusStub(
+                application_statuses={"app": "active"},
+                unit_workload_statuses={"app/0": "active"},
+                unit_juju_statuses={"app/0": "idle"},
+            )
+
+            class TwoModelClientStub(JubilantClient):
+                def model(self, model: str | None) -> Any:
+                    if model == "model-1":
+                        return stub_1
+                    return stub_2
+
+            backend = JubilantBackend(TwoModelClientStub())
+            backend.default_delay = timedelta(0)
+
+            # WHEN waiting for both models
+            backend.wait_idle_multi_model(["model-1", "model-2"], timeout=timedelta(seconds=10), count=3)
+
+            # THEN each single-model wait completes
+            assert stub_1.call_count == 3
+            assert stub_2.call_count == 3
+
+        def test_multi_model_wait_delegates_unique_models(self) -> None:
+            # GIVEN a backend that records single-model waits
+            calls: list[tuple[str, timedelta | None, int | None, bool]] = []
+
+            class RecordingBackend(JubilantBackend):
+                def wait_idle(
+                    self,
+                    model: str,
+                    timeout: timedelta | None,
+                    count: int | None,
+                    strict_timeout: bool = False,
+                    applications: list[str] | None = None,
+                ) -> None:
+                    calls.append((model, timeout, count, strict_timeout))
+
+            backend = RecordingBackend()
+            timeout = timedelta(seconds=10)
+
+            # WHEN waiting for models with a duplicate
+            backend.wait_idle_multi_model(
+                ["model-2", "model-1", "model-2"],
+                timeout=timeout,
+                count=4,
+                strict_timeout=True,
+            )
+
+            # THEN each unique model is delegated once with the same settings
+            assert sorted(calls) == [
+                ("model-1", timeout, 4, True),
+                ("model-2", timeout, 4, True),
+            ]
+
+        def test_empty_multi_model_wait_returns_immediately(self) -> None:
+            # GIVEN a backend
+            backend = JubilantBackend()
+
+            # WHEN waiting for no models
+            backend.wait_idle_multi_model([], timeout=timedelta(seconds=10), count=3)
+
+            # THEN no error is raised
+
+        def test_multi_model_wait_runs_single_model_waits_concurrently(self) -> None:
+            # GIVEN waits that only complete after both worker threads have started
+            workers_started = Barrier(2, timeout=5)
+
+            class ConcurrentBackend(JubilantBackend):
+                def wait_idle(
+                    self,
+                    model: str,
+                    timeout: timedelta | None,
+                    count: int | None,
+                    strict_timeout: bool = False,
+                    applications: list[str] | None = None,
+                ) -> None:
+                    workers_started.wait()
+
+            backend = ConcurrentBackend()
+
+            # WHEN waiting for both models
+            backend.wait_idle_multi_model(
+                ["model-1", "model-2"],
+                timeout=timedelta(seconds=10),
+                count=3,
+            )
+
+            # THEN both workers reached the barrier concurrently
+            assert not workers_started.broken
+
+        def test_multi_model_wait_aggregates_timeouts(self) -> None:
+            # GIVEN multiple models whose single-model waits time out differently
+            class TimeoutBackend(JubilantBackend):
+                def wait_idle(
+                    self,
+                    model: str,
+                    timeout: timedelta | None,
+                    count: int | None,
+                    strict_timeout: bool = False,
+                    applications: list[str] | None = None,
+                ) -> None:
+                    if model == "model-1":
+                        raise JujuWaitTimeoutError(
+                            JujuWaitState(
+                                message="not ready",
+                                noncompliant_applications={"app": None},
+                            )
+                        )
+                    raise JujuWaitTimeoutError(
+                        JujuWaitState(
+                            message="agent not idle",
+                            insufficient_status_checks=True,
+                            noncompliant_units={"app/0": None},
+                            noncompliant_unit_agents={"app/0": None},
+                        )
+                    )
+
+            backend = TimeoutBackend()
+
+            # WHEN waiting for both models
+            with pytest.raises(JujuWaitTimeoutError) as exc_info:
+                backend.wait_idle_multi_model(
+                    ["model-1", "model-2"],
+                    timeout=timedelta(seconds=10),
+                    count=3,
+                )
+
+            # THEN the timeout preserves details for every failing model
+            assert exc_info.value.wait_state.message == "waiting for models: [model-1, model-2] to become idle"
+            assert "model-1::app" in exc_info.value.wait_state.noncompliant_applications
+            assert "model-2::app/0" in exc_info.value.wait_state.noncompliant_units
+            assert "model-2::app/0" in exc_info.value.wait_state.noncompliant_unit_agents
+            assert exc_info.value.wait_state.insufficient_status_checks
+
+        def test_multi_model_wait_propagates_unexpected_errors(self) -> None:
+            # GIVEN a model whose single-model wait fails unexpectedly
+            class ErrorBackend(JubilantBackend):
+                def wait_idle(
+                    self,
+                    model: str,
+                    timeout: timedelta | None,
+                    count: int | None,
+                    strict_timeout: bool = False,
+                    applications: list[str] | None = None,
+                ) -> None:
+                    if model == "model-2":
+                        raise RuntimeError("status failed")
+
+            backend = ErrorBackend()
+
+            # WHEN / THEN the unexpected error is not converted or swallowed
+            with pytest.raises(RuntimeError, match="status failed"):
+                backend.wait_idle_multi_model(
+                    ["model-1", "model-2"],
+                    timeout=timedelta(seconds=10),
+                    count=3,
+                )
 
     class TestWaitApplicationSettled:
         def test_application_settled(self) -> None:
