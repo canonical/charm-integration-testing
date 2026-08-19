@@ -2994,6 +2994,52 @@ type = "directory"
 url = "validators/tracing"
 
 [[package]]
+name = "validators-update-status-check"
+version = "0.1.0"
+description = "Runs endpoint validators at the 'simple' level on every update-status hook"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+ops = ">=2.0.0"
+pydantic = ">=2.0.0"
+validators-base = "*"
+validators-test-utils = {version = "*", optional = true}
+
+[package.extras]
+dev = ["validators-test-utils"]
+
+[package.source]
+type = "directory"
+url = "validators/update_status_check"
+
+[[package]]
+name = "validators-validate-action"
+version = "0.1.0"
+description = "Runs endpoint validators at a user-chosen level for a charm's 'validate' action"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+ops = ">=2.0.0"
+pydantic = ">=2.0.0"
+validators-base = "*"
+validators-test-utils = {version = "*", optional = true}
+
+[package.extras]
+dev = ["validators-test-utils"]
+
+[package.source]
+type = "directory"
+url = "validators/validate_action"
+
+[[package]]
 name = "websocket-client"
 version = "1.9.0"
 description = "WebSocket client for Python with low level API options"
