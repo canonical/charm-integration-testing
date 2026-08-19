@@ -8,14 +8,11 @@
 # Evidence gathered from src/charm.py, src/cloud_integration.py,
 # src/encryption_at_rest.py (main branch, 2026-05-20).
 #
-# Five criteria blocks cover the five distinct endpoint generations:
+# Four criteria blocks cover the distinct endpoint generations:
 #   1.23:            legacy reactive charm, no external-cloud-provider
 #   1.24-1.28:       legacy reactive charm, adds external-cloud-provider
-# Five criteria blocks cover the five distinct endpoint generations:
-#   1.23:            legacy reactive charm, no external-cloud-provider
-#   1.24-1.28:       legacy reactive charm, adds external-cloud-provider
-#   1.29 edge/beta:  ops-based rewrite; stripped azure/gcp/keystone/openstack/vault-kv/ceph-client
-#   1.29 candidate/stable, 1.30+: legacy reactive charm, full endpoint set (confirmed live 2026-08-18)
+#   1.29 edge/beta:  ops-based rewrite; minimal endpoint set
+#   default:         remaining channels (incl. 1.29/candidate+ and 1.30+); see 1.30+ block comment
 #
 # Truly required in 1.29+ (DO NOT mark optional):
 #   certificates  - assert self.certificates.relation in request_certificates()
