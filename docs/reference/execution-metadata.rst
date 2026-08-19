@@ -195,6 +195,14 @@ Failure Information
      - Interface name for an unfulfilled application endpoint. Collected when ``UnfulfilledEndpointsError`` is raised. Multiple values may be recorded.
      - No
      - ``postgresql_client``
+   * - ``failure:build_bundle:feature_mismatch``
+     - Two integrated charm endpoints declared mutually incompatible ``features:`` tags (see :doc:`constraint-dsl`). Collected when ``UncompletableBundleError`` is raised with ``feature_mismatches`` populated. Packed as a single value (rather than split across separate keys) so that pairing information survives even when a run has multiple distinct mismatches. Format: ``<requires charm>:<requires endpoint>/<provides charm>:<provides endpoint>``. Multiple values may be recorded.
+     - No
+     - ``katib-controller:k8s-service-info/kfp-viz:kfp-viz``
+   * - ``failure:build_bundle:feature_mismatch:feature``
+     - The feature name that could not be reconciled between the two endpoints in a feature mismatch. Collected alongside ``failure:build_bundle:feature_mismatch``, for coarse cross-run filtering/grouping (loses the endpoint pairing, same tradeoff as ``unfulfilled_interface``). Multiple values may be recorded.
+     - No
+     - ``katib-service``
    * - ``resource_discrepancy:<resource_type>:<qualifier>``
      - A Kubernetes resource discrepancy detected between two visits to the same scheduler state. Collected when ``ResourceDiscrepancyError`` is raised. ``<resource_type>`` identifies the tracked resource (e.g. ``pvc``) and ``<qualifier>`` is the drift kind, generically ``missing`` or ``extra`` (extensible per resource type). Run-specific context is carried in the value as ``state=<state> model=<model> <resource_type>=<name>`` followed by the resource's descriptive attributes. Multiple values may be recorded. See :doc:`../explanation/resource-tracking`.
      - Yes

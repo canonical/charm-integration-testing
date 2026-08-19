@@ -252,6 +252,22 @@ The two mechanisms have distinct roles:
    * - ``features(endpoint[x]) == {...}`` in DSL
      - Restricts which features may be active; prevents undeclared combinations
 
+Feature coherence across an integration
+'''''''''''''''''''''''''''''''''''''''
+
+When two endpoints are integrated, the builder also enforces that a feature can
+only be active on one side if the other side declares that same feature too - a
+feature declared on only one endpoint of a relation is forced inactive, and a
+feature declared on both sides must agree. This prevents the solver from
+silently pairing two charms whose declared feature sets don't actually overlap
+(for example, a charm requiring feature ``katib-service`` on an endpoint being
+paired with a provider that only declares feature ``kfp-viz`` on the matching
+interface). When this check fails, it is reported via the
+``INTEGRATION_FEATURE_MISMATCH`` assertion tag (see
+:doc:`/explanation/bundle-builder-x-algorithm`) and surfaced on
+``UncompletableBundleError.feature_mismatches``, rather than the generic
+"cannot expand domain" message.
+
 Config value
 ~~~~~~~~~~~~
 
