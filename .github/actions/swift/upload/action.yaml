@@ -1,0 +1,94 @@
+---
+name: Upload to Swift
+description: 'Uploads logs to swift'
+inputs:
+  job_uuid:
+    required: true
+    type: string
+  log_path:
+    required: false
+    type: string
+    default: project
+  create_index_html:
+    type: string
+    default: "true"
+  swift_bucket:
+    required: false
+    type: string
+    default: solutions-qa
+  SWIFT_OS_AUTH_URL:
+    required: true
+    type: string
+  SWIFT_OS_USERNAME:
+    required: true
+    type: string
+  SWIFT_OS_PASSWORD:
+    required: true
+    type: string
+  SWIFT_OS_PROJECT_NAME:
+    required: true
+    type: string
+  SWIFT_OS_REGION_NAME:
+    required: true
+    type: string
+  SWIFT_OS_USER_DOMAIN_NAME:
+    required: true
+    type: string
+  SWIFT_OS_PROJECT_DOMAIN_NAME:
+    required: true
+    type: string
+  log_retention_seconds:
+    required: false
+    type: string
+    default: '31536000'
+    description: 'Expiration time in seconds from now. Default is 31536000 (1 year).
+      Set to empty string to disable expiration.'
+runs:
+  using: "composite"
+  steps:
+    - name: Setup
+      shell: bash
+      env:
+        JOB_UUID: ${{ inputs.job_uuid }}
+        LOG_PATH: ${{ inputs.log_path }}
+      run: |
+        # openstack and openstackclients use the same name space `openstack` so we need to remove the openstack snap if it is installed before installing openstackclients snap
+        sudo snap remove openstack --purge || echo "Openstack snap was not installed"
+        sudo snap install openstackclients || echo "Openstackclients snap was already installed"
+        mkdir -p ${JOB_UUID}
+        cp -r ${LOG_PATH}/* ${JOB_UUID}
+    - name: Create index.html
+      shell: bash
+      env:
+        JOB_UUID: ${{ inputs.job_uuid }}
+        CREATE_INDEX_HTML: ${{ inputs.create_index_html }}
+      run: |
+        if [ "$CREATE_INDEX_HTML" = "false" ]; then
+            echo "not creating index.html"
+        else
+            find ${JOB_UUID} -type f -printf "<a href=\"%P\">%P</a><br>\n" > ${JOB_UUID}/index.html
+            for P in "jobs.json" "run.log"
+            do
+              echo "<a href=\"generated/github-runner/$P\">generated/github-runner/$P</a><br>" >> ${JOB_UUID}/index.html
+            done
+        fi
+    - name: Upload to swift
+      shell: bash
+      env:
+        JOB_UUID: ${{ inputs.job_uuid }}
+        OS_AUTH_URL: ${{ inputs.SWIFT_OS_AUTH_URL }}
+        OS_USERNAME: ${{ inputs.SWIFT_OS_USERNAME }}
+        OS_PASSWORD: ${{ inputs.SWIFT_OS_PASSWORD }}
+        OS_PROJECT_NAME: ${{ inputs.SWIFT_OS_PROJECT_NAME }}
+        OS_REGION_NAME: ${{ inputs.SWIFT_OS_REGION_NAME }}
+        OS_USER_DOMAIN_NAME: ${{ inputs.SWIFT_OS_USER_DOMAIN_NAME }}
+        OS_PROJECT_DOMAIN_NAME: ${{ inputs.SWIFT_OS_PROJECT_DOMAIN_NAME }}
+        LOG_PATH: ${{ inputs.log_path }}
+        SWIFT_BUCKET: ${{ inputs.swift_bucket }}
+        LOG_RETENTION_SECONDS: ${{ inputs.log_retention_seconds }}
+      run: |-
+        HEADER_FLAG=""
+        if [ -n "$LOG_RETENTION_SECONDS" ]; then
+          HEADER_FLAG="--header X-Delete-After:$LOG_RETENTION_SECONDS"
+        fi
+        /snap/bin/swift upload $HEADER_FLAG ${SWIFT_BUCKET} ${JOB_UUID}
