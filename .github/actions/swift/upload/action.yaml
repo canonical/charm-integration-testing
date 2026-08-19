@@ -1,45 +1,48 @@
 ---
+# Vendored from canonical/sqa-cloud-deployment-pipeline
+# (.github/actions/upload-to-swift/action.yml).
 name: Upload to Swift
 description: 'Uploads logs to swift'
 inputs:
   job_uuid:
     required: true
-    type: string
+    description: 'Unique identifier for this job; used as the destination directory
+      name in the swift bucket.'
   log_path:
     required: false
-    type: string
     default: project
+    description: 'Local path containing the logs/artifacts to upload.'
   create_index_html:
-    type: string
     default: "true"
+    description: 'Whether to generate an index.html linking to the uploaded files.
+      Set to "false" to skip.'
   swift_bucket:
     required: false
-    type: string
     default: solutions-qa
+    description: 'Name of the swift bucket (container) to upload to.'
   SWIFT_OS_AUTH_URL:
     required: true
-    type: string
+    description: 'OpenStack auth URL for the swift object storage endpoint.'
   SWIFT_OS_USERNAME:
     required: true
-    type: string
+    description: 'OpenStack username used to authenticate with swift.'
   SWIFT_OS_PASSWORD:
     required: true
-    type: string
+    description: 'OpenStack password used to authenticate with swift.'
   SWIFT_OS_PROJECT_NAME:
     required: true
-    type: string
+    description: 'OpenStack project name used to authenticate with swift.'
   SWIFT_OS_REGION_NAME:
     required: true
-    type: string
+    description: 'OpenStack region name used to authenticate with swift.'
   SWIFT_OS_USER_DOMAIN_NAME:
     required: true
-    type: string
+    description: 'OpenStack user domain name used to authenticate with swift.'
   SWIFT_OS_PROJECT_DOMAIN_NAME:
     required: true
-    type: string
+    description: 'OpenStack project domain name used to authenticate with swift.'
   log_retention_seconds:
     required: false
-    type: string
     default: '31536000'
     description: 'Expiration time in seconds from now. Default is 31536000 (1 year).
       Set to empty string to disable expiration.'
