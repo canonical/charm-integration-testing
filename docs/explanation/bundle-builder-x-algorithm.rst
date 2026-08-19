@@ -91,7 +91,7 @@ Candidate expansion is deliberately asymmetric:
 - For a user-requested application, all compatible direct candidates are exposed
   so optimization can compare the immediate alternatives.
 - For a transitive dependency, only the first viable candidate is added. This
-  prevents every common interface from recursively materializing its entire
+  prevents every common interface from recursively adding its entire
   dependency closure.
 
 Candidates are sorted by charm priority and then name. Each new candidate is
