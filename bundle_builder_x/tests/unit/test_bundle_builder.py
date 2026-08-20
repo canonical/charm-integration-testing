@@ -9,7 +9,14 @@ from typing import Iterator
 import pytest
 import z3  # type: ignore[import-untyped]
 
-from bundle_builder_x.assertion_tags import CharmPayload, PeerChannelMismatchTag, SubordinateBaseMismatchTag
+from bundle_builder_x.assertion_tags import (
+    CharmEndpointNonOptionalTag,
+    CharmEndpointPayload,
+    CharmPayload,
+    IntegrationFeatureMismatchTag,
+    PeerChannelMismatchTag,
+    SubordinateBaseMismatchTag,
+)
 from bundle_builder_x.bundle_builder import BundleBuilder, UncompletableBundleError
 from bundle_builder_x.charm import Charm, CharmChannel, CharmEndpoint, EndpointScope, EndpointType
 from bundle_builder_x.charmhub import CharmhubClient
@@ -1104,3 +1111,87 @@ class TestValidatePlatforms:
         with pytest.raises(UncompletableBundleError) as exc_info:
             builder._validate_platforms(spec)
         assert "bad" in str(exc_info.value)
+
+
+class TestUncompletableBundleErrorFeatureMismatches:
+    """UncompletableBundleError.feature_mismatches and the generated failure reason."""
+
+    def test_feature_mismatches_extracted_from_unsat_core(self) -> None:
+        # GIVEN an unsat core containing an integration feature mismatch tag alongside
+        # an unrelated tag kind
+        mismatch = IntegrationFeatureMismatchTag(
+            requires=CharmEndpointPayload(charm_name="katib-controller", charm_id=0, endpoint="k8s-service-info"),
+            provides=CharmEndpointPayload(charm_name="kfp-viz", charm_id=1, endpoint="kfp-viz"),
+            feature="katib-service",
+        )
+        unrelated = SubordinateBaseMismatchTag(
+            subordinate_charm_name="nrpe",
+            subordinate_charm_id=2,
+            subordinate_endpoint="general-info",
+            principal_charm_name="ubuntu",
+            principal_charm_id=3,
+            principal_endpoint="juju-info",
+            subordinate_base="22.04",
+            principal_base="24.04",
+        )
+
+        # WHEN constructing the error from that unsat core
+        error = UncompletableBundleError(unsat_core=[mismatch, unrelated])
+
+        # THEN only the feature mismatch tag is surfaced via feature_mismatches
+        assert error.feature_mismatches == [mismatch]
+
+    def test_reason_describes_feature_mismatch_when_no_unfulfilled_endpoints(self) -> None:
+        # GIVEN an unsat core with only a feature mismatch (no CHARM_ENDPOINT_NON_OPTIONAL tags)
+        mismatch = IntegrationFeatureMismatchTag(
+            requires=CharmEndpointPayload(charm_name="katib-controller", charm_id=0, endpoint="k8s-service-info"),
+            provides=CharmEndpointPayload(charm_name="kfp-viz", charm_id=1, endpoint="kfp-viz"),
+            feature="katib-service",
+        )
+
+        # WHEN constructing the error without an explicit reason
+        error = UncompletableBundleError(unsat_core=[mismatch])
+
+        # THEN the message names both endpoints and the mismatched feature
+        message = str(error)
+        assert "katib-controller:k8s-service-info" in message
+        assert "kfp-viz:kfp-viz" in message
+        assert "katib-service" in message
+
+    def test_unfulfilled_endpoints_take_priority_over_feature_mismatches(self) -> None:
+        # GIVEN an unsat core with both an unfulfilled endpoint and a feature mismatch
+        non_optional = CharmEndpointNonOptionalTag(
+            charm=CharmEndpointPayload(charm_name="postgresql", charm_id=0, endpoint="db"),
+            interface="pgsql",
+        )
+        mismatch = IntegrationFeatureMismatchTag(
+            requires=CharmEndpointPayload(charm_name="katib-controller", charm_id=1, endpoint="k8s-service-info"),
+            provides=CharmEndpointPayload(charm_name="kfp-viz", charm_id=2, endpoint="kfp-viz"),
+            feature="katib-service",
+        )
+
+        # WHEN constructing the error without an explicit reason
+        error = UncompletableBundleError(unsat_core=[non_optional, mismatch])
+
+        # THEN the unfulfilled-endpoint message takes priority (matches existing precedence)
+        message = str(error)
+        assert "postgresql:db" in message
+        assert "katib-service" not in message
+        # but feature_mismatches is still populated for callers that want it directly
+        assert error.feature_mismatches == [mismatch]
+
+    def test_falls_back_to_generic_reason_when_no_recognized_tags(self) -> None:
+        # GIVEN an unsat core with no CHARM_ENDPOINT_NON_OPTIONAL or feature mismatch tags
+        peer_mismatch = PeerChannelMismatchTag(
+            charm=CharmPayload(charm_name="mysql-router", charm_id=0),
+            endpoint="db-router",
+            peer_charm_name="mysql",
+            peer_charm_id=1,
+            required_track="8.0",
+        )
+
+        # WHEN constructing the error without an explicit reason
+        error = UncompletableBundleError(unsat_core=[peer_mismatch])
+
+        # THEN the generic fallback message is used
+        assert "Cannot expand domain to handle failed assertion tags" in str(error)
