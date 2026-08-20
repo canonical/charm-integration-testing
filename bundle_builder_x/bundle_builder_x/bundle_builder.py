@@ -380,7 +380,13 @@ class BundleBuilder:
         elif tag.kind == Assertions.APPLICATION_EXISTS:
             app_exists = cast(ApplicationExistsTag, tag)
             model_ref = app_exists.model
-            charm = self._get_charm_for_application(app_exists.application, domain, model_ref)
+            try:
+                charm = self._get_charm_for_application(app_exists.application, domain, model_ref)
+            except CharmReleaseNotFoundException:
+                # No release satisfies this application's constraints (e.g. an override
+                # sentinel feature the target platform can never provide). Leave the tag
+                # unexpanded; it surfaces via the unsat core as an unresolved application.
+                return False
             return self._add_charm_for_application(charm, app_exists.application, domain, model_ref)
 
         elif tag.kind == Assertions.APPLICATION_INTEGRATION_EXISTS:
@@ -388,7 +394,11 @@ class BundleBuilder:
             results = []
             for endpoint in app_integration_exists.integration:
                 model_ref = endpoint.model if endpoint.model.name is not None else app_integration_exists.model
-                charm = self._get_charm_for_application(endpoint.application, domain, model_ref)
+                try:
+                    charm = self._get_charm_for_application(endpoint.application, domain, model_ref)
+                except CharmReleaseNotFoundException:
+                    # Same rationale as above: report via the unsat core rather than raising here.
+                    return False
                 results.append(self._add_charm_for_application(charm, endpoint.application, domain, model_ref))
             if any(results):
                 return True
