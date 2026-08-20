@@ -232,6 +232,9 @@ class NullJujuBackend(JujuBackend):
     def get_controller_kubeconfig(self, controller: str) -> Path | None:
         raise NotImplementedError
 
+    def get_kubernetes_client_for_controller(self, controller: str) -> KubernetesClient | None:
+        raise NotImplementedError
+
 
 @dataclass
 class JujuStub(NullJujuBackend):
