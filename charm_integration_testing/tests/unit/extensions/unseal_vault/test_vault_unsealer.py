@@ -437,6 +437,29 @@ class TestVaultUnsealer:
         assert ("vault/leader", "authorize-charm", {"secret-id": "secret-id"}) in juju.actions_run
 
     def test_try_init_vault_wont_authorize_charm_if_asked(self) -> None:
+        # A vault that is already initialized and only needs re-unsealing (e.g. after a pod
+        # restart) must not be re-authorized when authorize_charm=False.
+        # GIVEN
+        juju = JujuStub(
+            units={"vault": ["vault/leader"]},
+            secrets={"vault-secret-application-vault-tokens": {"root-token": "abc", "unseal-key": "xyz"}},
+        )
+        vault = VaultStub(initialized_units={"vault/leader": True})
+        logger = LoggerStub()
+        charm = CharmInfo(name="vault")
+
+        # WHEN
+        VaultUnsealer(charm, vault, juju, logger).try_init_vault("test-model", "vault", authorize_charm=False)
+
+        # THEN
+        for target, action, _ in juju.actions_run:
+            assert (target, action) != ("vault/leader", "authorize-charm")
+
+    def test_try_init_vault_authorizes_after_fresh_init_even_if_asked_not_to(self) -> None:
+        # Regression test for issue #854: a k8s vault scaled to 0 and back up comes back
+        # uninitialized. post_scale() calls try_init_vault with authorize_charm=False, but a
+        # freshly initialized vault must still be authorized or it stays blocked on "Please
+        # authorize charm". The skip only applies to already-initialized (resealed) vaults.
         # GIVEN
         juju = JujuStub(units={"vault": ["vault/leader"]})
         vault = VaultStub(initialized_units={"vault/leader": False})
@@ -447,8 +470,8 @@ class TestVaultUnsealer:
         VaultUnsealer(charm, vault, juju, logger).try_init_vault(TEST_MODEL, "vault", authorize_charm=False)
 
         # THEN
-        for target, action, _ in juju.actions_run:
-            assert (target, action) != ("vault/leader", "authorize-charm")
+        assert "vault/leader" in vault.inits
+        assert ("vault/leader", "authorize-charm", {"secret-id": "secret-id"}) in juju.actions_run
 
     def test_authorize_vault_charm_runs_action_and_removes_secret(self) -> None:
         # GIVEN

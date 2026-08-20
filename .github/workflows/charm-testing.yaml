@@ -103,7 +103,7 @@ jobs:
   execute-charm-test:
     name: Execute integration tests against the charms
     # runs-on: ${{ fromJSON(needs.determine-runner.outputs.runner) }}  # see NOTE above
-    runs-on: [self-hosted-linux-amd64-jammy-solqa-ps7]
+    runs-on: [self-hosted-linux-amd64-noble-private-endpoint-small]
     env:
       TEST_OBSERVER_API: ${{ inputs.test_observer_environment == 'production' && vars.PROD_TEST_OBSERVER_API || (inputs.test_observer_environment == 'staging' && vars.STG_TEST_OBSERVER_API || '') }}
       TEST_OBSERVER_TOKEN: ${{ inputs.test_observer_environment == 'production' && secrets.PROD_TEST_OBSERVER_TOKEN || (inputs.test_observer_environment == 'staging' && secrets.STG_TEST_OBSERVER_TOKEN || '') }}
@@ -537,7 +537,7 @@ jobs:
       - name: Post Logs To Swift
         id: post_logs_to_swift
         if: ${{ !cancelled() && inputs.execution_id != '' }}
-        uses: canonical/sqa-cloud-deployment-pipeline/.github/actions/upload-to-swift@173b1936e2c96e317b0f1167509b068b2020e233
+        uses: ./.github/actions/swift/upload
         with:
           job_uuid: ${{ inputs.test_observer_environment }}/${{ inputs.execution_id
             }}

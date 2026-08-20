@@ -2,6 +2,7 @@
 # See LICENSE file for licensing details.
 
 import logging
+from collections.abc import Iterable
 from datetime import timedelta
 from typing import cast
 
@@ -19,7 +20,7 @@ from .assertion_tags import (
     SubordinateBaseMismatchTag,
 )
 from .bundle import Solution
-from .charm import Charm, CharmChannel, EndpointScope, EndpointType
+from .charm import Charm, CharmChannel, CharmEndpoint, EndpointScope, EndpointType
 from .charmhub import CharmhubClient
 from .charmhub_http import CharmReleaseNotFoundException
 from .constraints import add_constraints
@@ -27,6 +28,7 @@ from .domain import (
     Domain,
     ModelRef,
     add_charm_to_domain,
+    pair_charms_in_domain,
 )
 from .domain_builder import DomainBuilder
 from .extract import extract_solution
@@ -35,6 +37,9 @@ from .spec import SpecFile
 from .timing import NullTimeline, Timeline
 
 _DEFAULT_OPTIMIZE_TIMEOUT = timedelta(minutes=1)
+# CEGIS expands obligations from the selected SAT model; this regression-tested seed keeps
+# that choice repeatable across runs.
+_SOLVER_RANDOM_SEED = 6
 
 _COST_SCALE = 1_000_000
 _COST_EPSILON = 1e-6
@@ -147,8 +152,8 @@ class BundleBuilder:
 
     def _solve(self, domain: Domain) -> z3.ModelRef:
         # Iterative CEGIS loop: expand domain until satisfiable.
-        # Termination relies on the per-iteration solver timeout; there is no hard
-        # iteration cap so that arbitrarily complex dependency graphs can converge.
+        # Termination otherwise relies on the per-iteration solver timeout; there is no
+        # hard iteration cap so that arbitrarily complex dependency graphs can converge.
         iteration = 0
         while True:
             iteration += 1
@@ -158,6 +163,7 @@ class BundleBuilder:
             solver = z3.Solver()
             solver.set("unsat_core", True)
             solver.set("timeout", int(self.optimize_timeout.total_seconds() * 1000))
+            solver.set("random_seed", _SOLVER_RANDOM_SEED)
 
             # Add constraints
             t_constraints = self.timeline.on(f"iter{iteration}/add_constraints")
@@ -172,6 +178,7 @@ class BundleBuilder:
             if result == z3.sat:
                 self.logger.info("Problem is satisfiable")
                 model = solver.model()
+                self._prepare_optimization_domain(domain, model)
                 self.logger.info("Re-solving with optimization to minimize applications and integrations")
                 t_opt = self.timeline.on(f"iter{iteration}/optimize")
                 try:
@@ -263,7 +270,11 @@ class BundleBuilder:
                 model_ref = endpoint.model if endpoint.model.name is not None else app_integration_exists.model
                 charm = self._get_charm_for_application(endpoint.application, domain, model_ref)
                 results.append(self._add_charm_for_application(charm, endpoint.application, domain, model_ref))
-            return any(results)
+            if any(results):
+                return True
+            # Both charms already exist but aren't paired (add_charm_to_domain no longer
+            # eagerly pairs); connect them directly.
+            return self._connect_apps_for_integration(app_integration_exists, domain)
 
         elif tag.kind == Assertions.ENDPOINT_COUNT_MATCHES_INTEGRATIONS:
             count_tag = cast(EndpointCountMatchesIntegrationsTag, tag)
@@ -287,33 +298,308 @@ class BundleBuilder:
     ) -> bool:
         """Expand the domain to satisfy an unfulfilled endpoint.
 
-        Tries the owning model first. If no same-platform charm can satisfy the
-        endpoint (e.g. a kubernetes charm requiring an interface that only a
-        machine charm provides), tries other models. Adding a provider to
-        another model creates a cross-model DomainCharmIntegration that the solver can activate on
-        the next iteration.
+        The owning model is tried before other models (which are skipped entirely for
+        container-scoped endpoints). Existing compatible charms are reused first.
+        Application charms expose every direct alternative; transitive dependencies add
+        only the first viable candidate to keep the CEGIS domain small.
         """
         owning_model = domain.charms[charm_id].model
+        endpoint = domain.charms[charm_id].spec.endpoints[endpoint_name]
+        is_container_scoped = endpoint.scope == EndpointScope.CONTAINER
+        models = (
+            [owning_model] if is_container_scoped else [owning_model, *(m for m in domain.models if m != owning_model)]
+        )
 
-        charms = self._get_charms_for_endpoint(charm_id, endpoint_name, domain, owning_model)
-        if not charms:
-            self.logger.debug(
-                f"No charms found for endpoint {domain.charms[charm_id].spec.name}:{endpoint_name} "
-                f"in model '{owning_model.key}'"
-            )
-        results = [self._add_charm_for_charm_id(charm, charm_id, domain, owning_model) for charm in charms]
+        # Exhaust the owning model before considering any other model, so a cheap local
+        # integration is always preferred over a cross-model one.
+        for model_ref in models:
+            if self._connect_existing_for_endpoint(charm_id, endpoint_name, domain, model_ref):
+                return True
+            names = self._get_charms_for_endpoint(charm_id, endpoint_name, domain, model_ref)
+            if not names:
+                self.logger.debug(
+                    f"No charms found for endpoint {domain.charms[charm_id].spec.name}:{endpoint_name} "
+                    f"in model '{model_ref.key}'"
+                )
+            if self._add_available_charms(
+                names,
+                charm_id,
+                endpoint_name,
+                domain,
+                model_ref,
+                stop_after_first=not self._is_application_charm(charm_id, domain),
+            ):
+                return True
 
-        if not any(results):
-            for other_model_ref in domain.models:
-                if other_model_ref == owning_model:
-                    continue
-                other_charms = self._get_charms_for_endpoint(charm_id, endpoint_name, domain, other_model_ref)
-                other_results = [
-                    self._add_charm_for_charm_id(charm, charm_id, domain, other_model_ref) for charm in other_charms
-                ]
-                if any(other_results):
+        return False
+
+    def _add_available_charms(
+        self,
+        candidate_names: list[str],
+        charm_id: int,
+        endpoint_name: str,
+        domain: Domain,
+        model_ref: ModelRef,
+        *,
+        stop_after_first: bool = False,
+    ) -> bool:
+        """Fetch and add every compatible candidate for one failed endpoint.
+
+        Each candidate is paired only with the parent charm. This gives the optimizer
+        the same direct alternatives as eager expansion without pairing each new charm
+        against the entire domain. Transitive dependency expansion sets
+        ``stop_after_first`` to keep the CEGIS domain small.
+        """
+        model = domain.models[model_ref]
+        endpoint = domain.charms[charm_id].spec.endpoints[endpoint_name]
+        ubuntu_version: str | None = (
+            domain.charms[charm_id].spec.ubuntu_version if endpoint.scope == EndpointScope.CONTAINER else None
+        )
+        added = False
+
+        for charm_name in candidate_names:
+            try:
+                charm = self.charmhub_client.charm_from_store(
+                    charm_name=charm_name,
+                    ubuntu_arch=model.arch,
+                    juju_version=model.juju_version,
+                    platform=model.platform,
+                    ubuntu_version=ubuntu_version,
+                )
+            except CharmReleaseNotFoundException:
+                self.logger.debug(f"Skipping {charm_name}: no compatible release for {model.platform}/{model.arch}")
+                continue
+            if not self._has_compatible_endpoint(endpoint, charm.endpoints.values()):
+                self.logger.debug(f"Skipping {charm_name}: no endpoint compatible with {endpoint_name}")
+                continue
+            if self._add_charm_for_charm_id(charm, charm_id, domain, model_ref):
+                added = True
+                if stop_after_first:
                     return True
-        return any(results)
+        return added
+
+    def _connect_existing_for_endpoint(
+        self,
+        charm_id: int,
+        endpoint_name: str,
+        domain: Domain,
+        target_model: ModelRef,
+    ) -> bool:
+        """Pair charm_id with any existing domain charm that can satisfy endpoint_name.
+
+        Only creates integration variables — never adds new charms. Only report success
+        once the integration variable for this specific endpoint actually exists.
+        """
+        endpoint = domain.charms[charm_id].spec.endpoints[endpoint_name]
+        for other_id, other_charm in enumerate(domain.charms):
+            if other_id == charm_id:
+                continue
+            if other_charm.model != target_model:
+                continue
+            # Check this other charm has a compatible endpoint.
+            if not self._has_compatible_endpoint(endpoint, other_charm.spec.endpoints.values()):
+                continue
+            if self._is_endpoint_connected_to(charm_id, endpoint_name, other_id, domain):
+                continue
+
+            pair_charms_in_domain(domain, charm_id, other_id)
+            if self._is_endpoint_connected_to(charm_id, endpoint_name, other_id, domain):
+                self.logger.debug(
+                    f"Connected existing charm {other_charm.spec.name}:{other_id} "
+                    f"to {domain.charms[charm_id].spec.name}:{charm_id} via {endpoint_name}"
+                )
+                return True
+        return False
+
+    def _prepare_optimization_domain(self, domain: Domain, model: z3.ModelRef) -> None:
+        """Expose bounded alternatives that can improve the satisfiable graph."""
+        active_charm_ids = [
+            charm_id
+            for charm_id, charm in enumerate(domain.charms)
+            if z3.is_true(model.eval(charm.exists, model_completion=True))
+        ]
+
+        # CEGIS creates only the integrations needed for feasibility. Pairing the
+        # already-small active graph lets optimization share an active provider across
+        # multiple consumers without expanding any dependency frontier.
+        for index, charm_id in enumerate(active_charm_ids):
+            for other_id in active_charm_ids[index + 1 :]:
+                pair_charms_in_domain(domain, charm_id, other_id)
+
+        # Base/channel mismatch handlers may have discovered an inactive replacement
+        # for an active charm. Connect only those same-charm variants to the active graph
+        # so optimization can replace the whole charm, not just the mismatched endpoint.
+        for charm_id in active_charm_ids:
+            charm = domain.charms[charm_id]
+            replacement_ids = [
+                added_id
+                for added_id in charm.charms_added
+                if domain.charms[added_id].model == charm.model and domain.charms[added_id].spec.name == charm.spec.name
+            ]
+            for replacement_id in replacement_ids:
+                for other_id in active_charm_ids:
+                    if other_id != charm_id:
+                        pair_charms_in_domain(domain, replacement_id, other_id)
+
+        self._add_optimization_duplicates(domain, model)
+
+    @staticmethod
+    def _add_optimization_duplicates(domain: Domain, model: z3.ModelRef) -> None:
+        """Expose cheaper duplicate-charm solutions before optimizing.
+
+        Lazy expansion stops once the domain is satisfiable, but a smaller solution may
+        require a second instance of an active charm to break a bidirectional-interface
+        cycle or satisfy multiple required endpoints on one counterpart. Add one such
+        candidate and pair it only with the active domain, avoiding the eager all-candidate
+        pairing that caused the original timeout.
+        """
+        active_charm_ids = [
+            charm_id
+            for charm_id, charm in enumerate(domain.charms)
+            if z3.is_true(model.eval(charm.exists, model_completion=True))
+        ]
+        active_interfaces: dict[int, set[str]] = {charm_id: set() for charm_id in active_charm_ids}
+        for integration in domain.charm_integrations:
+            if not z3.is_true(model.eval(integration.exists, model_completion=True)):
+                continue
+            interface = domain.integration_interface(integration)
+            active_interfaces.get(integration.requires_charm_id, set()).add(interface)
+            active_interfaces.get(integration.provides_charm_id, set()).add(interface)
+
+        duplicate_ids: list[int] = []
+        processed: list[int] = []
+        for charm_id in active_charm_ids:
+            charm = domain.charms[charm_id]
+            if any(
+                domain.charms[other_id].model == charm.model and domain.charms[other_id].spec == charm.spec
+                for other_id in processed
+            ):
+                continue
+            processed.append(charm_id)
+
+            requires = {
+                endpoint.interface
+                for endpoint in charm.spec.endpoints.values()
+                if endpoint.type == EndpointType.REQUIRES
+            }
+            provides = {
+                endpoint.interface
+                for endpoint in charm.spec.endpoints.values()
+                if endpoint.type == EndpointType.PROVIDES
+            }
+            breaks_cycle = bool(active_interfaces[charm_id].intersection(requires, provides))
+            serves_parallel_endpoints = any(
+                BundleBuilder._can_serve_multiple_required_endpoints(charm.spec, other.spec)
+                for other_id, other in enumerate(domain.charms)
+                if other_id in active_charm_ids and other_id != charm_id and other.model == charm.model
+            )
+            if not breaks_cycle and not serves_parallel_endpoints:
+                continue
+
+            equivalent_ids = [
+                other_id
+                for other_id, other in enumerate(domain.charms)
+                if other.model == charm.model and other.spec == charm.spec
+            ]
+            active_equivalent_ids = [
+                equivalent_id for equivalent_id in equivalent_ids if equivalent_id in active_charm_ids
+            ]
+            for equivalent_id in active_equivalent_ids:
+                for other_id in active_charm_ids:
+                    if other_id != equivalent_id:
+                        pair_charms_in_domain(domain, equivalent_id, other_id)
+
+            if len(active_equivalent_ids) > 1:
+                continue
+
+            duplicate_id = next(
+                (other_id for other_id in equivalent_ids if other_id not in active_charm_ids),
+                None,
+            )
+            if duplicate_id is None:
+                duplicate_id = add_charm_to_domain(charm.spec, domain, charm.model)
+
+            for other_id in [*active_charm_ids, *duplicate_ids]:
+                if other_id != duplicate_id:
+                    pair_charms_in_domain(domain, duplicate_id, other_id)
+            duplicate_ids.append(duplicate_id)
+
+    @staticmethod
+    def _connect_apps_for_integration(
+        app_integration_exists: ApplicationIntegrationExistsTag,
+        domain: Domain,
+    ) -> bool:
+        """Pair the charms currently mapped to each side of a user-specified app integration.
+
+        add_charm_to_domain doesn't eagerly pair a new charm against the rest of the domain, so
+        two applications can each have their charm added (via _add_charm_for_application, one
+        no-op call per side) without ever being connected to each other. This handles that case
+        directly: for every candidate charm currently mapped to each application (usually one
+        each, but can be more if channel-mismatch resolution added variants), try pairing them.
+        """
+        endpoints = app_integration_exists.integration
+        if len(endpoints) != 2:
+            return False
+        ep_a, ep_b = endpoints
+        model_a = ep_a.model if ep_a.model.name is not None else app_integration_exists.model
+        model_b = ep_b.model if ep_b.model.name is not None else app_integration_exists.model
+        if model_a not in domain.models or model_b not in domain.models:
+            return False  # external CMR endpoint - nothing in-domain to pair
+
+        charm_ids_a = domain.models[model_a].applications[ep_a.application].charm_ids
+        charm_ids_b = domain.models[model_b].applications[ep_b.application].charm_ids
+        connected = False
+        for charm_id_a in charm_ids_a:
+            for charm_id_b in charm_ids_b:
+                if charm_id_a == charm_id_b:
+                    continue
+                if pair_charms_in_domain(domain, charm_id_a, charm_id_b):
+                    connected = True
+        return connected
+
+    @staticmethod
+    def _has_compatible_endpoint(endpoint: CharmEndpoint, other_endpoints: Iterable[CharmEndpoint]) -> bool:
+        """Check whether any of other_endpoints can semantically connect to endpoint.
+
+        Two endpoints are compatible when they share the same interface and have opposite
+        REQUIRES/PROVIDES directions.
+        """
+        return any(
+            other_ep.interface == endpoint.interface
+            and (
+                (endpoint.type == EndpointType.REQUIRES and other_ep.type == EndpointType.PROVIDES)
+                or (endpoint.type == EndpointType.PROVIDES and other_ep.type == EndpointType.REQUIRES)
+            )
+            for other_ep in other_endpoints
+        )
+
+    @staticmethod
+    def _can_serve_multiple_required_endpoints(charm: Charm, counterpart: Charm) -> bool:
+        """Return whether charm can satisfy more than one required endpoint on counterpart."""
+        matching_required = sum(
+            1
+            for endpoint in counterpart.endpoints.values()
+            if not endpoint.optional and BundleBuilder._has_compatible_endpoint(endpoint, charm.endpoints.values())
+        )
+        return matching_required > 1
+
+    @staticmethod
+    def _is_application_charm(charm_id: int, domain: Domain) -> bool:
+        """Return whether charm_id is a candidate for a user-specified application."""
+        return any(
+            charm_id in application.charm_ids
+            for domain_model in domain.models.values()
+            for application in domain_model.applications.values()
+        )
+
+    @staticmethod
+    def _is_endpoint_connected_to(charm_id: int, endpoint_name: str, other_id: int, domain: Domain) -> bool:
+        """Check whether charm_id:endpoint_name already has an integration variable to other_id."""
+        return any(
+            (i.requires_charm_id, i.requires_endpoint, i.provides_charm_id) == (charm_id, endpoint_name, other_id)
+            or (i.provides_charm_id, i.provides_endpoint, i.requires_charm_id) == (charm_id, endpoint_name, other_id)
+            for i in domain.charm_integrations
+        )
 
     def _handle_peer_channel_mismatch(
         self,
@@ -344,7 +630,14 @@ class BundleBuilder:
                 charm_risk=risk,
                 charm_revision=tag.required_revision,
             )
-            expanded |= self._add_charm_for_charm_id(peer_charm, tag.peer_charm_id, domain, owning_model)
+            expanded |= self._add_charm_for_charm_id(
+                peer_charm,
+                tag.peer_charm_id,
+                domain,
+                owning_model,
+                connect_to_id=tag.charm.charm_id,
+                connect_to_neighbors=True,
+            )
         except CharmReleaseNotFoundException:
             self.logger.debug(f"No release found for {tag.peer_charm_name} on {track}/{risk or '*'}")
 
@@ -359,7 +652,14 @@ class BundleBuilder:
                 charm_track=peer_channel.track,
                 charm_risk=peer_channel.risk,
             )
-            expanded |= self._add_charm_for_charm_id(owning_charm, tag.charm.charm_id, domain, owning_model)
+            expanded |= self._add_charm_for_charm_id(
+                owning_charm,
+                tag.charm.charm_id,
+                domain,
+                owning_model,
+                connect_to_id=tag.peer_charm_id,
+                connect_to_neighbors=True,
+            )
         except CharmReleaseNotFoundException:
             self.logger.debug(
                 f"No release found for {tag.charm.charm_name} on {peer_channel.track}/{peer_channel.risk or '*'}"
@@ -384,6 +684,7 @@ class BundleBuilder:
         sub_charm_spec = domain.charms[tag.subordinate_charm_id].spec
         principal_base = tag.principal_base
         expanded = False
+        interface = sub_charm_spec.endpoints[tag.subordinate_endpoint].interface
 
         # Try fetching the subordinate charm at the principal's base.
         try:
@@ -396,7 +697,15 @@ class BundleBuilder:
                 charm_risk=sub_charm_spec.channel.risk or None,
                 ubuntu_version=principal_base,
             )
-            expanded |= self._add_charm_for_charm_id(sub_charm, tag.subordinate_charm_id, domain, model_ref)
+            expanded |= self._add_charm_for_charm_id(
+                sub_charm,
+                tag.subordinate_charm_id,
+                domain,
+                model_ref,
+                connect_to_id=tag.principal_charm_id,
+                connect_to_neighbors=True,
+                connect_to_interface=interface,
+            )
         except CharmReleaseNotFoundException:
             self.logger.debug(
                 f"No release found for subordinate {tag.subordinate_charm_name} " f"on base {principal_base}"
@@ -415,7 +724,15 @@ class BundleBuilder:
                 charm_risk=principal_spec.channel.risk or None,
                 ubuntu_version=tag.subordinate_base,
             )
-            expanded |= self._add_charm_for_charm_id(principal_charm, tag.principal_charm_id, domain, model_ref)
+            expanded |= self._add_charm_for_charm_id(
+                principal_charm,
+                tag.principal_charm_id,
+                domain,
+                model_ref,
+                connect_to_id=tag.subordinate_charm_id,
+                connect_to_neighbors=True,
+                connect_to_interface=interface,
+            )
         except CharmReleaseNotFoundException:
             self.logger.debug(
                 f"No release found for principal {tag.principal_charm_name} " f"on base {tag.subordinate_base}"
@@ -444,8 +761,12 @@ class BundleBuilder:
         endpoint_name: str,
         domain: Domain,
         target_model: ModelRef,
-    ) -> list[Charm]:
-        """Find charms that can fulfill an endpoint, compatible with target_model's platform/arch."""
+    ) -> list[str]:
+        """Find candidate charm names that can fulfill an endpoint, sorted by priority.
+
+        Returns names only (no network fetches beyond find_charms). Callers fetch either
+        the first viable candidate for feasibility or every candidate for optimization.
+        """
         model = domain.models[target_model]
         endpoint = domain.charms[charm_id].spec.endpoints[endpoint_name]
 
@@ -460,26 +781,12 @@ class BundleBuilder:
         elif endpoint.type == EndpointType.PROVIDES:
             fulfilling_charms = self.charmhub_client.find_charms(requires=endpoint.interface, platform=model.platform)
 
-        # For container-scoped endpoints the other charm must share the same base
-        ubuntu_version: str | None = None
-        if endpoint.scope == EndpointScope.CONTAINER:
-            ubuntu_version = domain.charms[charm_id].spec.ubuntu_version
-
-        results: list[Charm] = []
-        for charm_name in fulfilling_charms:
-            try:
-                results.append(
-                    self.charmhub_client.charm_from_store(
-                        charm_name=charm_name,
-                        ubuntu_arch=model.arch,
-                        juju_version=model.juju_version,
-                        platform=model.platform,
-                        ubuntu_version=ubuntu_version,
-                    )
-                )
-            except CharmReleaseNotFoundException:
-                self.logger.debug(f"Skipping {charm_name}: no compatible release for {model.platform}/{model.arch}")
-        return results
+        # Sort by priority, then name — `fulfilling_charms` is a set with per-process
+        # randomized order, so a deterministic tiebreak is needed for repeatable builds.
+        return sorted(
+            fulfilling_charms,
+            key=lambda name: (-self.charmhub_client.overrides_client.get_charm_priority(name), name),
+        )
 
     def _add_charm_for_application(
         self,
@@ -509,12 +816,17 @@ class BundleBuilder:
         charm_id: int,
         domain: Domain,
         model_ref: ModelRef,
+        *,
+        connect_to_id: int | None = None,
+        connect_to_neighbors: bool = False,
+        connect_to_interface: str | None = None,
     ) -> bool:
-        # Check if this exact charm was already added for this charm_id
         parent_charm = domain.charms[charm_id]
-        for added_charm_id in parent_charm.charms_added:
-            if domain.charms[added_charm_id].spec == charm:
-                return False
+
+        # Dedup per parent charm_id: one candidate instance is enough during expansion.
+        # Additional instances needed only for optimization are added after satisfiability.
+        if any(domain.charms[added_id].spec == charm for added_id in parent_charm.charms_added):
+            return False
 
         # Traverse the dependency chain to detect cycles
         # Walk backwards from charm_id through parents to see if the charm we're trying to add
@@ -543,6 +855,24 @@ class BundleBuilder:
             f"for charm {domain.charms[charm_id].spec.name}:{charm_id}"
         )
         new_charm_id = add_charm_to_domain(charm, domain, model_ref)
+
+        # Pair direct dependencies with their parent. Replacement variants inherit
+        # same-interface neighbors because one replacement may satisfy several counterparts.
+        if connect_to_neighbors:
+            counterpart_ids = {
+                integration.provides_charm_id
+                if integration.requires_charm_id == charm_id
+                else integration.requires_charm_id
+                for integration in domain.charm_integrations
+                if charm_id in (integration.requires_charm_id, integration.provides_charm_id)
+                and (connect_to_interface is None or domain.integration_interface(integration) == connect_to_interface)
+            }
+            if connect_to_id is not None:
+                counterpart_ids.add(connect_to_id)
+            for other_id in counterpart_ids:
+                pair_charms_in_domain(domain, other_id, new_charm_id)
+        else:
+            pair_charms_in_domain(domain, connect_to_id if connect_to_id is not None else charm_id, new_charm_id)
 
         # Record that this charm was added for this charm_id
         parent_charm.charms_added.append(new_charm_id)
@@ -661,6 +991,7 @@ class BundleBuilder:
         # Build the solver once; push/pop bound constraints on top each step.
         solver = z3.Solver()
         solver.set("timeout", step_ms)
+        solver.set("random_seed", _SOLVER_RANDOM_SEED)
         add_constraints(solver, domain)
         for c in extra_constraints or []:
             solver.add(c)
