@@ -1,9 +1,22 @@
 ---
+# The "kfp-api" feature tag on the requires side already restricts this endpoint
+# to charms that self-tag their k8s-service provider as "kfp-api" (currently only
+# the kfp-api charm itself, per kfp-api.yaml). No other charm in the override set
+# declares that feature, so pairing kfp-persistence with an unrelated k8s-service
+# provider (e.g. katib-db-manager, tagged "katib-service") is already rejected by
+# feature coherence with a clear IntegrationFeatureMismatch diagnostic.
+#
+# An extra `tracks({self}) == tracks(charms(endpoint[kfp-api]))` / `risks({self}) ==
+# risks(...)` pair used to be asserted here as well. It was redundant (feature
+# coherence alone already enforces the intended pairing) and inconsistent with the
+# rest of the KFP charm suite (e.g. kfp-ui.yaml's identical "kfp-api" requirement
+# has no track/risk pinning). Worse, it caused the solver to expand on a
+# PEER_CHANNEL_MISMATCH tag it could never resolve for non-KFP peers, masking the
+# correct feature-mismatch diagnostic behind a generic "Cannot expand domain to
+# handle failed assertion tags" error (see #600).
 overrides:
   - requires:
       kfp-api:
         features: [kfp-api]
     constraints:
       - '"kfp-api" in features(endpoint[kfp-api])'
-      - 'tracks({self}) == tracks(charms(endpoint[kfp-api]))'
-      - 'risks({self}) == risks(charms(endpoint[kfp-api]))'
