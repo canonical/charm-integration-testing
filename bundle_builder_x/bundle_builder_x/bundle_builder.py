@@ -87,7 +87,7 @@ class UnresolvedIntegrationInfo(BaseModel):
 def _sorted_endpoints(
     endpoints: list[UnresolvedIntegrationEndpointInfo],
 ) -> list[UnresolvedIntegrationEndpointInfo]:
-    return sorted(endpoints, key=lambda ep: (ep.charm_name, ep.endpoint))
+    return sorted(endpoints, key=lambda ep: (ep.charm_name, ep.endpoint, ep.application))
 
 
 class UncompletableBundleError(ValueError):
@@ -110,9 +110,9 @@ class UncompletableBundleError(ValueError):
         unresolved_applications: list[UnresolvedApplicationInfo] | None = None,
         unresolved_integrations: list[UnresolvedIntegrationInfo] | None = None,
     ):
-        self.unsat_core = unsat_core or []
-        self.unresolved_applications = unresolved_applications or []
-        self.unresolved_integrations = unresolved_integrations or []
+        self.unsat_core = list(unsat_core) if unsat_core is not None else []
+        self.unresolved_applications = list(unresolved_applications) if unresolved_applications is not None else []
+        self.unresolved_integrations = list(unresolved_integrations) if unresolved_integrations is not None else []
         if reason is None:
             if self.unresolved_applications:
                 reason = "Cannot resolve application(s) to a charm: " + ", ".join(

@@ -188,7 +188,7 @@ Failure Information
      - Yes
      - ``Unexpected exception during validation``
    * - ``failure:build_bundle:unresolved_application``
-     - An application whose declared charm could not be resolved to exactly one charm during bundle building. Collected when ``UncompletableBundleError`` is raised. Value is the charm name (not the generic application name from the spec).
+     - An application whose declared charm could not be resolved to exactly one charm during bundle building. Collected when ``UncompletableBundleError`` is raised. Value is the charm name (not the generic application name from the spec). Multiple values may be recorded.
      - No
      - ``kafka``
    * - ``failure:build_bundle:unresolved_integration``
