@@ -31,6 +31,7 @@ class Assertions(str, Enum):
     CHARM_CONFIG_VALUE_MATCHES_INDEX = "charm_config_value_matches_index"
     CHARM_RANK_BOUNDED = "charm_rank_bounded"
     SUBORDINATE_BASE_MISMATCH = "subordinate_base_mismatch"
+    INTEGRATION_FEATURE_MISMATCH = "integration_feature_mismatch"
 
 
 class AssertionTag(BaseModel):
@@ -201,6 +202,15 @@ class SubordinateBaseMismatchTag(AssertionTag):
     principal_base: str
 
 
+class IntegrationFeatureMismatchTag(AssertionTag):
+    """A relation whose two endpoints declared mutually-incompatible feature tags."""
+
+    kind: Assertions = Assertions.INTEGRATION_FEATURE_MISMATCH
+    requires: CharmEndpointPayload
+    provides: CharmEndpointPayload
+    feature: str
+
+
 _ASSERTION_TYPE_REGISTRY: dict[Assertions, type[AssertionTag]] = {
     Assertions.APPLICATION_EXISTS: ApplicationExistsTag,
     Assertions.APPLICATION_INTEGRATION_EXISTS: ApplicationIntegrationExistsTag,
@@ -221,4 +231,5 @@ _ASSERTION_TYPE_REGISTRY: dict[Assertions, type[AssertionTag]] = {
     Assertions.CHARM_CONFIG_VALUE_MATCHES_INDEX: CharmConfigValueMatchesIndexTag,
     Assertions.CHARM_RANK_BOUNDED: CharmRankBoundedTag,
     Assertions.SUBORDINATE_BASE_MISMATCH: SubordinateBaseMismatchTag,
+    Assertions.INTEGRATION_FEATURE_MISMATCH: IntegrationFeatureMismatchTag,
 }

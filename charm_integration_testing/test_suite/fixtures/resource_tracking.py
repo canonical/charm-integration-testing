@@ -21,7 +21,6 @@ from typing import Iterator
 import pytest
 from juju import JujuClient
 from juju.resource_registry import JujuModelHandle
-from kubernetes_client import KubernetesClient
 from resource_registry import ResourceRegistry
 from resource_tracking import (
     DEFAULT_KUBERNETES_SOURCES,
@@ -119,7 +118,7 @@ def resource_tracking_skips_by_application(
 @pytest.fixture(autouse=True)
 def track_state_resources(
     request: pytest.FixtureRequest,
-    kubernetes_client: KubernetesClient | None,
+    juju_client: JujuClient,
     session_resource_registry: ResourceRegistry,
     state_resource_tracker: StateResourceTracker,
     resource_tracking_skips_by_application: dict[str, frozenset[str]],
@@ -145,19 +144,15 @@ def track_state_resources(
     if marker is None:
         return
 
-    # Build a collector per available substrate.  Only Kubernetes is supported
-    # today, but adding an lxd/openstack collector here keeps the tracker itself
-    # substrate-agnostic.
-    collectors: list[ResourceCollector] = []
-    if kubernetes_client is not None:
-        collectors.append(
-            KubernetesResourceCollector(
-                kubernetes_client,
-                session_resource_registry,
-                sources=DEFAULT_KUBERNETES_SOURCES,
-            )
+    # Build a collector per supported substrate. Only Kubernetes is supported today; the collector will
+    # skip models whose controllers are not Kubernetes-based.
+    # Adding an lxd/openstack collector here keeps the tracker itself substrate-agnostic.
+    collectors: list[ResourceCollector] = [
+        KubernetesResourceCollector(
+            juju_client.backend,
+            session_resource_registry,
+            sources=DEFAULT_KUBERNETES_SOURCES,
         )
-    if not collectors:
-        return
+    ]
 
     state_resource_tracker.collect(marker.provides, collectors, logger)

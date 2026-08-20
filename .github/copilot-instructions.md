@@ -101,3 +101,22 @@ After findings, include:
 
 - Do not block PRs solely for subjective style preferences when code matches local conventions.
 - Do not recommend broad refactors outside the PR scope unless risk is high.
+
+## Known Pitfalls to Flag
+
+- **Avoid pre-computed/cached fixtures for state that can change during a test run.** A
+  session- or fixture-scoped cache (e.g. a `dict` built once from "every controller/cluster
+  registered so far") can silently go stale if new resources (e.g. Kubernetes clusters,
+  controllers, models) are introduced mid-run - especially in CMR-style tests where the
+  topology is discovered dynamically rather than fixed at session start.
+  - Prefer resolving such values on demand from the authoritative source (e.g.
+    `JujuBackend`/`juju_client.backend`) at the point of use, rather than precomputing a
+    mapping in a fixture and passing the mapping around.
+  - If resolution is expensive enough to need caching, scope the cache to a single
+    operation (e.g. one `collect()` call) instead of the whole test session, and cache by
+    controller/identity rather than derived values like filesystem paths (which can differ
+    for equivalent inputs, e.g. relative vs. absolute vs. `~`-expanded paths).
+  - Example precedent: `KubernetesResourceCollector` resolves Kubernetes clients per
+    controller via `JujuBackend.get_kubernetes_client_for_controller()` inside `collect()`,
+    instead of a `kubernetes_clients_by_controller` fixture that pre-builds and caches
+    clients for the session.
