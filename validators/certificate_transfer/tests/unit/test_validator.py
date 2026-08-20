@@ -51,6 +51,10 @@ EXPIRED_CERT_PEM = _make_certificate_pem(
     not_valid_before=datetime.now(timezone.utc) - timedelta(days=2),
     not_valid_after=datetime.now(timezone.utc) - timedelta(days=1),
 )
+NOT_YET_VALID_CERT_PEM = _make_certificate_pem(
+    not_valid_before=datetime.now(timezone.utc) + timedelta(days=1),
+    not_valid_after=datetime.now(timezone.utc) + timedelta(days=365),
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -236,9 +240,34 @@ class TestCertificateTransferValidatorSimple:
         assert not schema_check.passed
         assert "Invalid JSON" in schema_check.message
 
+    def test_fails_schema_check_when_certificates_field_is_not_a_list_of_strings(self) -> None:
+        # GIVEN a 'certificates' field that decodes to valid JSON but not a list of strings
+        validator = _make_validator({"certificates": json.dumps({"not": "a list"}), "version": "1"})
+
+        # WHEN
+        result = validator.validate(level="simple")
+
+        # THEN
+        assert result.status == "FAIL"
+        schema_check = next(c for c in result.checks if c.name == "schema")
+        assert not schema_check.passed
+        assert "list of strings" in schema_check.message
+
     def test_fails_validity_period_check_on_expired_certificate(self) -> None:
         # GIVEN a databag with an expired certificate
         validator = _make_validator(_v1_databag(EXPIRED_CERT_PEM))
+
+        # WHEN
+        result = validator.validate(level="simple")
+
+        # THEN
+        assert result.status == "FAIL"
+        validity_check = next(c for c in result.checks if c.name == "validity_period")
+        assert not validity_check.passed
+
+    def test_fails_validity_period_check_on_not_yet_valid_certificate(self) -> None:
+        # GIVEN a databag with a certificate whose validity period starts in the future
+        validator = _make_validator(_v1_databag(NOT_YET_VALID_CERT_PEM))
 
         # WHEN
         result = validator.validate(level="simple")

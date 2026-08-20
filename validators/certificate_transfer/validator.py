@@ -75,11 +75,7 @@ class CertificateTransferValidator(BaseValidator):
     def _check_relation_exists(self, level: ValidationLevel) -> ValidationResult | None:
         """Return an ERROR result if the remote app is absent, else None."""
         if not self.relation_exists():
-            return self._make_result(
-                status="ERROR",
-                level=level,
-                error=f"No remote application on relation '{self.endpoint}'.",
-            )
+            return self._error_result(level, f"No remote application on relation '{self.endpoint}'.")
         return None
 
     def _collect_certificates(self) -> tuple[list[str], ValidationCheck]:
@@ -94,26 +90,25 @@ class CertificateTransferValidator(BaseValidator):
 
         raw_certificates = self.databag.get("certificates")
         if raw_certificates:
-            try:
-                certificates.extend(json.loads(raw_certificates))
-            except json.JSONDecodeError as exc:
-                decode_errors.append(f"Invalid JSON in 'certificates' field: {exc}")
+            certs, error = self._decode_string_list(raw_certificates, field="certificates")
+            if error:
+                decode_errors.append(error)
+            else:
+                certificates.extend(certs)
 
         for unit in self.relation.units:
             unit_data = dict(self.relation.data[unit])
             for field in ("certificate", "ca"):
                 raw_value = unit_data.get(field)
                 if raw_value:
-                    # Per the upstream certificate_transfer_interface v0 library, these
-                    # fields are plain PEM strings, not JSON-encoded; fall back to the
-                    # raw value when it isn't valid JSON instead of treating it as an error.
                     certificates.append(self._decode_v0_field(raw_value))
             raw_chain = unit_data.get("chain")
             if raw_chain:
-                try:
-                    certificates.extend(json.loads(raw_chain))
-                except json.JSONDecodeError as exc:
-                    decode_errors.append(f"Invalid JSON in unit 'chain' field: {exc}")
+                chain, error = self._decode_string_list(raw_chain, field="chain")
+                if error:
+                    decode_errors.append(error)
+                else:
+                    certificates.extend(chain)
 
         deduped = list(dict.fromkeys(certificates))
 
@@ -131,11 +126,27 @@ class CertificateTransferValidator(BaseValidator):
         return deduped, ValidationCheck(name="schema", passed=True, message=f"Found {len(deduped)} certificate(s).")
 
     @staticmethod
-    def _decode_v0_field(raw_value: str) -> str:
-        """Decode a v0 unit databag field, tolerating plain (non-JSON) PEM strings.
+    def _decode_string_list(raw_value: str, *, field: str) -> tuple[list[str], str | None]:
+        """Decode a JSON field expected to hold a list of strings.
 
-        Matches the upstream certificate_transfer_interface v0 library, which
-        JSON-decodes each field and falls back to the raw string on failure.
+        Returns the decoded list and no error on success, or an empty list and a
+        descriptive schema error if the value isn't valid JSON or isn't a list of
+        strings.
+        """
+        try:
+            decoded = json.loads(raw_value)
+        except json.JSONDecodeError as exc:
+            return [], f"Invalid JSON in '{field}' field: {exc}"
+        if not isinstance(decoded, list) or not all(isinstance(item, str) for item in decoded):
+            return [], f"Expected '{field}' field to decode to a list of strings, got: {decoded!r}"
+        return decoded, None
+
+    @staticmethod
+    def _decode_v0_field(raw_value: str) -> str:
+        """Decode a unit databag field, tolerating plain (non-JSON) PEM strings.
+
+        Falls back to the raw string when the value isn't valid JSON or doesn't
+        decode to a string.
         """
         try:
             decoded = json.loads(raw_value)
@@ -167,14 +178,16 @@ class CertificateTransferValidator(BaseValidator):
         )
 
     def _check_not_expired(self, certificates: list[x509.Certificate]) -> ValidationCheck:
-        """Verify none of the transferred certificates are past their validity period."""
+        """Verify all transferred certificates are currently within their validity period."""
         now = datetime.now(timezone.utc)
-        expired = [cert for cert in certificates if cert.not_valid_after_utc < now]
-        if expired:
+        out_of_range = [
+            cert for cert in certificates if cert.not_valid_after_utc < now or cert.not_valid_before_utc > now
+        ]
+        if out_of_range:
             return ValidationCheck(
                 name="validity_period",
                 passed=False,
-                message=f"{len(expired)}/{len(certificates)} certificate(s) are expired.",
+                message=f"{len(out_of_range)}/{len(certificates)} certificate(s) are expired or not yet valid.",
             )
         return ValidationCheck(
             name="validity_period",
