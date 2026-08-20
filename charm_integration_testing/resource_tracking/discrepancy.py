@@ -203,36 +203,46 @@ def diff_snapshots(
 
 def _without_skipped(
     snapshots: frozenset[ResourceSnapshot],
-    skips: Mapping[str, frozenset[str]],
+    model: str,
+    skips: Mapping[tuple[str, str], frozenset[str]],
 ) -> frozenset[ResourceSnapshot]:
     """Drop snapshots whose owning application opts out of their resource type.
 
-    ``skips`` maps application name to the resource types that application opts
-    out of.  Filtering here -- from a single, once-resolved map -- excludes a
+    ``skips`` maps ``(model, application)`` to the resource types that
+    application opts out of *in that model*.  Scoping the opt-out to the model
+    rather than the charm track reflects the physical reality that all of a
+    model's states share one namespace: a resource retained by any track
+    exercised in the model (e.g. an upgrade/downgrade test) can surface in any
+    state, so the opt-out must cover the whole model.  Filtering here excludes a
     skipped kind uniformly from the baseline and every re-entry, so a per-visit
     resolution difference cannot make a skipped kind read as missing/extra drift.
     """
     return frozenset(
-        snapshot for snapshot in snapshots if snapshot.resource_type not in skips.get(snapshot.application, frozenset())
+        snapshot
+        for snapshot in snapshots
+        if snapshot.resource_type not in skips.get((model, snapshot.application), frozenset())
     )
 
 
 def calculate_discrepancies(
     observations: Iterable[ResourceObservation],
-    skips: Mapping[str, frozenset[str]] | None = None,
+    skips: Mapping[tuple[str, str], frozenset[str]] | None = None,
 ) -> list[ModelResourceDiscrepancy]:
     """Diff each state's later observations against its first (baseline) visit.
 
-    ``skips`` maps each application to the resource kinds it opts out of tracking.
-    It is resolved once and applied uniformly to every observation, so a skipped
-    kind is excluded identically across every visit.
+    ``skips`` maps each ``(model, application)`` to the resource kinds it opts
+    out of tracking.  Skips are scoped to the model rather than the charm track
+    because all of a model's states share one namespace, so a resource retained
+    by any track exercised in the model can appear in any state.  The map is
+    applied uniformly to every observation, so a skipped kind is excluded
+    identically across every visit.
     """
-    resolved_skips: Mapping[str, frozenset[str]] = skips if skips is not None else {}
+    resolved_skips: Mapping[tuple[str, str], frozenset[str]] = skips if skips is not None else {}
     baselines: dict[tuple[State, str], frozenset[ResourceSnapshot]] = {}
     discrepancies: list[ModelResourceDiscrepancy] = []
 
     for observation in observations:
-        snapshots = _without_skipped(observation.snapshots, resolved_skips)
+        snapshots = _without_skipped(observation.snapshots, observation.model, resolved_skips)
         key = (observation.state, observation.model)
         if key not in baselines:
             baselines[key] = snapshots

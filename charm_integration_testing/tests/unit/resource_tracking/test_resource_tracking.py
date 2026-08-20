@@ -677,10 +677,29 @@ class TestCalculateDiscrepancies:
         tracker.record(State.DEPLOYED, "test-model", frozenset({_pvc("data-neighbor-0", application="neighbor")}))
 
         # WHEN discrepancies are calculated with the target application skipping PVCs
-        discrepancies = calculate_discrepancies(tracker.observations(), skips={"target": frozenset({"pvc"})})
+        discrepancies = calculate_discrepancies(
+            tracker.observations(), skips={("test-model", "target"): frozenset({"pvc"})}
+        )
 
         # THEN the skipped application's dropped PVC is excluded, so nothing is reported
         assert discrepancies == []
+
+    def test_skips_are_scoped_to_the_owning_model(self) -> None:
+        # GIVEN the same application drifting a PVC in two models, skipped in only one
+        tracker = StateResourceTracker()
+        tracker.record(State.DEPLOYED, "model-a", frozenset({_pvc("data-0", application="target")}))
+        tracker.record(State.DEPLOYED, "model-b", frozenset({_pvc("data-0", application="target")}))
+        tracker.record(State.DEPLOYED, "model-a", frozenset())
+        tracker.record(State.DEPLOYED, "model-b", frozenset())
+
+        # WHEN discrepancies are calculated with the skip scoped to model-a only
+        discrepancies = calculate_discrepancies(
+            tracker.observations(), skips={("model-a", "target"): frozenset({"pvc"})}
+        )
+
+        # THEN only model-b, which does not opt out, reports the dropped PVC
+        assert len(discrepancies) == 1
+        assert discrepancies[0].model == "model-b"
 
     def test_skip_excludes_kind_uniformly_across_visits(self) -> None:
         # GIVEN a skipped PVC present on the baseline visit but absent on re-entry
@@ -690,7 +709,9 @@ class TestCalculateDiscrepancies:
         tracker.record(State.DEPLOYED, "test-model", frozenset())
 
         # WHEN discrepancies are calculated with the owning application skipping PVCs
-        discrepancies = calculate_discrepancies(tracker.observations(), skips={"target": frozenset({"pvc"})})
+        discrepancies = calculate_discrepancies(
+            tracker.observations(), skips={("test-model", "target"): frozenset({"pvc"})}
+        )
 
         # THEN the skip is applied uniformly to both visits, so no drift is reported
         assert discrepancies == []

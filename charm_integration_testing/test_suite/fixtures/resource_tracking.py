@@ -62,14 +62,18 @@ def _resource_tracking_overrides_client(
 
 
 @pytest.fixture(scope="session")
-def _resource_tracking_skip_cache() -> dict[str, frozenset[str]]:
-    """Session-scoped accumulator of each application's resolved skip set.
+def _resource_tracking_skip_cache() -> dict[tuple[str, str, str], frozenset[str]]:
+    """Session-scoped accumulator of resolved skip sets, keyed by
+    ``(model, application, track)``.
 
-    Applications are resolved once, the first time they are seen, and cached
-    here for the rest of the run.  Caching makes the map immune to transient
+    Each ``(model, application, track)`` is resolved once, the first time it is
+    seen, and cached for the rest of the run.  Keying by model and track -- not
+    by bare application name -- lets an application that moves between tracks
+    (e.g. an upgrade/downgrade test) contribute every track's skips, and keeps a
+    retaining track's opt-out from leaking into an unrelated model that never
+    runs that track.  Caching makes the map immune to transient
     ``list_applications`` failures on later visits and gives the end-of-suite
-    report a stable, fully-accumulated map even after applications have been
-    torn down.
+    report a stable, fully-accumulated map even after applications are torn down.
     """
     return {}
 
@@ -79,40 +83,55 @@ def resource_tracking_skips_by_application(
     request: pytest.FixtureRequest,
     juju_client: JujuClient,
     session_resource_registry: ResourceRegistry,
-    _resource_tracking_skip_cache: dict[str, frozenset[str]],
+    _resource_tracking_skip_cache: dict[tuple[str, str, str], frozenset[str]],
     logger: logging.Logger,
-) -> dict[str, frozenset[str]]:
-    """Map each deployed application to the resource kinds it opts out of tracking.
+) -> dict[tuple[str, str], frozenset[str]]:
+    """Map each ``(model, application)`` to the resource kinds it opts out of tracking.
 
     Overrides are declared per *charm version* under ``overrides`` in
     ``static/charm-overrides/<charm>.yaml``, but resources are attributed to an
-    *application* on the cluster.  The application-to-charm mapping is read from
-    the live models via ``juju_client.list_applications`` rather than from
-    hard-coded target/neighbor options, so charms pulled in as dependencies are
-    resolved the same way.  Each application is resolved once and cached across
-    the session, so a model that cannot be queried on some later visit does not
-    lose skip coverage already established for its applications.
+    *application in a model* on the cluster.  The application-to-charm mapping is
+    read from the live models via ``juju_client.list_applications`` rather than
+    from hard-coded target/neighbor options, so charms pulled in as dependencies
+    are resolved the same way.
+
+    Each application's channel is resolved per model and per track and cached, so
+    a model that cannot be queried on some later visit does not lose skip
+    coverage already established.  The returned map is scoped to
+    ``(model, application)`` and unions the skips of every track the application
+    was seen on *within that model*: because all of a model's states share one
+    namespace, a resource kind retained by any track exercised there must be
+    opted out for the whole model, while a different model that never runs that
+    track keeps tracking the kind.
     """
     overrides_client = _resource_tracking_overrides_client(request, logger)
-    if overrides_client is None:
-        return _resource_tracking_skip_cache
-
-    for handle in session_resource_registry.registered_handles():
-        if not isinstance(handle, JujuModelHandle):
-            continue
-        try:
-            applications = juju_client.list_applications(model=f"{handle.controller}:{handle.model}")
-        except Exception:
-            logger.warning("Could not list applications for model '%s'.", handle.model, exc_info=True)
-            continue
-        for application, info in applications.items():
-            if application in _resource_tracking_skip_cache or info.channel is None:
+    if overrides_client is not None:
+        for handle in session_resource_registry.registered_handles():
+            if not isinstance(handle, JujuModelHandle):
                 continue
-            channel = CharmChannel.model_validate(str(info.channel))
-            resolved = overrides_client.get_charm_resource_tracking_skips(info.charm, channel)
-            if resolved:
-                _resource_tracking_skip_cache[application] = resolved
-    return _resource_tracking_skip_cache
+            try:
+                applications = juju_client.list_applications(model=f"{handle.controller}:{handle.model}")
+            except Exception:
+                logger.warning("Could not list applications for model '%s'.", handle.model, exc_info=True)
+                continue
+            for application, info in applications.items():
+                if info.channel is None:
+                    continue
+                channel = CharmChannel.model_validate(str(info.channel))
+                key = (handle.model, application, channel.explicit_track)
+                if key in _resource_tracking_skip_cache:
+                    continue
+                resolved = overrides_client.get_charm_resource_tracking_skips(info.charm, channel)
+                if resolved:
+                    _resource_tracking_skip_cache[key] = resolved
+
+    skips_by_model_application: dict[tuple[str, str], frozenset[str]] = {}
+    for (model, application, _track), resolved in _resource_tracking_skip_cache.items():
+        model_application = (model, application)
+        skips_by_model_application[model_application] = (
+            skips_by_model_application.get(model_application, frozenset()) | resolved
+        )
+    return skips_by_model_application
 
 
 @pytest.fixture(autouse=True)
@@ -121,7 +140,7 @@ def track_state_resources(
     juju_client: JujuClient,
     session_resource_registry: ResourceRegistry,
     state_resource_tracker: StateResourceTracker,
-    resource_tracking_skips_by_application: dict[str, frozenset[str]],
+    resource_tracking_skips_by_application: dict[tuple[str, str], frozenset[str]],
     logger: logging.Logger,
 ) -> Iterator[None]:
     """Snapshot resources per scheduler state after each passing state-marked test.
