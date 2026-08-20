@@ -1,27 +1,16 @@
 ---
-# Override for openstack-dashboard
-# Source: https://github.com/openstack/charm-openstack-dashboard
+# openstack-dashboard: Source: https://github.com/openstack/charm-openstack-dashboard
 #
-# Classic charm. REQUIRED_INTERFACES from hooks/horizon_utils.py:
-#   identity (identity-service).
+# identity-service (requires): REQUIRED (only entry in REQUIRED_INTERFACES,
+#   hooks/horizon_utils.py). All other requires/provides: optional.
 #
-# nrpe-external-master (provides) - OPTIONAL: monitoring subordinate; convention.
-# website (provides) - OPTIONAL: HTTP; works without a consuming reverse-proxy relation.
-# dashboard-plugin (provides) - OPTIONAL: scope=container; additive plugin subordinates.
-# websso-trusted-dashboard (provides) - OPTIONAL: WebSSO feature; not primary purpose.
-# dashboard (provides) - OPTIONAL: nova-cc console integration; not primary purpose.
-#
-# identity-service (requires) - REQUIRED: only entry in REQUIRED_INTERFACES.
-# ha (requires) - OPTIONAL: scope=container; HA is additive.
-# certificates (requires) - OPTIONAL: TLS; charm runs without it.
-# websso-fid-service-provider (requires) - OPTIONAL: WebSSO FID; not in REQUIRED_INTERFACES.
-# application-dashboard (requires) - OPTIONAL: not in REQUIRED_INTERFACES (yoga+).
-# listed: false -- Excluded from automated bundle building (SQT-1081) to prevent
-# pipeline congestion; not currently covered by Charm QA.
-listed: false
+# assumes: [unsupported-openstack] -- listed on Charmhub, but not currently covered by Charm QA
+#   (SQT-1081); this blocks the charm from being built directly.
 overrides:
   # queens-train: dashboard endpoint not yet present in `provides` metadata
-  - criteria:
+  - assumes: &unsupported
+      - unsupported-openstack
+    criteria:
       - any_of:
           - track: 'queens'
           - track: 'rocky'
@@ -48,7 +37,8 @@ overrides:
       - 'tracks(charms(endpoint[identity-service])) == tracks({self})'
       - 'risks(charms(endpoint[identity-service])) == risks({self})'
   # ussuri-xena: dashboard endpoint present; application-dashboard not yet available
-  - criteria:
+  - assumes: *unsupported
+    criteria:
       - any_of:
           - track: 'ussuri'
           - track: 'victoria'
@@ -77,7 +67,8 @@ overrides:
       - 'tracks(charms(endpoint[identity-service])) == tracks({self})'
       - 'risks(charms(endpoint[identity-service])) == risks({self})'
   # default (yoga, zed, 2023.1+, latest, and future tracks)
-  - provides:
+  - assumes: *unsupported
+    provides:
       nrpe-external-master:
         optional: true
       website:

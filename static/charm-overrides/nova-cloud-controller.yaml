@@ -1,24 +1,18 @@
 ---
-# Override for nova-cloud-controller
-# Source: https://github.com/openstack/charm-nova-cloud-controller
+# nova-cloud-controller: Source: https://github.com/openstack/charm-nova-cloud-controller
 #
-# Classic charm. REQUIRED_INTERFACES from hooks/nova_cc_utils.py:
-#   database (shared-db), messaging (amqp), identity (identity-service),
-#   image (image-service), compute (cloud-compute). For Train+: placement.
+# shared-db, amqp, identity-service, image-service, cloud-compute (requires): REQUIRED
+#   (see REQUIRED_INTERFACES in hooks/nova_cc_utils.py).
+# placement (requires): REQUIRED for Train+; not present in metadata on queens/rocky/stein.
+# All other requires/provides: optional.
 #
-# cloud-controller (provides) - OPTIONAL: consumed only in multi-cell; not standard.
-# nova-cell-api (provides) - OPTIONAL: multi-cell deployments only.
-# nrpe-external-master (provides) - OPTIONAL: monitoring subordinate; convention.
-#
-# shared-db, amqp, identity-service, image-service, cloud-compute (requires) - REQUIRED.
-# placement (requires) - REQUIRED for Train+; not present in metadata on queens/rocky/stein.
-# All other requires: optional - not in REQUIRED_INTERFACES; checked only when present.
-# listed: false -- Excluded from automated bundle building (SQT-1081) to prevent
-# pipeline congestion; not currently covered by Charm QA.
-listed: false
+# assumes: [unsupported-openstack] -- listed on Charmhub, but not currently covered by Charm QA
+#   (SQT-1081); this blocks the charm from being built directly.
 overrides:
   # queens, rocky, stein: placement endpoint not present in charm metadata.
-  - criteria:
+  - assumes: &unsupported
+      - unsupported-openstack
+    criteria:
       - any_of:
           - track: queens
           - track: rocky
@@ -58,7 +52,8 @@ overrides:
       - 'tracks(charms(endpoint[cloud-compute])) == tracks({self})'
       - 'risks(charms(endpoint[cloud-compute])) == risks({self})'
   # train: placement endpoint present in metadata and required; dashboard not yet present.
-  - criteria:
+  - assumes: *unsupported
+    criteria:
       - track: train
     provides:
       nrpe-external-master:
@@ -97,7 +92,8 @@ overrides:
       - 'tracks(charms(endpoint[placement])) == tracks({self})'
       - 'risks(charms(endpoint[placement])) == risks({self})'
   # Default (ussuri and later): placement required; dashboard endpoint also present.
-  - provides:
+  - assumes: *unsupported
+    provides:
       nrpe-external-master:
         optional: true
       cloud-controller:

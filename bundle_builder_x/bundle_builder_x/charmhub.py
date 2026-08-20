@@ -289,7 +289,9 @@ class CharmhubClient:
         )
         if not charm.assumes.satisfied_by(juju_version, features):
             raise CharmReleaseNotFoundException(
-                f"Charm {charm.name} revision {charm.revision} in channel {charm.channel} does not satisfy assumes constraints for Juju version {juju_version} and platform {platform}"
+                f"Charm {charm.name} revision {charm.revision} in channel {charm.channel} does not satisfy "
+                f"assumes constraints {charm.assumes} for Juju version {juju_version} and platform {platform} "
+                f"(available features: {sorted(features)})"
             )
         return charm
 

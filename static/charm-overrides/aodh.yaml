@@ -1,28 +1,21 @@
 ---
-# aodh: OpenStack Alarming service.
-# Source: https://opendev.org/openstack/charm-aodh
+# aodh: OpenStack Alarming service. Source: https://opendev.org/openstack/charm-aodh
 #
-# mongodb (requires): legacy MongoDB storage backend. aodh supports either
-#   MySQL (shared-db) or MongoDB as its database. MongoDB was deprecated as
-#   a storage backend in favour of MySQL. The old reactive mongodb charm that
-#   provided the mongodb interface no longer exists on Charmhub default
-#   channels (see https://github.com/canonical/charm-integration-testing/issues/634).
-#   aodh reaches active with just shared-db; mongodb is genuinely optional.
+# mongodb (requires): optional - legacy backend, deprecated in favour of MySQL
+#   (shared-db); no provider exists on Charmhub (issue 634).
+# ha (requires): optional - runs single-unit without hacluster.
+# nrpe-external-master (provides): optional - monitoring only.
 #
-# ha (requires): hacluster for HA deployments. aodh runs single-unit without it.
-#
-# nrpe-external-master (provides): NRPE monitoring hook. Observability only.
-# listed: false -- Excluded from automated bundle building (SQT-1081) to prevent
-# pipeline congestion; not currently covered by Charm QA.
-listed: false
+# assumes: [unsupported-openstack] -- charm is listed on Charmhub but not currently covered by
+#   Charm QA (SQT-1081); this blocks it from being built directly.
 overrides:
   - requires:
       ha:
         optional: true
       mongodb:
         optional: true
-        # Legacy MongoDB backend; deprecated in favour of MySQL (shared-db).
-        # No provider available on Charmhub default channels (see issue 634).
     provides:
       nrpe-external-master:
         optional: true
+    assumes:
+      - unsupported-openstack

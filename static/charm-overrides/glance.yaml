@@ -1,21 +1,12 @@
 ---
-# Override for glance
-# Source: https://github.com/openstack/charm-glance
+# glance: Source: https://github.com/openstack/charm-glance
 #
-# Classic (non-reactive) charm. Endpoint optionality from glance_utils.py:
+# image-service (provides): REQUIRED - primary purpose.
+# shared-db, identity-service (requires): REQUIRED (see REQUIRED_INTERFACES in glance_utils.py).
+# All other requires/provides: optional.
 #
-# REQUIRED_INTERFACES = {'database': ['shared-db'], 'identity': ['identity-service']}
-# All other requires are in get_optional_interfaces() - checked only when present.
-#
-# image-service (provides) - REQUIRED: primary purpose; charm exists to provide images.
-# nrpe-external-master (provides) - OPTIONAL: monitoring subordinate; convention.
-#
-# shared-db, identity-service (requires) - REQUIRED: in REQUIRED_INTERFACES.
-# amqp (requires) - already optional: true upstream; no override needed.
-# All other requires: optional - none in REQUIRED_INTERFACES; no BlockedStatus when absent.
-# listed: false -- Excluded from automated bundle building (SQT-1081) to prevent
-# pipeline congestion; not currently covered by Charm QA.
-listed: false
+# assumes: [unsupported-openstack] -- listed on Charmhub, but not currently covered by Charm QA
+#   (SQT-1081); this blocks the charm from being built directly.
 overrides:
   - provides:
       nrpe-external-master:
@@ -34,8 +25,10 @@ overrides:
       storage-backend:
         optional: true
     constraints:
-      # All connected OpenStack service charms must be on the same release track.
+      # Connected OpenStack service charms must be on the same release track.
       - 'tracks(charms(endpoint[identity-service])) == tracks({self})'
       - 'risks(charms(endpoint[identity-service])) == risks({self})'
       - 'tracks(charms(endpoint[image-service])) == tracks({self})'
       - 'risks(charms(endpoint[image-service])) == risks({self})'
+    assumes:
+      - unsupported-openstack

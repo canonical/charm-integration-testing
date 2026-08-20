@@ -1,6 +1,5 @@
 ---
-# octavia-diskimage-retrofit: OpenStack Charmers charm.
-#
-# listed: false -- Excluded from automated bundle building (SQT-1081) to prevent
-# pipeline congestion; not currently covered by Charm QA.
-listed: false
+# octavia-diskimage-retrofit: listed on Charmhub, but not currently covered by Charm QA (SQT-1081).
+overrides:
+  - assumes:
+      - unsupported-openstack

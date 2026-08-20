@@ -1,21 +1,12 @@
 ---
-# Override for keystone
-# Source: https://github.com/openstack/charm-keystone
+# keystone: Source: https://github.com/openstack/charm-keystone
 #
-# Classic charm. REQUIRED_INTERFACES from hooks/keystone_utils.py:
-#   database (shared-db) only.
-# get_optional_interfaces() returns ha (via cluster) only when HA is present.
+# identity-service (provides): REQUIRED - all OpenStack services connect here.
+# shared-db (requires): REQUIRED (see REQUIRED_INTERFACES in hooks/keystone_utils.py).
+# All other requires/provides: optional.
 #
-# identity-service (provides) - REQUIRED: primary purpose; all OpenStack services connect here.
-# identity-admin, identity-notifications, identity-credentials (provides) - OPTIONAL:
-#   secondary service endpoints consumed only by specific integrations.
-# nrpe-external-master (provides) - OPTIONAL: monitoring subordinate; convention.
-#
-# shared-db (requires) - REQUIRED: in REQUIRED_INTERFACES.
-# All other requires: optional - not in REQUIRED_INTERFACES; no BlockedStatus when absent.
-# listed: false -- Excluded from automated bundle building (SQT-1081) to prevent
-# pipeline congestion; not currently covered by Charm QA.
-listed: false
+# assumes: [unsupported-openstack] -- listed on Charmhub, but not currently covered by Charm QA
+#   (SQT-1081); this blocks the charm from being built directly.
 overrides:
   - provides:
       nrpe-external-master:
@@ -40,6 +31,8 @@ overrides:
       keystone-middleware:
         optional: true
     constraints:
-      # All connected OpenStack service charms must be on the same release track.
+      # Connected OpenStack service charms must be on the same release track.
       - 'tracks(charms(endpoint[identity-service])) == tracks({self})'
       - 'risks(charms(endpoint[identity-service])) == risks({self})'
+    assumes:
+      - unsupported-openstack
