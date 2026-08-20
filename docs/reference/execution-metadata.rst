@@ -187,12 +187,20 @@ Failure Information
      - Error string from a validation result with status ``ERROR``. Only recorded when ``ValidationResult.error`` is set.
      - Yes
      - ``Unexpected exception during validation``
+   * - ``failure:build_bundle:unresolved_application``
+     - An application whose declared charm could not be resolved to exactly one charm during bundle building. Collected when ``UncompletableBundleError`` is raised. Value is the charm name (not the generic application name from the spec).
+     - No
+     - ``kafka``
+   * - ``failure:build_bundle:unresolved_integration``
+     - A user-specified integration whose named endpoint(s) could not be mapped to any charm integration, most commonly because the endpoint no longer exists on the resolved charm (e.g. renamed/removed upstream). Collected when ``UncompletableBundleError`` is raised. Format: ``<charm>:<endpoint_name>/<charm>:<endpoint_name>``, using charm names (not the generic application names from the spec). Multiple values may be recorded.
+     - No
+     - ``easyrsa:client/kafka:trusted-certificate``
    * - ``failure:build_bundle:unfulfilled_endpoint``
-     - An application endpoint that could not be fulfilled during bundle building. Collected when ``UnfulfilledEndpointsError`` is raised. Format: ``<charm>:<endpoint_name>``. Multiple values may be recorded.
+     - An application endpoint that could not be fulfilled during bundle building. Collected when ``UncompletableBundleError`` is raised. Format: ``<charm>:<endpoint_name>``. Multiple values may be recorded.
      - No
      - ``postgresql:db``
    * - ``failure:build_bundle:unfulfilled_interface``
-     - Interface name for an unfulfilled application endpoint. Collected when ``UnfulfilledEndpointsError`` is raised. Multiple values may be recorded.
+     - Interface name for an unfulfilled application endpoint. Collected when ``UncompletableBundleError`` is raised. Multiple values may be recorded.
      - No
      - ``postgresql_client``
    * - ``failure:build_bundle:feature_mismatch``

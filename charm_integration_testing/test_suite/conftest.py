@@ -913,6 +913,13 @@ def record_failure_execution_metadata(
                             normalize_string(result.error),
                         )
         elif isinstance(exc, UncompletableBundleError):
+            for app_info in exc.unresolved_applications:
+                execution_metadata("failure:build_bundle:unresolved_application", app_info.charm_name)
+            for integration_info in exc.unresolved_integrations:
+                execution_metadata(
+                    "failure:build_bundle:unresolved_integration",
+                    "/".join(f"{ep.charm_name}:{ep.endpoint}" for ep in integration_info.endpoints),
+                )
             for info in exc.unfulfilled_endpoints:
                 execution_metadata("failure:build_bundle:unfulfilled_endpoint", f"{info.charm_name}:{info.endpoint}")
                 if info.interface:

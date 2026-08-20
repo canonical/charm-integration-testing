@@ -10,6 +10,9 @@ import pytest
 import z3  # type: ignore[import-untyped]
 
 from bundle_builder_x.assertion_tags import (
+    AppEndpointPayload,
+    ApplicationExistsTag,
+    ApplicationIntegrationExistsTag,
     CharmEndpointNonOptionalTag,
     CharmEndpointPayload,
     CharmPayload,
@@ -17,7 +20,13 @@ from bundle_builder_x.assertion_tags import (
     PeerChannelMismatchTag,
     SubordinateBaseMismatchTag,
 )
-from bundle_builder_x.bundle_builder import BundleBuilder, UncompletableBundleError
+from bundle_builder_x.bundle_builder import (
+    BundleBuilder,
+    UncompletableBundleError,
+    UnresolvedApplicationInfo,
+    UnresolvedIntegrationEndpointInfo,
+    UnresolvedIntegrationInfo,
+)
 from bundle_builder_x.charm import Charm, CharmChannel, CharmEndpoint, EndpointScope, EndpointType
 from bundle_builder_x.charmhub import CharmhubClient
 from bundle_builder_x.charmhub_http import CharmReleaseNotFoundException
@@ -1162,3 +1171,195 @@ class TestUncompletableBundleErrorFeatureMismatches:
 
         # THEN the generic fallback message is used
         assert "Cannot expand domain to handle failed assertion tags" in str(error)
+
+
+class TestUncompletableBundleErrorUnresolvedApplicationsAndIntegrations:
+    """UncompletableBundleError.unresolved_applications / unresolved_integrations and their priority."""
+
+    def test_reason_names_unresolved_application_with_charm_name(self) -> None:
+        # GIVEN an unresolved application
+        info = UnresolvedApplicationInfo(application="neighbor", charm_name="kafka")
+
+        # WHEN constructing the error without an explicit reason
+        error = UncompletableBundleError(unresolved_applications=[info])
+
+        # THEN the message names both the application and its charm
+        message = str(error)
+        assert "neighbor" in message
+        assert "kafka" in message
+        assert error.unresolved_applications == [info]
+
+    def test_reason_names_unresolved_integration_endpoints_by_charm(self) -> None:
+        # GIVEN an unresolved integration
+        info = UnresolvedIntegrationInfo(
+            endpoints=[
+                UnresolvedIntegrationEndpointInfo(application="target", endpoint="client", charm_name="easyrsa"),
+                UnresolvedIntegrationEndpointInfo(
+                    application="neighbor", endpoint="trusted-certificate", charm_name="kafka"
+                ),
+            ]
+        )
+
+        # WHEN constructing the error without an explicit reason
+        error = UncompletableBundleError(unresolved_integrations=[info])
+
+        # THEN the message names both endpoints by charm
+        message = str(error)
+        assert "easyrsa:client" in message
+        assert "kafka:trusted-certificate" in message
+        assert error.unresolved_integrations == [info]
+
+    def test_reason_lists_unresolved_integrations_in_deterministic_order(self) -> None:
+        # GIVEN two unresolved integrations
+        zebra = UnresolvedIntegrationInfo(
+            endpoints=[
+                UnresolvedIntegrationEndpointInfo(application="a", endpoint="ep", charm_name="zebra"),
+                UnresolvedIntegrationEndpointInfo(application="b", endpoint="ep", charm_name="kafka"),
+            ]
+        )
+        alpha = UnresolvedIntegrationInfo(
+            endpoints=[
+                UnresolvedIntegrationEndpointInfo(application="c", endpoint="ep", charm_name="alpha"),
+                UnresolvedIntegrationEndpointInfo(application="d", endpoint="ep", charm_name="beta"),
+            ]
+        )
+
+        # WHEN constructing the error with the integrations in either order
+        forward = UncompletableBundleError(unresolved_integrations=[zebra, alpha])
+        reversed_order = UncompletableBundleError(unresolved_integrations=[alpha, zebra])
+
+        # THEN both renders produce the same message, sorted by endpoint content
+        assert str(forward) == str(reversed_order)
+        assert str(forward).index("alpha:ep") < str(forward).index("zebra:ep")
+
+    def test_unresolved_applications_take_priority_over_everything_else(self) -> None:
+        # GIVEN an unresolved application alongside an unresolved integration, an unfulfilled
+        # endpoint, and a feature mismatch
+        app_info = UnresolvedApplicationInfo(application="neighbor", charm_name="kafka")
+        integration_info = UnresolvedIntegrationInfo(
+            endpoints=[
+                UnresolvedIntegrationEndpointInfo(application="target", endpoint="client", charm_name="easyrsa"),
+                UnresolvedIntegrationEndpointInfo(
+                    application="neighbor2", endpoint="trusted-certificate", charm_name="kafka2"
+                ),
+            ]
+        )
+        non_optional = CharmEndpointNonOptionalTag(
+            charm=CharmEndpointPayload(charm_name="postgresql", charm_id=0, endpoint="db"),
+            interface="pgsql",
+        )
+        mismatch = IntegrationFeatureMismatchTag(
+            requires=CharmEndpointPayload(charm_name="katib-controller", charm_id=1, endpoint="k8s-service-info"),
+            provides=CharmEndpointPayload(charm_name="kfp-viz", charm_id=2, endpoint="kfp-viz"),
+            feature="katib-service",
+        )
+
+        # WHEN constructing the error without an explicit reason
+        error = UncompletableBundleError(
+            unsat_core=[non_optional, mismatch],
+            unresolved_applications=[app_info],
+            unresolved_integrations=[integration_info],
+        )
+
+        # THEN the unresolved-application message takes priority
+        message = str(error)
+        assert "kafka" in message
+        assert "kafka2:trusted-certificate" not in message
+        assert "postgresql:db" not in message
+        assert "katib-service" not in message
+        # but the other properties are still populated for callers that want them directly
+        assert error.unresolved_integrations == [integration_info]
+        assert error.unfulfilled_endpoints[0].charm_name == "postgresql"
+        assert error.feature_mismatches == [mismatch]
+
+    def test_unresolved_integrations_take_priority_over_unfulfilled_endpoints(self) -> None:
+        # GIVEN an unresolved integration alongside an unfulfilled endpoint (no unresolved
+        # application)
+        integration_info = UnresolvedIntegrationInfo(
+            endpoints=[
+                UnresolvedIntegrationEndpointInfo(application="target", endpoint="client", charm_name="easyrsa"),
+                UnresolvedIntegrationEndpointInfo(
+                    application="neighbor", endpoint="trusted-certificate", charm_name="kafka"
+                ),
+            ]
+        )
+        non_optional = CharmEndpointNonOptionalTag(
+            charm=CharmEndpointPayload(charm_name="postgresql", charm_id=0, endpoint="db"),
+            interface="pgsql",
+        )
+
+        # WHEN constructing the error without an explicit reason
+        error = UncompletableBundleError(unsat_core=[non_optional], unresolved_integrations=[integration_info])
+
+        # THEN the unresolved-integration message takes priority
+        message = str(error)
+        assert "kafka:trusted-certificate" in message
+        assert "postgresql:db" not in message
+
+
+def _domain_for_unresolved_diagnostics() -> Domain:
+    """A domain with two applications ('target'/easyrsa, 'neighbor'/kafka) and no charms added."""
+    domain = Domain()
+    domain.models[ModelRef(name="m")] = DomainModel(
+        arch="amd64",
+        platform="machine",
+        juju_version=_JUJU,
+        applications={
+            "target": DomainApplication(charm="easyrsa"),
+            "neighbor": DomainApplication(charm="kafka"),
+        },
+    )
+    return domain
+
+
+class TestCollectUnresolvedDiagnostics:
+    """BundleBuilder._collect_unresolved_applications / _collect_unresolved_integrations."""
+
+    def test_collect_unresolved_applications_resolves_charm_name_from_spec(self) -> None:
+        # GIVEN a domain where 'neighbor' is declared (but never resolved) as charm 'kafka'
+        domain = _domain_for_unresolved_diagnostics()
+        app_exists = ApplicationExistsTag(model=ModelRef(name="m"), application="neighbor")
+
+        # WHEN collecting unresolved-application diagnostics from the unsat core
+        result = BundleBuilder._collect_unresolved_applications([app_exists], domain)
+
+        # THEN the charm name is resolved from the spec, not left as the generic application name
+        assert result == [UnresolvedApplicationInfo(application="neighbor", charm_name="kafka")]
+
+    def test_collect_unresolved_integrations_resolves_charm_names_from_spec(self) -> None:
+        # GIVEN a domain with 'target'/easyrsa and 'neighbor'/kafka, and an integration tag naming
+        # an endpoint that doesn't exist on kafka
+        domain = _domain_for_unresolved_diagnostics()
+        integration_exists = ApplicationIntegrationExistsTag(
+            model=ModelRef(name="m"),
+            integration=[
+                AppEndpointPayload(application="target", endpoint="client"),
+                AppEndpointPayload(application="neighbor", endpoint="trusted-certificate"),
+            ],
+        )
+
+        # WHEN collecting unresolved-integration diagnostics from the unsat core
+        result = BundleBuilder._collect_unresolved_integrations([integration_exists], domain)
+
+        # THEN both endpoints are resolved to their charm names, not the generic application names
+        assert result == [
+            UnresolvedIntegrationInfo(
+                endpoints=[
+                    UnresolvedIntegrationEndpointInfo(application="target", endpoint="client", charm_name="easyrsa"),
+                    UnresolvedIntegrationEndpointInfo(
+                        application="neighbor", endpoint="trusted-certificate", charm_name="kafka"
+                    ),
+                ]
+            )
+        ]
+
+    def test_collect_unresolved_application_falls_back_to_application_name_when_unknown(self) -> None:
+        # GIVEN an unsat core naming a model/application that isn't present in the domain
+        domain = _domain_for_unresolved_diagnostics()
+        app_exists = ApplicationExistsTag(model=ModelRef(name="other-model"), application="mystery")
+
+        # WHEN collecting unresolved-application diagnostics
+        result = BundleBuilder._collect_unresolved_applications([app_exists], domain)
+
+        # THEN the application name is used as a defensive fallback for the charm name
+        assert result == [UnresolvedApplicationInfo(application="mystery", charm_name="mystery")]

@@ -158,4 +158,8 @@ which lists the specific constraints that could not be satisfied:
        print(e)
        for tag in e.unsat_core:
            print(f"  {tag}")
+       # e.unresolved_applications lists applications whose charm couldn't be resolved
+       # e.unresolved_integrations lists user-specified integrations whose named endpoint(s)
+       #   don't exist on the resolved charm (e.g. renamed/removed upstream)
        # e.unfulfilled_endpoints lists endpoints that no charm could satisfy
+       # e.feature_mismatches lists integrations with mutually incompatible feature tags
