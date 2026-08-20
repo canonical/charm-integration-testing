@@ -81,9 +81,6 @@ class _FakeKubernetesClient:
         self._pvcs = pvcs
         self.requested_model: str | None = None
 
-    def namespace_exists(self, model: str) -> bool:
-        return True
-
     def list_model_pvcs(self, model: str) -> list[SimpleNamespace]:
         self.requested_model = model
         return self._pvcs
@@ -92,39 +89,16 @@ class _FakeKubernetesClient:
 class _RaisingKubernetesClient:
     """Stand-in whose PVC listing always raises, to exercise error handling.
 
-    The namespace exists, so the collector runs the source; the failure models a
-    transient per-kind list error rather than a missing namespace.
+    The model is Kubernetes-backed, so the collector runs the source; the failure
+    models a transient per-kind list error that must drop only that model's
+    observation.
     """
 
     def __init__(self, error: Exception) -> None:
         self._error = error
-
-    def namespace_exists(self, model: str) -> bool:
-        return True
 
     def list_model_pvcs(self, model: str) -> list[SimpleNamespace]:
         raise self._error
-
-
-class _ProbeRaisingKubernetesClient:
-    """Stand-in whose namespace probe always raises, to exercise probe error handling.
-
-    The failure models a transient API error on the namespace read rather than a
-    missing namespace (a 404), which the client would surface as absence instead.
-    """
-
-    def __init__(self, error: Exception) -> None:
-        self._error = error
-
-    def namespace_exists(self, model: str) -> bool:
-        raise self._error
-
-
-class _NoNamespaceKubernetesClient:
-    """Stand-in whose model namespace does not exist (a non-Kubernetes model)."""
-
-    def namespace_exists(self, model: str) -> bool:
-        return False
 
 
 class _FakeResourceRegistry:
@@ -403,28 +377,6 @@ class TestKubernetesResourceCollector:
         # THEN no observation is recorded, so a partial snapshot is never diffed as drift
         assert collected == []
 
-    def test_namespace_probe_errors_drop_the_model_observation(self) -> None:
-        # GIVEN a model whose namespace probe transiently fails
-        registry = _FakeResourceRegistry([JujuModelHandle(controller="test-controller", model="test-model")])
-        client = _ProbeRaisingKubernetesClient(ApiException(status=500))
-
-        # WHEN the collector gathers resources
-        collected = KubernetesResourceCollector(client, registry).collect(_LOGGER)  # type: ignore[arg-type]
-
-        # THEN the probe failure is treated as best-effort skip rather than raising
-        assert collected == []
-
-    def test_models_without_a_namespace_are_skipped(self) -> None:
-        # GIVEN a model whose namespace does not exist (e.g. a machine model)
-        registry = _FakeResourceRegistry([JujuModelHandle(controller="test-controller", model="machine-model")])
-        client = _NoNamespaceKubernetesClient()
-
-        # WHEN the collector gathers resources
-        collected = KubernetesResourceCollector(client, registry).collect(_LOGGER)  # type: ignore[arg-type]
-
-        # THEN no observation is recorded for the non-Kubernetes model
-        assert collected == []
-
     def test_collects_every_snapshot_uniformly(self) -> None:
         # GIVEN two PVCs owned by different applications
         registry = _FakeResourceRegistry([JujuModelHandle(controller="test-controller", model="test-model")])
@@ -435,13 +387,11 @@ class TestKubernetesResourceCollector:
             ]
         )
         backend = _FakeJujuBackend({"test-controller": client})
-        resource_skips = {"target": frozenset({"pvc"})}
 
         # WHEN the collector gathers resources
         collected = KubernetesResourceCollector(
             backend,
             registry,  # type: ignore[arg-type]
-            resource_skips=resource_skips,
         ).collect(_LOGGER)
 
         # THEN every snapshot is recorded; per-charm skips are applied at diff time

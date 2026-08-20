@@ -57,14 +57,19 @@ stays small and substrate-agnostic:
   interface.
 
 **Collectors** (``resource_tracking.collectors``)
-  A ``ResourceCollector`` gathers snapshots from one *substrate*.
-  ``KubernetesResourceCollector`` iterates the registered Juju model handles,
-  runs each source, and returns ``CollectedResources`` per model. Collection is
-  best-effort: a scope that cannot be queried (for example a non-Kubernetes
-  model) is skipped rather than raising. Every observed snapshot is recorded
-  uniformly; per-charm opt-outs are *not* applied here but once at diff time (see
-  `Per-charm tracking overrides`_). Adding an ``lxd`` or ``openstack`` collector
-  requires no change to the tracker.
+  A ``ResourceCollector`` gathers snapshots from one *substrate*. For each
+  registered Juju model handle ``KubernetesResourceCollector`` resolves a
+  Kubernetes client for that model's *controller* through
+  ``JujuBackend.get_kubernetes_client_for_controller``, so a cross-model-relation
+  run spanning several controllers -- each bootstrapped on its own cluster --
+  queries every model against the cluster it actually lives on. It then runs each
+  source and returns ``CollectedResources`` per model. Collection is best-effort:
+  a controller that is not Kubernetes-based (its client resolves to ``None``) or
+  that cannot be reached contributes no snapshots rather than raising, and a
+  transient per-kind list error drops only that one model's observation. Every
+  observed snapshot is recorded uniformly; per-charm opt-outs are *not* applied
+  here but once at diff time (see `Per-charm tracking overrides`_). Adding an
+  ``lxd`` or ``openstack`` collector requires no change to the tracker.
 
 **Overrides** (bundle-builder ``OverridesClient``)
   A charm version opts out of tracking a resource kind under its ``overrides``
@@ -79,8 +84,9 @@ stays small and substrate-agnostic:
 
 **Tracker** (``resource_tracking.tracker``)
   ``StateResourceTracker`` is a substrate-agnostic store. After each passing,
-  state-marked test the ``track_state_resources`` fixture builds the collectors
-  available for the current substrates and calls ``collect()``, which records one
+  state-marked test the ``track_state_resources`` fixture builds the substrate
+  collectors -- today a single ``KubernetesResourceCollector`` driven by
+  ``DEFAULT_KUBERNETES_SOURCES`` -- and calls ``collect()``, which records one
   ``ResourceObservation`` per (state, model).
 
 **Discrepancies** (``resource_tracking.discrepancy``)

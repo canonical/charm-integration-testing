@@ -58,12 +58,8 @@ class KubernetesResourceCollector:
     that is not Kubernetes-based (or whose client cannot be resolved) simply
     contributes no snapshots.
 
-    Resources can be excluded per application via ``resource_skips``: a mapping
-    of application name to the resource types that application opts out of.  A
-    snapshot is dropped when its owning application skips its resource type, so
-    the same model can still track that resource type for other applications. 
-    Every observed snapshot is recorded uniformly; per-charm opt-outs are not
-    applied here.  Skips are resolved once and excluded at diff time in
+    Every observed snapshot is recorded uniformly; per-application opt-outs are
+    not applied here.  Skips are excluded at diff time in
     :func:`~resource_tracking.discrepancy.calculate_discrepancies`, so a
     per-visit resolution difference cannot make a skipped kind read as drift.
     """

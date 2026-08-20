@@ -95,28 +95,6 @@ class KubernetesClient:
         self.logger.debug(f"Found {len(pvcs.items)} PVC(s) in namespace {model}")
         return list(pvcs.items)
 
-    def namespace_exists(self, model: str) -> bool:
-        """Return whether the model's namespace exists on the cluster.
-
-        Juju creates a namespace per model, so a missing namespace means the model
-        is not backed by this Kubernetes cluster (e.g. a machine model). A 404 is
-        reported as absence; any other API error propagates so callers do not treat
-        a transient failure as a missing namespace.
-
-        Args:
-            model: Model whose namespace should be checked (used as the namespace name)
-
-        Raises:
-            ApiException: If the cluster query fails for any reason other than 404.
-        """
-        try:
-            self.backend.core_v1_api.read_namespace(model)
-        except ApiException as exc:
-            if exc.status == 404:
-                return False
-            raise
-        return True
-
     def wait(
         self,
         check: Callable[[], T | None],
