@@ -16,6 +16,7 @@ from .assertion_tags import (
     AssertionTag,
     CharmEndpointNonOptionalTag,
     EndpointCountMatchesIntegrationsTag,
+    IntegrationFeatureMismatchTag,
     PeerChannelMismatchTag,
     SubordinateBaseMismatchTag,
 )
@@ -82,6 +83,15 @@ class UncompletableBundleError(ValueError):
         if reason is None:
             if self.unfulfilled_endpoints:
                 reason = f"Cannot fulfill charm endpoints: {', '.join(f'{ep.charm_name}:{ep.endpoint}' for ep in sorted(self.unfulfilled_endpoints, key=lambda e: (e.charm_name, e.endpoint)))}"
+            elif self.feature_mismatches:
+                reason = "Charm endpoints have mutually incompatible feature tags: " + ", ".join(
+                    f"{m.requires.charm_name}:{m.requires.endpoint} <-> "
+                    f"{m.provides.charm_name}:{m.provides.endpoint} (feature {m.feature!r})"
+                    for m in sorted(
+                        self.feature_mismatches,
+                        key=lambda m: (m.requires.charm_name, m.requires.endpoint, m.feature),
+                    )
+                )
             else:
                 reason = "Cannot expand domain to handle failed assertion tags"
         super().__init__(f"Could not build a complete valid bundle: {reason}")
@@ -97,6 +107,15 @@ class UncompletableBundleError(ValueError):
             )
             for tag in self.unsat_core
             if tag.kind == Assertions.CHARM_ENDPOINT_NON_OPTIONAL
+        ]
+
+    @property
+    def feature_mismatches(self) -> list[IntegrationFeatureMismatchTag]:
+        """Integrations in the unsat core whose endpoints declared incompatible feature tags."""
+        return [
+            cast(IntegrationFeatureMismatchTag, tag)
+            for tag in self.unsat_core
+            if tag.kind == Assertions.INTEGRATION_FEATURE_MISMATCH
         ]
 
 

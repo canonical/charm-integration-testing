@@ -917,6 +917,14 @@ def record_failure_execution_metadata(
                 execution_metadata("failure:build_bundle:unfulfilled_endpoint", f"{info.charm_name}:{info.endpoint}")
                 if info.interface:
                     execution_metadata("failure:build_bundle:unfulfilled_interface", info.interface)
+            for mismatch in exc.feature_mismatches:
+                # Packed value: keeps requires/provides paired per mismatch.
+                execution_metadata(
+                    "failure:build_bundle:feature_mismatch",
+                    f"{mismatch.requires.charm_name}:{mismatch.requires.endpoint}"
+                    f"/{mismatch.provides.charm_name}:{mismatch.provides.endpoint}",
+                )
+                execution_metadata("failure:build_bundle:feature_mismatch:feature", mismatch.feature)
         elif isinstance(exc, ResourceDiscrepancyError):
             # Only the generically-applicable dimensions (resource_type and
             # qualifier) go in the key so downstream attachment rules can select
