@@ -2408,6 +2408,28 @@ type = "directory"
 url = "validators/base"
 
 [[package]]
+name = "validators-certificate-transfer"
+version = "0.1.0"
+description = "Validator for certificate_transfer interface"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+cryptography = ">=42.0.0"
+validators-base = "*"
+validators-test-utils = {version = "*", optional = true}
+
+[package.extras]
+dev = ["validators-test-utils"]
+
+[package.source]
+type = "directory"
+url = "validators/certificate_transfer"
+
+[[package]]
 name = "validators-config-server"
 version = "0.1.0"
 description = "Validator for config-server interface (MongoDB sharding)"
@@ -2839,6 +2861,7 @@ ops = ">=3.3.0,<4.0.0"
 pydantic = ">=2.0.0"
 validators-azure-storage = "*"
 validators-base = "*"
+validators-certificate-transfer = "*"
 validators-config-server = "*"
 validators-cve-catalog = "*"
 validators-external-provider = "*"
@@ -3019,4 +3042,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<4.0"
-content-hash = "4c000a7832ba1ac48574eefc484bf41911cba9d15660a80bbdd5758081ee1e2d"
+content-hash = "dfdc23b0243a69fd99347302da21fb9b68e7f8adc8542ea835eb8d35eb6d9f20"
