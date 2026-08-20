@@ -22,6 +22,7 @@ from .assertion_tags import (
     EndpointCountMatchesIntegrationsTag,
     EndpointIntegratedMatchesCountTag,
     EndpointRespectsLimitTag,
+    IntegrationFeatureMismatchTag,
     SubordinateBaseMismatchTag,
 )
 from .charm import EndpointScope
@@ -315,17 +316,46 @@ def add_charm_metadata_constraints(solver: z3.Solver, domain: Domain) -> None:
     # (see SQT-1038 - cross-model integrations previously skipped this check, letting
     # the solver silently pair charms whose declared features didn't actually match).
     for integration in domain.charm_integrations:
-        req_ep = domain.charms[integration.requires_charm_id].endpoints[integration.requires_endpoint]
-        prov_ep = domain.charms[integration.provides_charm_id].endpoints[integration.provides_endpoint]
+        requires_charm = domain.charms[integration.requires_charm_id]
+        provides_charm = domain.charms[integration.provides_charm_id]
+        req_ep = requires_charm.endpoints[integration.requires_endpoint]
+        prov_ep = provides_charm.endpoints[integration.provides_endpoint]
+        requires_payload = _charm_endpoint_payload(
+            requires_charm, integration.requires_charm_id, integration.requires_endpoint
+        )
+        provides_payload = _charm_endpoint_payload(
+            provides_charm, integration.provides_charm_id, integration.provides_endpoint
+        )
         for f, f_var in req_ep.features.items():
             if f not in prov_ep.features:
-                solver.add(z3.Implies(integration.exists, z3.Not(f_var)))
+                solver.assert_and_track(
+                    z3.Implies(integration.exists, z3.Not(f_var)),
+                    IntegrationFeatureMismatchTag(
+                        requires=requires_payload,
+                        provides=provides_payload,
+                        feature=f,
+                    ).encode(),
+                )
             else:
                 # Both endpoints declare this feature: they must agree when integrated.
-                solver.add(z3.Implies(integration.exists, f_var == prov_ep.features[f]))
+                solver.assert_and_track(
+                    z3.Implies(integration.exists, f_var == prov_ep.features[f]),
+                    IntegrationFeatureMismatchTag(
+                        requires=requires_payload,
+                        provides=provides_payload,
+                        feature=f,
+                    ).encode(),
+                )
         for f, f_var in prov_ep.features.items():
             if f not in req_ep.features:
-                solver.add(z3.Implies(integration.exists, z3.Not(f_var)))
+                solver.assert_and_track(
+                    z3.Implies(integration.exists, z3.Not(f_var)),
+                    IntegrationFeatureMismatchTag(
+                        requires=requires_payload,
+                        provides=provides_payload,
+                        feature=f,
+                    ).encode(),
+                )
 
     # Config domain constraints: when a charm exists, its config variable must equal
     # one of the declared allowed values.
