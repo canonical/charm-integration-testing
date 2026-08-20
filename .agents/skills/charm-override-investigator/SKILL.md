@@ -1,6 +1,6 @@
 ---
 name: charm-override-investigator
-description: 'Charm Override Investigator - investigates charm metadata and creates per-charm override YAML files in static/charm-overrides/. USE FOR: creating a new override from scratch, updating after an upstream PR lands, fixing broken constraints, auditing against live metadata. GUIDED WORKFLOWS: write_new_override, update_existing_override, validate_override. INPUTS: charm name, optional upstream PR URL, optional track filter. OUTPUTS: PR-ready YAML with evidence comments.'
+description: 'Charm Override Investigator - investigates charm metadata and creates per-charm override YAML files in static/charm-overrides/. USE FOR: creating a new override from scratch, updating after an upstream PR lands, fixing broken constraints, auditing against live metadata, recording expected resource inconsistencies (e.g. a retained PVC) so the resource tracker does not flag them. GUIDED WORKFLOWS: write_new_override, update_existing_override, validate_override, write_resource_inconsistency_override. INPUTS: charm name, optional upstream PR URL, optional track filter. OUTPUTS: PR-ready YAML with evidence comments.'
 tools: ['github/*']
 ---
 
@@ -208,6 +208,67 @@ A single repo may contain multiple charms (e.g. `kfp-operators`, `cos-charms`). 
 
 ---
 
+## Resource Inconsistency Overrides (`resource_tracking.skip`)
+
+A separate override mechanism, unrelated to endpoint optionality, lives in the same
+`static/charm-overrides/<charm>.yaml` files: the `resource_tracking.skip` block. It tells
+the integration-test resource tracker to stop flagging a whole resource kind as drift for
+a specific charm-version criteria block.
+
+### Why it exists
+
+The test suite re-enters each scheduler state many times and expects the *same* set of
+substrate resources every visit. When a later visit differs, the end-of-suite
+`test_resource_consistency_report` fails with a `resource_discrepancy:<kind>:<qualifier>`
+execution-metadata entry (qualifiers: `missing`, `extra`, or a modification kind such as
+`resized`). See `docs/explanation/resource-tracking.rst`.
+
+Some charms leave resources behind *by design*. The canonical example: `postgresql-k8s`
+(via Juju/Kubernetes) retains its `pgdata` PersistentVolumeClaim across pod deletion and
+scale-in so the original pod can be restarted, so a leftover or re-created PVC surfaces as
+`resource_discrepancy:pvc:extra` on every run. That is expected behaviour, not a defect.
+The override records it:
+
+```yaml
+resource_tracking:
+  skip:
+    - pvc
+```
+
+### The single purpose (and the fatal misuse)
+
+`resource_tracking.skip` exists for **one** reason: to suppress drift of a resource kind
+that the charm is *known and proven* to change by design across a state round-trip.
+
+The fatal misuse is skipping a kind to silence a **genuine leak**. If a charm accidentally
+leaks a resource (a real bug), the tracker firing is the *correct* signal - the fix is a
+bug report against the charm, never a skip. The test:
+
+> "Is this drift an inherent, documented property of how the charm (or Juju/Kubernetes
+> underneath it) manages this resource - or is it an accident that should be fixed?"
+
+Only the first case justifies a skip.
+
+### Evidence rules (same discipline as optionality)
+
+A reproduced discrepancy is **necessary but not sufficient**. Before adding a skip you must
+have evidence the drift is by-design: charm source, upstream documentation, an upstream
+issue/PR, or a domain-expert statement (e.g. postgresql-k8s issue confirming PVC retention).
+"The tracker complains and I do not know why" is not evidence - that is exactly the leak case
+a skip must not hide.
+
+### Scope and granularity
+
+- Resource tracking is **Kubernetes-only** today. Valid skip kinds are the tracked
+  `resource_type` values: `pvc`, `statefulset`, `deployment`, `service`, `configmap`,
+  `secret`, `serviceaccount`, `role`, `rolebinding`, `networkpolicy`, `ingress`.
+- The skip is **per resource kind**, applied per charm-version criteria block. It suppresses
+  *all* drift of that kind for that version, including a future genuine leak of the same
+  kind. Keep the skip on the narrowest set of version blocks that actually exhibit the
+  behaviour, and never widen it to kinds that are still consistent.
+
+---
+
 ## Guided Workflows
 
 ### write_new_override
@@ -254,6 +315,110 @@ poetry run bundle-builder-x --spec /tmp/test.yaml --overrides ./static/charm-ove
 
 Inspect the diagram: does the bundle contain the apps you would expect for a real deployment of this charm?
 
+### write_resource_inconsistency_override
+
+Use this workflow to record an expected resource inconsistency via `resource_tracking.skip`.
+Read the `Resource Inconsistency Overrides` section above first. The five steps below cover
+starting the VM test environment and then the four acceptance criteria: confirm necessity,
+add the override, validate with and without it, and confirm the expected result.
+
+1. **Start a fresh VM test environment.** Validation must run against a clean substrate, so
+   provision the sandbox and install only the Kubernetes prerequisites (resource tracking is
+   Kubernetes-only), using the existing skills rather than ad-hoc commands.
+
+   Before provisioning anything, **offer the user a choice** — do not silently start a long,
+   resource-heavy VM run:
+   - `Run validation on sandbox` - proceed with the provisioning and the without/with runs
+     below.
+   - `Do not run validation on sandbox` - stop after the research/evidence steps and hand back
+     the candidate override clearly labelled as unverified (no VM run).
+
+   Only continue with the rest of this step if the user picks `Run validation on sandbox`:
+   - *Provision the VM (host side).* Use the development sandbox to get a clean VM. For a
+     truly fresh environment, recycle any existing one first:
+     ```bash
+     scripts/sandbox.sh destroy   # only if a stale VM exists
+     scripts/sandbox.sh up        # create/resume the VM and install deps
+     scripts/sandbox.sh run --interactive   # or: scripts/sandbox.sh shell
+     ```
+   - *Install substrates and logging tools (inside the VM).* Run the `/setup-charm-tests`
+     skill scoped to Kubernetes; it installs Canonical k8s plus the crashdump/kubectl tooling
+     and leaves controller bootstrap to the test suite:
+     ```bash
+     /setup-charm-tests --platform kubernetes
+     ```
+   - *Export the per-cloud kubeconfig env var (required).* Resource tracking only runs when the
+     suite can build a `KubernetesClient` for the target cloud, which it does from a
+     `KUBECONFIG_<cloud>` env var (hyphens become underscores), **not** from plain `KUBECONFIG`.
+     For the `local-k8s` cloud used here, export the kubeconfig written by `/setup-k8s`:
+     ```bash
+     export KUBECONFIG_local_k8s=/home/ubuntu/k8s.yaml
+     ```
+     If this is missing, the client is silently `None`: `test_pod_deletion` fails with
+     "KubernetesClient was not instantiated correctly", no snapshots are collected, and
+     `test_resource_consistency_report` passes vacuously - a false green that proves nothing.
+   The actual test runs go through the `/run-charm-tests` skill (`scripts/run-tests.sh`);
+   follow that skill for the full set of required parameters (e.g. `--target-application`,
+   `--mermaid-output`, and the empty `--*-controller-bootstrap-constraints`). The commands in
+   the next steps show only the flags specific to this workflow.
+
+   **Run only the affected tests, not the whole suite.** Resource drift is produced solely by
+   the state transitions that mutate Kubernetes resources: scaling down and back up
+   (`test_scale_in_and_scale_out`), deleting a pod (`test_pod_deletion`), and removing then
+   redeploying the application (`test_idempotent_redeploy`, which the scheduler reaches via the
+   injected `test_teardown` bridge - the classic remove-then-redeploy cycle that leaves a
+   retained PVC). The end-of-suite `test_resource_consistency_report` is unmarked and computes
+   the discrepancies. Select exactly those tests with pytest `-k`; the state scheduler is
+   Dijkstra-based, so it automatically injects only the setup bridges needed to reach them
+   (`test_build_bundle` -> `test_bootstrap_controller` -> `test_create_model` -> `test_deploy`,
+   plus `test_teardown`) and skips the slow, resource-irrelevant states (charm upgrade/downgrade,
+   old-revision deploy, controller upgrade, controller restart, model migration,
+   remove-and-restore). This reproduces the same resource-tracking behaviour in a fraction of the
+   time. `test_resource_consistency_report` **must** be named in `-k`: it is unmarked, so pytest
+   would otherwise deselect it before the scheduler can append it. Reuse this exact `-k`
+   expression for both the without-skip and with-skip runs:
+   ```bash
+   -k "test_scale_in_and_scale_out or test_pod_deletion or test_idempotent_redeploy or test_resource_consistency_report"
+   ```
+2. **Confirm the override is necessary.** Two things must both hold:
+   - *Reproduce the drift.* On the fresh VM, run only the affected tests (see the `-k` selection
+     above) for the affected charm/state with an overrides directory that does **not** contain
+     the skip, and confirm the end-of-suite report fails with
+     `resource_discrepancy:<kind>:<qualifier>` for that charm's application. Copy the overrides so
+     the skip can be removed without disturbing the rest (the bundle still needs the other
+     overrides to build):
+     ```bash
+     cp -r static/charm-overrides /tmp/overrides-no-skip
+     # edit /tmp/overrides-no-skip/<charm>.yaml to delete only the resource_tracking block
+     ./scripts/run-tests.sh \
+       -k "test_scale_in_and_scale_out or test_pod_deletion or test_idempotent_redeploy or test_resource_consistency_report" \
+       --target-cloud "local-k8s" --target-charm "<charm>" --target-endpoint "<endpoint>" \
+       --neighbor-charm "<neighbor>" --neighbor-endpoint "<endpoint>" \
+       --current-state "no_bundle" \
+       --charm-overrides "/tmp/overrides-no-skip" \
+       --log-dir "./test-logs-without"
+     ```
+   - *Prove it is by-design.* Gather evidence (charm source, upstream docs, an upstream
+     issue/PR, or a domain-expert statement) that the retention is inherent, not a leak. If
+     you cannot, stop: this is a candidate bug report, not a skip.
+3. **Add the resource override.** In `static/charm-overrides/<charm>.yaml` add
+   `resource_tracking: skip: [<kind>]` to the criteria block(s) for the affected version(s)
+   only (create the file via `write_new_override` conventions if it does not exist). When
+   several version blocks share the same behaviour, use a YAML anchor as `postgresql-k8s.yaml`
+   does (`&resource_tracking` / `*resource_tracking`). Add a one-line evidence comment above
+   the block citing the source/issue.
+4. **Validate with and without the override.** Re-run the same affected-tests scenario twice on
+   the fresh VM, using the identical `-k` selection from step 1 both times so only the resource
+   state transitions differ:
+   - *Without* (from step 2): `--charm-overrides /tmp/overrides-no-skip` -> the report must
+     fail with `resource_discrepancy:<kind>:<qualifier>`.
+   - *With*: `--charm-overrides ./static/charm-overrides/` -> the resource-consistency report
+     must pass for that kind, while every other resource kind stays tracked.
+5. **Confirm the test outputs the correct expected result.** Assert the
+   `resource_discrepancy:<kind>:<qualifier>` entry is **present** in the without-override run
+   and **absent** in the with-override run, and that unrelated discrepancies (other kinds) are
+   still reported in both. Record the two report outcomes as evidence in the PR description.
+
 ---
 
 ## Self-Validation Checklist
@@ -267,6 +432,14 @@ Inspect the diagram: does the bundle contain the apps you would expect for a rea
 7. **No Meaning 2 misuse** - no endpoint marked `optional: true` solely to suppress solver sprawl
 8. **Realistic bundle** - solver run produces a bundle you would actually deploy (not a lone charm, not missing obvious dependencies)
 9. **Cross-reference** - compare patterns with similar overrides in `static/charm-overrides/`
+
+Additional checks for `resource_tracking.skip` entries:
+
+10. **Real kind** - every skipped name is a tracked `resource_type` (`pvc`, `statefulset`, `deployment`, `service`, `configmap`, `secret`, `serviceaccount`, `role`, `rolebinding`, `networkpolicy`, `ingress`)
+11. **Scoped to the affected version** - the skip is only in the criteria block(s) that exhibit the drift, not the whole file
+12. **By-design evidence** - a one-line comment cites source/docs/issue proving the drift is inherent, not a leak
+13. **Not masking a leak** - the skip suppresses only the expected kind; other kinds remain tracked and no genuine leak is being silenced
+14. **Resource check test ran** - `test_resource_consistency_report` was included in the `-k` selection for both runs (it is unmarked and required; if omitted, pytest deselects it and nothing is checked)
 
 ---
 
@@ -506,6 +679,14 @@ If the bundle pulls in something unexpected, check whether that endpoint should 
 9. **Writing evidence-free overrides.** If a future maintainer cannot verify why an endpoint is marked required or optional by reading the comment, the override is incomplete.
 
 10. **Writing evidence-bloated overrides.** A multi-line comment quoting source code, listing every revision number checked, or narrating the investigation is just as much a maintenance problem as no comment at all - it goes stale and nobody rereads it. One line, a pointer to the file/function, done. See the Comment Budget rule under "File Format".
+
+11. **Skipping a resource kind to silence a genuine leak.** `resource_tracking.skip` is only for drift the charm causes by design. A real leak firing the tracker is the correct signal; fix the charm, do not skip.
+
+12. **Skipping too broadly.** Putting the skip in a shared/fallback block, or skipping a kind that is still consistent, hides future regressions. Scope it to the version blocks that actually exhibit the behaviour, and only the kind that drifts.
+
+13. **Treating a bare reproduction as justification.** Reproducing the discrepancy proves it happens, not that it is expected. A skip still needs by-design evidence (source/docs/issue).
+
+14. **Omitting the resource check test from the `-k` selection.** `test_resource_consistency_report` is the test that computes the discrepancies, and it is unmarked, so pytest deselects it whenever `-k` does not name it - leaving the run green because nothing checked. It is a required test: always include `test_resource_consistency_report` in the `-k` expression for both the without-skip and with-skip runs.
 
 ---
 
