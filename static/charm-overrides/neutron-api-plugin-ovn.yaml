@@ -1,6 +1,5 @@
 ---
-# nrpe-external-master does not exist in any published channel of neutron-api-plugin-ovn
-# listed: false -- Excluded from automated bundle building (SQT-1081) to prevent
-# pipeline congestion; not currently covered by Charm QA.
-listed: false
-overrides: []
+# neutron-api-plugin-ovn: listed on Charmhub, but not currently covered by Charm QA (SQT-1081).
+overrides:
+  - assumes:
+      - unsupported-openstack

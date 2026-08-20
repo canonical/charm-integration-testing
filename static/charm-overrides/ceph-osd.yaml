@@ -1,22 +1,12 @@
 ---
-# Override for ceph-osd
-# Source: https://github.com/canonical/ceph-charms/tree/main/ceph-osd
-# Upstream PR: https://github.com/canonical/ceph-charms/pull/185
+# ceph-osd: Source: https://github.com/canonical/ceph-charms/tree/main/ceph-osd
 #
-# Endpoint set is identical across all stable tracks; no criteria blocks needed.
+# mon (requires): REQUIRED - connects to ceph-mon:osd for bootstrap/auth.
+# secrets-storage (requires): optional - only when osd-encrypt=True + vault.
+# nrpe-external-master (provides): optional - monitoring only.
 #
-# mon (requires): REQUIRED - connects to ceph-mon:osd for bootstrap keys and
-#   cluster auth. The charm cannot join the cluster without this relation.
-#
-# secrets-storage (requires): optional - only used when osd-encrypt=True and
-#   osd-encrypt-keymanager=vault. Gated entirely behind use_vaultlocker();
-#   off by default.
-#
-# nrpe-external-master (provides): optional - NRPE monitoring only;
-#   activates on relation events, no blocking when absent.
-# listed: false -- Excluded from automated bundle building (SQT-1081) to prevent
-# pipeline congestion; not currently covered by Charm QA.
-listed: false
+# assumes: [unsupported-openstack] -- listed on Charmhub, but not currently covered by Charm QA
+#   (SQT-1081); this blocks the charm from being built directly.
 overrides:
   - requires:
       secrets-storage:
@@ -24,3 +14,5 @@ overrides:
     provides:
       nrpe-external-master:
         optional: true
+    assumes:
+      - unsupported-openstack

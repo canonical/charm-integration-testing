@@ -1,10 +1,10 @@
 ---
-# listed: false -- Excluded from automated bundle building (SQT-1081) to prevent
-# pipeline congestion; not currently covered by Charm QA.
-listed: false
+# manila-ganesha: listed on Charmhub, but not currently covered by Charm QA (SQT-1081).
 overrides:
   # ussuri-yoga: nrpe-external-master not yet available
-  - criteria:
+  - assumes: &unsupported
+      - unsupported-openstack
+    criteria:
       - any_of:
           - track: 'ussuri'
           - track: 'victoria'
@@ -12,6 +12,7 @@ overrides:
           - track: 'xena'
           - track: 'yoga'
   # default (zed, 2023.1+, latest, and future tracks): nrpe-external-master
-  - provides:
+  - assumes: *unsupported
+    provides:
       nrpe-external-master:
         optional: true
