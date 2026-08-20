@@ -212,9 +212,9 @@ Failure Information
      - No
      - ``katib-service``
    * - ``resource_discrepancy:<resource_type>:<qualifier>``
-     - A Kubernetes resource discrepancy detected between two visits to the same scheduler state. Collected when ``ResourceDiscrepancyError`` is raised. ``<resource_type>`` identifies the tracked resource (e.g. ``pvc``) and ``<qualifier>`` is the drift kind, generically ``missing`` or ``extra`` (extensible per resource type). Run-specific context is carried in the value as ``state=<state> model=<model> <resource_type>=<name>`` followed by the resource's descriptive attributes. Multiple values may be recorded. See :doc:`../explanation/resource-tracking`.
+     - A Kubernetes resource discrepancy detected between two visits to the same scheduler state. Collected when ``ResourceDiscrepancyError`` is raised. ``<resource_type>`` identifies the tracked resource (e.g. ``pvc``) and ``<qualifier>`` is the drift kind: the generic presence kinds ``missing`` or ``extra``, or a resource-specific modification kind (e.g. ``resized``, ``image_changed``, ``scaled``, ``keys_changed``). Run-specific context is carried in the value as ``state=<state> controller=<controller> model=<model> <resource_type>=<name>`` followed by the resource's attributes: whole for presence kinds, or only the changed attributes as ``key=old->new`` for modification kinds. The controller is included because model names are only unique within a controller. Multiple values may be recorded. See :doc:`../explanation/resource-tracking`.
      - Yes
-     - ``state=deployed model=<model> pvc=<name> requested_storage=1Gi storage_class=csi-cephfs``
+     - ``state=deployed controller=<controller> model=<model> pvc=<name> requested_storage=1Gi->2Gi``
 
 Skip Information
 ~~~~~~~~~~~~~~~~

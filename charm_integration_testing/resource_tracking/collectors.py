@@ -14,7 +14,7 @@ collectors produce and knows nothing about namespaces or Kubernetes clients.
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -29,8 +29,15 @@ from .sources import KubernetesResourceSource, PvcSource
 
 @dataclass(frozen=True)
 class CollectedResources:
-    """Snapshots collected for a single tracked scope (e.g. a Juju model)."""
+    """Snapshots collected for a single tracked scope (a Juju model on a controller).
 
+    ``model`` names are only unique *within* a controller, so a CMR run can hold
+    e.g. ``controller-a:model`` and ``controller-b:model``.  ``controller`` is
+    carried alongside ``model`` so downstream baselines and skip keys never
+    conflate two same-named models on different clusters.
+    """
+
+    controller: str
     model: str
     snapshots: frozenset[ResourceSnapshot]
 
@@ -58,10 +65,10 @@ class KubernetesResourceCollector:
     that is not Kubernetes-based (or whose client cannot be resolved) simply
     contributes no snapshots.
 
-    Resources can be excluded per application via ``resource_skips``: a mapping
-    of application name to the resource types that application opts out of.  A
-    snapshot is dropped when its owning application skips its resource type, so
-    the same model can still track that resource type for other applications.
+    Every observed snapshot is recorded uniformly; per-application opt-outs are
+    not applied here.  Skips are excluded at diff time in
+    :func:`~resource_tracking.discrepancy.calculate_discrepancies`, so a
+    per-visit resolution difference cannot make a skipped kind read as drift.
     """
 
     def __init__(
@@ -69,12 +76,10 @@ class KubernetesResourceCollector:
         juju_backend: JujuBackend,
         resource_registry: ResourceRegistry,
         sources: Sequence[KubernetesResourceSource] | None = None,
-        resource_skips: Mapping[str, frozenset[str]] | None = None,
     ) -> None:
         self._juju_backend = juju_backend
         self._resource_registry = resource_registry
         self._sources: tuple[KubernetesResourceSource, ...] = tuple(sources) if sources is not None else (PvcSource(),)
-        self._resource_skips: Mapping[str, frozenset[str]] = resource_skips if resource_skips is not None else {}
 
     def collect(self, logger: logging.Logger) -> list[CollectedResources]:
         collected: list[CollectedResources] = []
@@ -96,12 +101,10 @@ class KubernetesResourceCollector:
                 try:
                     snapshots.update(source.collect(kubernetes_client, handle.model))
                 except ApiException as exc:
-                    # A model whose namespace does not exist (e.g. a non-Kubernetes
-                    # model) is skipped rather than raising.
-                    logger.debug("Skipping resource snapshot for model '%s'", handle.model, exc_info=exc)
-            tracked = frozenset(snapshot for snapshot in snapshots if not self._is_skipped(snapshot))
-            collected.append(CollectedResources(model=handle.model, snapshots=tracked))
+                    logger.debug("Skipping model '%s' (resource snapshot failed)", handle.model, exc_info=exc)
+                    break
+            else:
+                collected.append(
+                    CollectedResources(controller=handle.controller, model=handle.model, snapshots=frozenset(snapshots))
+                )
         return collected
-
-    def _is_skipped(self, snapshot: ResourceSnapshot) -> bool:
-        return snapshot.resource_type in self._resource_skips.get(snapshot.application, frozenset())
