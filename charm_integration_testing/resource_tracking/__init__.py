@@ -8,23 +8,25 @@ from .discrepancy import (
     Discrepancy,
     DiscrepancyEntry,
     ModelResourceDiscrepancy,
+    QualifiedSnapshot,
     ResourceDiscrepancyError,
     calculate_discrepancies,
     diff_snapshots,
 )
-from .snapshot import PvcSnapshot, ResourceSnapshot
-from .sources import KubernetesResourceSource, PvcSource
+from .snapshot import InconsistencyCheck, ResourceSnapshot
+from .sources import DEFAULT_KUBERNETES_SOURCES, KubernetesResourceSource
 from .tracker import ResourceObservation, StateResourceTracker
 
 __all__ = [
+    "DEFAULT_KUBERNETES_SOURCES",
     "CollectedResources",
     "Discrepancy",
     "DiscrepancyEntry",
+    "InconsistencyCheck",
     "KubernetesResourceCollector",
     "KubernetesResourceSource",
     "ModelResourceDiscrepancy",
-    "PvcSnapshot",
-    "PvcSource",
+    "QualifiedSnapshot",
     "ResourceCollector",
     "ResourceDiscrepancyError",
     "ResourceObservation",
