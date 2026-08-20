@@ -401,7 +401,7 @@ class TestCharmhubClient:
             # THEN it succeeds normally
             assert charm.name == "aodh"
 
-        def test_bundle_builder_fails_for_delisted_charm_requested_directly(self) -> None:
+        def test_bundle_builder_fails_for_charm_with_unsupported_sentinel_requested_directly(self) -> None:
             """End-to-end check that ``BundleBuilder.build()`` fails with a clear
             ``UncompletableBundleError`` when a spec directly requests an application
             backed by a charm marked unsupported via a sentinel ``assumes`` feature.
