@@ -1232,9 +1232,9 @@ class TestUncompletableBundleErrorUnresolvedApplicationsAndIntegrations:
         assert str(forward) == str(reversed_order)
         assert str(forward).index("alpha:ep") < str(forward).index("zebra:ep")
 
-    def test_unresolved_applications_take_priority_over_everything_else(self) -> None:
-        # GIVEN an unresolved application alongside an unresolved integration, an unfulfilled
-        # endpoint, and a feature mismatch
+    def test_unfulfilled_endpoints_take_priority_over_everything_else(self) -> None:
+        # GIVEN an unfulfilled endpoint alongside a feature mismatch, an unresolved integration,
+        # and an unresolved application
         app_info = UnresolvedApplicationInfo(application="neighbor", charm_name="kafka")
         integration_info = UnresolvedIntegrationInfo(
             endpoints=[
@@ -1261,40 +1261,73 @@ class TestUncompletableBundleErrorUnresolvedApplicationsAndIntegrations:
             unresolved_integrations=[integration_info],
         )
 
-        # THEN the unresolved-application message takes priority
+        # THEN the unfulfilled-endpoint message takes priority
         message = str(error)
-        assert "kafka" in message
-        assert "kafka2:trusted-certificate" not in message
-        assert "postgresql:db" not in message
+        assert "postgresql:db" in message
         assert "katib-service" not in message
+        assert "kafka2:trusted-certificate" not in message
+        assert "kafka" not in message
         # but the other properties are still populated for callers that want them directly
+        assert error.unresolved_applications == [app_info]
         assert error.unresolved_integrations == [integration_info]
-        assert error.unfulfilled_endpoints[0].charm_name == "postgresql"
         assert error.feature_mismatches == [mismatch]
 
-    def test_unresolved_integrations_take_priority_over_unfulfilled_endpoints(self) -> None:
-        # GIVEN an unresolved integration alongside an unfulfilled endpoint (no unresolved
-        # application)
+    def test_feature_mismatches_take_priority_over_unresolved_integrations_and_applications(self) -> None:
+        # GIVEN a feature mismatch alongside an unresolved integration and an unresolved
+        # application (no unfulfilled endpoint)
+        app_info = UnresolvedApplicationInfo(application="neighbor", charm_name="kafka")
         integration_info = UnresolvedIntegrationInfo(
             endpoints=[
                 UnresolvedIntegrationEndpointInfo(application="target", endpoint="client", charm_name="easyrsa"),
                 UnresolvedIntegrationEndpointInfo(
-                    application="neighbor", endpoint="trusted-certificate", charm_name="kafka"
+                    application="neighbor2", endpoint="trusted-certificate", charm_name="kafka2"
                 ),
             ]
         )
-        non_optional = CharmEndpointNonOptionalTag(
-            charm=CharmEndpointPayload(charm_name="postgresql", charm_id=0, endpoint="db"),
-            interface="pgsql",
+        mismatch = IntegrationFeatureMismatchTag(
+            requires=CharmEndpointPayload(charm_name="katib-controller", charm_id=1, endpoint="k8s-service-info"),
+            provides=CharmEndpointPayload(charm_name="kfp-viz", charm_id=2, endpoint="kfp-viz"),
+            feature="katib-service",
         )
 
         # WHEN constructing the error without an explicit reason
-        error = UncompletableBundleError(unsat_core=[non_optional], unresolved_integrations=[integration_info])
+        error = UncompletableBundleError(
+            unsat_core=[mismatch],
+            unresolved_applications=[app_info],
+            unresolved_integrations=[integration_info],
+        )
+
+        # THEN the feature-mismatch message takes priority
+        message = str(error)
+        assert "katib-service" in message
+        assert "kafka2:trusted-certificate" not in message
+        assert "kafka" not in message
+        # but the other properties are still populated for callers that want them directly
+        assert error.unresolved_applications == [app_info]
+        assert error.unresolved_integrations == [integration_info]
+
+    def test_unresolved_integrations_take_priority_over_unresolved_applications(self) -> None:
+        # GIVEN an unresolved integration alongside an unresolved application (no unfulfilled
+        # endpoint or feature mismatch)
+        app_info = UnresolvedApplicationInfo(application="neighbor", charm_name="kafka")
+        integration_info = UnresolvedIntegrationInfo(
+            endpoints=[
+                UnresolvedIntegrationEndpointInfo(application="target", endpoint="client", charm_name="easyrsa"),
+                UnresolvedIntegrationEndpointInfo(
+                    application="neighbor2", endpoint="trusted-certificate", charm_name="kafka2"
+                ),
+            ]
+        )
+
+        # WHEN constructing the error without an explicit reason
+        error = UncompletableBundleError(unresolved_applications=[app_info], unresolved_integrations=[integration_info])
 
         # THEN the unresolved-integration message takes priority
         message = str(error)
-        assert "kafka:trusted-certificate" in message
-        assert "postgresql:db" not in message
+        assert "kafka2:trusted-certificate" in message
+        assert message.count("kafka") == 1
+        # but unresolved_applications is still populated for callers that want it directly
+        assert error.unresolved_applications == [app_info]
 
 
 def _domain_for_unresolved_diagnostics() -> Domain:

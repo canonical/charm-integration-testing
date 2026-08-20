@@ -114,20 +114,7 @@ class UncompletableBundleError(ValueError):
         self.unresolved_applications = list(unresolved_applications) if unresolved_applications is not None else []
         self.unresolved_integrations = list(unresolved_integrations) if unresolved_integrations is not None else []
         if reason is None:
-            if self.unresolved_applications:
-                reason = "Cannot resolve application(s) to a charm: " + ", ".join(
-                    f"{info.application} ({info.charm_name})"
-                    for info in sorted(self.unresolved_applications, key=lambda i: i.application)
-                )
-            elif self.unresolved_integrations:
-                reason = "Unresolved integration(s): " + ", ".join(
-                    "/".join(f"{ep.charm_name}:{ep.endpoint}" for ep in _sorted_endpoints(integration.endpoints))
-                    for integration in sorted(
-                        self.unresolved_integrations,
-                        key=lambda i: [(ep.charm_name, ep.endpoint) for ep in _sorted_endpoints(i.endpoints)],
-                    )
-                )
-            elif self.unfulfilled_endpoints:
+            if self.unfulfilled_endpoints:
                 reason = f"Cannot fulfill charm endpoints: {', '.join(f'{ep.charm_name}:{ep.endpoint}' for ep in sorted(self.unfulfilled_endpoints, key=lambda e: (e.charm_name, e.endpoint)))}"
             elif self.feature_mismatches:
                 reason = "Charm endpoints have mutually incompatible feature tags: " + ", ".join(
@@ -137,6 +124,19 @@ class UncompletableBundleError(ValueError):
                         self.feature_mismatches,
                         key=lambda m: (m.requires.charm_name, m.requires.endpoint, m.feature),
                     )
+                )
+            elif self.unresolved_integrations:
+                reason = "Unresolved integration(s): " + ", ".join(
+                    "/".join(f"{ep.charm_name}:{ep.endpoint}" for ep in _sorted_endpoints(integration.endpoints))
+                    for integration in sorted(
+                        self.unresolved_integrations,
+                        key=lambda i: [(ep.charm_name, ep.endpoint) for ep in _sorted_endpoints(i.endpoints)],
+                    )
+                )
+            elif self.unresolved_applications:
+                reason = "Cannot resolve application(s) to a charm: " + ", ".join(
+                    f"{info.application} ({info.charm_name})"
+                    for info in sorted(self.unresolved_applications, key=lambda i: i.application)
                 )
             else:
                 reason = "Cannot expand domain to handle failed assertion tags"
