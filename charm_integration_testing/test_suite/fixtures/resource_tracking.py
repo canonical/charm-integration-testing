@@ -19,8 +19,7 @@ from pathlib import Path
 from typing import Iterator
 
 import pytest
-from juju import JujuClient
-from juju.resource_registry import JujuModelHandle
+from juju import JujuClient, JujuModelHandle
 from kubernetes_client import KubernetesClient
 from resource_registry import ResourceRegistry
 from resource_tracking import (

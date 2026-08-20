@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 import pytest
-from juju.resource_registry import JujuModelHandle
+from juju import JujuModelHandle
 from pydantic import TypeAdapter, ValidationError
 from utils import generate_juju_name
 

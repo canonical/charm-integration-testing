@@ -18,7 +18,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
-from juju.resource_registry import JujuModelHandle
+from juju import JujuModelHandle
 from kubernetes.client import ApiException  # type: ignore[import-untyped]
 from kubernetes_client import KubernetesClient
 from resource_registry import ResourceRegistry

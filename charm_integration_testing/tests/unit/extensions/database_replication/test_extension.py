@@ -8,8 +8,8 @@ import pytest
 from extensions.database_replication.database_client import DatabaseClient
 from extensions.database_replication.database_replicator import CharmInfo
 from extensions.database_replication.extension import GenericDatabaseReplicationExtension
+from juju import JujuModelHandle
 from juju.models import JujuIntegrationApplication
-from juju.resource_registry.handles import JujuModelHandle
 
 from ..shared import JujuStub as JujuStubBase
 
@@ -47,7 +47,7 @@ class JujuStub(JujuStubBase):
     )
     units: dict[str, int] = field(default_factory=lambda: {"postgresql-1": 3, "postgresql-2": 3})
 
-    def num_units(self, model: JujuModelHandle | str, application: str) -> int:
+    def num_units(self, model: JujuModelHandle, application: str) -> int:
         """Return the number of units for an application"""
         return self.units.get(application, 0)
 

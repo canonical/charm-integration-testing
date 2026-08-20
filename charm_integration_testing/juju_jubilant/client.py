@@ -5,16 +5,12 @@
 from datetime import timedelta
 
 import jubilant
-from juju.resource_registry.handles import JujuModelHandle
+from juju import JujuModelHandle
 
 
 class JubilantClient:
-    def model(self, model: JujuModelHandle | str | None) -> jubilant.Juju:
-        # Most callers pass a JujuModelHandle. A handful of call sites (e.g. Kubernetes-pod
-        # hooks) only ever see a bare k8s namespace/model name with no controller available,
-        # so a plain str is accepted as-is for backward compatibility.
-        model_str = model.uri if isinstance(model, JujuModelHandle) else model
+    def model(self, model: JujuModelHandle | None) -> jubilant.Juju:
         return jubilant.Juju(
-            model=model_str,
+            model=model.uri if model is not None else None,
             wait_timeout=timedelta(days=1).total_seconds(),
         )

@@ -204,7 +204,7 @@ class TestS3IntegratorMinIOBackendExtension:
 
             results = generate_results()
 
-            def ssh_errors_once(model: JujuModelHandle | str, target: str, command: str) -> None:
+            def ssh_errors_once(model: JujuModelHandle, target: str, command: str) -> None:
                 result = next(results)
                 if isinstance(result, CalledProcessError):
                     raise result
@@ -224,7 +224,7 @@ class TestS3IntegratorMinIOBackendExtension:
         def test_alias_max_attempts_exceeded(
             self, extension: S3IntegratorMinIOBackendExtension, juju: JujuStub, monkeypatch: pytest.MonkeyPatch
         ) -> None:
-            def ssh_errors(model: JujuModelHandle | str, target: str, command: str) -> None:
+            def ssh_errors(model: JujuModelHandle, target: str, command: str) -> None:
                 raise CalledProcessError(1, "bad-command")
 
             monkeypatch.setattr(juju, "ssh", ssh_errors)

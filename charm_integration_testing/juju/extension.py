@@ -5,7 +5,7 @@ from abc import ABC
 
 from validators.base import ValidationResult
 
-from .resource_registry.handles import JujuModelHandle
+from .handles import JujuModelHandle
 
 
 class JujuExtension(ABC):

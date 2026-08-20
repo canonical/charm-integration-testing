@@ -11,8 +11,8 @@ from extensions.validator_injection.extension import (
     ValidatorInjectorExtension,
     remote_validators_path,
 )
+from juju import JujuModelHandle
 from juju.backend import JujuExecOutput
-from juju.resource_registry.handles import JujuModelHandle
 
 from validators.base import ValidationResult
 from validators.runner import ValidatorRunnerResults

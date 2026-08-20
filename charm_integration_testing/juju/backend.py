@@ -14,8 +14,8 @@ from pydantic.dataclasses import dataclass
 
 from validators.base.validator import ValidationResult
 
+from .handles import JujuModelHandle
 from .models import JujuApplicationInfo, JujuConsumedOfferInfo, JujuIntegration, JujuIntegrationApplication
-from .resource_registry.handles import JujuModelHandle
 from .version import JujuVersion
 
 _P = ParamSpec("_P")

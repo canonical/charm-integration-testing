@@ -18,10 +18,9 @@ from extensions.unseal_vault.vault_client import (
     VaultTokenSecret,
 )
 from extensions.unseal_vault.vault_unsealer import CharmInfo, VaultUnsealer, order_apps_by_dependency
-from juju import JujuExecOutput, JujuWaitTimeoutError
+from juju import JujuExecOutput, JujuModelHandle, JujuWaitTimeoutError
 from juju.backend import JujuTask
 from juju.models import JujuApplicationInfo, JujuIntegration, JujuIntegrationApplication
-from juju.resource_registry.handles import JujuModelHandle
 
 from ..shared import NullJujuBackend
 

@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 from resource_registry.protocols import ResourceHandle
 
-from .handles import JujuControllerHandle
+from juju import JujuControllerHandle
 
 if TYPE_CHECKING:
     from juju.backend import JujuBackend

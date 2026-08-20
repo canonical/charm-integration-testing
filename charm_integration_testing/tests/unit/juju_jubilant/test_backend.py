@@ -11,8 +11,14 @@ from unittest.mock import patch
 import jubilant
 import pytest
 import yaml
-from juju import CharmChannel, JujuConsumedOfferInfo, JujuIntegrationApplication, JujuWaitState, JujuWaitTimeoutError
-from juju.resource_registry.handles import JujuModelHandle
+from juju import (
+    CharmChannel,
+    JujuConsumedOfferInfo,
+    JujuIntegrationApplication,
+    JujuModelHandle,
+    JujuWaitState,
+    JujuWaitTimeoutError,
+)
 from juju.version import JujuVersion
 from juju_jubilant.backend import JubilantBackend
 from juju_jubilant.client import JubilantClient
@@ -131,7 +137,7 @@ class JubilantClientStub(JubilantClient):
     def __init__(self, client: Any) -> None:
         self.client = client
 
-    def model(self, model: JujuModelHandle | str | None) -> Any:
+    def model(self, model: JujuModelHandle | None) -> Any:
         return self.client
 
 
@@ -242,7 +248,7 @@ class WaitStub:
 
     def wait(
         self,
-        model: JujuModelHandle | str,
+        model: JujuModelHandle,
         ready: Callable[[jubilant.Status], tuple[bool, JujuWaitState]],
         error: Callable[[jubilant.Status], tuple[bool, JujuWaitState]] | None = None,
         timeout: timedelta | None = None,
@@ -296,7 +302,7 @@ class TestJubilantBackend:
 
             # WHEN wait is called with a ready condition that is immediately true
             backend.wait(
-                "test-model",
+                TEST_MODEL,
                 ready=lambda status: (True, JujuWaitState(message="ready")),
                 timeout=timedelta(seconds=10),
                 successes=3,
@@ -315,7 +321,7 @@ class TestJubilantBackend:
             # WHEN wait is called with a ready condition that is never true
             with pytest.raises(JujuWaitTimeoutError) as exc_info:
                 backend.wait(
-                    "test-model",
+                    TEST_MODEL,
                     ready=lambda status: (False, JujuWaitState(message="not ready")),
                     timeout=timedelta(milliseconds=100),
                     successes=3,
@@ -344,7 +350,7 @@ class TestJubilantBackend:
             # WHEN wait times out while always being ready with strict_timeout=True
             with pytest.raises(JujuWaitTimeoutError) as exc_info:
                 backend.wait(
-                    "test-model",
+                    TEST_MODEL,
                     ready=ready_func,
                     timeout=timedelta(milliseconds=100),
                     successes=100,  # Need 100 successes but will timeout
@@ -365,7 +371,7 @@ class TestJubilantBackend:
             # WHEN wait is called with an error condition that triggers
             with pytest.raises(JujuWaitTimeoutError) as exc_info:
                 backend.wait(
-                    "test-model",
+                    TEST_MODEL,
                     ready=lambda status: (False, JujuWaitState(message="not ready")),
                     error=lambda status: (True, JujuWaitState(message="error occurred")),
                     timeout=timedelta(seconds=10),
@@ -464,7 +470,7 @@ class TestJubilantBackend:
 
             # WHEN wait is called with strict_timeout=False (default) and making progress
             backend.wait(
-                "test-model",
+                TEST_MODEL,
                 ready=ready_func,
                 timeout=timedelta(milliseconds=50),  # Very short timeout
                 successes=10,  # Need 10 successes
@@ -493,7 +499,7 @@ class TestJubilantBackend:
             # WHEN wait is called with strict_timeout=True
             with pytest.raises(JujuWaitTimeoutError) as exc_info:
                 backend.wait(
-                    "test-model",
+                    TEST_MODEL,
                     ready=ready_func,
                     timeout=timedelta(milliseconds=50),  # Very short timeout
                     successes=100,  # Need 100 successes (impossible in time)
@@ -636,7 +642,7 @@ class TestJubilantBackend:
             )
 
             class TwoModelClientStub(JubilantClient):
-                def model(self, model: JujuModelHandle | str | None) -> Any:
+                def model(self, model: JujuModelHandle | None) -> Any:
                     model_name = model.model if isinstance(model, JujuModelHandle) else model
                     if model_name == "model-1":
                         return stub_1
@@ -1119,7 +1125,7 @@ class TestJubilantBackend:
             captured_ready: Callable[[jubilant.Status], tuple[bool, JujuWaitState]] | None = None
 
             def capture_wait(
-                model: JujuModelHandle | str,
+                model: JujuModelHandle,
                 ready: Callable[[jubilant.Status], tuple[bool, JujuWaitState]],
                 **kwargs: Any,
             ) -> None:
@@ -1174,7 +1180,7 @@ class TestJubilantBackend:
             captured_ready: Callable[[jubilant.Status], tuple[bool, JujuWaitState]] | None = None
 
             def capture_wait(
-                model: JujuModelHandle | str,
+                model: JujuModelHandle,
                 ready: Callable[[jubilant.Status], tuple[bool, JujuWaitState]],
                 **kwargs: Any,
             ) -> None:
@@ -1229,7 +1235,7 @@ class TestJubilantBackend:
             captured_ready: Callable[[jubilant.Status], tuple[bool, JujuWaitState]] | None = None
 
             def capture_wait(
-                model: JujuModelHandle | str,
+                model: JujuModelHandle,
                 ready: Callable[[jubilant.Status], tuple[bool, JujuWaitState]],
                 **kwargs: Any,
             ) -> None:
@@ -2358,7 +2364,7 @@ class TestDeployBundleFile:
         captured_ready: Callable[[jubilant.Status], tuple[bool, JujuWaitState]] | None = None
 
         def capture_wait(
-            model: JujuModelHandle | str,
+            model: JujuModelHandle,
             ready: Callable[[jubilant.Status], tuple[bool, JujuWaitState]],
             **kwargs: Any,
         ) -> None:
@@ -2430,11 +2436,11 @@ class TestJubilantBackendCliVersion:
 
     def test_passes_none_model_to_client(self) -> None:
         # GIVEN a client stub that records which model was requested
-        requested_models: list[JujuModelHandle | str | None] = []
+        requested_models: list[JujuModelHandle | None] = []
         version_stub = self.VersionStub()
 
         class TrackingClient(JubilantClientStub):
-            def model(self, model: JujuModelHandle | str | None) -> Any:
+            def model(self, model: JujuModelHandle | None) -> Any:
                 requested_models.append(model)
                 return version_stub
 
@@ -2451,14 +2457,14 @@ class TestJubilantBackendDebugLog:
     def test_debug_log_calls_client_debug_log(self) -> None:
         # GIVEN a client stub that returns a debug log message
         class ModelStub:
-            def __init__(self, model: JujuModelHandle | str) -> None:
+            def __init__(self, model: JujuModelHandle) -> None:
                 self.model = model.model if isinstance(model, JujuModelHandle) else model
 
             def debug_log(self) -> str:
                 return f"this is a debug log for model {self.model}"
 
         class DebugClient(JubilantClientStub):
-            def model(self, model: JujuModelHandle | str | Any) -> Any:
+            def model(self, model: JujuModelHandle | Any) -> Any:
                 return ModelStub(model=model)
 
         client = DebugClient(client=None)

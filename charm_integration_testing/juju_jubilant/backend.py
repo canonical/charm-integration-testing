@@ -25,6 +25,7 @@ from juju import (
     JujuExecOutput,
     JujuIntegration,
     JujuIntegrationApplication,
+    JujuModelHandle,
     JujuStatusPerformanceWarning,
     JujuTask,
     JujuVersion,
@@ -32,7 +33,6 @@ from juju import (
     JujuWaitTimeoutError,
     warn_performance,
 )
-from juju.resource_registry.handles import JujuModelHandle
 from juju_cmd import JujuCmdBackend
 from kubernetes_client import KubernetesBackend, KubernetesClient
 from tenacity import retry, stop_after_attempt, wait_fixed
@@ -99,16 +99,12 @@ class TransientModelUnavailabilityError(jubilant.CLIError):
     """
 
 
-def _is_transient_model_unavailability_error(error: jubilant.CLIError, model: JujuModelHandle | str) -> bool:
+def _is_transient_model_unavailability_error(error: jubilant.CLIError, model: JujuModelHandle) -> bool:
     """Detect CLIErrors that mean "model temporarily unreachable due to migration"."""
     err_msg = error.stderr.lower()
     # e.stderr: 'ERROR model pytest-tmp-controller-n84qeh17:admin/debug-test-1 not found\n'
-    if isinstance(model, JujuModelHandle):
-        is_missing = "not found" in err_msg and model.controller.lower() in err_msg and model.model.lower() in err_msg
-    else:
-        # No controller available (e.g. a bare k8s namespace) - fall back to matching on
-        # whatever parts of the model string we do have.
-        is_missing = "not found" in err_msg and all(p in err_msg for p in model.lower().split(":"))
+    controller_matches = model.controller is None or model.controller.lower() in err_msg
+    is_missing = "not found" in err_msg and controller_matches and model.model.lower() in err_msg
     is_migrating = "has been migrated to controller" in err_msg or "migration in progress" in err_msg
     return is_missing or is_migrating
 
@@ -140,7 +136,7 @@ class JubilantBackend(JujuCmdBackend):
         return self._kubernetes_clients[cloud]
 
     @warn_performance(category=JujuStatusPerformanceWarning, threshold=timedelta(seconds=5))
-    def status(self, model: JujuModelHandle | str) -> jubilant.Status:
+    def status(self, model: JujuModelHandle) -> jubilant.Status:
         try:
             return self.client.model(model).status()
         except jubilant.CLIError as e:
@@ -154,7 +150,7 @@ class JubilantBackend(JujuCmdBackend):
 
     def wait(
         self,
-        model: JujuModelHandle | str,
+        model: JujuModelHandle,
         ready: Callable[[jubilant.Status], tuple[bool, JujuWaitState]],
         error: Callable[[jubilant.Status], tuple[bool, JujuWaitState]] | None = None,
         timeout: timedelta | None = None,

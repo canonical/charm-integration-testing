@@ -14,12 +14,12 @@ from juju import (
     JujuExecOutput,
     JujuIntegration,
     JujuIntegrationApplication,
+    JujuModelHandle,
     JujuTask,
     JujuVersion,
     JujuWaitTimeoutError,
 )
 from juju.backend import JujuStatusPerformanceWarning, warn_performance
-from juju.resource_registry.handles import JujuModelHandle
 
 from .cmd import CmdArg, CmdClient, CmdError
 from .structures import JujuModel, JujuSecretInfo, JujuStatus

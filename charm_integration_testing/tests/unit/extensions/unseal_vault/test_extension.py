@@ -28,10 +28,10 @@ class VaultUnsealerStub(VaultUnsealer):
     """Stub VaultUnsealer that records calls instead of touching Juju/Vault."""
 
     def __init__(self, juju: JujuBackendStub | None = None) -> None:
-        self.calls: list[tuple[JujuModelHandle | str, bool]] = []
+        self.calls: list[tuple[JujuModelHandle, bool]] = []
         self.juju = juju or JujuBackendStub()
 
-    def try_init_or_unseal_all_vaults(self, model: JujuModelHandle | str, authorize_charm: bool = True) -> None:
+    def try_init_or_unseal_all_vaults(self, model: JujuModelHandle, authorize_charm: bool = True) -> None:
         self.calls.append((model, authorize_charm))
 
 
@@ -96,9 +96,9 @@ class TestUnsealVaultK8sJujuExtension:
         # WHEN post_delete_pod is called (e.g. after a pod is force-deleted by a test)
         extension.post_delete_pod(TEST_MODEL.model, "vault-k8s-0")
 
-        # THEN the unsealer re-unseals vault, using the namespace as the model, without
-        # re-authorizing the already-authorized charm
-        assert unsealer.calls == [(TEST_MODEL.model, False)]
+        # THEN the unsealer re-unseals vault, using a controller-less handle for the namespace,
+        # without re-authorizing the already-authorized charm
+        assert unsealer.calls == [(JujuModelHandle(model=TEST_MODEL.model), False)]
 
     def test_post_restart_statefulset_reunseals_without_reauthorizing(self) -> None:
         # GIVEN an extension wrapping a stub unsealer, mimicking a statefulset rollout restart
@@ -109,6 +109,6 @@ class TestUnsealVaultK8sJujuExtension:
         # WHEN post_restart_statefulset is called
         extension.post_restart_statefulset(TEST_MODEL.model, "vault-k8s")
 
-        # THEN the unsealer re-unseals vault, using the namespace as the model, without
-        # re-authorizing the already-authorized charm
-        assert unsealer.calls == [(TEST_MODEL.model, False)]
+        # THEN the unsealer re-unseals vault, using a controller-less handle for the namespace,
+        # without re-authorizing the already-authorized charm
+        assert unsealer.calls == [(JujuModelHandle(model=TEST_MODEL.model), False)]

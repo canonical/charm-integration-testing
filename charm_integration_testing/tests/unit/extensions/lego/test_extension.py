@@ -12,8 +12,8 @@ from extensions.lego.extension import (
     LEGO_CHARM,
     LegoExtension,
 )
+from juju import JujuModelHandle
 from juju.backend import JujuBackend
-from juju.resource_registry.handles import JujuModelHandle
 
 from ..shared import JujuStub as JujuStubBase
 
@@ -27,14 +27,14 @@ class JujuStub(JujuStubBase):
     secrets_removed: list[str] = field(default_factory=list)
     next_secret_id: str = "new-secret-id"
 
-    def add_secret(self, model: JujuModelHandle | str, name: str, values: dict[str, str]) -> str:
+    def add_secret(self, model: JujuModelHandle, name: str, values: dict[str, str]) -> str:
         self.secrets[name] = values
         return self.next_secret_id
 
-    def grant_secret(self, model: JujuModelHandle | str, name_or_id: str, application: str) -> None:
+    def grant_secret(self, model: JujuModelHandle, name_or_id: str, application: str) -> None:
         self.secrets_granted.append((name_or_id, application))
 
-    def remove_secret(self, model: JujuModelHandle | str, name_or_id: str) -> None:
+    def remove_secret(self, model: JujuModelHandle, name_or_id: str) -> None:
         self.secrets_removed.append(name_or_id)
         try:
             del self.secrets[name_or_id]

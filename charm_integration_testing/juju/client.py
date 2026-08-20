@@ -10,13 +10,13 @@ from validators.base import ValidationResult
 from .backend import JujuBackend
 from .bundle_utils import parse_offers_from_bundle, strip_offers_from_bundle, strip_saas_from_bundle
 from .extension import JujuExtension
+from .handles import JujuModelHandle
 from .models import (
     JujuApplicationInfo,
     JujuConsumedOfferInfo,
     JujuIntegration,
     JujuIntegrationApplication,
 )
-from .resource_registry.handles import JujuModelHandle
 from .version import JujuVersion
 
 

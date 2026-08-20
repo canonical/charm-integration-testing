@@ -21,7 +21,7 @@ class JujuStub(JujuStubBase):
     unit_ips: dict[str, str] = field(default_factory=dict)  # {"temporal-app/leader": "10.0.0.1"})
     action_responses: list[JujuTask] = field(default_factory=list)
 
-    def run_action(self, model: "JujuModelHandle | str", unit: str, action: str, params: dict[str, Any]) -> JujuTask:
+    def run_action(self, model: "JujuModelHandle", unit: str, action: str, params: dict[str, Any]) -> JujuTask:
         """Mock running an action on a unit (captures call for verification)"""
         super().run_action(model, unit, action, params)
         return self.action_responses.pop(0)

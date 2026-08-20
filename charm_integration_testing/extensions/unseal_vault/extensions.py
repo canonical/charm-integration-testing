@@ -45,13 +45,11 @@ class UnsealVaultK8sJujuExtension(GenericUnsealVaultJujuExtension, KubernetesExt
     def post_delete_pod(self, namespace: str, _pod_name: str) -> None:
         # A deleted vault-k8s pod comes back sealed (Vault's in-memory unseal state is lost
         # on process restart). Re-unseal without re-authorizing, mirroring post_scale.
-        # No controller is available here (only the k8s namespace), so this cannot construct a
-        # real JujuModelHandle - a known, documented limitation (see PR description).
-        self.vault_unsealer.try_init_or_unseal_all_vaults(namespace, authorize_charm=False)  # type: ignore[arg-type]
+        # No controller is available here (only the k8s namespace), so the handle carries no controller.
+        self.vault_unsealer.try_init_or_unseal_all_vaults(JujuModelHandle(model=namespace), authorize_charm=False)
 
     def post_restart_statefulset(self, namespace: str, _statefulset_name: str) -> None:
         # Same rationale as post_delete_pod: a StatefulSet rollout restarts every pod,
         # which seals vault-k8s again.
-        # No controller is available here (only the k8s namespace), so this cannot construct a
-        # real JujuModelHandle - a known, documented limitation (see PR description).
-        self.vault_unsealer.try_init_or_unseal_all_vaults(namespace, authorize_charm=False)  # type: ignore[arg-type]
+        # No controller is available here (only the k8s namespace), so the handle carries no controller.
+        self.vault_unsealer.try_init_or_unseal_all_vaults(JujuModelHandle(model=namespace), authorize_charm=False)

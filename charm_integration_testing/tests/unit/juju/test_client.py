@@ -7,14 +7,13 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from juju import JujuValidationError
+from juju import JujuModelHandle, JujuValidationError
 from juju.client import JujuClient
 from juju.extension import JujuExtension
 from juju.models import (
     JujuApplicationInfo,
     JujuIntegrationApplication,
 )
-from juju.resource_registry.handles import JujuModelHandle
 from juju.version import JujuVersion
 
 from validators.base.validator import ValidationCheck, ValidationResult

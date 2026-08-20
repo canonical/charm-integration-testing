@@ -5,7 +5,7 @@ import logging
 from types import SimpleNamespace
 
 import pytest
-from juju.resource_registry import JujuControllerHandle, JujuModelHandle
+from juju import JujuControllerHandle, JujuModelHandle
 from kubernetes.client import ApiException  # type: ignore[import-untyped]
 from resource_tracking import (
     CollectedResources,

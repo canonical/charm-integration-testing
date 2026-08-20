@@ -10,8 +10,8 @@ from extensions.configure_livepatch_server.extensions import (
     LIVEPATCH_SERVER_CONFIGURE_MESSAGE,
     ConfigureLivepatchServerExtension,
 )
+from juju import JujuModelHandle
 from juju.backend import JujuBackend
-from juju.resource_registry.handles import JujuModelHandle
 
 from ..shared import JujuStub as JujuStubBase
 

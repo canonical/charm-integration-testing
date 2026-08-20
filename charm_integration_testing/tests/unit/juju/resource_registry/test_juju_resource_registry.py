@@ -10,10 +10,10 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
+from juju import JujuControllerHandle, JujuModelHandle
 from juju.client import JujuClient
 from juju.resource_registry.collectors import JujuCrashdumpCollector
 from juju.resource_registry.extension import JujuResourceRegistryExtension
-from juju.resource_registry.handles import JujuControllerHandle, JujuModelHandle
 from resource_registry.registry import ResourceRegistry
 
 from ...extensions.shared import NullJujuBackend
@@ -58,7 +58,7 @@ class BootstrapKillBackendStub(NullJujuBackend):
     def add_model(self, controller: str, model: str, model_config: dict[str, str]) -> None:
         self.models_added.append((controller, model))
 
-    def juju_status_text(self, model: JujuModelHandle | str) -> str:
+    def juju_status_text(self, model: JujuModelHandle) -> str:
         model_uri = model.uri if isinstance(model, JujuModelHandle) else model
         self.status_calls.append(model_uri)
         return f"status for {model_uri}"

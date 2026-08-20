@@ -27,11 +27,14 @@ class JujuControllerHandle:
 
 @dataclass(frozen=True)
 class JujuModelHandle:
-    controller: str
     model: str
+    controller: str | None = None
 
     @property
     def uri(self) -> str:
+        # Bare model when controller is unknown (e.g. a Kubernetes pod hook only sees the namespace).
+        if self.controller is None:
+            return self.model
         return f"{self.controller}:{self.model}"
 
     @property
@@ -44,6 +47,6 @@ class JujuModelHandle:
 
     @property
     def path_segment(self) -> str:
-        safe_controller = _UNSAFE_PATH_CHARS.sub("-", self.controller)
+        safe_controller = _UNSAFE_PATH_CHARS.sub("-", self.controller or "")
         safe_model = _UNSAFE_PATH_CHARS.sub("-", self.model)
         return f"juju-model-{safe_controller}-{safe_model}"
