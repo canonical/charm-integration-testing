@@ -72,18 +72,26 @@ class KubernetesResourceCollector:
                 continue
             # A model without a namespace is not backed by this cluster (e.g. a
             # machine model); skip it up front rather than issuing a failing list
-            # call for every configured source.
-            if not self._kubernetes_client.namespace_exists(handle.model):
+            # call for every configured source. A transient probe failure is also
+            # skipped rather than raising, honouring the best-effort contract.
+            try:
+                namespace_exists = self._kubernetes_client.namespace_exists(handle.model)
+            except ApiException as exc:
+                logger.debug("Skipping model '%s' (namespace probe failed)", handle.model, exc_info=exc)
+                continue
+            if not namespace_exists:
                 logger.debug("Skipping non-Kubernetes model '%s'", handle.model)
                 continue
+            # A partial snapshot is indistinguishable from a genuine absence once
+            # recorded, so a single failing source would later be diffed as drift.
+            # Drop the whole model observation instead of recording partial data.
             snapshots: set[ResourceSnapshot] = set()
             for source in self._sources:
                 try:
                     snapshots.update(source.collect(self._kubernetes_client, handle.model))
                 except ApiException as exc:
-                    # A source whose list call fails on an existing namespace is
-                    # skipped rather than raising, so one flaky kind does not abort
-                    # collection for the whole model.
-                    logger.debug("Skipping resource snapshot for model '%s'", handle.model, exc_info=exc)
-            collected.append(CollectedResources(model=handle.model, snapshots=frozenset(snapshots)))
+                    logger.debug("Skipping model '%s' (resource snapshot failed)", handle.model, exc_info=exc)
+                    break
+            else:
+                collected.append(CollectedResources(model=handle.model, snapshots=frozenset(snapshots)))
         return collected
