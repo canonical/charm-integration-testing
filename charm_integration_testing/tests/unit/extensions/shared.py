@@ -350,15 +350,11 @@ class JujuStub(NullJujuBackend):
         """Wait for model to become idle (captures call for verification)"""
         self.waited_idle.append((_model_key(model), str(timeout), count, strict_timeout, applications))
 
-    def wait_application_scaled(
-        self, model: "JujuModelHandle", application: str, timeout: timedelta | None
-    ) -> None:
+    def wait_application_scaled(self, model: "JujuModelHandle", application: str, timeout: timedelta | None) -> None:
         """Wait for application to be scaled (captures call for verification)"""
         self.waited_scaled.append((_model_key(model), application, str(timeout)))
 
-    def wait_application_settled(
-        self, model: "JujuModelHandle", application: str, timeout: timedelta | None
-    ) -> None:
+    def wait_application_settled(self, model: "JujuModelHandle", application: str, timeout: timedelta | None) -> None:
         """Wait for application to settle (captures call for verification)"""
         self.waited_settled.append((_model_key(model), application, str(timeout)))
 
@@ -394,9 +390,7 @@ class JujuStub(NullJujuBackend):
         for application in applications:
             self.removed.append((_model_key(model), application))
 
-    def wait_for_removal(
-        self, model: "JujuModelHandle", applications: list[str], timeout: timedelta | None
-    ) -> None:
+    def wait_for_removal(self, model: "JujuModelHandle", applications: list[str], timeout: timedelta | None) -> None:
         """Mock waiting for application removal (captures call for verification)"""
         self.waited_removal.append((_model_key(model), applications, str(timeout)))
 
