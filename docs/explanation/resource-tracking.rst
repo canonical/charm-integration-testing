@@ -222,22 +222,24 @@ where ``<qualifier>`` is either a presence kind (``missing`` / ``extra``) or a
 resource-specific modification kind (see `Resource-specific discrepancy kinds`_).
 Only these generically-applicable dimensions appear in the key so that downstream
 attachment rules can select on them. Run-specific context (the scheduler state,
-the model name, and descriptive resource attributes) is carried in the value
-instead of the key. For a presence qualifier the value carries the resource's
-attributes whole; a leaked PVC is recorded as::
+the controller, the model name, and descriptive resource attributes) is carried
+in the value instead of the key. The controller is included because model names
+are only unique within a controller. For a presence qualifier the value carries
+the resource's attributes whole; a leaked PVC is recorded as::
 
    key:   resource_discrepancy:pvc:extra
-   value: state=deployed model=<model> pvc=<name> requested_storage=1Gi storage_class=csi-cephfs
+   value: state=deployed controller=<controller> model=<model> pvc=<name> requested_storage=1Gi storage_class=csi-cephfs
 
 For a modification qualifier only the attributes that actually changed are
 emitted, as ``old->new``, so the drift is visible at a glance. A PVC that grew
 in place is recorded as::
 
    key:   resource_discrepancy:pvc:resized
-   value: state=deployed model=<model> pvc=<name> requested_storage=1Gi->2Gi
+   value: state=deployed controller=<controller> model=<model> pvc=<name> requested_storage=1Gi->2Gi
 
-Because the model name is a per-run identifier it is intentionally kept out of
-the key; keys stay stable across runs while the value provides debugging detail.
+Because the controller and model name are per-run identifiers they are
+intentionally kept out of the key; keys stay stable across runs while the value
+provides debugging detail.
 
 
 Per-charm tracking overrides
