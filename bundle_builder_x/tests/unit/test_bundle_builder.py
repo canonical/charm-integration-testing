@@ -796,6 +796,39 @@ class TestPrepareOptimizationDomain:
             for item in domain.charm_integrations
         )
 
+    def test_active_replacement_is_not_paired_with_itself(self) -> None:
+        # Regression test: a charm's own replacement can already be active too.
+        # GIVEN a mesh-style charm with an active original and an active replacement
+        domain = Domain()
+        model_ref = ModelRef(name="m")
+        domain.models[model_ref] = DomainModel(
+            arch="amd64",
+            platform="kubernetes",
+            juju_version=_JUJU,
+        )
+        mesh_charm = _make_charm(
+            "grafana-k8s",
+            {
+                "require-cmr-mesh": CharmEndpoint(type=EndpointType.REQUIRES, interface="cross_model_mesh"),
+                "provide-cmr-mesh": CharmEndpoint(type=EndpointType.PROVIDES, interface="cross_model_mesh"),
+            },
+        )
+        original_id = add_charm_to_domain(mesh_charm, domain, model_ref)
+        replacement_id = add_charm_to_domain(mesh_charm.model_copy(update={"revision": 2}), domain, model_ref)
+        domain.charms[original_id].charms_added.append(replacement_id)
+        solver = z3.Solver()
+        solver.add(domain.charms[original_id].exists, domain.charms[replacement_id].exists)
+        assert solver.check() == z3.sat
+
+        # WHEN preparing the active graph for optimization
+        BundleBuilder(charmhub_client=_FakeCharmhubClient())._prepare_optimization_domain(domain, solver.model())
+
+        # THEN no integration pairs the replacement with itself
+        assert not any(item.requires_charm_id == item.provides_charm_id for item in domain.charm_integrations)
+
+        # AND building constraints doesn't crash z3
+        add_constraints(z3.Solver(), domain)
+
 
 class TestSolve:
     """BundleBuilder._solve."""
