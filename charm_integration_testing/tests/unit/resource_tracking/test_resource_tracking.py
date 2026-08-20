@@ -316,19 +316,19 @@ class TestStateResourceTracker:
         tracker = StateResourceTracker()
 
         # WHEN two observations are recorded
-        tracker.record(State.DEPLOYED, "model-a", frozenset({_pvc("data-0")}))
-        tracker.record(State.DEPLOYED, "model-b", frozenset())
+        tracker.record(State.DEPLOYED, "controller-a", "model-a", frozenset({_pvc("data-0")}))
+        tracker.record(State.DEPLOYED, "controller-b", "model-b", frozenset())
 
         # THEN they are stored in order
         assert tracker.observations() == (
-            ResourceObservation(State.DEPLOYED, "model-a", frozenset({_pvc("data-0")})),
-            ResourceObservation(State.DEPLOYED, "model-b", frozenset()),
+            ResourceObservation(State.DEPLOYED, "controller-a", "model-a", frozenset({_pvc("data-0")})),
+            ResourceObservation(State.DEPLOYED, "controller-b", "model-b", frozenset()),
         )
 
     def test_collect_records_each_collectors_resources(self) -> None:
         # GIVEN two collectors each reporting resources for a model
-        collector_a = _FakeCollector([CollectedResources("model-a", frozenset({_pvc("data-0")}))])
-        collector_b = _FakeCollector([CollectedResources("model-b", frozenset())])
+        collector_a = _FakeCollector([CollectedResources("controller-a", "model-a", frozenset({_pvc("data-0")}))])
+        collector_b = _FakeCollector([CollectedResources("controller-b", "model-b", frozenset())])
         tracker = StateResourceTracker()
 
         # WHEN the tracker collects for a state
@@ -336,8 +336,8 @@ class TestStateResourceTracker:
 
         # THEN every collector's resources are recorded under that state
         assert tracker.observations() == (
-            ResourceObservation(State.DEPLOYED, "model-a", frozenset({_pvc("data-0")})),
-            ResourceObservation(State.DEPLOYED, "model-b", frozenset()),
+            ResourceObservation(State.DEPLOYED, "controller-a", "model-a", frozenset({_pvc("data-0")})),
+            ResourceObservation(State.DEPLOYED, "controller-b", "model-b", frozenset()),
         )
 
 
@@ -360,7 +360,7 @@ class TestKubernetesResourceCollector:
         ).collect(_LOGGER)
 
         # THEN only the model handle yields a snapshot set
-        assert collected == [CollectedResources("test-model", frozenset({_pvc("data-0")}))]
+        assert collected == [CollectedResources("test-controller", "test-model", frozenset({_pvc("data-0")}))]
 
     def test_source_errors_drop_the_whole_model_observation(self) -> None:
         # GIVEN a model whose namespace exists but whose PVC listing transiently fails
@@ -397,6 +397,7 @@ class TestKubernetesResourceCollector:
         # THEN every snapshot is recorded; per-charm skips are applied at diff time
         assert collected == [
             CollectedResources(
+                "test-controller",
                 "test-model",
                 frozenset(
                     {
@@ -429,8 +430,14 @@ class TestKubernetesResourceCollector:
         assert target_client.requested_model == "target-model"
         assert neighbor_client.requested_model == "neighbor-model"
         assert set(collected) == {
-            CollectedResources("target-model", frozenset({_pvc("data-target-0", namespace="target-model")})),
-            CollectedResources("neighbor-model", frozenset({_pvc("data-neighbor-0", namespace="neighbor-model")})),
+            CollectedResources(
+                "target-controller", "target-model", frozenset({_pvc("data-target-0", namespace="target-model")})
+            ),
+            CollectedResources(
+                "neighbor-controller",
+                "neighbor-model",
+                frozenset({_pvc("data-neighbor-0", namespace="neighbor-model")}),
+            ),
         }
 
     def test_models_on_a_controller_without_a_kubernetes_client_are_skipped(self) -> None:
@@ -453,7 +460,9 @@ class TestKubernetesResourceCollector:
 
         # THEN only the target model is recorded; the non-Kubernetes neighbor is skipped entirely
         assert collected == [
-            CollectedResources("target-model", frozenset({_pvc("data-target-0", namespace="target-model")}))
+            CollectedResources(
+                "target-controller", "target-model", frozenset({_pvc("data-target-0", namespace="target-model")})
+            )
         ]
 
     def test_client_resolution_errors_are_skipped(self) -> None:
@@ -551,7 +560,7 @@ class TestCalculateDiscrepancies:
     def test_first_visit_records_baseline_without_discrepancy(self) -> None:
         # GIVEN a single observation for a state
         tracker = StateResourceTracker()
-        tracker.record(State.DEPLOYED, "test-model", frozenset({_pvc("data-0")}))
+        tracker.record(State.DEPLOYED, "test-controller", "test-model", frozenset({_pvc("data-0")}))
 
         # WHEN discrepancies are calculated
         # THEN the first visit establishes a baseline and reports nothing
@@ -560,8 +569,8 @@ class TestCalculateDiscrepancies:
     def test_identical_revisit_reports_no_discrepancy(self) -> None:
         # GIVEN a state visited twice with the same resources
         tracker = StateResourceTracker()
-        tracker.record(State.DEPLOYED, "test-model", frozenset({_pvc("data-0")}))
-        tracker.record(State.DEPLOYED, "test-model", frozenset({_pvc("data-0")}))
+        tracker.record(State.DEPLOYED, "test-controller", "test-model", frozenset({_pvc("data-0")}))
+        tracker.record(State.DEPLOYED, "test-controller", "test-model", frozenset({_pvc("data-0")}))
 
         # WHEN discrepancies are calculated THEN nothing is reported
         assert calculate_discrepancies(tracker.observations()) == []
@@ -569,8 +578,8 @@ class TestCalculateDiscrepancies:
     def test_missing_resource_on_revisit_is_reported(self) -> None:
         # GIVEN a baseline with two PVCs revisited with one missing
         tracker = StateResourceTracker()
-        tracker.record(State.DEPLOYED, "test-model", frozenset({_pvc("data-0"), _pvc("data-1")}))
-        tracker.record(State.DEPLOYED, "test-model", frozenset({_pvc("data-0")}))
+        tracker.record(State.DEPLOYED, "test-controller", "test-model", frozenset({_pvc("data-0"), _pvc("data-1")}))
+        tracker.record(State.DEPLOYED, "test-controller", "test-model", frozenset({_pvc("data-0")}))
 
         # WHEN discrepancies are calculated
         discrepancies = calculate_discrepancies(tracker.observations())
@@ -579,6 +588,7 @@ class TestCalculateDiscrepancies:
         assert discrepancies == [
             ModelResourceDiscrepancy(
                 state=State.DEPLOYED,
+                controller="test-controller",
                 model="test-model",
                 qualified={"missing": (_qs(_pvc("data-1")),)},
             )
@@ -587,8 +597,8 @@ class TestCalculateDiscrepancies:
     def test_extra_resource_on_revisit_is_reported(self) -> None:
         # GIVEN a baseline with one PVC revisited with an unexpected extra
         tracker = StateResourceTracker()
-        tracker.record(State.DEPLOYED, "test-model", frozenset({_pvc("data-0")}))
-        tracker.record(State.DEPLOYED, "test-model", frozenset({_pvc("data-0"), _pvc("data-1")}))
+        tracker.record(State.DEPLOYED, "test-controller", "test-model", frozenset({_pvc("data-0")}))
+        tracker.record(State.DEPLOYED, "test-controller", "test-model", frozenset({_pvc("data-0"), _pvc("data-1")}))
 
         # WHEN discrepancies are calculated
         discrepancies = calculate_discrepancies(tracker.observations())
@@ -599,8 +609,8 @@ class TestCalculateDiscrepancies:
     def test_missing_and_extra_reported_together(self) -> None:
         # GIVEN a baseline PVC replaced by a differently-named one on revisit
         tracker = StateResourceTracker()
-        tracker.record(State.DEPLOYED, "test-model", frozenset({_pvc("data-0")}))
-        tracker.record(State.DEPLOYED, "test-model", frozenset({_pvc("data-1")}))
+        tracker.record(State.DEPLOYED, "test-controller", "test-model", frozenset({_pvc("data-0")}))
+        tracker.record(State.DEPLOYED, "test-controller", "test-model", frozenset({_pvc("data-1")}))
 
         # WHEN discrepancies are calculated
         discrepancies = calculate_discrepancies(tracker.observations())
@@ -614,8 +624,8 @@ class TestCalculateDiscrepancies:
     def test_resized_pvc_is_reported_as_a_modification(self) -> None:
         # GIVEN a baseline PVC resized in place on revisit
         tracker = StateResourceTracker()
-        tracker.record(State.DEPLOYED, "test-model", frozenset({_pvc("data-0", storage="1Gi")}))
-        tracker.record(State.DEPLOYED, "test-model", frozenset({_pvc("data-0", storage="2Gi")}))
+        tracker.record(State.DEPLOYED, "test-controller", "test-model", frozenset({_pvc("data-0", storage="1Gi")}))
+        tracker.record(State.DEPLOYED, "test-controller", "test-model", frozenset({_pvc("data-0", storage="2Gi")}))
 
         # WHEN discrepancies are calculated
         discrepancies = calculate_discrepancies(tracker.observations())
@@ -628,7 +638,7 @@ class TestCalculateDiscrepancies:
     def test_phase_change_alone_is_not_a_discrepancy(self) -> None:
         # GIVEN a baseline PVC that reappears in a different phase
         tracker = StateResourceTracker()
-        tracker.record(State.DEPLOYED, "test-model", frozenset({_pvc("data-0")}))
+        tracker.record(State.DEPLOYED, "test-controller", "test-model", frozenset({_pvc("data-0")}))
         pending = PvcSnapshot(
             name="data-0",
             namespace="test-model",
@@ -636,7 +646,7 @@ class TestCalculateDiscrepancies:
             requested_storage="1Gi",
             phase="Pending",
         )
-        tracker.record(State.DEPLOYED, "test-model", frozenset({pending}))
+        tracker.record(State.DEPLOYED, "test-controller", "test-model", frozenset({pending}))
 
         # WHEN discrepancies are calculated
         # THEN identity (which excludes phase) matches and nothing is reported
@@ -645,10 +655,10 @@ class TestCalculateDiscrepancies:
     def test_different_states_have_independent_baselines(self) -> None:
         # GIVEN baselines recorded and revisited for two different states
         tracker = StateResourceTracker()
-        tracker.record(State.EMPTY_MODEL, "test-model", frozenset())
-        tracker.record(State.DEPLOYED, "test-model", frozenset({_pvc("data-0")}))
-        tracker.record(State.EMPTY_MODEL, "test-model", frozenset())
-        tracker.record(State.DEPLOYED, "test-model", frozenset({_pvc("data-0")}))
+        tracker.record(State.EMPTY_MODEL, "test-controller", "test-model", frozenset())
+        tracker.record(State.DEPLOYED, "test-controller", "test-model", frozenset({_pvc("data-0")}))
+        tracker.record(State.EMPTY_MODEL, "test-controller", "test-model", frozenset())
+        tracker.record(State.DEPLOYED, "test-controller", "test-model", frozenset({_pvc("data-0")}))
 
         # WHEN discrepancies are calculated THEN neither state reports one
         assert calculate_discrepancies(tracker.observations()) == []
@@ -656,29 +666,47 @@ class TestCalculateDiscrepancies:
     def test_same_state_different_models_are_independent(self) -> None:
         # GIVEN the same state tracked across two models
         tracker = StateResourceTracker()
-        tracker.record(State.DEPLOYED, "model-a", frozenset({_pvc("data-0")}))
-        tracker.record(State.DEPLOYED, "model-b", frozenset({_pvc("data-0")}))
-        tracker.record(State.DEPLOYED, "model-a", frozenset())
-        tracker.record(State.DEPLOYED, "model-b", frozenset({_pvc("data-0")}))
+        tracker.record(State.DEPLOYED, "controller-a", "model-a", frozenset({_pvc("data-0")}))
+        tracker.record(State.DEPLOYED, "controller-b", "model-b", frozenset({_pvc("data-0")}))
+        tracker.record(State.DEPLOYED, "controller-a", "model-a", frozenset())
+        tracker.record(State.DEPLOYED, "controller-b", "model-b", frozenset({_pvc("data-0")}))
 
         # WHEN discrepancies are calculated THEN only model-a reports one
         discrepancies = calculate_discrepancies(tracker.observations())
         assert len(discrepancies) == 1
         assert discrepancies[0].model == "model-a"
 
+    def test_same_model_name_on_different_controllers_is_independent(self) -> None:
+        # GIVEN a CMR run where two controllers each have a model with the same name
+        tracker = StateResourceTracker()
+        tracker.record(State.DEPLOYED, "controller-a", "shared-name", frozenset({_pvc("data-0")}))
+        tracker.record(State.DEPLOYED, "controller-b", "shared-name", frozenset())
+        tracker.record(State.DEPLOYED, "controller-a", "shared-name", frozenset({_pvc("data-0")}))
+        tracker.record(State.DEPLOYED, "controller-b", "shared-name", frozenset())
+
+        # WHEN discrepancies are calculated
+        # THEN each controller keeps its own baseline, so neither reads as drift of the other
+        assert calculate_discrepancies(tracker.observations()) == []
+
     def test_skips_are_scoped_to_the_owning_application(self) -> None:
         # GIVEN two applications' PVCs where only the skipping one drifts
         tracker = StateResourceTracker()
         tracker.record(
             State.DEPLOYED,
+            "test-controller",
             "test-model",
             frozenset({_pvc("data-target-0", application="target"), _pvc("data-neighbor-0", application="neighbor")}),
         )
-        tracker.record(State.DEPLOYED, "test-model", frozenset({_pvc("data-neighbor-0", application="neighbor")}))
+        tracker.record(
+            State.DEPLOYED,
+            "test-controller",
+            "test-model",
+            frozenset({_pvc("data-neighbor-0", application="neighbor")}),
+        )
 
         # WHEN discrepancies are calculated with the target application skipping PVCs
         discrepancies = calculate_discrepancies(
-            tracker.observations(), skips={("test-model", "target"): frozenset({"pvc"})}
+            tracker.observations(), skips={("test-controller", "test-model", "target"): frozenset({"pvc"})}
         )
 
         # THEN the skipped application's dropped PVC is excluded, so nothing is reported
@@ -687,14 +715,14 @@ class TestCalculateDiscrepancies:
     def test_skips_are_scoped_to_the_owning_model(self) -> None:
         # GIVEN the same application drifting a PVC in two models, skipped in only one
         tracker = StateResourceTracker()
-        tracker.record(State.DEPLOYED, "model-a", frozenset({_pvc("data-0", application="target")}))
-        tracker.record(State.DEPLOYED, "model-b", frozenset({_pvc("data-0", application="target")}))
-        tracker.record(State.DEPLOYED, "model-a", frozenset())
-        tracker.record(State.DEPLOYED, "model-b", frozenset())
+        tracker.record(State.DEPLOYED, "controller-a", "model-a", frozenset({_pvc("data-0", application="target")}))
+        tracker.record(State.DEPLOYED, "controller-b", "model-b", frozenset({_pvc("data-0", application="target")}))
+        tracker.record(State.DEPLOYED, "controller-a", "model-a", frozenset())
+        tracker.record(State.DEPLOYED, "controller-b", "model-b", frozenset())
 
         # WHEN discrepancies are calculated with the skip scoped to model-a only
         discrepancies = calculate_discrepancies(
-            tracker.observations(), skips={("model-a", "target"): frozenset({"pvc"})}
+            tracker.observations(), skips={("controller-a", "model-a", "target"): frozenset({"pvc"})}
         )
 
         # THEN only model-b, which does not opt out, reports the dropped PVC
@@ -705,12 +733,14 @@ class TestCalculateDiscrepancies:
         # GIVEN a skipped PVC present on the baseline visit but absent on re-entry
         # (as a transient collection difference would produce)
         tracker = StateResourceTracker()
-        tracker.record(State.DEPLOYED, "test-model", frozenset({_pvc("data-0", application="target")}))
-        tracker.record(State.DEPLOYED, "test-model", frozenset())
+        tracker.record(
+            State.DEPLOYED, "test-controller", "test-model", frozenset({_pvc("data-0", application="target")})
+        )
+        tracker.record(State.DEPLOYED, "test-controller", "test-model", frozenset())
 
         # WHEN discrepancies are calculated with the owning application skipping PVCs
         discrepancies = calculate_discrepancies(
-            tracker.observations(), skips={("test-model", "target"): frozenset({"pvc"})}
+            tracker.observations(), skips={("test-controller", "test-model", "target"): frozenset({"pvc"})}
         )
 
         # THEN the skip is applied uniformly to both visits, so no drift is reported
@@ -723,6 +753,7 @@ class TestModelResourceDiscrepancyEntries:
         snapshot = _pvc("data-1")
         discrepancy = ModelResourceDiscrepancy(
             state=State.DEPLOYED,
+            controller="test-controller",
             model="test-model",
             qualified={"missing": (_qs(snapshot),)},
         )
@@ -737,6 +768,7 @@ class TestModelResourceDiscrepancyEntries:
                 resource_type="pvc",
                 qualifier="missing",
                 state="deployed",
+                controller="test-controller",
                 model="test-model",
                 snapshot=snapshot,
                 baseline=None,
@@ -748,6 +780,7 @@ class TestModelResourceDiscrepancyEntries:
         snapshot = _pvc("data-1")
         discrepancy = ModelResourceDiscrepancy(
             state=State.DEPLOYED,
+            controller="test-controller",
             model="test-model",
             qualified={"extra": (_qs(snapshot),)},
         )
@@ -761,6 +794,7 @@ class TestModelResourceDiscrepancyEntries:
                 resource_type="pvc",
                 qualifier="extra",
                 state="deployed",
+                controller="test-controller",
                 model="test-model",
                 snapshot=snapshot,
                 baseline=None,
@@ -773,6 +807,7 @@ class TestModelResourceDiscrepancyEntries:
         current = _pvc("data-0", storage="2Gi")
         discrepancy = ModelResourceDiscrepancy(
             state=State.DEPLOYED,
+            controller="test-controller",
             model="test-model",
             qualified={"resized": (_qs(current, baseline=baseline),)},
         )
@@ -786,6 +821,7 @@ class TestModelResourceDiscrepancyEntries:
                 resource_type="pvc",
                 qualifier="resized",
                 state="deployed",
+                controller="test-controller",
                 model="test-model",
                 snapshot=current,
                 baseline=baseline,
@@ -799,8 +835,8 @@ class TestResourceConsistencyReport:
     def test_passes_when_consistent(self) -> None:
         # GIVEN a tracker whose state re-entry is consistent
         tracker = StateResourceTracker()
-        tracker.record(State.DEPLOYED, "test-model", frozenset({_pvc("data-0")}))
-        tracker.record(State.DEPLOYED, "test-model", frozenset({_pvc("data-0")}))
+        tracker.record(State.DEPLOYED, "test-controller", "test-model", frozenset({_pvc("data-0")}))
+        tracker.record(State.DEPLOYED, "test-controller", "test-model", frozenset({_pvc("data-0")}))
 
         # WHEN the report runs THEN it does not raise
         run_resource_consistency_report(tracker, {})
@@ -808,8 +844,8 @@ class TestResourceConsistencyReport:
     def test_raises_with_discrepancies_on_drift(self) -> None:
         # GIVEN a tracker whose revisit dropped a PVC
         tracker = StateResourceTracker()
-        tracker.record(State.DEPLOYED, "test-model", frozenset({_pvc("data-0"), _pvc("data-1")}))
-        tracker.record(State.DEPLOYED, "test-model", frozenset({_pvc("data-0")}))
+        tracker.record(State.DEPLOYED, "test-controller", "test-model", frozenset({_pvc("data-0"), _pvc("data-1")}))
+        tracker.record(State.DEPLOYED, "test-controller", "test-model", frozenset({_pvc("data-0")}))
 
         # WHEN the report runs THEN it raises carrying the structured discrepancies
         with pytest.raises(ResourceDiscrepancyError) as excinfo:
@@ -818,6 +854,7 @@ class TestResourceConsistencyReport:
         assert excinfo.value.discrepancies == (
             ModelResourceDiscrepancy(
                 state=State.DEPLOYED,
+                controller="test-controller",
                 model="test-model",
                 qualified={"missing": (_qs(_pvc("data-1")),)},
             ),

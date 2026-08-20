@@ -953,7 +953,10 @@ def record_failure_execution_metadata(
             # carried in the value.
             for discrepancy in exc.discrepancies:
                 for entry in discrepancy.entries():
-                    detail = f"state={entry.state} model={entry.model} {entry.resource_type}={entry.snapshot.name}"
+                    detail = (
+                        f"state={entry.state} controller={entry.controller} model={entry.model} "
+                        f"{entry.resource_type}={entry.snapshot.name}"
+                    )
                     attributes = _format_discrepancy_attributes(entry)
                     value = f"{detail} {attributes}" if attributes else detail
                     execution_metadata(

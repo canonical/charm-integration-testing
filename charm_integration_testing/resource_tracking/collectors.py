@@ -29,8 +29,15 @@ from .sources import KubernetesResourceSource, PvcSource
 
 @dataclass(frozen=True)
 class CollectedResources:
-    """Snapshots collected for a single tracked scope (e.g. a Juju model)."""
+    """Snapshots collected for a single tracked scope (a Juju model on a controller).
 
+    ``model`` names are only unique *within* a controller, so a CMR run can hold
+    e.g. ``controller-a:model`` and ``controller-b:model``.  ``controller`` is
+    carried alongside ``model`` so downstream baselines and skip keys never
+    conflate two same-named models on different clusters.
+    """
+
+    controller: str
     model: str
     snapshots: frozenset[ResourceSnapshot]
 
@@ -97,5 +104,7 @@ class KubernetesResourceCollector:
                     logger.debug("Skipping model '%s' (resource snapshot failed)", handle.model, exc_info=exc)
                     break
             else:
-                collected.append(CollectedResources(model=handle.model, snapshots=frozenset(snapshots)))
+                collected.append(
+                    CollectedResources(controller=handle.controller, model=handle.model, snapshots=frozenset(snapshots))
+                )
         return collected

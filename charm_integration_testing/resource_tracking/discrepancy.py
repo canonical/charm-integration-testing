@@ -52,6 +52,7 @@ class DiscrepancyEntry:
     resource_type: str
     qualifier: str
     state: str
+    controller: str
     model: str
     snapshot: ResourceSnapshot
     baseline: ResourceSnapshot | None = None
@@ -92,6 +93,7 @@ class ModelResourceDiscrepancy:
     """
 
     state: State
+    controller: str
     model: str
     qualified: Mapping[str, tuple[QualifiedSnapshot, ...]]
 
@@ -102,6 +104,7 @@ class ModelResourceDiscrepancy:
                     resource_type=item.snapshot.resource_type,
                     qualifier=qualifier,
                     state=self.state.value,
+                    controller=self.controller,
                     model=self.model,
                     snapshot=item.snapshot,
                     baseline=item.baseline,
@@ -113,7 +116,7 @@ class ModelResourceDiscrepancy:
             for qualifier, qualified in self.qualified.items()
             for item in qualified
         ]
-        return f"state={self.state.value} model={self.model}: " + ", ".join(parts)
+        return f"state={self.state.value} controller={self.controller} model={self.model}: " + ", ".join(parts)
 
 
 class ResourceDiscrepancyError(Exception):
@@ -203,47 +206,54 @@ def diff_snapshots(
 
 def _without_skipped(
     snapshots: frozenset[ResourceSnapshot],
+    controller: str,
     model: str,
-    skips: Mapping[tuple[str, str], frozenset[str]],
+    skips: Mapping[tuple[str, str, str], frozenset[str]],
 ) -> frozenset[ResourceSnapshot]:
     """Drop snapshots whose owning application opts out of their resource type.
 
-    ``skips`` maps ``(model, application)`` to the resource types that
-    application opts out of *in that model*.  Scoping the opt-out to the model
-    rather than the charm track reflects the physical reality that all of a
+    ``skips`` maps ``(controller, model, application)`` to the resource types
+    that application opts out of *in that model*.  Scoping the opt-out to the
+    model rather than the charm track reflects the physical reality that all of a
     model's states share one namespace: a resource retained by any track
     exercised in the model (e.g. an upgrade/downgrade test) can surface in any
-    state, so the opt-out must cover the whole model.  Filtering here excludes a
-    skipped kind uniformly from the baseline and every re-entry, so a per-visit
-    resolution difference cannot make a skipped kind read as missing/extra drift.
+    state, so the opt-out must cover the whole model.  The controller is part of
+    the key because model names are only unique within a controller.  Filtering
+    here excludes a skipped kind uniformly from the baseline and every re-entry,
+    so a per-visit resolution difference cannot make a skipped kind read as
+    missing/extra drift.
     """
     return frozenset(
         snapshot
         for snapshot in snapshots
-        if snapshot.resource_type not in skips.get((model, snapshot.application), frozenset())
+        if snapshot.resource_type not in skips.get((controller, model, snapshot.application), frozenset())
     )
 
 
 def calculate_discrepancies(
     observations: Iterable[ResourceObservation],
-    skips: Mapping[tuple[str, str], frozenset[str]] | None = None,
+    skips: Mapping[tuple[str, str, str], frozenset[str]] | None = None,
 ) -> list[ModelResourceDiscrepancy]:
     """Diff each state's later observations against its first (baseline) visit.
 
-    ``skips`` maps each ``(model, application)`` to the resource kinds it opts
-    out of tracking.  Skips are scoped to the model rather than the charm track
-    because all of a model's states share one namespace, so a resource retained
-    by any track exercised in the model can appear in any state.  The map is
-    applied uniformly to every observation, so a skipped kind is excluded
+    ``skips`` maps each ``(controller, model, application)`` to the resource kinds
+    it opts out of tracking.  Skips are scoped to the model rather than the charm
+    track because all of a model's states share one namespace, so a resource
+    retained by any track exercised in the model can appear in any state.  The
+    map is applied uniformly to every observation, so a skipped kind is excluded
     identically across every visit.
+
+    Baselines are keyed by ``(state, controller, model)`` so two same-named models
+    on different controllers (a CMR run) are never conflated into a single
+    baseline.
     """
-    resolved_skips: Mapping[tuple[str, str], frozenset[str]] = skips if skips is not None else {}
-    baselines: dict[tuple[State, str], frozenset[ResourceSnapshot]] = {}
+    resolved_skips: Mapping[tuple[str, str, str], frozenset[str]] = skips if skips is not None else {}
+    baselines: dict[tuple[State, str, str], frozenset[ResourceSnapshot]] = {}
     discrepancies: list[ModelResourceDiscrepancy] = []
 
     for observation in observations:
-        snapshots = _without_skipped(observation.snapshots, observation.model, resolved_skips)
-        key = (observation.state, observation.model)
+        snapshots = _without_skipped(observation.snapshots, observation.controller, observation.model, resolved_skips)
+        key = (observation.state, observation.controller, observation.model)
         if key not in baselines:
             baselines[key] = snapshots
             continue
@@ -253,6 +263,7 @@ def calculate_discrepancies(
             discrepancies.append(
                 ModelResourceDiscrepancy(
                     state=observation.state,
+                    controller=observation.controller,
                     model=observation.model,
                     qualified=qualified,
                 )
