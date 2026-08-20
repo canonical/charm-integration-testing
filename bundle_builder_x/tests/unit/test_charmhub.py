@@ -6,7 +6,7 @@ from typing import cast
 import pytest
 from pydantic.dataclasses import dataclass
 
-from bundle_builder_x.bundle_builder import BundleBuilder
+from bundle_builder_x.bundle_builder import BundleBuilder, UncompletableBundleError
 from bundle_builder_x.charm import CharmChannel, EndpointScope, EndpointType
 from bundle_builder_x.charmhub import CharmhubClient
 from bundle_builder_x.charmhub_http import (
@@ -402,16 +402,16 @@ class TestCharmhubClient:
             assert charm.name == "aodh"
 
         def test_bundle_builder_fails_for_delisted_charm_requested_directly(self) -> None:
-            """End-to-end check that ``BundleBuilder.build()`` - not just
-            ``CharmhubClient.charm_from_store()`` in isolation - fails with a clear
-            ``CharmReleaseNotFoundException`` when a spec directly requests an application
+            """End-to-end check that ``BundleBuilder.build()`` fails with a clear
+            ``UncompletableBundleError`` when a spec directly requests an application
             backed by a charm marked unsupported via a sentinel ``assumes`` feature.
 
             The application-charm lookup in ``BundleBuilder._get_charm_for_application()``
-            is not wrapped in a try/except (unlike the candidate-neighbor lookups in
-            ``_get_charms_for_endpoint()``), so this exception is expected to propagate
-            all the way out of ``build()`` rather than being swallowed or surfacing as a
-            generic ``UncompletableBundleError``.
+            can raise ``CharmReleaseNotFoundException`` (e.g. no release satisfies the
+            sentinel feature). ``_handle_failed_assertion`` catches that and leaves the
+            assertion tag unexpanded, so the failure surfaces via the unsat core as an
+            ``UnresolvedApplicationInfo`` on the canonical ``UncompletableBundleError``,
+            identifying the charm that could not be resolved.
             """
             # GIVEN a real CharmhubClient (stubbed HTTP/overrides) where "aodh" is marked
             # unsupported via a sentinel feature, wired into a real BundleBuilder
@@ -431,10 +431,11 @@ class TestCharmhubClient:
             )
 
             # WHEN building the bundle
-            # THEN CharmReleaseNotFoundException propagates out of build(), identifying
-            # the unmet assumes constraint, instead of failing later/differently
-            with pytest.raises(CharmReleaseNotFoundException, match="assumes constraints"):
+            # THEN UncompletableBundleError propagates out of build(), identifying the
+            # unresolved application/charm, instead of a raw CharmReleaseNotFoundException
+            with pytest.raises(UncompletableBundleError, match="aodh") as exc_info:
                 builder.build(spec)
+            assert [info.charm_name for info in exc_info.value.unresolved_applications] == ["aodh"]
 
     # ---------------------------------------------------------------------------
     # TestChannelSupportsUbuntuVersion
