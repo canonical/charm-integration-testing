@@ -163,7 +163,8 @@ class OverridesClient:
         }
 
     def get_charm_priority(self, charm: str) -> float:
-        return self._get_charm_global_overrides(charm).priority or 1.0
+        priority = self._get_charm_global_overrides(charm).priority
+        return priority if priority is not None else 1.0
 
     def get_charm_default_channel(self, charm: str) -> str | None:
         return self._get_charm_global_overrides(charm).default_channel

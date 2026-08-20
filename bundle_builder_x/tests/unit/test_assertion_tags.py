@@ -6,6 +6,8 @@
 from bundle_builder_x.assertion_tags import (
     Assertions,
     AssertionTag,
+    CharmEndpointPayload,
+    IntegrationFeatureMismatchTag,
     SubordinateBaseMismatchTag,
 )
 
@@ -47,3 +49,29 @@ class TestSubordinateBaseMismatchTag:
             principal_base="24.04",
         )
         assert tag.kind == Assertions.SUBORDINATE_BASE_MISMATCH
+
+
+class TestIntegrationFeatureMismatchTag:
+    """IntegrationFeatureMismatchTag: encode/decode and kind."""
+
+    def test_encode_decode_roundtrip(self) -> None:
+        tag = IntegrationFeatureMismatchTag(
+            requires=CharmEndpointPayload(charm_name="katib-controller", charm_id=0, endpoint="k8s-service-info"),
+            provides=CharmEndpointPayload(charm_name="kfp-viz", charm_id=1, endpoint="kfp-viz"),
+            feature="katib-service",
+        )
+        decoded = AssertionTag.decode(tag.encode())
+        assert isinstance(decoded, IntegrationFeatureMismatchTag)
+        assert decoded.requires == CharmEndpointPayload(
+            charm_name="katib-controller", charm_id=0, endpoint="k8s-service-info"
+        )
+        assert decoded.provides == CharmEndpointPayload(charm_name="kfp-viz", charm_id=1, endpoint="kfp-viz")
+        assert decoded.feature == "katib-service"
+
+    def test_kind_is_integration_feature_mismatch(self) -> None:
+        tag = IntegrationFeatureMismatchTag(
+            requires=CharmEndpointPayload(charm_name="requirer", charm_id=0, endpoint="svc"),
+            provides=CharmEndpointPayload(charm_name="provider", charm_id=1, endpoint="svc"),
+            feature="tag",
+        )
+        assert tag.kind == Assertions.INTEGRATION_FEATURE_MISMATCH

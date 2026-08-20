@@ -45,3 +45,28 @@ class TestResourceTrackingOverrides:
 
         # THEN no skips are reported
         assert client.get_charm_resource_tracking_skips("postgresql-k8s", _ch("14")) == frozenset()
+
+
+class TestGetCharmPriority:
+    def test_explicit_zero_priority_is_respected(self, tmp_path: Path) -> None:
+        # GIVEN an override file that explicitly sets priority to 0.0
+        (tmp_path / "low-priority-charm.yaml").write_text("priority: 0.0\n", encoding="utf-8")
+        client = OverridesClient(overrides=tmp_path)
+
+        # THEN the explicit 0.0 is returned, not the 1.0 default
+        assert client.get_charm_priority("low-priority-charm") == 0.0
+
+    def test_missing_priority_defaults_to_one(self, tmp_path: Path) -> None:
+        # GIVEN an override file with no priority set
+        (tmp_path / "no-priority-charm.yaml").write_text("overrides: []\n", encoding="utf-8")
+        client = OverridesClient(overrides=tmp_path)
+
+        # THEN the default priority of 1.0 is returned
+        assert client.get_charm_priority("no-priority-charm") == 1.0
+
+    def test_no_overrides_directory_defaults_to_one(self) -> None:
+        # GIVEN a client without an overrides directory
+        client = OverridesClient()
+
+        # THEN the default priority of 1.0 is returned
+        assert client.get_charm_priority("any-charm") == 1.0

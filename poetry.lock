@@ -2743,6 +2743,29 @@ type = "directory"
 url = "validators/parca_store"
 
 [[package]]
+name = "validators-pgsql"
+version = "0.1.0"
+description = "Validator for pgsql interface"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+psycopg2-binary = ">=2.9.0"
+types-psycopg2 = {version = ">=2.9.21.20260422,<3", optional = true}
+validators-base = "*"
+validators-test-utils = {version = "*", optional = true}
+
+[package.extras]
+dev = ["types-psycopg2 (>=2.9.21.20260422,<3)", "validators-test-utils"]
+
+[package.source]
+type = "directory"
+url = "validators/pgsql"
+
+[[package]]
 name = "validators-postgresql-client"
 version = "0.1.0"
 description = "Validator for postgresql_client interface"
@@ -2832,6 +2855,7 @@ validators-object-storage = "*"
 validators-opensearch-client = "*"
 validators-parca-scrape = "*"
 validators-parca-store = "*"
+validators-pgsql = "*"
 validators-postgresql-client = "*"
 validators-prometheus-remote-write = "*"
 validators-prometheus-scrape = "*"
@@ -2995,4 +3019,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<4.0"
-content-hash = "26310f8bbbb2fdb285058edb80178c1b174ba4bcc91b82da7eebe5b39758855d"
+content-hash = "4c000a7832ba1ac48574eefc484bf41911cba9d15660a80bbdd5758081ee1e2d"
