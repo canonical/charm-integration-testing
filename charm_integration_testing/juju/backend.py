@@ -10,6 +10,7 @@ from functools import wraps
 from pathlib import Path
 from typing import Any, ParamSpec, TypeVar
 
+from kubernetes_client import KubernetesClient
 from pydantic.dataclasses import dataclass
 
 from validators.base.validator import ValidationResult
@@ -406,4 +407,14 @@ class JujuBackend(ABC):
     @abstractmethod
     def get_controller_kubeconfig(self, controller: str) -> Path | None:
         """Return the kubeconfig path for a K8s controller's cloud, or None for machine controllers."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_kubernetes_client_for_controller(self, controller: str) -> KubernetesClient | None:
+        """Return a KubernetesClient for a K8s controller's cloud, or None for machine controllers.
+
+        Resolution (cloud type, kubeconfig lookup, client construction/caching) is
+        delegated entirely to the backend, which is the single source of truth for
+        controller cloud configuration.
+        """
         raise NotImplementedError
