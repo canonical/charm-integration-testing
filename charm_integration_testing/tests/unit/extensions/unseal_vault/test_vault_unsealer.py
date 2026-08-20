@@ -449,7 +449,7 @@ class TestVaultUnsealer:
         charm = CharmInfo(name="vault")
 
         # WHEN
-        VaultUnsealer(charm, vault, juju, logger).try_init_vault("test-model", "vault", authorize_charm=False)
+        VaultUnsealer(charm, vault, juju, logger).try_init_vault(TEST_MODEL, "vault", authorize_charm=False)
 
         # THEN
         for target, action, _ in juju.actions_run:
