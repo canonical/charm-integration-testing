@@ -191,6 +191,10 @@ Failure Information
      - An application whose declared charm could not be resolved to exactly one charm during bundle building. Collected when ``UncompletableBundleError`` is raised. Value is the charm name (not the generic application name from the spec). Multiple values may be recorded.
      - No
      - ``kafka``
+   * - ``failure:build_bundle:release_resolution``
+     - Structured context for a required application whose Charmhub release could not be resolved. The category is constant so equivalent failures can be linked across runs. Values contain sorted ``key=value`` facts such as the failure kind, requested platform/base/channel, supported values, unmet ``assumes`` requirement, and stable Charmhub error code. Application, charm, and model names and free-form server messages are deliberately excluded. Aggregate track searches emit their deduplicated leaf failures.
+     - No
+     - ``kind=platform_mismatch platform=machine requested_platform=machine supported_platforms=kubernetes``
    * - ``failure:build_bundle:unresolved_integration``
      - A user-specified integration whose named endpoint(s) could not be mapped to any charm integration, most commonly because the endpoint no longer exists on the resolved charm (e.g. renamed/removed upstream). Collected when ``UncompletableBundleError`` is raised. Format: ``<charm>:<endpoint_name>/<charm>:<endpoint_name>``, using charm names (not the generic application names from the spec). Multiple values may be recorded.
      - No

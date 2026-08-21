@@ -13,6 +13,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from .charm import EndpointScope
+from .release_errors import CharmReleaseNotFoundException as CharmReleaseNotFoundException
 
 
 class UnparsableCharmException(Exception):
@@ -23,12 +24,6 @@ class UnparsableCharmException(Exception):
 
 class IncompleteCharmInfoException(UnparsableCharmException):
     """Raised when the charm info from charmhub is incomplete or missing required fields."""
-
-    pass
-
-
-class CharmReleaseNotFoundException(Exception):
-    """Raised when the release for a charm cannot be deduced."""
 
     pass
 
