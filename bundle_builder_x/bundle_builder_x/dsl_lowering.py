@@ -276,14 +276,17 @@ def _reachable_set(charm_id: int, endpoint_name: str, spec: object, domain: Doma
     endpoint.  So if C's ``R`` endpoint connects to a charm that is already
     reachable (i.e. its certificate is trusted), then C itself is reachable.
 
-    The fixed-point iteration adds at most one new charm per step, so it
-    converges in at most ``len(domain.charms)`` iterations.
+    Only charms that declare proxies can extend the reachable set. Because
+    each such charm can enter the set at most once, the fixed point converges
+    in at most the number of proxy-capable charm instances.
     """
     # Seed: charms directly connected to this endpoint
     result: z3.ExprRef = _charm_set_for_endpoints(charm_id, [endpoint_name], domain)
 
-    # Iterate to fixed point
-    for _ in range(len(domain.charms)):
+    # Iterate to fixed point. Non-proxy charms can only appear in the initial
+    # seed, so they do not contribute to the maximum proxy-chain depth.
+    proxy_charm_count = sum(bool(charm.spec.proxies) for charm in domain.charms)
+    for _ in range(proxy_charm_count):
         extended = result
         for peer_charm_id, peer_charm in enumerate(domain.charms):
             for proxy in peer_charm.spec.proxies:
