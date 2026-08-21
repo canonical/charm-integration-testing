@@ -1,0 +1,28 @@
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+[project]
+name = "validators-ingress-auth"
+version = "0.1.0"
+description = "Validator for ingress-auth interface"
+authors = [
+    {name = "SQA Team", email = "solutionsqa@canonical.com"}
+]
+
+requires-python = ">=3.10"
+dependencies = [
+    "validators-base",
+]
+
+[project.entry-points."endpoint_validators"]
+ingress-auth = "validators.ingress_auth:IngressAuthValidator"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["validators.ingress_auth"]
+
+[tool.setuptools.package-dir]
+"validators.ingress_auth" = "."

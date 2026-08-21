@@ -1,0 +1,145 @@
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+from dataclasses import dataclass, field
+from typing import Any, cast
+from unittest.mock import patch
+
+import ops
+
+from validators.ingress_auth.validator import IngressAuthValidator
+
+
+@dataclass(frozen=True)
+class AppStub:
+    name: str = "provider"
+
+
+@dataclass(frozen=True)
+class UnitStub:
+    name: str
+
+
+@dataclass
+class RelationStub:
+    name: str
+    id: int
+    app: AppStub | None
+    data: dict[Any, dict[str, str]] = field(default_factory=dict)
+    units: frozenset[UnitStub] = field(default_factory=frozenset)
+
+
+@dataclass
+class RelationMetaStub:
+    interface_name: str
+    role: Any
+
+
+@dataclass
+class CharmMetaStub:
+    relations: dict[str, RelationMetaStub]
+
+
+@dataclass
+class CharmStub:
+    meta: CharmMetaStub
+    model: Any
+
+
+@dataclass
+class _RoleStub:
+    value: str
+
+
+@dataclass
+class _SecretStub:
+    content: dict[str, str] = field(default_factory=dict)
+
+    def get_content(self) -> dict[str, str]:
+        return self.content
+
+
+@dataclass
+class _ModelStub:
+    def get_secret(self, id: str) -> _SecretStub:  # noqa: A002
+        return _SecretStub()
+
+
+def _make_validator(
+    *,
+    app_databag: dict[str, str] | None = None,
+    unit_databags: list[dict[str, str]] | None = None,
+    app_present: bool = True,
+) -> IngressAuthValidator:
+    endpoint = "ingress-auth"
+    app = AppStub() if app_present else None
+    relation_data: dict[Any, dict[str, str]] = {}
+    if app is not None:
+        relation_data[app] = app_databag or {}
+
+    units: list[UnitStub] = []
+    for index, unit_databag in enumerate(unit_databags or []):
+        unit = UnitStub(name=f"provider/{index}")
+        units.append(unit)
+        relation_data[unit] = unit_databag
+
+    relation = RelationStub(
+        name=endpoint,
+        id=1,
+        app=app,
+        data=relation_data,
+        units=frozenset(units),
+    )
+    relation_meta = RelationMetaStub(interface_name="ingress-auth", role=_RoleStub("requires"))
+    charm = CharmStub(
+        meta=CharmMetaStub(relations={endpoint: relation_meta}),
+        model=_ModelStub(),
+    )
+    return IngressAuthValidator(cast(ops.CharmBase, charm), cast(ops.Relation, relation))
+
+
+def test_happy_path_passes() -> None:
+    validator = _make_validator(
+        app_databag={},
+        unit_databags=[
+            {
+                "ingress-address": "10.0.0.1",
+                "private-address": "10.0.0.1",
+                "egress-subnets": "10.152.183.0/24",
+            }
+        ],
+    )
+    with patch.object(IngressAuthValidator, "resolve_secret", return_value={}):
+        result = validator.validate(level="simple")
+    assert result.status == "PASS"
+
+
+def test_missing_fields_fails() -> None:
+    validator = _make_validator(
+        app_databag={},
+        unit_databags=[
+            {
+                "ingress-address": "10.0.0.1",
+                "egress-subnets": "10.152.183.0/24",
+            }
+        ],
+    )
+    with patch.object(IngressAuthValidator, "resolve_secret", return_value={}):
+        result = validator.validate(level="simple")
+    assert result.status == "FAIL"
+    check = next(check for check in result.checks if check.name == "unit_databag")
+    assert "private-address" in check.message
+
+
+def test_no_app_returns_error() -> None:
+    validator = _make_validator(app_present=False, unit_databags=[])
+    with patch.object(IngressAuthValidator, "resolve_secret", return_value={}):
+        result = validator.validate(level="simple")
+    assert result.status == "ERROR"
+
+
+def test_unsupported_level_is_skipped() -> None:
+    validator = _make_validator(app_databag={}, unit_databags=[])
+    with patch.object(IngressAuthValidator, "resolve_secret", return_value={}):
+        result = validator.validate(level="deep")
+    assert result.status == "SKIPPED"

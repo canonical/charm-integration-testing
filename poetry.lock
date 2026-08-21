@@ -2545,6 +2545,23 @@ type = "directory"
 url = "validators/ingress"
 
 [[package]]
+name = "validators-ingress-auth"
+version = "0.1.0"
+description = "Validator for ingress-auth interface"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+validators-base = "*"
+
+[package.source]
+type = "directory"
+url = "validators/ingress_auth"
+
+[[package]]
 name = "validators-kafka-client"
 version = "0.1.0"
 description = "Validator for kafka_client interface"
@@ -2846,6 +2863,7 @@ validators-grafana-dashboard = "*"
 validators-grafana-datasource = "*"
 validators-http-interface = "*"
 validators-ingress = "*"
+validators-ingress-auth = "*"
 validators-kafka-client = "*"
 validators-livepatch-pro-airgapped-server = "*"
 validators-loki-push-api = "*"
@@ -3019,4 +3037,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<4.0"
-content-hash = "4c000a7832ba1ac48574eefc484bf41911cba9d15660a80bbdd5758081ee1e2d"
+content-hash = "c6cdd03a1a90a51d475d88eb50bfcb329d45cbb324438b1ffe959cfad2ed25eb"
