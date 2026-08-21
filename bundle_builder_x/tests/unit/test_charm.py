@@ -1,7 +1,15 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-from bundle_builder_x.charm import Charm, CharmChannel, CharmEndpoint, EndpointScope, EndpointType
+from bundle_builder_x.charm import (
+    Charm,
+    CharmAssumesEntry,
+    CharmChannel,
+    CharmEndpoint,
+    EndpointScope,
+    EndpointType,
+)
+from bundle_builder_x.juju_version import JujuVersion
 
 
 def _ch(track: str, risk: str) -> CharmChannel:
@@ -43,6 +51,67 @@ class TestCharmChannel:
                 _ch("latest", "stable"),
                 _ch("latest", "edge"),
             ]
+
+
+class TestCharmAssumesEntry:
+    def test_satisfaction_matches_reported_failures(self) -> None:
+        entry = CharmAssumesEntry(
+            all_of=frozenset(
+                {
+                    CharmAssumesEntry(feature="k8s-api"),
+                    CharmAssumesEntry(op=">=", required_version=JujuVersion.parse("4.0.0")),
+                }
+            )
+        )
+
+        assert entry.satisfied_by(JujuVersion.parse("3.6.0"), frozenset({"juju"})) is False
+        assert entry.satisfied_by(JujuVersion.parse("4.0.0"), frozenset({"juju", "k8s-api"})) is True
+
+    def test_reports_missing_feature(self) -> None:
+        entry = CharmAssumesEntry(feature="k8s-api")
+
+        assert entry.unsatisfied_requirements(
+            JujuVersion.parse("3.6.0"),
+            frozenset({"juju"}),
+        ) == ("feature=k8s-api",)
+
+    def test_reports_failed_juju_version(self) -> None:
+        entry = CharmAssumesEntry(op=">=", required_version=JujuVersion.parse("4.0.0"))
+
+        assert entry.unsatisfied_requirements(
+            JujuVersion.parse("3.6.0"),
+            frozenset({"juju"}),
+        ) == ("juju>=4.0.0",)
+
+    def test_all_of_reports_each_failed_leaf(self) -> None:
+        entry = CharmAssumesEntry(
+            all_of=frozenset(
+                {
+                    CharmAssumesEntry(feature="k8s-api"),
+                    CharmAssumesEntry(feature="foo"),
+                }
+            )
+        )
+
+        assert entry.unsatisfied_requirements(
+            JujuVersion.parse("3.6.0"),
+            frozenset({"juju"}),
+        ) == ("feature=foo", "feature=k8s-api")
+
+    def test_any_of_preserves_the_failed_alternative_group(self) -> None:
+        entry = CharmAssumesEntry(
+            any_of=frozenset(
+                {
+                    CharmAssumesEntry(feature="k8s-api"),
+                    CharmAssumesEntry(op=">=", required_version=JujuVersion.parse("4.0.0")),
+                }
+            )
+        )
+
+        assert entry.unsatisfied_requirements(
+            JujuVersion.parse("3.6.0"),
+            frozenset({"juju"}),
+        ) == ("any-of(feature=k8s-api,juju>=4.0.0)",)
 
 
 class TestCharmEndpointScope:

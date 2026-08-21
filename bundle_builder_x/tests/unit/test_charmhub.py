@@ -6,7 +6,9 @@ from typing import cast
 import pytest
 from pydantic.dataclasses import dataclass
 
+from bundle_builder_x import CharmReleaseNotFoundException
 from bundle_builder_x.bundle_builder import BundleBuilder, UncompletableBundleError
+from bundle_builder_x.bundle_diagnostics import ApplicationReleaseDiagnostic
 from bundle_builder_x.charm import CharmChannel, EndpointScope, EndpointType
 from bundle_builder_x.charmhub import CharmhubClient
 from bundle_builder_x.charmhub_http import (
@@ -14,7 +16,6 @@ from bundle_builder_x.charmhub_http import (
     CharmhubBase,
     CharmhubHttpClient,
     CharmMetadata,
-    CharmReleaseNotFoundException,
     FindResponse,
     IncompleteCharmInfoException,
     InfoResponse,
@@ -23,6 +24,7 @@ from bundle_builder_x.charmhub_http import (
     UnparsableCharmException,
 )
 from bundle_builder_x.overrides import CharmGlobalOverrides, OverridesClient
+from bundle_builder_x.release_errors import AssumesMismatchError, PlatformMismatchError
 from bundle_builder_x.spec import AppSpec, ModelSpec, SpecFile
 
 # ---------------------------------------------------------------------------
@@ -118,6 +120,20 @@ def _refresh_response_with_charm(name: str, revision: int, metadata: CharmMetada
     """
     charm = RefreshResponse.Charm.model_construct(revision=revision, metadata=metadata, config=_EMPTY_CONFIG)
     return RefreshResponse.model_construct(name=name, charm=charm, effective_channel=None, error=None)
+
+
+def _aodh_client_with_raw_overrides(raw_overrides: dict[str, object]) -> CharmhubClient:
+    """Build a CharmhubClient stubbed to refresh a fixed "aodh" charm with the given overrides."""
+    response = _refresh_response_with_charm("aodh", revision=5, metadata=_METADATA_REQUIRES)
+
+    class _StubClient(_NullHttpClient):
+        def refresh(self, action: RefreshAction) -> RefreshResponse:
+            return response
+
+    return CharmhubClient(
+        http_client=cast(CharmhubHttpClient, _StubClient()),
+        overrides_client=_StubOverridesClient(raw_overrides),
+    )
 
 
 class TestCharmhubClient:
@@ -328,6 +344,43 @@ class TestCharmhubClient:
             assert charm.platforms == ["machine"]
 
     # ---------------------------------------------------------------------------
+    # TestBundleBuilderPlatformMismatch
+    # ---------------------------------------------------------------------------
+
+    class TestBundleBuilderPlatformMismatch:
+        """End-to-end check that ``BundleBuilder.build()`` reports a charm/model platform
+        mismatch (see TestCharmFromStorePlatformOverrides above) through the canonical bundle
+        error with its typed release rejection.
+        """
+
+        def test_bundle_builder_reports_platform_mismatch_as_unresolved_application(self) -> None:
+            # GIVEN a charm restricted to Kubernetes placed on a machine model
+            charmhub_client = _aodh_client_with_raw_overrides({"platforms": ["kubernetes"]})
+            builder = BundleBuilder(charmhub_client=charmhub_client)
+            spec = SpecFile(
+                models=[
+                    ModelSpec(
+                        name="m",
+                        platform="machine",
+                        juju="3.6.0",
+                        applications={"neighbor": AppSpec(charm="aodh", base="22.04", channel="latest/stable")},
+                    )
+                ]
+            )
+
+            # WHEN building the bundle
+            # THEN the canonical bundle error retains the precise release rejection
+            with pytest.raises(UncompletableBundleError, match="supports platform") as exc_info:
+                builder.build(spec)
+            assert len(exc_info.value.diagnostics) == 1
+            failure = exc_info.value.diagnostics[0]
+            assert isinstance(failure, ApplicationReleaseDiagnostic)
+            assert failure.application == "neighbor"
+            assert isinstance(failure.error, PlatformMismatchError)
+            assert failure.error.requested_platform == "machine"
+            assert failure.error.supported_platforms == ("kubernetes",)
+
+    # ---------------------------------------------------------------------------
     # TestAssumesUnsupportedFeatureOverride
     # ---------------------------------------------------------------------------
 
@@ -345,20 +398,8 @@ class TestCharmhubClient:
         its criteria blocks, whether or not it is also delisted (``listed: false``).
         """
 
-        def _client_with_raw_overrides(self, raw_overrides: dict[str, object]) -> CharmhubClient:
-            response = _refresh_response_with_charm("aodh", revision=5, metadata=_METADATA_REQUIRES)
-
-            class _StubClient(_NullHttpClient):
-                def refresh(self, action: RefreshAction) -> RefreshResponse:
-                    return response
-
-            return CharmhubClient(
-                http_client=cast(CharmhubHttpClient, _StubClient()),
-                overrides_client=_StubOverridesClient(raw_overrides),
-            )
-
         def _client_with_assumes_override(self, feature: str) -> CharmhubClient:
-            return self._client_with_raw_overrides(
+            return _aodh_client_with_raw_overrides(
                 {"listed": False, "platforms": ["machine", "kubernetes"], "overrides": [{"assumes": [feature]}]}
             )
 
@@ -374,7 +415,7 @@ class TestCharmhubClient:
             # THEN CharmReleaseNotFoundException is raised with a message identifying the
             # unmet assumes constraint, rather than the charm silently building and later
             # failing deep inside relation resolution
-            with pytest.raises(CharmReleaseNotFoundException, match="assumes constraints"):
+            with pytest.raises(AssumesMismatchError, match="assumes constraints") as exc_info:
                 client.charm_from_store(
                     charm_name="aodh",
                     ubuntu_arch="amd64",
@@ -383,10 +424,11 @@ class TestCharmhubClient:
                     charm_risk="stable",
                     platform=platform,
                 )
+            assert exc_info.value.unmet_requirements == ("feature=unsupported-openstack",)
 
         def test_charm_from_store_succeeds_without_the_sentinel_feature(self) -> None:
             # GIVEN a charm with no assumes override at all
-            client = self._client_with_raw_overrides({})
+            client = _aodh_client_with_raw_overrides({})
 
             # WHEN fetching the charm for the machine platform
             charm = client.charm_from_store(
@@ -408,10 +450,9 @@ class TestCharmhubClient:
 
             The application-charm lookup in ``BundleBuilder._get_charm_for_application()``
             can raise ``CharmReleaseNotFoundException`` (e.g. no release satisfies the
-            sentinel feature). ``_handle_failed_assertion`` catches that and leaves the
-            assertion tag unexpanded, so the failure surfaces via the unsat core as an
-            ``UnresolvedApplicationInfo`` on the canonical ``UncompletableBundleError``,
-            identifying the charm that could not be resolved.
+            sentinel feature). ``_handle_failed_assertion`` catches that and attaches the
+            typed rejection to the canonical ``UncompletableBundleError`` while retaining
+            the unresolved application diagnostic.
             """
             # GIVEN a real CharmhubClient (stubbed HTTP/overrides) where "aodh" is marked
             # unsupported via a sentinel feature, wired into a real BundleBuilder
@@ -432,10 +473,14 @@ class TestCharmhubClient:
 
             # WHEN building the bundle
             # THEN UncompletableBundleError propagates out of build(), identifying the
-            # unresolved application/charm, instead of a raw CharmReleaseNotFoundException
+            # precise release rejection instead of a raw CharmReleaseNotFoundException
             with pytest.raises(UncompletableBundleError, match="aodh") as exc_info:
                 builder.build(spec)
-            assert [info.charm_name for info in exc_info.value.unresolved_applications] == ["aodh"]
+            assert len(exc_info.value.diagnostics) == 1
+            diagnostic = exc_info.value.diagnostics[0]
+            assert isinstance(diagnostic, ApplicationReleaseDiagnostic)
+            assert diagnostic.charm_name == "aodh"
+            assert isinstance(diagnostic.error, AssumesMismatchError)
 
     # ---------------------------------------------------------------------------
     # TestChannelSupportsUbuntuVersion
