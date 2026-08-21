@@ -6,5 +6,4 @@
 # cni, etcd, kube-api-endpoint (requires): REQUIRED (see reactive/calico.py gating).
 listed: false
 overrides:
-  - assumes:
-      - unsupported-obsolete
+  - assumes: [unsupported-obsolete]

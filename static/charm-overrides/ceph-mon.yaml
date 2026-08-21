@@ -11,8 +11,7 @@
 overrides:
 
   # octopus, pacific and earlier: no cos-agent/metrics-endpoint.
-  - assumes: &unsupported
-      - unsupported-openstack
+  - assumes: &unsupported [unsupported-openstack]
     criteria:
       - any_of:
           - track: 'luminous'

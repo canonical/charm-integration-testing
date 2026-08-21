@@ -5,5 +5,4 @@
 # produce an undeployable bundle. See: https://github.com/canonical/charm-integration-testing/issues/816
 listed: false
 overrides:
-  - assumes:
-      - unsupported-obsolete
+  - assumes: [unsupported-obsolete]

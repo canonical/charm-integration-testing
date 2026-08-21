@@ -10,5 +10,4 @@ overrides:
         optional: true
       external-dns:  # not in REQUIRED_INTERFACES; hooks/neutron_api_utils.py
         optional: true
-    assumes:
-      - unsupported-openstack
+    assumes: [unsupported-openstack]

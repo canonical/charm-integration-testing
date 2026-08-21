@@ -9,8 +9,7 @@
 #   (SQT-1081); this blocks the charm from being built directly.
 overrides:
   # Rocky, Stein: identity-credentials not yet in required_relations.
-  - assumes: &unsupported
-      - unsupported-openstack
+  - assumes: &unsupported [unsupported-openstack]
     criteria:
       - any_of:
           - track: 'rocky'

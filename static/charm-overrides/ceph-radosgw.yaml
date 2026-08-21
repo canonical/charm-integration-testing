@@ -9,8 +9,7 @@
 #   (SQT-1081); this blocks the charm from being built directly.
 overrides:
   # luminous, mimic, nautilus, octopus, pacific: no secondary, no primary, no s3
-  - assumes: &unsupported
-      - unsupported-openstack
+  - assumes: &unsupported [unsupported-openstack]
     criteria:
       - any_of:
           - track: 'luminous'

@@ -9,8 +9,7 @@
 #   (SQT-1081); this blocks the charm from being built directly.
 overrides:
   # queens, rocky, stein, train: identity-credentials not present until ussuri.
-  - assumes: &unsupported
-      - unsupported-openstack
+  - assumes: &unsupported [unsupported-openstack]
     criteria:
       - any_of:
           - track: 'queens'

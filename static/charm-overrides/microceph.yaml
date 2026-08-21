@@ -9,8 +9,7 @@
 overrides:
 
   # latest, reef: only ceph, radosgw, mds provided.
-  - assumes: &unsupported
-      - unsupported-openstack
+  - assumes: &unsupported [unsupported-openstack]
     criteria:
       - any_of:
           - track: 'latest'
