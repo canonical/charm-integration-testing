@@ -8,8 +8,7 @@
 #   (SQT-1081); this blocks the charm from being built directly.
 overrides:
   # queens-train: dashboard endpoint not yet present in `provides` metadata
-  - assumes: &unsupported
-      - unsupported-openstack
+  - assumes: &unsupported [unsupported-openstack]
     criteria:
       - any_of:
           - track: 'queens'

@@ -1,5 +1,4 @@
 ---
 # octavia-dashboard: listed on Charmhub, but not currently covered by Charm QA (SQT-1081).
 overrides:
-  - assumes:
-      - unsupported-openstack
+  - assumes: [unsupported-openstack]

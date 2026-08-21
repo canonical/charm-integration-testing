@@ -3,5 +3,4 @@
 # Charmhub. Delist request: https://warthogs.atlassian.net/browse/IQA-3694
 listed: false
 overrides:
-  - assumes:
-      - unsupported-obsolete
+  - assumes: [unsupported-obsolete]

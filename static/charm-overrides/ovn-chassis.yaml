@@ -5,5 +5,4 @@ overrides:
   - provides:
       nrpe-external-master:
         optional: true
-    assumes:
-      - unsupported-openstack
+    assumes: [unsupported-openstack]

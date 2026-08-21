@@ -2,8 +2,7 @@
 # manila-ganesha: listed on Charmhub, but not currently covered by Charm QA (SQT-1081).
 overrides:
   # ussuri-yoga: nrpe-external-master not yet available
-  - assumes: &unsupported
-      - unsupported-openstack
+  - assumes: &unsupported [unsupported-openstack]
     criteria:
       - any_of:
           - track: 'ussuri'

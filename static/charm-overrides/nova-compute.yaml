@@ -10,8 +10,7 @@
 #   (SQT-1081); this blocks the charm from being built directly.
 overrides:
   # Old tracks (queens through xena): nova-vgpu endpoint does not exist in charm metadata.
-  - assumes: &unsupported
-      - unsupported-openstack
+  - assumes: &unsupported [unsupported-openstack]
     criteria:
       - any_of:
           - track: queens
