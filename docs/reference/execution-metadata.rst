@@ -192,9 +192,17 @@ Failure Information
      - No
      - ``kafka``
    * - ``failure:build_bundle:release_resolution``
-     - Structured context for a required application whose Charmhub release could not be resolved. The category is constant so equivalent failures can be linked across runs. Values contain sorted ``key=value`` facts such as the failure kind, requested platform/base/channel, supported values, unmet ``assumes`` requirement, and stable Charmhub error code. Application, charm, and model names and free-form server messages are deliberately excluded. Aggregate track searches emit their unique leaf failures.
+     - Stable failure kind for a required charm release that could not be resolved. Additional fixed categories under ``failure:build_bundle:release_resolution:<dimension>`` record only relevant dimensions, such as ``charm``, ``requested_platform``, ``supported_platform``, ``requirement``, ``requested_base``, ``supported_base``, ``requested_architecture``, ``supported_architecture``, ``channel``, ``track``, ``revision``, and ``error_code``. Values are atomic so attachment rules can match them directly. Application aliases, model names, and free-form server messages are excluded. Aggregate track searches emit metadata from their unique leaf failures.
      - No
-     - ``kind=platform_mismatch platform=machine requested_platform=machine supported_platforms=kubernetes``
+     - ``platform_mismatch``
+   * - ``failure:build_bundle:release_resolution:charm``
+     - Charm name associated with a release-resolution failure. Unlike an application alias, this remains stable across equivalent specs.
+     - No
+     - ``aodh``
+   * - ``failure:build_bundle:release_resolution:<dimension>``
+     - Atomic value for a relevant release-resolution dimension. A failure can emit multiple entries for plural dimensions, such as supported platforms or unmet ``assumes`` requirements.
+     - No
+     - ``failure:build_bundle:release_resolution:requested_platform = machine``
    * - ``failure:build_bundle:unresolved_integration``
      - A user-specified integration whose named endpoint(s) could not be mapped to any charm integration, most commonly because the endpoint no longer exists on the resolved charm (e.g. renamed/removed upstream). Collected when ``UncompletableBundleError`` is raised. Format: ``<charm>:<endpoint_name>/<charm>:<endpoint_name>``, using charm names (not the generic application names from the spec). Multiple values may be recorded.
      - No

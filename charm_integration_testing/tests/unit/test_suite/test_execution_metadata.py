@@ -1,7 +1,7 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-from test_suite.conftest import _bundle_diagnostic_metadata, _release_resolution_metadata_values
+from test_suite.conftest import _bundle_diagnostic_metadata, _release_resolution_metadata
 
 from bundle_builder_x import (
     ApplicationReleaseDiagnostic,
@@ -18,7 +18,7 @@ from bundle_builder_x import (
 )
 
 
-def test_platform_mismatch_metadata_excludes_run_local_names() -> None:
+def test_platform_mismatch_metadata_uses_atomic_stable_values() -> None:
     error = PlatformMismatchError(
         request=ReleaseRequest(
             charm_name="aodh",
@@ -30,16 +30,17 @@ def test_platform_mismatch_metadata_excludes_run_local_names() -> None:
         supported_platforms=("kubernetes",),
     )
 
-    values = _release_resolution_metadata_values(error)
+    entries = _release_resolution_metadata(error)
 
-    assert values == {
-        "architecture=amd64 channel=latest/stable kind=platform_mismatch platform=machine "
-        "requested_platform=machine supported_platforms=kubernetes"
+    assert entries == {
+        ("failure:build_bundle:release_resolution", "platform_mismatch"),
+        ("failure:build_bundle:release_resolution:charm", "aodh"),
+        ("failure:build_bundle:release_resolution:requested_platform", "machine"),
+        ("failure:build_bundle:release_resolution:supported_platform", "kubernetes"),
     }
-    assert all("aodh" not in value for value in values)
 
 
-def test_assumes_metadata_emits_one_stable_value_per_requirement() -> None:
+def test_assumes_metadata_emits_one_atomic_value_per_requirement() -> None:
     error = AssumesMismatchError(
         request=ReleaseRequest(
             charm_name="aodh",
@@ -51,13 +52,14 @@ def test_assumes_metadata_emits_one_stable_value_per_requirement() -> None:
         available_features=("juju",),
     )
 
-    values = _release_resolution_metadata_values(error)
+    entries = _release_resolution_metadata(error)
 
-    assert values == {
-        "architecture=amd64 available_features=juju juju_version=3.5.0 kind=assumes_mismatch "
-        "platform=machine requirement=feature=unsupported-openstack",
-        "architecture=amd64 available_features=juju juju_version=3.5.0 kind=assumes_mismatch "
-        "platform=machine requirement=juju>=3.6.0",
+    assert entries == {
+        ("failure:build_bundle:release_resolution", "assumes_mismatch"),
+        ("failure:build_bundle:release_resolution:charm", "aodh"),
+        ("failure:build_bundle:release_resolution:juju_version", "3.5.0"),
+        ("failure:build_bundle:release_resolution:requirement", "feature=unsupported-openstack"),
+        ("failure:build_bundle:release_resolution:requirement", "juju>=3.6.0"),
     }
 
 
@@ -80,12 +82,16 @@ def test_aggregate_release_metadata_flattens_and_deduplicates_children() -> None
         causes=(child, child),
     )
 
-    values = _release_resolution_metadata_values(aggregate)
+    entries = _release_resolution_metadata(aggregate)
 
-    assert values == {
-        "architecture=amd64 base=22.04 channel=latest/stable error_code=revision-not-found " "kind=channel_not_found"
+    assert entries == {
+        ("failure:build_bundle:release_resolution", "channel_not_found"),
+        ("failure:build_bundle:release_resolution:architecture", "amd64"),
+        ("failure:build_bundle:release_resolution:base", "22.04"),
+        ("failure:build_bundle:release_resolution:channel", "latest/stable"),
+        ("failure:build_bundle:release_resolution:charm", "aodh"),
+        ("failure:build_bundle:release_resolution:error_code", "revision-not-found"),
     }
-    assert all("server message" not in value and "aodh" not in value for value in values)
 
 
 def test_bundle_diagnostic_metadata_dispatches_every_public_variant() -> None:
@@ -137,7 +143,6 @@ def test_bundle_diagnostic_metadata_dispatches_every_public_variant() -> None:
         "katib-controller:service/kfp-viz:info",
     ) in entries
     assert ("failure:build_bundle:feature_mismatch:feature", "katib-service") in entries
-    release_values = [value for category, value in entries if category.endswith("release_resolution")]
-    assert len(release_values) == 1
-    assert "aodh" not in release_values[0]
-    assert "neighbor" not in release_values[0]
+    assert ("failure:build_bundle:release_resolution", "platform_mismatch") in entries
+    assert ("failure:build_bundle:release_resolution:charm", "aodh") in entries
+    assert all(value != "neighbor" for _, value in entries)
