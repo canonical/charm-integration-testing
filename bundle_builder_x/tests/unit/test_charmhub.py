@@ -328,6 +328,54 @@ class TestCharmhubClient:
             assert charm.platforms == ["machine"]
 
     # ---------------------------------------------------------------------------
+    # TestBundleBuilderPlatformMismatch
+    # ---------------------------------------------------------------------------
+
+    class TestBundleBuilderPlatformMismatch:
+        """End-to-end check that ``BundleBuilder.build()`` reports a charm/model platform
+        mismatch (see TestCharmFromStorePlatformOverrides above) through the canonical
+        unresolved-application diagnostic, rather than a raw ``CharmReleaseNotFoundException``.
+        """
+
+        def _client_with_raw_overrides(self, raw_overrides: dict[str, object]) -> CharmhubClient:
+            response = _refresh_response_with_charm("aodh", revision=5, metadata=_METADATA_REQUIRES)
+
+            class _StubClient(_NullHttpClient):
+                def refresh(self, action: RefreshAction) -> RefreshResponse:
+                    return response
+
+            return CharmhubClient(
+                http_client=cast(CharmhubHttpClient, _StubClient()),
+                overrides_client=_StubOverridesClient(raw_overrides),
+            )
+
+        def test_bundle_builder_reports_platform_mismatch_as_unresolved_application(self) -> None:
+            # GIVEN a charm restricted to Kubernetes placed on a machine model
+            charmhub_client = self._client_with_raw_overrides({"platforms": ["kubernetes"]})
+            builder = BundleBuilder(charmhub_client=charmhub_client)
+            spec = SpecFile(
+                models=[
+                    ModelSpec(
+                        name="m",
+                        platform="machine",
+                        juju="3.6.0",
+                        applications={"neighbor": AppSpec(charm="aodh", base="22.04", channel="latest/stable")},
+                    )
+                ]
+            )
+
+            # WHEN building the bundle
+            # THEN the failure uses the canonical unresolved-application diagnostic
+            with pytest.raises(
+                UncompletableBundleError,
+                match=r"Unresolved application\(s\): neighbor \(aodh\)",
+            ) as exc_info:
+                builder.build(spec)
+            assert exc_info.value.unresolved_applications == [
+                UnresolvedApplicationInfo(application="neighbor", charm_name="aodh")
+            ]
+
+    # ---------------------------------------------------------------------------
     # TestAssumesUnsupportedFeatureOverride
     # ---------------------------------------------------------------------------
 
@@ -436,32 +484,6 @@ class TestCharmhubClient:
             with pytest.raises(UncompletableBundleError, match="aodh") as exc_info:
                 builder.build(spec)
             assert [info.charm_name for info in exc_info.value.unresolved_applications] == ["aodh"]
-
-        def test_bundle_builder_reports_platform_mismatch_as_unresolved_application(self) -> None:
-            # GIVEN a charm restricted to Kubernetes placed on a machine model
-            charmhub_client = self._client_with_raw_overrides({"platforms": ["kubernetes"]})
-            builder = BundleBuilder(charmhub_client=charmhub_client)
-            spec = SpecFile(
-                models=[
-                    ModelSpec(
-                        name="m",
-                        platform="machine",
-                        juju="3.6.0",
-                        applications={"neighbor": AppSpec(charm="aodh", base="22.04", channel="latest/stable")},
-                    )
-                ]
-            )
-
-            # WHEN building the bundle
-            # THEN the failure uses the canonical unresolved-application diagnostic
-            with pytest.raises(
-                UncompletableBundleError,
-                match=r"Unresolved application\(s\): neighbor \(aodh\)",
-            ) as exc_info:
-                builder.build(spec)
-            assert exc_info.value.unresolved_applications == [
-                UnresolvedApplicationInfo(application="neighbor", charm_name="aodh")
-            ]
 
     # ---------------------------------------------------------------------------
     # TestChannelSupportsUbuntuVersion
