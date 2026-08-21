@@ -76,6 +76,36 @@ class TestInitializeGlobalDomain:
         assert len(domain.charms) == 0
 
 
+class TestPairCharmsInDomainSelfPairing:
+    def test_pairing_a_charm_with_itself_creates_no_integration(self) -> None:
+        # GIVEN a mesh-style charm (REQUIRES + PROVIDES on the same interface)
+        domain = _make_domain(
+            {
+                ModelRef(name="m1"): DomainModel(
+                    arch="amd64",
+                    platform="kubernetes",
+                    juju_version=_JUJU,
+                    applications={"grafana": DomainApplication(charm="grafana-k8s")},
+                ),
+            }
+        )
+        mesh_charm = _make_charm(
+            "grafana-k8s",
+            {
+                "require-cmr-mesh": CharmEndpoint(type=EndpointType.REQUIRES, interface="cross_model_mesh"),
+                "provide-cmr-mesh": CharmEndpoint(type=EndpointType.PROVIDES, interface="cross_model_mesh"),
+            },
+        )
+        charm_id = add_charm_to_domain(mesh_charm, domain, ModelRef(name="m1"))
+
+        # WHEN pairing the charm with itself
+        created = pair_charms_in_domain(domain, charm_id, charm_id)
+
+        # THEN no integration is created
+        assert created is False
+        assert domain.charm_integrations == []
+
+
 class TestAddCharmCrossModelPairing:
     def test_same_model_creates_local_integration(self) -> None:
         # GIVEN a domain with one model
