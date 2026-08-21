@@ -436,6 +436,8 @@ def pair_charms_in_domain(domain: Domain, charm_a_id: int, charm_b_id: int) -> b
 
     Returns True if at least one new integration variable was created.
     """
+    if charm_a_id == charm_b_id:
+        return False  # a charm never relates to itself
     charm_a = domain.charms[charm_a_id]
     charm_b = domain.charms[charm_b_id]
     model_a = charm_a.model

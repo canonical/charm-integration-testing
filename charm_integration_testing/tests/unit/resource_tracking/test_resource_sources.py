@@ -28,10 +28,12 @@ from resource_tracking.snapshot import (
     StatefulSetSnapshot,
 )
 from resource_tracking.sources import (
+    DEFAULT_KUBERNETES_SOURCES,
     ConfigMapSource,
     DeploymentSource,
     IngressSource,
     NetworkPolicySource,
+    PvcSource,
     RoleBindingSource,
     RoleSource,
     SecretSource,
@@ -43,8 +45,8 @@ from resource_tracking.sources import (
 MODEL = "test-model"
 
 
-def _meta(name: str, labels: dict[str, str] | None = None) -> SimpleNamespace:
-    return SimpleNamespace(name=name, labels=labels)
+def _meta(name: str, labels: dict[str, str] | None = None, generate_name: str | None = None) -> SimpleNamespace:
+    return SimpleNamespace(name=name, labels=labels, generate_name=generate_name)
 
 
 def _listing(items: list[Any]) -> SimpleNamespace:
@@ -244,6 +246,42 @@ class TestServiceSource:
         # THEN the optional fields default to empty
         assert snapshots == [ServiceSnapshot(name="svc", namespace=MODEL, service_type="", cluster_ip="", ports="")]
 
+    def test_juju_placeholder_port_is_excluded_from_ports(self) -> None:
+        # GIVEN a Service still carrying only Juju's placeholder port
+        raw = SimpleNamespace(
+            metadata=_meta("target", labels={"app.kubernetes.io/name": "target"}),
+            spec=SimpleNamespace(
+                type="ClusterIP",
+                cluster_ip="10.1.2.3",
+                ports=[SimpleNamespace(port=65535, protocol="TCP")],
+            ),
+        )
+        client = _client(core=_FakeCoreApi(services=[raw]))
+
+        # WHEN the source collects snapshots
+        snapshots = ServiceSource().collect(client, MODEL)  # type: ignore[arg-type]
+
+        # THEN the placeholder port is filtered out, leaving no ports
+        assert snapshots[0].report_attributes()["ports"] == ""
+
+    def test_real_ports_are_kept_when_placeholder_is_absent(self) -> None:
+        # GIVEN a Service that has opened its real ports alongside no placeholder
+        raw = SimpleNamespace(
+            metadata=_meta("target", labels={"app.kubernetes.io/name": "target"}),
+            spec=SimpleNamespace(
+                type="ClusterIP",
+                cluster_ip="10.1.2.3",
+                ports=[SimpleNamespace(port=5432, protocol="TCP"), SimpleNamespace(port=8008, protocol="TCP")],
+            ),
+        )
+        client = _client(core=_FakeCoreApi(services=[raw]))
+
+        # WHEN the source collects snapshots
+        snapshots = ServiceSource().collect(client, MODEL)  # type: ignore[arg-type]
+
+        # THEN the real ports are retained
+        assert snapshots[0].report_attributes()["ports"] == "5432/TCP,8008/TCP"
+
 
 class TestConfigMapSource:
     def test_records_sorted_keys_and_excludes_values_from_identity(self) -> None:
@@ -309,6 +347,102 @@ class TestSecretSource:
         # THEN the optional fields default to empty
         assert snapshots == [SecretSnapshot(name="blank", namespace=MODEL, secret_type="", data_keys="")]
 
+    def test_service_account_token_secrets_are_skipped(self) -> None:
+        # GIVEN a service-account-token Secret (volatile ``<sa>-token-XXXXX`` name)
+        raw = SimpleNamespace(
+            metadata=_meta("postgresql-token-ab12c", labels=None),
+            type="kubernetes.io/service-account-token",
+            data={"ca.crt": "Y2E=", "namespace": "bnM=", "token": "dG9r"},
+        )
+        client = _client(core=_FakeCoreApi(secrets=[raw]))
+
+        # WHEN the source collects snapshots
+        snapshots = SecretSource().collect(client, MODEL)  # type: ignore[arg-type]
+
+        # THEN the volatile-named token secret is not tracked
+        assert snapshots == []
+
+    def test_generate_name_secrets_are_skipped(self) -> None:
+        # GIVEN a Secret created with generateName (server-appended random suffix)
+        raw = SimpleNamespace(
+            metadata=_meta("ephemeral-x9k2p", labels=None, generate_name="ephemeral-"),
+            type="Opaque",
+            data={"token": "dG9r"},
+        )
+        client = _client(core=_FakeCoreApi(secrets=[raw]))
+
+        # WHEN the source collects snapshots
+        snapshots = SecretSource().collect(client, MODEL)  # type: ignore[arg-type]
+
+        # THEN the generated-name secret is not tracked
+        assert snapshots == []
+
+    def test_stable_secret_is_tracked_alongside_skipped_ones(self) -> None:
+        # GIVEN a stable Opaque secret and a volatile token secret in the same model
+        stable = SimpleNamespace(
+            metadata=_meta("postgresql.app", labels={"app.kubernetes.io/name": "postgresql"}),
+            type="Opaque",
+            data={"password": "cGFzcw=="},
+        )
+        token = SimpleNamespace(
+            metadata=_meta("postgresql-token-ab12c", labels=None),
+            type="kubernetes.io/service-account-token",
+            data={"token": "dG9r"},
+        )
+        client = _client(core=_FakeCoreApi(secrets=[stable, token]))
+
+        # WHEN the source collects snapshots
+        snapshots = SecretSource().collect(client, MODEL)  # type: ignore[arg-type]
+
+        # THEN only the stable secret is tracked
+        assert snapshots == [
+            SecretSnapshot(
+                name="postgresql.app",
+                namespace=MODEL,
+                secret_type="Opaque",
+                data_keys="password",
+                application="postgresql",
+            )
+        ]
+
+    def test_juju_secret_content_revisions_are_skipped(self) -> None:
+        # GIVEN an unlabelled Juju secret-content revision (``<xid>-<revision>`` name)
+        raw = SimpleNamespace(
+            metadata=_meta("9j258vlfg9ccpjm2d8cg-1", labels=None),
+            type="Opaque",
+            data={"content": "dg=="},
+        )
+        client = _client(core=_FakeCoreApi(secrets=[raw]))
+
+        # WHEN the source collects snapshots
+        snapshots = SecretSource().collect(client, MODEL)  # type: ignore[arg-type]
+
+        # THEN the volatile content-revision secret is not tracked
+        assert snapshots == []
+
+    def test_labelled_secret_matching_content_pattern_is_tracked(self) -> None:
+        # GIVEN a charm-labelled secret whose name coincidentally matches the pattern
+        raw = SimpleNamespace(
+            metadata=_meta("9j258vlfg9ccpjm2d8cg-1", labels={"app.kubernetes.io/name": "postgresql"}),
+            type="Opaque",
+            data={"password": "cGFzcw=="},
+        )
+        client = _client(core=_FakeCoreApi(secrets=[raw]))
+
+        # WHEN the source collects snapshots
+        snapshots = SecretSource().collect(client, MODEL)  # type: ignore[arg-type]
+
+        # THEN the labelled secret is still tracked (label gate prevents a false drop)
+        assert snapshots == [
+            SecretSnapshot(
+                name="9j258vlfg9ccpjm2d8cg-1",
+                namespace=MODEL,
+                secret_type="Opaque",
+                data_keys="password",
+                application="postgresql",
+            )
+        ]
+
 
 class TestServiceAccountSource:
     def test_maps_name_and_application(self) -> None:
@@ -320,6 +454,20 @@ class TestServiceAccountSource:
         snapshots = ServiceAccountSource().collect(client, MODEL)  # type: ignore[arg-type]
 
         # THEN the snapshot records the name, namespace and application
+        assert snapshots == [ServiceAccountSnapshot(name="postgresql", namespace=MODEL, application="postgresql")]
+
+    def test_juju_secret_consumer_service_accounts_are_skipped(self) -> None:
+        # GIVEN a Juju secret-consumer ServiceAccount (volatile ``...-<uuid>`` name)
+        volatile = SimpleNamespace(
+            metadata=_meta("juju-secret-consumer-ac64e0e2-0c32-4e6c-a61f-ee8af9462d84", labels=None)
+        )
+        stable = SimpleNamespace(metadata=_meta("postgresql", labels={"app.kubernetes.io/name": "postgresql"}))
+        client = _client(core=_FakeCoreApi(service_accounts=[volatile, stable]))
+
+        # WHEN the source collects snapshots
+        snapshots = ServiceAccountSource().collect(client, MODEL)  # type: ignore[arg-type]
+
+        # THEN only the stable ServiceAccount is tracked
         assert snapshots == [ServiceAccountSnapshot(name="postgresql", namespace=MODEL, application="postgresql")]
 
 
@@ -357,6 +505,27 @@ class TestRoleSource:
 
         # THEN the rules summary is empty
         assert snapshots == [RoleSnapshot(name="empty", namespace=MODEL, rules="")]
+
+    def test_juju_secret_consumer_roles_are_skipped(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # GIVEN a Juju secret-consumer Role (volatile ``...-<uuid>`` name) and a stable Role
+        volatile = SimpleNamespace(
+            metadata=_meta("juju-secret-consumer-ac64e0e2-0c32-4e6c-a61f-ee8af9462d84", labels=None),
+            rules=[SimpleNamespace(verbs=["get"], resources=["secrets"])],
+        )
+        stable = SimpleNamespace(
+            metadata=_meta("postgresql", labels={"app.kubernetes.io/name": "postgresql"}),
+            rules=[SimpleNamespace(verbs=["get"], resources=["pods"])],
+        )
+        _patch_rbac(monkeypatch, _FakeRbacApi(roles=[volatile, stable]))
+        client = _client()
+
+        # WHEN the source collects snapshots
+        snapshots = RoleSource().collect(client, MODEL)  # type: ignore[arg-type]
+
+        # THEN only the stable Role is tracked
+        assert snapshots == [
+            RoleSnapshot(name="postgresql", namespace=MODEL, rules="get:pods", application="postgresql")
+        ]
 
 
 class TestRoleBindingSource:
@@ -398,6 +567,35 @@ class TestRoleBindingSource:
 
         # THEN the optional fields default to empty
         assert snapshots == [RoleBindingSnapshot(name="rb", namespace=MODEL, role_ref="", subjects="")]
+
+    def test_juju_secret_consumer_role_bindings_are_skipped(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # GIVEN a Juju secret-consumer RoleBinding (volatile ``...-<uuid>`` name) and a stable one
+        volatile = SimpleNamespace(
+            metadata=_meta("juju-secret-consumer-ac64e0e2-0c32-4e6c-a61f-ee8af9462d84", labels=None),
+            role_ref=SimpleNamespace(kind="Role", name="juju-secret-consumer-ac64e0e2-0c32-4e6c-a61f-ee8af9462d84"),
+            subjects=None,
+        )
+        stable = SimpleNamespace(
+            metadata=_meta("postgresql", labels={"app.kubernetes.io/name": "postgresql"}),
+            role_ref=SimpleNamespace(kind="Role", name="postgresql"),
+            subjects=[SimpleNamespace(kind="ServiceAccount", name="postgresql")],
+        )
+        _patch_rbac(monkeypatch, _FakeRbacApi(role_bindings=[volatile, stable]))
+        client = _client()
+
+        # WHEN the source collects snapshots
+        snapshots = RoleBindingSource().collect(client, MODEL)  # type: ignore[arg-type]
+
+        # THEN only the stable RoleBinding is tracked
+        assert snapshots == [
+            RoleBindingSnapshot(
+                name="postgresql",
+                namespace=MODEL,
+                role_ref="Role/postgresql",
+                subjects="ServiceAccount/postgresql",
+                application="postgresql",
+            )
+        ]
 
 
 class TestNetworkPolicySource:
@@ -474,3 +672,23 @@ class TestIngressSource:
 
         # THEN the optional fields default to empty
         assert snapshots == [IngressSnapshot(name="ing", namespace=MODEL, ingress_class="", hosts="")]
+
+
+class TestDefaultKubernetesSources:
+    def test_covers_every_source_kind(self) -> None:
+        # GIVEN the canonical source list used to drive live collection
+        # THEN it holds exactly one instance of each implemented source kind
+        assert {type(source) for source in DEFAULT_KUBERNETES_SOURCES} == {
+            PvcSource,
+            StatefulSetSource,
+            DeploymentSource,
+            ServiceSource,
+            ConfigMapSource,
+            SecretSource,
+            ServiceAccountSource,
+            RoleSource,
+            RoleBindingSource,
+            NetworkPolicySource,
+            IngressSource,
+        }
+        assert len(DEFAULT_KUBERNETES_SOURCES) == 11
