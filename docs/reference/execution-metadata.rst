@@ -192,7 +192,7 @@ Failure Information
      - No
      - ``kafka``
    * - ``failure:build_bundle:release_resolution``
-     - Structured context for a required application whose Charmhub release could not be resolved. The category is constant so equivalent failures can be linked across runs. Values contain sorted ``key=value`` facts such as the failure kind, requested platform/base/channel, supported values, unmet ``assumes`` requirement, and stable Charmhub error code. Application, charm, and model names and free-form server messages are deliberately excluded. Aggregate track searches emit their deduplicated leaf failures.
+     - Structured context for a required application whose Charmhub release could not be resolved. The category is constant so equivalent failures can be linked across runs. Values contain sorted ``key=value`` facts such as the failure kind, requested platform/base/channel, supported values, unmet ``assumes`` requirement, and stable Charmhub error code. Application, charm, and model names and free-form server messages are deliberately excluded. Aggregate track searches emit their unique leaf failures.
      - No
      - ``kind=platform_mismatch platform=machine requested_platform=machine supported_platforms=kubernetes``
    * - ``failure:build_bundle:unresolved_integration``
