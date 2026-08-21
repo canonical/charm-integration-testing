@@ -6,7 +6,7 @@ from typing import cast
 import pytest
 from pydantic.dataclasses import dataclass
 
-from bundle_builder_x.bundle_builder import BundleBuilder, UncompletableBundleError
+from bundle_builder_x.bundle_builder import BundleBuilder, UncompletableBundleError, UnresolvedApplicationInfo
 from bundle_builder_x.charm import CharmChannel, EndpointScope, EndpointType
 from bundle_builder_x.charmhub import CharmhubClient
 from bundle_builder_x.charmhub_http import (
@@ -436,6 +436,32 @@ class TestCharmhubClient:
             with pytest.raises(UncompletableBundleError, match="aodh") as exc_info:
                 builder.build(spec)
             assert [info.charm_name for info in exc_info.value.unresolved_applications] == ["aodh"]
+
+        def test_bundle_builder_reports_platform_mismatch_as_unresolved_application(self) -> None:
+            # GIVEN a charm restricted to Kubernetes placed on a machine model
+            charmhub_client = self._client_with_raw_overrides({"platforms": ["kubernetes"]})
+            builder = BundleBuilder(charmhub_client=charmhub_client)
+            spec = SpecFile(
+                models=[
+                    ModelSpec(
+                        name="m",
+                        platform="machine",
+                        juju="3.6.0",
+                        applications={"neighbor": AppSpec(charm="aodh", base="22.04", channel="latest/stable")},
+                    )
+                ]
+            )
+
+            # WHEN building the bundle
+            # THEN the failure uses the canonical unresolved-application diagnostic
+            with pytest.raises(
+                UncompletableBundleError,
+                match=r"Unresolved application\(s\): neighbor \(aodh\)",
+            ) as exc_info:
+                builder.build(spec)
+            assert exc_info.value.unresolved_applications == [
+                UnresolvedApplicationInfo(application="neighbor", charm_name="aodh")
+            ]
 
     # ---------------------------------------------------------------------------
     # TestChannelSupportsUbuntuVersion

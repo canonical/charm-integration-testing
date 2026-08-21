@@ -6,7 +6,6 @@
 from itertools import repeat
 from typing import Iterator
 
-import pytest
 import z3  # type: ignore[import-untyped]
 
 from bundle_builder_x.assertion_tags import (
@@ -40,8 +39,7 @@ from bundle_builder_x.domain import (
     pair_charms_in_domain,
 )
 from bundle_builder_x.juju_version import JujuVersion
-from bundle_builder_x.overrides import CharmGlobalOverrides, OverridesClient
-from bundle_builder_x.spec import AppSpec, ModelSpec, SpecFile
+from bundle_builder_x.overrides import OverridesClient
 
 _JUJU = JujuVersion(major=3, minor=6, patch=0)
 _CHANNEL = CharmChannel(track="latest", risk="stable", branch="")
@@ -1037,89 +1035,6 @@ class TestMergeMismatchTags:
         assert result[2] is non_mismatch
         assert isinstance(result[3], PeerChannelMismatchTag)
         assert result[3].required_track == "antelope"
-
-
-class _StubOverridesClient(OverridesClient):
-    """OverridesClient returning fixed platform overrides per charm."""
-
-    def __init__(self, platforms_by_charm: dict[str, list[str] | None]) -> None:
-        super().__init__()
-        self._overrides_by_charm = {
-            charm: CharmGlobalOverrides(platforms=platforms) for charm, platforms in platforms_by_charm.items()
-        }
-
-    def get_charm_platform_overrides(self, charm: str) -> list[str] | None:
-        return self._overrides_by_charm.get(charm, CharmGlobalOverrides()).platforms
-
-
-def _builder_with_platform_overrides(platforms_by_charm: dict[str, list[str] | None]) -> BundleBuilder:
-    fake = _FakeCharmhubClient()
-    fake.overrides_client = _StubOverridesClient(platforms_by_charm)
-    return BundleBuilder(charmhub_client=fake)
-
-
-def _single_model_spec(charm: str, platform: str) -> SpecFile:
-    return SpecFile(
-        models=[
-            ModelSpec(
-                name="m",
-                platform=platform,
-                applications={charm: AppSpec(charm=charm)},
-            )
-        ]
-    )
-
-
-class TestValidatePlatforms:
-    """BundleBuilder._validate_platforms."""
-
-    def test_raises_when_model_platform_not_in_overrides(self) -> None:
-        # GIVEN a charm whose overrides only allow the machine platform
-        builder = _builder_with_platform_overrides({"mysql": ["machine"]})
-        spec = _single_model_spec("mysql", platform="kubernetes")
-
-        # WHEN the charm is placed on a kubernetes model
-        # THEN validation fails with details about the mismatch
-        with pytest.raises(UncompletableBundleError) as exc_info:
-            builder._validate_platforms(spec)
-        message = str(exc_info.value)
-        assert "mysql" in message
-        assert "kubernetes" in message
-        assert "machine" in message
-
-    def test_passes_when_model_platform_in_overrides(self) -> None:
-        # GIVEN a charm whose overrides allow the model platform
-        builder = _builder_with_platform_overrides({"mysql": ["machine", "kubernetes"]})
-        spec = _single_model_spec("mysql", platform="kubernetes")
-
-        # WHEN validating
-        # THEN no error is raised
-        builder._validate_platforms(spec)
-
-    def test_passes_when_charm_has_no_platform_overrides(self) -> None:
-        # GIVEN a charm with no platform overrides
-        builder = _builder_with_platform_overrides({"mysql": None})
-        spec = _single_model_spec("mysql", platform="kubernetes")
-
-        # WHEN validating
-        # THEN no error is raised (any platform is acceptable)
-        builder._validate_platforms(spec)
-
-    def test_validates_all_models_and_applications(self) -> None:
-        # GIVEN a multi-model spec where one application violates its platform overrides
-        builder = _builder_with_platform_overrides({"good": ["kubernetes"], "bad": ["machine"]})
-        spec = SpecFile(
-            models=[
-                ModelSpec(name="k8s", platform="kubernetes", applications={"good": AppSpec(charm="good")}),
-                ModelSpec(name="other", platform="kubernetes", applications={"bad": AppSpec(charm="bad")}),
-            ]
-        )
-
-        # WHEN validating
-        # THEN the offending application is reported
-        with pytest.raises(UncompletableBundleError) as exc_info:
-            builder._validate_platforms(spec)
-        assert "bad" in str(exc_info.value)
 
 
 class TestUncompletableBundleErrorFeatureMismatches:
