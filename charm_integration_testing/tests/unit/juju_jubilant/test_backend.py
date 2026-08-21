@@ -2458,7 +2458,7 @@ class TestJubilantBackendDebugLog:
         # GIVEN a client stub that returns a debug log message
         class ModelStub:
             def __init__(self, model: JujuModelHandle) -> None:
-                self.model = model.model if isinstance(model, JujuModelHandle) else model
+                self.model = model.model
 
             def debug_log(self) -> str:
                 return f"this is a debug log for model {self.model}"

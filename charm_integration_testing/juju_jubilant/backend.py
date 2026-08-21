@@ -190,10 +190,9 @@ class JubilantBackend(JujuCmdBackend):
             try:
                 status = self.status(model)
             except TransientModelUnavailabilityError as e:
-                model_display = model.uri if isinstance(model, JujuModelHandle) else model
                 noncompliant_wait_state = dataclasses.replace(
                     last_wait_state,
-                    message=f"Model {model_display} temporarily unavailable during migration: {e.stderr.strip()}",
+                    message=f"Model {model.uri} temporarily unavailable during migration: {e.stderr.strip()}",
                 )
                 success_count = 0
                 elapsed = datetime.now() - iteration_start

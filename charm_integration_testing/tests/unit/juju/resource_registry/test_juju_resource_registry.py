@@ -59,9 +59,8 @@ class BootstrapKillBackendStub(NullJujuBackend):
         self.models_added.append((controller, model))
 
     def juju_status_text(self, model: JujuModelHandle) -> str:
-        model_uri = model.uri if isinstance(model, JujuModelHandle) else model
-        self.status_calls.append(model_uri)
-        return f"status for {model_uri}"
+        self.status_calls.append(model.uri)
+        return f"status for {model.uri}"
 
     def migrate_model(self, model_name: str, source_controller: str, target_controller: str) -> None:
         pass

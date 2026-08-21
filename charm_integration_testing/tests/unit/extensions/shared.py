@@ -13,12 +13,8 @@ from validators.base.validator import ValidationResult
 
 
 def _model_key(model: JujuModelHandle) -> str:
-    """Normalize a model reference for recording/comparison in test stubs.
-
-    Accepts either the new JujuModelHandle or a plain str for legacy callers
-    that still pass a model name/URI.
-    """
-    return model.uri if isinstance(model, JujuModelHandle) else model
+    """Normalize a model reference for recording/comparison in test stubs."""
+    return model.uri
 
 
 class NullJujuBackend(JujuBackend):
