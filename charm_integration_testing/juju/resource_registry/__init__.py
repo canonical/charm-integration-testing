@@ -1,9 +1,10 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+from juju import JujuControllerHandle, JujuModelHandle
+
 from .collectors import JujuCrashdumpCollector
 from .extension import JujuResourceRegistryExtension
-from .handles import JujuControllerHandle, JujuModelHandle
 
 __all__ = [
     "JujuControllerHandle",

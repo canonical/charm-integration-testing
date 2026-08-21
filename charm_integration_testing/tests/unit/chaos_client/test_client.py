@@ -5,16 +5,19 @@ from dataclasses import dataclass, field
 from datetime import timedelta
 
 from chaos_client import NativeChaosClient
+from juju import JujuModelHandle
 from juju.backend import JujuExecOutput
 
 from ..extensions.shared import NullJujuBackend
 
+TEST_MODEL = JujuModelHandle(controller="test-controller", model="test-model")
+
 
 @dataclass
 class JujuStub(NullJujuBackend):
-    exec_calls: list[tuple[str, str, str, bool]] = field(default_factory=list)
+    exec_calls: list[tuple[JujuModelHandle, str, str, bool]] = field(default_factory=list)
 
-    def exec_unit(self, model: str, unit: str, task: str, operator: bool = False) -> JujuExecOutput:
+    def exec_unit(self, model: JujuModelHandle, unit: str, task: str, operator: bool = False) -> JujuExecOutput:
         self.exec_calls.append((model, unit, task, operator))
         return JujuExecOutput(return_code=0, stdout="", stderr="")
 
@@ -43,10 +46,10 @@ class TestFillDisk:
         client = NativeChaosClient(juju_backend=stub)
 
         # WHEN filling disk on a unit
-        client.fill_disk(model="test-model", unit="postgresql/0", path="/tmp/fill", size_mb=512)
+        client.fill_disk(model=TEST_MODEL, unit="postgresql/0", path="/tmp/fill", size_mb=512)
 
         # THEN exec_unit is called with the assembled fallocate command
-        assert stub.exec_calls == [("test-model", "postgresql/0", "fallocate -l 512M -- /tmp/fill", False)]
+        assert stub.exec_calls == [(TEST_MODEL, "postgresql/0", "fallocate -l 512M -- /tmp/fill", False)]
 
 
 class TestStressCpu:
@@ -58,10 +61,10 @@ class TestStressCpu:
         client = NativeChaosClient(juju_backend=stub)
 
         # WHEN stressing CPU on a unit
-        client.stress_cpu(model="test-model", unit="postgresql/0", workers=4, duration=timedelta(seconds=30))
+        client.stress_cpu(model=TEST_MODEL, unit="postgresql/0", workers=4, duration=timedelta(seconds=30))
 
         # THEN exec_unit is called with the assembled stress-ng command
-        assert stub.exec_calls == [("test-model", "postgresql/0", "stress-ng --cpu 4 --timeout 30s", False)]
+        assert stub.exec_calls == [(TEST_MODEL, "postgresql/0", "stress-ng --cpu 4 --timeout 30s", False)]
 
     def test_duration_is_rounded_down_to_whole_seconds(self) -> None:
         # GIVEN a client wrapping a juju backend stub
@@ -69,10 +72,10 @@ class TestStressCpu:
         client = NativeChaosClient(juju_backend=stub)
 
         # WHEN stressing CPU with a sub-second duration component
-        client.stress_cpu(model="test-model", unit="postgresql/0", workers=2, duration=timedelta(seconds=10.9))
+        client.stress_cpu(model=TEST_MODEL, unit="postgresql/0", workers=2, duration=timedelta(seconds=10.9))
 
         # THEN the duration is truncated to whole seconds
-        assert stub.exec_calls == [("test-model", "postgresql/0", "stress-ng --cpu 2 --timeout 10s", False)]
+        assert stub.exec_calls == [(TEST_MODEL, "postgresql/0", "stress-ng --cpu 2 --timeout 10s", False)]
 
 
 class TestStressMemory:
@@ -85,12 +88,12 @@ class TestStressMemory:
 
         # WHEN stressing memory on a unit
         client.stress_memory(
-            model="test-model", unit="postgresql/0", workers=2, size_mb=256, duration=timedelta(minutes=1)
+            model=TEST_MODEL, unit="postgresql/0", workers=2, size_mb=256, duration=timedelta(minutes=1)
         )
 
         # THEN exec_unit is called with the assembled stress-ng command
         assert stub.exec_calls == [
-            ("test-model", "postgresql/0", "stress-ng --vm 2 --vm-bytes 256M --timeout 60s", False)
+            (TEST_MODEL, "postgresql/0", "stress-ng --vm 2 --vm-bytes 256M --timeout 60s", False)
         ]
 
 
@@ -103,10 +106,10 @@ class TestCleanup:
         client = NativeChaosClient(juju_backend=stub)
 
         # WHEN cleaning up a unit
-        client.cleanup(model="test-model", unit="postgresql/0", path="/tmp/fill")
+        client.cleanup(model=TEST_MODEL, unit="postgresql/0", path="/tmp/fill")
 
         # THEN exec_unit is called to remove the fill file and kill stress-ng processes
         assert stub.exec_calls == [
-            ("test-model", "postgresql/0", "rm -f -- /tmp/fill", False),
-            ("test-model", "postgresql/0", "pkill -f stress-ng || true", False),
+            (TEST_MODEL, "postgresql/0", "rm -f -- /tmp/fill", False),
+            (TEST_MODEL, "postgresql/0", "pkill -f stress-ng || true", False),
         ]
