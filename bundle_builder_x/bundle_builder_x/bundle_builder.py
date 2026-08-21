@@ -134,7 +134,7 @@ class UncompletableBundleError(ValueError):
                     )
                 )
             elif self.unresolved_applications:
-                reason = "Cannot resolve application(s) to a charm: " + ", ".join(
+                reason = "Unresolved application(s): " + ", ".join(
                     f"{info.application} ({info.charm_name})"
                     for info in sorted(self.unresolved_applications, key=lambda i: i.application)
                 )
