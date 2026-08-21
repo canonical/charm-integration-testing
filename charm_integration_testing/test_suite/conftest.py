@@ -934,18 +934,14 @@ def record_failure_execution_metadata(
                             normalize_string(result.error),
                         )
         elif isinstance(exc, UncompletableBundleError):
-            for app_info in sorted(exc.unresolved_applications, key=lambda a: a.application):
+            # Iteration order here doesn't matter: record_failure_execution_metadata's final
+            # `record_property` call sorts every category's values before recording them.
+            for app_info in exc.unresolved_applications:
                 execution_metadata("failure:build_bundle:unresolved_application", app_info.charm_name)
-            for integration_info in sorted(
-                exc.unresolved_integrations,
-                key=lambda i: sorted((ep.charm_name, ep.endpoint) for ep in i.endpoints),
-            ):
+            for integration_info in exc.unresolved_integrations:
                 execution_metadata(
                     "failure:build_bundle:unresolved_integration",
-                    "/".join(
-                        f"{ep.charm_name}:{ep.endpoint}"
-                        for ep in sorted(integration_info.endpoints, key=lambda ep: (ep.charm_name, ep.endpoint))
-                    ),
+                    "/".join(f"{ep.charm_name}:{ep.endpoint}" for ep in integration_info.endpoints),
                 )
             for info in exc.unfulfilled_endpoints:
                 execution_metadata("failure:build_bundle:unfulfilled_endpoint", f"{info.charm_name}:{info.endpoint}")
