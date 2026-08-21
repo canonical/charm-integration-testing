@@ -314,7 +314,11 @@ class JujuClient:
 
     def reboot_model_controller(self, model: str = "default") -> None:
         self.logger.info("Restarting model controller.")
-        return self.backend.reboot_model_controller(model)
+        self.backend.reboot_model_controller(model)
+
+        # Call extensions
+        for extension in self.extensions:
+            extension.post_reboot_controller(model)
 
     def version(self, model: str = "default") -> JujuVersion:
         self.logger.info("Collecting Juju model version.")

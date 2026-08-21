@@ -32,6 +32,11 @@ class GenericUnsealVaultJujuExtension(JujuExtension, ABC):
         self.vault_unsealer.juju.wait_for_model_to_exist(target_model, timeout=timedelta(minutes=15))
         self.vault_unsealer.try_init_or_unseal_all_vaults(target_model, authorize_charm=False)
 
+    def post_reboot_controller(self, model: str) -> None:
+        # Vault comes back sealed after its controller restarts (e.g. test_controller_restart,
+        # test_model_controller_migration): re-unseal without re-authorizing.
+        self.vault_unsealer.try_init_or_unseal_all_vaults(model, authorize_charm=False)
+
 
 class UnsealVaultJujuExtension(GenericUnsealVaultJujuExtension):
     def __init__(self, juju: JujuBackend, logger: logging.Logger) -> None:

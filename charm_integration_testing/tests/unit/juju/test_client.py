@@ -81,6 +81,16 @@ class MigrateModelBackendStub(NullJujuBackend):
 
 
 @dataclass
+class RebootControllerBackendStub(NullJujuBackend):
+    """Backend stub that records reboot_model_controller calls."""
+
+    rebooted_models: list[str] = field(default_factory=list)
+
+    def reboot_model_controller(self, model: str) -> None:
+        self.rebooted_models.append(model)
+
+
+@dataclass
 class WaitIdleBackendStub(NullJujuBackend):
     """Backend stub that records multi-model idle waits."""
 
@@ -758,6 +768,7 @@ class HookRecordingExtension(JujuExtension):
     post_bootstrap_calls: list[str] = field(default_factory=list)
     pre_kill_calls: list[str] = field(default_factory=list)
     post_migrate_calls: list[tuple[str, str, str]] = field(default_factory=list)
+    post_reboot_calls: list[str] = field(default_factory=list)
 
     def post_bootstrap_controller(self, controller: str) -> None:
         self.post_bootstrap_calls.append(controller)
@@ -767,6 +778,9 @@ class HookRecordingExtension(JujuExtension):
 
     def post_migrate_model(self, model: str, source: str, target: str) -> None:
         self.post_migrate_calls.append((model, source, target))
+
+    def post_reboot_controller(self, model: str) -> None:
+        self.post_reboot_calls.append(model)
 
 
 # ---------------------------------------------------------------------------
@@ -895,6 +909,43 @@ class TestJujuClientMigrateModelHooks:
         # THEN both extensions received the hook
         assert ext1.post_migrate_calls == [("mymodel", "source-ctrl", "target-ctrl")]
         assert ext2.post_migrate_calls == [("mymodel", "source-ctrl", "target-ctrl")]
+
+
+class TestJujuClientRebootControllerHooks:
+    @pytest.fixture
+    def logger(self) -> LoggerStub:
+        return LoggerStub()
+
+    def _client(
+        self, logger: Any, backend: NullJujuBackend, extensions: list[JujuExtension] | None = None
+    ) -> JujuClient:
+        return JujuClient(backend, logger, extensions or [])
+
+    def test_post_reboot_controller_hook_fires(self, logger: LoggerStub) -> None:
+        # GIVEN a client with a hook-recording extension
+        ext = HookRecordingExtension()
+        backend = RebootControllerBackendStub()
+        client = self._client(logger, backend, [ext])
+
+        # WHEN the model controller is rebooted
+        client.reboot_model_controller(model="mymodel")
+
+        # THEN the backend was called and the extension hook received the model
+        assert backend.rebooted_models == ["mymodel"]
+        assert ext.post_reboot_calls == ["mymodel"]
+
+    def test_post_reboot_controller_hook_fires_for_all_extensions(self, logger: LoggerStub) -> None:
+        # GIVEN a client with two extensions
+        ext1 = HookRecordingExtension()
+        ext2 = HookRecordingExtension()
+        client = self._client(logger, RebootControllerBackendStub(), [ext1, ext2])
+
+        # WHEN
+        client.reboot_model_controller(model="mymodel")
+
+        # THEN both extensions received the hook
+        assert ext1.post_reboot_calls == ["mymodel"]
+        assert ext2.post_reboot_calls == ["mymodel"]
 
 
 # ---------------------------------------------------------------------------

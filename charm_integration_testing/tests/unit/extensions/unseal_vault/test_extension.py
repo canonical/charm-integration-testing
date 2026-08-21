@@ -69,6 +69,18 @@ class TestGenericUnsealVaultJujuExtension:
         assert juju_backend.wait_calls == ["target-ctrl:test-model"]
         assert unsealer.calls == [("target-ctrl:test-model", False)]
 
+    def test_post_reboot_controller_reunseals_without_reauthorizing(self) -> None:
+        # GIVEN an extension wrapping a stub unsealer
+        unsealer = VaultUnsealerStub()
+        extension = GenericUnsealVaultJujuExtension(unsealer)
+
+        # WHEN post_reboot_controller is called (e.g. after test_controller_restart or
+        # test_model_controller_migration restarts the controller's StatefulSet)
+        extension.post_reboot_controller("test-model")
+
+        # THEN the unsealer re-unseals vault without re-authorizing the already-authorized charm
+        assert unsealer.calls == [("test-model", False)]
+
 
 class TestUnsealVaultK8sJujuExtension:
     def _build_extension(self) -> UnsealVaultK8sJujuExtension:

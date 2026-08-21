@@ -33,3 +33,6 @@ class JujuExtension(ABC):
 
     def post_migrate_model(self, model: str, source: str, target: str) -> None:
         pass
+
+    def post_reboot_controller(self, model: str) -> None:
+        pass
