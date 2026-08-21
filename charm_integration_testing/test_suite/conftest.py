@@ -47,7 +47,22 @@ from utils.juju_releases import (
     select_upgrade_target,
 )
 
-from bundle_builder_x import UncompletableBundleError
+from bundle_builder_x import (
+    ApplicationReleaseDiagnostic,
+    ArchitectureMismatchError,
+    AssumesMismatchError,
+    BaseMismatchError,
+    BundleDiagnostic,
+    CharmReleaseNotFoundException,
+    FeatureMismatchDiagnostic,
+    PlatformMismatchError,
+    ReleaseUnavailableError,
+    UncompletableBundleError,
+    UnfulfilledEndpointDiagnostic,
+    UnresolvedApplicationDiagnostic,
+    UnresolvedIntegrationDiagnostic,
+    leaf_release_errors,
+)
 from test_suite.scheduler.states import STATES_WITHOUT_EXISTING_CONTROLLER, STATES_WITHOUT_EXISTING_MODEL, State
 
 pytest_plugins = [
@@ -867,6 +882,102 @@ def _format_discrepancy_attributes(entry: DiscrepancyEntry) -> str:
     )
 
 
+def _release_request_metadata(error: CharmReleaseNotFoundException) -> dict[str, str]:
+    request = error.request
+    if request is None:
+        return {}
+    fields = {
+        "architecture": request.architecture,
+        "base": request.base,
+        "channel": request.channel,
+        "juju_version": request.juju_version,
+        "platform": request.platform,
+        "revision": str(request.revision) if request.revision is not None else None,
+        "risk": request.risk,
+        "track": request.track,
+    }
+    return {key: value for key, value in fields.items() if value is not None}
+
+
+def _release_resolution_metadata_values(error: CharmReleaseNotFoundException) -> set[str]:
+    """Format stable structured release failures without run-local names or free text."""
+    values: set[str] = set()
+    for leaf in leaf_release_errors(error):
+        fields = _release_request_metadata(leaf)
+        if isinstance(leaf, PlatformMismatchError):
+            fields.update(
+                kind="platform_mismatch",
+                requested_platform=leaf.requested_platform,
+                supported_platforms=",".join(leaf.supported_platforms),
+            )
+        elif isinstance(leaf, AssumesMismatchError):
+            fields.update(
+                kind="assumes_mismatch",
+                available_features=",".join(leaf.available_features),
+            )
+            for requirement in leaf.unmet_requirements:
+                requirement_fields = {**fields, "requirement": requirement}
+                values.add(" ".join(f"{key}={value}" for key, value in sorted(requirement_fields.items())))
+            continue
+        elif isinstance(leaf, BaseMismatchError):
+            fields.update(
+                kind="base_mismatch",
+                requested_base=leaf.requested_base,
+            )
+            if leaf.supported_bases:
+                fields["supported_bases"] = ",".join(leaf.supported_bases)
+        elif isinstance(leaf, ArchitectureMismatchError):
+            fields["kind"] = "architecture_mismatch"
+            if leaf.supported_architectures:
+                fields["supported_architectures"] = ",".join(leaf.supported_architectures)
+        elif isinstance(leaf, ReleaseUnavailableError):
+            fields.update(kind=leaf.kind.value)
+            if leaf.error_code is not None:
+                fields["error_code"] = leaf.error_code
+        else:
+            fields["kind"] = "release_not_found"
+        values.add(" ".join(f"{key}={value}" for key, value in sorted(fields.items())))
+    return values
+
+
+def _bundle_diagnostic_metadata(diagnostic: BundleDiagnostic) -> list[tuple[str, str]]:
+    """Translate one bundle diagnostic into execution metadata entries."""
+    if isinstance(diagnostic, ApplicationReleaseDiagnostic):
+        return [
+            ("failure:build_bundle:release_resolution", value)
+            for value in sorted(_release_resolution_metadata_values(diagnostic.error))
+        ]
+    if isinstance(diagnostic, UnresolvedApplicationDiagnostic):
+        return [("failure:build_bundle:unresolved_application", diagnostic.charm_name)]
+    if isinstance(diagnostic, UnresolvedIntegrationDiagnostic):
+        return [
+            (
+                "failure:build_bundle:unresolved_integration",
+                "/".join(f"{endpoint.charm_name}:{endpoint.endpoint}" for endpoint in diagnostic.endpoints),
+            )
+        ]
+    if isinstance(diagnostic, UnfulfilledEndpointDiagnostic):
+        entries = [
+            (
+                "failure:build_bundle:unfulfilled_endpoint",
+                f"{diagnostic.endpoint.charm_name}:{diagnostic.endpoint.endpoint}",
+            )
+        ]
+        if diagnostic.interface:
+            entries.append(("failure:build_bundle:unfulfilled_interface", diagnostic.interface))
+        return entries
+    if isinstance(diagnostic, FeatureMismatchDiagnostic):
+        return [
+            (
+                "failure:build_bundle:feature_mismatch",
+                f"{diagnostic.requires.charm_name}:{diagnostic.requires.endpoint}"
+                f"/{diagnostic.provides.charm_name}:{diagnostic.provides.endpoint}",
+            ),
+            ("failure:build_bundle:feature_mismatch:feature", diagnostic.feature),
+        ]
+    return []
+
+
 @pytest.fixture
 def record_failure_execution_metadata(
     request: pytest.FixtureRequest, execution_metadata: Callable[[str, str | int], None]
@@ -934,31 +1045,9 @@ def record_failure_execution_metadata(
                             normalize_string(result.error),
                         )
         elif isinstance(exc, UncompletableBundleError):
-            for app_info in sorted(exc.unresolved_applications, key=lambda a: a.application):
-                execution_metadata("failure:build_bundle:unresolved_application", app_info.charm_name)
-            for integration_info in sorted(
-                exc.unresolved_integrations,
-                key=lambda i: sorted((ep.charm_name, ep.endpoint) for ep in i.endpoints),
-            ):
-                execution_metadata(
-                    "failure:build_bundle:unresolved_integration",
-                    "/".join(
-                        f"{ep.charm_name}:{ep.endpoint}"
-                        for ep in sorted(integration_info.endpoints, key=lambda ep: (ep.charm_name, ep.endpoint))
-                    ),
-                )
-            for info in exc.unfulfilled_endpoints:
-                execution_metadata("failure:build_bundle:unfulfilled_endpoint", f"{info.charm_name}:{info.endpoint}")
-                if info.interface:
-                    execution_metadata("failure:build_bundle:unfulfilled_interface", info.interface)
-            for mismatch in exc.feature_mismatches:
-                # Packed value: keeps requires/provides paired per mismatch.
-                execution_metadata(
-                    "failure:build_bundle:feature_mismatch",
-                    f"{mismatch.requires.charm_name}:{mismatch.requires.endpoint}"
-                    f"/{mismatch.provides.charm_name}:{mismatch.provides.endpoint}",
-                )
-                execution_metadata("failure:build_bundle:feature_mismatch:feature", mismatch.feature)
+            for diagnostic in exc.diagnostics:
+                for category, value in _bundle_diagnostic_metadata(diagnostic):
+                    execution_metadata(category, value)
         elif isinstance(exc, ResourceDiscrepancyError):
             # Only the generically-applicable dimensions (resource_type and
             # qualifier) go in the key so downstream attachment rules can select

@@ -2,21 +2,35 @@
 # See LICENSE file for licensing details.
 
 from .bundle import Application, ApplicationEndpoint, Bundle, CrossModelIntegration, Integration, Solution
-from .bundle_builder import (
-    BundleBuilder,
-    UncompletableBundleError,
-    UnfulfilledEndpointInfo,
-    UnresolvedApplicationInfo,
-    UnresolvedIntegrationEndpointInfo,
-    UnresolvedIntegrationInfo,
+from .bundle_builder import BundleBuilder, UncompletableBundleError
+from .bundle_diagnostics import (
+    ApplicationReleaseDiagnostic,
+    BundleBuildFailureDiagnostic,
+    BundleBuildFailureKind,
+    BundleDiagnostic,
+    DiagnosticEndpoint,
+    FeatureMismatchDiagnostic,
+    UnfulfilledEndpointDiagnostic,
+    UnresolvedApplicationDiagnostic,
+    UnresolvedIntegrationDiagnostic,
 )
 from .charm import Charm, CharmChannel, CharmEndpoint, EndpointType
 from .charmhub import CharmhubClient
-from .charmhub_http import CharmReleaseNotFoundException
 from .constraints_dsl import DSLSyntaxError, DSLTypeError
 from .dsl_lowering import DSLLoweringError
 from .juju_version import JujuVersion
 from .overrides import OverridesClient
+from .release_errors import (
+    ArchitectureMismatchError,
+    AssumesMismatchError,
+    BaseMismatchError,
+    CharmReleaseNotFoundException,
+    PlatformMismatchError,
+    ReleaseRequest,
+    ReleaseUnavailableError,
+    ReleaseUnavailableKind,
+    leaf_release_errors,
+)
 from .snapstore_http import SnapVersionNotFoundException
 from .spec import AppSpec, IntegrationSpec, ModelSpec, SpecFile
 from .timing import Timeline
@@ -25,7 +39,14 @@ __all__ = [
     "AppSpec",
     "Application",
     "ApplicationEndpoint",
+    "ApplicationReleaseDiagnostic",
+    "ArchitectureMismatchError",
+    "AssumesMismatchError",
+    "BaseMismatchError",
     "Bundle",
+    "BundleBuildFailureDiagnostic",
+    "BundleBuildFailureKind",
+    "BundleDiagnostic",
     "BundleBuilder",
     "Charm",
     "CharmChannel",
@@ -36,19 +57,25 @@ __all__ = [
     "DSLLoweringError",
     "DSLSyntaxError",
     "DSLTypeError",
+    "DiagnosticEndpoint",
     "EndpointType",
+    "FeatureMismatchDiagnostic",
     "Integration",
     "IntegrationSpec",
     "JujuVersion",
     "ModelSpec",
     "OverridesClient",
+    "PlatformMismatchError",
+    "ReleaseRequest",
+    "ReleaseUnavailableError",
+    "ReleaseUnavailableKind",
     "Solution",
     "SnapVersionNotFoundException",
     "SpecFile",
     "Timeline",
     "UncompletableBundleError",
-    "UnfulfilledEndpointInfo",
-    "UnresolvedApplicationInfo",
-    "UnresolvedIntegrationEndpointInfo",
-    "UnresolvedIntegrationInfo",
+    "UnfulfilledEndpointDiagnostic",
+    "UnresolvedApplicationDiagnostic",
+    "UnresolvedIntegrationDiagnostic",
+    "leaf_release_errors",
 ]
