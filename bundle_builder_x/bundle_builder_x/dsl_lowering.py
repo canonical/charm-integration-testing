@@ -36,8 +36,9 @@ reachable(endpoint[x])
     chains declared in domain charms' specs.  A proxy {requires: R, provides: P}
     on charm C means C passes certificates from its R endpoint to consumers of
     its P endpoint; those consumers are therefore reachable from the cert-trust
-    anchor.  Reachability is computed by fixed-point iteration up to
-    len(domain.charms) hops.
+    anchor.  Reachability is computed by fixed-point iteration bounded by the
+    number of proxy-capable charm instances; non-proxy charms cannot extend the
+    reachable set.
 
 {self}
     Z3 Set(Int) containing only the current charm's ID.
