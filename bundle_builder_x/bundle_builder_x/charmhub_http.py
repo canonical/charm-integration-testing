@@ -13,7 +13,6 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from .charm import EndpointScope
-from .release_errors import CharmReleaseNotFoundException as CharmReleaseNotFoundException
 
 
 class UnparsableCharmException(Exception):
