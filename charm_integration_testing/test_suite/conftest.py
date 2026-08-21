@@ -57,6 +57,7 @@ from bundle_builder_x import (
     FeatureMismatchDiagnostic,
     PlatformMismatchError,
     ReleaseUnavailableError,
+    ReleaseUnavailableKind,
     UncompletableBundleError,
     UnfulfilledEndpointDiagnostic,
     UnresolvedApplicationDiagnostic,
@@ -882,71 +883,74 @@ def _format_discrepancy_attributes(entry: DiscrepancyEntry) -> str:
     )
 
 
-def _release_request_metadata(error: CharmReleaseNotFoundException) -> dict[str, str]:
-    request = error.request
-    if request is None:
-        return {}
-    fields = {
-        "architecture": request.architecture,
-        "base": request.base,
-        "channel": request.channel,
-        "juju_version": request.juju_version,
-        "platform": request.platform,
-        "revision": str(request.revision) if request.revision is not None else None,
-        "risk": request.risk,
-        "track": request.track,
-    }
-    return {key: value for key, value in fields.items() if value is not None}
+def _release_resolution_metadata(error: CharmReleaseNotFoundException) -> set[tuple[str, str]]:
+    """Return stable atomic metadata for release failures."""
+    prefix = "failure:build_bundle:release_resolution"
+    entries: set[tuple[str, str]] = set()
 
+    def add(category: str, value: str | int | None) -> None:
+        if value is not None:
+            entries.add((f"{prefix}:{category}", str(value)))
 
-def _release_resolution_metadata_values(error: CharmReleaseNotFoundException) -> set[str]:
-    """Format stable structured release failures without run-local names or free text."""
-    values: set[str] = set()
     for leaf in leaf_release_errors(error):
-        fields = _release_request_metadata(leaf)
+        request = leaf.request
+        kind = "release_not_found"
         if isinstance(leaf, PlatformMismatchError):
-            fields.update(
-                kind="platform_mismatch",
-                requested_platform=leaf.requested_platform,
-                supported_platforms=",".join(leaf.supported_platforms),
-            )
+            kind = "platform_mismatch"
+            add("requested_platform", leaf.requested_platform)
+            for platform in leaf.supported_platforms:
+                add("supported_platform", platform)
         elif isinstance(leaf, AssumesMismatchError):
-            fields.update(
-                kind="assumes_mismatch",
-                available_features=",".join(leaf.available_features),
-            )
+            kind = "assumes_mismatch"
             for requirement in leaf.unmet_requirements:
-                requirement_fields = {**fields, "requirement": requirement}
-                values.add(" ".join(f"{key}={value}" for key, value in sorted(requirement_fields.items())))
-            continue
+                add("requirement", requirement)
+            if request is not None:
+                add("juju_version", request.juju_version)
         elif isinstance(leaf, BaseMismatchError):
-            fields.update(
-                kind="base_mismatch",
-                requested_base=leaf.requested_base,
-            )
-            if leaf.supported_bases:
-                fields["supported_bases"] = ",".join(leaf.supported_bases)
+            kind = "base_mismatch"
+            add("requested_base", leaf.requested_base)
+            for base in leaf.supported_bases:
+                add("supported_base", base)
+            if request is not None:
+                add("architecture", request.architecture)
         elif isinstance(leaf, ArchitectureMismatchError):
-            fields["kind"] = "architecture_mismatch"
-            if leaf.supported_architectures:
-                fields["supported_architectures"] = ",".join(leaf.supported_architectures)
+            kind = "architecture_mismatch"
+            if request is not None:
+                add("requested_architecture", request.architecture)
+            for architecture in leaf.supported_architectures:
+                add("supported_architecture", architecture)
         elif isinstance(leaf, ReleaseUnavailableError):
-            fields.update(kind=leaf.kind.value)
-            if leaf.error_code is not None:
-                fields["error_code"] = leaf.error_code
-        else:
-            fields["kind"] = "release_not_found"
-        values.add(" ".join(f"{key}={value}" for key, value in sorted(fields.items())))
-    return values
+            kind = leaf.kind.value
+            add("error_code", leaf.error_code)
+            if request is not None:
+                request_fields_by_kind = {
+                    ReleaseUnavailableKind.MISSING_BASES: ("channel", "revision"),
+                    ReleaseUnavailableKind.CHANNEL_BASE_UNSUPPORTED: (
+                        "architecture",
+                        "base",
+                        "channel",
+                        "revision",
+                    ),
+                    ReleaseUnavailableKind.REVISION_NOT_FOUND: ("revision",),
+                    ReleaseUnavailableKind.NO_SUITABLE_CHANNEL: ("architecture", "base", "revision"),
+                    ReleaseUnavailableKind.CHANNEL_NOT_FOUND: ("architecture", "base", "channel"),
+                    ReleaseUnavailableKind.TRACK_NOT_FOUND: ("architecture", "base", "track", "revision"),
+                    ReleaseUnavailableKind.DEFAULT_RELEASE_NOT_FOUND: ("architecture", "base"),
+                    ReleaseUnavailableKind.UNEXPECTED_STORE_RESPONSE: ("architecture",),
+                }
+                for field in request_fields_by_kind[leaf.kind]:
+                    add(field, getattr(request, field))
+
+        entries.add((prefix, kind))
+        if request is not None:
+            add("charm", request.charm_name)
+    return entries
 
 
 def _bundle_diagnostic_metadata(diagnostic: BundleDiagnostic) -> list[tuple[str, str]]:
     """Translate one bundle diagnostic into execution metadata entries."""
     if isinstance(diagnostic, ApplicationReleaseDiagnostic):
-        return [
-            ("failure:build_bundle:release_resolution", value)
-            for value in sorted(_release_resolution_metadata_values(diagnostic.error))
-        ]
+        return sorted(_release_resolution_metadata(diagnostic.error))
     if isinstance(diagnostic, UnresolvedApplicationDiagnostic):
         return [("failure:build_bundle:unresolved_application", diagnostic.charm_name)]
     if isinstance(diagnostic, UnresolvedIntegrationDiagnostic):
