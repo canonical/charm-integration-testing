@@ -120,6 +120,20 @@ def _refresh_response_with_charm(name: str, revision: int, metadata: CharmMetada
     return RefreshResponse.model_construct(name=name, charm=charm, effective_channel=None, error=None)
 
 
+def _aodh_client_with_raw_overrides(raw_overrides: dict[str, object]) -> CharmhubClient:
+    """Build a CharmhubClient stubbed to refresh a fixed "aodh" charm with the given overrides."""
+    response = _refresh_response_with_charm("aodh", revision=5, metadata=_METADATA_REQUIRES)
+
+    class _StubClient(_NullHttpClient):
+        def refresh(self, action: RefreshAction) -> RefreshResponse:
+            return response
+
+    return CharmhubClient(
+        http_client=cast(CharmhubHttpClient, _StubClient()),
+        overrides_client=_StubOverridesClient(raw_overrides),
+    )
+
+
 class TestCharmhubClient:
     # ---------------------------------------------------------------------------
     # TestBuildCharmPlatforms
@@ -337,21 +351,9 @@ class TestCharmhubClient:
         unresolved-application diagnostic, rather than a raw ``CharmReleaseNotFoundException``.
         """
 
-        def _client_with_raw_overrides(self, raw_overrides: dict[str, object]) -> CharmhubClient:
-            response = _refresh_response_with_charm("aodh", revision=5, metadata=_METADATA_REQUIRES)
-
-            class _StubClient(_NullHttpClient):
-                def refresh(self, action: RefreshAction) -> RefreshResponse:
-                    return response
-
-            return CharmhubClient(
-                http_client=cast(CharmhubHttpClient, _StubClient()),
-                overrides_client=_StubOverridesClient(raw_overrides),
-            )
-
         def test_bundle_builder_reports_platform_mismatch_as_unresolved_application(self) -> None:
             # GIVEN a charm restricted to Kubernetes placed on a machine model
-            charmhub_client = self._client_with_raw_overrides({"platforms": ["kubernetes"]})
+            charmhub_client = _aodh_client_with_raw_overrides({"platforms": ["kubernetes"]})
             builder = BundleBuilder(charmhub_client=charmhub_client)
             spec = SpecFile(
                 models=[
@@ -393,20 +395,8 @@ class TestCharmhubClient:
         its criteria blocks, whether or not it is also delisted (``listed: false``).
         """
 
-        def _client_with_raw_overrides(self, raw_overrides: dict[str, object]) -> CharmhubClient:
-            response = _refresh_response_with_charm("aodh", revision=5, metadata=_METADATA_REQUIRES)
-
-            class _StubClient(_NullHttpClient):
-                def refresh(self, action: RefreshAction) -> RefreshResponse:
-                    return response
-
-            return CharmhubClient(
-                http_client=cast(CharmhubHttpClient, _StubClient()),
-                overrides_client=_StubOverridesClient(raw_overrides),
-            )
-
         def _client_with_assumes_override(self, feature: str) -> CharmhubClient:
-            return self._client_with_raw_overrides(
+            return _aodh_client_with_raw_overrides(
                 {"listed": False, "platforms": ["machine", "kubernetes"], "overrides": [{"assumes": [feature]}]}
             )
 
@@ -434,7 +424,7 @@ class TestCharmhubClient:
 
         def test_charm_from_store_succeeds_without_the_sentinel_feature(self) -> None:
             # GIVEN a charm with no assumes override at all
-            client = self._client_with_raw_overrides({})
+            client = _aodh_client_with_raw_overrides({})
 
             # WHEN fetching the charm for the machine platform
             charm = client.charm_from_store(
