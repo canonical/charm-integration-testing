@@ -103,7 +103,7 @@ def _is_transient_model_unavailability_error(error: jubilant.CLIError, model: Ju
     """Detect CLIErrors that mean "model temporarily unreachable due to migration"."""
     err_msg = error.stderr.lower()
     # e.stderr: 'ERROR model pytest-tmp-controller-n84qeh17:admin/debug-test-1 not found\n'
-    controller_matches = model.controller is None or model.controller.lower() in err_msg
+    controller_matches = model.controller.lower() in err_msg
     is_missing = "not found" in err_msg and controller_matches and model.model.lower() in err_msg
     is_migrating = "has been migrated to controller" in err_msg or "migration in progress" in err_msg
     return is_missing or is_migrating
@@ -731,6 +731,19 @@ class JubilantBackend(JujuCmdBackend):
                 f"Set KUBECONFIG_{cloud.replace('-', '_')} to the kubeconfig path."
             )
         return path
+
+    def get_kubernetes_client_for_controller(self, controller: str) -> KubernetesClient | None:
+        """Return a KubernetesClient for a K8s controller's cloud, or None for machine controllers.
+
+        Cloud type is determined by querying Juju (show_model().type), never by
+        whether a kubeconfig was supplied. Returning None unambiguously means the
+        controller is machine-based. Client construction is delegated to
+        ``get_kubernetes_client``, which caches per cloud.
+        """
+        model_info = self.client.model(JujuModelHandle(controller=controller, model="controller")).show_model()
+        if model_info.type != "kubernetes":
+            return None
+        return self.get_kubernetes_client(model_info.cloud)
 
     def reboot_model_controller(self, model: JujuModelHandle) -> None:
         controller_name = self.status(model).model.controller

@@ -38,7 +38,7 @@ from juju_jubilant import JubilantBackend
 from kubernetes_client import KubernetesBackend, KubernetesClient
 from pytest import StashKey
 from resource_registry import ResourceRegistry, ResourceTeardownWarning
-from resource_tracking import ResourceDiscrepancyError
+from resource_tracking import DiscrepancyEntry, ResourceDiscrepancyError
 from test_observer_client import TestObserverClient as TestObserverAPIClient
 from test_observer_client import TestObserverClientError
 from utils import generate_juju_name, normalize_string, normalize_string_multiline
@@ -134,6 +134,7 @@ def juju_backend(cloud_kubeconfigs: dict[str, Path]) -> JujuBackend:
 def kubernetes_client(
     cloud_kubeconfigs: dict[str, Path],
     target_cloud: str,
+    target_controller: str,
     logger: logging.Logger,
     juju_backend: JujuBackend,
 ) -> KubernetesClient | None:
@@ -144,7 +145,7 @@ def kubernetes_client(
     return KubernetesClient(
         KubernetesBackend.k8s_client(kubeconfig=path),
         logger=logger,
-        extensions=[UnsealVaultK8sJujuExtension(juju_backend, logger)],
+        extensions=[UnsealVaultK8sJujuExtension(juju_backend, target_controller, logger)],
     )
 
 
@@ -230,6 +231,7 @@ def register_preexisting_resources(
 @pytest.fixture
 def juju_client(
     juju_backend: JujuBackend,
+    target_controller: str,
     logger: logging.Logger,
     minio_client_file: Path | None,
     minio_server_file: Path | None,
@@ -248,7 +250,7 @@ def juju_client(
             PostgresqlK8sDatabaseReplicationExtension(juju_backend, logger),
             S3IntegratorMinIOBackendExtension(juju_backend, logger, minio_client_file, minio_server_file),
             UnsealVaultJujuExtension(juju_backend, logger),
-            UnsealVaultK8sJujuExtension(juju_backend, logger),
+            UnsealVaultK8sJujuExtension(juju_backend, target_controller, logger),
             ValidatorInjectorExtension(validators_path, juju_backend, logger, uv_file),
             JujuResourceRegistryExtension(juju_backend, session_resource_registry),
         ],
@@ -844,6 +846,27 @@ def record_charm_info_execution_metadata(
     _record_all()
 
 
+def _format_discrepancy_attributes(entry: DiscrepancyEntry) -> str:
+    """Render a discrepancy entry's descriptive attributes for its metadata value.
+
+    For modification qualifiers (``entry.baseline`` set) only the attributes that
+    actually changed are emitted, as ``key=old->new`` so a report shows what
+    drifted.  For presence qualifiers (``missing``/``extra``) ``entry.snapshot``'s
+    attributes are emitted whole -- for ``extra`` that is the re-entry snapshot,
+    for ``missing`` the first-visit snapshot, since the resource is absent on
+    re-entry.
+    """
+    current = entry.snapshot.report_attributes()
+    if entry.baseline is None:
+        return " ".join(f"{key}={value}" for key, value in sorted(current.items()))
+    baseline = entry.baseline.report_attributes()
+    return " ".join(
+        f"{key}={baseline.get(key, '')}->{value}"
+        for key, value in sorted(current.items())
+        if baseline.get(key) != value
+    )
+
+
 @pytest.fixture
 def record_failure_execution_metadata(
     request: pytest.FixtureRequest, execution_metadata: Callable[[str, str | int], None]
@@ -915,6 +938,14 @@ def record_failure_execution_metadata(
                 execution_metadata("failure:build_bundle:unfulfilled_endpoint", f"{info.charm_name}:{info.endpoint}")
                 if info.interface:
                     execution_metadata("failure:build_bundle:unfulfilled_interface", info.interface)
+            for mismatch in exc.feature_mismatches:
+                # Packed value: keeps requires/provides paired per mismatch.
+                execution_metadata(
+                    "failure:build_bundle:feature_mismatch",
+                    f"{mismatch.requires.charm_name}:{mismatch.requires.endpoint}"
+                    f"/{mismatch.provides.charm_name}:{mismatch.provides.endpoint}",
+                )
+                execution_metadata("failure:build_bundle:feature_mismatch:feature", mismatch.feature)
         elif isinstance(exc, ResourceDiscrepancyError):
             # Only the generically-applicable dimensions (resource_type and
             # qualifier) go in the key so downstream attachment rules can select
@@ -922,10 +953,11 @@ def record_failure_execution_metadata(
             # carried in the value.
             for discrepancy in exc.discrepancies:
                 for entry in discrepancy.entries():
-                    detail = f"state={entry.state} model={entry.model} {entry.resource_type}={entry.snapshot.name}"
-                    attributes = " ".join(
-                        f"{key}={value}" for key, value in sorted(entry.snapshot.report_attributes().items())
+                    detail = (
+                        f"state={entry.state} controller={entry.controller} model={entry.model} "
+                        f"{entry.resource_type}={entry.snapshot.name}"
                     )
+                    attributes = _format_discrepancy_attributes(entry)
                     value = f"{detail} {attributes}" if attributes else detail
                     execution_metadata(
                         f"resource_discrepancy:{entry.resource_type}:{entry.qualifier}",
