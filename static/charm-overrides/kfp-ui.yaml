@@ -11,8 +11,8 @@
 # service-mesh/require-cmr-mesh/istio-ingress-route/provide-cmr-mesh: optional - additive mesh integrations, not inputs to MlPipelineUiPebbleService.
 #
 # kfp-api's "kfp-api" feature tag is shared across all its published tracks/risks
-# (2.0-alpha.7 through latest/edge), which are not interchangeable (see kfp-api.yaml
-# criteria blocks). The feature tag alone only proves the peer is *a* kfp-api charm,
+# (which are not interchangeable). The feature tag alone only proves the peer is *a*
+# kfp-api charm,
 # not the matching release, so track/risk equality is pinned alongside it here (and
 # on kfp-persistence.yaml) to require kfp-ui to integrate with a kfp-api on the same
 # channel.
