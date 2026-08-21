@@ -6,6 +6,7 @@ from typing import cast
 import pytest
 from pydantic.dataclasses import dataclass
 
+from bundle_builder_x import CharmReleaseNotFoundException
 from bundle_builder_x.bundle_builder import BundleBuilder, UncompletableBundleError
 from bundle_builder_x.bundle_diagnostics import ApplicationReleaseDiagnostic
 from bundle_builder_x.charm import CharmChannel, EndpointScope, EndpointType
@@ -15,7 +16,6 @@ from bundle_builder_x.charmhub_http import (
     CharmhubBase,
     CharmhubHttpClient,
     CharmMetadata,
-    CharmReleaseNotFoundException,
     FindResponse,
     IncompleteCharmInfoException,
     InfoResponse,

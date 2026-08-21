@@ -8,6 +8,7 @@ from typing import Iterator
 
 import z3  # type: ignore[import-untyped]
 
+from bundle_builder_x import CharmReleaseNotFoundException
 from bundle_builder_x.assertion_tags import (
     AppEndpointPayload,
     ApplicationExistsTag,
@@ -32,7 +33,6 @@ from bundle_builder_x.bundle_diagnostics import (
 )
 from bundle_builder_x.charm import Charm, CharmChannel, CharmEndpoint, EndpointScope, EndpointType
 from bundle_builder_x.charmhub import CharmhubClient
-from bundle_builder_x.charmhub_http import CharmReleaseNotFoundException
 from bundle_builder_x.constraints import add_constraints
 from bundle_builder_x.domain import (
     Domain,
