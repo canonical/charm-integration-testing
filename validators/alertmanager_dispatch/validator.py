@@ -186,8 +186,8 @@ def _schema_check(
         if not hostname:
             errors.append(f"{url!r}: missing hostname")
             continue
-        # API paths are appended by string concatenation, so a query/fragment would misroute the request.
-        if parsed.query or parsed.fragment:
+        # Reject raw '?'/'#' too: urlparse drops empty delimiters, and appended API paths would misroute.
+        if "?" in url or "#" in url:
             errors.append(f"{url!r}: unexpected query or fragment component")
             continue
 

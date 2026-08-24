@@ -260,6 +260,32 @@ class TestAlertmanagerDispatchValidatorSchema:
         assert not schema_check.passed
         assert "query or fragment" in schema_check.message
 
+    def test_fails_when_url_has_empty_query_delimiter(self) -> None:
+        # GIVEN a URL ending in a bare '?'; urlparse drops the empty query, but appending an API path would misroute
+        validator = _make_validator({"alertmanager-k8s/0": {"url": "http://alertmanager-0.am-test.svc:9093?"}})
+
+        # WHEN
+        result = validator.validate(level="simple")
+
+        # THEN the bare delimiter is still rejected
+        assert result.status == "FAIL"
+        schema_check = next(c for c in result.checks if c.name == "schema")
+        assert not schema_check.passed
+        assert "query or fragment" in schema_check.message
+
+    def test_fails_when_url_has_empty_fragment_delimiter(self) -> None:
+        # GIVEN a URL ending in a bare '#'; urlparse drops the empty fragment, but an API path would hide in it
+        validator = _make_validator({"alertmanager-k8s/0": {"url": "http://alertmanager-0.am-test.svc:9093#"}})
+
+        # WHEN
+        result = validator.validate(level="simple")
+
+        # THEN the bare delimiter is still rejected
+        assert result.status == "FAIL"
+        schema_check = next(c for c in result.checks if c.name == "schema")
+        assert not schema_check.passed
+        assert "query or fragment" in schema_check.message
+
     def test_fails_when_v0_scheme_explicitly_empty(self) -> None:
         # GIVEN a v0 databag with an explicitly empty 'scheme' (malformed data)
         validator = _make_validator(
