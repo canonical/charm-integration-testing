@@ -40,6 +40,7 @@ validators-grafana-datasource = { path = "./validators/grafana_datasource", deve
 validators-ingress = { path = "./validators/ingress", develop = true }
 validators-prometheus-remote-write = { path = "./validators/prometheus_remote_write", develop = true }
 validators-alertmanager-dispatch = { path = "./validators/alertmanager_dispatch", develop = true, extras = ["dev"] }
+validators-certificate-transfer = { path = "./validators/certificate_transfer", develop = true, extras = ["dev"] }
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
