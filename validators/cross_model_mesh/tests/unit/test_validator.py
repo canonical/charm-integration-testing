@@ -172,12 +172,14 @@ class TestCheckIdentityFormat:
 
 class TestCheckDnsReachable:
     def test_resolves(self) -> None:
-        with patch("validators.cross_model_mesh.validator.socket.gethostbyname", return_value="10.0.0.1"):
+        with patch(
+            "validators.cross_model_mesh.validator.socket.getaddrinfo", return_value=[(2, 1, 6, "", ("10.0.0.1", 0))]
+        ):
             check = _check_dns_reachable(_VALID_CMR_DATA)
         assert check.passed, check.message
 
     def test_resolution_failure(self) -> None:
-        with patch("validators.cross_model_mesh.validator.socket.gethostbyname", side_effect=OSError("not found")):
+        with patch("validators.cross_model_mesh.validator.socket.getaddrinfo", side_effect=OSError("not found")):
             check = _check_dns_reachable(_VALID_CMR_DATA)
         assert not check.passed
         assert "not found" in check.message
@@ -390,7 +392,9 @@ class TestProvidesSimple:
     def test_valid_remote_data_passes(self) -> None:
         validator = _make_provides_validator({"cmr_data": json.dumps(dataclasses.asdict(_VALID_CMR_DATA))})
 
-        with patch("validators.cross_model_mesh.validator.socket.gethostbyname", return_value="10.0.0.5"):
+        with patch(
+            "validators.cross_model_mesh.validator.socket.getaddrinfo", return_value=[(2, 1, 6, "", ("10.0.0.5", 0))]
+        ):
             result = validator.validate(level="simple")
 
         assert result.status == "PASS", result
@@ -431,7 +435,7 @@ class TestProvidesSimple:
             {"cmr_data": json.dumps(impersonated_data)}, remote_app_name=_LOCAL_APP_NAME
         )
 
-        with patch("validators.cross_model_mesh.validator.socket.gethostbyname") as mock_dns:
+        with patch("validators.cross_model_mesh.validator.socket.getaddrinfo") as mock_dns:
             result = validator.validate(level="simple")
 
         mock_dns.assert_not_called()
@@ -444,7 +448,7 @@ class TestProvidesSimple:
         validator = _make_provides_validator({"cmr_data": json.dumps(dataclasses.asdict(_VALID_CMR_DATA))})
 
         with patch(
-            "validators.cross_model_mesh.validator.socket.gethostbyname",
+            "validators.cross_model_mesh.validator.socket.getaddrinfo",
             side_effect=OSError("Name or service not known"),
         ):
             result = validator.validate(level="simple")
@@ -470,7 +474,10 @@ class TestProvidesDeep:
         validator = _make_provides_validator({"cmr_data": json.dumps(dataclasses.asdict(_VALID_CMR_DATA))})
 
         with (
-            patch("validators.cross_model_mesh.validator.socket.gethostbyname", return_value="10.0.0.5"),
+            patch(
+                "validators.cross_model_mesh.validator.socket.getaddrinfo",
+                return_value=[(2, 1, 6, "", ("10.0.0.5", 0))],
+            ),
             patch("validators.cross_model_mesh.validator._discover_service_ports", return_value=[80]),
             patch("validators.cross_model_mesh.validator.socket.create_connection") as mock_conn,
         ):
@@ -487,7 +494,10 @@ class TestProvidesDeep:
         validator = _make_provides_validator({"cmr_data": json.dumps(dataclasses.asdict(_VALID_CMR_DATA))})
 
         with (
-            patch("validators.cross_model_mesh.validator.socket.gethostbyname", return_value="10.0.0.5"),
+            patch(
+                "validators.cross_model_mesh.validator.socket.getaddrinfo",
+                return_value=[(2, 1, 6, "", ("10.0.0.5", 0))],
+            ),
             patch("validators.cross_model_mesh.validator._discover_service_ports", return_value=[80]),
             patch(
                 "validators.cross_model_mesh.validator.socket.create_connection",
@@ -505,7 +515,7 @@ class TestProvidesDeep:
         """Deep validation should not attempt any network I/O when schema is invalid."""
         validator = _make_provides_validator({})
 
-        with patch("validators.cross_model_mesh.validator.socket.gethostbyname") as mock_dns:
+        with patch("validators.cross_model_mesh.validator.socket.getaddrinfo") as mock_dns:
             result = validator.validate(level="deep")
 
         mock_dns.assert_not_called()

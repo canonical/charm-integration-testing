@@ -355,7 +355,9 @@ def _check_dns_reachable(cmr_data: CMRData) -> ValidationCheck:
     previous_timeout = socket.getdefaulttimeout()
     try:
         socket.setdefaulttimeout(_DNS_TIMEOUT)
-        socket.gethostbyname(host)
+        # getaddrinfo (unlike gethostbyname) resolves AAAA records too, so an
+        # IPv6-only cluster's Service name is not falsely reported as unresolvable.
+        socket.getaddrinfo(host, None)
     except OSError as exc:
         return ValidationCheck(
             name="dns_reachable",
