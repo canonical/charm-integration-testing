@@ -154,7 +154,7 @@ def leaf_release_errors(
     """Flatten aggregate release errors into deterministic leaf errors."""
     if isinstance(error, ReleaseUnavailableError) and error.causes:
         leaves = [leaf for cause in error.causes for leaf in leaf_release_errors(cause)]
-        return tuple(sorted(leaves, key=str))
+        return tuple(sorted(leaves, key=release_error_key))
     return (error,)
 
 

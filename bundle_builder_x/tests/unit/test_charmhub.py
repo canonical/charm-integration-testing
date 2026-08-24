@@ -353,7 +353,7 @@ class TestCharmhubClient:
         error with its typed release rejection.
         """
 
-        def test_bundle_builder_reports_platform_mismatch_as_unresolved_application(self) -> None:
+        def test_bundle_builder_reports_platform_mismatch_as_application_release_diagnostic(self) -> None:
             # GIVEN a charm restricted to Kubernetes placed on a machine model
             charmhub_client = _aodh_client_with_raw_overrides({"platforms": ["kubernetes"]})
             builder = BundleBuilder(charmhub_client=charmhub_client)

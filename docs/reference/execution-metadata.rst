@@ -202,7 +202,7 @@ Failure Information
    * - ``failure:build_bundle:release_resolution:<dimension>``
      - Atomic value for a relevant release-resolution dimension. A failure can emit multiple entries for plural dimensions, such as supported platforms or unmet ``assumes`` requirements.
      - No
-     - ``failure:build_bundle:release_resolution:requested_platform = machine``
+     - ``machine``
    * - ``failure:build_bundle:unresolved_integration``
      - A user-specified integration whose named endpoint(s) could not be mapped to any charm integration, most commonly because the endpoint no longer exists on the resolved charm (e.g. renamed/removed upstream). Collected when ``UncompletableBundleError`` is raised. Format: ``<charm>:<endpoint_name>/<charm>:<endpoint_name>``, using charm names (not the generic application names from the spec). Multiple values may be recorded.
      - No
