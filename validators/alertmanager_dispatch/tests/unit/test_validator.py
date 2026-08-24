@@ -219,6 +219,19 @@ class TestAlertmanagerDispatchValidatorSchema:
         assert not schema_check.passed
         assert "malformed URL" in schema_check.message
 
+    def test_fails_when_url_has_query_or_fragment(self) -> None:
+        # GIVEN a URL with a query component; API paths are appended by concatenation so this would misroute
+        validator = _make_validator({"alertmanager-k8s/0": {"url": "http://alertmanager-0.am-test.svc:9093?x"}})
+
+        # WHEN
+        result = validator.validate(level="simple")
+
+        # THEN it is rejected instead of silently targeting '/' with a query
+        assert result.status == "FAIL"
+        schema_check = next(c for c in result.checks if c.name == "schema")
+        assert not schema_check.passed
+        assert "query or fragment" in schema_check.message
+
     def test_fails_when_v0_scheme_explicitly_empty(self) -> None:
         # GIVEN a v0 databag with an explicitly empty 'scheme' (malformed data)
         validator = _make_validator(
@@ -567,21 +580,21 @@ class TestAlertmanagerDispatchValidatorDeep:
         probe = MagicMock()
         probe.hex = "abc123def456"  # matches 'validator_probe' in _ALERTS_FOUND_BODY
 
+        urlopen = MagicMock(
+            side_effect=[
+                _mock_http_response(200, b"OK"),  # GET /-/healthy
+                _mock_http_response(200, _SILENCE_CREATED_BODY),  # POST silence
+                _mock_http_response(200, b""),  # POST dispatch
+                _mock_http_response(200, _ALERTS_FOUND_BODY),  # GET query (found)
+                _mock_http_error(400),  # POST resolve rejected
+            ]
+        )
+
         with (
             patch("validators.alertmanager_dispatch.validator._tcp_ping"),
             patch("validators.alertmanager_dispatch.validator.time.sleep"),
             patch("validators.alertmanager_dispatch.validator.uuid.uuid4", return_value=probe),
-            patch(
-                "validators.alertmanager_dispatch.validator.urlopen",
-                side_effect=[
-                    _mock_http_response(200, b"OK"),  # GET /-/healthy
-                    _mock_http_response(200, _SILENCE_CREATED_BODY),  # POST silence
-                    _mock_http_response(200, b""),  # POST dispatch
-                    _mock_http_response(200, _ALERTS_FOUND_BODY),  # GET query (found)
-                    _mock_http_error(400),  # POST resolve rejected
-                    _mock_http_response(200, b""),  # DELETE silence
-                ],
-            ),
+            patch("validators.alertmanager_dispatch.validator.urlopen", urlopen),
         ):
             result = validator.validate(level="deep")
 
@@ -593,6 +606,10 @@ class TestAlertmanagerDispatchValidatorDeep:
         # the round-trip itself still passed
         canary_checks = [c for c in result.checks if c.name.startswith("canary[")]
         assert canary_checks and canary_checks[0].passed
+        # AND the silence is retained (no DELETE) so the unresolved canary stays muted until expiry
+        methods = [call.args[0].method for call in urlopen.call_args_list if hasattr(call.args[0], "method")]
+        assert "DELETE" not in methods
+        assert urlopen.call_count == 5  # healthy, silence, dispatch, query, resolve (no delete)
 
     def test_attempts_cleanup_after_dispatch_transport_error(self) -> None:
         # GIVEN the dispatch POST raises locally (e.g. a read timeout) even though

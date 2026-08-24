@@ -162,6 +162,10 @@ def _schema_check(
         if not hostname:
             errors.append(f"{url!r}: missing hostname")
             continue
+        # API paths are appended by string concatenation, so a query/fragment would misroute the request.
+        if parsed.query or parsed.fragment:
+            errors.append(f"{url!r}: unexpected query or fragment component")
+            continue
 
     if errors:
         return ValidationCheck(name="schema", passed=False, message="; ".join(errors))
@@ -312,21 +316,23 @@ def _cleanup_check(base_url: str, probe_id: str, silence_id: str, check_name: st
     active) or a failed silence removal must fail deep validation so stray state
     is surfaced.
     """
-    errors: list[str] = []
     try:
         _resolve_canary(base_url, probe_id)
     except Exception as exc:
-        errors.append(f"canary resolve failed: {exc}")
-    try:
-        _delete_silence(base_url, silence_id)
-    except Exception as exc:
-        errors.append(f"silence removal failed: {exc}")
-
-    if errors:
+        # Keep the silence until it expires; deleting it would leave an unresolved canary able to page.
         return ValidationCheck(
             name=check_name,
             passed=False,
-            message=f"Canary cleanup failed on {netloc}; alert or silence may linger: {'; '.join(errors)}",
+            message=f"Canary cleanup failed on {netloc}; canary resolve failed: {exc}. "
+            "Silence retained until expiry so the canary stays muted.",
+        )
+    try:
+        _delete_silence(base_url, silence_id)
+    except Exception as exc:
+        return ValidationCheck(
+            name=check_name,
+            passed=False,
+            message=f"Canary cleanup failed on {netloc}; silence removal failed: {exc}",
         )
     return ValidationCheck(name=check_name, passed=True, message=f"Canary resolved and silence removed on {netloc}.")
 
