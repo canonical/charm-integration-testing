@@ -1,11 +1,14 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import pytest
 from test_suite.conftest import _bundle_diagnostic_metadata, _release_resolution_metadata
 
 from bundle_builder_x import (
     ApplicationReleaseDiagnostic,
+    ArchitectureMismatchError,
     AssumesMismatchError,
+    BaseMismatchError,
     CharmReleaseNotFoundException,
     DiagnosticEndpoint,
     FeatureMismatchDiagnostic,
@@ -92,6 +95,131 @@ def test_aggregate_release_metadata_flattens_and_deduplicates_children() -> None
         ("failure:build_bundle:release_resolution:channel", "latest/stable"),
         ("failure:build_bundle:release_resolution:charm", "aodh"),
         ("failure:build_bundle:release_resolution:error_code", "revision-not-found"),
+    }
+
+
+def test_base_mismatch_metadata_uses_atomic_stable_values() -> None:
+    error = BaseMismatchError(
+        request=ReleaseRequest(charm_name="aodh", architecture="amd64"),
+        requested_base="24.04",
+        supported_bases=("22.04",),
+    )
+
+    entries = _release_resolution_metadata(error, "aodh")
+
+    assert entries == {
+        ("failure:build_bundle:release_resolution", "base_mismatch"),
+        ("failure:build_bundle:release_resolution:charm", "aodh"),
+        ("failure:build_bundle:release_resolution:requested_base", "24.04"),
+        ("failure:build_bundle:release_resolution:supported_base", "22.04"),
+        ("failure:build_bundle:release_resolution:architecture", "amd64"),
+    }
+
+
+def test_architecture_mismatch_metadata_uses_atomic_stable_values() -> None:
+    error = ArchitectureMismatchError(
+        request=ReleaseRequest(charm_name="aodh", architecture="arm64"),
+        supported_architectures=("amd64",),
+    )
+
+    entries = _release_resolution_metadata(error, "aodh")
+
+    assert entries == {
+        ("failure:build_bundle:release_resolution", "architecture_mismatch"),
+        ("failure:build_bundle:release_resolution:charm", "aodh"),
+        ("failure:build_bundle:release_resolution:requested_architecture", "arm64"),
+        ("failure:build_bundle:release_resolution:supported_architecture", "amd64"),
+    }
+
+
+@pytest.mark.parametrize(
+    ("kind", "request_kwargs", "expected_extra_entries"),
+    [
+        (
+            ReleaseUnavailableKind.MISSING_BASES,
+            {"channel": "latest/stable", "revision": 7},
+            {
+                ("failure:build_bundle:release_resolution:channel", "latest/stable"),
+                ("failure:build_bundle:release_resolution:revision", "7"),
+            },
+        ),
+        (
+            ReleaseUnavailableKind.CHANNEL_BASE_UNSUPPORTED,
+            {"architecture": "amd64", "base": "22.04", "channel": "latest/stable", "revision": 7},
+            {
+                ("failure:build_bundle:release_resolution:architecture", "amd64"),
+                ("failure:build_bundle:release_resolution:base", "22.04"),
+                ("failure:build_bundle:release_resolution:channel", "latest/stable"),
+                ("failure:build_bundle:release_resolution:revision", "7"),
+            },
+        ),
+        (
+            ReleaseUnavailableKind.REVISION_NOT_FOUND,
+            {"revision": 7},
+            {("failure:build_bundle:release_resolution:revision", "7")},
+        ),
+        (
+            ReleaseUnavailableKind.NO_SUITABLE_CHANNEL,
+            {"architecture": "amd64", "base": "22.04", "revision": 7},
+            {
+                ("failure:build_bundle:release_resolution:architecture", "amd64"),
+                ("failure:build_bundle:release_resolution:base", "22.04"),
+                ("failure:build_bundle:release_resolution:revision", "7"),
+            },
+        ),
+        (
+            ReleaseUnavailableKind.CHANNEL_NOT_FOUND,
+            {"architecture": "amd64", "base": "22.04", "channel": "latest/stable"},
+            {
+                ("failure:build_bundle:release_resolution:architecture", "amd64"),
+                ("failure:build_bundle:release_resolution:base", "22.04"),
+                ("failure:build_bundle:release_resolution:channel", "latest/stable"),
+            },
+        ),
+        (
+            ReleaseUnavailableKind.TRACK_NOT_FOUND,
+            {"architecture": "amd64", "base": "22.04", "track": "latest", "revision": 7},
+            {
+                ("failure:build_bundle:release_resolution:architecture", "amd64"),
+                ("failure:build_bundle:release_resolution:base", "22.04"),
+                ("failure:build_bundle:release_resolution:track", "latest"),
+                ("failure:build_bundle:release_resolution:revision", "7"),
+            },
+        ),
+        (
+            ReleaseUnavailableKind.DEFAULT_RELEASE_NOT_FOUND,
+            {"architecture": "amd64", "base": "22.04"},
+            {
+                ("failure:build_bundle:release_resolution:architecture", "amd64"),
+                ("failure:build_bundle:release_resolution:base", "22.04"),
+            },
+        ),
+        (
+            ReleaseUnavailableKind.UNEXPECTED_STORE_RESPONSE,
+            {"architecture": "amd64"},
+            {("failure:build_bundle:release_resolution:architecture", "amd64")},
+        ),
+    ],
+)
+def test_release_unavailable_metadata_uses_kind_specific_fields(
+    kind: ReleaseUnavailableKind,
+    request_kwargs: dict[str, str | int],
+    expected_extra_entries: set[tuple[str, str]],
+) -> None:
+    error = ReleaseUnavailableError(
+        kind=kind,
+        request=ReleaseRequest(charm_name="aodh", **request_kwargs),  # type: ignore[arg-type]
+        detail="server message",
+        error_code="some-error-code",
+    )
+
+    entries = _release_resolution_metadata(error, "aodh")
+
+    assert entries == {
+        ("failure:build_bundle:release_resolution", kind.value),
+        ("failure:build_bundle:release_resolution:charm", "aodh"),
+        ("failure:build_bundle:release_resolution:error_code", "some-error-code"),
+        *expected_extra_entries,
     }
 
 
