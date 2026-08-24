@@ -10,6 +10,7 @@ Coverage targets
 * L2 (deep)   — provides role: >=1 valid + >=2 invalid scenarios.
 """
 
+import dataclasses
 import json
 from typing import Any, cast
 from unittest.mock import mock_open, patch
@@ -110,7 +111,7 @@ def _make_validator_no_remote_app(
 
 class TestDecodeCmrData:
     def test_valid_data(self) -> None:
-        cmr_data, check = _decode_cmr_data(json.dumps(_VALID_CMR_DATA), source="test")
+        cmr_data, check = _decode_cmr_data(json.dumps(dataclasses.asdict(_VALID_CMR_DATA)), source="test")
         assert check.passed, check.message
         assert cmr_data == _VALID_CMR_DATA
 
@@ -145,26 +146,26 @@ class TestDecodeCmrData:
 
 class TestCheckIdentityFormat:
     def test_valid_names(self) -> None:
-        check = _check_identity_format({"app_name": "catalogue-k8s", "juju_model_name": "cross-model-mesh-test"})
+        check = _check_identity_format(CMRData(app_name="catalogue-k8s", juju_model_name="cross-model-mesh-test"))
         assert check.passed, check.message
 
     def test_invalid_app_name_uppercase(self) -> None:
-        check = _check_identity_format({"app_name": "Catalogue-K8s", "juju_model_name": "testing"})
+        check = _check_identity_format(CMRData(app_name="Catalogue-K8s", juju_model_name="testing"))
         assert not check.passed
         assert "app_name" in check.message
 
     def test_invalid_model_name_starts_with_hyphen(self) -> None:
-        check = _check_identity_format({"app_name": "catalogue-k8s", "juju_model_name": "-testing"})
+        check = _check_identity_format(CMRData(app_name="catalogue-k8s", juju_model_name="-testing"))
         assert not check.passed
         assert "juju_model_name" in check.message
 
     def test_invalid_empty_app_name(self) -> None:
-        check = _check_identity_format({"app_name": "", "juju_model_name": "testing"})
+        check = _check_identity_format(CMRData(app_name="", juju_model_name="testing"))
         assert not check.passed
 
     def test_invalid_trailing_newline(self) -> None:
         """`.match()` alone would let `$` match just before a trailing newline; fullmatch must not."""
-        check = _check_identity_format({"app_name": "catalogue-k8s\n", "juju_model_name": "testing"})
+        check = _check_identity_format(CMRData(app_name="catalogue-k8s\n", juju_model_name="testing"))
         assert not check.passed
         assert "app_name" in check.message
 
@@ -258,7 +259,7 @@ class TestCheckMeshDataPlaneReachable:
 
 class TestDiscoverServicePorts:
     def test_returns_none_when_service_account_files_absent(self) -> None:
-        with patch("builtins.open", side_effect=FileNotFoundError):
+        with patch("builtins.open", side_effect=FileNotFoundError("no such file")):
             assert _discover_service_ports("some-model", "some-app") is None
 
     def test_returns_ports_on_successful_api_response(self) -> None:
@@ -328,7 +329,7 @@ class TestDiscoverServicePorts:
 
 class TestRequiresSimple:
     def test_valid_self_published_data_passes(self) -> None:
-        validator = _make_requires_validator({"cmr_data": json.dumps(_VALID_CMR_DATA)})
+        validator = _make_requires_validator({"cmr_data": json.dumps(dataclasses.asdict(_VALID_CMR_DATA))})
 
         result = validator.validate(level="simple")
 
@@ -370,12 +371,12 @@ class TestRequiresSimple:
         assert result.error is not None
 
     def test_deep_level_skipped(self) -> None:
-        validator = _make_requires_validator({"cmr_data": json.dumps(_VALID_CMR_DATA)})
+        validator = _make_requires_validator({"cmr_data": json.dumps(dataclasses.asdict(_VALID_CMR_DATA))})
         result = validator.validate(level="deep")
         assert result.status == "SKIPPED"
 
     def test_uat_level_skipped(self) -> None:
-        validator = _make_requires_validator({"cmr_data": json.dumps(_VALID_CMR_DATA)})
+        validator = _make_requires_validator({"cmr_data": json.dumps(dataclasses.asdict(_VALID_CMR_DATA))})
         result = validator.validate(level="uat")
         assert result.status == "SKIPPED"
 
@@ -387,7 +388,7 @@ class TestRequiresSimple:
 
 class TestProvidesSimple:
     def test_valid_remote_data_passes(self) -> None:
-        validator = _make_provides_validator({"cmr_data": json.dumps(_VALID_CMR_DATA)})
+        validator = _make_provides_validator({"cmr_data": json.dumps(dataclasses.asdict(_VALID_CMR_DATA))})
 
         with patch("validators.cross_model_mesh.validator.socket.gethostbyname", return_value="10.0.0.5"):
             result = validator.validate(level="simple")
@@ -440,7 +441,7 @@ class TestProvidesSimple:
         assert "some-other-app" in consistency.message
 
     def test_invalid_dns_unresolvable(self) -> None:
-        validator = _make_provides_validator({"cmr_data": json.dumps(_VALID_CMR_DATA)})
+        validator = _make_provides_validator({"cmr_data": json.dumps(dataclasses.asdict(_VALID_CMR_DATA))})
 
         with patch(
             "validators.cross_model_mesh.validator.socket.gethostbyname",
@@ -466,10 +467,11 @@ class TestProvidesSimple:
 
 class TestProvidesDeep:
     def test_valid_mesh_path_reachable(self) -> None:
-        validator = _make_provides_validator({"cmr_data": json.dumps(_VALID_CMR_DATA)})
+        validator = _make_provides_validator({"cmr_data": json.dumps(dataclasses.asdict(_VALID_CMR_DATA))})
 
         with (
             patch("validators.cross_model_mesh.validator.socket.gethostbyname", return_value="10.0.0.5"),
+            patch("validators.cross_model_mesh.validator._discover_service_ports", return_value=[80]),
             patch("validators.cross_model_mesh.validator.socket.create_connection") as mock_conn,
         ):
             mock_conn.return_value.__enter__.return_value = mock_conn.return_value
@@ -482,10 +484,11 @@ class TestProvidesDeep:
         assert canary.passed
 
     def test_invalid_mesh_path_unreachable(self) -> None:
-        validator = _make_provides_validator({"cmr_data": json.dumps(_VALID_CMR_DATA)})
+        validator = _make_provides_validator({"cmr_data": json.dumps(dataclasses.asdict(_VALID_CMR_DATA))})
 
         with (
             patch("validators.cross_model_mesh.validator.socket.gethostbyname", return_value="10.0.0.5"),
+            patch("validators.cross_model_mesh.validator._discover_service_ports", return_value=[80]),
             patch(
                 "validators.cross_model_mesh.validator.socket.create_connection",
                 side_effect=OSError("Connection refused"),

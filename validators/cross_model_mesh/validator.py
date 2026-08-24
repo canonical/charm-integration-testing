@@ -28,7 +28,7 @@ import socket
 import ssl
 import urllib.error
 import urllib.request
-from typing import TypedDict
+from dataclasses import dataclass
 
 from validators.base import (
     BaseValidator,
@@ -62,7 +62,8 @@ _TCP_TIMEOUT = 5
 _K8S_API_TIMEOUT = 5
 
 
-class CMRData(TypedDict):
+@dataclass(frozen=True)
+class CMRData:
     app_name: str
     juju_model_name: str
 
@@ -137,7 +138,7 @@ class CrossModelMeshValidator(BaseValidator):
         """
         expected_app = self.charm.app.name
         expected_model = self.charm.model.name
-        if cmr_data["app_name"] != expected_app or cmr_data["juju_model_name"] != expected_model:
+        if cmr_data.app_name != expected_app or cmr_data.juju_model_name != expected_model:
             return ValidationCheck(
                 name="self_consistency",
                 passed=False,
@@ -160,50 +161,24 @@ class CrossModelMeshValidator(BaseValidator):
 
     def _validate_provides_simple(self) -> ValidationResult:
         """L1: Schema/type validation and reachability of the declared identity."""
-        checks: list[ValidationCheck] = []
-
         error = self._check_relation_exists("simple")
         if error:
             return error
 
-        cmr_data, schema_check = self._parse_remote_cmr_data()
-        checks.append(schema_check)
-        if not schema_check.passed or cmr_data is None:
-            return self._make_result(level="simple", checks=checks)
-
-        checks.append(_check_identity_format(cmr_data))
-        if not checks[-1].passed:
-            return self._make_result(level="simple", checks=checks)
-
-        remote_app_check = self._check_remote_app_consistency(cmr_data)
-        checks.append(remote_app_check)
-        if not remote_app_check.passed:
-            return self._make_result(level="simple", checks=checks)
-
-        checks.append(_check_dns_reachable(cmr_data))
+        cmr_data, checks = self._provides_common_checks()
+        if cmr_data is not None:
+            checks.append(_check_dns_reachable(cmr_data))
 
         return self._make_result(level="simple", checks=checks)
 
     def _validate_provides_deep(self) -> ValidationResult:
         """L2: All L1 checks plus a canary TCP connection across the mesh's data plane."""
-        checks: list[ValidationCheck] = []
-
         error = self._check_relation_exists("deep")
         if error:
             return error
 
-        cmr_data, schema_check = self._parse_remote_cmr_data()
-        checks.append(schema_check)
-        if not schema_check.passed or cmr_data is None:
-            return self._make_result(level="deep", checks=checks)
-
-        checks.append(_check_identity_format(cmr_data))
-        if not checks[-1].passed:
-            return self._make_result(level="deep", checks=checks)
-
-        remote_app_check = self._check_remote_app_consistency(cmr_data)
-        checks.append(remote_app_check)
-        if not remote_app_check.passed:
+        cmr_data, checks = self._provides_common_checks()
+        if cmr_data is None:
             return self._make_result(level="deep", checks=checks)
 
         dns_check = _check_dns_reachable(cmr_data)
@@ -214,6 +189,32 @@ class CrossModelMeshValidator(BaseValidator):
         checks.append(_check_mesh_data_plane_reachable(cmr_data))
 
         return self._make_result(level="deep", checks=checks)
+
+    def _provides_common_checks(self) -> tuple[CMRData | None, list[ValidationCheck]]:
+        """Run the schema/identity-format/remote-app-consistency pipeline shared by
+        both the L1 and L2 provider validation paths.
+
+        Returns the decoded ``cmr_data`` (or ``None`` if any check failed) together
+        with the checks accumulated so far, so callers only need to append their
+        level-specific checks (DNS reachability, the mesh canary, etc.) on success.
+        """
+        checks: list[ValidationCheck] = []
+
+        cmr_data, schema_check = self._parse_remote_cmr_data()
+        checks.append(schema_check)
+        if not schema_check.passed or cmr_data is None:
+            return None, checks
+
+        checks.append(_check_identity_format(cmr_data))
+        if not checks[-1].passed:
+            return None, checks
+
+        remote_app_check = self._check_remote_app_consistency(cmr_data)
+        checks.append(remote_app_check)
+        if not remote_app_check.passed:
+            return None, checks
+
+        return cmr_data, checks
 
     def _parse_remote_cmr_data(self) -> tuple[CMRData | None, ValidationCheck]:
         """Read and decode ``cmr_data`` from the remote (requirer) application databag."""
@@ -229,12 +230,12 @@ class CrossModelMeshValidator(BaseValidator):
         provider builds an authorization policy for the wrong application.
         """
         actual_app_name = self.relation.app.name if self.relation.app is not None else None
-        if cmr_data["app_name"] != actual_app_name:
+        if cmr_data.app_name != actual_app_name:
             return ValidationCheck(
                 name="remote_app_consistency",
                 passed=False,
                 message=(
-                    f"Declared app_name {cmr_data['app_name']!r} in cmr_data does not match the "
+                    f"Declared app_name {cmr_data.app_name!r} in cmr_data does not match the "
                     f"actual remote application {actual_app_name!r} on relation '{self.endpoint}'. "
                     "Remediation: verify the requirer publishes its own application name unmodified."
                 ),
@@ -261,7 +262,7 @@ class CrossModelMeshValidator(BaseValidator):
 
 
 def _decode_cmr_data(raw: str, *, source: str) -> tuple[CMRData | None, ValidationCheck]:
-    """Decode a ``cmr_data`` JSON string into a CMRData dict.
+    """Decode a ``cmr_data`` JSON string into a CMRData value.
 
     Returns ``(None, failing_check)`` if the field is missing, not valid
     JSON, or does not contain both ``app_name`` and ``juju_model_name`` as
@@ -311,7 +312,7 @@ def _check_identity_format(cmr_data: CMRData) -> ValidationCheck:
     """Verify app_name and juju_model_name conform to valid Juju naming rules."""
     invalid = [
         f"{field}={value!r}"
-        for field, value in (("app_name", cmr_data["app_name"]), ("juju_model_name", cmr_data["juju_model_name"]))
+        for field, value in (("app_name", cmr_data.app_name), ("juju_model_name", cmr_data.juju_model_name))
         if not _JUJU_NAME_RE.fullmatch(value)
     ]
     if invalid:
@@ -326,7 +327,7 @@ def _check_identity_format(cmr_data: CMRData) -> ValidationCheck:
     return ValidationCheck(
         name="identity_format",
         passed=True,
-        message=f"app_name={cmr_data['app_name']!r}, juju_model_name={cmr_data['juju_model_name']!r} are well-formed.",
+        message=f"app_name={cmr_data.app_name!r}, juju_model_name={cmr_data.juju_model_name!r} are well-formed.",
     )
 
 
@@ -337,7 +338,7 @@ def _check_identity_format(cmr_data: CMRData) -> ValidationCheck:
 
 def _cross_model_dns_name(cmr_data: CMRData) -> str:
     """Return the standard Kubernetes Service FQDN for a Juju k8s application."""
-    return f"{cmr_data['app_name']}.{cmr_data['juju_model_name']}.svc.cluster.local"
+    return f"{cmr_data.app_name}.{cmr_data.juju_model_name}.svc.cluster.local"
 
 
 def _check_dns_reachable(cmr_data: CMRData) -> ValidationCheck:
@@ -381,9 +382,9 @@ def _discover_service_ports(namespace: str, name: str) -> list[int] | None:
     reasonable assumption for this specific interface's provider role.
 
     Returns ``None`` when discovery itself failed (rather than raising) --
-    missing service account files, RBAC denial, Service not found, API
-    unreachable (e.g. a genuinely different Kubernetes cluster) -- so callers
-    can fall back to a less discriminating probe instead of failing outright.
+    missing service account files, RBAC denial, Service not found, or the
+    in-cluster API being unreachable -- so callers can fall back to a less
+    discriminating probe instead of failing outright.
 
     Returns ``[]`` (a distinct, non-``None`` value) when the Service was
     successfully found but declares no ports at all, so callers can treat
@@ -429,15 +430,21 @@ def _check_mesh_data_plane_reachable(cmr_data: CMRData) -> ValidationCheck:
     them is reachable.
 
     Falls back to the well-known ambient mesh HBONE port only when Service
-    discovery itself fails (e.g. a genuinely separate Kubernetes cluster);
-    that fallback is a weaker signal, as it only confirms a mesh data-plane
-    proxy is listening for the destination's address, not that its workload
-    is currently up. A Service that is successfully discovered but declares
-    no ports at all is treated as a definitive failure rather than silently
-    falling back to that weaker probe.
+    discovery itself fails (e.g. missing/unreadable service account files,
+    an RBAC denial, or the API being unreachable); that fallback is a weaker
+    signal, as it only confirms a mesh data-plane proxy is listening for the
+    destination's address, not that its workload is currently up. Note this
+    check only ever runs after ``_check_dns_reachable`` has already resolved
+    the destination's Service DNS name, so discovery failures reachable here
+    are same-cluster problems (e.g. RBAC), not a separate-cluster scenario --
+    a genuinely different cluster's Service name would already have failed
+    DNS resolution and short-circuited before this check runs. A Service
+    that is successfully discovered but declares no ports at all is treated
+    as a definitive failure rather than silently falling back to that weaker
+    probe.
     """
     host = _cross_model_dns_name(cmr_data)
-    ports = _discover_service_ports(cmr_data["juju_model_name"], cmr_data["app_name"])
+    ports = _discover_service_ports(cmr_data.juju_model_name, cmr_data.app_name)
 
     if ports is None:
         candidates = [_AMBIENT_MESH_PORT]
