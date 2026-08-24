@@ -53,19 +53,8 @@ class _RoleStub:
 
 
 @dataclass
-class _SecretStub:
-    content: dict[str, str] = field(default_factory=dict)
-
-    def get_content(self) -> dict[str, str]:
-        return self.content
-
-
-@dataclass
 class _ModelStub:
     name: str = "test-model"
-
-    def get_secret(self, id: str) -> _SecretStub:  # noqa: A002
-        return _SecretStub()
 
 
 def _make_validator(
