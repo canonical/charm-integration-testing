@@ -8,21 +8,27 @@ import urllib.error
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
-from urllib.parse import urlencode, urlparse
+from urllib.parse import quote, urlencode, urlparse
 from urllib.request import Request, urlopen
 
 from validators.base import BaseValidator, ValidationCheck, ValidationLevel, ValidationResult
 
 _HEALTHY_PATH = "/-/healthy"
 _ALERTS_PATH = "/api/v2/alerts"
+_SILENCES_PATH = "/api/v2/silences"
 _CANARY_ALERTNAME = "EndpointValidatorCanary"
 _CANARY_LABEL_KEY = "validator_probe"
+_VALIDATOR_ID = "alertmanager_dispatch-validator"
 _INGEST_WAIT_S = 2
 _QUERY_ATTEMPTS = 3
 _HEALTH_ATTEMPTS = 3
 _HEALTH_BACKOFF_S = 3
 _HEALTH_TIMEOUT_S = 5
+_CONNECT_TIMEOUT_S = 5
 _ALERTS_TIMEOUT_S = 10
+_CANARY_ACTIVE_MIN = 5
+_SILENCE_DURATION_MIN = 10
+_PROBE_ID_LEN = 12
 
 
 class AlertmanagerDispatchValidator(BaseValidator):
@@ -35,20 +41,20 @@ class AlertmanagerDispatchValidator(BaseValidator):
         if self.relation.app is None:
             return self._error_result(level, f"No remote application on relation '{self.endpoint}'.")
 
-        endpoint_infos, collection_errors = _collect_endpoint_infos(self.relation)
+        urls, collection_errors = _collect_endpoint_urls(self.relation)
 
-        schema_check = _schema_check(endpoint_infos, collection_errors)
+        schema_check = _schema_check(urls, collection_errors)
         checks: list[ValidationCheck] = [schema_check]
         if not schema_check.passed:
             return self._fail_result(level, checks)
 
-        checks.append(_connectivity_check(endpoint_infos))
+        checks.append(_connectivity_check(urls))
         if not checks[-1].passed:
             return self._fail_result(level, checks)
 
-        checks.extend(_http_healthy_checks(endpoint_infos))
+        checks.extend(_http_healthy_checks(urls))
         if level == "deep" and all(c.passed for c in checks):
-            checks.extend(_canary_checks(endpoint_infos))
+            checks.extend(_canary_checks(urls))
 
         return self._make_result(level=level, checks=checks)
 
@@ -63,15 +69,20 @@ def _base_url(url: str) -> str:
     return url.rstrip("/")
 
 
+def _http_error_body(exc: urllib.error.HTTPError) -> str:
+    """Best-effort decode of an HTTPError response body for diagnostics."""
+    return exc.read().decode("utf-8", errors="replace") if exc.fp else ""
+
+
 # ---------------------------------------------------------------------------
 # Pure helpers — endpoint collection from provider unit databags
 # ---------------------------------------------------------------------------
 
 
-def _collect_endpoint_infos(
+def _collect_endpoint_urls(
     relation: Any,
-) -> tuple[list[dict[str, str]], list[str]]:
-    """Return deduplicated endpoint info dicts and any collection errors.
+) -> tuple[list[str], list[str]]:
+    """Return deduplicated endpoint URLs and any collection errors.
 
     The ``alertmanager_dispatch`` provider (Alertmanager) writes its workload
     URL to each of its **unit** databags. Two on-wire shapes exist:
@@ -85,7 +96,7 @@ def _collect_endpoint_infos(
     Malformed entries are returned as errors so ``_schema_check`` can surface
     every bad databag in one check.
     """
-    infos: list[dict[str, str]] = []
+    urls: list[str] = []
     errors: list[str] = []
     seen_urls: set[str] = set()
     for unit in sorted(relation.units, key=lambda u: getattr(u, "name", repr(u))):
@@ -108,8 +119,8 @@ def _collect_endpoint_infos(
             continue  # dedup — same URL from a scaled-out provider is not an error
         seen_urls.add(url)
 
-        infos.append({"url": url})
-    return infos, errors
+        urls.append(url)
+    return urls, errors
 
 
 # ---------------------------------------------------------------------------
@@ -118,15 +129,14 @@ def _collect_endpoint_infos(
 
 
 def _schema_check(
-    endpoint_infos: list[dict[str, str]],
+    urls: list[str],
     collection_errors: list[str],
 ) -> ValidationCheck:
     """Validate structure and value constraints of every advertised endpoint.
 
-    Per endpoint, ``url`` must be non-empty, use an http/https scheme, and have
-    a hostname.
+    Each URL must use an http/https scheme and have a hostname.
     """
-    if not endpoint_infos and not collection_errors:
+    if not urls and not collection_errors:
         return ValidationCheck(
             name="schema",
             passed=False,
@@ -134,11 +144,7 @@ def _schema_check(
         )
 
     errors: list[str] = list(collection_errors)
-    for info in endpoint_infos:
-        url = info.get("url", "")
-        if not url:
-            errors.append("'url' is empty")
-            continue
+    for url in urls:
         parsed = urlparse(url)
         if parsed.scheme not in ("http", "https"):
             errors.append(f"{url!r}: unsupported scheme {parsed.scheme!r}")
@@ -149,7 +155,7 @@ def _schema_check(
 
     if errors:
         return ValidationCheck(name="schema", passed=False, message="; ".join(errors))
-    return ValidationCheck(name="schema", passed=True, message=f"Validated {len(endpoint_infos)} endpoint(s).")
+    return ValidationCheck(name="schema", passed=True, message=f"Validated {len(urls)} endpoint(s).")
 
 
 # ---------------------------------------------------------------------------
@@ -157,16 +163,15 @@ def _schema_check(
 # ---------------------------------------------------------------------------
 
 
-def _tcp_ping(host: str, port: int, timeout: float = 5.0) -> None:
+def _tcp_ping(host: str, port: int, timeout: float = _CONNECT_TIMEOUT_S) -> None:
     with socket.create_connection((host, port), timeout=timeout):
         pass
 
 
-def _connectivity_check(endpoint_infos: list[dict[str, str]]) -> ValidationCheck:
+def _connectivity_check(urls: list[str]) -> ValidationCheck:
     """TCP-ping every Alertmanager endpoint; return a single pass/fail check."""
     errors: list[str] = []
-    for info in endpoint_infos:
-        url = info["url"]
+    for url in urls:
         try:
             parsed = urlparse(url)
             host = parsed.hostname or url
@@ -177,18 +182,17 @@ def _connectivity_check(endpoint_infos: list[dict[str, str]]) -> ValidationCheck
 
     if errors:
         return ValidationCheck(name="connect", passed=False, message="; ".join(errors))
-    return ValidationCheck(name="connect", passed=True, message=f"TCP reached {len(endpoint_infos)} endpoint(s).")
+    return ValidationCheck(name="connect", passed=True, message=f"TCP reached {len(urls)} endpoint(s).")
 
 
-def _http_healthy_checks(endpoint_infos: list[dict[str, str]]) -> list[ValidationCheck]:
+def _http_healthy_checks(urls: list[str]) -> list[ValidationCheck]:
     """HTTP GET ``/-/healthy`` for each Alertmanager URL; confirm 200 OK.
 
     Alertmanager may take a few seconds to become healthy after startup, so the
     check retries with back-off before reporting failure.
     """
     checks: list[ValidationCheck] = []
-    for info in endpoint_infos:
-        url = info["url"]
+    for url in urls:
         parsed = urlparse(url)
         healthy_url = f"{_base_url(url)}{_HEALTHY_PATH}"
         check_name = f"http_healthy[{parsed.netloc}]"
@@ -206,7 +210,7 @@ def _http_healthy_checks(endpoint_infos: list[dict[str, str]]) -> list[Validatio
                         break
                     last_msg = f"Unexpected status {resp.status} from {healthy_url}."
             except urllib.error.HTTPError as exc:
-                body = exc.read().decode("utf-8", errors="replace") if exc.fp else ""
+                body = _http_error_body(exc)
                 last_msg = f"Unexpected response {exc.code} from {healthy_url}: {body[:200]}"
             except Exception as exc:
                 last_msg = str(exc)
@@ -219,81 +223,102 @@ def _http_healthy_checks(endpoint_infos: list[dict[str, str]]) -> list[Validatio
 # ---------------------------------------------------------------------------
 
 
-def _canary_checks(endpoint_infos: list[dict[str, str]]) -> list[ValidationCheck]:
-    """Dispatch a canary alert to each endpoint, read it back, then resolve it.
+def _canary_checks(urls: list[str]) -> list[ValidationCheck]:
+    """Silence, dispatch, read back, then resolve a canary alert per endpoint.
 
     Uses a unique per-run probe label so concurrent validator runs do not
     cross-pollinate. Returns two checks per endpoint: the push + query
     round-trip, and a cleanup check that fails if the canary could not be
-    resolved (leaving a stray active alert).
+    resolved or the silence could not be removed (leaving stray state).
     """
     checks: list[ValidationCheck] = []
-    for info in endpoint_infos:
-        url = info["url"]
+    for url in urls:
         parsed = urlparse(url)
         base = _base_url(url)
-        check_name = f"canary[{parsed.netloc}]"
-        cleanup_name = f"canary_cleanup[{parsed.netloc}]"
-        probe_id = uuid.uuid4().hex[:12]
+        netloc = parsed.netloc
+        check_name = f"canary[{netloc}]"
+        cleanup_name = f"canary_cleanup[{netloc}]"
+        probe_id = uuid.uuid4().hex[:_PROBE_ID_LEN]
 
+        # Silence the probe label before dispatch so a catch-all or short
+        # group_wait route cannot page a real receiver with the canary — a
+        # delivered notification cannot be retracted by cleanup.
         try:
-            _push_canary(base, probe_id)
+            silence_id = _create_silence(base, probe_id)
         except Exception as exc:
-            checks.append(ValidationCheck(name=check_name, passed=False, message=f"Dispatch failed: {exc}"))
-            continue  # nothing was dispatched, so there is nothing to clean up
+            checks.append(
+                ValidationCheck(
+                    name=check_name,
+                    passed=False,
+                    message=f"Failed to silence canary probe before dispatch on {netloc}: {exc}",
+                )
+            )
+            continue  # never dispatch an unsilenced canary that could notify real receivers
 
         try:
-            found = False
-            query_error = ""
-            for _ in range(_QUERY_ATTEMPTS):
-                time.sleep(_INGEST_WAIT_S)
-                try:
-                    found = _query_canary(base, probe_id)
-                except Exception as exc:
-                    query_error = str(exc)
-                    continue
-                query_error = ""  # a successful query supersedes any earlier transient error
-                if found:
-                    break
-
-            if found:
-                checks.append(
-                    ValidationCheck(
-                        name=check_name,
-                        passed=True,
-                        message=f"Canary alert dispatched and read back from {parsed.netloc}.",
-                    )
-                )
-            elif query_error:
-                checks.append(ValidationCheck(name=check_name, passed=False, message=f"Query failed: {query_error}"))
-            else:
-                checks.append(
-                    ValidationCheck(
-                        name=check_name,
-                        passed=False,
-                        message=f"Canary alert dispatched to {parsed.netloc} but not found in active alerts.",
-                    )
-                )
+            checks.append(_round_trip_check(base, probe_id, check_name, netloc))
         finally:
-            checks.append(_resolve_check(base, probe_id, cleanup_name, parsed.netloc))
+            # A dispatch that raised locally may still have reached Alertmanager,
+            # so always resolve the canary and remove the silence.
+            checks.append(_cleanup_check(base, probe_id, silence_id, cleanup_name, netloc))
     return checks
 
 
-def _resolve_check(base_url: str, probe_id: str, check_name: str, netloc: str) -> ValidationCheck:
-    """Resolve the canary and report whether cleanup succeeded.
+def _round_trip_check(base_url: str, probe_id: str, check_name: str, netloc: str) -> ValidationCheck:
+    """Dispatch the canary and confirm it can be read back from the alerts API."""
+    try:
+        _push_canary(base_url, probe_id)
+    except Exception as exc:
+        return ValidationCheck(name=check_name, passed=False, message=f"Dispatch failed: {exc}")
 
-    A rejected resolve leaves the five-minute canary active, so — unlike a
-    silently swallowed error — it must fail deep validation.
+    found = False
+    query_error = ""
+    for _ in range(_QUERY_ATTEMPTS):
+        time.sleep(_INGEST_WAIT_S)
+        try:
+            found = _query_canary(base_url, probe_id)
+        except Exception as exc:
+            query_error = str(exc)
+            continue
+        query_error = ""  # a successful query supersedes any earlier transient error
+        if found:
+            break
+
+    if found:
+        return ValidationCheck(
+            name=check_name, passed=True, message=f"Canary alert dispatched and read back from {netloc}."
+        )
+    if query_error:
+        return ValidationCheck(name=check_name, passed=False, message=f"Query failed: {query_error}")
+    return ValidationCheck(
+        name=check_name, passed=False, message=f"Canary alert dispatched to {netloc} but not found in active alerts."
+    )
+
+
+def _cleanup_check(base_url: str, probe_id: str, silence_id: str, check_name: str, netloc: str) -> ValidationCheck:
+    """Resolve the canary and remove its silence, reporting either failure.
+
+    Unlike a silently swallowed error, a failed resolve (which leaves the alert
+    active) or a failed silence removal must fail deep validation so stray state
+    is surfaced.
     """
+    errors: list[str] = []
     try:
         _resolve_canary(base_url, probe_id)
     except Exception as exc:
+        errors.append(f"canary resolve failed: {exc}")
+    try:
+        _delete_silence(base_url, silence_id)
+    except Exception as exc:
+        errors.append(f"silence removal failed: {exc}")
+
+    if errors:
         return ValidationCheck(
             name=check_name,
             passed=False,
-            message=f"Canary cleanup failed on {netloc}; alert may stay active for up to five minutes: {exc}",
+            message=f"Canary cleanup failed on {netloc}; alert or silence may linger: {'; '.join(errors)}",
         )
-    return ValidationCheck(name=check_name, passed=True, message=f"Canary alert resolved on {netloc}.")
+    return ValidationCheck(name=check_name, passed=True, message=f"Canary resolved and silence removed on {netloc}.")
 
 
 def _canary_payload(probe_id: str, starts_at: datetime, ends_at: datetime) -> bytes:
@@ -321,14 +346,14 @@ def _post_alerts(base_url: str, payload: bytes) -> None:
             if resp.status not in (200, 204):
                 raise RuntimeError(f"Unexpected dispatch response: HTTP {resp.status}")
     except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace") if exc.fp else ""
+        body = _http_error_body(exc)
         raise RuntimeError(f"Dispatch rejected: HTTP {exc.code}: {body[:200]}") from exc
 
 
 def _push_canary(base_url: str, probe_id: str) -> None:
-    """POST a single canary alert active for five minutes to *base_url*."""
+    """POST a single canary alert to *base_url*, active for a few minutes."""
     now = datetime.now(timezone.utc)
-    _post_alerts(base_url, _canary_payload(probe_id, now, now + timedelta(minutes=5)))
+    _post_alerts(base_url, _canary_payload(probe_id, now, now + timedelta(minutes=_CANARY_ACTIVE_MIN)))
 
 
 def _query_canary(base_url: str, probe_id: str) -> bool:
@@ -336,10 +361,11 @@ def _query_canary(base_url: str, probe_id: str) -> bool:
 
     A server-side ``filter`` matcher restricts the response to the canary's own
     probe label so a busy Alertmanager does not stream back its entire active
-    alert set on every retry.
+    alert set on every retry. ``silenced`` is requested explicitly because the
+    probe is silenced before dispatch, and the read-back must still see it.
     """
-    matcher = urlencode({"filter": f'{_CANARY_LABEL_KEY}="{probe_id}"'})
-    query_url = f"{base_url}{_ALERTS_PATH}?{matcher}"
+    query = urlencode({"filter": f'{_CANARY_LABEL_KEY}="{probe_id}"', "active": "true", "silenced": "true"})
+    query_url = f"{base_url}{_ALERTS_PATH}?{query}"
     with urlopen(query_url, timeout=_ALERTS_TIMEOUT_S) as resp:  # nosec B310
         raw = resp.read()
     try:
@@ -363,5 +389,52 @@ def _resolve_canary(base_url: str, probe_id: str) -> None:
     """
     now = datetime.now(timezone.utc)
     ends_at = now - timedelta(seconds=1)
-    starts_at = now - timedelta(minutes=5)  # keep startsAt before endsAt so Alertmanager accepts the resolve
+    starts_at = now - timedelta(minutes=_CANARY_ACTIVE_MIN)  # keep startsAt before endsAt so the resolve is accepted
     _post_alerts(base_url, _canary_payload(probe_id, starts_at, ends_at))
+
+
+def _create_silence(base_url: str, probe_id: str) -> str:
+    """Create a silence matching the canary probe label; return its silence ID.
+
+    Silencing before dispatch prevents Alertmanager from routing the canary to
+    real receivers, whose notifications cleanup cannot retract.
+    """
+    now = datetime.now(timezone.utc)
+    body = {
+        "matchers": [{"name": _CANARY_LABEL_KEY, "value": probe_id, "isRegex": False, "isEqual": True}],
+        "startsAt": now.isoformat(),
+        "endsAt": (now + timedelta(minutes=_SILENCE_DURATION_MIN)).isoformat(),
+        "createdBy": _VALIDATOR_ID,
+        "comment": "Silence validator canary probe so it cannot page real receivers.",
+    }
+    req = Request(f"{base_url}{_SILENCES_PATH}", data=json.dumps(body).encode("utf-8"), method="POST")  # nosec B310
+    req.add_header("Content-Type", "application/json")
+    try:
+        with urlopen(req, timeout=_ALERTS_TIMEOUT_S) as resp:  # nosec B310
+            raw = resp.read()
+            if resp.status not in (200, 201):
+                raise RuntimeError(f"Unexpected silence response: HTTP {resp.status}")
+    except urllib.error.HTTPError as exc:
+        body_text = _http_error_body(exc)
+        raise RuntimeError(f"Silence rejected: HTTP {exc.code}: {body_text[:200]}") from exc
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"Silence response is not valid JSON: {exc}") from exc
+    silence_id = data.get("silenceID") or data.get("silenceId") if isinstance(data, dict) else ""
+    if not silence_id:
+        raise RuntimeError("Silence response did not include a silence ID")
+    return str(silence_id)
+
+
+def _delete_silence(base_url: str, silence_id: str) -> None:
+    """Delete the canary silence created before dispatch."""
+    req = Request(f"{base_url}{_SILENCES_PATH}/{quote(silence_id, safe='')}", method="DELETE")  # nosec B310
+    try:
+        with urlopen(req, timeout=_ALERTS_TIMEOUT_S) as resp:  # nosec B310
+            resp.read()
+            if resp.status not in (200, 204):
+                raise RuntimeError(f"Unexpected silence deletion response: HTTP {resp.status}")
+    except urllib.error.HTTPError as exc:
+        body_text = _http_error_body(exc)
+        raise RuntimeError(f"Silence deletion rejected: HTTP {exc.code}: {body_text[:200]}") from exc
