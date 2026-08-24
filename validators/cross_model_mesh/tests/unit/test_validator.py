@@ -12,6 +12,7 @@ Coverage targets
 
 import dataclasses
 import json
+import time
 import urllib.request
 from typing import Any, cast
 from unittest.mock import MagicMock, mock_open, patch
@@ -184,6 +185,21 @@ class TestCheckDnsReachable:
             check = _check_dns_reachable(_VALID_CMR_DATA)
         assert not check.passed
         assert "not found" in check.message
+
+    def test_resolution_timeout(self) -> None:
+        """socket.setdefaulttimeout() does not bound getaddrinfo(); a hung resolver call must
+        still be treated as a failure within _DNS_TIMEOUT rather than blocking indefinitely."""
+
+        def _hangs_forever(*_args: Any, **_kwargs: Any) -> Any:
+            time.sleep(3600)
+
+        with (
+            patch("validators.cross_model_mesh.validator.socket.getaddrinfo", side_effect=_hangs_forever),
+            patch("validators.cross_model_mesh.validator._DNS_TIMEOUT", 0.05),
+        ):
+            check = _check_dns_reachable(_VALID_CMR_DATA)
+        assert not check.passed
+        assert "did not complete" in check.message
 
 
 class TestCheckMeshDataPlaneReachable:

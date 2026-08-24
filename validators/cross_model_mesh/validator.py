@@ -26,9 +26,11 @@ import json
 import re
 import socket
 import ssl
+import threading
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from typing import Any
 
 from validators.base import (
     BaseValidator,
@@ -352,24 +354,45 @@ def _check_dns_reachable(cmr_data: CMRData) -> ValidationCheck:
     target to route traffic to.
     """
     host = _cross_model_dns_name(cmr_data)
-    previous_timeout = socket.getdefaulttimeout()
-    try:
-        socket.setdefaulttimeout(_DNS_TIMEOUT)
-        # getaddrinfo (unlike gethostbyname) resolves AAAA records too, so an
-        # IPv6-only cluster's Service name is not falsely reported as unresolvable.
-        socket.getaddrinfo(host, None)
-    except OSError as exc:
+    # socket.setdefaulttimeout() only bounds newly created socket objects, not
+    # the blocking resolver call getaddrinfo() makes internally, so it cannot
+    # enforce a deadline here. Run the lookup in a daemon thread instead: if
+    # it doesn't finish within _DNS_TIMEOUT, treat that as failure and move
+    # on. getaddrinfo() cannot be cancelled from the outside, so the thread
+    # is abandoned (not joined) rather than blocking validation further; it
+    # is a daemon thread so it cannot block process exit either.
+    result: dict[str, list[tuple[Any, ...]] | OSError] = {}
+
+    def _resolve() -> None:
+        try:
+            result["addrs"] = socket.getaddrinfo(host, None)
+        except OSError as exc:
+            result["error"] = exc
+
+    thread = threading.Thread(target=_resolve, daemon=True)
+    thread.start()
+    thread.join(timeout=_DNS_TIMEOUT)
+
+    if thread.is_alive():
         return ValidationCheck(
             name="dns_reachable",
             passed=False,
             message=(
-                f"Could not resolve {host!r}: {exc}. "
+                f"Could not resolve {host!r}: DNS lookup did not complete within {_DNS_TIMEOUT}s. "
                 "Remediation: confirm the requirer application and model names in cmr_data are correct "
                 "and that the workload is deployed."
             ),
         )
-    finally:
-        socket.setdefaulttimeout(previous_timeout)
+    if "error" in result:
+        return ValidationCheck(
+            name="dns_reachable",
+            passed=False,
+            message=(
+                f"Could not resolve {host!r}: {result['error']}. "
+                "Remediation: confirm the requirer application and model names in cmr_data are correct "
+                "and that the workload is deployed."
+            ),
+        )
     return ValidationCheck(name="dns_reachable", passed=True, message=f"Resolved {host!r}.")
 
 
