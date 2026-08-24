@@ -229,74 +229,62 @@ class BundleBuilder:
             if isinstance(diagnostic, ApplicationReleaseDiagnostic)
         }
         for tag in tags:
-            if tag.kind == Assertions.CHARM_ENDPOINT_NON_OPTIONAL:
-                non_optional = cast(CharmEndpointNonOptionalTag, tag)
-                diagnostics.append(
-                    UnfulfilledEndpointDiagnostic(
-                        endpoint=DiagnosticEndpoint(
-                            charm_name=non_optional.charm.charm_name,
-                            endpoint=non_optional.charm.endpoint,
-                        ),
-                        interface=non_optional.interface,
-                    )
-                )
-            elif tag.kind == Assertions.INTEGRATION_FEATURE_MISMATCH:
-                mismatch = cast(IntegrationFeatureMismatchTag, tag)
-                diagnostics.append(
-                    FeatureMismatchDiagnostic(
-                        requires=DiagnosticEndpoint(
-                            charm_name=mismatch.requires.charm_name,
-                            endpoint=mismatch.requires.endpoint,
-                        ),
-                        provides=DiagnosticEndpoint(
-                            charm_name=mismatch.provides.charm_name,
-                            endpoint=mismatch.provides.endpoint,
-                        ),
-                        feature=mismatch.feature,
-                    ),
-                )
-            elif tag.kind == Assertions.APPLICATION_EXISTS:
-                app_exists = cast(ApplicationExistsTag, tag)
-                if (app_exists.model.key, app_exists.application) not in release_failed_applications:
+            match tag:
+                case CharmEndpointNonOptionalTag():
                     diagnostics.append(
-                        UnresolvedApplicationDiagnostic(
-                            application=app_exists.application,
-                            charm_name=cls._application_charm_name(
-                                domain,
-                                app_exists.model,
-                                app_exists.application,
-                            ),
+                        UnfulfilledEndpointDiagnostic(
+                            endpoint=DiagnosticEndpoint(charm_name=tag.charm.charm_name, endpoint=tag.charm.endpoint),
+                            interface=tag.interface,
                         )
                     )
-            elif tag.kind == Assertions.APPLICATION_INTEGRATION_EXISTS:
-                integration_exists = cast(ApplicationIntegrationExistsTag, tag)
-                if any(
-                    (
-                        (endpoint.model if endpoint.model.name is not None else integration_exists.model).key,
-                        endpoint.application,
-                    )
-                    in release_failed_applications
-                    for endpoint in integration_exists.integration
-                ):
-                    continue
-                endpoints = tuple(
-                    sorted(
-                        (
-                            DiagnosticEndpoint(
-                                application=endpoint.application,
-                                endpoint=endpoint.endpoint,
-                                charm_name=cls._application_charm_name(
-                                    domain,
-                                    endpoint.model if endpoint.model.name is not None else integration_exists.model,
-                                    endpoint.application,
-                                ),
-                            )
-                            for endpoint in integration_exists.integration
+                case IntegrationFeatureMismatchTag():
+                    diagnostics.append(
+                        FeatureMismatchDiagnostic(
+                            requires=DiagnosticEndpoint(
+                                charm_name=tag.requires.charm_name, endpoint=tag.requires.endpoint
+                            ),
+                            provides=DiagnosticEndpoint(
+                                charm_name=tag.provides.charm_name, endpoint=tag.provides.endpoint
+                            ),
+                            feature=tag.feature,
                         ),
-                        key=lambda endpoint: endpoint.identity,
                     )
-                )
-                diagnostics.append(UnresolvedIntegrationDiagnostic(endpoints=endpoints))
+                case ApplicationExistsTag():
+                    if (tag.model.key, tag.application) not in release_failed_applications:
+                        diagnostics.append(
+                            UnresolvedApplicationDiagnostic(
+                                application=tag.application,
+                                charm_name=cls._application_charm_name(domain, tag.model, tag.application),
+                            )
+                        )
+                case ApplicationIntegrationExistsTag():
+                    if any(
+                        (
+                            (endpoint.model if endpoint.model.name is not None else tag.model).key,
+                            endpoint.application,
+                        )
+                        in release_failed_applications
+                        for endpoint in tag.integration
+                    ):
+                        continue
+                    endpoints = tuple(
+                        sorted(
+                            (
+                                DiagnosticEndpoint(
+                                    application=endpoint.application,
+                                    endpoint=endpoint.endpoint,
+                                    charm_name=cls._application_charm_name(
+                                        domain,
+                                        endpoint.model if endpoint.model.name is not None else tag.model,
+                                        endpoint.application,
+                                    ),
+                                )
+                                for endpoint in tag.integration
+                            ),
+                            key=lambda endpoint: endpoint.identity,
+                        )
+                    )
+                    diagnostics.append(UnresolvedIntegrationDiagnostic(endpoints=endpoints))
         if not diagnostics:
             diagnostics.append(
                 BundleBuildFailureDiagnostic(
