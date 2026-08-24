@@ -258,10 +258,8 @@ class TestCheckMeshDataPlaneReachable:
 
 class TestDiscoverServicePorts:
     def test_returns_none_when_service_account_files_absent(self) -> None:
-        # No mocking: the sandboxed unit test environment has no mounted
-        # Kubernetes service account, so discovery must fail closed to None
-        # rather than raising.
-        assert _discover_service_ports("some-model", "some-app") is None
+        with patch("builtins.open", side_effect=FileNotFoundError):
+            assert _discover_service_ports("some-model", "some-app") is None
 
     def test_returns_ports_on_successful_api_response(self) -> None:
         response_body = json.dumps({"spec": {"ports": [{"port": 80}, {"port": 8080}]}}).encode()

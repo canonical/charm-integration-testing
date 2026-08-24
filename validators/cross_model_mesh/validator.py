@@ -400,7 +400,22 @@ def _discover_service_ports(namespace: str, name: str) -> list[int] | None:
             service = json.loads(response.read())
     except (OSError, ValueError, urllib.error.URLError):
         return None
-    return [port["port"] for port in service.get("spec", {}).get("ports", []) if "port" in port]
+    if not isinstance(service, dict):
+        return None
+    spec = service.get("spec")
+    if not isinstance(spec, dict):
+        return None
+    raw_ports = spec.get("ports", [])
+    if not isinstance(raw_ports, list):
+        return None
+    return [
+        port["port"]
+        for port in raw_ports
+        if isinstance(port, dict)
+        and isinstance(port.get("port"), int)
+        and not isinstance(port["port"], bool)
+        and 1 <= port["port"] <= 65535
+    ]
 
 
 def _check_mesh_data_plane_reachable(cmr_data: CMRData) -> ValidationCheck:
