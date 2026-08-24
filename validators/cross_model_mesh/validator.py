@@ -392,6 +392,12 @@ def _discover_service_ports(namespace: str, name: str) -> list[int] | None:
     successfully found but declares no ports at all, so callers can treat
     that as a definitive result rather than silently falling back to the
     weaker HBONE probe.
+
+    The request is issued through an opener with proxying explicitly
+    disabled: the default opener honors ``HTTP(S)_PROXY``/``NO_PROXY``, and
+    this request carries the pod's service-account bearer token, so if
+    ``kubernetes.default.svc`` were not already covered by ``NO_PROXY`` that
+    token could otherwise be sent to a configured proxy.
     """
     try:
         with open(f"{_K8S_SA_DIR}/token", encoding="utf-8") as fh:
@@ -399,7 +405,11 @@ def _discover_service_ports(namespace: str, name: str) -> list[int] | None:
         ctx = ssl.create_default_context(cafile=f"{_K8S_SA_DIR}/ca.crt")
         url = f"{_K8S_API_SERVER}/api/v1/namespaces/{namespace}/services/{name}"
         request = urllib.request.Request(url, headers={"Authorization": "Bearer " + token})
-        with urllib.request.urlopen(request, context=ctx, timeout=_K8S_API_TIMEOUT) as response:  # nosec B310
+        opener = urllib.request.build_opener(
+            urllib.request.ProxyHandler({}),
+            urllib.request.HTTPSHandler(context=ctx),
+        )
+        with opener.open(request, timeout=_K8S_API_TIMEOUT) as response:  # nosec B310
             service = json.loads(response.read())
     except (OSError, ValueError, urllib.error.URLError):
         return None

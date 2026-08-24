@@ -12,8 +12,9 @@ Coverage targets
 
 import dataclasses
 import json
+import urllib.request
 from typing import Any, cast
-from unittest.mock import mock_open, patch
+from unittest.mock import MagicMock, mock_open, patch
 
 import ops
 
@@ -277,10 +278,13 @@ class TestDiscoverServicePorts:
             def __exit__(self, *args: object) -> None:
                 return None
 
+        fake_opener = MagicMock()
+        fake_opener.open.return_value = _FakeResponse()
+
         with (
             patch("builtins.open", mock_open(read_data="fake-token")),
             patch("validators.cross_model_mesh.validator.ssl.create_default_context"),
-            patch("validators.cross_model_mesh.validator.urllib.request.urlopen", return_value=_FakeResponse()),
+            patch("validators.cross_model_mesh.validator.urllib.request.build_opener", return_value=fake_opener),
         ):
             ports = _discover_service_ports("some-model", "some-app")
 
@@ -289,13 +293,13 @@ class TestDiscoverServicePorts:
     def test_returns_none_on_api_error(self) -> None:
         import urllib.error
 
+        fake_opener = MagicMock()
+        fake_opener.open.side_effect = urllib.error.URLError("unreachable")
+
         with (
             patch("builtins.open", mock_open(read_data="fake-token")),
             patch("validators.cross_model_mesh.validator.ssl.create_default_context"),
-            patch(
-                "validators.cross_model_mesh.validator.urllib.request.urlopen",
-                side_effect=urllib.error.URLError("unreachable"),
-            ),
+            patch("validators.cross_model_mesh.validator.urllib.request.build_opener", return_value=fake_opener),
         ):
             ports = _discover_service_ports("some-model", "some-app")
 
@@ -314,14 +318,46 @@ class TestDiscoverServicePorts:
             def __exit__(self, *args: object) -> None:
                 return None
 
+        fake_opener = MagicMock()
+        fake_opener.open.return_value = _FakeResponse()
+
         with (
             patch("builtins.open", mock_open(read_data="fake-token")),
             patch("validators.cross_model_mesh.validator.ssl.create_default_context"),
-            patch("validators.cross_model_mesh.validator.urllib.request.urlopen", return_value=_FakeResponse()),
+            patch("validators.cross_model_mesh.validator.urllib.request.build_opener", return_value=fake_opener),
         ):
             ports = _discover_service_ports("some-model", "some-app")
 
         assert ports == []
+
+    def test_does_not_use_a_proxy_for_the_in_cluster_api_request(self) -> None:
+        """The bearer token must never be sent to an env-configured proxy."""
+        response_body = json.dumps({"spec": {"ports": [{"port": 80}]}}).encode()
+
+        class _FakeResponse:
+            def read(self) -> bytes:
+                return response_body
+
+            def __enter__(self) -> "_FakeResponse":
+                return self
+
+            def __exit__(self, *args: object) -> None:
+                return None
+
+        fake_opener = MagicMock()
+        fake_opener.open.return_value = _FakeResponse()
+
+        with (
+            patch("builtins.open", mock_open(read_data="fake-token")),
+            patch("validators.cross_model_mesh.validator.ssl.create_default_context"),
+            patch(
+                "validators.cross_model_mesh.validator.urllib.request.build_opener", return_value=fake_opener
+            ) as mock_build_opener,
+        ):
+            _discover_service_ports("some-model", "some-app")
+
+        handlers = mock_build_opener.call_args.args
+        assert any(isinstance(h, urllib.request.ProxyHandler) and getattr(h, "proxies", None) == {} for h in handlers)
 
 
 # ---------------------------------------------------------------------------
