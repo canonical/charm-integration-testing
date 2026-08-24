@@ -81,11 +81,9 @@ def _collect_endpoint_infos(
 
     * v1: ``relation.data[unit]["url"] = "<scheme>://<host>:<port>"``
     * v0: ``relation.data[unit]["public_address"] = "<host>:<port>"`` with an
-      optional ``relation.data[unit]["scheme"]`` (defaults to ``http``).
-
-    ``receiver`` is not part of the interface's relation data (Alertmanager
-    receivers are server-side routing config), so it is collected only when a
-    charm happens to advertise it and is validated opportunistically.
+      optional ``relation.data[unit]["scheme"]`` that defaults to ``http`` only
+      when the key is absent (an explicitly empty scheme is malformed and is
+      left to fail the schema check).
 
     Malformed entries are returned as errors so ``_schema_check`` can surface
     every bad databag in one check.
@@ -103,7 +101,7 @@ def _collect_endpoint_infos(
         if not url:
             public_address = data.get("public_address", "")
             if public_address:
-                scheme = data.get("scheme", "http") or "http"
+                scheme = data.get("scheme", "http")
                 url = f"{scheme}://{public_address}"
 
         if not url:
@@ -113,10 +111,7 @@ def _collect_endpoint_infos(
             continue  # dedup — same URL from a scaled-out provider is not an error
         seen_urls.add(url)
 
-        info: dict[str, str] = {"url": url}
-        if "receiver" in data:
-            info["receiver"] = data["receiver"]
-        infos.append(info)
+        infos.append({"url": url})
     return infos, errors
 
 
@@ -131,10 +126,8 @@ def _schema_check(
 ) -> ValidationCheck:
     """Validate structure and value constraints of every advertised endpoint.
 
-    Per endpoint:
-
-    * ``url`` must be non-empty, use an http/https scheme, and have a hostname.
-    * ``receiver`` (optional) — when present, must be a non-empty string.
+    Per endpoint, ``url`` must be non-empty, use an http/https scheme, and have
+    a hostname.
     """
     if not endpoint_infos and not collection_errors:
         return ValidationCheck(
@@ -156,9 +149,6 @@ def _schema_check(
         if not parsed.hostname:
             errors.append(f"{url!r}: missing hostname")
             continue
-
-        if "receiver" in info and not info["receiver"].strip():
-            errors.append(f"{url!r}: 'receiver' must be a non-empty string when present")
 
     if errors:
         return ValidationCheck(name="schema", passed=False, message="; ".join(errors))
@@ -289,8 +279,7 @@ def _canary_checks(endpoint_infos: list[dict[str, str]]) -> list[ValidationCheck
     return checks
 
 
-def _canary_payload(probe_id: str, ends_at: datetime) -> bytes:
-    now = datetime.now(timezone.utc)
+def _canary_payload(probe_id: str, starts_at: datetime, ends_at: datetime) -> bytes:
     alert = [
         {
             "labels": {
@@ -299,7 +288,7 @@ def _canary_payload(probe_id: str, ends_at: datetime) -> bytes:
                 "severity": "info",
             },
             "annotations": {"summary": "canary alert emitted by the alertmanager_dispatch validator"},
-            "startsAt": now.isoformat(),
+            "startsAt": starts_at.isoformat(),
             "endsAt": ends_at.isoformat(),
         }
     ]
@@ -321,8 +310,8 @@ def _post_alerts(base_url: str, payload: bytes) -> None:
 
 def _push_canary(base_url: str, probe_id: str) -> None:
     """POST a single canary alert active for five minutes to *base_url*."""
-    ends_at = datetime.now(timezone.utc) + timedelta(minutes=5)
-    _post_alerts(base_url, _canary_payload(probe_id, ends_at))
+    now = datetime.now(timezone.utc)
+    _post_alerts(base_url, _canary_payload(probe_id, now, now + timedelta(minutes=5)))
 
 
 def _query_canary(base_url: str, probe_id: str) -> bool:
@@ -355,8 +344,10 @@ def _resolve_canary(base_url: str, probe_id: str) -> None:
     Best-effort cleanup: Alertmanager marks an alert resolved once ``endsAt``
     has elapsed, so any error here is intentionally swallowed.
     """
-    ends_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+    now = datetime.now(timezone.utc)
+    ends_at = now - timedelta(seconds=1)
+    starts_at = now - timedelta(minutes=5)  # keep startsAt before endsAt so Alertmanager accepts the resolve
     try:
-        _post_alerts(base_url, _canary_payload(probe_id, ends_at))
+        _post_alerts(base_url, _canary_payload(probe_id, starts_at, ends_at))
     except Exception as exc:
         logger.debug("Best-effort resolve of canary alert %s failed: %s", probe_id, exc)

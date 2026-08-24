@@ -3,6 +3,7 @@
 
 import json
 import urllib.error
+from datetime import datetime
 from typing import cast
 from unittest.mock import MagicMock, patch
 
@@ -190,18 +191,20 @@ class TestAlertmanagerDispatchValidatorSchema:
         assert not schema_check.passed
         assert "unsupported scheme" in schema_check.message
 
-    def test_fails_when_receiver_present_but_empty(self) -> None:
-        # GIVEN a valid url but an empty 'receiver' advertised alongside it
-        validator = _make_validator({"alertmanager-k8s/0": {"url": _URL, "receiver": "  "}})
+    def test_fails_when_v0_scheme_explicitly_empty(self) -> None:
+        # GIVEN a v0 databag with an explicitly empty 'scheme' (malformed data)
+        validator = _make_validator(
+            {"alertmanager-k8s/0": {"public_address": "alertmanager-0.am-test.svc:9093", "scheme": ""}}
+        )
 
         # WHEN
         result = validator.validate(level="simple")
 
-        # THEN
+        # THEN the empty scheme is preserved (not defaulted to http) and rejected
         assert result.status == "FAIL"
         schema_check = next(c for c in result.checks if c.name == "schema")
         assert not schema_check.passed
-        assert "receiver" in schema_check.message
+        assert "unsupported scheme" in schema_check.message
 
     def test_accepts_v0_public_address_and_scheme(self) -> None:
         # GIVEN a v0-style provider databag (public_address + scheme)
@@ -486,3 +489,33 @@ class TestAlertmanagerDispatchValidatorDeep:
         assert isinstance(query_target, str)
         assert "filter=validator_probe" in query_target
         assert "abc123def456" in query_target
+
+    def test_resolve_payload_starts_before_it_ends(self) -> None:
+        # GIVEN a deep run where the canary is found, triggering resolve cleanup
+        validator = _make_validator()
+        probe = MagicMock()
+        probe.hex = "abc123def456"  # matches 'validator_probe' in _ALERTS_FOUND_BODY
+        urlopen = MagicMock(
+            side_effect=[
+                _mock_http_response(200, b"OK"),  # GET /-/healthy
+                _mock_http_response(200, b""),  # POST /api/v2/alerts (dispatch)
+                _mock_http_response(200, _ALERTS_FOUND_BODY),  # GET /api/v2/alerts (query)
+                _mock_http_response(200, b""),  # POST /api/v2/alerts (resolve cleanup)
+            ]
+        )
+
+        with (
+            patch("validators.alertmanager_dispatch.validator._tcp_ping"),
+            patch("validators.alertmanager_dispatch.validator.time.sleep"),
+            patch("validators.alertmanager_dispatch.validator.uuid.uuid4", return_value=probe),
+            patch("validators.alertmanager_dispatch.validator.urlopen", urlopen),
+        ):
+            validator.validate(level="deep")
+
+        # THEN the resolve payload keeps startsAt strictly before endsAt so
+        # Alertmanager accepts the cleanup and actually resolves the canary
+        resolve_request = urlopen.call_args_list[3].args[0]
+        payload = json.loads(resolve_request.data)
+        starts_at = datetime.fromisoformat(payload[0]["startsAt"])
+        ends_at = datetime.fromisoformat(payload[0]["endsAt"])
+        assert starts_at < ends_at
