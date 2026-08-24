@@ -186,6 +186,39 @@ def test_provider_rejects_invalid_contract() -> None:
     assert "integer" in check.message
 
 
+def test_provider_rejects_non_string_service() -> None:
+    validator = _make_validator(
+        role="provides",
+        app_databag={"data": yaml.safe_dump({"service": ["oidc-gatekeeper"], "port": 8080})},
+    )
+    result = validator.validate(level="simple")
+    assert result.status == "FAIL"
+    check = next(check for check in result.checks if check.name == "required_fields")
+    assert "'service' must be a string" in check.message
+
+
+def test_provider_rejects_boolean_port() -> None:
+    validator = _make_validator(
+        role="provides",
+        app_databag={"data": yaml.safe_dump({"service": "oidc-gatekeeper", "port": True})},
+    )
+    result = validator.validate(level="simple")
+    assert result.status == "FAIL"
+    check = next(check for check in result.checks if check.name == "port")
+    assert "integer" in check.message
+
+
+def test_provider_rejects_float_port() -> None:
+    validator = _make_validator(
+        role="provides",
+        app_databag={"data": yaml.safe_dump({"service": "oidc-gatekeeper", "port": 1.5})},
+    )
+    result = validator.validate(level="simple")
+    assert result.status == "FAIL"
+    check = next(check for check in result.checks if check.name == "port")
+    assert "integer" in check.message
+
+
 def test_provider_deep_connectivity_passes() -> None:
     validator = _make_validator(
         role="provides",

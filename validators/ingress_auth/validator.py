@@ -141,6 +141,12 @@ class IngressAuthValidator(BaseValidator):
 
 def _check_required_fields(data: dict[str, Any]) -> ValidationCheck:
     missing = [field for field in _REQUIRED_PROVIDER_FIELDS if not data.get(field)]
+    if not missing and not isinstance(data.get("service"), str):
+        return ValidationCheck(
+            name="required_fields",
+            passed=False,
+            message="'service' must be a string.",
+        )
     return ValidationCheck(
         name="required_fields",
         passed=not missing,
@@ -149,10 +155,11 @@ def _check_required_fields(data: dict[str, Any]) -> ValidationCheck:
 
 
 def _check_port(port_value: Any) -> ValidationCheck:
-    try:
-        port = int(port_value)
-    except (TypeError, ValueError):
+    # Reject bool (a subclass of int) and any other non-int type before conversion,
+    # since int(True) == 1 and int(1.5) == 1 would otherwise silently pass invalid values.
+    if isinstance(port_value, bool) or not isinstance(port_value, int):
         return ValidationCheck(name="port", passed=False, message="'port' must be an integer.")
+    port = port_value
     if not 1 <= port <= 65535:
         return ValidationCheck(name="port", passed=False, message="'port' must be between 1 and 65535.")
     return ValidationCheck(name="port", passed=True, message=f"Valid port {port}.")
