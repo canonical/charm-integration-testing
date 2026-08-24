@@ -175,6 +175,11 @@ class CrossModelMeshValidator(BaseValidator):
         if not checks[-1].passed:
             return self._make_result(level="simple", checks=checks)
 
+        remote_app_check = self._check_remote_app_consistency(cmr_data)
+        checks.append(remote_app_check)
+        if not remote_app_check.passed:
+            return self._make_result(level="simple", checks=checks)
+
         checks.append(_check_dns_reachable(cmr_data))
 
         return self._make_result(level="simple", checks=checks)
@@ -196,6 +201,11 @@ class CrossModelMeshValidator(BaseValidator):
         if not checks[-1].passed:
             return self._make_result(level="deep", checks=checks)
 
+        remote_app_check = self._check_remote_app_consistency(cmr_data)
+        checks.append(remote_app_check)
+        if not remote_app_check.passed:
+            return self._make_result(level="deep", checks=checks)
+
         dns_check = _check_dns_reachable(cmr_data)
         checks.append(dns_check)
         if not dns_check.passed:
@@ -208,6 +218,32 @@ class CrossModelMeshValidator(BaseValidator):
     def _parse_remote_cmr_data(self) -> tuple[CMRData | None, ValidationCheck]:
         """Read and decode ``cmr_data`` from the remote (requirer) application databag."""
         return _decode_cmr_data(self.databag.get("cmr_data", ""), source="remote application databag")
+
+    def _check_remote_app_consistency(self, cmr_data: CMRData) -> ValidationCheck:
+        """Verify the declared ``app_name`` matches the actual remote relation application.
+
+        Without this check, a requirer could publish a well-formed identity
+        for a *different* application/model than the one actually on the
+        other end of this relation. If that impersonated identity happens to
+        resolve, both L1 and L2 checks would otherwise pass while the
+        provider builds an authorization policy for the wrong application.
+        """
+        actual_app_name = self.relation.app.name if self.relation.app is not None else None
+        if cmr_data["app_name"] != actual_app_name:
+            return ValidationCheck(
+                name="remote_app_consistency",
+                passed=False,
+                message=(
+                    f"Declared app_name {cmr_data['app_name']!r} in cmr_data does not match the "
+                    f"actual remote application {actual_app_name!r} on relation '{self.endpoint}'. "
+                    "Remediation: verify the requirer publishes its own application name unmodified."
+                ),
+            )
+        return ValidationCheck(
+            name="remote_app_consistency",
+            passed=True,
+            message=f"Declared app_name matches the actual remote application {actual_app_name!r}.",
+        )
 
     # ------------------------------------------------------------------
     # Helpers
@@ -305,11 +341,14 @@ def _cross_model_dns_name(cmr_data: CMRData) -> str:
 
 
 def _check_dns_reachable(cmr_data: CMRData) -> ValidationCheck:
-    """Verify the declared identity's Kubernetes Service DNS name resolves.
+    """Verify the declared identity's Service DNS name resolves.
 
-    This is a prerequisite for any mesh authorization to have an effect: if
-    the declared application/model cannot be resolved at all, the mesh has
-    no addressable target to route traffic to.
+    This only confirms the destination's Kubernetes Service DNS name exists;
+    a Service can still resolve even when its workload has zero endpoints
+    (that is exactly why the deep-level ``mesh_data_plane_reachable`` check
+    exists). It is nonetheless a useful prerequisite: if the declared
+    application/model cannot be resolved at all, the mesh has no addressable
+    target to route traffic to.
     """
     host = _cross_model_dns_name(cmr_data)
     previous_timeout = socket.getdefaulttimeout()
@@ -341,60 +380,88 @@ def _discover_service_ports(namespace: str, name: str) -> list[int] | None:
     this in-cluster access for a same-cluster reachability probe is a
     reasonable assumption for this specific interface's provider role.
 
-    Returns ``None`` (rather than raising) on any failure -- missing service
-    account files, RBAC denial, Service not found, API unreachable (e.g. a
-    genuinely different Kubernetes cluster) -- so callers can fall back to a
-    less discriminating probe instead of failing outright.
+    Returns ``None`` when discovery itself failed (rather than raising) --
+    missing service account files, RBAC denial, Service not found, API
+    unreachable (e.g. a genuinely different Kubernetes cluster) -- so callers
+    can fall back to a less discriminating probe instead of failing outright.
+
+    Returns ``[]`` (a distinct, non-``None`` value) when the Service was
+    successfully found but declares no ports at all, so callers can treat
+    that as a definitive result rather than silently falling back to the
+    weaker HBONE probe.
     """
     try:
         with open(f"{_K8S_SA_DIR}/token", encoding="utf-8") as fh:
             token = fh.read().strip()
         ctx = ssl.create_default_context(cafile=f"{_K8S_SA_DIR}/ca.crt")
         url = f"{_K8S_API_SERVER}/api/v1/namespaces/{namespace}/services/{name}"
-        request = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
+        request = urllib.request.Request(url, headers={"Authorization": "Bearer " + token})
         with urllib.request.urlopen(request, context=ctx, timeout=_K8S_API_TIMEOUT) as response:  # nosec B310
             service = json.loads(response.read())
-        ports = [port["port"] for port in service.get("spec", {}).get("ports", []) if "port" in port]
-        return ports or None
     except (OSError, ValueError, urllib.error.URLError):
         return None
+    return [port["port"] for port in service.get("spec", {}).get("ports", []) if "port" in port]
 
 
 def _check_mesh_data_plane_reachable(cmr_data: CMRData) -> ValidationCheck:
     """Canary: open a TCP connection to the declared identity's workload port.
 
-    Prefers the destination's real Kubernetes Service port (discovered via
-    the in-cluster API), since traffic to it is only accepted while the
-    workload actually has running pods behind it. Falls back to the
-    well-known ambient mesh HBONE port when discovery is unavailable (e.g. a
-    genuinely separate Kubernetes cluster); that fallback is a weaker signal,
-    as it only confirms a mesh data-plane proxy is listening for the
-    destination's address, not that its workload is currently up.
+    Prefers the destination's real Kubernetes Service port(s) (discovered
+    via the in-cluster API), since traffic to them is only accepted while
+    the workload actually has running pods behind it. Service port order is
+    not a reliable signal of which port is the application's primary one, so
+    every declared port is tried in turn and the check passes if any one of
+    them is reachable.
+
+    Falls back to the well-known ambient mesh HBONE port only when Service
+    discovery itself fails (e.g. a genuinely separate Kubernetes cluster);
+    that fallback is a weaker signal, as it only confirms a mesh data-plane
+    proxy is listening for the destination's address, not that its workload
+    is currently up. A Service that is successfully discovered but declares
+    no ports at all is treated as a definitive failure rather than silently
+    falling back to that weaker probe.
     """
     host = _cross_model_dns_name(cmr_data)
     ports = _discover_service_ports(cmr_data["juju_model_name"], cmr_data["app_name"])
-    if ports:
-        port = ports[0]
-        port_desc = f"application port {port} (discovered via in-cluster Service lookup)"
-    else:
-        port = _AMBIENT_MESH_PORT
-        port_desc = f"ambient mesh HBONE port {port} (best-effort fallback; Service port discovery unavailable)"
 
-    try:
-        with socket.create_connection((host, port), timeout=_TCP_TIMEOUT):
-            pass
-    except OSError as exc:
+    if ports is None:
+        candidates = [_AMBIENT_MESH_PORT]
+        port_source = "ambient mesh HBONE port (best-effort fallback; Service port discovery unavailable)"
+    elif not ports:
         return ValidationCheck(
             name="mesh_data_plane_reachable",
             passed=False,
             message=(
-                f"Could not reach {host!r} on {port_desc}: {exc}. "
-                "Remediation: verify the destination workload has running units and that the mesh's "
-                "ambient data plane (e.g. ztunnel) is not blocked by a NetworkPolicy between namespaces."
+                f"Discovered the Kubernetes Service for {host!r} but it declares no ports. "
+                "Remediation: confirm the destination application's charm exposes at least one "
+                "container port via its Kubernetes Service."
             ),
         )
+    else:
+        candidates = ports
+        port_source = "application port(s) (discovered via in-cluster Service lookup)"
+
+    errors: list[str] = []
+    for port in candidates:
+        try:
+            with socket.create_connection((host, port), timeout=_TCP_TIMEOUT):
+                pass
+        except OSError as exc:
+            errors.append(f"{port}: {exc}")
+            continue
+        return ValidationCheck(
+            name="mesh_data_plane_reachable",
+            passed=True,
+            message=f"Connected to {host!r} on {port_source}, port {port}.",
+        )
+
     return ValidationCheck(
         name="mesh_data_plane_reachable",
-        passed=True,
-        message=f"Connected to {host!r} on {port_desc}.",
+        passed=False,
+        message=(
+            f"Could not reach {host!r} on any of its {port_source} "
+            f"({', '.join(str(p) for p in candidates)}): {'; '.join(errors)}. "
+            "Remediation: verify the destination workload has running units and that the mesh's "
+            "ambient data plane (e.g. ztunnel) is not blocked by a NetworkPolicy between namespaces."
+        ),
     )

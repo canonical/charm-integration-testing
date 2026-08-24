@@ -11,8 +11,8 @@ Coverage targets
 """
 
 import json
-from typing import cast
-from unittest.mock import patch
+from typing import Any, cast
+from unittest.mock import mock_open, patch
 
 import ops
 
@@ -72,9 +72,10 @@ def _make_requires_validator(
 def _make_provides_validator(
     remote_databag: dict[str, str],
     endpoint: str = "provide-cmr-mesh",
+    remote_app_name: str = _LOCAL_APP_NAME,
 ) -> CrossModelMeshValidator:
     """Build a validator on the provider side. Remote app is the requirer."""
-    remote_app = ApplicationStub(name=_LOCAL_APP_NAME)
+    remote_app = ApplicationStub(name=remote_app_name)
     relation = RelationStub(name=endpoint, id=0, app=remote_app, data={remote_app: remote_databag})
     charm = cast(
         ops.CharmBase,
@@ -161,6 +162,12 @@ class TestCheckIdentityFormat:
         check = _check_identity_format({"app_name": "", "juju_model_name": "testing"})
         assert not check.passed
 
+    def test_invalid_trailing_newline(self) -> None:
+        """`.match()` alone would let `$` match just before a trailing newline; fullmatch must not."""
+        check = _check_identity_format({"app_name": "catalogue-k8s\n", "juju_model_name": "testing"})
+        assert not check.passed
+        assert "app_name" in check.message
+
 
 class TestCheckDnsReachable:
     def test_resolves(self) -> None:
@@ -191,6 +198,27 @@ class TestCheckMeshDataPlaneReachable:
         assert mock_conn.call_args[0][0][1] == 80
         assert "discovered via in-cluster Service lookup" in check.message
 
+    def test_connects_using_second_port_when_first_fails(self) -> None:
+        """Service port order is not a reliability signal: try every declared port."""
+        attempts: list[int] = []
+
+        def fake_create_connection(address: tuple[str, int], timeout: float) -> Any:
+            attempts.append(address[1])
+            if address[1] == 8080:
+                raise OSError("Connection refused")
+            return mock_open()()
+
+        with (
+            patch("validators.cross_model_mesh.validator._discover_service_ports", return_value=[8080, 80]),
+            patch(
+                "validators.cross_model_mesh.validator.socket.create_connection",
+                side_effect=fake_create_connection,
+            ),
+        ):
+            check = _check_mesh_data_plane_reachable(_VALID_CMR_DATA)
+        assert check.passed, check.message
+        assert attempts == [8080, 80]
+
     def test_connects_using_fallback_port_when_discovery_unavailable(self) -> None:
         with (
             patch("validators.cross_model_mesh.validator._discover_service_ports", return_value=None),
@@ -202,6 +230,18 @@ class TestCheckMeshDataPlaneReachable:
         assert check.passed, check.message
         assert mock_conn.call_args[0][0][1] == 15008
         assert "best-effort fallback" in check.message
+
+    def test_invalid_service_with_no_ports_does_not_fall_back(self) -> None:
+        """A Service discovered with zero declared ports is a definitive FAIL,
+        not a silent fallback to the weaker HBONE probe."""
+        with (
+            patch("validators.cross_model_mesh.validator._discover_service_ports", return_value=[]),
+            patch("validators.cross_model_mesh.validator.socket.create_connection") as mock_conn,
+        ):
+            check = _check_mesh_data_plane_reachable(_VALID_CMR_DATA)
+        mock_conn.assert_not_called()
+        assert not check.passed
+        assert "no ports" in check.message
 
     def test_connection_refused(self) -> None:
         with (
@@ -222,6 +262,65 @@ class TestDiscoverServicePorts:
         # Kubernetes service account, so discovery must fail closed to None
         # rather than raising.
         assert _discover_service_ports("some-model", "some-app") is None
+
+    def test_returns_ports_on_successful_api_response(self) -> None:
+        response_body = json.dumps({"spec": {"ports": [{"port": 80}, {"port": 8080}]}}).encode()
+
+        class _FakeResponse:
+            def read(self) -> bytes:
+                return response_body
+
+            def __enter__(self) -> "_FakeResponse":
+                return self
+
+            def __exit__(self, *args: object) -> None:
+                return None
+
+        with (
+            patch("builtins.open", mock_open(read_data="fake-token")),
+            patch("validators.cross_model_mesh.validator.ssl.create_default_context"),
+            patch("validators.cross_model_mesh.validator.urllib.request.urlopen", return_value=_FakeResponse()),
+        ):
+            ports = _discover_service_ports("some-model", "some-app")
+
+        assert ports == [80, 8080]
+
+    def test_returns_none_on_api_error(self) -> None:
+        import urllib.error
+
+        with (
+            patch("builtins.open", mock_open(read_data="fake-token")),
+            patch("validators.cross_model_mesh.validator.ssl.create_default_context"),
+            patch(
+                "validators.cross_model_mesh.validator.urllib.request.urlopen",
+                side_effect=urllib.error.URLError("unreachable"),
+            ),
+        ):
+            ports = _discover_service_ports("some-model", "some-app")
+
+        assert ports is None
+
+    def test_returns_empty_list_when_service_has_no_ports(self) -> None:
+        response_body = json.dumps({"spec": {"ports": []}}).encode()
+
+        class _FakeResponse:
+            def read(self) -> bytes:
+                return response_body
+
+            def __enter__(self) -> "_FakeResponse":
+                return self
+
+            def __exit__(self, *args: object) -> None:
+                return None
+
+        with (
+            patch("builtins.open", mock_open(read_data="fake-token")),
+            patch("validators.cross_model_mesh.validator.ssl.create_default_context"),
+            patch("validators.cross_model_mesh.validator.urllib.request.urlopen", return_value=_FakeResponse()),
+        ):
+            ports = _discover_service_ports("some-model", "some-app")
+
+        assert ports == []
 
 
 # ---------------------------------------------------------------------------
@@ -301,6 +400,8 @@ class TestProvidesSimple:
         assert schema.passed
         fmt = next(c for c in result.checks if c.name == "identity_format")
         assert fmt.passed
+        consistency = next(c for c in result.checks if c.name == "remote_app_consistency")
+        assert consistency.passed
         dns = next(c for c in result.checks if c.name == "dns_reachable")
         assert dns.passed
 
@@ -322,6 +423,23 @@ class TestProvidesSimple:
         assert result.status == "FAIL"
         fmt = next(c for c in result.checks if c.name == "identity_format")
         assert not fmt.passed
+
+    def test_invalid_remote_app_impersonation(self) -> None:
+        """A requirer that declares a different app_name than the actual relation
+        app must fail, even if that identity would otherwise resolve."""
+        impersonated_data = {"app_name": "some-other-app", "juju_model_name": _LOCAL_MODEL_NAME}
+        validator = _make_provides_validator(
+            {"cmr_data": json.dumps(impersonated_data)}, remote_app_name=_LOCAL_APP_NAME
+        )
+
+        with patch("validators.cross_model_mesh.validator.socket.gethostbyname") as mock_dns:
+            result = validator.validate(level="simple")
+
+        mock_dns.assert_not_called()
+        assert result.status == "FAIL"
+        consistency = next(c for c in result.checks if c.name == "remote_app_consistency")
+        assert not consistency.passed
+        assert "some-other-app" in consistency.message
 
     def test_invalid_dns_unresolvable(self) -> None:
         validator = _make_provides_validator({"cmr_data": json.dumps(_VALID_CMR_DATA)})
