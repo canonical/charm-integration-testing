@@ -12,6 +12,7 @@ import pytest
 import yaml
 
 from bundle_builder_x.bundle_builder import BundleBuilder, UncompletableBundleError
+from bundle_builder_x.bundle_diagnostics import ApplicationReleaseDiagnostic
 from bundle_builder_x.charmhub import CharmhubClient
 from bundle_builder_x.snapstore import SnapstoreClient
 from bundle_builder_x.spec import SpecFile
@@ -271,4 +272,7 @@ def test_openstack_charm_requested_directly_fails_with_clear_exception(
     # THEN it fails fast identifying the application/charm that could not be resolved
     with pytest.raises(UncompletableBundleError, match="aodh") as exc_info:
         builder.build(spec)
-    assert [info.charm_name for info in exc_info.value.unresolved_applications] == ["aodh"]
+    assert len(exc_info.value.diagnostics) == 1
+    diagnostic = exc_info.value.diagnostics[0]
+    assert isinstance(diagnostic, ApplicationReleaseDiagnostic)
+    assert diagnostic.charm_name == "aodh"

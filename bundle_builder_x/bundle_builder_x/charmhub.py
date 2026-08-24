@@ -22,7 +22,6 @@ from .charmhub_http import (
     CharmhubBase,
     CharmhubHttpClient,
     CharmMetadata,
-    CharmReleaseNotFoundException,
     IncompleteCharmInfoException,
     RefreshAction,
     RefreshResponse,
@@ -31,6 +30,16 @@ from .charmhub_http import (
 from .constraints_dsl import AnyExpr, DSLType, parse_constraint
 from .juju_version import JujuVersion
 from .overrides import CharmEndpointOverrides, OverridesClient
+from .release_errors import (
+    ArchitectureMismatchError,
+    AssumesMismatchError,
+    BaseMismatchError,
+    CharmReleaseNotFoundException,
+    PlatformMismatchError,
+    ReleaseRequest,
+    ReleaseUnavailableError,
+    ReleaseUnavailableKind,
+)
 from .timing import NullTimeline, Timeline
 
 # Matches juju version constraint strings in charm assumes blocks e.g. "juju >= 3.0" or "juju>=3.0"
@@ -272,12 +281,22 @@ class CharmhubClient:
         )
 
     def _ensure_compatibility(self, charm: Charm, juju_version: JujuVersion | None, platform: str | None) -> Charm:
+        request = ReleaseRequest(
+            charm_name=charm.name,
+            architecture=charm.ubuntu_arch,
+            platform=platform,
+            juju_version=str(juju_version) if juju_version is not None else None,
+            base=charm.ubuntu_version,
+            channel=str(charm.channel),
+            revision=charm.revision,
+        )
         if platform is not None:
             supported_platforms = charm.platforms
             if platform not in supported_platforms:
-                raise CharmReleaseNotFoundException(
-                    f"Charm {charm.name} revision {charm.revision} in channel {charm.channel} supports "
-                    f"platform(s) {supported_platforms!r}, but platform {platform!r} was requested"
+                raise PlatformMismatchError(
+                    request=request,
+                    requested_platform=platform,
+                    supported_platforms=tuple(supported_platforms),
                 )
 
         if juju_version is None and platform is None:
@@ -288,10 +307,10 @@ class CharmhubClient:
             else frozenset(["juju"])
         )
         if not charm.assumes.satisfied_by(juju_version, features):
-            raise CharmReleaseNotFoundException(
-                f"Charm {charm.name} revision {charm.revision} in channel {charm.channel} does not satisfy "
-                f"assumes constraints {charm.assumes} for Juju version {juju_version} and platform {platform} "
-                f"(available features: {sorted(features)})"
+            raise AssumesMismatchError(
+                request=request,
+                unmet_requirements=charm.assumes.unsatisfied_requirements(juju_version, features),
+                available_features=tuple(features),
             )
         return charm
 
@@ -310,8 +329,16 @@ class CharmhubClient:
 
         # Get or validate ubuntu version from bases
         if refresh_info.charm is None or refresh_info.charm.bases is None:
-            raise CharmReleaseNotFoundException(
-                f"Charm {charm_name} revision {charm_revision} has no bases information"
+            raise ReleaseUnavailableError(
+                kind=ReleaseUnavailableKind.MISSING_BASES,
+                request=ReleaseRequest(
+                    charm_name=charm_name,
+                    architecture=ubuntu_arch,
+                    platform=platform,
+                    revision=charm_revision,
+                    channel=str(charm_channel),
+                ),
+                detail=f"Charm {charm_name} revision {charm_revision} has no bases information",
             )
         ubuntu_version = self._get_ubuntu_version_from_bases(
             refresh_info.charm.bases, ubuntu_arch, charm_name, charm_revision, ubuntu_version
@@ -323,9 +350,20 @@ class CharmhubClient:
         # If the channel doesn't support the ubuntu version the revision needs,
         # the deployment will fail when Juju calls Charmhub with channel+base.
         if not self._channel_supports_ubuntu_version(charm_name, ubuntu_arch, ubuntu_version, charm_channel):
-            raise CharmReleaseNotFoundException(
-                f"Charm {charm_name} channel {charm_channel} does not support ubuntu {ubuntu_version} for arch {ubuntu_arch}"
-                f" (revision {charm_revision} requires ubuntu {ubuntu_version})"
+            raise ReleaseUnavailableError(
+                kind=ReleaseUnavailableKind.CHANNEL_BASE_UNSUPPORTED,
+                request=ReleaseRequest(
+                    charm_name=charm_name,
+                    architecture=ubuntu_arch,
+                    platform=platform,
+                    base=ubuntu_version,
+                    channel=str(charm_channel),
+                    revision=charm_revision,
+                ),
+                detail=(
+                    f"Charm {charm_name} channel {charm_channel} does not support Ubuntu "
+                    f"{ubuntu_version} for architecture {ubuntu_arch}"
+                ),
             )
 
         # Return Charm from refresh info
@@ -357,8 +395,16 @@ class CharmhubClient:
 
         # Check for errors and incomplete data
         if refresh_info.error is not None:
-            raise CharmReleaseNotFoundException(
-                f"Failed to find charm {charm_name} for revision {charm_revision}: {refresh_info.error.message}"
+            raise ReleaseUnavailableError(
+                kind=ReleaseUnavailableKind.REVISION_NOT_FOUND,
+                request=ReleaseRequest(
+                    charm_name=charm_name,
+                    architecture=ubuntu_arch,
+                    platform=platform,
+                    revision=charm_revision,
+                ),
+                detail=f"Failed to find charm {charm_name} for revision {charm_revision}: {refresh_info.error.message}",
+                error_code=refresh_info.error.code,
             )
         if refresh_info.charm is None:
             raise IncompleteCharmInfoException(
@@ -385,8 +431,19 @@ class CharmhubClient:
 
         # Return Charm from refresh info
         if default_refresh_info.effective_channel is None:
-            raise CharmReleaseNotFoundException(
-                f"Failed to find suitable channel for charm {charm_name} revision {charm_revision} with ubuntu version {ubuntu_version} and arch {ubuntu_arch}"
+            raise ReleaseUnavailableError(
+                kind=ReleaseUnavailableKind.NO_SUITABLE_CHANNEL,
+                request=ReleaseRequest(
+                    charm_name=charm_name,
+                    architecture=ubuntu_arch,
+                    platform=platform,
+                    base=ubuntu_version,
+                    revision=charm_revision,
+                ),
+                detail=(
+                    f"Failed to find suitable channel for charm {charm_name} revision "
+                    f"{charm_revision} with Ubuntu {ubuntu_version} and architecture {ubuntu_arch}"
+                ),
             )
 
         return self._ensure_compatibility(
@@ -430,8 +487,20 @@ class CharmhubClient:
 
         # Check for errors and incomplete data
         if refresh_info.error is not None:
-            raise CharmReleaseNotFoundException(
-                f"Failed to find release for charm {charm_name} in channel {charm_channel} with ubuntu version {ubuntu_version}: {refresh_info.error.message}"
+            raise ReleaseUnavailableError(
+                kind=ReleaseUnavailableKind.CHANNEL_NOT_FOUND,
+                request=ReleaseRequest(
+                    charm_name=charm_name,
+                    architecture=ubuntu_arch,
+                    platform=platform,
+                    base=ubuntu_version,
+                    channel=str(charm_channel),
+                ),
+                detail=(
+                    f"Failed to find release for charm {charm_name} in channel {charm_channel} "
+                    f"with Ubuntu {ubuntu_version}: {refresh_info.error.message}"
+                ),
+                error_code=refresh_info.error.code,
             )
 
         if refresh_info.charm is None:
@@ -467,7 +536,7 @@ class CharmhubClient:
         charm_revision: int,
         ubuntu_version: str | None = None,
     ) -> Charm:
-        last_exc: CharmReleaseNotFoundException | None = None
+        attempt_errors: list[CharmReleaseNotFoundException] = []
         for risk in ["stable", "candidate", "beta", "edge"]:
             try:
                 return self._charm_from_store_by_channel_and_revision(
@@ -480,10 +549,20 @@ class CharmhubClient:
                     ubuntu_version=ubuntu_version,
                 )
             except CharmReleaseNotFoundException as exc:
-                last_exc = exc
-        raise CharmReleaseNotFoundException(
-            f"No release found for {charm_name} on track {charm_track!r} in any risk tier"
-        ) from last_exc
+                attempt_errors.append(exc)
+        raise ReleaseUnavailableError(
+            kind=ReleaseUnavailableKind.TRACK_NOT_FOUND,
+            request=ReleaseRequest(
+                charm_name=charm_name,
+                architecture=ubuntu_arch,
+                platform=platform,
+                base=ubuntu_version,
+                track=charm_track,
+                revision=charm_revision,
+            ),
+            detail=f"No release found for {charm_name} on track {charm_track!r} in any risk tier",
+            causes=tuple(attempt_errors),
+        ) from attempt_errors[-1]
 
     def _charm_from_store_by_track(
         self,
@@ -494,7 +573,7 @@ class CharmhubClient:
         charm_track: str,
         ubuntu_version: str | None = None,
     ) -> Charm:
-        last_exc: CharmReleaseNotFoundException | None = None
+        attempt_errors: list[CharmReleaseNotFoundException] = []
         for risk in ["stable", "candidate", "beta", "edge"]:
             try:
                 return self._charm_from_store_by_channel(
@@ -506,10 +585,19 @@ class CharmhubClient:
                     ubuntu_version=ubuntu_version,
                 )
             except CharmReleaseNotFoundException as exc:
-                last_exc = exc
-        raise CharmReleaseNotFoundException(
-            f"No release found for {charm_name} on track {charm_track!r} in any risk tier"
-        ) from last_exc
+                attempt_errors.append(exc)
+        raise ReleaseUnavailableError(
+            kind=ReleaseUnavailableKind.TRACK_NOT_FOUND,
+            request=ReleaseRequest(
+                charm_name=charm_name,
+                architecture=ubuntu_arch,
+                platform=platform,
+                base=ubuntu_version,
+                track=charm_track,
+            ),
+            detail=f"No release found for {charm_name} on track {charm_track!r} in any risk tier",
+            causes=tuple(attempt_errors),
+        ) from attempt_errors[-1]
 
     def _charm_from_store_default(
         self,
@@ -534,8 +622,18 @@ class CharmhubClient:
 
         # Check for errors and incomplete data
         if refresh_info.effective_channel is None:
-            raise CharmReleaseNotFoundException(
-                f"Failed to find suitable channel for charm {charm_name} with ubuntu version {ubuntu_version} and arch {ubuntu_arch}"
+            raise ReleaseUnavailableError(
+                kind=ReleaseUnavailableKind.NO_SUITABLE_CHANNEL,
+                request=ReleaseRequest(
+                    charm_name=charm_name,
+                    architecture=ubuntu_arch,
+                    platform=platform,
+                    base=ubuntu_version,
+                ),
+                detail=(
+                    f"Failed to find suitable channel for charm {charm_name} with Ubuntu "
+                    f"{ubuntu_version} and architecture {ubuntu_arch}"
+                ),
             )
         if refresh_info.charm is None:
             raise IncompleteCharmInfoException(f"Refresh info for charm {charm_name} returned no charm and no error")
@@ -567,8 +665,18 @@ class CharmhubClient:
         # Validate provided ubuntu_version is in bases
         if ubuntu_version:
             if CharmhubBase(name="ubuntu", channel=ubuntu_version, architecture=ubuntu_arch) not in bases:
-                raise CharmReleaseNotFoundException(
-                    f"Charm {charm_name} revision {charm_revision} does not support ubuntu version {ubuntu_version} for arch {ubuntu_arch}"
+                supported_bases = tuple(
+                    base.channel for base in bases if base.name == "ubuntu" and base.architecture == ubuntu_arch
+                )
+                raise BaseMismatchError(
+                    request=ReleaseRequest(
+                        charm_name=charm_name,
+                        architecture=ubuntu_arch,
+                        base=ubuntu_version,
+                        revision=charm_revision,
+                    ),
+                    requested_base=ubuntu_version,
+                    supported_bases=supported_bases,
                 )
             return ubuntu_version
 
@@ -580,8 +688,13 @@ class CharmhubClient:
                 return base.channel
 
         # No valid ubuntu version found
-        raise CharmReleaseNotFoundException(
-            f"Charm {charm_name} revision {charm_revision} does not appear to support arch {ubuntu_arch}"
+        raise ArchitectureMismatchError(
+            request=ReleaseRequest(
+                charm_name=charm_name,
+                architecture=ubuntu_arch,
+                revision=charm_revision,
+            ),
+            supported_architectures=tuple(sorted({base.architecture for base in bases if base.name == "ubuntu"})),
         )
 
     def _get_revision_refresh_info(self, charm_name: str, charm_revision: int) -> RefreshResponse:
@@ -594,8 +707,11 @@ class CharmhubClient:
             )
         )
         if refresh_info.error is not None:
-            raise CharmReleaseNotFoundException(
-                f"Failed to find charm {charm_name} for revision {charm_revision}: {refresh_info.error.message}"
+            raise ReleaseUnavailableError(
+                kind=ReleaseUnavailableKind.REVISION_NOT_FOUND,
+                request=ReleaseRequest(charm_name=charm_name, revision=charm_revision),
+                detail=f"Failed to find charm {charm_name} for revision {charm_revision}: {refresh_info.error.message}",
+                error_code=refresh_info.error.code,
             )
         return refresh_info
 
@@ -634,8 +750,10 @@ class CharmhubClient:
 
         # Extract bases from error response
         if refresh_info.error is None:
-            raise CharmReleaseNotFoundException(
-                f"Failed to find default bases for charm {charm_name}: no error returned"
+            raise ReleaseUnavailableError(
+                kind=ReleaseUnavailableKind.UNEXPECTED_STORE_RESPONSE,
+                request=ReleaseRequest(charm_name=charm_name, architecture=ubuntu_arch),
+                detail=f"Failed to find default bases for charm {charm_name}: no error returned",
             )
 
         if refresh_info.error.code == "invalid-charm-base":
@@ -647,8 +765,14 @@ class CharmhubClient:
                 raise IncompleteCharmInfoException(f"No extra information for default bases of {charm_name}")
             bases = [release.base for release in refresh_info.error.extra.releases]
         else:
-            raise CharmReleaseNotFoundException(
-                f"Failed to find default bases for charm {charm_name}: unexpected error code {refresh_info.error.code}"
+            raise ReleaseUnavailableError(
+                kind=ReleaseUnavailableKind.UNEXPECTED_STORE_RESPONSE,
+                request=ReleaseRequest(charm_name=charm_name, architecture=ubuntu_arch),
+                detail=(
+                    f"Failed to find default bases for charm {charm_name}: "
+                    f"unexpected error code {refresh_info.error.code}"
+                ),
+                error_code=refresh_info.error.code,
             )
 
         # Return the first supported ubuntu version for this arch.
@@ -658,7 +782,10 @@ class CharmhubClient:
             if base.name == "ubuntu" and base.architecture == ubuntu_arch:
                 return base.channel
 
-        raise CharmReleaseNotFoundException(f"No default bases found for {charm_name} in arch {ubuntu_arch}")
+        raise ArchitectureMismatchError(
+            request=ReleaseRequest(charm_name=charm_name, architecture=ubuntu_arch),
+            supported_architectures=tuple(sorted({base.architecture for base in bases if base.name == "ubuntu"})),
+        )
 
     def _default_refresh_info(self, charm_name: str, base: CharmhubBase) -> RefreshResponse:
         # Get refresh info for base
@@ -686,8 +813,18 @@ class CharmhubClient:
 
         # Check refresh info for error
         if refresh_info.error:
-            raise CharmReleaseNotFoundException(
-                f"Failed to find default release for charm {charm_name} with base {base}: {refresh_info.error.message}"
+            raise ReleaseUnavailableError(
+                kind=ReleaseUnavailableKind.DEFAULT_RELEASE_NOT_FOUND,
+                request=ReleaseRequest(
+                    charm_name=charm_name,
+                    architecture=base.architecture,
+                    base=base.channel,
+                ),
+                detail=(
+                    f"Failed to find default release for charm {charm_name} "
+                    f"with base {base}: {refresh_info.error.message}"
+                ),
+                error_code=refresh_info.error.code,
             )
 
         return refresh_info
