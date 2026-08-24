@@ -1,0 +1,5 @@
+---
+# ha (requires): sole provider is hacluster, which carries this assumes
+#   tag (SQT-1134); fails fast/skipped as candidate instead of resolving.
+overrides:
+  - assumes: [unsupported-openstack]
