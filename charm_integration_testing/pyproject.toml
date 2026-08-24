@@ -26,6 +26,7 @@ dependencies = [
 
 [tool.poetry]
 packages = [
+    { include = "chaos_client" },
     { include = "extensions" },
     { include = "juju" },
     { include = "juju_cmd" },

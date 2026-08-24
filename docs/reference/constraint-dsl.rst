@@ -252,6 +252,15 @@ The two mechanisms have distinct roles:
    * - ``features(endpoint[x]) == {...}`` in DSL
      - Restricts which features may be active; prevents undeclared combinations
 
+Feature coherence across an integration
+'''''''''''''''''''''''''''''''''''''''
+
+When two endpoints are integrated, a feature declared on only one side is
+forced inactive, and a feature declared on both sides must agree. This
+prevents pairing charms whose feature sets don't overlap. Failures are
+reported via ``INTEGRATION_FEATURE_MISMATCH`` and
+``UncompletableBundleError.feature_mismatches``.
+
 Config value
 ~~~~~~~~~~~~
 

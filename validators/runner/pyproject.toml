@@ -16,6 +16,7 @@ dependencies = [
     "validators-base",
     "validators-s3",
     "validators-postgresql-client",
+    "validators-pgsql",
     "validators-mysql-client",
     "validators-mysql",
     "validators-tracing[deep]",

@@ -1,0 +1,16 @@
+---
+# Source: https://github.com/canonical/kratos-external-idp-integrator
+#
+# One block covers all published tracks; the config schema is stable across generations.
+# Default `provider` is "generic", which requires `client_id`/`client_secret`/`issuer_url` -
+# without them the charm always blocks, so the solver must be given placeholder values.
+#
+# client_id (config): REQUIRED - GenericProvider.client_id has no default; ValidationError in
+#   validate_provider_config blocks the charm (upstream: kratos_external_provider.py)
+# client_secret (config): REQUIRED - same as above, GenericProvider.client_secret is mandatory
+# issuer_url (config): REQUIRED - same as above, GenericProvider.issuer_url is mandatory
+overrides:
+  - configs:
+      client_id: [test-client-id]
+      client_secret: [test-client-secret]
+      issuer_url: [https://example.com]

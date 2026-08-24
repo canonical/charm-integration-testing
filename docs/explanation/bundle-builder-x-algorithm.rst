@@ -85,6 +85,9 @@ first):
   integration. It uses the same reuse-and-search process.
 - ``PEER_CHANNEL_MISMATCH`` / ``SUBORDINATE_BASE_MISMATCH`` -- fetch compatible
   channel or base variants and pair them with the actual counterpart.
+- ``INTEGRATION_FEATURE_MISMATCH`` -- two integrated endpoints declared
+  incompatible ``features:`` tags (see :doc:`/reference/constraint-dsl`); not
+  expandable, so it remains in the unsat core.
 
 Candidate expansion is deliberately asymmetric:
 

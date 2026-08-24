@@ -15,6 +15,7 @@ Kubernetes resource kinds are supported by adding another source.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from typing import Any, Protocol
 
@@ -36,6 +37,12 @@ from .snapshot import (
     StatefulSetSnapshot,
 )
 
+# Juju assigns this sentinel port to an application's Service until the charm
+# opens its real ports.  It is not part of the service contract -- it appears
+# only while the workload settles --  it is filtered out to avoid
+# ``ports_changed`` between a settling and a settled observation.
+_JUJU_PLACEHOLDER_PORT = 65535
+
 
 def _application(labels: Mapping[str, str] | None) -> str:
     """Return the owning application from the standard Kubernetes name label."""
@@ -53,11 +60,17 @@ def _images(spec: Any) -> str:
 
 
 def _ports(spec: Any) -> str:
-    """Return a stable, comma-joined ``port/protocol`` view of a service's ports."""
+    """Return a stable, comma-joined ``port/protocol`` view of a service's ports.
+
+    The Juju placeholder port is excluded so a Service observed before its
+    workload has opened its real ports reports no ports rather than the sentinel.
+    """
     ports = spec.ports if spec is not None else None
     if not ports:
         return ""
-    return ",".join(sorted(f"{port.port}/{port.protocol or 'TCP'}" for port in ports))
+    return ",".join(
+        sorted(f"{port.port}/{port.protocol or 'TCP'}" for port in ports if port.port != _JUJU_PLACEHOLDER_PORT)
+    )
 
 
 def _keys(data: Mapping[str, str] | None) -> str:
@@ -92,6 +105,92 @@ def _hosts(spec: Any) -> str:
     return ",".join(sorted(rule.host for rule in rules if rule.host))
 
 
+_SERVICE_ACCOUNT_TOKEN_SECRET_TYPE = "kubernetes.io/service-account-token"  # nosec B105
+
+# Juju creates a per-consumer RBAC triad -- a Role, RoleBinding and ServiceAccount
+# all named ``juju-secret-consumer-<uuid>`` -- to grant units access to secret
+# content. The embedded UUID changes every time the triad is recreated, so these
+# objects are not trackable by ``(namespace, name)`` identity and would otherwise
+# be reported as spurious missing/extra on every state revisit.
+_JUJU_MANAGED_RBAC_NAME_RE = re.compile(
+    r"^juju-secret-consumer-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$"
+)
+
+# Juju stores secret content as Kubernetes Secrets named ``<xid>-<revision>``,
+# where the 20-character xid (base32hex, ``0-9a-v``) is minted per secret and the
+# numeric suffix is the revision. Both parts are volatile across state visits.
+_JUJU_SECRET_CONTENT_NAME_RE = re.compile(r"^[0-9a-v]{20}-\d+$")
+
+
+def _is_juju_managed_rbac_name(name: str) -> bool:
+    """Return whether a name is a volatile Juju secret-consumer RBAC object."""
+    return bool(_JUJU_MANAGED_RBAC_NAME_RE.match(name))
+
+
+def _is_juju_secret_content_name(name: str) -> bool:
+    """Return whether a name is a volatile Juju secret-content revision."""
+    return bool(_JUJU_SECRET_CONTENT_NAME_RE.match(name))
+
+
+def _has_volatile_name(secret: Any) -> bool:
+    """Return whether a Secret's name carries a volatile, non-reproducible component.
+
+    A Secret is not trackable by ``(namespace, name)`` identity when its name is
+    server-generated rather than declared, because the same logical secret gets a
+    different name each time it is recreated -- exactly the failure mode that made
+    volatile PVC names unusable as identity.  Three mechanisms produce such names:
+
+    * ``metadata.generateName`` is set, so the API server appends a random suffix.
+    * the Secret is a ``kubernetes.io/service-account-token``, which Kubernetes
+      auto-creates with a random ``<sa>-token-XXXXX`` name (and which carries a
+      fixed key set of no drift interest anyway).
+    * the Secret holds Juju secret content, named ``<xid>-<revision>`` with a
+      per-secret xid and a rotating revision suffix (only skipped when the Secret
+      is unlabelled, so a charm-declared secret is never dropped by coincidence).
+    """
+    metadata = secret.metadata
+    if metadata is not None and metadata.generate_name:
+        return True
+    if secret.type == _SERVICE_ACCOUNT_TOKEN_SECRET_TYPE:
+        return True
+    name = metadata.name if metadata is not None else ""
+    return not _application(metadata.labels if metadata is not None else None) and _is_juju_secret_content_name(name)
+
+
+# Juju provisions charm storage as PersistentVolumeClaims whose name embeds an
+# 8-hex volume id -- the first block of the storage UUID -- between the storage
+# label and the StatefulSet pod suffix, e.g.
+# ``postgresql-k8s-pgdata-b0ba0188-postgresql-k8s-0``. That id is minted afresh
+# whenever the claim is (re)provisioned, so two visits to the *same* logical
+# storage carry different names and would be diffed as a spurious missing/extra
+# pair. Unlike volatile Secrets -- which are dropped outright because their
+# content is not worth tracking -- a PVC still carries meaningful drift
+# (``resized``, ``storage_class_changed``), so its name is normalized rather than
+# dropped: replacing the volume id with a placeholder restores a stable
+# ``(namespace, name)`` identity while keeping the claim trackable.
+#
+# The whole name is anchored -- ``<storage-label>-<volume-id>-<pod-suffix>`` with
+# the ``<pod-suffix>`` being the StatefulSet ``<name>-<ordinal>`` -- and the
+# ``<prefix>`` is greedy so the volume id binds to the 8-hex block immediately
+# preceding the pod suffix. This rewrites only that block, so a name that happens
+# to contain an earlier 8-hex-like segment (e.g. a hex-like storage label) does
+# not have that segment collapsed too, which would otherwise make two distinct
+# claims look identical.
+_JUJU_PVC_NAME_RE = re.compile(r"^(?P<prefix>.+)-[0-9a-f]{8}-(?P<suffix>[a-z0-9]+(?:-[a-z0-9]+)*-\d+)$")
+_PVC_VOLUME_ID_PLACEHOLDER = "<volume-id>"
+
+
+def _normalize_pvc_name(name: str) -> str:
+    """Return a PVC name with its volatile Juju volume id replaced by a placeholder.
+
+    Names that do not match the Juju storage PVC shape are returned unchanged.
+    """
+    match = _JUJU_PVC_NAME_RE.match(name)
+    if match is None:
+        return name
+    return f"{match.group('prefix')}-{_PVC_VOLUME_ID_PLACEHOLDER}-{match.group('suffix')}"
+
+
 class KubernetesResourceSource(Protocol):
     """Collects snapshots of a single Kubernetes resource kind for one model."""
 
@@ -118,7 +217,7 @@ class PvcSource:
             requests = spec.resources.requests if spec is not None and spec.resources is not None else None
             snapshots.append(
                 PvcSnapshot(
-                    name=pvc.metadata.name,
+                    name=_normalize_pvc_name(pvc.metadata.name),
                     namespace=model,
                     storage_class=(spec.storage_class_name if spec is not None else None) or "",
                     requested_storage=(requests or {}).get("storage", ""),
@@ -217,6 +316,11 @@ class SecretSource:
         secrets = kubernetes_client.backend.core_v1_api.list_namespaced_secret(model)
         snapshots: list[ResourceSnapshot] = []
         for secret in secrets.items:
+            # Secrets with a server-generated name cannot be diffed by identity
+            # across state visits, so they are dropped rather than reported as
+            # spurious missing/extra on every recreation.
+            if _has_volatile_name(secret):
+                continue
             snapshots.append(
                 SecretSnapshot(
                     name=secret.metadata.name,
@@ -236,6 +340,10 @@ class ServiceAccountSource:
         service_accounts = kubernetes_client.backend.core_v1_api.list_namespaced_service_account(model)
         snapshots: list[ResourceSnapshot] = []
         for service_account in service_accounts.items:
+            # Juju's per-consumer ServiceAccounts carry a volatile UUID name, so
+            # they cannot be diffed by identity across state visits.
+            if _is_juju_managed_rbac_name(service_account.metadata.name):
+                continue
             snapshots.append(
                 ServiceAccountSnapshot(
                     name=service_account.metadata.name,
@@ -259,6 +367,10 @@ class RoleSource:
         roles = rbac_api.list_namespaced_role(model)
         snapshots: list[ResourceSnapshot] = []
         for role in roles.items:
+            # Juju's per-consumer Roles carry a volatile UUID name, so they cannot
+            # be diffed by identity across state visits.
+            if _is_juju_managed_rbac_name(role.metadata.name):
+                continue
             snapshots.append(
                 RoleSnapshot(
                     name=role.metadata.name,
@@ -278,6 +390,10 @@ class RoleBindingSource:
         role_bindings = rbac_api.list_namespaced_role_binding(model)
         snapshots: list[ResourceSnapshot] = []
         for role_binding in role_bindings.items:
+            # Juju's per-consumer RoleBindings carry a volatile UUID name, so they
+            # cannot be diffed by identity across state visits.
+            if _is_juju_managed_rbac_name(role_binding.metadata.name):
+                continue
             role_ref = role_binding.role_ref
             snapshots.append(
                 RoleBindingSnapshot(
@@ -335,3 +451,22 @@ class IngressSource:
                 )
             )
         return snapshots
+
+
+# The full set of Kubernetes resource kinds tracked when the collector is driven
+# live. Kept here as the single source of truth so call sites (e.g. the test-suite
+# fixture) and documentation cannot drift apart; a new kind becomes tracked by
+# adding its source to this tuple.
+DEFAULT_KUBERNETES_SOURCES: tuple[KubernetesResourceSource, ...] = (
+    PvcSource(),
+    StatefulSetSource(),
+    DeploymentSource(),
+    ServiceSource(),
+    ConfigMapSource(),
+    SecretSource(),
+    ServiceAccountSource(),
+    RoleSource(),
+    RoleBindingSource(),
+    NetworkPolicySource(),
+    IngressSource(),
+)
