@@ -36,6 +36,7 @@ class KubernetesClient:
         default_timeout: timedelta = timedelta(minutes=5),
         default_delay: timedelta = timedelta(seconds=1),
         extensions: list[KubernetesExtension] | None = None,
+        watch_factory: Callable[[], watch.Watch] = watch.Watch,
     ):
         self.backend = backend
         self.logger = logger or logging.getLogger(__name__)
@@ -43,6 +44,7 @@ class KubernetesClient:
         self.default_timeout = default_timeout
         self.default_delay = default_delay
         self.extensions = extensions or []
+        self.watch_factory = watch_factory
 
     def get_charm_pods(
         self, application_name: str, model: str
@@ -348,7 +350,7 @@ class KubernetesClient:
         deadline = datetime.now(timezone.utc) + timedelta(seconds=timeout_seconds)
         while True:
             remaining_seconds = (deadline - datetime.now(timezone.utc)).total_seconds()
-            watcher = watch.Watch()
+            watcher = self.watch_factory()
             try:
                 for event in watcher.stream(
                     self.backend.apps_v1_api.list_namespaced_stateful_set,
