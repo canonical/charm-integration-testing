@@ -29,9 +29,6 @@ class IngressAuthValidator(BaseValidator):
         if level != "simple":
             return self._skipped_result_due_to_level(level)
 
-        # Resolve optional credentials if this provider chooses secret-backed fields.
-        self.resolve_secret("secret-auth")
-
         checks: list[ValidationCheck] = [self._check_supported_versions()]
         checks.append(self._validate_remote_unit_databags())
         return self._make_result(level=level, checks=checks)
