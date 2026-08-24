@@ -23,6 +23,7 @@ from bundle_builder_x.domain import (
     DomainModel,
     ModelRef,
     add_charm_to_domain,
+    pair_charms_in_domain,
 )
 from bundle_builder_x.extract import extract_solution
 from bundle_builder_x.juju_version import JujuVersion
@@ -35,6 +36,13 @@ def _make_domain(models: dict[ModelRef, DomainModel]) -> Domain:
     domain = Domain()
     domain.models.update(models)
     return domain
+
+
+def _pair_all(domain: Domain, charm_ids: list[int]) -> None:
+    """Pair every combination of the given charm ids so the solver can choose freely between them."""
+    for i, charm_id_a in enumerate(charm_ids):
+        for charm_id_b in charm_ids[i + 1 :]:
+            pair_charms_in_domain(domain, charm_id_a, charm_id_b)
 
 
 def _make_charm(
@@ -98,7 +106,9 @@ class TestAppIntegrationOrderingConstraint:
         # One add_charm_to_domain call per application instance: each call allocates
         # a charm pool entry, so the solver has one per app sharing the charm.
         add_charm_to_domain(charm, domain, ModelRef(name="m"))
-        add_charm_to_domain(charm, domain, ModelRef(name="m"))
+        id_a = add_charm_to_domain(charm, domain, ModelRef(name="m"))
+        id_b = add_charm_to_domain(charm, domain, ModelRef(name="m"))
+        pair_charms_in_domain(domain, id_a, id_b)
 
         # WHEN solving
         model = _solve(domain)
@@ -150,8 +160,9 @@ class TestAppIntegrationOrderingConstraint:
                 "upstream": CharmEndpoint(type=EndpointType.REQUIRES, interface="data-flow", optional=True),
             },
         )
-        add_charm_to_domain(hub, domain, ModelRef(name="m"))
-        add_charm_to_domain(leaf, domain, ModelRef(name="m"))
+        hub_id = add_charm_to_domain(hub, domain, ModelRef(name="m"))
+        leaf_id = add_charm_to_domain(leaf, domain, ModelRef(name="m"))
+        pair_charms_in_domain(domain, hub_id, leaf_id)
 
         # WHEN solving
         model = _solve(domain)
@@ -204,9 +215,8 @@ class TestAppIntegrationOrderingConstraint:
             constraints=[parse_constraint("not (bool(endpoint[control]) and bool(endpoint[join]))")],
             platforms=["machine", "kubernetes"],
         )
-        add_charm_to_domain(charm, domain, ModelRef(name="m"))
-        add_charm_to_domain(charm, domain, ModelRef(name="m"))
-        add_charm_to_domain(charm, domain, ModelRef(name="m"))
+        ids = [add_charm_to_domain(charm, domain, ModelRef(name="m")) for _ in range(3)]
+        _pair_all(domain, ids)
 
         # WHEN solving
         model = _solve(domain)
@@ -271,8 +281,9 @@ class TestAppIntegrationOrderingConstraint:
                 "data": CharmEndpoint(type=EndpointType.PROVIDES, interface="stream", optional=True),
             },
         )
-        add_charm_to_domain(sender, domain, ModelRef(name="m"))
-        add_charm_to_domain(receiver, domain, ModelRef(name="m"))
+        sender_id = add_charm_to_domain(sender, domain, ModelRef(name="m"))
+        receiver_id = add_charm_to_domain(receiver, domain, ModelRef(name="m"))
+        pair_charms_in_domain(domain, sender_id, receiver_id)
 
         # WHEN solving
         model = _solve(domain)
@@ -332,8 +343,9 @@ class TestAppIntegrationOrderingConstraint:
                 "in": CharmEndpoint(type=EndpointType.PROVIDES, interface="pipe", optional=True),
             },
         )
-        add_charm_to_domain(sender, domain, ModelRef(name="m"))
-        add_charm_to_domain(receiver, domain, ModelRef(name="m"))
+        sender_id = add_charm_to_domain(sender, domain, ModelRef(name="m"))
+        receiver_id = add_charm_to_domain(receiver, domain, ModelRef(name="m"))
+        pair_charms_in_domain(domain, sender_id, receiver_id)
 
         # WHEN solving - only one ordering has valid keys (sender can't map to receiver's charm_id)
         model = _solve(domain)

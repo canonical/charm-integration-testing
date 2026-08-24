@@ -1,23 +1,11 @@
 ---
-# Override for heat
-# Source: https://github.com/openstack/charm-heat
+# heat: Source: https://github.com/openstack/charm-heat
 #
-# heat is an OpenStack orchestration service. It genuinely requires amqp,
-# identity-service (keystone), shared-db (mysql), and certificates for
-# basic operation.
+# amqp, identity-service, shared-db, certificates: required for basic operation.
+# ha, heat-plugin-subordinate (requires), nrpe-external-master (provides): optional.
 #
-# heat-plugin-subordinate (requires, heat-plugin-subordinate): for loading
-#   OpenStack plugin subordinate charms (e.g. heat-tempest-plugin). These are
-#   optional extensions; heat runs without any plugins connected.
-#
-# ha (requires, hacluster): hacluster subordinate for HA deployments.
-#   Optional: single-unit deployments do not need HA coordination.
-#
-# nrpe-external-master (provides, nrpe-external-master): monitoring subordinate.
-#   Optional: monitoring is not required for heat to function.
-# listed: false -- Excluded from automated bundle building (SQT-1081) to prevent
-# pipeline congestion; not currently covered by Charm QA.
-listed: false
+# assumes: [unsupported-openstack] -- listed on Charmhub, but not currently covered by Charm QA
+#   (SQT-1081); this blocks the charm from being built directly.
 overrides:
   - requires:
       ha:
@@ -27,3 +15,4 @@ overrides:
     provides:
       nrpe-external-master:
         optional: true
+    assumes: [unsupported-openstack]

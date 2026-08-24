@@ -197,177 +197,23 @@ class Domain(BaseModel):
         return f"{prov_charm.spec.name}-{integration.provides_endpoint}-{interface}-offer".replace("_", "-")
 
 
-def add_charm_to_domain(charm: Charm, domain: Domain, model_ref: ModelRef | None = None) -> int:
-    # Resolve model_ref: default to the single model if not provided
-    if model_ref is None:
-        if len(domain.models) == 1:
-            model_ref = next(iter(domain.models))
-        else:
-            raise ValueError("model_ref is required when the domain contains multiple models")
+def _refresh_application_integration_mappings(domain: Domain) -> None:
+    """Update application-integration mappings to include any newly created charm integrations.
 
-    model = domain.models[model_ref]
-    charm_id = len(domain.charms)
-
-    # Build per-key config entries.  Start from Charmhub defaults (all known keys),
-    # then overlay Z3 variables for keys declared in the override 'configs' list.
-    charm_config: dict[str, DomainCharmConfig] = {
-        key: DomainCharmConfig(default=default) for key, default in charm.config_defaults.items()
-    }
-    for key, allowed in charm.configs.items():
-        non_none = [v for v in allowed if v is not None]
-        if not non_none:
-            continue
-        existing = charm_config.get(key)
-        # Single non-null value with no null option: always emit, no Z3 var needed.
-        if len(non_none) == 1 and None not in allowed:
-            charm_config[key] = DomainCharmConfig(
-                fixed_value=True,
-                default=non_none[0],
-            )
-            continue
-        prefix = f"charm_{charm.name}_{charm_id}_config_{key}"
-        if all(isinstance(v, bool) for v in non_none):
-            var: z3.ExprRef = z3.Bool(prefix)
-        elif all(isinstance(v, int) and not isinstance(v, bool) for v in non_none):
-            var = z3.Int(prefix)
-        elif all(isinstance(v, float) for v in non_none):
-            var = z3.Real(prefix)
-        elif all(isinstance(v, str) for v in non_none):
-            var = z3.String(prefix)
-        else:
-            raise ValueError(
-                f"Config key {key!r} for charm {charm.name!r} has mixed-type allowed values: "
-                f"{[type(v).__name__ for v in non_none]}"
-            )
-        isset_var = z3.Bool(f"{prefix}_is_set") if None in allowed else None
-        charm_config[key] = DomainCharmConfig(
-            var=var,
-            isset_var=isset_var,
-            default=existing.default if existing is not None else None,
-        )
-
-    # Build per-key resource entries from the override 'resources' list.
-    charm_resources: dict[str, DomainCharmResource] = {}
-    for key, res_allowed in charm.resources.items():
-        res_non_none = [v for v in res_allowed if v is not None]
-        if not res_non_none:
-            continue
-        if len(res_non_none) == 1 and None not in res_allowed:
-            charm_resources[key] = DomainCharmResource(
-                fixed_value=True,
-                default=res_non_none[0],
-            )
-            continue
-        prefix = f"charm_{charm.name}_{charm_id}_resource_{key}"
-        res_var: z3.ExprRef = z3.String(prefix)
-        res_isset_var = z3.Bool(f"{prefix}_is_set") if None in res_allowed else None
-        charm_resources[key] = DomainCharmResource(
-            var=res_var,
-            isset_var=res_isset_var,
-        )
-
-    domain.charms.append(
-        DomainCharm(
-            exists=z3.Bool(f"charm_{charm.name}_{charm_id}_exists"),
-            num_units=z3.Int(f"charm_{charm.name}_{charm_id}_num_units"),
-            spec=charm,
-            model=model_ref,
-            config=charm_config,
-            resources=charm_resources,
-            endpoints={
-                name: DomainCharmEndpoint(
-                    count=z3.Int(f"charm_{charm.name}_{charm_id}_endpoint_{name}_count"),
-                    integrated=z3.Bool(f"charm_{charm.name}_{charm_id}_endpoint_{name}_integrated"),
-                    features={
-                        f: z3.Bool(f"charm_{charm.name}_{charm_id}_endpoint_{name}_feature_{f}")
-                        for f in endpoint.features
-                    },
-                )
-                for name, endpoint in charm.endpoints.items()
-            },
-        )
-    )
-
-    # Pair new charm with all existing charms
-    for other_charm_id, other_charm in enumerate(domain.charms):
-        if other_charm_id == charm_id:
-            continue
-        other_model = other_charm.model
-        same_model = other_model == model_ref
-
-        for endpoint_name, endpoint in charm.endpoints.items():
-            for other_endpoint_name, other_endpoint in other_charm.spec.endpoints.items():
-                if endpoint.interface != other_endpoint.interface:
-                    continue
-
-                # Determine semantic ordering
-                if endpoint.type == EndpointType.REQUIRES and other_endpoint.type == EndpointType.PROVIDES:
-                    req_charm_id, req_ep = charm_id, endpoint_name
-                    prov_charm_id, prov_ep = other_charm_id, other_endpoint_name
-                    req_model_ref, prov_model_ref = model_ref, other_model
-                elif endpoint.type == EndpointType.PROVIDES and other_endpoint.type == EndpointType.REQUIRES:
-                    req_charm_id, req_ep = other_charm_id, other_endpoint_name
-                    prov_charm_id, prov_ep = charm_id, endpoint_name
-                    req_model_ref, prov_model_ref = other_model, model_ref
-                else:
-                    continue
-
-                # Skip container-scoped integrations on non-machine models and across models.
-                # Container-scoped (subordinate) relations must be co-located with their principal;
-                # cross-model and kubernetes subordinate relations are not supported by Juju.
-                if endpoint.scope == EndpointScope.CONTAINER or other_endpoint.scope == EndpointScope.CONTAINER:
-                    if not same_model:
-                        continue
-                    req_platform = domain.models[req_model_ref].platform if req_model_ref in domain.models else None
-                    prov_platform = domain.models[prov_model_ref].platform if prov_model_ref in domain.models else None
-                    if req_platform != "machine" or prov_platform != "machine":
-                        continue
-
-                if same_model:
-                    domain.charm_integrations.append(
-                        DomainCharmIntegration(
-                            exists=z3.Bool(
-                                f"charm_integration_{prov_charm_id}:{prov_ep}__{req_charm_id}:{req_ep}_exists"
-                            ),
-                            requires_charm_id=req_charm_id,
-                            requires_endpoint=req_ep,
-                            provides_charm_id=prov_charm_id,
-                            provides_endpoint=prov_ep,
-                        )
-                    )
-                else:
-                    domain.charm_integrations.append(
-                        DomainCharmIntegration(
-                            exists=z3.Bool(
-                                f"cmr__{prov_model_ref.key}__{prov_charm_id}:{prov_ep}"
-                                f"__{req_model_ref.key}__{req_charm_id}:{req_ep}__exists"
-                            ),
-                            requires_charm_id=req_charm_id,
-                            requires_endpoint=req_ep,
-                            provides_charm_id=prov_charm_id,
-                            provides_endpoint=prov_ep,
-                        )
-                    )
-
-    # Create application-to-charm mappings for this model's constraints
-    for application, domain_app in model.applications.items():
-        if (
-            domain_app.charm != charm.name
-            or (domain_app.channel is not None and domain_app.channel != charm.channel)
-            or (domain_app.revision is not None and domain_app.revision != charm.revision)
-            or (domain_app.base is not None and domain_app.base != charm.ubuntu_version)
-        ):
-            continue
-        domain_app.charm_ids[charm_id] = z3.Bool(f"app_{application}_maps_to_charm_{charm.name}_{charm_id}")
-
-    # Create integration-to-charm-integration mappings (unified local + CMR).
-    # Re-scan all models each call because a newly added charm may complete a mapping
-    # in any model (as either the local or the remote application).
+    Re-scans all models each call because a newly created charm integration may complete
+    a mapping in any model (as either the local or the remote application). Already-linked
+    integration ids are skipped, so repeated calls are safe, though runtime still scales
+    with the number of models, application integrations, and charm integrations in the
+    domain.
+    """
     for mc_model_ref, mc in domain.models.items():
         for app_integration in mc.application_integrations:
             is_cmr = app_integration.endpoint_1.model != app_integration.endpoint_2.model
 
             for i_idx, integration in enumerate(domain.charm_integrations):
+                if i_idx in app_integration.charm_integration_ids:
+                    continue  # already linked
+
                 if domain.is_cross_model(integration) != is_cmr:
                     continue
 
@@ -461,12 +307,200 @@ def add_charm_to_domain(charm: Charm, domain: Domain, model_ref: ModelRef | None
                         or remote_charm_id not in remote_mc.applications[remote_ep.application].charm_ids
                     ):
                         continue
-                    if i_idx not in app_integration.charm_integration_ids:
-                        app_integration.charm_integration_ids[i_idx] = z3.Bool(
-                            f"app_integration"
-                            f"_{local_ep.application}:{local_ep.endpoint}"
-                            f"__cmr__{remote_ep.model.key}_{remote_ep.application}:{remote_ep.endpoint}"
-                            f"__integration_{i_idx}"
-                        )
+                    app_integration.charm_integration_ids[i_idx] = z3.Bool(
+                        f"app_integration"
+                        f"_{local_ep.application}:{local_ep.endpoint}"
+                        f"__cmr__{remote_ep.model.key}_{remote_ep.application}:{remote_ep.endpoint}"
+                        f"__integration_{i_idx}"
+                    )
+
+
+def add_charm_to_domain(charm: Charm, domain: Domain, model_ref: ModelRef | None = None) -> int:
+    # Resolve model_ref: default to the single model if not provided
+    if model_ref is None:
+        if len(domain.models) == 1:
+            model_ref = next(iter(domain.models))
+        else:
+            raise ValueError("model_ref is required when the domain contains multiple models")
+
+    model = domain.models[model_ref]
+    charm_id = len(domain.charms)
+
+    # Build per-key config entries.  Start from Charmhub defaults (all known keys),
+    # then overlay Z3 variables for keys declared in the override 'configs' list.
+    charm_config: dict[str, DomainCharmConfig] = {
+        key: DomainCharmConfig(default=default) for key, default in charm.config_defaults.items()
+    }
+    for key, allowed in charm.configs.items():
+        non_none = [v for v in allowed if v is not None]
+        if not non_none:
+            continue
+        existing = charm_config.get(key)
+        # Single non-null value with no null option: always emit, no Z3 var needed.
+        if len(non_none) == 1 and None not in allowed:
+            charm_config[key] = DomainCharmConfig(
+                fixed_value=True,
+                default=non_none[0],
+            )
+            continue
+        prefix = f"charm_{charm.name}_{charm_id}_config_{key}"
+        if all(isinstance(v, bool) for v in non_none):
+            var: z3.ExprRef = z3.Bool(prefix)
+        elif all(isinstance(v, int) and not isinstance(v, bool) for v in non_none):
+            var = z3.Int(prefix)
+        elif all(isinstance(v, float) for v in non_none):
+            var = z3.Real(prefix)
+        elif all(isinstance(v, str) for v in non_none):
+            var = z3.String(prefix)
+        else:
+            raise ValueError(
+                f"Config key {key!r} for charm {charm.name!r} has mixed-type allowed values: "
+                f"{[type(v).__name__ for v in non_none]}"
+            )
+        isset_var = z3.Bool(f"{prefix}_is_set") if None in allowed else None
+        charm_config[key] = DomainCharmConfig(
+            var=var,
+            isset_var=isset_var,
+            default=existing.default if existing is not None else None,
+        )
+
+    # Build per-key resource entries from the override 'resources' list.
+    charm_resources: dict[str, DomainCharmResource] = {}
+    for key, res_allowed in charm.resources.items():
+        res_non_none = [v for v in res_allowed if v is not None]
+        if not res_non_none:
+            continue
+        if len(res_non_none) == 1 and None not in res_allowed:
+            charm_resources[key] = DomainCharmResource(
+                fixed_value=True,
+                default=res_non_none[0],
+            )
+            continue
+        prefix = f"charm_{charm.name}_{charm_id}_resource_{key}"
+        res_var: z3.ExprRef = z3.String(prefix)
+        res_isset_var = z3.Bool(f"{prefix}_is_set") if None in res_allowed else None
+        charm_resources[key] = DomainCharmResource(
+            var=res_var,
+            isset_var=res_isset_var,
+        )
+
+    domain.charms.append(
+        DomainCharm(
+            exists=z3.Bool(f"charm_{charm.name}_{charm_id}_exists"),
+            num_units=z3.Int(f"charm_{charm.name}_{charm_id}_num_units"),
+            spec=charm,
+            model=model_ref,
+            config=charm_config,
+            resources=charm_resources,
+            endpoints={
+                name: DomainCharmEndpoint(
+                    count=z3.Int(f"charm_{charm.name}_{charm_id}_endpoint_{name}_count"),
+                    integrated=z3.Bool(f"charm_{charm.name}_{charm_id}_endpoint_{name}_integrated"),
+                    features={
+                        f: z3.Bool(f"charm_{charm.name}_{charm_id}_endpoint_{name}_feature_{f}")
+                        for f in endpoint.features
+                    },
+                )
+                for name, endpoint in charm.endpoints.items()
+            },
+        )
+    )
+
+    # Note: no integration vars against other domain charms are created here — eager pairing
+    # is O(domain size) per add and was the dominant driver of CEGIS blowup. Callers pair with
+    # the relevant charm(s) via pair_charms_in_domain(); other connections are discovered
+    # lazily by the CEGIS loop (_connect_existing_for_endpoint) on a later iteration.
+
+    # Create application-to-charm mappings for this model's constraints
+    for application, domain_app in model.applications.items():
+        if (
+            domain_app.charm != charm.name
+            or (domain_app.channel is not None and domain_app.channel != charm.channel)
+            or (domain_app.revision is not None and domain_app.revision != charm.revision)
+            or (domain_app.base is not None and domain_app.base != charm.ubuntu_version)
+        ):
+            continue
+        domain_app.charm_ids[charm_id] = z3.Bool(f"app_{application}_maps_to_charm_{charm.name}_{charm_id}")
+
+    # Create integration-to-charm-integration mappings (unified local + CMR).
+    _refresh_application_integration_mappings(domain)
 
     return charm_id
+
+
+def pair_charms_in_domain(domain: Domain, charm_a_id: int, charm_b_id: int) -> bool:
+    """Create integration variables for compatible endpoint pairs between two specific charms.
+
+    Safe to call multiple times for the same pair; already-existing integration variables
+    are skipped.  Runs the application-integration mapping scan when new vars are created.
+
+    Returns True if at least one new integration variable was created.
+    """
+    if charm_a_id == charm_b_id:
+        return False  # a charm never relates to itself
+    charm_a = domain.charms[charm_a_id]
+    charm_b = domain.charms[charm_b_id]
+    model_a = charm_a.model
+    model_b = charm_b.model
+    same_model = model_a == model_b
+
+    created_any = False
+    existing_keys = {
+        (i.requires_charm_id, i.requires_endpoint, i.provides_charm_id, i.provides_endpoint)
+        for i in domain.charm_integrations
+    }
+    for ep_name_a, ep_a in charm_a.spec.endpoints.items():
+        for ep_name_b, ep_b in charm_b.spec.endpoints.items():
+            if ep_a.interface != ep_b.interface:
+                continue
+
+            if ep_a.type == EndpointType.REQUIRES and ep_b.type == EndpointType.PROVIDES:
+                req_cid, req_ep = charm_a_id, ep_name_a
+                prov_cid, prov_ep = charm_b_id, ep_name_b
+                req_model, prov_model = model_a, model_b
+            elif ep_a.type == EndpointType.PROVIDES and ep_b.type == EndpointType.REQUIRES:
+                req_cid, req_ep = charm_b_id, ep_name_b
+                prov_cid, prov_ep = charm_a_id, ep_name_a
+                req_model, prov_model = model_b, model_a
+            else:
+                continue
+
+            if ep_a.scope == EndpointScope.CONTAINER or ep_b.scope == EndpointScope.CONTAINER:
+                if not same_model:
+                    continue
+                req_platform = domain.models[req_model].platform if req_model in domain.models else None
+                prov_platform = domain.models[prov_model].platform if prov_model in domain.models else None
+                if req_platform != "machine" or prov_platform != "machine":
+                    continue
+
+            # Skip if this integration variable already exists.
+            key = (req_cid, req_ep, prov_cid, prov_ep)
+            if key in existing_keys:
+                continue
+            existing_keys.add(key)
+
+            if same_model:
+                exists_var = z3.Bool(f"charm_integration_{prov_cid}:{prov_ep}__{req_cid}:{req_ep}_exists")
+            else:
+                exists_var = z3.Bool(
+                    f"cmr__{prov_model.key}__{prov_cid}:{prov_ep}" f"__{req_model.key}__{req_cid}:{req_ep}__exists"
+                )
+
+            domain.charm_integrations.append(
+                DomainCharmIntegration(
+                    exists=exists_var,
+                    requires_charm_id=req_cid,
+                    requires_endpoint=req_ep,
+                    provides_charm_id=prov_cid,
+                    provides_endpoint=prov_ep,
+                )
+            )
+            created_any = True
+
+    if not created_any:
+        return False
+
+    # Update application-integration mappings to include any newly created vars.
+    _refresh_application_integration_mappings(domain)
+
+    return True

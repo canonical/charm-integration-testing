@@ -2408,6 +2408,28 @@ type = "directory"
 url = "validators/base"
 
 [[package]]
+name = "validators-certificate-transfer"
+version = "0.1.0"
+description = "Validator for certificate_transfer interface"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+cryptography = ">=42.0.0"
+validators-base = "*"
+validators-test-utils = {version = "*", optional = true}
+
+[package.extras]
+dev = ["validators-test-utils"]
+
+[package.source]
+type = "directory"
+url = "validators/certificate_transfer"
+
+[[package]]
 name = "validators-config-server"
 version = "0.1.0"
 description = "Validator for config-server interface (MongoDB sharding)"
@@ -2743,6 +2765,29 @@ type = "directory"
 url = "validators/parca_store"
 
 [[package]]
+name = "validators-pgsql"
+version = "0.1.0"
+description = "Validator for pgsql interface"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+psycopg2-binary = ">=2.9.0"
+types-psycopg2 = {version = ">=2.9.21.20260422,<3", optional = true}
+validators-base = "*"
+validators-test-utils = {version = "*", optional = true}
+
+[package.extras]
+dev = ["types-psycopg2 (>=2.9.21.20260422,<3)", "validators-test-utils"]
+
+[package.source]
+type = "directory"
+url = "validators/pgsql"
+
+[[package]]
 name = "validators-postgresql-client"
 version = "0.1.0"
 description = "Validator for postgresql_client interface"
@@ -2816,6 +2861,7 @@ ops = ">=3.3.0,<4.0.0"
 pydantic = ">=2.0.0"
 validators-azure-storage = "*"
 validators-base = "*"
+validators-certificate-transfer = "*"
 validators-config-server = "*"
 validators-cve-catalog = "*"
 validators-external-provider = "*"
@@ -2832,6 +2878,7 @@ validators-object-storage = "*"
 validators-opensearch-client = "*"
 validators-parca-scrape = "*"
 validators-parca-store = "*"
+validators-pgsql = "*"
 validators-postgresql-client = "*"
 validators-prometheus-remote-write = "*"
 validators-prometheus-scrape = "*"
@@ -2995,4 +3042,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<4.0"
-content-hash = "26310f8bbbb2fdb285058edb80178c1b174ba4bcc91b82da7eebe5b39758855d"
+content-hash = "dfdc23b0243a69fd99347302da21fb9b68e7f8adc8542ea835eb8d35eb6d9f20"
