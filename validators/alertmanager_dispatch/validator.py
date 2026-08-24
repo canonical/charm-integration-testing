@@ -9,7 +9,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import quote, urlencode, urlparse
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from validators.base import BaseValidator, ValidationCheck, ValidationLevel, ValidationResult
 
@@ -36,6 +36,18 @@ _SILENCE_SETTLE_BACKOFF_S = 1
 _RESOLVE_CONFIRM_ATTEMPTS = 3
 _RESOLVE_CONFIRM_BACKOFF_S = 2
 _PROBE_ID_LEN = 12
+
+
+class _NoRedirectHandler(HTTPRedirectHandler):
+    """Refuse HTTP redirects so a login-page 302 cannot be followed to a 200 and read as healthy."""
+
+    def redirect_request(self, *args: Any, **kwargs: Any) -> None:
+        return None
+
+
+# Reject redirects on every call: an auth proxy bouncing /-/healthy to a login page must surface
+# as an error, not a masked 200. A rejected redirect raises HTTPError, which each caller handles.
+urlopen = build_opener(_NoRedirectHandler).open
 
 
 class AlertmanagerDispatchValidator(BaseValidator):

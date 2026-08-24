@@ -6,6 +6,7 @@ import urllib.error
 from datetime import datetime, timezone
 from typing import cast
 from unittest.mock import MagicMock, patch
+from urllib.request import HTTPRedirectHandler
 
 import ops
 
@@ -13,7 +14,9 @@ from validators.alertmanager_dispatch.validator import (
     _RESOLVE_CONFIRM_ATTEMPTS,
     _SILENCE_SETTLE_ATTEMPTS,
     AlertmanagerDispatchValidator,
+    _NoRedirectHandler,
 )
+from validators.alertmanager_dispatch.validator import urlopen as am_urlopen
 from validators.test_utils.helpers import make_charm_from_relation
 from validators.test_utils.stubs import (
     ApplicationStub,
@@ -334,7 +337,40 @@ class TestAlertmanagerDispatchValidatorSimple:
         health_checks = [c for c in result.checks if c.name.startswith("http_healthy[")]
         assert health_checks and not all(c.passed for c in health_checks)
 
-    def test_passes_with_valid_endpoint(self) -> None:
+    def test_fails_when_health_endpoint_redirects(self) -> None:
+        # GIVEN /-/healthy answers with a redirect (e.g. an auth proxy bouncing to a login page);
+        # the no-redirect opener surfaces the 302 as an HTTPError instead of following it to a 200
+        validator = _make_validator()
+
+        with (
+            patch("validators.alertmanager_dispatch.validator._tcp_ping"),
+            patch("validators.alertmanager_dispatch.validator.time.sleep"),
+            patch(
+                "validators.alertmanager_dispatch.validator.urlopen",
+                side_effect=_mock_http_error(302),
+            ),
+        ):
+            result = validator.validate(level="simple")
+
+        # THEN the redirect is not treated as healthy
+        assert result.status == "FAIL"
+        health_check = next(c for c in result.checks if c.name.startswith("http_healthy["))
+        assert not health_check.passed
+        assert "302" in health_check.message
+
+    def test_module_urlopen_rejects_redirects(self) -> None:
+        # GIVEN the module HTTP client is built from a no-redirect opener
+        opener = am_urlopen.__self__  # type: ignore[attr-defined]
+        redirect_handlers = [h for h in opener.handlers if isinstance(h, HTTPRedirectHandler)]
+
+        # THEN every installed redirect handler is the no-redirect variant and suppresses redirects
+        assert redirect_handlers
+        assert all(isinstance(h, _NoRedirectHandler) for h in redirect_handlers)
+        assert all(
+            h.redirect_request(MagicMock(), MagicMock(), 302, "Found", MagicMock(), "http://example/login") is None
+            for h in redirect_handlers
+        )
+
         # GIVEN a valid endpoint, reachable TCP, and Alertmanager healthy
         validator = _make_validator()
 
