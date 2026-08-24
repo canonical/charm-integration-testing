@@ -5,7 +5,7 @@
 # primary connection to ceph-mgr for the dashboard interface).
 #
 # assumes: [unsupported-openstack] -- sole provider of `dashboard` is ceph-mon,
-#   which carries this assumes tag (SQT-1134). Inherited so it errors correctly.
+#   which carries this tag (SQT-1134); fails fast/skipped as candidate instead.
 #
 # Optional requires:
 #   alertmanager-service (http): alertmanager integration via plain HTTP.
