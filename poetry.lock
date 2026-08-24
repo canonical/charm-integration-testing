@@ -2448,6 +2448,27 @@ type = "directory"
 url = "validators/config_server"
 
 [[package]]
+name = "validators-cross-model-mesh"
+version = "0.1.0"
+description = "Validator for the cross_model_mesh interface"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+validators-base = "*"
+validators-test-utils = {version = "*", optional = true}
+
+[package.extras]
+dev = ["validators-test-utils"]
+
+[package.source]
+type = "directory"
+url = "validators/cross_model_mesh"
+
+[[package]]
 name = "validators-cve-catalog"
 version = "0.1.0"
 description = "Validator for cve-catalog interface"
@@ -2863,6 +2884,7 @@ validators-azure-storage = "*"
 validators-base = "*"
 validators-certificate-transfer = "*"
 validators-config-server = "*"
+validators-cross-model-mesh = "*"
 validators-cve-catalog = "*"
 validators-external-provider = "*"
 validators-grafana-dashboard = "*"
@@ -3042,4 +3064,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<4.0"
-content-hash = "dfdc23b0243a69fd99347302da21fb9b68e7f8adc8542ea835eb8d35eb6d9f20"
+content-hash = "d39ddf64d6d79bc3c179518bec5fb5c7bef5ce120f8615646ae6f11379fbf9e7"

@@ -1,7 +1,15 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-from .stubs import CharmBaseStub, CharmMetaStub, ModelStub, RelationMetaStub, RelationRoleStub, RelationStub
+from .stubs import (
+    ApplicationStub,
+    CharmBaseStub,
+    CharmMetaStub,
+    ModelStub,
+    RelationMetaStub,
+    RelationRoleStub,
+    RelationStub,
+)
 
 
 def make_charm_from_relation(
@@ -9,6 +17,8 @@ def make_charm_from_relation(
     role: RelationRoleStub = RelationRoleStub.requires,
     interface_name: str | None = None,
     integrations_count: int = 1,
+    local_app_name: str = "app",
+    local_model_name: str = "model",
 ) -> CharmBaseStub:
     if integrations_count == 1:
         relations_list = [relation]
@@ -18,7 +28,7 @@ def make_charm_from_relation(
             for idx in range(integrations_count)
         ]
 
-    model = ModelStub(relations={relation.name: relations_list})
+    model = ModelStub(relations={relation.name: relations_list}, name=local_model_name)
     return CharmBaseStub(
         meta=CharmMetaStub(
             relations={
@@ -30,6 +40,7 @@ def make_charm_from_relation(
             }
         ),
         model=model,
+        app=ApplicationStub(name=local_app_name),
     )
 
 

@@ -39,6 +39,7 @@ dependencies = [
     "validators-ingress",
     "validators-prometheus-remote-write",
     "validators-certificate-transfer",
+    "validators-cross-model-mesh",
 ]
 
 [build-system]
