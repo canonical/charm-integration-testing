@@ -20,6 +20,7 @@ is integrated.
 import pytest
 
 from bundle_builder_x.bundle_builder import BundleBuilder, UncompletableBundleError
+from bundle_builder_x.bundle_diagnostics import FeatureMismatchDiagnostic
 from bundle_builder_x.charm import Charm, CharmEndpoint, EndpointType
 from bundle_builder_x.spec import AppSpec, IntegrationSpec, ModelSpec
 
@@ -290,7 +291,7 @@ class TestFeatureCoherenceCrossModelConsistency:
 
 
 class TestFeatureMismatchDiagnostics:
-    """UncompletableBundleError.feature_mismatches must surface all three ways the
+    """FeatureMismatchDiagnostic must surface all three ways the
     feature-coherence check (SQT-1038) can fail, so the failure is diagnosable instead of
     falling back to the generic "Cannot expand domain..." message:
 
@@ -336,7 +337,9 @@ class TestFeatureMismatchDiagnostics:
             )
 
         # THEN the error reports the requires/provides endpoints and the missing feature
-        mismatches = exc_info.value.feature_mismatches
+        mismatches = [
+            diagnostic for diagnostic in exc_info.value.diagnostics if isinstance(diagnostic, FeatureMismatchDiagnostic)
+        ]
         assert any(
             m.requires.charm_name == "temporal-k8s"
             and m.requires.endpoint == "admin"
@@ -392,7 +395,9 @@ class TestFeatureMismatchDiagnostics:
             )
 
         # THEN the error reports the requires/provides endpoints and the unmatched feature
-        mismatches = exc_info.value.feature_mismatches
+        mismatches = [
+            diagnostic for diagnostic in exc_info.value.diagnostics if isinstance(diagnostic, FeatureMismatchDiagnostic)
+        ]
         assert any(
             m.requires.charm_name == "requirer-app"
             and m.requires.endpoint == "svc"
@@ -451,7 +456,9 @@ class TestFeatureMismatchDiagnostics:
             )
 
         # THEN the error reports the requires/provides endpoints and the conflicting feature
-        mismatches = exc_info.value.feature_mismatches
+        mismatches = [
+            diagnostic for diagnostic in exc_info.value.diagnostics if isinstance(diagnostic, FeatureMismatchDiagnostic)
+        ]
         assert any(
             m.requires.charm_name == "requirer-app"
             and m.requires.endpoint == "svc"

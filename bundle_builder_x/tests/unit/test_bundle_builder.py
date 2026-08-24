@@ -6,9 +6,9 @@
 from itertools import repeat
 from typing import Iterator
 
-import pytest
 import z3  # type: ignore[import-untyped]
 
+from bundle_builder_x import CharmReleaseNotFoundException
 from bundle_builder_x.assertion_tags import (
     AppEndpointPayload,
     ApplicationExistsTag,
@@ -20,16 +20,19 @@ from bundle_builder_x.assertion_tags import (
     PeerChannelMismatchTag,
     SubordinateBaseMismatchTag,
 )
-from bundle_builder_x.bundle_builder import (
-    BundleBuilder,
-    UncompletableBundleError,
-    UnresolvedApplicationInfo,
-    UnresolvedIntegrationEndpointInfo,
-    UnresolvedIntegrationInfo,
+from bundle_builder_x.bundle_builder import BundleBuilder, UncompletableBundleError
+from bundle_builder_x.bundle_diagnostics import (
+    ApplicationReleaseDiagnostic,
+    BundleBuildFailureDiagnostic,
+    BundleBuildFailureKind,
+    DiagnosticEndpoint,
+    FeatureMismatchDiagnostic,
+    UnfulfilledEndpointDiagnostic,
+    UnresolvedApplicationDiagnostic,
+    UnresolvedIntegrationDiagnostic,
 )
 from bundle_builder_x.charm import Charm, CharmChannel, CharmEndpoint, EndpointScope, EndpointType
 from bundle_builder_x.charmhub import CharmhubClient
-from bundle_builder_x.charmhub_http import CharmReleaseNotFoundException
 from bundle_builder_x.constraints import add_constraints
 from bundle_builder_x.domain import (
     Domain,
@@ -40,8 +43,7 @@ from bundle_builder_x.domain import (
     pair_charms_in_domain,
 )
 from bundle_builder_x.juju_version import JujuVersion
-from bundle_builder_x.overrides import CharmGlobalOverrides, OverridesClient
-from bundle_builder_x.spec import AppSpec, ModelSpec, SpecFile
+from bundle_builder_x.overrides import OverridesClient
 
 _JUJU = JujuVersion(major=3, minor=6, patch=0)
 _CHANNEL = CharmChannel(track="latest", risk="stable", branch="")
@@ -1039,330 +1041,6 @@ class TestMergeMismatchTags:
         assert result[3].required_track == "antelope"
 
 
-class _StubOverridesClient(OverridesClient):
-    """OverridesClient returning fixed platform overrides per charm."""
-
-    def __init__(self, platforms_by_charm: dict[str, list[str] | None]) -> None:
-        super().__init__()
-        self._overrides_by_charm = {
-            charm: CharmGlobalOverrides(platforms=platforms) for charm, platforms in platforms_by_charm.items()
-        }
-
-    def get_charm_platform_overrides(self, charm: str) -> list[str] | None:
-        return self._overrides_by_charm.get(charm, CharmGlobalOverrides()).platforms
-
-
-def _builder_with_platform_overrides(platforms_by_charm: dict[str, list[str] | None]) -> BundleBuilder:
-    fake = _FakeCharmhubClient()
-    fake.overrides_client = _StubOverridesClient(platforms_by_charm)
-    return BundleBuilder(charmhub_client=fake)
-
-
-def _single_model_spec(charm: str, platform: str) -> SpecFile:
-    return SpecFile(
-        models=[
-            ModelSpec(
-                name="m",
-                platform=platform,
-                applications={charm: AppSpec(charm=charm)},
-            )
-        ]
-    )
-
-
-class TestValidatePlatforms:
-    """BundleBuilder._validate_platforms."""
-
-    def test_raises_when_model_platform_not_in_overrides(self) -> None:
-        # GIVEN a charm whose overrides only allow the machine platform
-        builder = _builder_with_platform_overrides({"mysql": ["machine"]})
-        spec = _single_model_spec("mysql", platform="kubernetes")
-
-        # WHEN the charm is placed on a kubernetes model
-        # THEN validation fails with details about the mismatch
-        with pytest.raises(UncompletableBundleError) as exc_info:
-            builder._validate_platforms(spec)
-        message = str(exc_info.value)
-        assert "mysql" in message
-        assert "kubernetes" in message
-        assert "machine" in message
-
-    def test_passes_when_model_platform_in_overrides(self) -> None:
-        # GIVEN a charm whose overrides allow the model platform
-        builder = _builder_with_platform_overrides({"mysql": ["machine", "kubernetes"]})
-        spec = _single_model_spec("mysql", platform="kubernetes")
-
-        # WHEN validating
-        # THEN no error is raised
-        builder._validate_platforms(spec)
-
-    def test_passes_when_charm_has_no_platform_overrides(self) -> None:
-        # GIVEN a charm with no platform overrides
-        builder = _builder_with_platform_overrides({"mysql": None})
-        spec = _single_model_spec("mysql", platform="kubernetes")
-
-        # WHEN validating
-        # THEN no error is raised (any platform is acceptable)
-        builder._validate_platforms(spec)
-
-    def test_validates_all_models_and_applications(self) -> None:
-        # GIVEN a multi-model spec where one application violates its platform overrides
-        builder = _builder_with_platform_overrides({"good": ["kubernetes"], "bad": ["machine"]})
-        spec = SpecFile(
-            models=[
-                ModelSpec(name="k8s", platform="kubernetes", applications={"good": AppSpec(charm="good")}),
-                ModelSpec(name="other", platform="kubernetes", applications={"bad": AppSpec(charm="bad")}),
-            ]
-        )
-
-        # WHEN validating
-        # THEN the offending application is reported
-        with pytest.raises(UncompletableBundleError) as exc_info:
-            builder._validate_platforms(spec)
-        assert "bad" in str(exc_info.value)
-
-
-class TestUncompletableBundleErrorFeatureMismatches:
-    """UncompletableBundleError.feature_mismatches and the generated failure reason."""
-
-    def test_feature_mismatches_extracted_from_unsat_core(self) -> None:
-        # GIVEN an unsat core containing an integration feature mismatch tag alongside
-        # an unrelated tag kind
-        mismatch = IntegrationFeatureMismatchTag(
-            requires=CharmEndpointPayload(charm_name="katib-controller", charm_id=0, endpoint="k8s-service-info"),
-            provides=CharmEndpointPayload(charm_name="kfp-viz", charm_id=1, endpoint="kfp-viz"),
-            feature="katib-service",
-        )
-        unrelated = SubordinateBaseMismatchTag(
-            subordinate_charm_name="nrpe",
-            subordinate_charm_id=2,
-            subordinate_endpoint="general-info",
-            principal_charm_name="ubuntu",
-            principal_charm_id=3,
-            principal_endpoint="juju-info",
-            subordinate_base="22.04",
-            principal_base="24.04",
-        )
-
-        # WHEN constructing the error from that unsat core
-        error = UncompletableBundleError(unsat_core=[mismatch, unrelated])
-
-        # THEN only the feature mismatch tag is surfaced via feature_mismatches
-        assert error.feature_mismatches == [mismatch]
-
-    def test_reason_describes_feature_mismatch_when_no_unfulfilled_endpoints(self) -> None:
-        # GIVEN an unsat core with only a feature mismatch (no CHARM_ENDPOINT_NON_OPTIONAL tags)
-        mismatch = IntegrationFeatureMismatchTag(
-            requires=CharmEndpointPayload(charm_name="katib-controller", charm_id=0, endpoint="k8s-service-info"),
-            provides=CharmEndpointPayload(charm_name="kfp-viz", charm_id=1, endpoint="kfp-viz"),
-            feature="katib-service",
-        )
-
-        # WHEN constructing the error without an explicit reason
-        error = UncompletableBundleError(unsat_core=[mismatch])
-
-        # THEN the message names both endpoints and the mismatched feature
-        message = str(error)
-        assert "katib-controller:k8s-service-info" in message
-        assert "kfp-viz:kfp-viz" in message
-        assert "katib-service" in message
-
-    def test_unfulfilled_endpoints_take_priority_over_feature_mismatches(self) -> None:
-        # GIVEN an unsat core with both an unfulfilled endpoint and a feature mismatch
-        non_optional = CharmEndpointNonOptionalTag(
-            charm=CharmEndpointPayload(charm_name="postgresql", charm_id=0, endpoint="db"),
-            interface="pgsql",
-        )
-        mismatch = IntegrationFeatureMismatchTag(
-            requires=CharmEndpointPayload(charm_name="katib-controller", charm_id=1, endpoint="k8s-service-info"),
-            provides=CharmEndpointPayload(charm_name="kfp-viz", charm_id=2, endpoint="kfp-viz"),
-            feature="katib-service",
-        )
-
-        # WHEN constructing the error without an explicit reason
-        error = UncompletableBundleError(unsat_core=[non_optional, mismatch])
-
-        # THEN the unfulfilled-endpoint message takes priority (matches existing precedence)
-        message = str(error)
-        assert "postgresql:db" in message
-        assert "katib-service" not in message
-        # but feature_mismatches is still populated for callers that want it directly
-        assert error.feature_mismatches == [mismatch]
-
-    def test_falls_back_to_generic_reason_when_no_recognized_tags(self) -> None:
-        # GIVEN an unsat core with no CHARM_ENDPOINT_NON_OPTIONAL or feature mismatch tags
-        peer_mismatch = PeerChannelMismatchTag(
-            charm=CharmPayload(charm_name="mysql-router", charm_id=0),
-            endpoint="db-router",
-            peer_charm_name="mysql",
-            peer_charm_id=1,
-            required_track="8.0",
-        )
-
-        # WHEN constructing the error without an explicit reason
-        error = UncompletableBundleError(unsat_core=[peer_mismatch])
-
-        # THEN the generic fallback message is used
-        assert "Cannot expand domain to handle failed assertion tags" in str(error)
-
-
-class TestUncompletableBundleErrorUnresolvedApplicationsAndIntegrations:
-    """UncompletableBundleError.unresolved_applications / unresolved_integrations and their priority."""
-
-    def test_reason_names_unresolved_application_with_charm_name(self) -> None:
-        # GIVEN an unresolved application
-        info = UnresolvedApplicationInfo(application="neighbor", charm_name="kafka")
-
-        # WHEN constructing the error without an explicit reason
-        error = UncompletableBundleError(unresolved_applications=[info])
-
-        # THEN the message names both the application and its charm
-        message = str(error)
-        assert "neighbor" in message
-        assert "kafka" in message
-        assert error.unresolved_applications == [info]
-
-    def test_reason_names_unresolved_integration_endpoints_by_charm(self) -> None:
-        # GIVEN an unresolved integration
-        info = UnresolvedIntegrationInfo(
-            endpoints=[
-                UnresolvedIntegrationEndpointInfo(application="target", endpoint="client", charm_name="easyrsa"),
-                UnresolvedIntegrationEndpointInfo(
-                    application="neighbor", endpoint="trusted-certificate", charm_name="kafka"
-                ),
-            ]
-        )
-
-        # WHEN constructing the error without an explicit reason
-        error = UncompletableBundleError(unresolved_integrations=[info])
-
-        # THEN the message names both endpoints by charm
-        message = str(error)
-        assert "easyrsa:client" in message
-        assert "kafka:trusted-certificate" in message
-        assert error.unresolved_integrations == [info]
-
-    def test_reason_lists_unresolved_integrations_in_deterministic_order(self) -> None:
-        # GIVEN two unresolved integrations
-        zebra = UnresolvedIntegrationInfo(
-            endpoints=[
-                UnresolvedIntegrationEndpointInfo(application="a", endpoint="ep", charm_name="zebra"),
-                UnresolvedIntegrationEndpointInfo(application="b", endpoint="ep", charm_name="kafka"),
-            ]
-        )
-        alpha = UnresolvedIntegrationInfo(
-            endpoints=[
-                UnresolvedIntegrationEndpointInfo(application="c", endpoint="ep", charm_name="alpha"),
-                UnresolvedIntegrationEndpointInfo(application="d", endpoint="ep", charm_name="beta"),
-            ]
-        )
-
-        # WHEN constructing the error with the integrations in either order
-        forward = UncompletableBundleError(unresolved_integrations=[zebra, alpha])
-        reversed_order = UncompletableBundleError(unresolved_integrations=[alpha, zebra])
-
-        # THEN both renders produce the same message, sorted by endpoint content
-        assert str(forward) == str(reversed_order)
-        assert str(forward).index("alpha:ep") < str(forward).index("zebra:ep")
-
-    def test_unfulfilled_endpoints_take_priority_over_everything_else(self) -> None:
-        # GIVEN an unfulfilled endpoint alongside a feature mismatch, an unresolved integration,
-        # and an unresolved application
-        app_info = UnresolvedApplicationInfo(application="neighbor", charm_name="kafka")
-        integration_info = UnresolvedIntegrationInfo(
-            endpoints=[
-                UnresolvedIntegrationEndpointInfo(application="target", endpoint="client", charm_name="easyrsa"),
-                UnresolvedIntegrationEndpointInfo(
-                    application="neighbor2", endpoint="trusted-certificate", charm_name="kafka2"
-                ),
-            ]
-        )
-        non_optional = CharmEndpointNonOptionalTag(
-            charm=CharmEndpointPayload(charm_name="postgresql", charm_id=0, endpoint="db"),
-            interface="pgsql",
-        )
-        mismatch = IntegrationFeatureMismatchTag(
-            requires=CharmEndpointPayload(charm_name="katib-controller", charm_id=1, endpoint="k8s-service-info"),
-            provides=CharmEndpointPayload(charm_name="kfp-viz", charm_id=2, endpoint="kfp-viz"),
-            feature="katib-service",
-        )
-
-        # WHEN constructing the error without an explicit reason
-        error = UncompletableBundleError(
-            unsat_core=[non_optional, mismatch],
-            unresolved_applications=[app_info],
-            unresolved_integrations=[integration_info],
-        )
-
-        # THEN the unfulfilled-endpoint message takes priority
-        message = str(error)
-        assert "postgresql:db" in message
-        assert "katib-service" not in message
-        assert "kafka2:trusted-certificate" not in message
-        assert "kafka" not in message
-        # but the other properties are still populated for callers that want them directly
-        assert error.unresolved_applications == [app_info]
-        assert error.unresolved_integrations == [integration_info]
-        assert error.feature_mismatches == [mismatch]
-
-    def test_feature_mismatches_take_priority_over_unresolved_integrations_and_applications(self) -> None:
-        # GIVEN a feature mismatch alongside an unresolved integration and an unresolved
-        # application (no unfulfilled endpoint)
-        app_info = UnresolvedApplicationInfo(application="neighbor", charm_name="kafka")
-        integration_info = UnresolvedIntegrationInfo(
-            endpoints=[
-                UnresolvedIntegrationEndpointInfo(application="target", endpoint="client", charm_name="easyrsa"),
-                UnresolvedIntegrationEndpointInfo(
-                    application="neighbor2", endpoint="trusted-certificate", charm_name="kafka2"
-                ),
-            ]
-        )
-        mismatch = IntegrationFeatureMismatchTag(
-            requires=CharmEndpointPayload(charm_name="katib-controller", charm_id=1, endpoint="k8s-service-info"),
-            provides=CharmEndpointPayload(charm_name="kfp-viz", charm_id=2, endpoint="kfp-viz"),
-            feature="katib-service",
-        )
-
-        # WHEN constructing the error without an explicit reason
-        error = UncompletableBundleError(
-            unsat_core=[mismatch],
-            unresolved_applications=[app_info],
-            unresolved_integrations=[integration_info],
-        )
-
-        # THEN the feature-mismatch message takes priority
-        message = str(error)
-        assert "katib-service" in message
-        assert "kafka2:trusted-certificate" not in message
-        assert "kafka" not in message
-        # but the other properties are still populated for callers that want them directly
-        assert error.unresolved_applications == [app_info]
-        assert error.unresolved_integrations == [integration_info]
-
-    def test_unresolved_integrations_take_priority_over_unresolved_applications(self) -> None:
-        # GIVEN an unresolved integration alongside an unresolved application (no unfulfilled
-        # endpoint or feature mismatch)
-        app_info = UnresolvedApplicationInfo(application="neighbor", charm_name="kafka")
-        integration_info = UnresolvedIntegrationInfo(
-            endpoints=[
-                UnresolvedIntegrationEndpointInfo(application="target", endpoint="client", charm_name="easyrsa"),
-                UnresolvedIntegrationEndpointInfo(
-                    application="neighbor2", endpoint="trusted-certificate", charm_name="kafka2"
-                ),
-            ]
-        )
-
-        # WHEN constructing the error without an explicit reason
-        error = UncompletableBundleError(unresolved_applications=[app_info], unresolved_integrations=[integration_info])
-
-        # THEN the unresolved-integration message takes priority
-        message = str(error)
-        assert "kafka2:trusted-certificate" in message
-        assert message.count("kafka") == 1
-        # but unresolved_applications is still populated for callers that want it directly
-        assert error.unresolved_applications == [app_info]
-
-
 def _domain_for_unresolved_diagnostics() -> Domain:
     """A domain with two applications ('target'/easyrsa, 'neighbor'/kafka) and no charms added."""
     domain = Domain()
@@ -1378,8 +1056,8 @@ def _domain_for_unresolved_diagnostics() -> Domain:
     return domain
 
 
-class TestCollectUnresolvedDiagnostics:
-    """BundleBuilder._collect_unresolved_applications / _collect_unresolved_integrations."""
+class TestCollectUnsatDiagnostics:
+    """BundleBuilder._collect_unsat_diagnostics."""
 
     def test_collect_unresolved_applications_resolves_charm_name_from_spec(self) -> None:
         # GIVEN a domain where 'neighbor' is declared (but never resolved) as charm 'kafka'
@@ -1387,10 +1065,10 @@ class TestCollectUnresolvedDiagnostics:
         app_exists = ApplicationExistsTag(model=ModelRef(name="m"), application="neighbor")
 
         # WHEN collecting unresolved-application diagnostics from the unsat core
-        result = BundleBuilder._collect_unresolved_applications([app_exists], domain)
+        result = BundleBuilder._collect_unsat_diagnostics([app_exists], domain)
 
         # THEN the charm name is resolved from the spec, not left as the generic application name
-        assert result == [UnresolvedApplicationInfo(application="neighbor", charm_name="kafka")]
+        assert result == (UnresolvedApplicationDiagnostic(application="neighbor", charm_name="kafka"),)
 
     def test_collect_unresolved_integrations_resolves_charm_names_from_spec(self) -> None:
         # GIVEN a domain with 'target'/easyrsa and 'neighbor'/kafka, and an integration tag naming
@@ -1405,19 +1083,21 @@ class TestCollectUnresolvedDiagnostics:
         )
 
         # WHEN collecting unresolved-integration diagnostics from the unsat core
-        result = BundleBuilder._collect_unresolved_integrations([integration_exists], domain)
+        result = BundleBuilder._collect_unsat_diagnostics([integration_exists], domain)
 
         # THEN both endpoints are resolved to their charm names, not the generic application names
-        assert result == [
-            UnresolvedIntegrationInfo(
-                endpoints=[
-                    UnresolvedIntegrationEndpointInfo(application="target", endpoint="client", charm_name="easyrsa"),
-                    UnresolvedIntegrationEndpointInfo(
-                        application="neighbor", endpoint="trusted-certificate", charm_name="kafka"
+        assert result == (
+            UnresolvedIntegrationDiagnostic(
+                endpoints=(
+                    DiagnosticEndpoint(application="target", endpoint="client", charm_name="easyrsa"),
+                    DiagnosticEndpoint(
+                        application="neighbor",
+                        endpoint="trusted-certificate",
+                        charm_name="kafka",
                     ),
-                ]
-            )
-        ]
+                )
+            ),
+        )
 
     def test_collect_unresolved_application_falls_back_to_application_name_when_unknown(self) -> None:
         # GIVEN an unsat core naming a model/application that isn't present in the domain
@@ -1425,7 +1105,97 @@ class TestCollectUnresolvedDiagnostics:
         app_exists = ApplicationExistsTag(model=ModelRef(name="other-model"), application="mystery")
 
         # WHEN collecting unresolved-application diagnostics
-        result = BundleBuilder._collect_unresolved_applications([app_exists], domain)
+        result = BundleBuilder._collect_unsat_diagnostics([app_exists], domain)
 
         # THEN the application name is used as a defensive fallback for the charm name
-        assert result == [UnresolvedApplicationInfo(application="mystery", charm_name="mystery")]
+        assert result == (UnresolvedApplicationDiagnostic(application="mystery", charm_name="mystery"),)
+
+    def test_collects_every_independent_diagnostic(self) -> None:
+        domain = _domain_for_unresolved_diagnostics()
+        non_optional = CharmEndpointNonOptionalTag(
+            charm=CharmEndpointPayload(charm_name="postgresql", charm_id=0, endpoint="db"),
+            interface="pgsql",
+        )
+        mismatch = IntegrationFeatureMismatchTag(
+            requires=CharmEndpointPayload(
+                charm_name="katib-controller",
+                charm_id=1,
+                endpoint="k8s-service-info",
+            ),
+            provides=CharmEndpointPayload(charm_name="kfp-viz", charm_id=2, endpoint="kfp-viz"),
+            feature="katib-service",
+        )
+
+        result = BundleBuilder._collect_unsat_diagnostics([mismatch, non_optional], domain)
+
+        assert result == (
+            UnfulfilledEndpointDiagnostic(
+                endpoint=DiagnosticEndpoint(charm_name="postgresql", endpoint="db"),
+                interface="pgsql",
+            ),
+            FeatureMismatchDiagnostic(
+                requires=DiagnosticEndpoint(
+                    charm_name="katib-controller",
+                    endpoint="k8s-service-info",
+                ),
+                provides=DiagnosticEndpoint(charm_name="kfp-viz", endpoint="kfp-viz"),
+                feature="katib-service",
+            ),
+        )
+        error = UncompletableBundleError(diagnostics=result)
+        assert "postgresql:db" in str(error)
+        assert "katib-service" in str(error)
+
+    def test_release_failure_suppresses_redundant_application_and_integration(self) -> None:
+        domain = _domain_for_unresolved_diagnostics()
+        domain.models[ModelRef(name="other")] = DomainModel(
+            arch="amd64",
+            platform="machine",
+            juju_version=_JUJU,
+            applications={"neighbor": DomainApplication(charm="kafka-other")},
+        )
+        app_exists = ApplicationExistsTag(model=ModelRef(name="m"), application="neighbor")
+        other_app_exists = ApplicationExistsTag(model=ModelRef(name="other"), application="neighbor")
+        integration_exists = ApplicationIntegrationExistsTag(
+            model=ModelRef(name="m"),
+            integration=[
+                AppEndpointPayload(application="target", endpoint="client"),
+                AppEndpointPayload(application="neighbor", endpoint="trusted-certificate"),
+            ],
+        )
+        release = ApplicationReleaseDiagnostic(
+            application="neighbor",
+            charm_name="kafka",
+            model="m",
+            error=CharmReleaseNotFoundException("No compatible release"),
+        )
+
+        result = BundleBuilder._collect_unsat_diagnostics(
+            [app_exists, other_app_exists, integration_exists],
+            domain,
+            [release],
+        )
+
+        assert result == (
+            UnresolvedApplicationDiagnostic(application="neighbor", charm_name="kafka-other"),
+            release,
+        )
+
+    def test_unknown_tags_produce_internal_failure_diagnostic(self) -> None:
+        domain = _domain_for_unresolved_diagnostics()
+        peer_mismatch = PeerChannelMismatchTag(
+            charm=CharmPayload(charm_name="mysql-router", charm_id=0),
+            endpoint="db-router",
+            peer_charm_name="mysql",
+            peer_charm_id=1,
+            required_track="8.0",
+        )
+
+        result = BundleBuilder._collect_unsat_diagnostics([peer_mismatch], domain)
+
+        assert result == (
+            BundleBuildFailureDiagnostic(
+                kind=BundleBuildFailureKind.UNEXPANDABLE_ASSERTIONS,
+                detail="Cannot expand the domain to handle failed assertion tags",
+            ),
+        )
