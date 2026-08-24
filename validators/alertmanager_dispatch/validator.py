@@ -2,7 +2,6 @@
 # See LICENSE file for licensing details.
 
 import json
-import logging
 import socket
 import time
 import urllib.error
@@ -13,8 +12,6 @@ from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
 
 from validators.base import BaseValidator, ValidationCheck, ValidationLevel, ValidationResult
-
-logger = logging.getLogger(__name__)
 
 _HEALTHY_PATH = "/-/healthy"
 _ALERTS_PATH = "/api/v2/alerts"
@@ -226,8 +223,9 @@ def _canary_checks(endpoint_infos: list[dict[str, str]]) -> list[ValidationCheck
     """Dispatch a canary alert to each endpoint, read it back, then resolve it.
 
     Uses a unique per-run probe label so concurrent validator runs do not
-    cross-pollinate. Returns one check per endpoint covering push + query;
-    the resolve step is best-effort cleanup and never fails the check.
+    cross-pollinate. Returns two checks per endpoint: the push + query
+    round-trip, and a cleanup check that fails if the canary could not be
+    resolved (leaving a stray active alert).
     """
     checks: list[ValidationCheck] = []
     for info in endpoint_infos:
@@ -235,48 +233,67 @@ def _canary_checks(endpoint_infos: list[dict[str, str]]) -> list[ValidationCheck
         parsed = urlparse(url)
         base = _base_url(url)
         check_name = f"canary[{parsed.netloc}]"
+        cleanup_name = f"canary_cleanup[{parsed.netloc}]"
         probe_id = uuid.uuid4().hex[:12]
 
         try:
             _push_canary(base, probe_id)
         except Exception as exc:
             checks.append(ValidationCheck(name=check_name, passed=False, message=f"Dispatch failed: {exc}"))
-            continue
+            continue  # nothing was dispatched, so there is nothing to clean up
 
-        found = False
-        query_error = ""
-        for _ in range(_QUERY_ATTEMPTS):
-            time.sleep(_INGEST_WAIT_S)
-            try:
-                found = _query_canary(base, probe_id)
-            except Exception as exc:
-                query_error = str(exc)
-                continue
-            query_error = ""  # a successful query supersedes any earlier transient error
+        try:
+            found = False
+            query_error = ""
+            for _ in range(_QUERY_ATTEMPTS):
+                time.sleep(_INGEST_WAIT_S)
+                try:
+                    found = _query_canary(base, probe_id)
+                except Exception as exc:
+                    query_error = str(exc)
+                    continue
+                query_error = ""  # a successful query supersedes any earlier transient error
+                if found:
+                    break
+
             if found:
-                break
-
-        _resolve_canary(base, probe_id)  # best-effort cleanup
-
-        if found:
-            checks.append(
-                ValidationCheck(
-                    name=check_name,
-                    passed=True,
-                    message=f"Canary alert dispatched and read back from {parsed.netloc}.",
+                checks.append(
+                    ValidationCheck(
+                        name=check_name,
+                        passed=True,
+                        message=f"Canary alert dispatched and read back from {parsed.netloc}.",
+                    )
                 )
-            )
-        elif query_error:
-            checks.append(ValidationCheck(name=check_name, passed=False, message=f"Query failed: {query_error}"))
-        else:
-            checks.append(
-                ValidationCheck(
-                    name=check_name,
-                    passed=False,
-                    message=f"Canary alert dispatched to {parsed.netloc} but not found in active alerts.",
+            elif query_error:
+                checks.append(ValidationCheck(name=check_name, passed=False, message=f"Query failed: {query_error}"))
+            else:
+                checks.append(
+                    ValidationCheck(
+                        name=check_name,
+                        passed=False,
+                        message=f"Canary alert dispatched to {parsed.netloc} but not found in active alerts.",
+                    )
                 )
-            )
+        finally:
+            checks.append(_resolve_check(base, probe_id, cleanup_name, parsed.netloc))
     return checks
+
+
+def _resolve_check(base_url: str, probe_id: str, check_name: str, netloc: str) -> ValidationCheck:
+    """Resolve the canary and report whether cleanup succeeded.
+
+    A rejected resolve leaves the five-minute canary active, so — unlike a
+    silently swallowed error — it must fail deep validation.
+    """
+    try:
+        _resolve_canary(base_url, probe_id)
+    except Exception as exc:
+        return ValidationCheck(
+            name=check_name,
+            passed=False,
+            message=f"Canary cleanup failed on {netloc}; alert may stay active for up to five minutes: {exc}",
+        )
+    return ValidationCheck(name=check_name, passed=True, message=f"Canary alert resolved on {netloc}.")
 
 
 def _canary_payload(probe_id: str, starts_at: datetime, ends_at: datetime) -> bytes:
@@ -341,13 +358,10 @@ def _query_canary(base_url: str, probe_id: str) -> bool:
 def _resolve_canary(base_url: str, probe_id: str) -> None:
     """Resolve the canary alert by re-dispatching it with an ``endsAt`` in the past.
 
-    Best-effort cleanup: Alertmanager marks an alert resolved once ``endsAt``
-    has elapsed, so any error here is intentionally swallowed.
+    Alertmanager marks an alert resolved once ``endsAt`` has elapsed. Any error
+    propagates so the caller can report the cleanup as failed.
     """
     now = datetime.now(timezone.utc)
     ends_at = now - timedelta(seconds=1)
     starts_at = now - timedelta(minutes=5)  # keep startsAt before endsAt so Alertmanager accepts the resolve
-    try:
-        _post_alerts(base_url, _canary_payload(probe_id, starts_at, ends_at))
-    except Exception as exc:
-        logger.debug("Best-effort resolve of canary alert %s failed: %s", probe_id, exc)
+    _post_alerts(base_url, _canary_payload(probe_id, starts_at, ends_at))

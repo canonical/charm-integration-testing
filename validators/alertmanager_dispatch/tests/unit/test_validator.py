@@ -519,3 +519,34 @@ class TestAlertmanagerDispatchValidatorDeep:
         starts_at = datetime.fromisoformat(payload[0]["startsAt"])
         ends_at = datetime.fromisoformat(payload[0]["endsAt"])
         assert starts_at < ends_at
+
+    def test_reports_cleanup_failure_when_resolve_rejected(self) -> None:
+        # GIVEN the canary is dispatched and read back, but the resolve POST is rejected
+        validator = _make_validator()
+        probe = MagicMock()
+        probe.hex = "abc123def456"  # matches 'validator_probe' in _ALERTS_FOUND_BODY
+
+        with (
+            patch("validators.alertmanager_dispatch.validator._tcp_ping"),
+            patch("validators.alertmanager_dispatch.validator.time.sleep"),
+            patch("validators.alertmanager_dispatch.validator.uuid.uuid4", return_value=probe),
+            patch(
+                "validators.alertmanager_dispatch.validator.urlopen",
+                side_effect=[
+                    _mock_http_response(200, b"OK"),  # GET /-/healthy
+                    _mock_http_response(200, b""),  # POST dispatch
+                    _mock_http_response(200, _ALERTS_FOUND_BODY),  # GET query (found)
+                    _mock_http_error(400),  # POST resolve rejected
+                ],
+            ),
+        ):
+            result = validator.validate(level="deep")
+
+        # THEN the cleanup failure is surfaced as a failing check rather than swallowed
+        assert result.status == "FAIL"
+        cleanup_checks = [c for c in result.checks if c.name.startswith("canary_cleanup[")]
+        assert cleanup_checks and not cleanup_checks[0].passed
+        assert "cleanup failed" in cleanup_checks[0].message.lower()
+        # the round-trip itself still passed
+        canary_checks = [c for c in result.checks if c.name.startswith("canary[")]
+        assert canary_checks and canary_checks[0].passed
