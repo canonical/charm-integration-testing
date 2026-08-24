@@ -192,7 +192,7 @@ Failure Information
      - No
      - ``kafka``
    * - ``failure:build_bundle:release_resolution``
-     - Stable failure kind for a required charm release that could not be resolved. Additional fixed categories under ``failure:build_bundle:release_resolution:<dimension>`` record only relevant dimensions, such as ``charm``, ``requested_platform``, ``supported_platform``, ``requirement``, ``requested_base``, ``supported_base``, ``requested_architecture``, ``supported_architecture``, ``channel``, ``track``, ``revision``, and ``error_code``. Values are atomic so attachment rules can match them directly. Application aliases, model names, and free-form server messages are excluded. Aggregate track searches emit metadata from their unique leaf failures.
+     - Stable failure kind for a required charm release that could not be resolved. If the failure does not match a more specific classification, the kind is recorded as ``release_not_found``. Additional fixed categories under ``failure:build_bundle:release_resolution:<dimension>`` record only relevant dimensions, such as ``charm``, ``requested_platform``, ``supported_platform``, ``requirement``, ``requested_base``, ``supported_base``, ``requested_architecture``, ``supported_architecture``, ``channel``, ``track``, ``revision``, and ``error_code``. Values are atomic so attachment rules can match them directly. Application aliases, model names, and free-form server messages are excluded. Aggregate track searches emit metadata from their unique leaf failures.
      - No
      - ``platform_mismatch``
    * - ``failure:build_bundle:release_resolution:charm``
