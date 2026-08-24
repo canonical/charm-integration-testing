@@ -7,11 +7,11 @@ These tests use a stub CharmhubClient that serves charms from an in-memory
 registry, making all tests fully offline and deterministic.
 """
 
+from bundle_builder_x import CharmReleaseNotFoundException
 from bundle_builder_x.bundle import Bundle, Solution
 from bundle_builder_x.bundle_builder import BundleBuilder
 from bundle_builder_x.charm import Charm, CharmChannel, CharmEndpoint, CharmEndpointProxy, EndpointType
 from bundle_builder_x.charmhub import CharmhubClient
-from bundle_builder_x.charmhub_http import CharmReleaseNotFoundException
 from bundle_builder_x.constraints_dsl import parse_constraint
 from bundle_builder_x.juju_version import JujuVersion
 from bundle_builder_x.spec import AppSpec, IntegrationSpec, ModelSpec, SpecFile

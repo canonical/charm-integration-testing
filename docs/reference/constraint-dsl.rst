@@ -259,7 +259,7 @@ When two endpoints are integrated, a feature declared on only one side is
 forced inactive, and a feature declared on both sides must agree. This
 prevents pairing charms whose feature sets don't overlap. Failures are
 reported via ``INTEGRATION_FEATURE_MISMATCH`` and
-``UncompletableBundleError.feature_mismatches``.
+``FeatureMismatchDiagnostic`` values in ``UncompletableBundleError.diagnostics``.
 
 Config value
 ~~~~~~~~~~~~

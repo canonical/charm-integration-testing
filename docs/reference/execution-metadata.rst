@@ -191,6 +191,18 @@ Failure Information
      - An application whose declared charm could not be resolved to exactly one charm during bundle building. Collected when ``UncompletableBundleError`` is raised. Value is the charm name (not the generic application name from the spec). Multiple values may be recorded.
      - No
      - ``kafka``
+   * - ``failure:build_bundle:release_resolution``
+     - Stable failure kind for a required charm release that could not be resolved. If the failure does not match a more specific classification, the kind is recorded as ``release_not_found``. Additional fixed categories under ``failure:build_bundle:release_resolution:<dimension>`` record only relevant dimensions, such as ``charm``, ``requested_platform``, ``supported_platform``, ``requirement``, ``requested_base``, ``supported_base``, ``requested_architecture``, ``supported_architecture``, ``channel``, ``track``, ``revision``, and ``error_code``. Values are atomic so attachment rules can match them directly. Application aliases, model names, and free-form server messages are excluded. Aggregate track searches emit metadata from their unique leaf failures.
+     - No
+     - ``platform_mismatch``
+   * - ``failure:build_bundle:release_resolution:charm``
+     - Charm name associated with a release-resolution failure. Unlike an application alias, this remains stable across equivalent specs.
+     - No
+     - ``aodh``
+   * - ``failure:build_bundle:release_resolution:<dimension>``
+     - Atomic value for a relevant release-resolution dimension. A failure can emit multiple entries for plural dimensions, such as supported platforms or unmet ``assumes`` requirements.
+     - No
+     - ``machine``
    * - ``failure:build_bundle:unresolved_integration``
      - A user-specified integration whose named endpoint(s) could not be mapped to any charm integration, most commonly because the endpoint no longer exists on the resolved charm (e.g. renamed/removed upstream). Collected when ``UncompletableBundleError`` is raised. Format: ``<charm>:<endpoint_name>/<charm>:<endpoint_name>``, using charm names (not the generic application names from the spec). Multiple values may be recorded.
      - No
