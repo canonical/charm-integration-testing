@@ -1,0 +1,7 @@
+---
+# trilio-wlm: Source: https://opendev.org/x/charm-trilio-wlm
+#
+# ha (requires): sole provider is hacluster, which carries this assumes
+#   tag (SQT-1134). Inherited so it errors correctly.
+overrides:
+  - assumes: [unsupported-openstack]
