@@ -206,7 +206,10 @@ def test_provider_validates_requirer_databag() -> None:
             ),
         },
     )
-    result = validator.validate(level="simple")
+    with patch("validators.ingress_auth.validator.socket.create_connection") as mock_connect:
+        mock_connect.return_value.__enter__ = lambda self: None
+        mock_connect.return_value.__exit__ = lambda self, *args: None
+        result = validator.validate(level="simple")
     assert result.status == "PASS"
 
 
@@ -319,7 +322,7 @@ def test_provider_rejects_float_port() -> None:
     assert "integer" in check.message
 
 
-def test_provider_deep_connectivity_passes() -> None:
+def test_provider_connectivity_passes_at_deep() -> None:
     validator = _make_validator(
         role="provides",
         app_databag={
@@ -337,7 +340,25 @@ def test_provider_deep_connectivity_passes() -> None:
     assert "TCP reached" in check.message
 
 
-def test_provider_deep_connectivity_fails() -> None:
+def test_provider_connectivity_passes_at_simple() -> None:
+    validator = _make_validator(
+        role="provides",
+        app_databag={
+            "_supported_versions": yaml.safe_dump(["v1"]),
+            "data": yaml.safe_dump({"service": "oidc-gatekeeper", "port": 8080}),
+        },
+    )
+    with patch("validators.ingress_auth.validator.socket.create_connection") as mock_connect:
+        mock_connect.return_value.__enter__ = lambda self: None
+        mock_connect.return_value.__exit__ = lambda self, *args: None
+        result = validator.validate(level="simple")
+    mock_connect.assert_called_once_with(("oidc-gatekeeper.test-model.svc.cluster.local", 8080), timeout=5)
+    assert result.status == "PASS"
+    check = next(check for check in result.checks if check.name == "connectivity")
+    assert "TCP reached" in check.message
+
+
+def test_provider_connectivity_fails() -> None:
     validator = _make_validator(
         role="provides",
         app_databag={
@@ -346,13 +367,27 @@ def test_provider_deep_connectivity_fails() -> None:
         },
     )
     with patch("validators.ingress_auth.validator.socket.create_connection", side_effect=OSError("refused")):
-        result = validator.validate(level="deep")
+        result = validator.validate(level="simple")
     assert result.status == "FAIL"
     check = next(check for check in result.checks if check.name == "connectivity")
     assert "refused" in check.message
 
 
-def test_provider_deep_skips_connectivity_when_port_invalid() -> None:
+def test_provider_connectivity_fails_on_malformed_service_name() -> None:
+    validator = _make_validator(
+        role="provides",
+        app_databag={
+            "_supported_versions": yaml.safe_dump(["v1"]),
+            "data": yaml.safe_dump({"service": "a" * 70, "port": 8080}),
+        },
+    )
+    result = validator.validate(level="simple")
+    assert result.status == "FAIL"
+    check = next(check for check in result.checks if check.name == "connectivity")
+    assert "failed" in check.message
+
+
+def test_provider_skips_connectivity_when_port_invalid() -> None:
     validator = _make_validator(
         role="provides",
         app_databag={
@@ -361,7 +396,7 @@ def test_provider_deep_skips_connectivity_when_port_invalid() -> None:
         },
     )
     with patch("validators.ingress_auth.validator.socket.create_connection") as mock_connect:
-        result = validator.validate(level="deep")
+        result = validator.validate(level="simple")
     mock_connect.assert_not_called()
     assert result.status == "FAIL"
     assert not any(check.name == "connectivity" for check in result.checks)

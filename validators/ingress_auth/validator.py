@@ -105,7 +105,7 @@ class IngressAuthValidator(BaseValidator):
             if field in data:
                 checks.append(_check_header_list(field, data[field]))
 
-        if level == "deep" and port_check.passed:
+        if port_check.passed:
             checks.append(self._validate_connectivity(str(data["service"]), int(data["port"])))
 
         return self._make_result(level=level, checks=checks)
@@ -156,7 +156,7 @@ class IngressAuthValidator(BaseValidator):
                 passed=True,
                 message=f"TCP reached {host}:{port}.",
             )
-        except OSError as exc:
+        except (OSError, UnicodeError) as exc:
             return ValidationCheck(
                 name="connectivity",
                 passed=False,
