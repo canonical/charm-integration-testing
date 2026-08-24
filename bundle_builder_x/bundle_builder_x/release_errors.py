@@ -176,20 +176,21 @@ def release_error_key(error: CharmReleaseNotFoundException) -> tuple[Any, ...]:
         else ()
     )
     detail: tuple[Any, ...]
-    if isinstance(error, PlatformMismatchError):
-        detail = (error.requested_platform, error.supported_platforms)
-    elif isinstance(error, AssumesMismatchError):
-        detail = (error.unmet_requirements, error.available_features)
-    elif isinstance(error, BaseMismatchError):
-        detail = (error.requested_base, error.supported_bases)
-    elif isinstance(error, ArchitectureMismatchError):
-        detail = (error.supported_architectures,)
-    elif isinstance(error, ReleaseUnavailableError):
-        detail = (
-            error.kind.value,
-            error.error_code or "",
-            tuple(release_error_key(cause) for cause in error.causes),
-        )
-    else:
-        detail = (str(error),)
+    match error:
+        case PlatformMismatchError():
+            detail = (error.requested_platform, error.supported_platforms)
+        case AssumesMismatchError():
+            detail = (error.unmet_requirements, error.available_features)
+        case BaseMismatchError():
+            detail = (error.requested_base, error.supported_bases)
+        case ArchitectureMismatchError():
+            detail = (error.supported_architectures,)
+        case ReleaseUnavailableError():
+            detail = (
+                error.kind.value,
+                error.error_code or "",
+                tuple(release_error_key(cause) for cause in error.causes),
+            )
+        case _:
+            detail = (str(error),)
     return (type(error).__name__, request_key, detail)

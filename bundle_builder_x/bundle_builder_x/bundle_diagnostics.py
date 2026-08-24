@@ -4,15 +4,13 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, ClassVar, Iterable
+from typing import Any, Iterable
 
 from .release_errors import CharmReleaseNotFoundException, release_error_key
 
 
 class BundleDiagnostic(ABC):
     """Structured explanation for one reason a bundle could not be completed."""
-
-    order: ClassVar[int]
 
     @property
     @abstractmethod
@@ -40,8 +38,6 @@ class DiagnosticEndpoint:
 
 @dataclass(frozen=True)
 class UnfulfilledEndpointDiagnostic(BundleDiagnostic):
-    order: ClassVar[int] = 0
-
     endpoint: DiagnosticEndpoint
     interface: str | None
 
@@ -56,8 +52,6 @@ class UnfulfilledEndpointDiagnostic(BundleDiagnostic):
 
 @dataclass(frozen=True)
 class FeatureMismatchDiagnostic(BundleDiagnostic):
-    order: ClassVar[int] = 1
-
     requires: DiagnosticEndpoint
     provides: DiagnosticEndpoint
     feature: str
@@ -77,8 +71,6 @@ class FeatureMismatchDiagnostic(BundleDiagnostic):
 
 @dataclass(frozen=True)
 class UnresolvedApplicationDiagnostic(BundleDiagnostic):
-    order: ClassVar[int] = 2
-
     application: str
     charm_name: str
 
@@ -93,8 +85,6 @@ class UnresolvedApplicationDiagnostic(BundleDiagnostic):
 
 @dataclass(frozen=True)
 class UnresolvedIntegrationDiagnostic(BundleDiagnostic):
-    order: ClassVar[int] = 3
-
     endpoints: tuple[DiagnosticEndpoint, ...]
 
     def __post_init__(self) -> None:
@@ -114,8 +104,6 @@ class UnresolvedIntegrationDiagnostic(BundleDiagnostic):
 
 @dataclass(frozen=True)
 class ApplicationReleaseDiagnostic(BundleDiagnostic):
-    order: ClassVar[int] = 4
-
     application: str
     charm_name: str
     model: str
@@ -145,8 +133,6 @@ class BundleBuildFailureKind(str, Enum):
 
 @dataclass(frozen=True)
 class BundleBuildFailureDiagnostic(BundleDiagnostic):
-    order: ClassVar[int] = 5
-
     kind: BundleBuildFailureKind
     detail: str
 
@@ -162,11 +148,23 @@ class BundleBuildFailureDiagnostic(BundleDiagnostic):
 def canonicalize_diagnostics(
     diagnostics: Iterable[BundleDiagnostic],
 ) -> tuple[BundleDiagnostic, ...]:
-    """Deduplicate and sort diagnostics by structured identity."""
+    """Deduplicate and sort diagnostics by structured identity.
+
+    Presentation order groups diagnostics by kind, in the order below, then by each
+    kind's own structured identity.
+    """
+    diagnostic_order: tuple[type[BundleDiagnostic], ...] = (
+        UnfulfilledEndpointDiagnostic,
+        FeatureMismatchDiagnostic,
+        UnresolvedApplicationDiagnostic,
+        UnresolvedIntegrationDiagnostic,
+        ApplicationReleaseDiagnostic,
+        BundleBuildFailureDiagnostic,
+    )
     unique = {(type(diagnostic), diagnostic.identity): diagnostic for diagnostic in diagnostics}
     return tuple(
         sorted(
             unique.values(),
-            key=lambda diagnostic: (diagnostic.order, diagnostic.identity),
+            key=lambda diagnostic: (diagnostic_order.index(type(diagnostic)), diagnostic.identity),
         )
     )
