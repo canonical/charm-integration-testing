@@ -113,8 +113,7 @@ def test_happy_path_passes() -> None:
             }
         ],
     )
-    with patch.object(IngressAuthValidator, "resolve_secret", return_value={}):
-        result = validator.validate(level="simple")
+    result = validator.validate(level="simple")
     assert result.status == "PASS"
 
 
@@ -128,8 +127,7 @@ def test_missing_fields_fails() -> None:
             }
         ],
     )
-    with patch.object(IngressAuthValidator, "resolve_secret", return_value={}):
-        result = validator.validate(level="simple")
+    result = validator.validate(level="simple")
     assert result.status == "FAIL"
     check = next(check for check in result.checks if check.name == "unit_databag")
     assert "private-address" in check.message
@@ -146,8 +144,7 @@ def test_missing_supported_versions_fails() -> None:
             }
         ],
     )
-    with patch.object(IngressAuthValidator, "resolve_secret", return_value={}):
-        result = validator.validate(level="simple")
+    result = validator.validate(level="simple")
     assert result.status == "FAIL"
     check = next(check for check in result.checks if check.name == "schema")
     assert "_supported_versions" in check.message
@@ -164,8 +161,7 @@ def test_unsupported_version_fails() -> None:
             }
         ],
     )
-    with patch.object(IngressAuthValidator, "resolve_secret", return_value={}):
-        result = validator.validate(level="simple")
+    result = validator.validate(level="simple")
     assert result.status == "FAIL"
     check = next(check for check in result.checks if check.name == "schema")
     assert "does not advertise 'v1'" in check.message
@@ -173,8 +169,7 @@ def test_unsupported_version_fails() -> None:
 
 def test_no_app_returns_error() -> None:
     validator = _make_validator(app_present=False, unit_databags=[])
-    with patch.object(IngressAuthValidator, "resolve_secret", return_value={}):
-        result = validator.validate(level="simple")
+    result = validator.validate(level="simple")
     assert result.status == "ERROR"
 
 
@@ -186,8 +181,7 @@ def test_unsupported_role_without_app_is_skipped() -> None:
 
 def test_unsupported_level_is_skipped() -> None:
     validator = _make_validator(app_databag={}, unit_databags=[])
-    with patch.object(IngressAuthValidator, "resolve_secret", return_value={}):
-        result = validator.validate(level="deep")
+    result = validator.validate(level="deep")
     assert result.status == "SKIPPED"
 
 
