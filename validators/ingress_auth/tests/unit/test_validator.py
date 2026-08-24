@@ -178,6 +178,12 @@ def test_no_app_returns_error() -> None:
     assert result.status == "ERROR"
 
 
+def test_unsupported_role_without_app_is_skipped() -> None:
+    validator = _make_validator(role="peer", app_present=False, unit_databags=[])
+    result = validator.validate(level="simple")
+    assert result.status == "SKIPPED"
+
+
 def test_unsupported_level_is_skipped() -> None:
     validator = _make_validator(app_databag={}, unit_databags=[])
     with patch.object(IngressAuthValidator, "resolve_secret", return_value={}):

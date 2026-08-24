@@ -19,13 +19,13 @@ class IngressAuthValidator(BaseValidator):
     def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
         if level == "uat":
             return self._skipped_result_due_to_level(level)
+        if self.role not in ("provides", "requires"):
+            return self._skipped_result_due_to_role(level, self.role)
         if not self.relation_exists():
             return self._error_result(level, f"No remote application on relation '{self.endpoint}'.")
 
         if self.role == "provides":
             return self._validate_provides(level)
-        if self.role != "requires":
-            return self._skipped_result_due_to_role(level, self.role)
         if level != "simple":
             return self._skipped_result_due_to_level(level)
 
@@ -101,7 +101,7 @@ class IngressAuthValidator(BaseValidator):
         raw = self.databag.get("data", "")
         if not raw:
             return (
-                ValidationCheck(name="schema", passed=False, message="Missing 'data' key in provider app databag."),
+                ValidationCheck(name="schema", passed=False, message="Missing 'data' key in requirer app databag."),
                 {},
             )
         try:
