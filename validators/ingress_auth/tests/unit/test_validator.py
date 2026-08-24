@@ -156,6 +156,23 @@ def test_unsupported_version_fails() -> None:
     assert "does not advertise 'v1'" in check.message
 
 
+def test_malformed_mixed_version_list_fails() -> None:
+    validator = _make_validator(
+        app_databag={"_supported_versions": yaml.safe_dump(["v1", None])},
+        unit_databags=[
+            {
+                "ingress-address": "10.0.0.1",
+                "private-address": "10.0.0.1",
+                "egress-subnets": "10.152.183.0/24",
+            }
+        ],
+    )
+    result = validator.validate(level="simple")
+    assert result.status == "FAIL"
+    check = next(check for check in result.checks if check.name == "version")
+    assert "invalid version entry" in check.message
+
+
 def test_no_app_returns_error() -> None:
     validator = _make_validator(app_present=False, unit_databags=[])
     result = validator.validate(level="simple")
@@ -228,6 +245,21 @@ def test_provider_unsupported_version_fails() -> None:
     assert result.status == "FAIL"
     check = next(check for check in result.checks if check.name == "version")
     assert "does not advertise 'v1'" in check.message
+    assert not any(check.name == "schema" for check in result.checks)
+
+
+def test_provider_malformed_mixed_version_list_fails() -> None:
+    validator = _make_validator(
+        role="provides",
+        app_databag={
+            "_supported_versions": yaml.safe_dump(["v1", {}]),
+            "data": yaml.safe_dump({"service": "oidc-gatekeeper", "port": 8080}),
+        },
+    )
+    result = validator.validate(level="simple")
+    assert result.status == "FAIL"
+    check = next(check for check in result.checks if check.name == "version")
+    assert "invalid version entry" in check.message
     assert not any(check.name == "schema" for check in result.checks)
 
 

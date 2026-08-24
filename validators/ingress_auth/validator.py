@@ -13,6 +13,7 @@ _REQUIRED_PROVIDER_FIELDS = ("service", "port")
 _OPTIONAL_HEADER_FIELDS = ("allowed-request-headers", "allowed-response-headers")
 _TCP_TIMEOUT = 5
 _SUPPORTED_VERSION = "v1"
+_SUPPORTED_VERSION_NUMBER = 1
 
 
 class IngressAuthValidator(BaseValidator):
@@ -57,7 +58,21 @@ class IngressAuthValidator(BaseValidator):
                 passed=False,
                 message=f"Could not decode '_supported_versions' as YAML: {exc}",
             )
-        if not isinstance(decoded, list) or _SUPPORTED_VERSION not in decoded:
+        if not isinstance(decoded, list):
+            return ValidationCheck(
+                name="version",
+                passed=False,
+                message=f"'_supported_versions' must be a list, got {type(decoded).__name__}: {decoded!r}",
+            )
+        try:
+            parsed_versions = {_parse_sdi_version(version) for version in decoded}
+        except ValueError as exc:
+            return ValidationCheck(
+                name="version",
+                passed=False,
+                message=f"'_supported_versions' contains an invalid entry: {exc}",
+            )
+        if _SUPPORTED_VERSION_NUMBER not in parsed_versions:
             return ValidationCheck(
                 name="version",
                 passed=False,
@@ -171,6 +186,25 @@ class IngressAuthValidator(BaseValidator):
             passed=True,
             message=f"Validated {len(units)} remote unit databag(s).",
         )
+
+
+def _parse_sdi_version(version: Any) -> int:
+    """Parse a single ``_supported_versions`` entry using SDI's own version grammar.
+
+    Mirrors ``SerializedDataInterface._parse_versions``: an entry is either a bare ``int``
+    or a string of the form ``v<int>`` (e.g. ``"v1"``). Anything else (``None``, a mapping,
+    a malformed string, etc.) is invalid and would raise inside SDI's own ``get_version()``.
+    """
+    if isinstance(version, bool):
+        raise ValueError(f"invalid version entry: {version!r}")
+    if isinstance(version, int):
+        return version
+    if isinstance(version, str) and version.startswith("v"):
+        try:
+            return int(version[1:])
+        except ValueError:
+            raise ValueError(f"invalid version entry: {version!r}") from None
+    raise ValueError(f"invalid version entry: {version!r}")
 
 
 def _check_required_fields(data: dict[str, Any]) -> ValidationCheck:
