@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from kubernetes.client import ApiException, V1ObjectMeta, V1Pod, V1PodStatus  # type: ignore[import-untyped]
 from kubernetes_client import KubernetesBackend, KubernetesClient, KubernetesExtension, PodStatus
+from urllib3.exceptions import ProtocolError
 
 
 class KubernetesExtensionSpy(KubernetesExtension):
@@ -153,6 +154,25 @@ class WatchStub:
 
     def stream(self, func: Callable[..., Any], **kwargs: Any) -> Iterator[dict[str, Any]]:
         return iter(self.events)
+
+    def stop(self) -> None:
+        self.stop_call_count += 1
+
+
+@dataclass
+class RaisingWatchStub:
+    """A watch stub whose stream raises once iteration begins, simulating a connection
+    reset partway through a real watch (rather than a call-time failure)."""
+
+    exception: Exception
+    stop_call_count: int = 0
+
+    def stream(self, func: Callable[..., Any], **kwargs: Any) -> Iterator[dict[str, Any]]:
+        def _raise() -> Iterator[dict[str, Any]]:
+            raise self.exception
+            yield  # pragma: no cover - unreachable, keeps this a generator
+
+        return _raise()
 
     def stop(self) -> None:
         self.stop_call_count += 1
@@ -1081,6 +1101,68 @@ class TestKubernetesClientInit:
 
             # THEN None counts are treated as 0 so the first event is skipped, and the method
             # returns without raising once actual counts reach the desired replica count
+
+        @patch("kubernetes_client.client.watch.Watch")
+        @patch("kubernetes_client.client.datetime")
+        def test_reconnects_after_protocol_error_and_succeeds(
+            self, mock_datetime: MagicMock, MockWatch: MagicMock
+        ) -> None:
+            # GIVEN a first watch stream that is reset mid-flight (a transient disconnect, not a
+            # real timeout) and a second stream that then delivers a fully-rolled-out event
+            from datetime import datetime
+
+            now = datetime(2026, 3, 16, 10, 0, 0)
+            mock_datetime.now.side_effect = [now, now, now, now]
+
+            ready_sts = create_statefulset_stub(
+                generation=2, observed_generation=2, updated_replicas=2, ready_replicas=2, replicas=2
+            )
+            raising_stub = RaisingWatchStub(exception=ProtocolError("Connection aborted."))
+            success_stub = WatchStub(events=[{"object": ready_sts}])
+            MockWatch.side_effect = [raising_stub, success_stub]
+            backend_stub = KubernetesBackendStub(
+                read_stateful_set_result=create_statefulset_stub(
+                    generation=2, observed_generation=2, updated_replicas=0, ready_replicas=0, replicas=2
+                )
+            )
+            client = KubernetesClient(backend=backend_stub)
+
+            # WHEN waiting for the statefulset restart
+            client.wait_for_statefulset_restart(namespace="test-ns", statefulset_name="my-sts", timeout_seconds=60)
+
+            # THEN no exception is raised: the reset watch was stopped and a new one opened,
+            # which observed the rollout completing
+            assert raising_stub.stop_call_count == 1
+            assert success_stub.stop_call_count == 1
+
+        @patch("kubernetes_client.client.watch.Watch")
+        @patch("kubernetes_client.client.datetime")
+        def test_raises_timeout_when_protocol_error_occurs_after_deadline(
+            self, mock_datetime: MagicMock, MockWatch: MagicMock
+        ) -> None:
+            # GIVEN a watch stream that is reset only after the overall timeout has already elapsed
+            from datetime import datetime
+
+            start = datetime(2026, 3, 16, 10, 0, 0)
+            after_deadline = datetime(2026, 3, 16, 10, 1, 1)  # just over the 60s timeout
+            mock_datetime.now.side_effect = [start, start, after_deadline]
+
+            raising_stub = RaisingWatchStub(exception=ProtocolError("Connection aborted."))
+            MockWatch.return_value = raising_stub
+            backend_stub = KubernetesBackendStub(
+                read_stateful_set_result=create_statefulset_stub(
+                    generation=1, observed_generation=1, updated_replicas=0, ready_replicas=0, replicas=1
+                )
+            )
+            client = KubernetesClient(backend=backend_stub)
+
+            # WHEN waiting for the statefulset restart
+            # THEN a TimeoutError is raised rather than reconnecting indefinitely
+            with pytest.raises(TimeoutError) as exc_info:
+                client.wait_for_statefulset_restart(namespace="test-ns", statefulset_name="my-sts", timeout_seconds=60)
+
+            assert "my-sts" in str(exc_info.value)
+            assert raising_stub.stop_call_count == 1
 
 
 @dataclass
