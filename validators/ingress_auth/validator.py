@@ -12,6 +12,7 @@ _REQUIRED_UNIT_FIELDS = ("ingress-address", "private-address", "egress-subnets")
 _REQUIRED_PROVIDER_FIELDS = ("service", "port")
 _OPTIONAL_HEADER_FIELDS = ("allowed-request-headers", "allowed-response-headers")
 _TCP_TIMEOUT = 5
+_SUPPORTED_VERSION = "v1"
 
 
 class IngressAuthValidator(BaseValidator):
@@ -31,10 +32,39 @@ class IngressAuthValidator(BaseValidator):
         # Resolve optional credentials if this provider chooses secret-backed fields.
         self.resolve_secret("secret-auth")
 
-        required_app_fields = ["_supported_versions"] if "_supported_versions" in self.databag else []
-        checks: list[ValidationCheck] = [self.validate_schema(required_app_fields)]
+        checks: list[ValidationCheck] = [self._check_supported_versions()]
         checks.append(self._validate_remote_unit_databags())
         return self._make_result(level=level, checks=checks)
+
+    def _check_supported_versions(self) -> ValidationCheck:
+        """Verify the provider advertises SDI version negotiation for this v1-only interface.
+
+        Without ``_supported_versions`` (or without ``v1`` listed in it), SDI cannot negotiate
+        a shared schema version with the requirer, so the relation cannot be considered wired
+        correctly even if the rest of the databag looks fine.
+        """
+        raw = self.databag.get("_supported_versions", "")
+        if not raw:
+            return ValidationCheck(
+                name="schema",
+                passed=False,
+                message="Missing '_supported_versions' in provider app databag.",
+            )
+        try:
+            decoded = yaml.safe_load(raw)
+        except yaml.YAMLError as exc:
+            return ValidationCheck(
+                name="schema",
+                passed=False,
+                message=f"Could not decode '_supported_versions' as YAML: {exc}",
+            )
+        if not isinstance(decoded, list) or _SUPPORTED_VERSION not in decoded:
+            return ValidationCheck(
+                name="schema",
+                passed=False,
+                message=f"'_supported_versions' does not advertise '{_SUPPORTED_VERSION}': {decoded!r}",
+            )
+        return ValidationCheck(name="schema", passed=True, message="OK")
 
     def _validate_provides(self, level: ValidationLevel) -> ValidationResult:
         if level not in ("simple", "deep"):

@@ -104,7 +104,7 @@ def _make_validator(
 
 def test_happy_path_passes() -> None:
     validator = _make_validator(
-        app_databag={},
+        app_databag={"_supported_versions": yaml.safe_dump(["v1"])},
         unit_databags=[
             {
                 "ingress-address": "10.0.0.1",
@@ -120,7 +120,7 @@ def test_happy_path_passes() -> None:
 
 def test_missing_fields_fails() -> None:
     validator = _make_validator(
-        app_databag={},
+        app_databag={"_supported_versions": yaml.safe_dump(["v1"])},
         unit_databags=[
             {
                 "ingress-address": "10.0.0.1",
@@ -133,6 +133,42 @@ def test_missing_fields_fails() -> None:
     assert result.status == "FAIL"
     check = next(check for check in result.checks if check.name == "unit_databag")
     assert "private-address" in check.message
+
+
+def test_missing_supported_versions_fails() -> None:
+    validator = _make_validator(
+        app_databag={},
+        unit_databags=[
+            {
+                "ingress-address": "10.0.0.1",
+                "private-address": "10.0.0.1",
+                "egress-subnets": "10.152.183.0/24",
+            }
+        ],
+    )
+    with patch.object(IngressAuthValidator, "resolve_secret", return_value={}):
+        result = validator.validate(level="simple")
+    assert result.status == "FAIL"
+    check = next(check for check in result.checks if check.name == "schema")
+    assert "_supported_versions" in check.message
+
+
+def test_unsupported_version_fails() -> None:
+    validator = _make_validator(
+        app_databag={"_supported_versions": yaml.safe_dump(["v2"])},
+        unit_databags=[
+            {
+                "ingress-address": "10.0.0.1",
+                "private-address": "10.0.0.1",
+                "egress-subnets": "10.152.183.0/24",
+            }
+        ],
+    )
+    with patch.object(IngressAuthValidator, "resolve_secret", return_value={}):
+        result = validator.validate(level="simple")
+    assert result.status == "FAIL"
+    check = next(check for check in result.checks if check.name == "schema")
+    assert "does not advertise 'v1'" in check.message
 
 
 def test_no_app_returns_error() -> None:
