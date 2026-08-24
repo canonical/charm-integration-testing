@@ -135,7 +135,7 @@ def test_missing_supported_versions_fails() -> None:
     )
     result = validator.validate(level="simple")
     assert result.status == "FAIL"
-    check = next(check for check in result.checks if check.name == "schema")
+    check = next(check for check in result.checks if check.name == "version")
     assert "_supported_versions" in check.message
 
 
@@ -152,7 +152,7 @@ def test_unsupported_version_fails() -> None:
     )
     result = validator.validate(level="simple")
     assert result.status == "FAIL"
-    check = next(check for check in result.checks if check.name == "schema")
+    check = next(check for check in result.checks if check.name == "version")
     assert "does not advertise 'v1'" in check.message
 
 
@@ -178,6 +178,7 @@ def test_provider_validates_requirer_databag() -> None:
     validator = _make_validator(
         role="provides",
         app_databag={
+            "_supported_versions": yaml.safe_dump(["v1"]),
             "data": yaml.safe_dump(
                 {
                     "service": "oidc-gatekeeper",
@@ -193,17 +194,50 @@ def test_provider_validates_requirer_databag() -> None:
 
 
 def test_provider_missing_data_key_fails() -> None:
-    validator = _make_validator(role="provides", app_databag={})
+    validator = _make_validator(
+        role="provides",
+        app_databag={"_supported_versions": yaml.safe_dump(["v1"])},
+    )
     result = validator.validate(level="simple")
     assert result.status == "FAIL"
     check = next(check for check in result.checks if check.name == "schema")
     assert "Missing 'data' key" in check.message
 
 
+def test_provider_missing_supported_versions_fails() -> None:
+    validator = _make_validator(
+        role="provides",
+        app_databag={"data": yaml.safe_dump({"service": "oidc-gatekeeper", "port": 8080})},
+    )
+    result = validator.validate(level="simple")
+    assert result.status == "FAIL"
+    check = next(check for check in result.checks if check.name == "version")
+    assert "_supported_versions" in check.message
+    assert not any(check.name == "schema" for check in result.checks)
+
+
+def test_provider_unsupported_version_fails() -> None:
+    validator = _make_validator(
+        role="provides",
+        app_databag={
+            "_supported_versions": yaml.safe_dump(["v2"]),
+            "data": yaml.safe_dump({"service": "oidc-gatekeeper", "port": 8080}),
+        },
+    )
+    result = validator.validate(level="simple")
+    assert result.status == "FAIL"
+    check = next(check for check in result.checks if check.name == "version")
+    assert "does not advertise 'v1'" in check.message
+    assert not any(check.name == "schema" for check in result.checks)
+
+
 def test_provider_rejects_invalid_contract() -> None:
     validator = _make_validator(
         role="provides",
-        app_databag={"data": yaml.safe_dump({"service": "oidc-gatekeeper", "port": "not-a-port"})},
+        app_databag={
+            "_supported_versions": yaml.safe_dump(["v1"]),
+            "data": yaml.safe_dump({"service": "oidc-gatekeeper", "port": "not-a-port"}),
+        },
     )
     result = validator.validate(level="simple")
     assert result.status == "FAIL"
@@ -214,7 +248,10 @@ def test_provider_rejects_invalid_contract() -> None:
 def test_provider_rejects_non_string_service() -> None:
     validator = _make_validator(
         role="provides",
-        app_databag={"data": yaml.safe_dump({"service": ["oidc-gatekeeper"], "port": 8080})},
+        app_databag={
+            "_supported_versions": yaml.safe_dump(["v1"]),
+            "data": yaml.safe_dump({"service": ["oidc-gatekeeper"], "port": 8080}),
+        },
     )
     result = validator.validate(level="simple")
     assert result.status == "FAIL"
@@ -225,7 +262,10 @@ def test_provider_rejects_non_string_service() -> None:
 def test_provider_rejects_boolean_port() -> None:
     validator = _make_validator(
         role="provides",
-        app_databag={"data": yaml.safe_dump({"service": "oidc-gatekeeper", "port": True})},
+        app_databag={
+            "_supported_versions": yaml.safe_dump(["v1"]),
+            "data": yaml.safe_dump({"service": "oidc-gatekeeper", "port": True}),
+        },
     )
     result = validator.validate(level="simple")
     assert result.status == "FAIL"
@@ -236,7 +276,10 @@ def test_provider_rejects_boolean_port() -> None:
 def test_provider_rejects_float_port() -> None:
     validator = _make_validator(
         role="provides",
-        app_databag={"data": yaml.safe_dump({"service": "oidc-gatekeeper", "port": 1.5})},
+        app_databag={
+            "_supported_versions": yaml.safe_dump(["v1"]),
+            "data": yaml.safe_dump({"service": "oidc-gatekeeper", "port": 1.5}),
+        },
     )
     result = validator.validate(level="simple")
     assert result.status == "FAIL"
@@ -247,7 +290,10 @@ def test_provider_rejects_float_port() -> None:
 def test_provider_deep_connectivity_passes() -> None:
     validator = _make_validator(
         role="provides",
-        app_databag={"data": yaml.safe_dump({"service": "oidc-gatekeeper", "port": 8080})},
+        app_databag={
+            "_supported_versions": yaml.safe_dump(["v1"]),
+            "data": yaml.safe_dump({"service": "oidc-gatekeeper", "port": 8080}),
+        },
     )
     with patch("validators.ingress_auth.validator.socket.create_connection") as mock_connect:
         mock_connect.return_value.__enter__ = lambda self: None
@@ -262,7 +308,10 @@ def test_provider_deep_connectivity_passes() -> None:
 def test_provider_deep_connectivity_fails() -> None:
     validator = _make_validator(
         role="provides",
-        app_databag={"data": yaml.safe_dump({"service": "oidc-gatekeeper", "port": 8080})},
+        app_databag={
+            "_supported_versions": yaml.safe_dump(["v1"]),
+            "data": yaml.safe_dump({"service": "oidc-gatekeeper", "port": 8080}),
+        },
     )
     with patch("validators.ingress_auth.validator.socket.create_connection", side_effect=OSError("refused")):
         result = validator.validate(level="deep")
@@ -274,7 +323,10 @@ def test_provider_deep_connectivity_fails() -> None:
 def test_provider_deep_skips_connectivity_when_port_invalid() -> None:
     validator = _make_validator(
         role="provides",
-        app_databag={"data": yaml.safe_dump({"service": "oidc-gatekeeper", "port": "not-a-port"})},
+        app_databag={
+            "_supported_versions": yaml.safe_dump(["v1"]),
+            "data": yaml.safe_dump({"service": "oidc-gatekeeper", "port": "not-a-port"}),
+        },
     )
     with patch("validators.ingress_auth.validator.socket.create_connection") as mock_connect:
         result = validator.validate(level="deep")

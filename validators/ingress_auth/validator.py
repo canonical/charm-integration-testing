@@ -34,41 +34,48 @@ class IngressAuthValidator(BaseValidator):
         return self._make_result(level=level, checks=checks)
 
     def _check_supported_versions(self) -> ValidationCheck:
-        """Verify the provider advertises SDI version negotiation for this v1-only interface.
+        """Verify the remote app advertises SDI version negotiation for this v1-only interface.
 
-        Without ``_supported_versions`` (or without ``v1`` listed in it), SDI cannot negotiate
-        a shared schema version with the requirer, so the relation cannot be considered wired
-        correctly even if the rest of the databag looks fine.
+        SDI's ``get_version()`` is called before the payload is unwrapped, on either side of
+        the relation, and raises if ``_supported_versions`` is missing, malformed, or does not
+        include a version this validator understands. Without it, the charms cannot negotiate
+        a shared schema version, so the relation cannot be considered wired correctly even if
+        the rest of the databag looks fine.
         """
         raw = self.databag.get("_supported_versions", "")
         if not raw:
             return ValidationCheck(
-                name="schema",
+                name="version",
                 passed=False,
-                message="Missing '_supported_versions' in provider app databag.",
+                message="Missing '_supported_versions' in remote app databag.",
             )
         try:
             decoded = yaml.safe_load(raw)
         except yaml.YAMLError as exc:
             return ValidationCheck(
-                name="schema",
+                name="version",
                 passed=False,
                 message=f"Could not decode '_supported_versions' as YAML: {exc}",
             )
         if not isinstance(decoded, list) or _SUPPORTED_VERSION not in decoded:
             return ValidationCheck(
-                name="schema",
+                name="version",
                 passed=False,
                 message=f"'_supported_versions' does not advertise '{_SUPPORTED_VERSION}': {decoded!r}",
             )
-        return ValidationCheck(name="schema", passed=True, message="OK")
+        return ValidationCheck(name="version", passed=True, message="OK")
 
     def _validate_provides(self, level: ValidationLevel) -> ValidationResult:
         if level not in ("simple", "deep"):
             return self._skipped_result_due_to_level(level)
 
+        version_check = self._check_supported_versions()
+        checks: list[ValidationCheck] = [version_check]
+        if not version_check.passed:
+            return self._make_result(level=level, checks=checks)
+
         schema_check, data = self._decode_requirer_data()
-        checks: list[ValidationCheck] = [schema_check]
+        checks.append(schema_check)
         if not schema_check.passed:
             return self._make_result(level=level, checks=checks)
 
