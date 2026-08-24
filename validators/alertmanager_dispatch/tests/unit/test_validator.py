@@ -185,6 +185,25 @@ class TestAlertmanagerDispatchValidatorSchema:
         assert not schema_check.passed
         assert "public_address" in schema_check.message
 
+    def test_fails_when_a_scaled_unit_has_empty_databag(self) -> None:
+        # GIVEN one provider unit advertises a valid url and a scaled sibling has an empty databag
+        validator = _make_validator(
+            {
+                "alertmanager-k8s/0": {"url": _URL},
+                "alertmanager-k8s/1": {},
+            }
+        )
+
+        # WHEN
+        result = validator.validate(level="simple")
+
+        # THEN the empty databag is surfaced as a schema error instead of being silently ignored
+        assert result.status == "FAIL"
+        schema_check = next(c for c in result.checks if c.name == "schema")
+        assert not schema_check.passed
+        assert "alertmanager-k8s/1" in schema_check.message
+        assert "public_address" in schema_check.message
+
     def test_fails_when_url_has_unsupported_scheme(self) -> None:
         # GIVEN a URL with an ftp:// scheme
         bad_url = "ftp://alertmanager-0.am-test.svc.cluster.local:9093"
@@ -791,6 +810,7 @@ class TestAlertmanagerDispatchValidatorDeep:
                 _mock_http_response(200, _SILENCE_CREATED_BODY),  # POST silence
                 # the silence never settles to 'active' within the poll budget
                 *[_mock_http_response(200, _SILENCE_PENDING_BODY) for _ in range(_SILENCE_SETTLE_ATTEMPTS)],
+                _mock_http_response(200, b""),  # DELETE silence (stray state removed since no canary was dispatched)
             ]
         )
 
@@ -813,3 +833,12 @@ class TestAlertmanagerDispatchValidatorDeep:
             if hasattr(call.args[0], "full_url") and call.args[0].full_url.endswith("/api/v2/alerts")
         ]
         assert not dispatched
+        # AND the accepted-but-unconfirmed silence is removed rather than left as stray state
+        deleted = [
+            call
+            for call in urlopen.call_args_list
+            if hasattr(call.args[0], "method") and call.args[0].method == "DELETE"
+        ]
+        assert deleted
+        cleanup_checks = [c for c in result.checks if c.name.startswith("canary_cleanup[")]
+        assert cleanup_checks and all(c.passed for c in cleanup_checks)

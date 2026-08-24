@@ -119,8 +119,6 @@ def _collect_endpoint_urls(
     for unit in sorted(relation.units, key=lambda u: getattr(u, "name", repr(u))):
         unit_name = getattr(unit, "name", repr(unit))
         data = relation.data[unit]
-        if not data:
-            continue  # a provider unit with an empty databag has nothing to advertise yet
 
         url = data.get("url", "")
         if not url:
@@ -288,7 +286,6 @@ def _canary_checks(urls: list[str]) -> list[ValidationCheck]:
         try:
             _confirm_silence_active(base, silence_id)
         except Exception as exc:
-            # No canary is dispatched, so the unconfirmed silence is harmless and left to expire.
             checks.append(
                 ValidationCheck(
                     name=check_name,
@@ -296,6 +293,8 @@ def _canary_checks(urls: list[str]) -> list[ValidationCheck]:
                     message=f"Silence not confirmed active before dispatch on {netloc}: {exc}",
                 )
             )
+            # No canary was dispatched, so remove the accepted silence now instead of leaving stray state.
+            checks.append(_remove_silence_check(base, silence_id, cleanup_name, netloc))
             continue
 
         try:
@@ -382,6 +381,19 @@ def _cleanup_check(base_url: str, probe_id: str, silence_id: str, check_name: st
             message=f"Canary cleanup failed on {netloc}; silence removal failed: {exc}",
         )
     return ValidationCheck(name=check_name, passed=True, message=f"Canary resolved and silence removed on {netloc}.")
+
+
+def _remove_silence_check(base_url: str, silence_id: str, check_name: str, netloc: str) -> ValidationCheck:
+    """Delete a silence created before any canary dispatch, surfacing failure as stray state."""
+    try:
+        _delete_silence(base_url, silence_id)
+    except Exception as exc:
+        return ValidationCheck(
+            name=check_name,
+            passed=False,
+            message=f"Canary cleanup failed on {netloc}; silence removal failed: {exc}",
+        )
+    return ValidationCheck(name=check_name, passed=True, message=f"Silence removed on {netloc}.")
 
 
 def _canary_payload(probe_id: str, starts_at: datetime, ends_at: datetime) -> bytes:
