@@ -642,7 +642,7 @@ class TestAlertmanagerDispatchValidatorDeep:
         }
         delete_request = urlopen.call_args_list[5].args[0]
         assert delete_request.method == "DELETE"
-        assert delete_request.full_url.endswith("/api/v2/silences/sil-abc123")
+        assert delete_request.full_url.endswith("/api/v2/silence/sil-abc123")
         assert result.status == "PASS"
 
     def test_skips_dispatch_when_silence_creation_fails(self) -> None:

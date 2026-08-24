@@ -16,6 +16,8 @@ from validators.base import BaseValidator, ValidationCheck, ValidationLevel, Val
 _HEALTHY_PATH = "/-/healthy"
 _ALERTS_PATH = "/api/v2/alerts"
 _SILENCES_PATH = "/api/v2/silences"
+# A single silence is fetched/deleted via the singular path per the Alertmanager API v2 spec.
+_SILENCE_PATH = "/api/v2/silence"
 _CANARY_ALERTNAME = "EndpointValidatorCanary"
 _CANARY_LABEL_KEY = "validator_probe"
 _VALIDATOR_ID = "alertmanager_dispatch-validator"
@@ -429,7 +431,7 @@ def _create_silence(base_url: str, probe_id: str) -> str:
 
 def _delete_silence(base_url: str, silence_id: str) -> None:
     """Delete the canary silence created before dispatch."""
-    req = Request(f"{base_url}{_SILENCES_PATH}/{quote(silence_id, safe='')}", method="DELETE")  # nosec B310
+    req = Request(f"{base_url}{_SILENCE_PATH}/{quote(silence_id, safe='')}", method="DELETE")  # nosec B310
     try:
         with urlopen(req, timeout=_ALERTS_TIMEOUT_S) as resp:  # nosec B310
             resp.read()
