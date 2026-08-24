@@ -2,6 +2,7 @@
 # See LICENSE file for licensing details.
 
 import logging
+import math
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from time import sleep
@@ -356,7 +357,7 @@ class KubernetesClient:
                     self.backend.apps_v1_api.list_namespaced_stateful_set,
                     namespace=namespace,
                     field_selector=f"metadata.name={statefulset_name}",
-                    timeout_seconds=max(0, int(remaining_seconds)),
+                    timeout_seconds=max(0, math.ceil(remaining_seconds)),
                 ):
                     sts = event["object"]
                     status = sts.status
@@ -389,7 +390,7 @@ class KubernetesClient:
                     break
                 self.logger.warning(
                     f"Watch stream for StatefulSet '{statefulset_name}' in namespace '{namespace}' was reset "
-                    f"({exc}); reconnecting with {int(remaining_seconds)}s remaining to resume waiting."
+                    f"({exc}); reconnecting with {math.ceil(remaining_seconds)}s remaining to resume waiting."
                 )
                 continue
             finally:
