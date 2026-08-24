@@ -39,6 +39,7 @@ dependencies = [
     "validators-ingress",
     "validators-ingress-auth",
     "validators-prometheus-remote-write",
+    "validators-certificate-transfer",
 ]
 
 [build-system]

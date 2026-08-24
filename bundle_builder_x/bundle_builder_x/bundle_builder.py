@@ -63,6 +63,33 @@ class UnfulfilledEndpointInfo(BaseModel):
     interface: str | None
 
 
+class UnresolvedApplicationInfo(BaseModel):
+    """Information about an application that could not be resolved to exactly one charm."""
+
+    application: str
+    charm_name: str
+
+
+class UnresolvedIntegrationEndpointInfo(BaseModel):
+    """One side of a user-specified integration that could not be mapped to a charm integration."""
+
+    application: str
+    endpoint: str
+    charm_name: str
+
+
+class UnresolvedIntegrationInfo(BaseModel):
+    """A user-specified integration whose endpoints could not be mapped to any charm integration."""
+
+    endpoints: list[UnresolvedIntegrationEndpointInfo]
+
+
+def _sorted_endpoints(
+    endpoints: list[UnresolvedIntegrationEndpointInfo],
+) -> list[UnresolvedIntegrationEndpointInfo]:
+    return sorted(endpoints, key=lambda ep: (ep.charm_name, ep.endpoint, ep.application))
+
+
 class UncompletableBundleError(ValueError):
     """Exception raised when bundle builder cannot generate a complete bundle from the base bundle.
 
@@ -73,13 +100,19 @@ class UncompletableBundleError(ValueError):
     """
 
     unsat_core: list[AssertionTag]
+    unresolved_applications: list[UnresolvedApplicationInfo]
+    unresolved_integrations: list[UnresolvedIntegrationInfo]
 
     def __init__(
         self,
         reason: str | None = None,
         unsat_core: list[AssertionTag] | None = None,
+        unresolved_applications: list[UnresolvedApplicationInfo] | None = None,
+        unresolved_integrations: list[UnresolvedIntegrationInfo] | None = None,
     ):
-        self.unsat_core = unsat_core or []
+        self.unsat_core = list(unsat_core) if unsat_core is not None else []
+        self.unresolved_applications = list(unresolved_applications) if unresolved_applications is not None else []
+        self.unresolved_integrations = list(unresolved_integrations) if unresolved_integrations is not None else []
         if reason is None:
             if self.unfulfilled_endpoints:
                 reason = f"Cannot fulfill charm endpoints: {', '.join(f'{ep.charm_name}:{ep.endpoint}' for ep in sorted(self.unfulfilled_endpoints, key=lambda e: (e.charm_name, e.endpoint)))}"
@@ -91,6 +124,19 @@ class UncompletableBundleError(ValueError):
                         self.feature_mismatches,
                         key=lambda m: (m.requires.charm_name, m.requires.endpoint, m.feature),
                     )
+                )
+            elif self.unresolved_integrations:
+                reason = "Unresolved integration(s): " + ", ".join(
+                    "/".join(f"{ep.charm_name}:{ep.endpoint}" for ep in _sorted_endpoints(integration.endpoints))
+                    for integration in sorted(
+                        self.unresolved_integrations,
+                        key=lambda i: [(ep.charm_name, ep.endpoint) for ep in _sorted_endpoints(i.endpoints)],
+                    )
+                )
+            elif self.unresolved_applications:
+                reason = "Unresolved application(s): " + ", ".join(
+                    f"{info.application} ({info.charm_name})"
+                    for info in sorted(self.unresolved_applications, key=lambda i: i.application)
                 )
             else:
                 reason = "Cannot expand domain to handle failed assertion tags"
@@ -233,7 +279,62 @@ class BundleBuilder:
                 self.logger.info(f"Expanded domain to handle failed assertion tag: {tag}")
                 expanded = True
         if not expanded:
-            raise UncompletableBundleError(unsat_core=tags)
+            raise UncompletableBundleError(
+                unsat_core=tags,
+                unresolved_applications=self._collect_unresolved_applications(tags, domain),
+                unresolved_integrations=self._collect_unresolved_integrations(tags, domain),
+            )
+
+    @staticmethod
+    def _application_charm_name(domain: Domain, model_ref: ModelRef, application: str) -> str:
+        """Look up the spec-declared charm name for an application (available even if never resolved)."""
+        model = domain.models.get(model_ref)
+        if model is not None and application in model.applications:
+            return model.applications[application].charm
+        return application
+
+    @classmethod
+    def _collect_unresolved_applications(
+        cls, tags: list[AssertionTag], domain: Domain
+    ) -> list[UnresolvedApplicationInfo]:
+        """Build charm-identified diagnostics for every unresolved APPLICATION_EXISTS tag."""
+        result = []
+        for tag in tags:
+            if tag.kind != Assertions.APPLICATION_EXISTS:
+                continue
+            app_exists = cast(ApplicationExistsTag, tag)
+            result.append(
+                UnresolvedApplicationInfo(
+                    application=app_exists.application,
+                    charm_name=cls._application_charm_name(domain, app_exists.model, app_exists.application),
+                )
+            )
+        return result
+
+    @classmethod
+    def _collect_unresolved_integrations(
+        cls, tags: list[AssertionTag], domain: Domain
+    ) -> list[UnresolvedIntegrationInfo]:
+        """Build charm-identified diagnostics for every unresolved APPLICATION_INTEGRATION_EXISTS tag."""
+        result = []
+        for tag in tags:
+            if tag.kind != Assertions.APPLICATION_INTEGRATION_EXISTS:
+                continue
+            integration_exists = cast(ApplicationIntegrationExistsTag, tag)
+            endpoints = [
+                UnresolvedIntegrationEndpointInfo(
+                    application=ep.application,
+                    endpoint=ep.endpoint,
+                    charm_name=cls._application_charm_name(
+                        domain,
+                        ep.model if ep.model.name is not None else integration_exists.model,
+                        ep.application,
+                    ),
+                )
+                for ep in integration_exists.integration
+            ]
+            result.append(UnresolvedIntegrationInfo(endpoints=_sorted_endpoints(endpoints)))
+        return result
 
     @staticmethod
     def _merge_mismatch_tags(tags: list[AssertionTag]) -> list[AssertionTag]:
@@ -279,7 +380,13 @@ class BundleBuilder:
         elif tag.kind == Assertions.APPLICATION_EXISTS:
             app_exists = cast(ApplicationExistsTag, tag)
             model_ref = app_exists.model
-            charm = self._get_charm_for_application(app_exists.application, domain, model_ref)
+            try:
+                charm = self._get_charm_for_application(app_exists.application, domain, model_ref)
+            except CharmReleaseNotFoundException:
+                # No release satisfies this application's constraints (e.g. an override
+                # sentinel feature the target platform can never provide). Leave the tag
+                # unexpanded; it surfaces via the unsat core as an unresolved application.
+                return False
             return self._add_charm_for_application(charm, app_exists.application, domain, model_ref)
 
         elif tag.kind == Assertions.APPLICATION_INTEGRATION_EXISTS:
@@ -287,7 +394,11 @@ class BundleBuilder:
             results = []
             for endpoint in app_integration_exists.integration:
                 model_ref = endpoint.model if endpoint.model.name is not None else app_integration_exists.model
-                charm = self._get_charm_for_application(endpoint.application, domain, model_ref)
+                try:
+                    charm = self._get_charm_for_application(endpoint.application, domain, model_ref)
+                except CharmReleaseNotFoundException:
+                    # Same rationale as above: report via the unsat core rather than raising here.
+                    return False
                 results.append(self._add_charm_for_application(charm, endpoint.application, domain, model_ref))
             if any(results):
                 return True
