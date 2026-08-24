@@ -883,10 +883,15 @@ def _format_discrepancy_attributes(entry: DiscrepancyEntry) -> str:
     )
 
 
-def _release_resolution_metadata(error: CharmReleaseNotFoundException) -> set[tuple[str, str]]:
-    """Return stable atomic metadata for release failures."""
+def _release_resolution_metadata(error: CharmReleaseNotFoundException, charm_name: str) -> set[tuple[str, str]]:
+    """Return stable atomic metadata for release failures.
+
+    ``charm_name`` is the caller's authoritative charm name (e.g. from
+    ``ApplicationReleaseDiagnostic.charm_name``), used instead of ``error.request.charm_name``
+    since ``request`` is optional on ``CharmReleaseNotFoundException`` and may be unset.
+    """
     prefix = "failure:build_bundle:release_resolution"
-    entries: set[tuple[str, str]] = set()
+    entries: set[tuple[str, str]] = {(f"{prefix}:charm", charm_name)}
 
     def add(category: str, value: str | int | None) -> None:
         if value is not None:
@@ -942,15 +947,13 @@ def _release_resolution_metadata(error: CharmReleaseNotFoundException) -> set[tu
                     add(field, getattr(request, field))
 
         entries.add((prefix, kind))
-        if request is not None:
-            add("charm", request.charm_name)
     return entries
 
 
 def _bundle_diagnostic_metadata(diagnostic: BundleDiagnostic) -> list[tuple[str, str]]:
     """Translate one bundle diagnostic into execution metadata entries."""
     if isinstance(diagnostic, ApplicationReleaseDiagnostic):
-        return sorted(_release_resolution_metadata(diagnostic.error))
+        return sorted(_release_resolution_metadata(diagnostic.error, diagnostic.charm_name))
     if isinstance(diagnostic, UnresolvedApplicationDiagnostic):
         return [("failure:build_bundle:unresolved_application", diagnostic.charm_name)]
     if isinstance(diagnostic, UnresolvedIntegrationDiagnostic):

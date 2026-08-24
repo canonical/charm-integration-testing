@@ -6,6 +6,7 @@ from test_suite.conftest import _bundle_diagnostic_metadata, _release_resolution
 from bundle_builder_x import (
     ApplicationReleaseDiagnostic,
     AssumesMismatchError,
+    CharmReleaseNotFoundException,
     DiagnosticEndpoint,
     FeatureMismatchDiagnostic,
     PlatformMismatchError,
@@ -30,7 +31,7 @@ def test_platform_mismatch_metadata_uses_atomic_stable_values() -> None:
         supported_platforms=("kubernetes",),
     )
 
-    entries = _release_resolution_metadata(error)
+    entries = _release_resolution_metadata(error, "aodh")
 
     assert entries == {
         ("failure:build_bundle:release_resolution", "platform_mismatch"),
@@ -52,7 +53,7 @@ def test_assumes_metadata_emits_one_atomic_value_per_requirement() -> None:
         available_features=("juju",),
     )
 
-    entries = _release_resolution_metadata(error)
+    entries = _release_resolution_metadata(error, "aodh")
 
     assert entries == {
         ("failure:build_bundle:release_resolution", "assumes_mismatch"),
@@ -82,7 +83,7 @@ def test_aggregate_release_metadata_flattens_and_deduplicates_children() -> None
         causes=(child, child),
     )
 
-    entries = _release_resolution_metadata(aggregate)
+    entries = _release_resolution_metadata(aggregate, "aodh")
 
     assert entries == {
         ("failure:build_bundle:release_resolution", "channel_not_found"),
@@ -92,6 +93,14 @@ def test_aggregate_release_metadata_flattens_and_deduplicates_children() -> None
         ("failure:build_bundle:release_resolution:charm", "aodh"),
         ("failure:build_bundle:release_resolution:error_code", "revision-not-found"),
     }
+
+
+def test_release_resolution_metadata_reports_charm_when_request_is_unset() -> None:
+    error = CharmReleaseNotFoundException("release not found", request=None)
+
+    entries = _release_resolution_metadata(error, "aodh")
+
+    assert ("failure:build_bundle:release_resolution:charm", "aodh") in entries
 
 
 def test_bundle_diagnostic_metadata_dispatches_every_public_variant() -> None:
