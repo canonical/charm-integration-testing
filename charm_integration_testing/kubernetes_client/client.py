@@ -320,14 +320,11 @@ class KubernetesClient:
         The expected generation is read once at call time; events whose
         `observed_generation` is below that threshold are skipped.
 
-        A watch is a single long-lived HTTP connection, so it gets none of the automatic
-        per-request retry that discrete calls (like a plain GET) benefit from: a transient
-        reset of that connection (e.g. an idle-connection timeout somewhere in the network
-        path) would otherwise abort the whole wait immediately. If the stream is reset before
-        the rollout is observed to finish, a new watch is opened and the wait resumes with
-        whatever time remains of `timeout_seconds`; a stream that ends on its own (its own
-        internal timeout elapses with no matching event) is treated as a real timeout, exactly
-        as before.
+        A watch is a single long-lived HTTP connection, so unlike discrete requests it gets no
+        automatic retry: a transient reset would otherwise abort the wait immediately. If the
+        stream is reset before the rollout finishes, a new watch is opened with whatever time
+        remains of `timeout_seconds`; a stream that ends on its own (internal timeout, no
+        matching event) is still treated as a real timeout.
 
         Args:
             namespace: Namespace where the StatefulSet is located.
