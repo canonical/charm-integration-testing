@@ -276,7 +276,7 @@ def _check_identity_format(cmr_data: CMRData) -> ValidationCheck:
     invalid = [
         f"{field}={value!r}"
         for field, value in (("app_name", cmr_data["app_name"]), ("juju_model_name", cmr_data["juju_model_name"]))
-        if not _JUJU_NAME_RE.match(value)
+        if not _JUJU_NAME_RE.fullmatch(value)
     ]
     if invalid:
         return ValidationCheck(
@@ -305,13 +305,14 @@ def _cross_model_dns_name(cmr_data: CMRData) -> str:
 
 
 def _check_dns_reachable(cmr_data: CMRData) -> ValidationCheck:
-    """Verify the declared identity resolves to a live Kubernetes workload.
+    """Verify the declared identity's Kubernetes Service DNS name resolves.
 
     This is a prerequisite for any mesh authorization to have an effect: if
     the declared application/model cannot be resolved at all, the mesh has
     no addressable target to route traffic to.
     """
     host = _cross_model_dns_name(cmr_data)
+    previous_timeout = socket.getdefaulttimeout()
     try:
         socket.setdefaulttimeout(_DNS_TIMEOUT)
         socket.gethostbyname(host)
@@ -325,6 +326,8 @@ def _check_dns_reachable(cmr_data: CMRData) -> ValidationCheck:
                 "and that the workload is deployed."
             ),
         )
+    finally:
+        socket.setdefaulttimeout(previous_timeout)
     return ValidationCheck(name="dns_reachable", passed=True, message=f"Resolved {host!r}.")
 
 
