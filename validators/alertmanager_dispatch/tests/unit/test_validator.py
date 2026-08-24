@@ -427,3 +427,62 @@ class TestAlertmanagerDispatchValidatorDeep:
         canary_checks = [c for c in result.checks if c.name.startswith("canary[")]
         assert canary_checks and not canary_checks[0].passed
         assert "Dispatch failed" in canary_checks[0].message
+
+    def test_reports_not_found_when_early_query_errors_then_succeeds(self) -> None:
+        # GIVEN dispatch succeeds, the first query attempt raises, and a later
+        # attempt succeeds but returns no matching canary
+        validator = _make_validator()
+
+        with (
+            patch("validators.alertmanager_dispatch.validator._tcp_ping"),
+            patch("validators.alertmanager_dispatch.validator.time.sleep"),
+            patch(
+                "validators.alertmanager_dispatch.validator.urlopen",
+                side_effect=[
+                    _mock_http_response(200, b"OK"),  # GET /-/healthy
+                    _mock_http_response(200, b""),  # POST dispatch
+                    _mock_http_error(502),  # query attempt 1 raises a transient error
+                    _mock_http_response(200, _ALERTS_EMPTY_BODY),  # query attempt 2 -> empty
+                    _mock_http_response(200, _ALERTS_EMPTY_BODY),  # query attempt 3 -> empty
+                    _mock_http_response(200, b""),  # POST resolve cleanup
+                ],
+            ),
+        ):
+            result = validator.validate(level="deep")
+
+        # THEN the later successful query supersedes the transient error, so the
+        # message reports "not found" rather than the earlier "Query failed"
+        assert result.status == "FAIL"
+        canary_checks = [c for c in result.checks if c.name.startswith("canary[")]
+        assert canary_checks and not canary_checks[0].passed
+        assert "not found" in canary_checks[0].message
+        assert "Query failed" not in canary_checks[0].message
+
+    def test_query_uses_server_side_filter_matcher(self) -> None:
+        # GIVEN a deep run where the canary is found on the first query
+        validator = _make_validator()
+        probe = MagicMock()
+        probe.hex = "abc123def456"  # matches 'validator_probe' in _ALERTS_FOUND_BODY
+        urlopen = MagicMock(
+            side_effect=[
+                _mock_http_response(200, b"OK"),  # GET /-/healthy
+                _mock_http_response(200, b""),  # POST /api/v2/alerts (dispatch)
+                _mock_http_response(200, _ALERTS_FOUND_BODY),  # GET /api/v2/alerts (query)
+                _mock_http_response(200, b""),  # POST /api/v2/alerts (resolve cleanup)
+            ]
+        )
+
+        with (
+            patch("validators.alertmanager_dispatch.validator._tcp_ping"),
+            patch("validators.alertmanager_dispatch.validator.time.sleep"),
+            patch("validators.alertmanager_dispatch.validator.uuid.uuid4", return_value=probe),
+            patch("validators.alertmanager_dispatch.validator.urlopen", urlopen),
+        ):
+            validator.validate(level="deep")
+
+        # THEN the active-alerts query is scoped by a server-side filter matcher
+        # on the canary's own probe label instead of downloading every alert
+        query_target = urlopen.call_args_list[2].args[0]
+        assert isinstance(query_target, str)
+        assert "filter=validator_probe" in query_target
+        assert "abc123def456" in query_target

@@ -9,7 +9,7 @@ import urllib.error
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
 
 from validators.base import BaseValidator, ValidationCheck, ValidationLevel, ValidationResult
@@ -22,6 +22,10 @@ _CANARY_ALERTNAME = "EndpointValidatorCanary"
 _CANARY_LABEL_KEY = "validator_probe"
 _INGEST_WAIT_S = 2
 _QUERY_ATTEMPTS = 3
+_HEALTH_ATTEMPTS = 3
+_HEALTH_BACKOFF_S = 3
+_HEALTH_TIMEOUT_S = 5
+_ALERTS_TIMEOUT_S = 10
 
 
 class AlertmanagerDispatchValidator(BaseValidator):
@@ -193,7 +197,7 @@ def _http_healthy_checks(endpoint_infos: list[dict[str, str]]) -> list[Validatio
     """HTTP GET ``/-/healthy`` for each Alertmanager URL; confirm 200 OK.
 
     Alertmanager may take a few seconds to become healthy after startup, so the
-    check retries with back-off before reporting failure (3 attempts, 3 s apart).
+    check retries with back-off before reporting failure.
     """
     checks: list[ValidationCheck] = []
     for info in endpoint_infos:
@@ -203,11 +207,11 @@ def _http_healthy_checks(endpoint_infos: list[dict[str, str]]) -> list[Validatio
         check_name = f"http_healthy[{parsed.netloc}]"
         last_msg = ""
         passed = False
-        for attempt in range(3):
+        for attempt in range(_HEALTH_ATTEMPTS):
             if attempt:
-                time.sleep(3)
+                time.sleep(_HEALTH_BACKOFF_S)
             try:
-                with urlopen(healthy_url, timeout=5) as resp:  # nosec B310
+                with urlopen(healthy_url, timeout=_HEALTH_TIMEOUT_S) as resp:  # nosec B310
                     resp.read()
                     if resp.status == 200:
                         passed = True
@@ -251,13 +255,14 @@ def _canary_checks(endpoint_infos: list[dict[str, str]]) -> list[ValidationCheck
 
         found = False
         query_error = ""
-        for attempt in range(_QUERY_ATTEMPTS):
+        for _ in range(_QUERY_ATTEMPTS):
             time.sleep(_INGEST_WAIT_S)
             try:
                 found = _query_canary(base, probe_id)
             except Exception as exc:
                 query_error = str(exc)
                 continue
+            query_error = ""  # a successful query supersedes any earlier transient error
             if found:
                 break
 
@@ -305,7 +310,7 @@ def _post_alerts(base_url: str, payload: bytes) -> None:
     req = Request(f"{base_url}{_ALERTS_PATH}", data=payload, method="POST")  # nosec B310
     req.add_header("Content-Type", "application/json")
     try:
-        with urlopen(req, timeout=10) as resp:  # nosec B310
+        with urlopen(req, timeout=_ALERTS_TIMEOUT_S) as resp:  # nosec B310
             resp.read()
             if resp.status not in (200, 204):
                 raise RuntimeError(f"Unexpected dispatch response: HTTP {resp.status}")
@@ -321,9 +326,15 @@ def _push_canary(base_url: str, probe_id: str) -> None:
 
 
 def _query_canary(base_url: str, probe_id: str) -> bool:
-    """Query the active alerts endpoint; return True if the canary is present."""
-    query_url = f"{base_url}{_ALERTS_PATH}"
-    with urlopen(query_url, timeout=10) as resp:  # nosec B310
+    """Query the active alerts endpoint; return True if the canary is present.
+
+    A server-side ``filter`` matcher restricts the response to the canary's own
+    probe label so a busy Alertmanager does not stream back its entire active
+    alert set on every retry.
+    """
+    matcher = urlencode({"filter": f'{_CANARY_LABEL_KEY}="{probe_id}"'})
+    query_url = f"{base_url}{_ALERTS_PATH}?{matcher}"
+    with urlopen(query_url, timeout=_ALERTS_TIMEOUT_S) as resp:  # nosec B310
         raw = resp.read()
     try:
         alerts = json.loads(raw)
