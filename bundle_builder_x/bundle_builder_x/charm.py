@@ -42,24 +42,42 @@ class CharmAssumesEntry(BaseModel):
         return v
 
     def satisfied_by(self, juju_version: JujuVersion | None, features: frozenset[str] = frozenset()) -> bool:
-        return all(
-            [
-                # all of
-                all(entry.satisfied_by(juju_version, features) for entry in self.all_of)
-                if self.all_of is not None
-                else True,
-                # any of
-                any(entry.satisfied_by(juju_version, features) for entry in self.any_of)
-                if self.any_of is not None
-                else True,
-                # juju version constraint (skipped when juju_version is unknown)
-                ASSUMES_OPS[self.op](juju_version, self.required_version)
-                if self.op is not None and self.required_version is not None and juju_version is not None
-                else True,
-                # feature requirement
-                self.feature in features if self.feature is not None else True,
-            ]
-        )
+        return not self.unsatisfied_requirements(juju_version, features)
+
+    def describe(self) -> str:
+        """Return a deterministic representation of this assumes expression."""
+        if self.all_of is not None:
+            return "all-of(" + ",".join(sorted(entry.describe() for entry in self.all_of)) + ")"
+        if self.any_of is not None:
+            return "any-of(" + ",".join(sorted(entry.describe() for entry in self.any_of)) + ")"
+        if self.op is not None and self.required_version is not None:
+            return f"juju{self.op}{self.required_version}"
+        if self.feature is not None:
+            return f"feature={self.feature}"
+        return "empty"
+
+    def unsatisfied_requirements(
+        self,
+        juju_version: JujuVersion | None,
+        features: frozenset[str] = frozenset(),
+    ) -> tuple[str, ...]:
+        """Explain which requirements are not satisfied by an environment."""
+        failures: list[str] = []
+        if self.all_of is not None:
+            for entry in self.all_of:
+                failures.extend(entry.unsatisfied_requirements(juju_version, features))
+        if self.any_of is not None and not any(entry.satisfied_by(juju_version, features) for entry in self.any_of):
+            failures.append(self.describe())
+        if (
+            self.op is not None
+            and self.required_version is not None
+            and juju_version is not None
+            and not ASSUMES_OPS[self.op](juju_version, self.required_version)
+        ):
+            failures.append(self.describe())
+        if self.feature is not None and self.feature not in features:
+            failures.append(self.describe())
+        return tuple(sorted(set(failures)))
 
 
 class EndpointType(str, Enum):

@@ -3,11 +3,11 @@
 
 import logging
 from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import timedelta
 from typing import cast
 
 import z3  # type: ignore[import-untyped]
-from pydantic import BaseModel
 
 from .assertion_tags import (
     ApplicationExistsTag,
@@ -21,9 +21,20 @@ from .assertion_tags import (
     SubordinateBaseMismatchTag,
 )
 from .bundle import Solution
+from .bundle_diagnostics import (
+    ApplicationReleaseDiagnostic,
+    BundleBuildFailureDiagnostic,
+    BundleBuildFailureKind,
+    BundleDiagnostic,
+    DiagnosticEndpoint,
+    FeatureMismatchDiagnostic,
+    UnfulfilledEndpointDiagnostic,
+    UnresolvedApplicationDiagnostic,
+    UnresolvedIntegrationDiagnostic,
+    canonicalize_diagnostics,
+)
 from .charm import Charm, CharmChannel, CharmEndpoint, EndpointScope, EndpointType
 from .charmhub import CharmhubClient
-from .charmhub_http import CharmReleaseNotFoundException
 from .constraints import add_constraints
 from .domain import (
     Domain,
@@ -33,6 +44,7 @@ from .domain import (
 )
 from .domain_builder import DomainBuilder
 from .extract import extract_solution
+from .release_errors import CharmReleaseNotFoundException
 from .snapstore import SnapstoreClient
 from .spec import SpecFile
 from .timing import NullTimeline, Timeline
@@ -55,114 +67,29 @@ _EXPANSION_PRIORITY: dict[Assertions, int] = {
 }
 
 
-class UnfulfilledEndpointInfo(BaseModel):
-    """Information about a charm endpoint that could not be fulfilled during bundle building."""
+@dataclass(frozen=True)
+class AssertionHandlingResult:
+    """Outcome of attempting to expand one failed solver assertion."""
 
-    charm_name: str
-    endpoint: str
-    interface: str | None
-
-
-class UnresolvedApplicationInfo(BaseModel):
-    """Information about an application that could not be resolved to exactly one charm."""
-
-    application: str
-    charm_name: str
-
-
-class UnresolvedIntegrationEndpointInfo(BaseModel):
-    """One side of a user-specified integration that could not be mapped to a charm integration."""
-
-    application: str
-    endpoint: str
-    charm_name: str
-
-
-class UnresolvedIntegrationInfo(BaseModel):
-    """A user-specified integration whose endpoints could not be mapped to any charm integration."""
-
-    endpoints: list[UnresolvedIntegrationEndpointInfo]
-
-
-def _sorted_endpoints(
-    endpoints: list[UnresolvedIntegrationEndpointInfo],
-) -> list[UnresolvedIntegrationEndpointInfo]:
-    return sorted(endpoints, key=lambda ep: (ep.charm_name, ep.endpoint, ep.application))
+    expanded: bool = False
+    diagnostics: tuple[ApplicationReleaseDiagnostic, ...] = ()
 
 
 class UncompletableBundleError(ValueError):
     """Exception raised when bundle builder cannot generate a complete bundle from the base bundle.
 
-    NOTE: This is the canonical failure exception for the bundle builder.
-    Raise it directly with a descriptive ``reason`` for any condition that prevents producing
-    a complete, valid bundle. Do not add new exception types unless callers must
-    programmatically distinguish that specific case.
+    This is the canonical failure exception for the bundle builder. Typed diagnostics carry
+    the structured reasons.
     """
 
-    unsat_core: list[AssertionTag]
-    unresolved_applications: list[UnresolvedApplicationInfo]
-    unresolved_integrations: list[UnresolvedIntegrationInfo]
+    diagnostics: tuple[BundleDiagnostic, ...]
 
-    def __init__(
-        self,
-        reason: str | None = None,
-        unsat_core: list[AssertionTag] | None = None,
-        unresolved_applications: list[UnresolvedApplicationInfo] | None = None,
-        unresolved_integrations: list[UnresolvedIntegrationInfo] | None = None,
-    ):
-        self.unsat_core = list(unsat_core) if unsat_core is not None else []
-        self.unresolved_applications = list(unresolved_applications) if unresolved_applications is not None else []
-        self.unresolved_integrations = list(unresolved_integrations) if unresolved_integrations is not None else []
-        if reason is None:
-            if self.unfulfilled_endpoints:
-                reason = f"Cannot fulfill charm endpoints: {', '.join(f'{ep.charm_name}:{ep.endpoint}' for ep in sorted(self.unfulfilled_endpoints, key=lambda e: (e.charm_name, e.endpoint)))}"
-            elif self.feature_mismatches:
-                reason = "Charm endpoints have mutually incompatible feature tags: " + ", ".join(
-                    f"{m.requires.charm_name}:{m.requires.endpoint} <-> "
-                    f"{m.provides.charm_name}:{m.provides.endpoint} (feature {m.feature!r})"
-                    for m in sorted(
-                        self.feature_mismatches,
-                        key=lambda m: (m.requires.charm_name, m.requires.endpoint, m.feature),
-                    )
-                )
-            elif self.unresolved_integrations:
-                reason = "Unresolved integration(s): " + ", ".join(
-                    "/".join(f"{ep.charm_name}:{ep.endpoint}" for ep in _sorted_endpoints(integration.endpoints))
-                    for integration in sorted(
-                        self.unresolved_integrations,
-                        key=lambda i: [(ep.charm_name, ep.endpoint) for ep in _sorted_endpoints(i.endpoints)],
-                    )
-                )
-            elif self.unresolved_applications:
-                reason = "Unresolved application(s): " + ", ".join(
-                    f"{info.application} ({info.charm_name})"
-                    for info in sorted(self.unresolved_applications, key=lambda i: i.application)
-                )
-            else:
-                reason = "Cannot expand domain to handle failed assertion tags"
+    def __init__(self, diagnostics: Iterable[BundleDiagnostic]) -> None:
+        self.diagnostics = canonicalize_diagnostics(diagnostics)
+        if not self.diagnostics:
+            raise ValueError("UncompletableBundleError requires at least one diagnostic")
+        reason = "; ".join(diagnostic.description for diagnostic in self.diagnostics)
         super().__init__(f"Could not build a complete valid bundle: {reason}")
-
-    @property
-    def unfulfilled_endpoints(self) -> list[UnfulfilledEndpointInfo]:
-        """Endpoints in the unsat core that could not be fulfilled by any charm."""
-        return [
-            UnfulfilledEndpointInfo(
-                charm_name=cast(CharmEndpointNonOptionalTag, tag).charm.charm_name,
-                endpoint=cast(CharmEndpointNonOptionalTag, tag).charm.endpoint,
-                interface=cast(CharmEndpointNonOptionalTag, tag).interface,
-            )
-            for tag in self.unsat_core
-            if tag.kind == Assertions.CHARM_ENDPOINT_NON_OPTIONAL
-        ]
-
-    @property
-    def feature_mismatches(self) -> list[IntegrationFeatureMismatchTag]:
-        """Integrations in the unsat core whose endpoints declared incompatible feature tags."""
-        return [
-            cast(IntegrationFeatureMismatchTag, tag)
-            for tag in self.unsat_core
-            if tag.kind == Assertions.INTEGRATION_FEATURE_MISMATCH
-        ]
 
 
 class BundleBuilder:
@@ -190,30 +117,9 @@ class BundleBuilder:
 
     def build(self, spec: SpecFile) -> Solution:
         """Build bundles for all models defined in a spec simultaneously."""
-        self._validate_platforms(spec)
         domain = self._domain_builder.build(spec)
         z3_model = self._solve(domain)
         return extract_solution(z3_model, domain, logger=self.logger)
-
-    def _validate_platforms(self, spec: SpecFile) -> None:
-        """Ensure every application is placed on a model whose platform its overrides allow.
-
-        A charm's platform overrides (when present) enumerate the platforms it is
-        expected to run on. Placing such a charm on a model with a different platform
-        cannot produce a deployable bundle, so fail fast with a clear error.
-        """
-        overrides_client = self.charmhub_client.overrides_client
-        for model_spec in spec.models:
-            for application, app_spec in model_spec.applications.items():
-                supported_platforms = overrides_client.get_charm_platform_overrides(app_spec.charm)
-                if supported_platforms is not None:
-                    supported_platforms = supported_platforms or ["machine"]
-                    if model_spec.platform not in supported_platforms:
-                        raise UncompletableBundleError(
-                            f"Charm {app_spec.charm!r} (model={model_spec.key!r}, application={application!r}) "
-                            f"supports platform(s) {supported_platforms!r}, but was placed on a model with "
-                            f"platform {model_spec.platform!r}."
-                        )
 
     def _solve(self, domain: Domain) -> z3.ModelRef:
         # Iterative CEGIS loop: expand domain until satisfiable.
@@ -258,13 +164,27 @@ class BundleBuilder:
                 unsat_core = solver.unsat_core()
                 if len(unsat_core) == 0:
                     self.logger.warning("Solver returned unsat but unsat core was empty")
-                    raise UncompletableBundleError("Solver returned unsat but unsat core was empty")
+                    raise UncompletableBundleError(
+                        diagnostics=(
+                            BundleBuildFailureDiagnostic(
+                                kind=BundleBuildFailureKind.EMPTY_UNSAT_CORE,
+                                detail="Solver returned unsat but the unsat core was empty",
+                            ),
+                        )
+                    )
 
                 self._handle_unsat_core(unsat_core, domain)
             else:
                 raise UncompletableBundleError(
-                    f"Solver timed out after {self.optimize_timeout} at iteration {iteration}; "
-                    "the domain may be too large to solve"
+                    diagnostics=(
+                        BundleBuildFailureDiagnostic(
+                            kind=BundleBuildFailureKind.SOLVER_TIMEOUT,
+                            detail=(
+                                f"Solver timed out after {self.optimize_timeout} at iteration {iteration}; "
+                                "the domain may be too large to solve"
+                            ),
+                        ),
+                    )
                 )
 
     def _handle_unsat_core(self, unsat_core: z3.AstVector, domain: Domain) -> None:
@@ -273,16 +193,17 @@ class BundleBuilder:
             key=lambda a: (_EXPANSION_PRIORITY.get(a.kind, len(_EXPANSION_PRIORITY)), str(a)),
         )
         expanded = False
+        provisional_diagnostics: list[ApplicationReleaseDiagnostic] = []
         for tag in tags:
             self.logger.debug(f"Unsat core item: {tag}")
-            if self._handle_failed_assertion(tag, domain):
+            result = self._handle_failed_assertion(tag, domain)
+            provisional_diagnostics.extend(result.diagnostics)
+            if result.expanded:
                 self.logger.info(f"Expanded domain to handle failed assertion tag: {tag}")
                 expanded = True
         if not expanded:
             raise UncompletableBundleError(
-                unsat_core=tags,
-                unresolved_applications=self._collect_unresolved_applications(tags, domain),
-                unresolved_integrations=self._collect_unresolved_integrations(tags, domain),
+                diagnostics=self._collect_unsat_diagnostics(tags, domain, provisional_diagnostics),
             )
 
     @staticmethod
@@ -294,47 +215,84 @@ class BundleBuilder:
         return application
 
     @classmethod
-    def _collect_unresolved_applications(
-        cls, tags: list[AssertionTag], domain: Domain
-    ) -> list[UnresolvedApplicationInfo]:
-        """Build charm-identified diagnostics for every unresolved APPLICATION_EXISTS tag."""
-        result = []
+    def _collect_unsat_diagnostics(
+        cls,
+        tags: list[AssertionTag],
+        domain: Domain,
+        provisional_diagnostics: Iterable[ApplicationReleaseDiagnostic] = (),
+    ) -> tuple[BundleDiagnostic, ...]:
+        """Translate a final unsat core into canonical public diagnostics."""
+        diagnostics: list[BundleDiagnostic] = list(provisional_diagnostics)
+        release_failed_applications = {
+            (diagnostic.model, diagnostic.application)
+            for diagnostic in diagnostics
+            if isinstance(diagnostic, ApplicationReleaseDiagnostic)
+        }
         for tag in tags:
-            if tag.kind != Assertions.APPLICATION_EXISTS:
-                continue
-            app_exists = cast(ApplicationExistsTag, tag)
-            result.append(
-                UnresolvedApplicationInfo(
-                    application=app_exists.application,
-                    charm_name=cls._application_charm_name(domain, app_exists.model, app_exists.application),
+            match tag:
+                case CharmEndpointNonOptionalTag():
+                    diagnostics.append(
+                        UnfulfilledEndpointDiagnostic(
+                            endpoint=DiagnosticEndpoint(charm_name=tag.charm.charm_name, endpoint=tag.charm.endpoint),
+                            interface=tag.interface,
+                        )
+                    )
+                case IntegrationFeatureMismatchTag():
+                    diagnostics.append(
+                        FeatureMismatchDiagnostic(
+                            requires=DiagnosticEndpoint(
+                                charm_name=tag.requires.charm_name, endpoint=tag.requires.endpoint
+                            ),
+                            provides=DiagnosticEndpoint(
+                                charm_name=tag.provides.charm_name, endpoint=tag.provides.endpoint
+                            ),
+                            feature=tag.feature,
+                        ),
+                    )
+                case ApplicationExistsTag():
+                    if (tag.model.key, tag.application) not in release_failed_applications:
+                        diagnostics.append(
+                            UnresolvedApplicationDiagnostic(
+                                application=tag.application,
+                                charm_name=cls._application_charm_name(domain, tag.model, tag.application),
+                            )
+                        )
+                case ApplicationIntegrationExistsTag():
+                    if any(
+                        (
+                            (endpoint.model if endpoint.model.name is not None else tag.model).key,
+                            endpoint.application,
+                        )
+                        in release_failed_applications
+                        for endpoint in tag.integration
+                    ):
+                        continue
+                    endpoints = tuple(
+                        sorted(
+                            (
+                                DiagnosticEndpoint(
+                                    application=endpoint.application,
+                                    endpoint=endpoint.endpoint,
+                                    charm_name=cls._application_charm_name(
+                                        domain,
+                                        endpoint.model if endpoint.model.name is not None else tag.model,
+                                        endpoint.application,
+                                    ),
+                                )
+                                for endpoint in tag.integration
+                            ),
+                            key=lambda endpoint: endpoint.identity,
+                        )
+                    )
+                    diagnostics.append(UnresolvedIntegrationDiagnostic(endpoints=endpoints))
+        if not diagnostics:
+            diagnostics.append(
+                BundleBuildFailureDiagnostic(
+                    kind=BundleBuildFailureKind.UNEXPANDABLE_ASSERTIONS,
+                    detail="Cannot expand the domain to handle failed assertion tags",
                 )
             )
-        return result
-
-    @classmethod
-    def _collect_unresolved_integrations(
-        cls, tags: list[AssertionTag], domain: Domain
-    ) -> list[UnresolvedIntegrationInfo]:
-        """Build charm-identified diagnostics for every unresolved APPLICATION_INTEGRATION_EXISTS tag."""
-        result = []
-        for tag in tags:
-            if tag.kind != Assertions.APPLICATION_INTEGRATION_EXISTS:
-                continue
-            integration_exists = cast(ApplicationIntegrationExistsTag, tag)
-            endpoints = [
-                UnresolvedIntegrationEndpointInfo(
-                    application=ep.application,
-                    endpoint=ep.endpoint,
-                    charm_name=cls._application_charm_name(
-                        domain,
-                        ep.model if ep.model.name is not None else integration_exists.model,
-                        ep.application,
-                    ),
-                )
-                for ep in integration_exists.integration
-            ]
-            result.append(UnresolvedIntegrationInfo(endpoints=_sorted_endpoints(endpoints)))
-        return result
+        return canonicalize_diagnostics(diagnostics)
 
     @staticmethod
     def _merge_mismatch_tags(tags: list[AssertionTag]) -> list[AssertionTag]:
@@ -372,53 +330,103 @@ class BundleBuilder:
         self,
         tag: AssertionTag,
         domain: Domain,
-    ) -> bool:
+    ) -> AssertionHandlingResult:
         if tag.kind == Assertions.CHARM_ENDPOINT_NON_OPTIONAL:
             non_optional = cast(CharmEndpointNonOptionalTag, tag)
-            return self._expand_for_endpoint(non_optional.charm.charm_id, non_optional.charm.endpoint, domain)
+            return AssertionHandlingResult(
+                expanded=self._expand_for_endpoint(
+                    non_optional.charm.charm_id,
+                    non_optional.charm.endpoint,
+                    domain,
+                )
+            )
 
         elif tag.kind == Assertions.APPLICATION_EXISTS:
             app_exists = cast(ApplicationExistsTag, tag)
             model_ref = app_exists.model
             try:
                 charm = self._get_charm_for_application(app_exists.application, domain, model_ref)
-            except CharmReleaseNotFoundException:
-                # No release satisfies this application's constraints (e.g. an override
-                # sentinel feature the target platform can never provide). Leave the tag
-                # unexpanded; it surfaces via the unsat core as an unresolved application.
-                return False
-            return self._add_charm_for_application(charm, app_exists.application, domain, model_ref)
+            except CharmReleaseNotFoundException as error:
+                return AssertionHandlingResult(
+                    diagnostics=(
+                        self._application_release_diagnostic(
+                            app_exists.application,
+                            model_ref,
+                            domain,
+                            error,
+                        ),
+                    )
+                )
+            return AssertionHandlingResult(
+                expanded=self._add_charm_for_application(
+                    charm,
+                    app_exists.application,
+                    domain,
+                    model_ref,
+                )
+            )
 
         elif tag.kind == Assertions.APPLICATION_INTEGRATION_EXISTS:
             app_integration_exists = cast(ApplicationIntegrationExistsTag, tag)
             results = []
+            diagnostics = []
             for endpoint in app_integration_exists.integration:
                 model_ref = endpoint.model if endpoint.model.name is not None else app_integration_exists.model
                 try:
                     charm = self._get_charm_for_application(endpoint.application, domain, model_ref)
-                except CharmReleaseNotFoundException:
-                    # Same rationale as above: report via the unsat core rather than raising here.
-                    return False
+                except CharmReleaseNotFoundException as error:
+                    diagnostics.append(
+                        self._application_release_diagnostic(
+                            endpoint.application,
+                            model_ref,
+                            domain,
+                            error,
+                        )
+                    )
+                    continue
                 results.append(self._add_charm_for_application(charm, endpoint.application, domain, model_ref))
             if any(results):
-                return True
+                return AssertionHandlingResult(expanded=True, diagnostics=tuple(diagnostics))
+            if diagnostics:
+                return AssertionHandlingResult(diagnostics=tuple(diagnostics))
             # Both charms already exist but aren't paired (add_charm_to_domain no longer
             # eagerly pairs); connect them directly.
-            return self._connect_apps_for_integration(app_integration_exists, domain)
+            return AssertionHandlingResult(expanded=self._connect_apps_for_integration(app_integration_exists, domain))
 
         elif tag.kind == Assertions.ENDPOINT_COUNT_MATCHES_INTEGRATIONS:
             count_tag = cast(EndpointCountMatchesIntegrationsTag, tag)
-            return self._expand_for_endpoint(count_tag.charm.charm_id, count_tag.charm.endpoint, domain)
+            return AssertionHandlingResult(
+                expanded=self._expand_for_endpoint(
+                    count_tag.charm.charm_id,
+                    count_tag.charm.endpoint,
+                    domain,
+                )
+            )
 
         elif tag.kind == Assertions.PEER_CHANNEL_MISMATCH:
             mismatch = cast(PeerChannelMismatchTag, tag)
-            return self._handle_peer_channel_mismatch(mismatch, domain)
+            return AssertionHandlingResult(expanded=self._handle_peer_channel_mismatch(mismatch, domain))
 
         elif tag.kind == Assertions.SUBORDINATE_BASE_MISMATCH:
             base_mismatch = cast(SubordinateBaseMismatchTag, tag)
-            return self._handle_subordinate_base_mismatch(base_mismatch, domain)
+            return AssertionHandlingResult(expanded=self._handle_subordinate_base_mismatch(base_mismatch, domain))
 
-        return False
+        return AssertionHandlingResult()
+
+    @classmethod
+    def _application_release_diagnostic(
+        cls,
+        application: str,
+        model_ref: ModelRef,
+        domain: Domain,
+        error: CharmReleaseNotFoundException,
+    ) -> ApplicationReleaseDiagnostic:
+        return ApplicationReleaseDiagnostic(
+            application=application,
+            charm_name=cls._application_charm_name(domain, model_ref, application),
+            model=model_ref.key,
+            error=error,
+        )
 
     def _expand_for_endpoint(
         self,
@@ -1077,7 +1085,14 @@ class BundleBuilder:
             self.logger.info("z3.Optimize found optimal solution")
             return opt.model()
         if result == z3.unsat:
-            raise UncompletableBundleError("Optimization failed - problem became unsatisfiable")
+            raise UncompletableBundleError(
+                diagnostics=(
+                    BundleBuildFailureDiagnostic(
+                        kind=BundleBuildFailureKind.OPTIMIZATION_UNSATISFIABLE,
+                        detail="Optimization failed because the problem became unsatisfiable",
+                    ),
+                )
+            )
         return None
 
     def _iterative_descent(
@@ -1132,9 +1147,23 @@ class BundleBuilder:
         else:
             result = solver.check()
             if result == z3.unsat:
-                raise UncompletableBundleError("Optimization failed - problem became unsatisfiable")
+                raise UncompletableBundleError(
+                    diagnostics=(
+                        BundleBuildFailureDiagnostic(
+                            kind=BundleBuildFailureKind.OPTIMIZATION_UNSATISFIABLE,
+                            detail="Optimization failed because the problem became unsatisfiable",
+                        ),
+                    )
+                )
             if result != z3.sat:
-                raise UncompletableBundleError("Optimization failed - initial solve timed out")
+                raise UncompletableBundleError(
+                    diagnostics=(
+                        BundleBuildFailureDiagnostic(
+                            kind=BundleBuildFailureKind.OPTIMIZATION_TIMEOUT,
+                            detail="Optimization failed because the initial solve timed out",
+                        ),
+                    )
+                )
             model = solver.model()
 
         # Phase 1: minimize charm cost.
