@@ -183,8 +183,11 @@ class TestExtractSingleModel:
                 )
             }
         )
-        add_charm_to_domain(provider, domain, ModelRef(name="m"))
-        add_charm_to_domain(requirer, domain, ModelRef(name="m"))
+        from bundle_builder_x.domain import pair_charms_in_domain
+
+        provider_id = add_charm_to_domain(provider, domain, ModelRef(name="m"))
+        requirer_id = add_charm_to_domain(requirer, domain, ModelRef(name="m"))
+        pair_charms_in_domain(domain, provider_id, requirer_id)
 
         # WHEN extracting
         model = _solve(domain)
@@ -235,8 +238,11 @@ class TestExtractSingleModel:
                 ),
             }
         )
-        add_charm_to_domain(provider, domain, ModelRef(name="provider-model"))
-        add_charm_to_domain(requirer, domain, ModelRef(name="consumer-model"))
+        from bundle_builder_x.domain import pair_charms_in_domain
+
+        provider_id = add_charm_to_domain(provider, domain, ModelRef(name="provider-model"))
+        requirer_id = add_charm_to_domain(requirer, domain, ModelRef(name="consumer-model"))
+        pair_charms_in_domain(domain, provider_id, requirer_id)
 
         # WHEN extracting
         model = _solve(domain)
@@ -310,8 +316,15 @@ class TestExtractSingleModel:
                 ),
             }
         )
-        add_charm_to_domain(provider, domain, ModelRef(name="target-model", controller="target-controller"))
-        add_charm_to_domain(requirer, domain, ModelRef(name="neighbor-model", controller="neighbor-controller"))
+        from bundle_builder_x.domain import pair_charms_in_domain
+
+        provider_id = add_charm_to_domain(
+            provider, domain, ModelRef(name="target-model", controller="target-controller")
+        )
+        requirer_id = add_charm_to_domain(
+            requirer, domain, ModelRef(name="neighbor-model", controller="neighbor-controller")
+        )
+        pair_charms_in_domain(domain, provider_id, requirer_id)
 
         # WHEN extracting
         model = _solve(domain)

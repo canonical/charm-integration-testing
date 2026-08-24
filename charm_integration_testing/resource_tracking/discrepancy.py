@@ -7,7 +7,10 @@ The same scheduler state is expected to correspond to the same set of resources
 every time it is entered.  :func:`calculate_discrepancies` takes the observations
 gathered by :class:`~resource_tracking.tracker.StateResourceTracker`, treats the
 first observation of each state as the baseline, and reports resources that have
-gone ``missing`` or appeared ``extra`` on any later visit.
+gone ``missing`` or appeared ``extra`` on any later visit, as well as resources
+that re-appear with the *same* logical identity but a *changed* attribute -- a
+resource-specific inconsistency (e.g. a PVC ``resized`` or a StatefulSet
+``image_changed``).
 
 :class:`Discrepancy` is a structural interface so that different resource
 scopes can carry their own attributes; :class:`ModelResourceDiscrepancy` is the
@@ -19,7 +22,7 @@ recording concern that belongs with the recorder, not here.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
@@ -37,13 +40,22 @@ class DiscrepancyEntry:
     broadly-applicable dimensions (``resource_type``, ``qualifier``) while
     treating run-specific context (``state``, ``model``, the ``snapshot``
     detail) as informational.
+
+    ``snapshot`` is the concrete resource this entry describes.  For ``extra`` and
+    modification qualifiers it is the re-entry (drifted) snapshot; for ``missing``
+    it is the first-visit snapshot, since the resource is absent on re-entry.
+    ``baseline`` is the first-visit snapshot of the *same* logical resource and is
+    only populated for modification qualifiers (e.g. ``resized``); for
+    ``missing``/``extra`` there is no counterpart, so it is ``None``.
     """
 
     resource_type: str
     qualifier: str
     state: str
+    controller: str
     model: str
     snapshot: ResourceSnapshot
+    baseline: ResourceSnapshot | None = None
 
 
 @runtime_checkable
@@ -58,37 +70,53 @@ class Discrepancy(Protocol):
 
 
 @dataclass(frozen=True)
+class QualifiedSnapshot:
+    """A drifted resource under one qualifier, with its baseline counterpart.
+
+    ``baseline`` is ``None`` for presence qualifiers (``missing``/``extra``) and
+    the first-visit snapshot for modification qualifiers, so the recorder can
+    render an ``old->new`` diff.
+    """
+
+    snapshot: ResourceSnapshot
+    baseline: ResourceSnapshot | None = None
+
+
+@dataclass(frozen=True)
 class ModelResourceDiscrepancy:
     """A resource inconsistency detected on re-entry into a state for one model.
 
-    ``missing`` holds baseline resources absent on re-entry; ``extra`` holds
-    resources present on re-entry that were not part of the baseline.
+    ``qualified`` maps each qualifier (``missing``, ``extra``, or a
+    resource-specific modification kind such as ``resized``) to the resources
+    that exhibit it.  Keeping a single mapping -- rather than fixed ``missing``
+    and ``extra`` fields -- lets a new qualifier flow through unchanged.
     """
 
     state: State
+    controller: str
     model: str
-    missing: tuple[ResourceSnapshot, ...]
-    extra: tuple[ResourceSnapshot, ...]
+    qualified: Mapping[str, tuple[QualifiedSnapshot, ...]]
 
     def entries(self) -> Iterable[DiscrepancyEntry]:
-        for snapshot in self.missing:
-            yield self._entry(snapshot, qualifier="missing")
-        for snapshot in self.extra:
-            yield self._entry(snapshot, qualifier="extra")
+        for qualifier, qualified in self.qualified.items():
+            for item in qualified:
+                yield DiscrepancyEntry(
+                    resource_type=item.snapshot.resource_type,
+                    qualifier=qualifier,
+                    state=self.state.value,
+                    controller=self.controller,
+                    model=self.model,
+                    snapshot=item.snapshot,
+                    baseline=item.baseline,
+                )
 
     def summary(self) -> str:
-        parts = [f"{snapshot.resource_type}={snapshot.name} (missing)" for snapshot in self.missing]
-        parts += [f"{snapshot.resource_type}={snapshot.name} (extra)" for snapshot in self.extra]
-        return f"state={self.state.value} model={self.model}: " + ", ".join(parts)
-
-    def _entry(self, snapshot: ResourceSnapshot, qualifier: str) -> DiscrepancyEntry:
-        return DiscrepancyEntry(
-            resource_type=snapshot.resource_type,
-            qualifier=qualifier,
-            state=self.state.value,
-            model=self.model,
-            snapshot=snapshot,
-        )
+        parts = [
+            f"{item.snapshot.resource_type}={item.snapshot.name} ({qualifier})"
+            for qualifier, qualified in self.qualified.items()
+            for item in qualified
+        ]
+        return f"state={self.state.value} controller={self.controller} model={self.model}: " + ", ".join(parts)
 
 
 class ResourceDiscrepancyError(Exception):
@@ -107,51 +135,137 @@ class ResourceDiscrepancyError(Exception):
         super().__init__(message)
 
 
-def _sorted_by_identity(snapshots: Iterable[ResourceSnapshot]) -> tuple[ResourceSnapshot, ...]:
-    return tuple(sorted(snapshots, key=lambda snapshot: snapshot.identity))
+def _modifications(
+    baseline: ResourceSnapshot,
+    current: ResourceSnapshot,
+) -> Iterable[tuple[str, QualifiedSnapshot]]:
+    """Yield ``(qualifier, QualifiedSnapshot)`` for each changed attribute.
+
+    Runs the resource type's declared
+    :attr:`~resource_tracking.snapshot.ResourceSnapshot.inconsistency_checks`,
+    comparing the named report attribute on the baseline against the current
+    snapshot.  Each differing attribute becomes its own qualifier so callers can
+    select on it.
+    """
+    baseline_attributes = baseline.report_attributes()
+    current_attributes = current.report_attributes()
+    for check in current.inconsistency_checks:
+        baseline_value = baseline_attributes.get(check.attribute)
+        current_value = current_attributes.get(check.attribute)
+        if baseline_value == current_value:
+            continue
+        if check.ignore_empty_transition and (not baseline_value or not current_value):
+            continue
+        yield check.qualifier, QualifiedSnapshot(snapshot=current, baseline=baseline)
 
 
 def diff_snapshots(
     baseline: frozenset[ResourceSnapshot],
     current: frozenset[ResourceSnapshot],
-) -> dict[str, tuple[ResourceSnapshot, ...]]:
-    """Compare a baseline snapshot set against a later one by resource identity.
+) -> dict[str, tuple[QualifiedSnapshot, ...]]:
+    """Compare a baseline snapshot set against a later one by logical identity.
 
-    Returns a mapping of qualifier name to the snapshots exhibiting it.  Today
-    the qualifiers are ``missing`` (in the baseline but gone) and ``extra`` (newly
-    present).  Isolating this here keeps :func:`calculate_discrepancies` a thin
-    orchestrator and gives a single place to add resource-specific qualifiers
-    (e.g. a resized volume or a changed phase) without disturbing the diff loop.
+    Returns a mapping of qualifier name to the resources exhibiting it, sorted by
+    identity.  ``missing`` holds baseline resources gone on re-entry and ``extra``
+    holds resources newly present; both carry no baseline counterpart.  Resources
+    present in both sets (same ``identity``) are then run through each snapshot's
+    :attr:`~resource_tracking.snapshot.ResourceSnapshot.inconsistency_checks` to
+    surface resource-specific modification qualifiers (e.g. ``resized``), each
+    carrying its first-visit baseline so an ``old->new`` diff can be reported.
+
+    Qualifiers with no matching resources are omitted, so ``bool(result)`` is a
+    truthy test for "some drift".
     """
-    baseline_identities = {snapshot.identity for snapshot in baseline}
-    current_identities = {snapshot.identity for snapshot in current}
-    return {
-        "missing": _sorted_by_identity(s for s in baseline if s.identity not in current_identities),
-        "extra": _sorted_by_identity(s for s in current if s.identity not in baseline_identities),
+    baseline_by_key = {(s.resource_type, s.identity): s for s in baseline}
+    current_by_key = {(s.resource_type, s.identity): s for s in current}
+
+    grouped: dict[str, list[QualifiedSnapshot]] = {"missing": [], "extra": []}
+    for key, snapshot in baseline_by_key.items():
+        if key not in current_by_key:
+            grouped["missing"].append(QualifiedSnapshot(snapshot=snapshot))
+    for key, snapshot in current_by_key.items():
+        if key not in baseline_by_key:
+            grouped["extra"].append(QualifiedSnapshot(snapshot=snapshot))
+        else:
+            for qualifier, qualified in _modifications(baseline_by_key[key], snapshot):
+                grouped.setdefault(qualifier, []).append(qualified)
+
+    sorted_grouped = {
+        qualifier: tuple(sorted(items, key=lambda item: (item.snapshot.resource_type, item.snapshot.identity)))
+        for qualifier, items in grouped.items()
+        if items
     }
+    ordered: dict[str, tuple[QualifiedSnapshot, ...]] = {}
+    for qualifier in ("missing", "extra"):
+        if qualifier in sorted_grouped:
+            ordered[qualifier] = sorted_grouped.pop(qualifier)
+    for qualifier in sorted(sorted_grouped):
+        ordered[qualifier] = sorted_grouped[qualifier]
+    return ordered
+
+
+def _without_skipped(
+    snapshots: frozenset[ResourceSnapshot],
+    controller: str,
+    model: str,
+    skips: Mapping[tuple[str, str, str], frozenset[str]],
+) -> frozenset[ResourceSnapshot]:
+    """Drop snapshots whose owning application opts out of their resource type.
+
+    ``skips`` maps ``(controller, model, application)`` to the resource types
+    that application opts out of *in that model*.  Scoping the opt-out to the
+    model rather than the charm track reflects the physical reality that all of a
+    model's states share one namespace: a resource retained by any track
+    exercised in the model (e.g. an upgrade/downgrade test) can surface in any
+    state, so the opt-out must cover the whole model.  The controller is part of
+    the key because model names are only unique within a controller.  Filtering
+    here excludes a skipped kind uniformly from the baseline and every re-entry,
+    so a per-visit resolution difference cannot make a skipped kind read as
+    missing/extra drift.
+    """
+    return frozenset(
+        snapshot
+        for snapshot in snapshots
+        if snapshot.resource_type not in skips.get((controller, model, snapshot.application), frozenset())
+    )
 
 
 def calculate_discrepancies(
     observations: Iterable[ResourceObservation],
+    skips: Mapping[tuple[str, str, str], frozenset[str]] | None = None,
 ) -> list[ModelResourceDiscrepancy]:
-    """Diff each state's later observations against its first (baseline) visit."""
-    baselines: dict[tuple[State, str], frozenset[ResourceSnapshot]] = {}
+    """Diff each state's later observations against its first (baseline) visit.
+
+    ``skips`` maps each ``(controller, model, application)`` to the resource kinds
+    it opts out of tracking.  Skips are scoped to the model rather than the charm
+    track because all of a model's states share one namespace, so a resource
+    retained by any track exercised in the model can appear in any state.  The
+    map is applied uniformly to every observation, so a skipped kind is excluded
+    identically across every visit.
+
+    Baselines are keyed by ``(state, controller, model)`` so two same-named models
+    on different controllers (a CMR run) are never conflated into a single
+    baseline.
+    """
+    resolved_skips: Mapping[tuple[str, str, str], frozenset[str]] = skips if skips is not None else {}
+    baselines: dict[tuple[State, str, str], frozenset[ResourceSnapshot]] = {}
     discrepancies: list[ModelResourceDiscrepancy] = []
 
     for observation in observations:
-        key = (observation.state, observation.model)
+        snapshots = _without_skipped(observation.snapshots, observation.controller, observation.model, resolved_skips)
+        key = (observation.state, observation.controller, observation.model)
         if key not in baselines:
-            baselines[key] = observation.snapshots
+            baselines[key] = snapshots
             continue
 
-        qualifiers = diff_snapshots(baselines[key], observation.snapshots)
-        if any(qualifiers.values()):
+        qualified = diff_snapshots(baselines[key], snapshots)
+        if qualified:
             discrepancies.append(
                 ModelResourceDiscrepancy(
                     state=observation.state,
+                    controller=observation.controller,
                     model=observation.model,
-                    missing=qualifiers["missing"],
-                    extra=qualifiers["extra"],
+                    qualified=qualified,
                 )
             )
 

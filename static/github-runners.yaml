@@ -8,3 +8,7 @@ github-runners:
     labels: [self-hosted-linux-amd64-jammy-solqa-ps7]
     debug-mode: tmate
     pip-proxy: ""
+  ps7-private-endpoint-runners:
+    labels: [self-hosted-linux-amd64-noble-private-endpoint-small]
+    debug-mode: tmate
+    pip-proxy: ""

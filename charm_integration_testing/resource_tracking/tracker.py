@@ -31,9 +31,15 @@ from .snapshot import ResourceSnapshot
 
 @dataclass(frozen=True)
 class ResourceObservation:
-    """A set of resources observed in one model on entry into a state."""
+    """A set of resources observed in one model on entry into a state.
+
+    ``controller`` disambiguates ``model`` because model names are only unique
+    within a controller; a CMR run can observe the same model name on two
+    different controllers.
+    """
 
     state: State
+    controller: str
     model: str
     snapshots: frozenset[ResourceSnapshot]
 
@@ -48,9 +54,11 @@ class StateResourceTracker:
     def __init__(self) -> None:
         self._observations: list[ResourceObservation] = []
 
-    def record(self, state: State, model: str, snapshots: frozenset[ResourceSnapshot]) -> None:
-        """Record a set of observed resources for a (state, model) pair."""
-        self._observations.append(ResourceObservation(state=state, model=model, snapshots=snapshots))
+    def record(self, state: State, controller: str, model: str, snapshots: frozenset[ResourceSnapshot]) -> None:
+        """Record a set of observed resources for a (state, controller, model) scope."""
+        self._observations.append(
+            ResourceObservation(state=state, controller=controller, model=model, snapshots=snapshots)
+        )
 
     def collect(
         self,
@@ -65,7 +73,7 @@ class StateResourceTracker:
         """
         for collector in collectors:
             for collected in collector.collect(logger):
-                self.record(state, collected.model, collected.snapshots)
+                self.record(state, collected.controller, collected.model, collected.snapshots)
 
     def observations(self) -> tuple[ResourceObservation, ...]:
         """Return all recorded observations, in the order they were recorded."""

@@ -186,7 +186,12 @@ class VaultUnsealer:
         else:
             tokens = self._init_and_unseal_vault(model, application, leader_unit)
 
-        if not authorize_charm:
+        if not authorize_charm and already_initialized:
+            # authorize_charm=False is used by re-unseal callers (post_scale, post_delete_pod,
+            # etc.) to skip re-authorizing a vault that was merely resealed. But if this call
+            # just performed a fresh init (e.g. a k8s vault scaled to 0 then back up comes up
+            # empty), the charm still needs authorizing or it stays blocked on "Please authorize
+            # charm" - so only honour the skip when vault was already initialized. See issue #854.
             self.logger.info(f"Skipping authorizing vault charm '{self.charm.name}' unit '{leader_unit}'")
             return
 
