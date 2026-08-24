@@ -3,7 +3,7 @@
 
 import json
 import urllib.error
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import cast
 from unittest.mock import MagicMock, patch
 
@@ -192,6 +192,32 @@ class TestAlertmanagerDispatchValidatorSchema:
         schema_check = next(c for c in result.checks if c.name == "schema")
         assert not schema_check.passed
         assert "unsupported scheme" in schema_check.message
+
+    def test_fails_when_url_has_malformed_port(self) -> None:
+        # GIVEN a URL whose port is out of range -> urlparse().port raises ValueError
+        validator = _make_validator({"alertmanager-k8s/0": {"url": "http://alertmanager-0.am-test.svc:99999"}})
+
+        # WHEN
+        result = validator.validate(level="simple")
+
+        # THEN the parse error is reported as a failed schema check, not raised out of validate()
+        assert result.status == "FAIL"
+        schema_check = next(c for c in result.checks if c.name == "schema")
+        assert not schema_check.passed
+        assert "malformed URL" in schema_check.message
+
+    def test_fails_when_url_has_unmatched_ipv6_bracket(self) -> None:
+        # GIVEN a URL with an unterminated IPv6 literal -> urlparse().hostname raises ValueError
+        validator = _make_validator({"alertmanager-k8s/0": {"url": "http://[::1:9093"}})
+
+        # WHEN
+        result = validator.validate(level="simple")
+
+        # THEN
+        assert result.status == "FAIL"
+        schema_check = next(c for c in result.checks if c.name == "schema")
+        assert not schema_check.passed
+        assert "malformed URL" in schema_check.message
 
     def test_fails_when_v0_scheme_explicitly_empty(self) -> None:
         # GIVEN a v0 databag with an explicitly empty 'scheme' (malformed data)
@@ -640,6 +666,11 @@ class TestAlertmanagerDispatchValidatorDeep:
             "isRegex": False,
             "isEqual": True,
         }
+        # startsAt is backdated before endsAt so a leading host clock cannot leave the silence pending
+        silence_start = datetime.fromisoformat(silence_body["startsAt"])
+        silence_end = datetime.fromisoformat(silence_body["endsAt"])
+        assert silence_start < datetime.now(timezone.utc)
+        assert silence_start < silence_end
         delete_request = urlopen.call_args_list[5].args[0]
         assert delete_request.method == "DELETE"
         assert delete_request.full_url.endswith("/api/v2/silence/sil-abc123")

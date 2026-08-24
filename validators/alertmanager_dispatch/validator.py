@@ -30,6 +30,7 @@ _CONNECT_TIMEOUT_S = 5
 _ALERTS_TIMEOUT_S = 10
 _CANARY_ACTIVE_MIN = 5
 _SILENCE_DURATION_MIN = 10
+_SILENCE_CLOCK_SKEW_S = 30
 _PROBE_ID_LEN = 12
 
 
@@ -147,11 +148,18 @@ def _schema_check(
 
     errors: list[str] = list(collection_errors)
     for url in urls:
-        parsed = urlparse(url)
-        if parsed.scheme not in ("http", "https"):
-            errors.append(f"{url!r}: unsupported scheme {parsed.scheme!r}")
+        try:
+            parsed = urlparse(url)
+            scheme, hostname = parsed.scheme, parsed.hostname
+            # Accessing .hostname/.port raises ValueError on a malformed URL (bad port, unmatched IPv6 bracket).
+            _ = parsed.port
+        except ValueError as exc:
+            errors.append(f"{url!r}: malformed URL: {exc}")
             continue
-        if not parsed.hostname:
+        if scheme not in ("http", "https"):
+            errors.append(f"{url!r}: unsupported scheme {scheme!r}")
+            continue
+        if not hostname:
             errors.append(f"{url!r}: missing hostname")
             continue
 
@@ -404,7 +412,8 @@ def _create_silence(base_url: str, probe_id: str) -> str:
     now = datetime.now(timezone.utc)
     body = {
         "matchers": [{"name": _CANARY_LABEL_KEY, "value": probe_id, "isRegex": False, "isEqual": True}],
-        "startsAt": now.isoformat(),
+        # Backdate startsAt so the silence is active even if this host's clock leads Alertmanager's.
+        "startsAt": (now - timedelta(seconds=_SILENCE_CLOCK_SKEW_S)).isoformat(),
         "endsAt": (now + timedelta(minutes=_SILENCE_DURATION_MIN)).isoformat(),
         "createdBy": _VALIDATOR_ID,
         "comment": "Silence validator canary probe so it cannot page real receivers.",
