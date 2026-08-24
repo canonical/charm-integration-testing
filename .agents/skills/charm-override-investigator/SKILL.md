@@ -702,3 +702,29 @@ If the bundle pulls in something unexpected, check whether that endpoint should 
 - Reactive research: `@when_not` + `status.blocked()` means required; only `@when` means optional
 - Subordinate principal-attachment endpoint (container scope) is always required
 - Version-track constraints are common for CNI, container-runtime, etcd
+
+**Charms that do not support our testing infrastructure:**
+- `listed` should always reflect the *ideal* Charmhub listing state - i.e. whether the
+  charm *should* be listed - not whether our pipeline can currently test it. Do not set
+  `listed: false` just because a charm is untestable right now (e.g. SQT-1081) - that
+  conflates "shouldn't be listed" with "not covered by Charm QA," and the two are unrelated.
+  `listed: false` is appropriate when the charm is obsolete/abandoned and we intend to
+  request Charmhub delist it (or already have), even if Charmhub hasn't caught up yet - the
+  override tracks the target state, not merely today's live Charmhub page.
+- To mark a charm as untestable/unsupported by our pipeline without affecting its listing,
+  add an `assumes:` sentinel feature to every criteria block in its override file. Any
+  feature string works as a sentinel - `_ensure_compatibility()` never supplies these
+  (only `juju` and `k8s-api` are ever satisfied - see `_PLATFORM_FEATURES`), so
+  `charm_from_store()` fails immediately and clearly whenever such a charm is requested
+  directly, and is silently skipped when only being considered as a candidate neighbor.
+  See issue #813.
+  - Use a sentinel name that captures *why* the charm is unsupported, so overrides remain
+    self-documenting and distinguishable at a glance. Existing conventions:
+    `unsupported-openstack` for OpenStack-family charms untestable under SQT-1081 (still
+    listed - see above), and `unsupported-obsolete` for charms that are abandoned/EOL and
+    also delisted (`listed: false`). Prefer reusing or extending this naming pattern
+    (`unsupported-<reason>`) over inventing an unrelated scheme.
+- **Exception:** charms whose Charmhub entry is actually a *bundle*, not a charm (e.g.
+  `ceph-base`, `openstack-base`, `openstack-telemetry`) have no charm metadata/bases at all.
+  We only override charms, not bundles - do not create (or keep) an override file for a
+  bundle; delete it if one exists.

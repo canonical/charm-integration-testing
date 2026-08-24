@@ -1,17 +1,10 @@
 ---
-# glance-simplestreams-sync syncs Simplestreams image metadata into Glance.
-# Primary purpose: fetches images from Simplestreams and registers them in
-# Glance via identity-service (Keystone) and certificates (TLS).
+# glance-simplestreams-sync: syncs Simplestreams image metadata into Glance.
+# image-modifier, nrpe-external-master, simplestreams-image-service (provides):
+#   all optional - charm operates standalone without consumers.
 #
-# image-modifier (provides) - OPTIONAL: interface for other charms to hook in
-#   as image modifiers during sync. The charm syncs images without any modifier
-#   connected; e.g. glance-image-modifier charms use this optionally.
-# nrpe-external-master (provides) - OPTIONAL: NRPE monitoring subordinate hook.
-# simplestreams-image-service (provides) - OPTIONAL: exposes the service to
-#   consumers; charm operates standalone.
-# listed: false -- Excluded from automated bundle building (SQT-1081) to prevent
-# pipeline congestion; not currently covered by Charm QA.
-listed: false
+# assumes: [unsupported-openstack] -- listed on Charmhub, but not currently covered by Charm QA
+#   (SQT-1081); this blocks the charm from being built directly.
 overrides:
   - provides:
       image-modifier:
@@ -20,3 +13,4 @@ overrides:
         optional: true
       simplestreams-image-service:
         optional: true
+    assumes: [unsupported-openstack]
