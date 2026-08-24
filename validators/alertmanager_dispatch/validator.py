@@ -30,7 +30,11 @@ _CONNECT_TIMEOUT_S = 5
 _ALERTS_TIMEOUT_S = 10
 _CANARY_ACTIVE_MIN = 5
 _SILENCE_DURATION_MIN = 10
-_SILENCE_CLOCK_SKEW_S = 30
+_CLOCK_SKEW_S = 30
+_SILENCE_SETTLE_ATTEMPTS = 5
+_SILENCE_SETTLE_BACKOFF_S = 1
+_RESOLVE_CONFIRM_ATTEMPTS = 3
+_RESOLVE_CONFIRM_BACKOFF_S = 2
 _PROBE_ID_LEN = 12
 
 
@@ -72,9 +76,19 @@ def _base_url(url: str) -> str:
     return url.rstrip("/")
 
 
+def _silence_url(base_url: str, silence_id: str) -> str:
+    """Return the singular single-silence URL used to GET or DELETE one silence."""
+    return f"{base_url}{_SILENCE_PATH}/{quote(silence_id, safe='')}"
+
+
 def _http_error_body(exc: urllib.error.HTTPError) -> str:
     """Best-effort decode of an HTTPError response body for diagnostics."""
     return exc.read().decode("utf-8", errors="replace") if exc.fp else ""
+
+
+def _http_error(exc: urllib.error.HTTPError, action: str) -> RuntimeError:
+    """Wrap an HTTPError as a RuntimeError carrying a truncated response body."""
+    return RuntimeError(f"{action}: HTTP {exc.code}: {_http_error_body(exc)[:200]}")
 
 
 # ---------------------------------------------------------------------------
@@ -269,6 +283,21 @@ def _canary_checks(urls: list[str]) -> list[ValidationCheck]:
             )
             continue  # never dispatch an unsilenced canary that could notify real receivers
 
+        # A silence ID only means the silence was accepted, not that it has settled to the
+        # 'active' state; dispatching against a pending silence could still page a real receiver.
+        try:
+            _confirm_silence_active(base, silence_id)
+        except Exception as exc:
+            # No canary is dispatched, so the unconfirmed silence is harmless and left to expire.
+            checks.append(
+                ValidationCheck(
+                    name=check_name,
+                    passed=False,
+                    message=f"Silence not confirmed active before dispatch on {netloc}: {exc}",
+                )
+            )
+            continue
+
         try:
             checks.append(_round_trip_check(base, probe_id, check_name, netloc))
         finally:
@@ -326,6 +355,24 @@ def _cleanup_check(base_url: str, probe_id: str, silence_id: str, check_name: st
             message=f"Canary cleanup failed on {netloc}; canary resolve failed: {exc}. "
             "Silence retained until expiry so the canary stays muted.",
         )
+    # A resolve POST only sets endsAt; clock skew / HA propagation can keep the canary
+    # active briefly, so confirm it is gone before removing the silence that mutes it.
+    try:
+        cleared = _confirm_canary_cleared(base_url, probe_id)
+    except Exception as exc:
+        return ValidationCheck(
+            name=check_name,
+            passed=False,
+            message=f"Canary cleanup failed on {netloc}; could not confirm canary resolved: {exc}. "
+            "Silence retained until expiry so the canary stays muted.",
+        )
+    if not cleared:
+        return ValidationCheck(
+            name=check_name,
+            passed=False,
+            message=f"Canary cleanup failed on {netloc}; canary still active after resolve. "
+            "Silence retained until expiry so the canary stays muted.",
+        )
     try:
         _delete_silence(base_url, silence_id)
     except Exception as exc:
@@ -362,8 +409,7 @@ def _post_alerts(base_url: str, payload: bytes) -> None:
             if resp.status not in (200, 204):
                 raise RuntimeError(f"Unexpected dispatch response: HTTP {resp.status}")
     except urllib.error.HTTPError as exc:
-        body = _http_error_body(exc)
-        raise RuntimeError(f"Dispatch rejected: HTTP {exc.code}: {body[:200]}") from exc
+        raise _http_error(exc, "Dispatch rejected") from exc
 
 
 def _push_canary(base_url: str, probe_id: str) -> None:
@@ -397,14 +443,31 @@ def _query_canary(base_url: str, probe_id: str) -> bool:
     return False
 
 
+def _confirm_canary_cleared(base_url: str, probe_id: str) -> bool:
+    """Return True once the resolved canary no longer appears in active alerts.
+
+    A resolve POST only sets ``endsAt``; clock skew or HA propagation can keep
+    Alertmanager listing the canary as active for a moment, so poll before the
+    caller removes the silence.
+    """
+    for attempt in range(_RESOLVE_CONFIRM_ATTEMPTS):
+        if attempt:
+            time.sleep(_RESOLVE_CONFIRM_BACKOFF_S)
+        if not _query_canary(base_url, probe_id):
+            return True
+    return False
+
+
 def _resolve_canary(base_url: str, probe_id: str) -> None:
     """Resolve the canary alert by re-dispatching it with an ``endsAt`` in the past.
 
-    Alertmanager marks an alert resolved once ``endsAt`` has elapsed. Any error
-    propagates so the caller can report the cleanup as failed.
+    Alertmanager marks an alert resolved once ``endsAt`` has elapsed. ``endsAt``
+    is backdated by a clock-skew allowance so a leading host clock cannot leave
+    it in Alertmanager's future. Any error propagates so the caller can report
+    the cleanup as failed.
     """
     now = datetime.now(timezone.utc)
-    ends_at = now - timedelta(seconds=1)
+    ends_at = now - timedelta(seconds=_CLOCK_SKEW_S)
     starts_at = now - timedelta(minutes=_CANARY_ACTIVE_MIN)  # keep startsAt before endsAt so the resolve is accepted
     _post_alerts(base_url, _canary_payload(probe_id, starts_at, ends_at))
 
@@ -419,7 +482,7 @@ def _create_silence(base_url: str, probe_id: str) -> str:
     body = {
         "matchers": [{"name": _CANARY_LABEL_KEY, "value": probe_id, "isRegex": False, "isEqual": True}],
         # Backdate startsAt so the silence is active even if this host's clock leads Alertmanager's.
-        "startsAt": (now - timedelta(seconds=_SILENCE_CLOCK_SKEW_S)).isoformat(),
+        "startsAt": (now - timedelta(seconds=_CLOCK_SKEW_S)).isoformat(),
         "endsAt": (now + timedelta(minutes=_SILENCE_DURATION_MIN)).isoformat(),
         "createdBy": _VALIDATOR_ID,
         "comment": "Silence validator canary probe so it cannot page real receivers.",
@@ -432,8 +495,7 @@ def _create_silence(base_url: str, probe_id: str) -> str:
             if resp.status not in (200, 201):
                 raise RuntimeError(f"Unexpected silence response: HTTP {resp.status}")
     except urllib.error.HTTPError as exc:
-        body_text = _http_error_body(exc)
-        raise RuntimeError(f"Silence rejected: HTTP {exc.code}: {body_text[:200]}") from exc
+        raise _http_error(exc, "Silence rejected") from exc
     try:
         data = json.loads(raw)
     except json.JSONDecodeError as exc:
@@ -444,14 +506,43 @@ def _create_silence(base_url: str, probe_id: str) -> str:
     return str(silence_id)
 
 
+def _confirm_silence_active(base_url: str, silence_id: str) -> None:
+    """Poll the silence until Alertmanager reports it ``active``, else raise.
+
+    A returned silence ID only means the silence was accepted; it may still be
+    ``pending`` (e.g. a leading host clock), and a pending silence does not mute
+    alerts. Callers must not dispatch the canary until this confirms ``active``.
+    """
+    last_state = "unknown"
+    for attempt in range(_SILENCE_SETTLE_ATTEMPTS):
+        if attempt:
+            time.sleep(_SILENCE_SETTLE_BACKOFF_S)
+        req = Request(_silence_url(base_url, silence_id))  # nosec B310
+        try:
+            with urlopen(req, timeout=_ALERTS_TIMEOUT_S) as resp:  # nosec B310
+                raw = resp.read()
+        except urllib.error.HTTPError as exc:
+            raise _http_error(exc, "Silence status query rejected") from exc
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"Silence status response is not valid JSON: {exc}") from exc
+        status = data.get("status", {}) if isinstance(data, dict) else {}
+        last_state = status.get("state", "unknown")
+        if last_state == "active":
+            return
+        if last_state == "expired":
+            raise RuntimeError(f"Silence {silence_id} expired before it could mute the canary")
+    raise RuntimeError(f"Silence {silence_id} did not become active (last state {last_state!r})")
+
+
 def _delete_silence(base_url: str, silence_id: str) -> None:
     """Delete the canary silence created before dispatch."""
-    req = Request(f"{base_url}{_SILENCE_PATH}/{quote(silence_id, safe='')}", method="DELETE")  # nosec B310
+    req = Request(_silence_url(base_url, silence_id), method="DELETE")  # nosec B310
     try:
         with urlopen(req, timeout=_ALERTS_TIMEOUT_S) as resp:  # nosec B310
             resp.read()
             if resp.status not in (200, 204):
                 raise RuntimeError(f"Unexpected silence deletion response: HTTP {resp.status}")
     except urllib.error.HTTPError as exc:
-        body_text = _http_error_body(exc)
-        raise RuntimeError(f"Silence deletion rejected: HTTP {exc.code}: {body_text[:200]}") from exc
+        raise _http_error(exc, "Silence deletion rejected") from exc

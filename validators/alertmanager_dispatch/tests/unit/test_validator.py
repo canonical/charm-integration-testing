@@ -9,7 +9,11 @@ from unittest.mock import MagicMock, patch
 
 import ops
 
-from validators.alertmanager_dispatch.validator import AlertmanagerDispatchValidator
+from validators.alertmanager_dispatch.validator import (
+    _RESOLVE_CONFIRM_ATTEMPTS,
+    _SILENCE_SETTLE_ATTEMPTS,
+    AlertmanagerDispatchValidator,
+)
 from validators.test_utils.helpers import make_charm_from_relation
 from validators.test_utils.stubs import (
     ApplicationStub,
@@ -79,6 +83,8 @@ _ALERTS_FOUND_BODY = json.dumps(
 _ALERTS_EMPTY_BODY = json.dumps([]).encode()
 
 _SILENCE_CREATED_BODY = json.dumps({"silenceID": "sil-abc123"}).encode()
+_SILENCE_ACTIVE_BODY = json.dumps({"id": "sil-abc123", "status": {"state": "active"}}).encode()
+_SILENCE_PENDING_BODY = json.dumps({"id": "sil-abc123", "status": {"state": "pending"}}).encode()
 
 
 # ---------------------------------------------------------------------------
@@ -409,9 +415,11 @@ class TestAlertmanagerDispatchValidatorDeep:
                 side_effect=[
                     _mock_http_response(200, b"OK"),  # GET /-/healthy
                     _mock_http_response(200, _SILENCE_CREATED_BODY),  # POST /api/v2/silences (silence)
+                    _mock_http_response(200, _SILENCE_ACTIVE_BODY),  # GET /api/v2/silence/{id} (confirm active)
                     _mock_http_response(200, b""),  # POST /api/v2/alerts (dispatch)
                     _mock_http_response(200, _ALERTS_FOUND_BODY),  # GET /api/v2/alerts (query)
                     _mock_http_response(200, b""),  # POST /api/v2/alerts (resolve cleanup)
+                    _mock_http_response(200, _ALERTS_EMPTY_BODY),  # GET /api/v2/alerts (confirm resolved)
                     _mock_http_response(200, b""),  # DELETE /api/v2/silences/{id}
                 ],
             ),
@@ -436,11 +444,13 @@ class TestAlertmanagerDispatchValidatorDeep:
                 side_effect=[
                     _mock_http_response(200, b"OK"),  # GET /-/healthy
                     _mock_http_response(200, _SILENCE_CREATED_BODY),  # POST silence
+                    _mock_http_response(200, _SILENCE_ACTIVE_BODY),  # GET silence status (confirm active)
                     _mock_http_response(200, b""),  # POST dispatch
                     _mock_http_response(200, _ALERTS_EMPTY_BODY),  # query attempt 1
                     _mock_http_response(200, _ALERTS_EMPTY_BODY),  # query attempt 2
                     _mock_http_response(200, _ALERTS_EMPTY_BODY),  # query attempt 3
                     _mock_http_response(200, b""),  # POST resolve cleanup
+                    _mock_http_response(200, _ALERTS_EMPTY_BODY),  # GET confirm resolved
                     _mock_http_response(200, b""),  # DELETE silence
                 ],
             ),
@@ -465,8 +475,10 @@ class TestAlertmanagerDispatchValidatorDeep:
                 side_effect=[
                     _mock_http_response(200, b"OK"),  # GET /-/healthy
                     _mock_http_response(200, _SILENCE_CREATED_BODY),  # POST silence
+                    _mock_http_response(200, _SILENCE_ACTIVE_BODY),  # GET silence status (confirm active)
                     _mock_http_error(400),  # POST dispatch rejected
                     _mock_http_response(200, b""),  # POST resolve cleanup
+                    _mock_http_response(200, _ALERTS_EMPTY_BODY),  # GET confirm resolved
                     _mock_http_response(200, b""),  # DELETE silence
                 ],
             ),
@@ -492,11 +504,13 @@ class TestAlertmanagerDispatchValidatorDeep:
                 side_effect=[
                     _mock_http_response(200, b"OK"),  # GET /-/healthy
                     _mock_http_response(200, _SILENCE_CREATED_BODY),  # POST silence
+                    _mock_http_response(200, _SILENCE_ACTIVE_BODY),  # GET silence status (confirm active)
                     _mock_http_response(200, b""),  # POST dispatch
                     _mock_http_error(502),  # query attempt 1 raises a transient error
                     _mock_http_response(200, _ALERTS_EMPTY_BODY),  # query attempt 2 -> empty
                     _mock_http_response(200, _ALERTS_EMPTY_BODY),  # query attempt 3 -> empty
                     _mock_http_response(200, b""),  # POST resolve cleanup
+                    _mock_http_response(200, _ALERTS_EMPTY_BODY),  # GET confirm resolved
                     _mock_http_response(200, b""),  # DELETE silence
                 ],
             ),
@@ -520,9 +534,11 @@ class TestAlertmanagerDispatchValidatorDeep:
             side_effect=[
                 _mock_http_response(200, b"OK"),  # GET /-/healthy
                 _mock_http_response(200, _SILENCE_CREATED_BODY),  # POST /api/v2/silences (silence)
+                _mock_http_response(200, _SILENCE_ACTIVE_BODY),  # GET /api/v2/silence/{id} (confirm active)
                 _mock_http_response(200, b""),  # POST /api/v2/alerts (dispatch)
                 _mock_http_response(200, _ALERTS_FOUND_BODY),  # GET /api/v2/alerts (query)
                 _mock_http_response(200, b""),  # POST /api/v2/alerts (resolve cleanup)
+                _mock_http_response(200, _ALERTS_EMPTY_BODY),  # GET /api/v2/alerts (confirm resolved)
                 _mock_http_response(200, b""),  # DELETE /api/v2/silences/{id}
             ]
         )
@@ -537,7 +553,7 @@ class TestAlertmanagerDispatchValidatorDeep:
 
         # THEN the active-alerts query is scoped by a server-side filter matcher
         # on the canary's own probe label instead of downloading every alert
-        query_target = urlopen.call_args_list[3].args[0]
+        query_target = urlopen.call_args_list[4].args[0]
         assert isinstance(query_target, str)
         assert "filter=validator_probe" in query_target
         assert "abc123def456" in query_target
@@ -551,9 +567,11 @@ class TestAlertmanagerDispatchValidatorDeep:
             side_effect=[
                 _mock_http_response(200, b"OK"),  # GET /-/healthy
                 _mock_http_response(200, _SILENCE_CREATED_BODY),  # POST /api/v2/silences (silence)
+                _mock_http_response(200, _SILENCE_ACTIVE_BODY),  # GET /api/v2/silence/{id} (confirm active)
                 _mock_http_response(200, b""),  # POST /api/v2/alerts (dispatch)
                 _mock_http_response(200, _ALERTS_FOUND_BODY),  # GET /api/v2/alerts (query)
                 _mock_http_response(200, b""),  # POST /api/v2/alerts (resolve cleanup)
+                _mock_http_response(200, _ALERTS_EMPTY_BODY),  # GET /api/v2/alerts (confirm resolved)
                 _mock_http_response(200, b""),  # DELETE /api/v2/silences/{id}
             ]
         )
@@ -568,7 +586,7 @@ class TestAlertmanagerDispatchValidatorDeep:
 
         # THEN the resolve payload keeps startsAt strictly before endsAt so
         # Alertmanager accepts the cleanup and actually resolves the canary
-        resolve_request = urlopen.call_args_list[4].args[0]
+        resolve_request = urlopen.call_args_list[5].args[0]
         payload = json.loads(resolve_request.data)
         starts_at = datetime.fromisoformat(payload[0]["startsAt"])
         ends_at = datetime.fromisoformat(payload[0]["endsAt"])
@@ -584,6 +602,7 @@ class TestAlertmanagerDispatchValidatorDeep:
             side_effect=[
                 _mock_http_response(200, b"OK"),  # GET /-/healthy
                 _mock_http_response(200, _SILENCE_CREATED_BODY),  # POST silence
+                _mock_http_response(200, _SILENCE_ACTIVE_BODY),  # GET silence status (confirm active)
                 _mock_http_response(200, b""),  # POST dispatch
                 _mock_http_response(200, _ALERTS_FOUND_BODY),  # GET query (found)
                 _mock_http_error(400),  # POST resolve rejected
@@ -609,7 +628,42 @@ class TestAlertmanagerDispatchValidatorDeep:
         # AND the silence is retained (no DELETE) so the unresolved canary stays muted until expiry
         methods = [call.args[0].method for call in urlopen.call_args_list if hasattr(call.args[0], "method")]
         assert "DELETE" not in methods
-        assert urlopen.call_count == 5  # healthy, silence, dispatch, query, resolve (no delete)
+        assert urlopen.call_count == 6  # healthy, silence, confirm-active, dispatch, query, resolve (no delete)
+
+    def test_retains_silence_when_canary_still_active_after_resolve(self) -> None:
+        # GIVEN the resolve POST is accepted but the canary is still listed active
+        # afterwards (clock skew / HA propagation), so it cannot be confirmed resolved
+        validator = _make_validator()
+        probe = MagicMock()
+        probe.hex = "abc123def456"
+        urlopen = MagicMock(
+            side_effect=[
+                _mock_http_response(200, b"OK"),  # GET /-/healthy
+                _mock_http_response(200, _SILENCE_CREATED_BODY),  # POST silence
+                _mock_http_response(200, _SILENCE_ACTIVE_BODY),  # GET silence status (confirm active)
+                _mock_http_response(200, b""),  # POST dispatch
+                _mock_http_response(200, _ALERTS_FOUND_BODY),  # GET query (found)
+                _mock_http_response(200, b""),  # POST resolve
+                # every confirm poll still finds the canary active, so it is never confirmed resolved
+                *[_mock_http_response(200, _ALERTS_FOUND_BODY) for _ in range(_RESOLVE_CONFIRM_ATTEMPTS)],
+            ]
+        )
+
+        with (
+            patch("validators.alertmanager_dispatch.validator._tcp_ping"),
+            patch("validators.alertmanager_dispatch.validator.time.sleep"),
+            patch("validators.alertmanager_dispatch.validator.uuid.uuid4", return_value=probe),
+            patch("validators.alertmanager_dispatch.validator.urlopen", urlopen),
+        ):
+            result = validator.validate(level="deep")
+
+        # THEN the silence is retained (no DELETE) so the still-active canary stays muted
+        assert result.status == "FAIL"
+        cleanup_checks = [c for c in result.checks if c.name.startswith("canary_cleanup[")]
+        assert cleanup_checks and not cleanup_checks[0].passed
+        assert "still active" in cleanup_checks[0].message
+        methods = [call.args[0].method for call in urlopen.call_args_list if hasattr(call.args[0], "method")]
+        assert "DELETE" not in methods
 
     def test_attempts_cleanup_after_dispatch_transport_error(self) -> None:
         # GIVEN the dispatch POST raises locally (e.g. a read timeout) even though
@@ -621,8 +675,10 @@ class TestAlertmanagerDispatchValidatorDeep:
             side_effect=[
                 _mock_http_response(200, b"OK"),  # GET /-/healthy
                 _mock_http_response(200, _SILENCE_CREATED_BODY),  # POST silence
+                _mock_http_response(200, _SILENCE_ACTIVE_BODY),  # GET silence status (confirm active)
                 TimeoutError("read timed out"),  # POST dispatch raises after possibly reaching AM
                 _mock_http_response(200, b""),  # POST resolve cleanup
+                _mock_http_response(200, _ALERTS_EMPTY_BODY),  # GET confirm resolved
                 _mock_http_response(200, b""),  # DELETE silence
             ]
         )
@@ -643,7 +699,7 @@ class TestAlertmanagerDispatchValidatorDeep:
         assert "Dispatch failed" in canary_checks[0].message
         cleanup_checks = [c for c in result.checks if c.name.startswith("canary_cleanup[")]
         assert cleanup_checks and cleanup_checks[0].passed
-        assert urlopen.call_count == 5  # healthy, silence, dispatch, resolve, delete-silence
+        assert urlopen.call_count == 7  # healthy, silence, confirm-active, dispatch, resolve, confirm-resolved, delete
 
     def test_silences_probe_before_dispatch(self) -> None:
         # GIVEN a fully successful deep run
@@ -654,9 +710,11 @@ class TestAlertmanagerDispatchValidatorDeep:
             side_effect=[
                 _mock_http_response(200, b"OK"),  # GET /-/healthy
                 _mock_http_response(200, _SILENCE_CREATED_BODY),  # POST /api/v2/silences
+                _mock_http_response(200, _SILENCE_ACTIVE_BODY),  # GET /api/v2/silence/{id} (confirm active)
                 _mock_http_response(200, b""),  # POST /api/v2/alerts (dispatch)
                 _mock_http_response(200, _ALERTS_FOUND_BODY),  # GET /api/v2/alerts (query)
                 _mock_http_response(200, b""),  # POST /api/v2/alerts (resolve)
+                _mock_http_response(200, _ALERTS_EMPTY_BODY),  # GET /api/v2/alerts (confirm resolved)
                 _mock_http_response(200, b""),  # DELETE /api/v2/silences/{id}
             ]
         )
@@ -672,7 +730,7 @@ class TestAlertmanagerDispatchValidatorDeep:
         # THEN the probe label is silenced (POST /api/v2/silences) before the
         # dispatch (POST /api/v2/alerts), and the silence is removed in cleanup
         silence_request = urlopen.call_args_list[1].args[0]
-        dispatch_request = urlopen.call_args_list[2].args[0]
+        dispatch_request = urlopen.call_args_list[3].args[0]
         assert silence_request.full_url.endswith("/api/v2/silences")
         assert silence_request.method == "POST"
         assert dispatch_request.full_url.endswith("/api/v2/alerts")
@@ -688,7 +746,7 @@ class TestAlertmanagerDispatchValidatorDeep:
         silence_end = datetime.fromisoformat(silence_body["endsAt"])
         assert silence_start < datetime.now(timezone.utc)
         assert silence_start < silence_end
-        delete_request = urlopen.call_args_list[5].args[0]
+        delete_request = urlopen.call_args_list[7].args[0]
         assert delete_request.method == "DELETE"
         assert delete_request.full_url.endswith("/api/v2/silence/sil-abc123")
         assert result.status == "PASS"
@@ -721,3 +779,37 @@ class TestAlertmanagerDispatchValidatorDeep:
         assert "silence" in canary_checks[0].message.lower()
         assert urlopen.call_count == 2  # healthy + failed silence attempt, no dispatch
         assert not any(c.name.startswith("canary_cleanup[") for c in result.checks)
+
+    def test_skips_dispatch_when_silence_never_active(self) -> None:
+        # GIVEN the silence is accepted but every settle poll reports 'pending'
+        validator = _make_validator()
+        probe = MagicMock()
+        probe.hex = "abc123def456"
+        urlopen = MagicMock(
+            side_effect=[
+                _mock_http_response(200, b"OK"),  # GET /-/healthy
+                _mock_http_response(200, _SILENCE_CREATED_BODY),  # POST silence
+                # the silence never settles to 'active' within the poll budget
+                *[_mock_http_response(200, _SILENCE_PENDING_BODY) for _ in range(_SILENCE_SETTLE_ATTEMPTS)],
+            ]
+        )
+
+        with (
+            patch("validators.alertmanager_dispatch.validator._tcp_ping"),
+            patch("validators.alertmanager_dispatch.validator.time.sleep"),
+            patch("validators.alertmanager_dispatch.validator.uuid.uuid4", return_value=probe),
+            patch("validators.alertmanager_dispatch.validator.urlopen", urlopen),
+        ):
+            result = validator.validate(level="deep")
+
+        # THEN the canary is never dispatched (no POST to /api/v2/alerts) and the check fails
+        assert result.status == "FAIL"
+        canary_checks = [c for c in result.checks if c.name.startswith("canary[")]
+        assert canary_checks and not canary_checks[0].passed
+        assert "not confirmed active" in canary_checks[0].message
+        dispatched = [
+            call
+            for call in urlopen.call_args_list
+            if hasattr(call.args[0], "full_url") and call.args[0].full_url.endswith("/api/v2/alerts")
+        ]
+        assert not dispatched
