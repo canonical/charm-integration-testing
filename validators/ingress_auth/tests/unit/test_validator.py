@@ -6,6 +6,7 @@ from typing import Any, cast
 from unittest.mock import patch
 
 import ops
+import yaml
 
 from validators.ingress_auth.validator import IngressAuthValidator
 
@@ -61,6 +62,8 @@ class _SecretStub:
 
 @dataclass
 class _ModelStub:
+    name: str = "test-model"
+
     def get_secret(self, id: str) -> _SecretStub:  # noqa: A002
         return _SecretStub()
 
@@ -70,6 +73,7 @@ def _make_validator(
     app_databag: dict[str, str] | None = None,
     unit_databags: list[dict[str, str]] | None = None,
     app_present: bool = True,
+    role: str = "requires",
 ) -> IngressAuthValidator:
     endpoint = "ingress-auth"
     app = AppStub() if app_present else None
@@ -90,7 +94,7 @@ def _make_validator(
         data=relation_data,
         units=frozenset(units),
     )
-    relation_meta = RelationMetaStub(interface_name="ingress-auth", role=_RoleStub("requires"))
+    relation_meta = RelationMetaStub(interface_name="ingress-auth", role=_RoleStub(role))
     charm = CharmStub(
         meta=CharmMetaStub(relations={endpoint: relation_meta}),
         model=_ModelStub(),
@@ -143,3 +147,79 @@ def test_unsupported_level_is_skipped() -> None:
     with patch.object(IngressAuthValidator, "resolve_secret", return_value={}):
         result = validator.validate(level="deep")
     assert result.status == "SKIPPED"
+
+
+def test_provider_validates_requirer_databag() -> None:
+    validator = _make_validator(
+        role="provides",
+        app_databag={
+            "data": yaml.safe_dump(
+                {
+                    "service": "oidc-gatekeeper",
+                    "port": 8080,
+                    "allowed-request-headers": ["cookie"],
+                    "allowed-response-headers": ["kubeflow-userid"],
+                }
+            ),
+        },
+    )
+    result = validator.validate(level="simple")
+    assert result.status == "PASS"
+
+
+def test_provider_missing_data_key_fails() -> None:
+    validator = _make_validator(role="provides", app_databag={})
+    result = validator.validate(level="simple")
+    assert result.status == "FAIL"
+    check = next(check for check in result.checks if check.name == "schema")
+    assert "Missing 'data' key" in check.message
+
+
+def test_provider_rejects_invalid_contract() -> None:
+    validator = _make_validator(
+        role="provides",
+        app_databag={"data": yaml.safe_dump({"service": "oidc-gatekeeper", "port": "not-a-port"})},
+    )
+    result = validator.validate(level="simple")
+    assert result.status == "FAIL"
+    check = next(check for check in result.checks if check.name == "port")
+    assert "integer" in check.message
+
+
+def test_provider_deep_connectivity_passes() -> None:
+    validator = _make_validator(
+        role="provides",
+        app_databag={"data": yaml.safe_dump({"service": "oidc-gatekeeper", "port": 8080})},
+    )
+    with patch("validators.ingress_auth.validator.socket.create_connection") as mock_connect:
+        mock_connect.return_value.__enter__ = lambda self: None
+        mock_connect.return_value.__exit__ = lambda self, *args: None
+        result = validator.validate(level="deep")
+    mock_connect.assert_called_once_with(("oidc-gatekeeper.test-model.svc.cluster.local", 8080), timeout=5)
+    assert result.status == "PASS"
+    check = next(check for check in result.checks if check.name == "connectivity")
+    assert "TCP reached" in check.message
+
+
+def test_provider_deep_connectivity_fails() -> None:
+    validator = _make_validator(
+        role="provides",
+        app_databag={"data": yaml.safe_dump({"service": "oidc-gatekeeper", "port": 8080})},
+    )
+    with patch("validators.ingress_auth.validator.socket.create_connection", side_effect=OSError("refused")):
+        result = validator.validate(level="deep")
+    assert result.status == "FAIL"
+    check = next(check for check in result.checks if check.name == "connectivity")
+    assert "refused" in check.message
+
+
+def test_provider_deep_skips_connectivity_when_port_invalid() -> None:
+    validator = _make_validator(
+        role="provides",
+        app_databag={"data": yaml.safe_dump({"service": "oidc-gatekeeper", "port": "not-a-port"})},
+    )
+    with patch("validators.ingress_auth.validator.socket.create_connection") as mock_connect:
+        result = validator.validate(level="deep")
+    mock_connect.assert_not_called()
+    assert result.status == "FAIL"
+    assert not any(check.name == "connectivity" for check in result.checks)

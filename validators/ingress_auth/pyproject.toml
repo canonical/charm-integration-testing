@@ -12,6 +12,9 @@ authors = [
 requires-python = ">=3.10"
 dependencies = [
     "validators-base",
+    # pyyaml is required to decode the serialized-data-interface (SDI) "data" wire format
+    # used by ingress-auth providers/requirers (e.g. istio-pilot, oidc-gatekeeper).
+    "pyyaml>=6.0,<7.0",
 ]
 
 [project.entry-points."endpoint_validators"]
