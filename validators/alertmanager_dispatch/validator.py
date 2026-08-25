@@ -9,7 +9,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import quote, urlencode, urlparse
-from urllib.request import HTTPRedirectHandler, Request, build_opener
+from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 from validators.base import BaseValidator, ValidationCheck, ValidationLevel, ValidationResult
 
@@ -47,7 +47,9 @@ class _NoRedirectHandler(HTTPRedirectHandler):
 
 # Reject redirects on every call: an auth proxy bouncing /-/healthy to a login page must surface
 # as an error, not a masked 200. A rejected redirect raises HTTPError, which each caller handles.
-urlopen = build_opener(_NoRedirectHandler).open
+# ProxyHandler({}) ignores http_proxy/https_proxy so in-model endpoints are reached directly rather
+# than routed through (or blocked by) a CI/dev corporate proxy.
+urlopen = build_opener(ProxyHandler({}), _NoRedirectHandler).open
 
 
 class AlertmanagerDispatchValidator(BaseValidator):
@@ -91,6 +93,24 @@ def _base_url(url: str) -> str:
 def _silence_url(base_url: str, silence_id: str) -> str:
     """Return the singular single-silence URL used to GET or DELETE one silence."""
     return f"{base_url}{_SILENCE_PATH}/{quote(silence_id, safe='')}"
+
+
+def _display_netloc(parsed: Any) -> str:
+    """Return ``host[:port]`` with any ``user:pass@`` userinfo stripped so credentials never reach reports."""
+    netloc: str = parsed.netloc
+    at = netloc.rfind("@")
+    return netloc[at + 1 :] if at != -1 else netloc
+
+
+def _redact_url(url: str) -> str:
+    """Return *url* with userinfo removed from its netloc for safe display (the request still keeps it)."""
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return url  # unparseable URLs are surfaced verbatim by the schema check that rejects them
+    if "@" not in parsed.netloc:
+        return url
+    return parsed._replace(netloc=_display_netloc(parsed)).geturl()
 
 
 def _http_error_body(exc: urllib.error.HTTPError) -> str:
@@ -161,7 +181,7 @@ def _schema_check(
 ) -> ValidationCheck:
     """Validate structure and value constraints of every advertised endpoint.
 
-    Each URL must use an http/https scheme and have a hostname.
+    Each URL must use an http/https scheme, a hostname, and an explicit port.
     """
     if not urls and not collection_errors:
         return ValidationCheck(
@@ -174,21 +194,25 @@ def _schema_check(
     for url in urls:
         try:
             parsed = urlparse(url)
-            scheme, hostname = parsed.scheme, parsed.hostname
             # Accessing .hostname/.port raises ValueError on a malformed URL (bad port, unmatched IPv6 bracket).
-            _ = parsed.port
+            scheme, hostname, port = parsed.scheme, parsed.hostname, parsed.port
         except ValueError as exc:
-            errors.append(f"{url!r}: malformed URL: {exc}")
+            errors.append(f"{_redact_url(url)!r}: malformed URL: {exc}")
             continue
         if scheme not in ("http", "https"):
-            errors.append(f"{url!r}: unsupported scheme {scheme!r}")
+            errors.append(f"{_redact_url(url)!r}: unsupported scheme {scheme!r}")
             continue
         if not hostname:
-            errors.append(f"{url!r}: missing hostname")
+            errors.append(f"{_redact_url(url)!r}: missing hostname")
+            continue
+        # The interface advertises an explicit ':<port>'; without one, connectivity would silently
+        # fall back to 80/443 and mask a mis-advertised endpoint.
+        if port is None:
+            errors.append(f"{_redact_url(url)!r}: missing explicit ':<port>'")
             continue
         # Reject raw '?'/'#' too: urlparse drops empty delimiters, and appended API paths would misroute.
         if "?" in url or "#" in url:
-            errors.append(f"{url!r}: unexpected query or fragment component")
+            errors.append(f"{_redact_url(url)!r}: unexpected query or fragment component")
             continue
 
     if errors:
@@ -216,7 +240,7 @@ def _connectivity_check(urls: list[str]) -> ValidationCheck:
             port = parsed.port or (443 if parsed.scheme == "https" else 80)
             _tcp_ping(host, port)
         except Exception as exc:
-            errors.append(f"{url}: {exc}")
+            errors.append(f"{_redact_url(url)}: {exc}")
 
     if errors:
         return ValidationCheck(name="connect", passed=False, message="; ".join(errors))
@@ -233,7 +257,8 @@ def _http_healthy_checks(urls: list[str]) -> list[ValidationCheck]:
     for url in urls:
         parsed = urlparse(url)
         healthy_url = f"{_base_url(url)}{_HEALTHY_PATH}"
-        check_name = f"http_healthy[{parsed.netloc}]"
+        display_url = _redact_url(healthy_url)  # request keeps any credentials; reports show none
+        check_name = f"http_healthy[{_display_netloc(parsed)}]"
         last_msg = ""
         passed = False
         for attempt in range(_HEALTH_ATTEMPTS):
@@ -244,12 +269,12 @@ def _http_healthy_checks(urls: list[str]) -> list[ValidationCheck]:
                     resp.read()
                     if resp.status == 200:
                         passed = True
-                        last_msg = f"Alertmanager healthy at {healthy_url}."
+                        last_msg = f"Alertmanager healthy at {display_url}."
                         break
-                    last_msg = f"Unexpected status {resp.status} from {healthy_url}."
+                    last_msg = f"Unexpected status {resp.status} from {display_url}."
             except urllib.error.HTTPError as exc:
                 body = _http_error_body(exc)
-                last_msg = f"Unexpected response {exc.code} from {healthy_url}: {body[:200]}"
+                last_msg = f"Unexpected response {exc.code} from {display_url}: {body[:200]}"
             except Exception as exc:
                 last_msg = str(exc)
         checks.append(ValidationCheck(name=check_name, passed=passed, message=last_msg))
@@ -273,7 +298,7 @@ def _canary_checks(urls: list[str]) -> list[ValidationCheck]:
     for url in urls:
         parsed = urlparse(url)
         base = _base_url(url)
-        netloc = parsed.netloc
+        netloc = _display_netloc(parsed)  # host:port only — never leak userinfo into check names/messages
         check_name = f"canary[{netloc}]"
         cleanup_name = f"canary_cleanup[{netloc}]"
         probe_id = uuid.uuid4().hex[:_PROBE_ID_LEN]

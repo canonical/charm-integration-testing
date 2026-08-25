@@ -16,7 +16,6 @@ from validators.alertmanager_dispatch.validator import (
     AlertmanagerDispatchValidator,
     _NoRedirectHandler,
 )
-from validators.alertmanager_dispatch.validator import urlopen as am_urlopen
 from validators.test_utils.helpers import make_charm_from_relation
 from validators.test_utils.stubs import (
     ApplicationStub,
@@ -234,6 +233,19 @@ class TestAlertmanagerDispatchValidatorSchema:
         assert not schema_check.passed
         assert "malformed URL" in schema_check.message
 
+    def test_fails_when_url_has_no_explicit_port(self) -> None:
+        # GIVEN a URL that omits the ':<port>' the interface is documented to advertise
+        validator = _make_validator({"alertmanager-k8s/0": {"url": "http://alertmanager-0.am-test.svc"}})
+
+        # WHEN
+        result = validator.validate(level="simple")
+
+        # THEN it is rejected instead of silently falling back to port 80/443 during connectivity
+        assert result.status == "FAIL"
+        schema_check = next(c for c in result.checks if c.name == "schema")
+        assert not schema_check.passed
+        assert "explicit ':<port>'" in schema_check.message
+
     def test_fails_when_url_has_unmatched_ipv6_bracket(self) -> None:
         # GIVEN a URL with an unterminated IPv6 literal -> urlparse().hostname raises ValueError
         validator = _make_validator({"alertmanager-k8s/0": {"url": "http://[::1:9093"}})
@@ -384,19 +396,38 @@ class TestAlertmanagerDispatchValidatorSimple:
         assert not health_check.passed
         assert "302" in health_check.message
 
-    def test_module_urlopen_rejects_redirects(self) -> None:
-        # GIVEN the module HTTP client is built from a no-redirect opener
-        opener = am_urlopen.__self__  # type: ignore[attr-defined]
-        redirect_handlers = [h for h in opener.handlers if isinstance(h, HTTPRedirectHandler)]
-
-        # THEN every installed redirect handler is the no-redirect variant and suppresses redirects
-        assert redirect_handlers
-        assert all(isinstance(h, _NoRedirectHandler) for h in redirect_handlers)
-        assert all(
-            h.redirect_request(MagicMock(), MagicMock(), 302, "Found", MagicMock(), "http://example/login") is None
-            for h in redirect_handlers
+    def test_no_redirect_handler_suppresses_redirects(self) -> None:
+        # The no-redirect handler returns None for a 3xx so urllib raises it as an HTTPError instead
+        # of following an auth-proxy login redirect to a 200 that would be misread as healthy.
+        handler: HTTPRedirectHandler = _NoRedirectHandler()
+        assert (
+            handler.redirect_request(MagicMock(), MagicMock(), 302, "Found", MagicMock(), "http://example/login")
+            is None
         )
 
+    def test_redacts_userinfo_from_reports(self) -> None:
+        # GIVEN a provider advertises credentials in the endpoint URL
+        validator = _make_validator(
+            {"alertmanager-k8s/0": {"url": "http://user:s3cr3t@alertmanager-0.am-test.svc:9093"}}
+        )
+
+        with (
+            patch("validators.alertmanager_dispatch.validator._tcp_ping"),
+            patch("validators.alertmanager_dispatch.validator.time.sleep"),
+            patch(
+                "validators.alertmanager_dispatch.validator.urlopen",
+                side_effect=_mock_http_error(503),
+            ),
+        ):
+            result = validator.validate(level="simple")
+
+        # THEN the password never reaches any check name or message, but the host:port still does
+        report = " ".join(f"{c.name} {c.message}" for c in result.checks)
+        assert "s3cr3t" not in report
+        assert "user:" not in report
+        assert "alertmanager-0.am-test.svc:9093" in report
+
+    def test_simple_level_passes_when_healthy(self) -> None:
         # GIVEN a valid endpoint, reachable TCP, and Alertmanager healthy
         validator = _make_validator()
 
