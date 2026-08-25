@@ -27,12 +27,6 @@ class IncompleteCharmInfoException(UnparsableCharmException):
     pass
 
 
-class CharmReleaseNotFoundException(Exception):
-    """Raised when the release for a charm cannot be deduced."""
-
-    pass
-
-
 class CharmhubBase(BaseModel):
     model_config = ConfigDict(frozen=True)
 

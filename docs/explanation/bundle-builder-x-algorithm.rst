@@ -108,7 +108,17 @@ resolved together in a single step, rather than one dimension at a time.
 There is no hard iteration limit: valid dependency graphs may require an
 arbitrary number of expansion steps. Each solver call has a timeout. If the
 domain cannot be expanded further and the problem is still unsatisfiable, the
-builder raises ``UncompletableBundleError`` with the decoded unsat core.
+builder raises ``UncompletableBundleError`` with typed diagnostics.
+Required-application release searches also return structured rejection details
+from Charmhub resolution. At the final failed iteration, assertion tags and
+release rejections are translated into an immutable tuple of typed diagnostics.
+Generic unresolved-application/integration diagnostics are omitted when a
+release diagnostic already explains the same application, and duplicate
+diagnostics are removed by structured identity. Every remaining diagnostic is
+rendered in deterministic order. Provisional diagnostics are discarded when
+another assertion expands the domain and solving continues. Rejections from
+speculative neighbour, peer-channel, and base-variant searches remain internal
+because an incompatible candidate is normal solver search behavior.
 
 Optimization preparation
 ~~~~~~~~~~~~~~~~~~~~~~~~
