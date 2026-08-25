@@ -327,8 +327,10 @@ def _round_trip_check(base_url: str, probe_id: str, check_name: str, netloc: str
 
     found = False
     query_error = ""
-    for _ in range(_QUERY_ATTEMPTS):
-        time.sleep(_INGEST_WAIT_S)
+    for attempt in range(_QUERY_ATTEMPTS):
+        # Query first, then wait only between retries: a canary that lands right away skips the ingest wait.
+        if attempt:
+            time.sleep(_INGEST_WAIT_S)
         try:
             found = _query_canary(base_url, probe_id)
         except Exception as exc:
