@@ -526,7 +526,9 @@ def _create_silence(base_url: str, probe_id: str) -> str:
         data = json.loads(raw)
     except json.JSONDecodeError as exc:
         raise RuntimeError(f"Silence response is not valid JSON: {exc}") from exc
-    silence_id = data.get("silenceID") or data.get("silenceId") if isinstance(data, dict) else ""
+    silence_id = ""
+    if isinstance(data, dict):
+        silence_id = data.get("silenceID") or data.get("silenceId") or ""
     if not silence_id:
         raise RuntimeError("Silence response did not include a silence ID")
     return str(silence_id)

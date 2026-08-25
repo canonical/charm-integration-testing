@@ -861,6 +861,34 @@ class TestAlertmanagerDispatchValidatorDeep:
         assert urlopen.call_count == 2  # healthy + failed silence attempt, no dispatch
         assert not any(c.name.startswith("canary_cleanup[") for c in result.checks)
 
+    def test_skips_dispatch_when_silence_response_is_not_a_dict(self) -> None:
+        # GIVEN the silence POST returns valid JSON that is not an object (e.g. a list or error shape)
+        validator = _make_validator()
+        probe = MagicMock()
+        probe.hex = "abc123def456"
+        urlopen = MagicMock(
+            side_effect=[
+                _mock_http_response(200, b"OK"),  # GET /-/healthy
+                _mock_http_response(200, json.dumps([]).encode()),  # POST /api/v2/silences -> non-dict JSON
+            ]
+        )
+
+        with (
+            patch("validators.alertmanager_dispatch.validator._tcp_ping"),
+            patch("validators.alertmanager_dispatch.validator.time.sleep"),
+            patch("validators.alertmanager_dispatch.validator.uuid.uuid4", return_value=probe),
+            patch("validators.alertmanager_dispatch.validator.urlopen", urlopen),
+        ):
+            result = validator.validate(level="deep")
+
+        # THEN it fails cleanly (no AttributeError) with a clear message and never dispatches
+        assert result.status == "FAIL"
+        canary_checks = [c for c in result.checks if c.name.startswith("canary[")]
+        assert canary_checks and not canary_checks[0].passed
+        assert "did not include a silence ID" in canary_checks[0].message
+        assert urlopen.call_count == 2  # healthy + silence POST only, no dispatch
+        assert not any(c.name.startswith("canary_cleanup[") for c in result.checks)
+
     def test_skips_dispatch_when_silence_never_active(self) -> None:
         # GIVEN the silence is accepted but every settle poll reports 'pending'
         validator = _make_validator()
