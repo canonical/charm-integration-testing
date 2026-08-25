@@ -6,7 +6,7 @@ import logging
 from requests.adapters import HTTPAdapter
 from test_observer_client.client import DEFAULT_RETRY_KWARGS
 from test_observer_client.client import TestObserverClient as ObserverClient
-from urllib3.util import Retry
+from urllib3.util.retry import Retry
 
 
 class TestClientInit:

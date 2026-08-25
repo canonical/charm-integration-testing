@@ -9,12 +9,12 @@ from typing import Any
 
 import requests
 from requests.adapters import HTTPAdapter
-from urllib3.util import Retry
+from urllib3.util.retry import Retry
 
 # Every call this client makes is a read-only GET, so retrying on connect/read timeouts and
 # transient 5xx responses is always safe here (unlike write endpoints, there's no risk of
 # duplicating a side effect).
-DEFAULT_RETRY_KWARGS: MappingProxyType[str, object] = MappingProxyType(
+DEFAULT_RETRY_KWARGS: MappingProxyType[str, Any] = MappingProxyType(
     {
         "total": 3,
         "backoff_factor": 1,
@@ -31,7 +31,8 @@ def build_default_retries() -> Retry:
     Returns a new instance on every call, so no two sessions ever share the same mutable
     `Retry` object.
     """
-    return Retry(**DEFAULT_RETRY_KWARGS)  # type: ignore[arg-type]
+    kwargs: dict[str, Any] = dict(DEFAULT_RETRY_KWARGS)
+    return Retry(**kwargs)
 
 
 class TestObserverClientError(Exception):
