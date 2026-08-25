@@ -103,14 +103,25 @@ def _display_netloc(parsed: Any) -> str:
 
 
 def _redact_url(url: str) -> str:
-    """Return *url* with userinfo removed from its netloc for safe display (the request still keeps it)."""
-    try:
-        parsed = urlparse(url)
-    except ValueError:
-        return url  # unparseable URLs are surfaced verbatim by the schema check that rejects them
-    if "@" not in parsed.netloc:
+    """Return *url* with any ``user:pass@`` userinfo stripped for safe display (the request keeps it).
+
+    Uses string ops rather than :func:`urlparse` so credentials are removed even from a URL that is
+    malformed enough for ``urlparse`` to reject (e.g. an unmatched IPv6 bracket).
+    """
+    scheme_sep = url.find("://")
+    if scheme_sep == -1:
         return url
-    return parsed._replace(netloc=_display_netloc(parsed)).geturl()
+    authority_start = scheme_sep + len("://")
+    authority_end = len(url)
+    for i in range(authority_start, len(url)):
+        if url[i] in "/?#":
+            authority_end = i
+            break
+    authority = url[authority_start:authority_end]
+    at = authority.rfind("@")
+    if at == -1:
+        return url
+    return url[:authority_start] + authority[at + 1 :] + url[authority_end:]
 
 
 def _http_error_body(exc: urllib.error.HTTPError) -> str:
@@ -181,7 +192,8 @@ def _schema_check(
 ) -> ValidationCheck:
     """Validate structure and value constraints of every advertised endpoint.
 
-    Each URL must use an http/https scheme, a hostname, and an explicit port.
+    Each URL must use an http/https scheme and have a hostname. A port is optional
+    (v1 permits portless ingress URLs; connectivity defaults to 80/443 by scheme).
     """
     if not urls and not collection_errors:
         return ValidationCheck(
@@ -194,8 +206,9 @@ def _schema_check(
     for url in urls:
         try:
             parsed = urlparse(url)
-            # Accessing .hostname/.port raises ValueError on a malformed URL (bad port, unmatched IPv6 bracket).
-            scheme, hostname, port = parsed.scheme, parsed.hostname, parsed.port
+            # Access .hostname/.port so a malformed URL (bad port, unmatched IPv6 bracket) fails here.
+            scheme, hostname = parsed.scheme, parsed.hostname
+            _ = parsed.port
         except ValueError as exc:
             errors.append(f"{_redact_url(url)!r}: malformed URL: {exc}")
             continue
@@ -204,11 +217,6 @@ def _schema_check(
             continue
         if not hostname:
             errors.append(f"{_redact_url(url)!r}: missing hostname")
-            continue
-        # The interface advertises an explicit ':<port>'; without one, connectivity would silently
-        # fall back to 80/443 and mask a mis-advertised endpoint.
-        if port is None:
-            errors.append(f"{_redact_url(url)!r}: missing explicit ':<port>'")
             continue
         # Reject raw '?'/'#' too: urlparse drops empty delimiters, and appended API paths would misroute.
         if "?" in url or "#" in url:

@@ -233,18 +233,23 @@ class TestAlertmanagerDispatchValidatorSchema:
         assert not schema_check.passed
         assert "malformed URL" in schema_check.message
 
-    def test_fails_when_url_has_no_explicit_port(self) -> None:
-        # GIVEN a URL that omits the ':<port>' the interface is documented to advertise
-        validator = _make_validator({"alertmanager-k8s/0": {"url": "http://alertmanager-0.am-test.svc"}})
+    def test_accepts_url_without_explicit_port(self) -> None:
+        # GIVEN a v1 ingress-style endpoint that omits the port (connectivity defaults https -> 443)
+        validator = _make_validator({"alertmanager-k8s/0": {"url": "https://alertmanager.example.com/am"}})
 
-        # WHEN
-        result = validator.validate(level="simple")
+        with (
+            patch("validators.alertmanager_dispatch.validator._tcp_ping"),
+            patch(
+                "validators.alertmanager_dispatch.validator.urlopen",
+                return_value=_mock_http_response(200, b"OK"),
+            ),
+        ):
+            result = validator.validate(level="simple")
 
-        # THEN it is rejected instead of silently falling back to port 80/443 during connectivity
-        assert result.status == "FAIL"
+        # THEN the portless ingress URL is accepted, not rejected as mis-advertised
+        assert result.status == "PASS"
         schema_check = next(c for c in result.checks if c.name == "schema")
-        assert not schema_check.passed
-        assert "explicit ':<port>'" in schema_check.message
+        assert schema_check.passed
 
     def test_fails_when_url_has_unmatched_ipv6_bracket(self) -> None:
         # GIVEN a URL with an unterminated IPv6 literal -> urlparse().hostname raises ValueError
@@ -258,6 +263,21 @@ class TestAlertmanagerDispatchValidatorSchema:
         schema_check = next(c for c in result.checks if c.name == "schema")
         assert not schema_check.passed
         assert "malformed URL" in schema_check.message
+
+    def test_redacts_userinfo_from_malformed_url(self) -> None:
+        # GIVEN a malformed URL (unmatched IPv6 bracket) that also carries credentials
+        validator = _make_validator({"alertmanager-k8s/0": {"url": "http://user:s3cr3t@[::1:9093"}})
+
+        # WHEN
+        result = validator.validate(level="simple")
+
+        # THEN it fails schema, but the password is stripped even though urlparse could not parse it
+        assert result.status == "FAIL"
+        schema_check = next(c for c in result.checks if c.name == "schema")
+        assert not schema_check.passed
+        assert "malformed URL" in schema_check.message
+        assert "s3cr3t" not in schema_check.message
+        assert "user:" not in schema_check.message
 
     def test_fails_when_url_has_query_or_fragment(self) -> None:
         # GIVEN a URL with a query component; API paths are appended by concatenation so this would misroute
