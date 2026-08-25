@@ -90,8 +90,10 @@ class PeerChannelMismatchDiagnostic(BundleDiagnostic):
             requirement = (
                 f"{requirement} (revision {self.required_revision})"
                 if requirement
-                else (f"revision {self.required_revision}")
+                else f"revision {self.required_revision}"
             )
+        if not requirement:
+            requirement = "an unspecified channel"
         return (
             f"Charm endpoint {self.charm_name}:{self.endpoint} requires its peer "
             f"{self.peer_charm_name} to be on {requirement}"
