@@ -35,6 +35,9 @@ _HEADER_FIELDS = ("allowed-request-headers", "allowed-response-headers")
 # status is a deny. See Envoy's ext_authz_http_impl.cc.
 _SERVER_ERROR_FLOOR = 500
 _ALLOW_STATUS = 200
+# The 3xx statuses that are actual redirects and must carry Location (RFC 9110); 300, 304
+# and 305 are 3xx but not redirects, and legitimately omit it.
+_REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
 
 _CROSS_MODEL_HINT = (
     " The relation is cross-model: ingress-auth advertises a bare service name with no"
@@ -447,7 +450,7 @@ def _auth_decision_check(
             ),
         )
 
-    if 300 <= status < 400:
+    if status in _REDIRECT_STATUSES:
         location = headers.get("location", "")
         if not location:
             return ValidationCheck(

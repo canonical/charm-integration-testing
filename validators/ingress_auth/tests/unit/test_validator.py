@@ -388,10 +388,11 @@ class TestDeepLevel:
         assert "ALLOW" not in message
         assert "only on 200" in message
 
-    def test_redirect_without_location_fails(self) -> None:
-        # GIVEN an authorization service that redirects but omits the Location header
+    @pytest.mark.parametrize("status", [301, 302, 303, 307, 308])
+    def test_redirect_without_location_fails(self, status: int) -> None:
+        # GIVEN a service returning a status that must carry Location, but omitting it
         validator = _make_validator(_nested_databag(VALID_PAYLOAD))
-        error = HTTPError("http://authsvc:8080/", 302, "Found", _headers(), None)
+        error = HTTPError("http://authsvc:8080/", status, "Redirect", _headers(), None)
 
         # WHEN the validator runs at the deep level
         with (
@@ -404,6 +405,25 @@ class TestDeepLevel:
         # THEN the decision is unusable by the gateway
         assert result.status == "FAIL"
         assert _checks_by_name(result)["auth_decision"].passed is False
+
+    @pytest.mark.parametrize("status", [300, 304, 305])
+    def test_non_redirect_3xx_without_location_is_a_deny(self, status: int) -> None:
+        # GIVEN a 3xx status that is not a redirect and legitimately carries no Location;
+        # Envoy denies on any non-200, non-5xx response, so the gateway can still act on it
+        validator = _make_validator(_nested_databag(VALID_PAYLOAD))
+        error = HTTPError("http://authsvc:8080/", status, "Not a redirect", _headers(), None)
+
+        # WHEN the validator runs at the deep level
+        with (
+            patch(f"{_MODULE}.socket.getaddrinfo", return_value=_addrinfo("10.152.183.29")),
+            patch(f"{_MODULE}.socket.create_connection"),
+            patch(f"{_MODULE}.build_opener", return_value=_mock_opener(error)),
+        ):
+            result = validator.validate("deep")
+
+        # THEN it is reported as a DENY rather than a missing-Location failure
+        assert result.status == "PASS"
+        assert f"DENY ({status})" in _checks_by_name(result)["auth_decision"].message
 
     def test_deny_decision_passes(self) -> None:
         # GIVEN an authorization service that denies with 401
