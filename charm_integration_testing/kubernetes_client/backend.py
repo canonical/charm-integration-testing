@@ -9,9 +9,9 @@ from typing import Callable
 from kubernetes import client, config  # type: ignore[import-untyped]
 from urllib3.util import Retry
 
-# Applied to the shared ApiClient's connection pool, so every request made through any API
-# group (including ad-hoc ones instantiated directly against `api_client`) gets the same
-# retry behaviour without each call site needing its own retry/backoff logic.
+# Template retry policy: each ApiClient gets its own copy (see k8s_client), so every request
+# made through any API group (including ad-hoc ones instantiated directly against `api_client`)
+# gets the same retry behaviour without each call site needing its own retry/backoff logic.
 DEFAULT_RETRIES = Retry(
     total=5,
     backoff_factor=1,
@@ -57,5 +57,7 @@ class KubernetesBackend:
             load_kube_config()
 
         configuration = client.Configuration.get_default_copy()
-        configuration.retries = DEFAULT_RETRIES
+        # Each client gets its own Retry instance so nothing shares (and could accidentally
+        # mutate) the module-level template.
+        configuration.retries = DEFAULT_RETRIES.new()
         return cls(client.ApiClient(configuration))

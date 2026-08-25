@@ -28,6 +28,7 @@ class TestK8sClient:
         assert load_kube_config.calls == [{"config_file": str(kubeconfig.resolve())}]
         retries = backend.api_client.configuration.retries
         assert isinstance(retries, Retry)
+        assert retries is not DEFAULT_RETRIES  # each client gets its own copy
         assert retries.total == DEFAULT_RETRIES.total
         assert retries.backoff_factor == DEFAULT_RETRIES.backoff_factor
         assert retries.status_forcelist == DEFAULT_RETRIES.status_forcelist
