@@ -152,9 +152,12 @@ def _parse_sdi_version(entry: Any) -> int | None:
     InvalidSchemaVersionError from _parse_versions() before any relation data is read,
     and the provider catches only the no-versions and incompatible-versions errors, so
     a single malformed entry stops it reconciling altogether.
+
+    ``bool`` subclasses ``int``, so SDI's isinstance check accepts YAML ``true`` as 1;
+    int() normalises it here to keep the parsed value numeric.
     """
     if isinstance(entry, int):
-        return entry
+        return int(entry)
     if isinstance(entry, str) and entry.startswith("v"):
         try:
             return int(entry[1:])

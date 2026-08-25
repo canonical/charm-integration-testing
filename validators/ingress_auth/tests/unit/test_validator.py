@@ -321,6 +321,19 @@ class TestSimpleLevel:
         assert result.status == "PASS"
         assert "validating as v1" in _checks_by_name(result)["supported_versions"].message
 
+    def test_yaml_boolean_version_does_not_error(self) -> None:
+        # GIVEN a remote whose version list YAML-decodes to a bool; bool subclasses int,
+        # so SDI's isinstance check parses `true` as version 1 rather than rejecting it
+        validator = _make_validator(_nested_databag(VALID_PAYLOAD, versions=[True]))
+
+        # WHEN the validator runs
+        with _reachable():
+            result = validator.validate("simple")
+
+        # THEN it is canonicalised to v1 instead of forming 'vTrue' and raising ValueError
+        assert result.status == "PASS"
+        assert "validating as v1" in _checks_by_name(result)["supported_versions"].message
+
     def test_missing_payload_fails(self) -> None:
         # GIVEN a remote that completed the handshake but published no data
         validator = _make_validator(_nested_databag(payload=None))
