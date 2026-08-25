@@ -23,13 +23,18 @@ _HTTP_TIMEOUT = 10
 _VERSION_KEY = "_supported_versions"
 _DATA_KEY = "data"
 
+# The published ingress-auth schema defines only v1, and every field name and deep-check
+# assumption below is v1's. A future version would have to be read against its own schema.
+_SUPPORTED_VERSIONS = ("v1",)
+
 _REQUIRED_FIELDS = ["service", "port"]
 _HEADER_FIELDS = ("allowed-request-headers", "allowed-response-headers")
 
-# Statuses an ext_authz HTTP authorization server may legitimately return. Anything
-# at 5xx (or a transport failure) means the gateway cannot obtain a decision at all,
-# which fails open or closed depending on the proxy and is always a real defect.
+# How Envoy's HTTP ext_authz client maps an authorization response: 5xx is an error (the
+# gateway cannot obtain a decision at all), exactly 200 admits the request, and every other
+# status is a deny. See Envoy's ext_authz_http_impl.cc.
 _SERVER_ERROR_FLOOR = 500
+_ALLOW_STATUS = 200
 
 _CROSS_MODEL_HINT = (
     " The relation is cross-model: ingress-auth advertises a bare service name with no"
@@ -141,7 +146,7 @@ class IngressAuthValidator(BaseValidator):
 
 
 def _supported_versions_check(databag: dict[str, str]) -> ValidationCheck:
-    """Verify the remote side completed the SDI version handshake."""
+    """Verify the remote completed the SDI version handshake on a version we can read."""
     raw = databag.get(_VERSION_KEY, "")
     if not raw:
         return ValidationCheck(
@@ -159,21 +164,31 @@ def _supported_versions_check(databag: dict[str, str]) -> ValidationCheck:
             message=f"'{_VERSION_KEY}' is not valid YAML: {exc}",
         )
 
-    if (
-        not versions
-        or not isinstance(versions, list)
-        or not all(isinstance(version, str) for version in versions)
-    ):
+    if not versions or not isinstance(versions, list) or not all(isinstance(version, str) for version in versions):
         return ValidationCheck(
             name="supported_versions",
             passed=False,
             message=f"'{_VERSION_KEY}' must be a non-empty list of strings, got {versions!r}.",
         )
 
+    # SDI negotiates the highest version both sides advertise, so a superset is fine: the
+    # provider only supports v1, which is what will be used.
+    usable = [version for version in versions if version in _SUPPORTED_VERSIONS]
+    if not usable:
+        return ValidationCheck(
+            name="supported_versions",
+            passed=False,
+            message=(
+                f"Remote advertises versions {versions}, none of which this validator"
+                f" supports ({list(_SUPPORTED_VERSIONS)}); its payload cannot be read as"
+                f" {_SUPPORTED_VERSIONS[0]}."
+            ),
+        )
+
     return ValidationCheck(
         name="supported_versions",
         passed=True,
-        message=f"Remote advertises versions {versions}.",
+        message=f"Remote advertises versions {versions}; validating as {usable[0]}.",
     )
 
 
@@ -202,6 +217,15 @@ def _decode_payload(databag: dict[str, str]) -> tuple[ValidationCheck, dict[str,
                     name="payload",
                     passed=False,
                     message=f"'{_DATA_KEY}' must decode to a mapping, got {type(payload).__name__}.",
+                ),
+                {},
+            )
+        if not all(isinstance(key, str) for key in payload):
+            return (
+                ValidationCheck(
+                    name="payload",
+                    passed=False,
+                    message=f"'{_DATA_KEY}' mapping keys must all be strings.",
                 ),
                 {},
             )
@@ -387,13 +411,25 @@ def _auth_decision_check(
             message="No authorization decision was obtained.",
         )
 
-    if 200 <= status < 300:
+    if status == _ALLOW_STATUS:
         forwarded = [h for h in allowed_response_headers if h.lower() in headers]
         detail = f" Upstream headers present: {forwarded}." if allowed_response_headers else ""
         return ValidationCheck(
             name="auth_decision",
             passed=True,
             message=f"Decision ALLOW ({status}).{detail}",
+        )
+
+    if 200 <= status < 300:
+        return ValidationCheck(
+            name="auth_decision",
+            passed=False,
+            message=(
+                f"Authorization service answered {status}, but ext_authz admits traffic only on"
+                f" {_ALLOW_STATUS}, so the gateway denies every request and never forwards"
+                f" {allowed_response_headers or 'any declared'} upstream headers. A success status"
+                " other than 200 usually means the service targets a proxy that accepts any 2xx."
+            ),
         )
 
     if 300 <= status < 400:

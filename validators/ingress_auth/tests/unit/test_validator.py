@@ -30,7 +30,7 @@ VALID_PAYLOAD: dict[str, Any] = {
 }
 
 
-def _nested_databag(payload: dict[str, Any] | None = None, versions: Any = ["v1"]) -> dict[str, str]:
+def _nested_databag(payload: dict[str, Any] | None = None, versions: Any = ("v1",)) -> dict[str, str]:
     databag = {}
     if versions is not None:
         databag["_supported_versions"] = yaml.safe_dump(versions)
@@ -188,6 +188,34 @@ class TestSimpleLevel:
         assert result.status == "FAIL"
         assert _checks_by_name(result)["supported_versions"].passed is False
 
+    @pytest.mark.parametrize("versions", [["v2"], ["v2", "v3"]])
+    def test_unsupported_version_is_rejected(self, versions: list[str]) -> None:
+        # GIVEN a remote advertising only versions this validator cannot read, with a
+        # payload that happens to satisfy the v1 schema
+        validator = _make_validator(_nested_databag(VALID_PAYLOAD, versions=versions))
+
+        # WHEN the validator runs
+        result = validator.validate("simple")
+
+        # THEN the handshake is rejected rather than the payload being read as v1
+        assert result.status == "FAIL"
+        versions_check = _checks_by_name(result)["supported_versions"]
+        assert versions_check.passed is False
+        assert "v1" in versions_check.message
+        assert "payload" not in _checks_by_name(result)
+
+    def test_superset_of_supported_versions_is_accepted(self) -> None:
+        # GIVEN a remote advertising v1 alongside a newer version; SDI negotiates the
+        # highest version both sides share, and the provider only supports v1
+        validator = _make_validator(_nested_databag(VALID_PAYLOAD, versions=["v1", "v2"]))
+
+        # WHEN the validator runs
+        result = validator.validate("simple")
+
+        # THEN validation proceeds against v1
+        assert result.status == "PASS"
+        assert "validating as v1" in _checks_by_name(result)["supported_versions"].message
+
     def test_missing_payload_fails(self) -> None:
         # GIVEN a remote that completed the handshake but published no data
         validator = _make_validator(_nested_databag(payload=None))
@@ -210,6 +238,30 @@ class TestSimpleLevel:
         # THEN the payload check fails
         assert result.status == "FAIL"
         assert "mapping" in _checks_by_name(result)["payload"].message
+
+    @pytest.mark.parametrize(
+        "data",
+        [
+            "8080: oidc-gatekeeper\nservice: authsvc\n",
+            "true: x\n",
+            "null: x\n",
+        ],
+    )
+    def test_non_string_payload_keys_fail(self, data: str) -> None:
+        # GIVEN a data mapping that YAML decodes to non-string keys, which no SDI field
+        # name can produce and which would otherwise break sorting of the field list
+        databag = {"_supported_versions": yaml.safe_dump(["v1"]), "data": data}
+        validator = _make_validator(databag)
+
+        # WHEN the validator runs
+        result = validator.validate("simple")
+
+        # THEN the payload is rejected before any field is read
+        assert result.status == "FAIL"
+        payload = _checks_by_name(result)["payload"]
+        assert payload.passed is False
+        assert "keys must all be strings" in payload.message
+        assert "schema" not in _checks_by_name(result)
 
     def test_missing_required_fields_fails(self) -> None:
         # GIVEN a payload without the mandatory service field
@@ -299,6 +351,27 @@ class TestDeepLevel:
         # THEN the ALLOW decision is reported with the declared upstream headers
         assert result.status == "PASS"
         assert "kubeflow-userid" in _checks_by_name(result)["auth_decision"].message
+
+    @pytest.mark.parametrize("status", [201, 202, 204])
+    def test_non_200_success_is_not_an_allow(self, status: int) -> None:
+        # GIVEN a service that signals success with a 2xx other than 200, as proxies
+        # accepting any 2xx would permit
+        validator = _make_validator(_nested_databag(VALID_PAYLOAD))
+        response = _mock_response(status, _headers(kubeflow_userid="user@example.com"))
+
+        # WHEN the validator runs at the deep level
+        with (
+            patch(f"{_MODULE}.socket.gethostbyname", return_value="10.152.183.29"),
+            patch(f"{_MODULE}.socket.create_connection"),
+            patch(f"{_MODULE}.build_opener", return_value=_mock_opener(response)),
+        ):
+            result = validator.validate("deep")
+
+        # THEN it is reported as a deny, because ext_authz admits traffic only on 200
+        assert result.status == "FAIL"
+        message = _checks_by_name(result)["auth_decision"].message
+        assert "ALLOW" not in message
+        assert "only on 200" in message
 
     def test_redirect_without_location_fails(self) -> None:
         # GIVEN an authorization service that redirects but omits the Location header
