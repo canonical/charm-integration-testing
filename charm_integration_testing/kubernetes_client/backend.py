@@ -6,6 +6,17 @@ from abc import ABC
 from pathlib import Path
 
 from kubernetes import client, config  # type: ignore[import-untyped]
+from urllib3.util import Retry
+
+# Applied to the shared ApiClient's connection pool, so every request made through any API
+# group (including ad-hoc ones instantiated directly against `api_client`) gets the same
+# retry behaviour without each call site needing its own retry/backoff logic.
+DEFAULT_RETRIES = Retry(
+    total=5,
+    backoff_factor=1,
+    status_forcelist=[500, 502, 503, 504],
+    allowed_methods=None,  # retry on all methods, including PATCH/POST/PUT/DELETE
+)
 
 
 class KubernetesExtension(ABC):
@@ -35,4 +46,6 @@ class KubernetesBackend:
         else:
             config.load_kube_config()
 
-        return cls(client.ApiClient())
+        configuration = client.Configuration.get_default_copy()
+        configuration.retries = DEFAULT_RETRIES
+        return cls(client.ApiClient(configuration))
