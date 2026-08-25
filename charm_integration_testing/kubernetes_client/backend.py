@@ -4,6 +4,7 @@
 
 from abc import ABC
 from pathlib import Path
+from typing import Callable
 
 from kubernetes import client, config  # type: ignore[import-untyped]
 from urllib3.util import Retry
@@ -40,11 +41,15 @@ class KubernetesBackend:
         self.apps_v1_api = client.AppsV1Api(api_client)
 
     @classmethod
-    def k8s_client(cls, kubeconfig: Path | None = None) -> "KubernetesBackend":
+    def k8s_client(
+        cls,
+        kubeconfig: Path | None = None,
+        load_kube_config: Callable[..., None] = config.load_kube_config,
+    ) -> "KubernetesBackend":
         if kubeconfig:
-            config.load_kube_config(config_file=str(kubeconfig.resolve()))
+            load_kube_config(config_file=str(kubeconfig.resolve()))
         else:
-            config.load_kube_config()
+            load_kube_config()
 
         configuration = client.Configuration.get_default_copy()
         configuration.retries = DEFAULT_RETRIES
