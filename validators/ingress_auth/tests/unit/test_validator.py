@@ -15,7 +15,7 @@ import ops
 import pytest
 import yaml
 
-from validators.ingress_auth.validator import IngressAuthValidator
+from validators.ingress_auth.validator import IngressAuthValidator, _negotiated_version
 from validators.test_utils.helpers import make_charm_from_relation
 from validators.test_utils.stubs import (
     ApplicationStub,
@@ -171,6 +171,28 @@ class TestGating:
 
         # THEN it reports ERROR
         assert result.status == "ERROR"
+
+
+# ---------------------------------------------------------------------------
+# SDI version negotiation
+# ---------------------------------------------------------------------------
+
+
+class TestVersionNegotiation:
+    @pytest.mark.parametrize(
+        ("usable", "expected"),
+        [
+            (["v1"], "v1"),
+            (["v1", "v2"], "v2"),
+            (["v2", "v1"], "v2"),
+            (["v9", "v10"], "v10"),
+            (["v10", "v9"], "v10"),
+        ],
+    )
+    def test_highest_common_version_wins(self, usable: list[str], expected: str) -> None:
+        # GIVEN versions both sides support; SDI parses 'vN' to the integer N and takes
+        # max() of the intersection, so selection is numeric and order-independent
+        assert _negotiated_version(usable) == expected
 
 
 # ---------------------------------------------------------------------------

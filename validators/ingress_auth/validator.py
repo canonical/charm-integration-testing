@@ -2,8 +2,8 @@
 # See LICENSE file for licensing details.
 
 import socket
-from http.client import BadStatusLine, HTTPResponse
-from typing import Any
+from http.client import BadStatusLine, HTTPMessage, HTTPResponse
+from typing import IO, Any
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
@@ -180,16 +180,25 @@ def _supported_versions_check(databag: dict[str, str]) -> ValidationCheck:
             passed=False,
             message=(
                 f"Remote advertises versions {versions}, none of which this validator"
-                f" supports ({list(_SUPPORTED_VERSIONS)}); its payload cannot be read as"
-                f" {_SUPPORTED_VERSIONS[0]}."
+                f" supports ({list(_SUPPORTED_VERSIONS)}); its payload cannot be read."
             ),
         )
 
     return ValidationCheck(
         name="supported_versions",
         passed=True,
-        message=f"Remote advertises versions {versions}; validating as {usable[0]}.",
+        message=f"Remote advertises versions {versions}; validating as {_negotiated_version(usable)}.",
     )
+
+
+def _negotiated_version(usable: list[str]) -> str:
+    """Pick the version SDI would negotiate from the versions both sides support.
+
+    SDI parses ``vN`` to the integer N and takes ``max()`` of the intersection, so the
+    ordering is numeric rather than lexicographic (``v10`` outranks ``v9``) and does not
+    depend on the order either side advertises.
+    """
+    return max(usable, key=lambda version: int(version[1:]))
 
 
 def _decode_payload(databag: dict[str, str]) -> tuple[ValidationCheck, dict[str, Any]]:
@@ -345,7 +354,7 @@ def _dns_check(service: str, model_name: str, cross_model: bool | None) -> tuple
         ValidationCheck(
             name="auth_service_dns",
             passed=True,
-            message=f"Advertised service resolves: {fqdn} -> {', '.join(addresses)}.{suffix}",
+            message=f"Advertised service resolves: {fqdn} -> {addresses}.{suffix}",
         ),
         fqdn,
     )
@@ -489,7 +498,15 @@ def _auth_decision_check(
 class _NoRedirectHandler(HTTPRedirectHandler):
     """Surface 3xx responses instead of following them."""
 
-    def redirect_request(self, *args: Any, **kwargs: Any) -> None:
+    def redirect_request(
+        self,
+        req: Request,
+        fp: IO[bytes],
+        code: int,
+        msg: str,
+        headers: HTTPMessage,
+        newurl: str,
+    ) -> Request | None:
         return None
 
 
