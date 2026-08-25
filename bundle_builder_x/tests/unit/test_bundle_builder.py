@@ -16,6 +16,7 @@ from bundle_builder_x.assertion_tags import (
     CharmEndpointNonOptionalTag,
     CharmEndpointPayload,
     CharmPayload,
+    CharmRankBoundedTag,
     IntegrationFeatureMismatchTag,
     PeerChannelMismatchTag,
     SubordinateBaseMismatchTag,
@@ -27,6 +28,8 @@ from bundle_builder_x.bundle_diagnostics import (
     BundleBuildFailureKind,
     DiagnosticEndpoint,
     FeatureMismatchDiagnostic,
+    PeerChannelMismatchDiagnostic,
+    SubordinateBaseMismatchDiagnostic,
     UnfulfilledEndpointDiagnostic,
     UnresolvedApplicationDiagnostic,
     UnresolvedIntegrationDiagnostic,
@@ -1183,6 +1186,20 @@ class TestCollectUnsatDiagnostics:
 
     def test_unknown_tags_produce_internal_failure_diagnostic(self) -> None:
         domain = _domain_for_unresolved_diagnostics()
+        unhandled = CharmRankBoundedTag(charm=CharmPayload(charm_name="mysql-router", charm_id=0))
+
+        result = BundleBuilder._collect_unsat_diagnostics([unhandled], domain)
+
+        assert result == (
+            BundleBuildFailureDiagnostic(
+                kind=BundleBuildFailureKind.UNEXPANDABLE_ASSERTIONS,
+                detail="Cannot expand the domain to handle failed assertion tags",
+            ),
+        )
+
+    def test_collect_peer_channel_mismatch_diagnostic(self) -> None:
+        # GIVEN an unsat core containing a peer channel mismatch tag
+        domain = _domain_for_unresolved_diagnostics()
         peer_mismatch = PeerChannelMismatchTag(
             charm=CharmPayload(charm_name="mysql-router", charm_id=0),
             endpoint="db-router",
@@ -1191,11 +1208,54 @@ class TestCollectUnsatDiagnostics:
             required_track="8.0",
         )
 
+        # WHEN collecting diagnostics from the unsat core
         result = BundleBuilder._collect_unsat_diagnostics([peer_mismatch], domain)
 
+        # THEN a structured peer-channel-mismatch diagnostic is produced, not a generic fallback
         assert result == (
-            BundleBuildFailureDiagnostic(
-                kind=BundleBuildFailureKind.UNEXPANDABLE_ASSERTIONS,
-                detail="Cannot expand the domain to handle failed assertion tags",
+            PeerChannelMismatchDiagnostic(
+                charm_name="mysql-router",
+                endpoint="db-router",
+                peer_charm_name="mysql",
+                required_track="8.0",
+                required_risk=None,
+                required_channel=None,
+                required_revision=None,
             ),
         )
+        error = UncompletableBundleError(diagnostics=result)
+        assert "mysql-router:db-router" in str(error)
+        assert "mysql" in str(error)
+
+    def test_collect_subordinate_base_mismatch_diagnostic(self) -> None:
+        # GIVEN an unsat core containing a subordinate base mismatch tag
+        domain = _domain_for_unresolved_diagnostics()
+        base_mismatch = SubordinateBaseMismatchTag(
+            subordinate_charm_name="nrpe",
+            subordinate_charm_id=0,
+            subordinate_endpoint="general-info",
+            principal_charm_name="postgresql",
+            principal_charm_id=1,
+            principal_endpoint="juju-info",
+            subordinate_base="ubuntu@22.04",
+            principal_base="ubuntu@24.04",
+        )
+
+        # WHEN collecting diagnostics from the unsat core
+        result = BundleBuilder._collect_unsat_diagnostics([base_mismatch], domain)
+
+        # THEN a structured subordinate-base-mismatch diagnostic is produced, not a generic fallback
+        assert result == (
+            SubordinateBaseMismatchDiagnostic(
+                subordinate_charm_name="nrpe",
+                subordinate_endpoint="general-info",
+                principal_charm_name="postgresql",
+                principal_endpoint="juju-info",
+                subordinate_base="ubuntu@22.04",
+                principal_base="ubuntu@24.04",
+            ),
+        )
+        error = UncompletableBundleError(diagnostics=result)
+        assert "nrpe:general-info" in str(error)
+        assert "ubuntu@22.04" in str(error)
+        assert "ubuntu@24.04" in str(error)

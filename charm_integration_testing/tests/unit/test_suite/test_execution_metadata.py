@@ -12,10 +12,12 @@ from bundle_builder_x import (
     CharmReleaseNotFoundException,
     DiagnosticEndpoint,
     FeatureMismatchDiagnostic,
+    PeerChannelMismatchDiagnostic,
     PlatformMismatchError,
     ReleaseRequest,
     ReleaseUnavailableError,
     ReleaseUnavailableKind,
+    SubordinateBaseMismatchDiagnostic,
     UnfulfilledEndpointDiagnostic,
     UnresolvedApplicationDiagnostic,
     UnresolvedIntegrationDiagnostic,
@@ -264,6 +266,23 @@ def test_bundle_diagnostic_metadata_dispatches_every_public_variant() -> None:
             provides=DiagnosticEndpoint(charm_name="kfp-viz", endpoint="info"),
             feature="katib-service",
         ),
+        PeerChannelMismatchDiagnostic(
+            charm_name="kfp-persistence",
+            endpoint="kfp-api",
+            peer_charm_name="kfp-viz",
+            required_track="2.15",
+            required_risk=None,
+            required_channel=None,
+            required_revision=None,
+        ),
+        SubordinateBaseMismatchDiagnostic(
+            subordinate_charm_name="nrpe",
+            subordinate_endpoint="general-info",
+            principal_charm_name="postgresql",
+            principal_endpoint="juju-info",
+            subordinate_base="ubuntu@22.04",
+            principal_base="ubuntu@24.04",
+        ),
     ]
 
     entries = [entry for diagnostic in diagnostics for entry in _bundle_diagnostic_metadata(diagnostic)]
@@ -282,4 +301,53 @@ def test_bundle_diagnostic_metadata_dispatches_every_public_variant() -> None:
     assert ("failure:build_bundle:feature_mismatch:feature", "katib-service") in entries
     assert ("failure:build_bundle:release_resolution", "platform_mismatch") in entries
     assert ("failure:build_bundle:release_resolution:charm", "aodh") in entries
+    assert (
+        "failure:build_bundle:peer_channel_mismatch",
+        "kfp-persistence:kfp-api/kfp-viz",
+    ) in entries
+    assert ("failure:build_bundle:peer_channel_mismatch:required_track", "2.15") in entries
+    assert (
+        "failure:build_bundle:subordinate_base_mismatch",
+        "nrpe:general-info/postgresql:juju-info",
+    ) in entries
+    assert ("failure:build_bundle:subordinate_base_mismatch:subordinate_base", "ubuntu@22.04") in entries
+    assert ("failure:build_bundle:subordinate_base_mismatch:principal_base", "ubuntu@24.04") in entries
     assert all(value != "neighbor" for _, value in entries)
+
+
+def test_peer_channel_mismatch_metadata_includes_required_channel_fields() -> None:
+    diagnostic = PeerChannelMismatchDiagnostic(
+        charm_name="kfp-persistence",
+        endpoint="kfp-api",
+        peer_charm_name="kfp-viz",
+        required_track="2.15",
+        required_risk=None,
+        required_channel=None,
+        required_revision=None,
+    )
+
+    entries = _bundle_diagnostic_metadata(diagnostic)
+
+    assert entries == [
+        ("failure:build_bundle:peer_channel_mismatch", "kfp-persistence:kfp-api/kfp-viz"),
+        ("failure:build_bundle:peer_channel_mismatch:required_track", "2.15"),
+    ]
+
+
+def test_subordinate_base_mismatch_metadata() -> None:
+    diagnostic = SubordinateBaseMismatchDiagnostic(
+        subordinate_charm_name="nrpe",
+        subordinate_endpoint="general-info",
+        principal_charm_name="postgresql",
+        principal_endpoint="juju-info",
+        subordinate_base="ubuntu@22.04",
+        principal_base="ubuntu@24.04",
+    )
+
+    entries = _bundle_diagnostic_metadata(diagnostic)
+
+    assert entries == [
+        ("failure:build_bundle:subordinate_base_mismatch", "nrpe:general-info/postgresql:juju-info"),
+        ("failure:build_bundle:subordinate_base_mismatch:subordinate_base", "ubuntu@22.04"),
+        ("failure:build_bundle:subordinate_base_mismatch:principal_base", "ubuntu@24.04"),
+    ]

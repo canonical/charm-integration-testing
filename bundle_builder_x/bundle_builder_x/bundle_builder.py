@@ -28,6 +28,8 @@ from .bundle_diagnostics import (
     BundleDiagnostic,
     DiagnosticEndpoint,
     FeatureMismatchDiagnostic,
+    PeerChannelMismatchDiagnostic,
+    SubordinateBaseMismatchDiagnostic,
     UnfulfilledEndpointDiagnostic,
     UnresolvedApplicationDiagnostic,
     UnresolvedIntegrationDiagnostic,
@@ -248,6 +250,29 @@ class BundleBuilder:
                             ),
                             feature=tag.feature,
                         ),
+                    )
+                case PeerChannelMismatchTag():
+                    diagnostics.append(
+                        PeerChannelMismatchDiagnostic(
+                            charm_name=tag.charm.charm_name,
+                            endpoint=tag.endpoint,
+                            peer_charm_name=tag.peer_charm_name,
+                            required_track=tag.required_track,
+                            required_risk=tag.required_risk,
+                            required_channel=tag.required_channel,
+                            required_revision=tag.required_revision,
+                        )
+                    )
+                case SubordinateBaseMismatchTag():
+                    diagnostics.append(
+                        SubordinateBaseMismatchDiagnostic(
+                            subordinate_charm_name=tag.subordinate_charm_name,
+                            subordinate_endpoint=tag.subordinate_endpoint,
+                            principal_charm_name=tag.principal_charm_name,
+                            principal_endpoint=tag.principal_endpoint,
+                            subordinate_base=tag.subordinate_base,
+                            principal_base=tag.principal_base,
+                        )
                     )
                 case ApplicationExistsTag():
                     if (tag.model.key, tag.application) not in release_failed_applications:

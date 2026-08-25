@@ -70,6 +70,78 @@ class FeatureMismatchDiagnostic(BundleDiagnostic):
 
 
 @dataclass(frozen=True)
+class PeerChannelMismatchDiagnostic(BundleDiagnostic):
+    """An endpoint requires its integration peer to be on a specific track/risk/channel/revision."""
+
+    charm_name: str
+    endpoint: str
+    peer_charm_name: str
+    required_track: str | None
+    required_risk: str | None
+    required_channel: str | None
+    required_revision: int | None
+
+    @property
+    def description(self) -> str:
+        requirement = self.required_channel or "/".join(
+            part for part in (self.required_track, self.required_risk) if part
+        )
+        if self.required_revision is not None:
+            requirement = (
+                f"{requirement} (revision {self.required_revision})"
+                if requirement
+                else (f"revision {self.required_revision}")
+            )
+        return (
+            f"Charm endpoint {self.charm_name}:{self.endpoint} requires its peer "
+            f"{self.peer_charm_name} to be on channel {requirement}"
+        )
+
+    @property
+    def identity(self) -> tuple[Any, ...]:
+        return (
+            self.charm_name,
+            self.endpoint,
+            self.peer_charm_name,
+            self.required_track or "",
+            self.required_risk or "",
+            self.required_channel or "",
+            self.required_revision if self.required_revision is not None else -1,
+        )
+
+
+@dataclass(frozen=True)
+class SubordinateBaseMismatchDiagnostic(BundleDiagnostic):
+    """A subordinate charm's endpoint requires the same base as its principal, but they differ."""
+
+    subordinate_charm_name: str
+    subordinate_endpoint: str
+    principal_charm_name: str
+    principal_endpoint: str
+    subordinate_base: str
+    principal_base: str
+
+    @property
+    def description(self) -> str:
+        return (
+            f"Subordinate endpoint {self.subordinate_charm_name}:{self.subordinate_endpoint} "
+            f"(base {self.subordinate_base}) cannot attach to principal endpoint "
+            f"{self.principal_charm_name}:{self.principal_endpoint} (base {self.principal_base})"
+        )
+
+    @property
+    def identity(self) -> tuple[Any, ...]:
+        return (
+            self.subordinate_charm_name,
+            self.subordinate_endpoint,
+            self.principal_charm_name,
+            self.principal_endpoint,
+            self.subordinate_base,
+            self.principal_base,
+        )
+
+
+@dataclass(frozen=True)
 class UnresolvedApplicationDiagnostic(BundleDiagnostic):
     application: str
     charm_name: str
@@ -156,6 +228,8 @@ def canonicalize_diagnostics(
     diagnostic_order: tuple[type[BundleDiagnostic], ...] = (
         UnfulfilledEndpointDiagnostic,
         FeatureMismatchDiagnostic,
+        PeerChannelMismatchDiagnostic,
+        SubordinateBaseMismatchDiagnostic,
         UnresolvedApplicationDiagnostic,
         UnresolvedIntegrationDiagnostic,
         ApplicationReleaseDiagnostic,
