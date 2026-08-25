@@ -16,7 +16,12 @@ DEFAULT_RETRIES = Retry(
     total=5,
     backoff_factor=1,
     status_forcelist=[500, 502, 503, 504],
-    allowed_methods=None,  # retry on all methods, including PATCH/POST/PUT/DELETE
+    # POST is excluded: it's not idempotent, and retrying it risks duplicate side effects if the
+    # server actually processed the original request before the client saw a disconnect.
+    allowed_methods=frozenset(["HEAD", "GET", "PUT", "DELETE", "OPTIONS", "TRACE", "PATCH"]),
+    # Let the Kubernetes client see the final 5xx response (and raise its usual ApiException)
+    # once retries are exhausted, instead of urllib3 raising MaxRetryError.
+    raise_on_status=False,
 )
 
 
