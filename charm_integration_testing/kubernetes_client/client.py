@@ -2,6 +2,7 @@
 # See LICENSE file for licensing details.
 
 import logging
+import math
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from time import sleep
@@ -10,6 +11,7 @@ from typing import Callable, Collection, TypeVar
 from kubernetes import client as K8sClient  # type: ignore[import-untyped]
 from kubernetes import watch
 from kubernetes.client import ApiException  # type: ignore[import-untyped]
+from urllib3.exceptions import ProtocolError
 
 from kubernetes_client.backend import KubernetesBackend, KubernetesExtension
 
@@ -35,6 +37,7 @@ class KubernetesClient:
         default_timeout: timedelta = timedelta(minutes=5),
         default_delay: timedelta = timedelta(seconds=1),
         extensions: list[KubernetesExtension] | None = None,
+        watch_factory: Callable[[], watch.Watch] = watch.Watch,
     ):
         self.backend = backend
         self.logger = logger or logging.getLogger(__name__)
@@ -42,6 +45,7 @@ class KubernetesClient:
         self.default_timeout = default_timeout
         self.default_delay = default_delay
         self.extensions = extensions or []
+        self.watch_factory = watch_factory
 
     def get_charm_pods(
         self, application_name: str, model: str
@@ -319,6 +323,12 @@ class KubernetesClient:
         The expected generation is read once at call time; events whose
         `observed_generation` is below that threshold are skipped.
 
+        A watch is a single long-lived HTTP connection, so unlike discrete requests it gets no
+        automatic retry: a transient reset would otherwise abort the wait immediately. If the
+        stream is reset before the rollout finishes, a new watch is opened with whatever time
+        remains of `timeout_seconds`; a stream that ends on its own (internal timeout, no
+        matching event) is still treated as a real timeout.
+
         Args:
             namespace: Namespace where the StatefulSet is located.
             statefulset_name: Name of the StatefulSet to watch.
@@ -329,8 +339,6 @@ class KubernetesClient:
             ApiException: If the initial StatefulSet read or the watch stream fails.
             TimeoutError: If the rollout does not complete within `timeout_seconds`.
         """
-        watcher = watch.Watch()
-
         try:
             sts = self.backend.apps_v1_api.read_namespaced_stateful_set(name=statefulset_name, namespace=namespace)
             target_generation = sts.metadata.generation
@@ -339,44 +347,62 @@ class KubernetesClient:
             raise
 
         self.logger.info(f"Waiting for StatefulSet '{statefulset_name}' to reach generation '{target_generation}'.")
-        try:
-            for event in watcher.stream(
-                self.backend.apps_v1_api.list_namespaced_stateful_set,
-                namespace=namespace,
-                field_selector=f"metadata.name={statefulset_name}",
-                timeout_seconds=timeout_seconds,
-            ):
-                sts = event["object"]
-                status = sts.status
 
-                if status.observed_generation < target_generation:
-                    self.logger.info("Waiting: K8s Controller hasn't processed the update yet.")
-                    continue
+        deadline = datetime.now(timezone.utc) + timedelta(seconds=timeout_seconds)
+        while True:
+            remaining_seconds = (deadline - datetime.now(timezone.utc)).total_seconds()
+            watcher = self.watch_factory()
+            try:
+                for event in watcher.stream(
+                    self.backend.apps_v1_api.list_namespaced_stateful_set,
+                    namespace=namespace,
+                    field_selector=f"metadata.name={statefulset_name}",
+                    timeout_seconds=max(0, math.ceil(remaining_seconds)),
+                ):
+                    sts = event["object"]
+                    status = sts.status
 
-                # If we use RollingUpdate, check if all replicas are updated
-                # updated_replicas refers to pods running the latest pod template
-                updated = status.updated_replicas or 0
-                ready = status.ready_replicas or 0
-                replicas = sts.spec.replicas
-                total = int(replicas) if replicas is not None else 1
+                    if status.observed_generation < target_generation:
+                        self.logger.info("Waiting: K8s Controller hasn't processed the update yet.")
+                        continue
 
-                if updated < total:
-                    self.logger.debug(f"Updating: {updated}/{total} pods are on the new version.")
-                    continue
+                    # If we use RollingUpdate, check if all replicas are updated
+                    # updated_replicas refers to pods running the latest pod template
+                    updated = status.updated_replicas or 0
+                    ready = status.ready_replicas or 0
+                    replicas = sts.spec.replicas
+                    total = int(replicas) if replicas is not None else 1
 
-                # Check if they are actually Ready (passing probes)
-                if ready < total:
-                    self.logger.debug(f"Waiting: {ready}/{total} pods are Ready.")
-                    continue
+                    if updated < total:
+                        self.logger.debug(f"Updating: {updated}/{total} pods are on the new version.")
+                        continue
 
-                self.logger.info(f"Successfully rolled out generation '{target_generation}'.")
-                return
+                    # Check if they are actually Ready (passing probes)
+                    if ready < total:
+                        self.logger.debug(f"Waiting: {ready}/{total} pods are Ready.")
+                        continue
 
-            self.logger.error(
-                f"Waiting for rollout restart on StatefulSet '{statefulset_name}' in namespace '{namespace}' timed out."
-            )
-            raise TimeoutError(
-                f"Waiting for rollout restart on StatefulSet '{statefulset_name}' in namespace '{namespace}' timed out."
-            )
-        finally:
-            watcher.stop()
+                    self.logger.info(f"Successfully rolled out generation '{target_generation}'.")
+                    return
+            except ProtocolError as exc:
+                remaining_seconds = (deadline - datetime.now(timezone.utc)).total_seconds()
+                if remaining_seconds <= 0:
+                    break
+                self.logger.warning(
+                    f"Watch stream for StatefulSet '{statefulset_name}' in namespace '{namespace}' was reset "
+                    f"({exc}); reconnecting with {math.ceil(remaining_seconds)}s remaining to resume waiting."
+                )
+                continue
+            finally:
+                watcher.stop()
+
+            # The stream ended on its own (its internal timeout elapsed) without the rollout
+            # completing: that is a genuine timeout, not a reconnectable disconnect.
+            break
+
+        self.logger.error(
+            f"Waiting for rollout restart on StatefulSet '{statefulset_name}' in namespace '{namespace}' timed out."
+        )
+        raise TimeoutError(
+            f"Waiting for rollout restart on StatefulSet '{statefulset_name}' in namespace '{namespace}' timed out."
+        )
