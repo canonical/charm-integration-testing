@@ -3,6 +3,11 @@
 #
 # prometheus/grafana (provides): optional - legacy/secondary observability
 #   hooks, no Blocked/WaitingStatus; cos-agent is the current path.
+# nrpe-external-master (provides): optional - Juju built-in NRPE subordinate
+#   hook, never referenced in charm.py; purely additive monitoring.
+# registry-client/registry-publisher (requires): optional - AAR integration;
+#   handlers (_on_registry_client_*) only react if related, never block
+#   (src/charm.py).
 # etcd (requires): optional when config[use_embedded_etcd]=true - verified
 #   empirically on both charm generations (1.22, 1.29) with no etcd relation.
 # etcd-client/certificates (requires, 1.29+): alt to legacy etcd, backed by
@@ -13,6 +18,7 @@
 # charm-tracing/cos-agent: optional - observability, no blocking.
 overrides:
   # 1.22-ops: minimal variant; no agent endpoint, but lxd-cluster/etcd may be integrated.
+  # nrpe-external-master is absent in this generation's metadata, so no provides entry needed.
   - criteria:
       - track: '1.22-ops'
     requires:
@@ -34,6 +40,11 @@ overrides:
         optional: true
       agent:
         optional: true
+      registry-client:
+        optional: true
+        # Never blocking - handlers only react if related (src/charm.py)
+      registry-publisher:
+        optional: true
     configs:
       use_embedded_etcd: [true, false]
     constraints:
@@ -50,6 +61,10 @@ overrides:
         optional: true
       charm-tracing:
         optional: true
+      registry-client:
+        optional: true
+      registry-publisher:
+        optional: true
     configs:
       use_embedded_etcd: [true, false]
     constraints:
@@ -65,11 +80,19 @@ overrides:
     requires:
       lxd-cluster:
         optional: true
+      registry-client:
+        optional: true
+        # Never blocking - handlers only react if related (src/charm.py)
+      registry-publisher:
+        optional: true
     provides:
       grafana:
         optional: true
       prometheus:
         optional: true
+      nrpe-external-master:
+        optional: true
+        # Legacy NRPE monitoring; not referenced in charm.py, purely additive.
   # 1.19-1.21: use_embedded_etcd added, no agent endpoint yet.
   - criteria:
       - any_of:
@@ -81,10 +104,16 @@ overrides:
         optional: true
       etcd:
         optional: true
+      registry-client:
+        optional: true
+      registry-publisher:
+        optional: true
     provides:
       grafana:
         optional: true
       prometheus:
+        optional: true
+      nrpe-external-master:
         optional: true
     configs:
       use_embedded_etcd: [true, false]
@@ -105,10 +134,16 @@ overrides:
         optional: true
       agent:
         optional: true
+      registry-client:
+        optional: true
+      registry-publisher:
+        optional: true
     provides:
       grafana:
         optional: true
       prometheus:
+        optional: true
+      nrpe-external-master:
         optional: true
     configs:
       use_embedded_etcd: [true, false]
@@ -120,10 +155,16 @@ overrides:
     requires:
       lxd-cluster:
         optional: true
+      registry-client:
+        optional: true
+      registry-publisher:
+        optional: true
     provides:
       grafana:
         optional: true
       prometheus:
+        optional: true
+      nrpe-external-master:
         optional: true
   # 1.27-1.28: send-remote-write, charm-tracing, cos-agent added.
   - criteria:
@@ -140,6 +181,10 @@ overrides:
       agent:
         optional: true
       charm-tracing:
+        optional: true
+      registry-client:
+        optional: true
+      registry-publisher:
         optional: true
     provides:
       grafana:
@@ -169,6 +214,10 @@ overrides:
       agent:
         optional: true
       charm-tracing:
+        optional: true
+      registry-client:
+        optional: true
+      registry-publisher:
         optional: true
     provides:
       grafana:
