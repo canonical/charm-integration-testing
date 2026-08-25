@@ -21,6 +21,7 @@ from validators.test_utils.stubs import (
     ApplicationStub,
     RelationRoleStub,
     RelationStub,
+    UnitStub,
 )
 
 _MODULE = "validators.ingress_auth.validator"
@@ -46,9 +47,11 @@ def _make_validator(
     app_databag: dict[str, str],
     endpoint: str = "ingress-auth",
     role: RelationRoleStub = RelationRoleStub.provides,
+    remote_app: bool = True,
 ) -> IngressAuthValidator:
-    app = ApplicationStub()
-    relation = RelationStub(name=endpoint, id=0, app=app, data={app: app_databag})
+    app = ApplicationStub() if remote_app else None
+    data: dict[ApplicationStub | UnitStub | None, dict[str, str]] = {app: app_databag} if app else {}
+    relation = RelationStub(name=endpoint, id=0, app=app, data=data)
     charm = make_charm_from_relation(relation, role=role, interface_name="ingress-auth")
     return IngressAuthValidator(cast(ops.CharmBase, charm), cast(ops.Relation, relation))
 
@@ -158,13 +161,7 @@ class TestGating:
 
     def test_missing_remote_app_is_error(self) -> None:
         # GIVEN a relation with no remote application in scope
-        relation = RelationStub(name="ingress-auth", id=0, app=None, data={})
-        charm = make_charm_from_relation(
-            RelationStub(name="ingress-auth", id=0, app=ApplicationStub(), data={}),
-            role=RelationRoleStub.provides,
-            interface_name="ingress-auth",
-        )
-        validator = IngressAuthValidator(cast(ops.CharmBase, charm), cast(ops.Relation, relation))
+        validator = _make_validator({}, remote_app=False)
 
         # WHEN the validator runs
         result = validator.validate("simple")
@@ -423,6 +420,23 @@ class TestSimpleLevel:
 
 
 class TestDeepLevel:
+    def test_probe_uses_get_like_the_guarded_traffic(self) -> None:
+        # GIVEN an authorization service; Envoy's HTTP ext_authz client copies the
+        # downstream request's :method into the check request rather than issuing a fixed
+        # POST, and the traffic this interface guards is browser navigation, i.e. GET
+        validator = _make_validator(_nested_databag(VALID_PAYLOAD))
+        error = HTTPError("http://authsvc:8080/", 302, "Found", _headers(Location="/dex/auth"), None)
+        opener = _mock_opener(error)
+
+        # WHEN the validator runs at the deep level
+        with _reachable(), patch(f"{_MODULE}.build_opener", return_value=opener):
+            validator.validate("deep")
+
+        # THEN the probe is a bodyless GET
+        request = opener.open.call_args.args[0]
+        assert request.get_method() == "GET"
+        assert request.data is None
+
     def test_redirect_decision_passes(self) -> None:
         # GIVEN an authorization service that redirects unauthenticated requests to a login page
         validator = _make_validator(_nested_databag(VALID_PAYLOAD))
@@ -555,6 +569,26 @@ class TestDeepLevel:
         # THEN the address family does not affect the verdict
         assert result.status == "PASS"
         assert "fd00::1" in _checks_by_name(result)["auth_service_dns"].message
+
+    def test_multiple_addresses_are_rendered_as_readable_text(self) -> None:
+        # GIVEN a service that resolves to several addresses
+        validator = _make_validator(_nested_databag(VALID_PAYLOAD))
+        error = HTTPError("http://authsvc:8080/", 302, "Found", _headers(Location="/dex/auth"), None)
+
+        # WHEN the validator runs at the deep level
+        with (
+            patch(f"{_MODULE}.socket.getaddrinfo", return_value=_addrinfo("10.0.0.2", "10.0.0.1")),
+            patch(f"{_MODULE}.socket.create_connection"),
+            patch(f"{_MODULE}.build_opener", return_value=_mock_opener(error)),
+        ):
+            result = validator.validate("deep")
+
+        # THEN they are joined as prose rather than dumped as a Python list repr,
+        # and the trailing period never abuts an address
+        message = _checks_by_name(result)["auth_service_dns"].message
+        assert "10.0.0.1, 10.0.0.2" in message
+        assert "[" not in message
+        assert message.endswith("svc.cluster.local.")
 
     def test_resolution_without_addresses_fails(self) -> None:
         # GIVEN a resolver that returns no addresses rather than raising

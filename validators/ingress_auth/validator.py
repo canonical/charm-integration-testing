@@ -354,7 +354,7 @@ def _dns_check(service: str, model_name: str, cross_model: bool | None) -> tuple
         ValidationCheck(
             name="auth_service_dns",
             passed=True,
-            message=f"Advertised service resolves: {fqdn} -> {addresses}.{suffix}",
+            message=f"Advertised service {service!r} resolves to {', '.join(addresses)}" f" via {fqdn}.{suffix}",
         ),
         fqdn,
     )
