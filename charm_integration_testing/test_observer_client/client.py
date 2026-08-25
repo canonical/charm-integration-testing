@@ -4,9 +4,35 @@
 """Test Observer API client for querying charm test results and metadata."""
 
 import logging
+from types import MappingProxyType
 from typing import Any
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
+# Every call this client makes is a read-only GET, so retrying on connect/read timeouts and
+# transient 5xx responses is always safe here (unlike write endpoints, there's no risk of
+# duplicating a side effect).
+DEFAULT_RETRY_KWARGS: MappingProxyType[str, Any] = MappingProxyType(
+    {
+        "total": 3,
+        "backoff_factor": 1,
+        "status_forcelist": frozenset([500, 502, 503, 504]),
+        "allowed_methods": frozenset(["GET"]),
+        "raise_on_status": False,
+    }
+)
+
+
+def build_default_retries() -> Retry:
+    """Builds a fresh `Retry` instance from `DEFAULT_RETRY_KWARGS`.
+
+    Returns a new instance on every call, so no two sessions ever share the same mutable
+    `Retry` object.
+    """
+    kwargs: dict[str, Any] = dict(DEFAULT_RETRY_KWARGS)
+    return Retry(**kwargs)
 
 
 class TestObserverClientError(Exception):
@@ -35,13 +61,22 @@ class TestObserverClient:
 
     logger: logging.Logger
 
-    def __init__(self, logger: logging.Logger, api_url: str, token: str) -> None:
+    def __init__(
+        self,
+        logger: logging.Logger,
+        api_url: str,
+        token: str,
+        *,
+        retries: Retry | None = None,
+    ) -> None:
         """Initialize the Test Observer client.
 
         Args:
             logger: Logger instance for logging client operations.
             api_url: Test Observer API base URL.
             token: API token for authentication.
+            retries: Retry policy to mount on the underlying HTTP session. Defaults to
+                `build_default_retries()` when not provided.
 
         Raises:
             TestObserverAPINotConfiguredError: If API URL or token is not configured.
@@ -56,6 +91,9 @@ class TestObserverClient:
 
         self._session = requests.Session()
         self._session.headers.update(self._build_headers())
+        adapter = HTTPAdapter(max_retries=retries if retries is not None else build_default_retries())
+        self._session.mount("https://", adapter)
+        self._session.mount("http://", adapter)
         self.logger = logger
 
     def close(self) -> None:
