@@ -2,6 +2,8 @@
 # See LICENSE file for licensing details.
 
 import socket
+from collections.abc import Iterator
+from contextlib import contextmanager
 from email.message import Message
 from http.client import BadStatusLine
 from types import SimpleNamespace
@@ -63,6 +65,16 @@ def _addrinfo(*addresses: str) -> list[tuple[Any, ...]]:
         )
         for address in addresses
     ]
+
+
+@contextmanager
+def _reachable() -> Iterator[MagicMock]:
+    """Make the reachability checks succeed without touching the network."""
+    with (
+        patch(f"{_MODULE}.socket.getaddrinfo", return_value=_addrinfo("10.152.183.29")) as resolve,
+        patch(f"{_MODULE}.socket.create_connection"),
+    ):
+        yield resolve
 
 
 def _headers(**values: str) -> Message:
@@ -172,11 +184,19 @@ class TestSimpleLevel:
         validator = _make_validator(_nested_databag(VALID_PAYLOAD))
 
         # WHEN the validator runs at the simple level
-        result = validator.validate("simple")
+        with _reachable():
+            result = validator.validate("simple")
 
-        # THEN every wire-format check passes
+        # THEN the wire-format and reachability checks pass, without probing for a decision
         assert result.status == "PASS"
-        assert set(_checks_by_name(result)) == {"supported_versions", "payload", "schema", "field_types"}
+        assert set(_checks_by_name(result)) == {
+            "supported_versions",
+            "payload",
+            "schema",
+            "field_types",
+            "auth_service_dns",
+            "auth_service_connect",
+        }
 
     def test_valid_flat_payload_passes(self) -> None:
         # GIVEN a requirer using the flat SDI wire format
@@ -185,7 +205,8 @@ class TestSimpleLevel:
         validator = _make_validator(databag)
 
         # WHEN the validator runs at the simple level
-        result = validator.validate("simple")
+        with _reachable():
+            result = validator.validate("simple")
 
         # THEN the flat encoding is decoded and accepted
         assert result.status == "PASS"
@@ -225,7 +246,8 @@ class TestSimpleLevel:
         validator = _make_validator(_nested_databag(VALID_PAYLOAD, versions=["v1", "v2"]))
 
         # WHEN the validator runs
-        result = validator.validate("simple")
+        with _reachable():
+            result = validator.validate("simple")
 
         # THEN validation proceeds against v1
         assert result.status == "PASS"
@@ -318,10 +340,59 @@ class TestSimpleLevel:
         validator = _make_validator(_nested_databag({"service": "authsvc", "port": 8080}))
 
         # WHEN the validator runs
-        result = validator.validate("simple")
+        with _reachable():
+            result = validator.validate("simple")
 
         # THEN the optional header lists are not required
         assert result.status == "PASS"
+
+    def test_unreachable_service_fails_at_simple(self) -> None:
+        # GIVEN a schema-valid payload whose service refuses connections (workload down)
+        validator = _make_validator(_nested_databag(VALID_PAYLOAD))
+
+        # WHEN the validator runs at the simple level
+        with (
+            patch(f"{_MODULE}.socket.getaddrinfo", return_value=_addrinfo("10.152.183.29")),
+            patch(f"{_MODULE}.socket.create_connection", side_effect=OSError("Connection refused")),
+            patch(f"{_MODULE}.build_opener") as opener,
+        ):
+            result = validator.validate("simple")
+
+        # THEN simple reports the unreachable service rather than passing on schema alone
+        assert result.status == "FAIL"
+        checks = _checks_by_name(result)
+        assert checks["field_types"].passed is True
+        assert checks["auth_service_connect"].passed is False
+        opener.assert_not_called()
+
+    def test_unresolvable_service_fails_at_simple(self) -> None:
+        # GIVEN a schema-valid payload whose service name does not resolve
+        validator = _make_validator(_nested_databag(VALID_PAYLOAD))
+
+        # WHEN the validator runs at the simple level
+        with patch(f"{_MODULE}.socket.getaddrinfo", side_effect=OSError("Name or service not known")):
+            result = validator.validate("simple")
+
+        # THEN resolution is reported and no connection is attempted
+        assert result.status == "FAIL"
+        checks = _checks_by_name(result)
+        assert checks["auth_service_dns"].passed is False
+        assert "auth_service_connect" not in checks
+
+    def test_simple_does_not_ask_for_an_authorization_decision(self) -> None:
+        # GIVEN a fully healthy authorization service
+        validator = _make_validator(_nested_databag(VALID_PAYLOAD))
+
+        # WHEN the validator runs at the simple level
+        with _reachable(), patch(f"{_MODULE}.build_opener") as opener:
+            result = validator.validate("simple")
+
+        # THEN the decision probe stays exclusive to the deep level
+        assert result.status == "PASS"
+        checks = _checks_by_name(result)
+        assert "ext_authz_probe" not in checks
+        assert "auth_decision" not in checks
+        opener.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -336,11 +407,7 @@ class TestDeepLevel:
         error = HTTPError("http://authsvc:8080/", 302, "Found", _headers(Location="/dex/auth"), None)
 
         # WHEN the validator runs at the deep level
-        with (
-            patch(f"{_MODULE}.socket.getaddrinfo", return_value=_addrinfo("10.152.183.29")),
-            patch(f"{_MODULE}.socket.create_connection"),
-            patch(f"{_MODULE}.build_opener", return_value=_mock_opener(error)),
-        ):
+        with _reachable(), patch(f"{_MODULE}.build_opener", return_value=_mock_opener(error)):
             result = validator.validate("deep")
 
         # THEN the redirect is recognised as an actionable DENY decision
@@ -356,11 +423,7 @@ class TestDeepLevel:
         response = _mock_response(200, _headers(kubeflow_userid="user@example.com"))
 
         # WHEN the validator runs at the deep level
-        with (
-            patch(f"{_MODULE}.socket.getaddrinfo", return_value=_addrinfo("10.152.183.29")),
-            patch(f"{_MODULE}.socket.create_connection"),
-            patch(f"{_MODULE}.build_opener", return_value=_mock_opener(response)),
-        ):
+        with _reachable(), patch(f"{_MODULE}.build_opener", return_value=_mock_opener(response)):
             result = validator.validate("deep")
 
         # THEN the ALLOW decision is reported with the declared upstream headers
@@ -375,11 +438,7 @@ class TestDeepLevel:
         response = _mock_response(status, _headers(kubeflow_userid="user@example.com"))
 
         # WHEN the validator runs at the deep level
-        with (
-            patch(f"{_MODULE}.socket.getaddrinfo", return_value=_addrinfo("10.152.183.29")),
-            patch(f"{_MODULE}.socket.create_connection"),
-            patch(f"{_MODULE}.build_opener", return_value=_mock_opener(response)),
-        ):
+        with _reachable(), patch(f"{_MODULE}.build_opener", return_value=_mock_opener(response)):
             result = validator.validate("deep")
 
         # THEN it is reported as a deny, because ext_authz admits traffic only on 200
@@ -395,11 +454,7 @@ class TestDeepLevel:
         error = HTTPError("http://authsvc:8080/", status, "Redirect", _headers(), None)
 
         # WHEN the validator runs at the deep level
-        with (
-            patch(f"{_MODULE}.socket.getaddrinfo", return_value=_addrinfo("10.152.183.29")),
-            patch(f"{_MODULE}.socket.create_connection"),
-            patch(f"{_MODULE}.build_opener", return_value=_mock_opener(error)),
-        ):
+        with _reachable(), patch(f"{_MODULE}.build_opener", return_value=_mock_opener(error)):
             result = validator.validate("deep")
 
         # THEN the decision is unusable by the gateway
@@ -414,11 +469,7 @@ class TestDeepLevel:
         error = HTTPError("http://authsvc:8080/", status, "Not a redirect", _headers(), None)
 
         # WHEN the validator runs at the deep level
-        with (
-            patch(f"{_MODULE}.socket.getaddrinfo", return_value=_addrinfo("10.152.183.29")),
-            patch(f"{_MODULE}.socket.create_connection"),
-            patch(f"{_MODULE}.build_opener", return_value=_mock_opener(error)),
-        ):
+        with _reachable(), patch(f"{_MODULE}.build_opener", return_value=_mock_opener(error)):
             result = validator.validate("deep")
 
         # THEN it is reported as a DENY rather than a missing-Location failure
@@ -431,11 +482,7 @@ class TestDeepLevel:
         error = HTTPError("http://authsvc:8080/", 401, "Unauthorized", _headers(), None)
 
         # WHEN the validator runs at the deep level
-        with (
-            patch(f"{_MODULE}.socket.getaddrinfo", return_value=_addrinfo("10.152.183.29")),
-            patch(f"{_MODULE}.socket.create_connection"),
-            patch(f"{_MODULE}.build_opener", return_value=_mock_opener(error)),
-        ):
+        with _reachable(), patch(f"{_MODULE}.build_opener", return_value=_mock_opener(error)):
             result = validator.validate("deep")
 
         # THEN an explicit deny is a valid decision
@@ -448,11 +495,7 @@ class TestDeepLevel:
         error = HTTPError("http://authsvc:8080/", 503, "Unavailable", _headers(), None)
 
         # WHEN the validator runs at the deep level
-        with (
-            patch(f"{_MODULE}.socket.getaddrinfo", return_value=_addrinfo("10.152.183.29")),
-            patch(f"{_MODULE}.socket.create_connection"),
-            patch(f"{_MODULE}.build_opener", return_value=_mock_opener(error)),
-        ):
+        with _reachable(), patch(f"{_MODULE}.build_opener", return_value=_mock_opener(error)):
             result = validator.validate("deep")
 
         # THEN the probe fails
@@ -527,11 +570,7 @@ class TestDeepLevel:
         validator = _make_validator(_nested_databag(VALID_PAYLOAD))
 
         # WHEN the validator runs at the deep level
-        with (
-            patch(f"{_MODULE}.socket.getaddrinfo", return_value=_addrinfo("10.152.183.29")),
-            patch(f"{_MODULE}.socket.create_connection"),
-            patch(f"{_MODULE}.build_opener", return_value=_mock_opener(URLError("timed out"))),
-        ):
+        with _reachable(), patch(f"{_MODULE}.build_opener", return_value=_mock_opener(URLError("timed out"))):
             result = validator.validate("deep")
 
         # THEN the probe reports the transport failure without guessing at a cause
@@ -549,11 +588,7 @@ class TestDeepLevel:
         validator = _make_validator(_nested_databag(VALID_PAYLOAD))
 
         # WHEN the validator probes it over plaintext HTTP, as the provider does
-        with (
-            patch(f"{_MODULE}.socket.getaddrinfo", return_value=_addrinfo("10.152.183.29")),
-            patch(f"{_MODULE}.socket.create_connection"),
-            patch(f"{_MODULE}.build_opener", return_value=_mock_opener(URLError(reason))),
-        ):
+        with _reachable(), patch(f"{_MODULE}.build_opener", return_value=_mock_opener(URLError(reason))):
             result = validator.validate("deep")
 
         # THEN the scheme mismatch is named rather than reported as a network fault
@@ -566,11 +601,7 @@ class TestDeepLevel:
         error = HTTPError("http://authsvc:8080/", 302, "Found", _headers(Location="/dex/auth"), None)
 
         # WHEN the validator runs at the deep level
-        with (
-            patch(f"{_MODULE}.socket.getaddrinfo", return_value=_addrinfo("10.152.183.29")) as resolve,
-            patch(f"{_MODULE}.socket.create_connection"),
-            patch(f"{_MODULE}.build_opener", return_value=_mock_opener(error)),
-        ):
+        with _reachable() as resolve, patch(f"{_MODULE}.build_opener", return_value=_mock_opener(error)):
             validator.validate("deep")
 
         # THEN only the address the provider programs into the proxy is resolved
@@ -617,11 +648,7 @@ class TestCrossModel:
         error = HTTPError("http://authsvc:8080/", 302, "Found", _headers(Location="/dex/auth"), None)
 
         # WHEN the validator runs at the deep level
-        with (
-            patch(f"{_MODULE}.socket.getaddrinfo", return_value=_addrinfo("10.152.183.29")),
-            patch(f"{_MODULE}.socket.create_connection"),
-            patch(f"{_MODULE}.build_opener", return_value=_mock_opener(error)),
-        ):
+        with _reachable(), patch(f"{_MODULE}.build_opener", return_value=_mock_opener(error)):
             result = validator.validate("deep")
 
         # THEN it passes, because the authorization path genuinely works

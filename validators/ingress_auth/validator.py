@@ -71,9 +71,9 @@ class IngressAuthValidator(BaseValidator):
     A cross-model relation is therefore only operational if the service name also
     resolves locally, and the deep checks report that explicitly.
 
-    The deep level exercises the advertised authorization service the same way the
-    gateway does at request time: it resolves the service, opens a connection and
-    asks it for an authorization decision on an unauthenticated request.
+    The simple level checks the payload and the advertised service's reachability. The
+    deep level then exercises it the same way the gateway does at request time, asking
+    for an authorization decision on an unauthenticated request.
     """
 
     def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
@@ -105,32 +105,29 @@ class IngressAuthValidator(BaseValidator):
         if not checks[-1].passed:
             return self._fail_result(level, checks)
 
+        reachability_checks, host = self._reachability_checks(payload)
+        checks.extend(reachability_checks)
+        if not checks[-1].passed:
+            return self._fail_result(level, checks)
+
         if level == "deep":
-            checks.extend(self._deep_checks(payload))
+            checks.extend(_decision_checks(host, int(payload["port"]), payload))
 
         return self._make_result(level=level, checks=checks)
 
-    def _deep_checks(self, payload: dict[str, Any]) -> list[ValidationCheck]:
-        """Exercise the advertised authorization service as the ingress gateway would."""
+    def _reachability_checks(self, payload: dict[str, Any]) -> tuple[list[ValidationCheck], str]:
+        """Resolve and connect to the advertised authorization service.
+
+        Reachability is a simple-level concern: it has no side effects on the service.
+        """
         service = str(payload["service"])
         port = int(payload["port"])
 
         dns_check, host = _dns_check(service, self.charm.model.name, self._is_cross_model())
-        checks = [dns_check]
         if not dns_check.passed:
-            return checks
+            return [dns_check], ""
 
-        checks.append(_connect_check(host, port))
-        if not checks[-1].passed:
-            return checks
-
-        probe_check, status, headers = _ext_authz_probe_check(host, port)
-        checks.append(probe_check)
-        if not probe_check.passed:
-            return checks
-
-        checks.append(_auth_decision_check(status, headers, payload.get("allowed-response-headers") or []))
-        return checks
+        return [dns_check, _connect_check(host, port)], host
 
     def _is_cross_model(self) -> bool | None:
         """Whether the remote application lives in another model, or None if unknown.
@@ -303,7 +300,7 @@ def _field_types_check(payload: dict[str, Any]) -> ValidationCheck:
 
 
 # ---------------------------------------------------------------------------
-# Deep level checks
+# Reachability checks (simple and deep) and the authorization decision (deep only)
 # ---------------------------------------------------------------------------
 
 
@@ -370,6 +367,16 @@ def _connect_check(host: str, port: int) -> ValidationCheck:
         passed=True,
         message=f"TCP reached authorization service {host}:{port}.",
     )
+
+
+def _decision_checks(host: str, port: int, payload: dict[str, Any]) -> list[ValidationCheck]:
+    """Ask the authorization service for a decision, as the gateway does per request."""
+    probe_check, status, headers = _ext_authz_probe_check(host, port)
+    if not probe_check.passed:
+        return [probe_check]
+
+    decision = _auth_decision_check(status, headers, payload.get("allowed-response-headers") or [])
+    return [probe_check, decision]
 
 
 def _ext_authz_probe_check(host: str, port: int) -> tuple[ValidationCheck, int | None, dict[str, str]]:
