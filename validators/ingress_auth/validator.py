@@ -159,11 +159,15 @@ def _supported_versions_check(databag: dict[str, str]) -> ValidationCheck:
             message=f"'{_VERSION_KEY}' is not valid YAML: {exc}",
         )
 
-    if not isinstance(versions, list) or not versions:
+    if (
+        not versions
+        or not isinstance(versions, list)
+        or not all(isinstance(version, str) for version in versions)
+    ):
         return ValidationCheck(
             name="supported_versions",
             passed=False,
-            message=f"'{_VERSION_KEY}' must be a non-empty list, got {versions!r}.",
+            message=f"'{_VERSION_KEY}' must be a non-empty list of strings, got {versions!r}.",
         )
 
     return ValidationCheck(
