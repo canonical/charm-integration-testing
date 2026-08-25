@@ -972,7 +972,7 @@ class TestHandlePeerChannelMismatch:
 
     def test_peer_in_different_model_gets_variant_placed_in_its_own_model(self) -> None:
         # GIVEN an anchor and peer in different models (a cross-model relation), each
-        # with its own arch/juju/platform
+        # with its own arch (distinct here to make model-attribution assertable)
         domain = Domain()
         anchor_model_ref = ModelRef(name="anchor-model", controller="anchor-controller")
         peer_model_ref = ModelRef(name="peer-model", controller="peer-controller")
