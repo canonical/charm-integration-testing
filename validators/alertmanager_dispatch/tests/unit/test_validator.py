@@ -279,6 +279,20 @@ class TestAlertmanagerDispatchValidatorSchema:
         assert "s3cr3t" not in schema_check.message
         assert "user:" not in schema_check.message
 
+    def test_redacts_userinfo_from_value_without_scheme(self) -> None:
+        # GIVEN a databag value that carries credentials but omits the '://' scheme separator
+        validator = _make_validator({"alertmanager-k8s/0": {"url": "user:s3cr3t@host"}})
+
+        # WHEN
+        result = validator.validate(level="simple")
+
+        # THEN it fails schema with the password stripped from the unsupported-scheme message
+        assert result.status == "FAIL"
+        schema_check = next(c for c in result.checks if c.name == "schema")
+        assert not schema_check.passed
+        assert "s3cr3t" not in schema_check.message
+        assert "user:" not in schema_check.message
+
     def test_fails_when_url_has_query_or_fragment(self) -> None:
         # GIVEN a URL with a query component; API paths are appended by concatenation so this would misroute
         validator = _make_validator({"alertmanager-k8s/0": {"url": "http://alertmanager-0.am-test.svc:9093?x"}})

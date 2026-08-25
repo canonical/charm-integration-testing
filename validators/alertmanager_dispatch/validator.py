@@ -106,12 +106,12 @@ def _redact_url(url: str) -> str:
     """Return *url* with any ``user:pass@`` userinfo stripped for safe display (the request keeps it).
 
     Uses string ops rather than :func:`urlparse` so credentials are removed even from a URL that is
-    malformed enough for ``urlparse`` to reject (e.g. an unmatched IPv6 bracket).
+    malformed enough for ``urlparse`` to reject (e.g. an unmatched IPv6 bracket) or that omits the
+    ``://`` separator entirely (e.g. a bare ``user:pass@host`` value that lands in an error message).
     """
     scheme_sep = url.find("://")
-    if scheme_sep == -1:
-        return url
-    authority_start = scheme_sep + len("://")
+    # Without a scheme separator the whole value up to the first '/', '?' or '#' is the authority.
+    authority_start = scheme_sep + len("://") if scheme_sep != -1 else 0
     authority_end = len(url)
     for i in range(authority_start, len(url)):
         if url[i] in "/?#":
