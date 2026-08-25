@@ -4,25 +4,37 @@
 
 from abc import ABC
 from pathlib import Path
+from types import MappingProxyType
 from typing import Callable
 
 from kubernetes import client, config  # type: ignore[import-untyped]
 from urllib3.util import Retry
 
-# Template retry policy: each ApiClient gets its own copy (see k8s_client), so every request
+# Template retry policy for a single ApiClient's Configuration (see k8s_client). Every request
 # made through any API group (including ad-hoc ones instantiated directly against `api_client`)
 # gets the same retry behaviour without each call site needing its own retry/backoff logic.
-DEFAULT_RETRIES = Retry(
-    total=5,
-    backoff_factor=1,
-    status_forcelist=frozenset([500, 502, 503, 504]),
-    # POST is excluded: it's not idempotent, and retrying it risks duplicate side effects if the
-    # server actually processed the original request before the client saw a disconnect.
-    allowed_methods=frozenset(["HEAD", "GET", "PUT", "DELETE", "OPTIONS", "TRACE", "PATCH"]),
-    # Let the Kubernetes client see the final 5xx response (and raise its usual ApiException)
-    # once retries are exhausted, instead of urllib3 raising MaxRetryError.
-    raise_on_status=False,
+DEFAULT_RETRY_KWARGS: MappingProxyType[str, object] = MappingProxyType(
+    {
+        "total": 5,
+        "backoff_factor": 1,
+        "status_forcelist": frozenset([500, 502, 503, 504]),
+        # POST is excluded: it's not idempotent, and retrying it risks duplicate side effects if
+        # the server actually processed the original request before the client saw a disconnect.
+        "allowed_methods": frozenset(["HEAD", "GET", "PUT", "DELETE", "OPTIONS", "TRACE", "PATCH"]),
+        # Let the Kubernetes client see the final 5xx response (and raise its usual ApiException)
+        # once retries are exhausted, instead of urllib3 raising MaxRetryError.
+        "raise_on_status": False,
+    }
 )
+
+
+def build_default_retries() -> Retry:
+    """Builds a fresh `Retry` instance from `DEFAULT_RETRY_KWARGS`.
+
+    Returns a new instance on every call, so no two clients (or anything else in the process)
+    ever share the same mutable `Retry` object.
+    """
+    return Retry(**DEFAULT_RETRY_KWARGS)  # type: ignore[arg-type]
 
 
 class KubernetesExtension(ABC):
@@ -58,7 +70,5 @@ class KubernetesBackend:
             load_kube_config()
 
         configuration = client.Configuration.get_default_copy()
-        # Each client gets its own Retry instance so nothing shares (and could accidentally
-        # mutate) the module-level template.
-        configuration.retries = DEFAULT_RETRIES.new()
+        configuration.retries = build_default_retries()
         return cls(client.ApiClient(configuration))
