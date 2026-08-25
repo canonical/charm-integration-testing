@@ -217,8 +217,10 @@ class TestSimpleLevel:
             "auth_service_connect",
         }
 
-    def test_valid_flat_payload_passes(self) -> None:
-        # GIVEN a requirer using the flat SDI wire format
+    def test_flat_payload_is_rejected(self) -> None:
+        # GIVEN a requirer that serialised each field into its own databag key; the
+        # ingress-auth schema does not set SDI's `flat: true`, so SDI unwraps this as an
+        # empty payload and istio-pilot removes the EnvoyFilter instead of programming it
         databag = {"_supported_versions": yaml.safe_dump(["v1"])}
         databag.update({key: yaml.safe_dump(value) for key, value in VALID_PAYLOAD.items()})
         validator = _make_validator(databag)
@@ -227,9 +229,25 @@ class TestSimpleLevel:
         with _reachable():
             result = validator.validate("simple")
 
-        # THEN the flat encoding is decoded and accepted
-        assert result.status == "PASS"
-        assert "flat" in _checks_by_name(result)["payload"].message
+        # THEN the payload check fails rather than reporting a false PASS
+        assert result.status == "FAIL"
+        checks = _checks_by_name(result)
+        assert checks["payload"].passed is False
+        assert "'data'" in checks["payload"].message
+        # AND no downstream check runs on a payload the provider will never see
+        assert "schema" not in checks
+        assert "auth_service_dns" not in checks
+
+    def test_databag_without_data_key_fails(self) -> None:
+        # GIVEN a remote that completed the version handshake but published no payload
+        validator = _make_validator(_nested_databag(payload=None))
+
+        # WHEN the validator runs at the simple level
+        result = validator.validate("simple")
+
+        # THEN the missing 'data' key is reported as a payload failure
+        assert result.status == "FAIL"
+        assert _checks_by_name(result)["payload"].passed is False
 
     @pytest.mark.parametrize("versions", [None, [], "not-a-list"])
     def test_broken_version_handshake_fails(self, versions: Any) -> None:
@@ -269,6 +287,37 @@ class TestSimpleLevel:
             result = validator.validate("simple")
 
         # THEN validation proceeds against v1
+        assert result.status == "PASS"
+        assert "validating as v1" in _checks_by_name(result)["supported_versions"].message
+
+    def test_malformed_version_entry_is_rejected(self) -> None:
+        # GIVEN a remote advertising a usable version alongside a malformed one; SDI's
+        # _parse_versions() raises InvalidSchemaVersionError over the whole list before
+        # intersecting, and istio-pilot catches only the no-versions and
+        # incompatible-versions errors, so the provider never reconciles
+        validator = _make_validator(_nested_databag(VALID_PAYLOAD, versions=["v1", "bogus"]))
+
+        # WHEN the validator runs
+        with _reachable():
+            result = validator.validate("simple")
+
+        # THEN the handshake fails rather than passing on the usable entry alone
+        assert result.status == "FAIL"
+        checks = _checks_by_name(result)
+        assert checks["supported_versions"].passed is False
+        assert "bogus" in checks["supported_versions"].message
+        assert "payload" not in checks
+
+    def test_sdi_integer_version_form_is_accepted(self) -> None:
+        # GIVEN a remote advertising the bare-integer form SDI also accepts, which
+        # parses to the same version number as the local 'v1'
+        validator = _make_validator(_nested_databag(VALID_PAYLOAD, versions=[1]))
+
+        # WHEN the validator runs
+        with _reachable():
+            result = validator.validate("simple")
+
+        # THEN it is treated as compatible instead of failing as a non-'vN' string
         assert result.status == "PASS"
         assert "validating as v1" in _checks_by_name(result)["supported_versions"].message
 

@@ -145,6 +145,24 @@ class IngressAuthValidator(BaseValidator):
 # ---------------------------------------------------------------------------
 
 
+def _parse_sdi_version(entry: Any) -> int | None:
+    """Parse one advertised version the way SDI does, or None if SDI would reject it.
+
+    SDI accepts a bare integer N or the string ``vN``. Anything else raises
+    InvalidSchemaVersionError from _parse_versions() before any relation data is read,
+    and the provider catches only the no-versions and incompatible-versions errors, so
+    a single malformed entry stops it reconciling altogether.
+    """
+    if isinstance(entry, int):
+        return entry
+    if isinstance(entry, str) and entry.startswith("v"):
+        try:
+            return int(entry[1:])
+        except ValueError:
+            return None
+    return None
+
+
 def _supported_versions_check(databag: dict[str, str]) -> ValidationCheck:
     """Verify the remote completed the SDI version handshake on a version we can read."""
     raw = databag.get(_VERSION_KEY, "")
@@ -164,16 +182,29 @@ def _supported_versions_check(databag: dict[str, str]) -> ValidationCheck:
             message=f"'{_VERSION_KEY}' is not valid YAML: {exc}",
         )
 
-    if not versions or not isinstance(versions, list) or not all(isinstance(version, str) for version in versions):
+    if not versions or not isinstance(versions, list):
         return ValidationCheck(
             name="supported_versions",
             passed=False,
-            message=f"'{_VERSION_KEY}' must be a non-empty list of strings, got {versions!r}.",
+            message=f"'{_VERSION_KEY}' must be a non-empty list, got {versions!r}.",
+        )
+
+    # SDI parses every advertised entry before intersecting, so one malformed entry
+    # rejects the whole list even when a usable version sits alongside it.
+    numbers = [_parse_sdi_version(entry) for entry in versions]
+    malformed = [entry for entry, number in zip(versions, numbers) if number is None]
+    if malformed:
+        return ValidationCheck(
+            name="supported_versions",
+            passed=False,
+            message=f"'{_VERSION_KEY}' advertises {malformed!r}, which is not SDI's integer or"
+            " 'vN' form; SDI rejects the whole list before the provider reads any relation data.",
         )
 
     # SDI negotiates the highest version both sides advertise, so a superset is fine: the
     # provider only supports v1, which is what will be used.
-    usable = [version for version in versions if version in _SUPPORTED_VERSIONS]
+    supported = {_parse_sdi_version(version) for version in _SUPPORTED_VERSIONS}
+    usable = [f"v{number}" for number in numbers if number in supported]
     if not usable:
         return ValidationCheck(
             name="supported_versions",
@@ -202,73 +233,60 @@ def _negotiated_version(usable: list[str]) -> str:
 
 
 def _decode_payload(databag: dict[str, str]) -> tuple[ValidationCheck, dict[str, Any]]:
-    """Decode the SDI payload, supporting both the nested and flat wire formats.
+    """Decode the nested SDI payload published by the requirer.
 
-    Nested (the default) puts the whole payload under a single YAML-encoded ``data``
-    key. Flat serialises each field directly into its own databag key. Returns a
-    (check, payload) tuple; the payload is empty when the check fails.
+    SDI serialises each field into its own databag key only when the schema sets
+    ``flat: true``. The ingress-auth schema does not, so the whole payload is
+    YAML-encoded under a single ``data`` key. A databag without that key unwraps to an
+    empty dict, and because SDI skips validation for a falsy payload the provider is
+    left with nothing to program. Returns a (check, payload) tuple; the payload is
+    empty when the check fails.
     """
-    if _DATA_KEY in databag:
-        try:
-            payload = yaml.safe_load(databag[_DATA_KEY])
-        except yaml.YAMLError as exc:
-            return (
-                ValidationCheck(
-                    name="payload",
-                    passed=False,
-                    message=f"'{_DATA_KEY}' is not valid YAML: {exc}",
-                ),
-                {},
-            )
-        if not isinstance(payload, dict):
-            return (
-                ValidationCheck(
-                    name="payload",
-                    passed=False,
-                    message=f"'{_DATA_KEY}' must decode to a mapping, got {type(payload).__name__}.",
-                ),
-                {},
-            )
-        if not all(isinstance(key, str) for key in payload):
-            return (
-                ValidationCheck(
-                    name="payload",
-                    passed=False,
-                    message=f"'{_DATA_KEY}' mapping keys must all be strings.",
-                ),
-                {},
-            )
-        return (
-            ValidationCheck(
-                name="payload",
-                passed=True,
-                message=f"Decoded nested SDI payload with fields {sorted(payload)}.",
-            ),
-            payload,
-        )
-
-    flat = {key: value for key, value in databag.items() if key != _VERSION_KEY}
-    if not flat:
+    if _DATA_KEY not in databag:
         return (
             ValidationCheck(
                 name="payload",
                 passed=False,
-                message="Remote app databag carries no authorization service data; the requirer published nothing.",
+                message=f"Remote app databag has no '{_DATA_KEY}' key, so SDI unwraps an empty"
+                " payload and the provider programs no authorization filter.",
             ),
             {},
         )
 
-    payload = {}
-    for key, value in flat.items():
-        try:
-            payload[key] = yaml.safe_load(value)
-        except yaml.YAMLError:
-            payload[key] = value
+    try:
+        payload = yaml.safe_load(databag[_DATA_KEY])
+    except yaml.YAMLError as exc:
+        return (
+            ValidationCheck(
+                name="payload",
+                passed=False,
+                message=f"'{_DATA_KEY}' is not valid YAML: {exc}",
+            ),
+            {},
+        )
+    if not isinstance(payload, dict):
+        return (
+            ValidationCheck(
+                name="payload",
+                passed=False,
+                message=f"'{_DATA_KEY}' must decode to a mapping, got {type(payload).__name__}.",
+            ),
+            {},
+        )
+    if not all(isinstance(key, str) for key in payload):
+        return (
+            ValidationCheck(
+                name="payload",
+                passed=False,
+                message=f"'{_DATA_KEY}' mapping keys must all be strings.",
+            ),
+            {},
+        )
     return (
         ValidationCheck(
             name="payload",
             passed=True,
-            message=f"Decoded flat SDI payload with fields {sorted(payload)}.",
+            message=f"Decoded SDI payload with fields {sorted(payload)}.",
         ),
         payload,
     )
