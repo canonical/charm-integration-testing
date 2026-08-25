@@ -12,9 +12,9 @@ from urllib3.util import Retry
 class LoadKubeConfigStub:
     """Stub standing in for `kubernetes.config.load_kube_config`, recording call args."""
 
-    calls: list[dict[str, str]] = field(default_factory=list)
+    calls: list[dict[str, object]] = field(default_factory=list)
 
-    def __call__(self, **kwargs: str) -> None:
+    def __call__(self, **kwargs: object) -> None:
         self.calls.append(kwargs)
 
 
