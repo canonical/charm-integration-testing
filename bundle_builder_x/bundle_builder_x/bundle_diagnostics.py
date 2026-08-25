@@ -94,7 +94,7 @@ class PeerChannelMismatchDiagnostic(BundleDiagnostic):
             )
         return (
             f"Charm endpoint {self.charm_name}:{self.endpoint} requires its peer "
-            f"{self.peer_charm_name} to be on channel {requirement}"
+            f"{self.peer_charm_name} to be on {requirement}"
         )
 
     @property
