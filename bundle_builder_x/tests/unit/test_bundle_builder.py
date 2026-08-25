@@ -1013,7 +1013,8 @@ class TestHandlePeerChannelMismatch:
         )
         assert domain.charms[peer_variant_id].model == peer_model_ref
 
-        # AND the charm was looked up using the peer's own model attributes
+        # AND the charm was looked up using the peer's own model's arch (the only
+        # attribute that differs between the two models in this test)
         assert fake.charm_from_store_calls[0]["ubuntu_arch"] == "arm64"
 
 
