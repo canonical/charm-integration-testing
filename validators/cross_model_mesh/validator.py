@@ -169,7 +169,8 @@ class CrossModelMeshValidator(BaseValidator):
 
         cmr_data, checks = self._provides_common_checks()
         if cmr_data is not None:
-            checks.append(_check_dns_reachable(cmr_data))
+            dns_check, _resolved_addrs = _check_dns_reachable(cmr_data)
+            checks.append(dns_check)
 
         return self._make_result(level="simple", checks=checks)
 
@@ -183,12 +184,12 @@ class CrossModelMeshValidator(BaseValidator):
         if cmr_data is None:
             return self._make_result(level="deep", checks=checks)
 
-        dns_check = _check_dns_reachable(cmr_data)
+        dns_check, resolved_addrs = _check_dns_reachable(cmr_data)
         checks.append(dns_check)
-        if not dns_check.passed:
+        if not dns_check.passed or resolved_addrs is None:
             return self._make_result(level="deep", checks=checks)
 
-        checks.append(_check_mesh_data_plane_reachable(cmr_data))
+        checks.append(_check_mesh_data_plane_reachable(cmr_data, resolved_addrs))
 
         return self._make_result(level="deep", checks=checks)
 
@@ -343,7 +344,7 @@ def _cross_model_dns_name(cmr_data: CMRData) -> str:
     return f"{cmr_data.app_name}.{cmr_data.juju_model_name}.svc.cluster.local"
 
 
-def _check_dns_reachable(cmr_data: CMRData) -> ValidationCheck:
+def _check_dns_reachable(cmr_data: CMRData) -> tuple[ValidationCheck, list[tuple[Any, ...]] | None]:
     """Verify the declared identity's Service DNS name resolves.
 
     This only confirms the destination's Kubernetes Service DNS name exists;
@@ -352,6 +353,11 @@ def _check_dns_reachable(cmr_data: CMRData) -> ValidationCheck:
     exists). It is nonetheless a useful prerequisite: if the declared
     application/model cannot be resolved at all, the mesh has no addressable
     target to route traffic to.
+
+    On success, also returns the resolved ``getaddrinfo()`` results so that
+    callers needing to open a TCP connection to the same host (e.g. the deep
+    canary check) can reuse them directly instead of resolving the hostname a
+    second time, which would not be bounded by ``_DNS_TIMEOUT``.
     """
     host = _cross_model_dns_name(cmr_data)
     # socket.setdefaulttimeout() only bounds newly created socket objects, not
@@ -365,7 +371,7 @@ def _check_dns_reachable(cmr_data: CMRData) -> ValidationCheck:
 
     def _resolve() -> None:
         try:
-            result["addrs"] = socket.getaddrinfo(host, None)
+            result["addrs"] = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
         except OSError as exc:
             result["error"] = exc
 
@@ -382,7 +388,7 @@ def _check_dns_reachable(cmr_data: CMRData) -> ValidationCheck:
                 "Remediation: confirm the requirer application and model names in cmr_data are correct "
                 "and that the workload is deployed."
             ),
-        )
+        ), None
     if "error" in result:
         return ValidationCheck(
             name="dns_reachable",
@@ -392,8 +398,10 @@ def _check_dns_reachable(cmr_data: CMRData) -> ValidationCheck:
                 "Remediation: confirm the requirer application and model names in cmr_data are correct "
                 "and that the workload is deployed."
             ),
-        )
-    return ValidationCheck(name="dns_reachable", passed=True, message=f"Resolved {host!r}.")
+        ), None
+    addrs = result.get("addrs")
+    resolved_addrs = addrs if isinstance(addrs, list) else []
+    return ValidationCheck(name="dns_reachable", passed=True, message=f"Resolved {host!r}."), resolved_addrs
 
 
 def _discover_service_ports(namespace: str, name: str) -> list[int] | None:
@@ -454,7 +462,38 @@ def _discover_service_ports(namespace: str, name: str) -> list[int] | None:
     ]
 
 
-def _check_mesh_data_plane_reachable(cmr_data: CMRData) -> ValidationCheck:
+def _connect_to_resolved_address(resolved_addrs: list[tuple[Any, ...]], port: int, timeout: float) -> socket.socket:
+    """Open a TCP connection to one of the already-resolved addresses on ``port``.
+
+    Mirrors ``socket.create_connection()``'s "try every address, keep the
+    first error" fallback behavior, but connects directly to pre-resolved
+    addresses instead of re-resolving the hostname. Re-resolving would not be
+    bounded by ``_DNS_TIMEOUT`` (see ``_check_dns_reachable``), so a stalled
+    resolver could otherwise block this canary indefinitely even though DNS
+    was already confirmed reachable moments earlier.
+    """
+    last_error: OSError | None = None
+    seen: set[tuple[int, str]] = set()
+    for family, socktype, proto, _canonname, sockaddr in resolved_addrs:
+        ip = sockaddr[0]
+        if (family, ip) in seen:
+            continue
+        seen.add((family, ip))
+        connect_addr = (ip, port) if family == socket.AF_INET else (ip, port, *sockaddr[2:])
+        sock = socket.socket(family, socktype, proto)
+        try:
+            sock.settimeout(timeout)
+            sock.connect(connect_addr)
+            return sock
+        except OSError as exc:
+            sock.close()
+            last_error = exc
+    if last_error is not None:
+        raise last_error
+    raise OSError("No resolved addresses to connect to.")
+
+
+def _check_mesh_data_plane_reachable(cmr_data: CMRData, resolved_addrs: list[tuple[Any, ...]]) -> ValidationCheck:
     """Canary: open a TCP connection to the declared identity's workload port.
 
     Prefers the destination's real Kubernetes Service port(s) (discovered
@@ -473,10 +512,13 @@ def _check_mesh_data_plane_reachable(cmr_data: CMRData) -> ValidationCheck:
     the destination's Service DNS name, so discovery failures reachable here
     are same-cluster problems (e.g. RBAC), not a separate-cluster scenario --
     a genuinely different cluster's Service name would already have failed
-    DNS resolution and short-circuited before this check runs. A Service
-    that is successfully discovered but declares no ports at all is treated
-    as a definitive failure rather than silently falling back to that weaker
-    probe.
+    DNS resolution and short-circuited before this check runs. The TCP probe
+    itself connects using the addresses ``_check_dns_reachable`` already
+    resolved (``resolved_addrs``) rather than resolving the hostname again,
+    so a resolver stall cannot bypass the DNS timeout bound and block this
+    check indefinitely. A Service that is successfully discovered but declares
+    no ports at all is treated as a definitive failure rather than silently
+    falling back to that weaker probe.
     """
     host = _cross_model_dns_name(cmr_data)
     ports = _discover_service_ports(cmr_data.juju_model_name, cmr_data.app_name)
@@ -501,8 +543,8 @@ def _check_mesh_data_plane_reachable(cmr_data: CMRData) -> ValidationCheck:
     errors: list[str] = []
     for port in candidates:
         try:
-            with socket.create_connection((host, port), timeout=_TCP_TIMEOUT):
-                pass
+            sock = _connect_to_resolved_address(resolved_addrs, port, _TCP_TIMEOUT)
+            sock.close()
         except OSError as exc:
             errors.append(f"{port}: {exc}")
             continue

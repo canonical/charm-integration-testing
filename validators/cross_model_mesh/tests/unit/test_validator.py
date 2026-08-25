@@ -18,6 +18,7 @@ from typing import Any, cast
 from unittest.mock import MagicMock, mock_open, patch
 
 import ops
+import pytest
 
 from validators.cross_model_mesh.validator import (
     CMRData,
@@ -25,6 +26,7 @@ from validators.cross_model_mesh.validator import (
     _check_dns_reachable,
     _check_identity_format,
     _check_mesh_data_plane_reachable,
+    _connect_to_resolved_address,
     _decode_cmr_data,
     _discover_service_ports,
 )
@@ -177,14 +179,16 @@ class TestCheckDnsReachable:
         with patch(
             "validators.cross_model_mesh.validator.socket.getaddrinfo", return_value=[(2, 1, 6, "", ("10.0.0.1", 0))]
         ):
-            check = _check_dns_reachable(_VALID_CMR_DATA)
+            check, addrs = _check_dns_reachable(_VALID_CMR_DATA)
         assert check.passed, check.message
+        assert addrs == [(2, 1, 6, "", ("10.0.0.1", 0))]
 
     def test_resolution_failure(self) -> None:
         with patch("validators.cross_model_mesh.validator.socket.getaddrinfo", side_effect=OSError("not found")):
-            check = _check_dns_reachable(_VALID_CMR_DATA)
+            check, addrs = _check_dns_reachable(_VALID_CMR_DATA)
         assert not check.passed
         assert "not found" in check.message
+        assert addrs is None
 
     def test_resolution_timeout(self) -> None:
         """socket.setdefaulttimeout() does not bound getaddrinfo(); a hung resolver call must
@@ -197,58 +201,112 @@ class TestCheckDnsReachable:
             patch("validators.cross_model_mesh.validator.socket.getaddrinfo", side_effect=_hangs_forever),
             patch("validators.cross_model_mesh.validator._DNS_TIMEOUT", 0.05),
         ):
-            check = _check_dns_reachable(_VALID_CMR_DATA)
+            check, addrs = _check_dns_reachable(_VALID_CMR_DATA)
         assert not check.passed
         assert "did not complete" in check.message
+        assert addrs is None
+
+
+class TestConnectToResolvedAddress:
+    """Unit tests for the low-level socket helper used by the mesh canary.
+
+    These verify it connects using the already-resolved addresses directly
+    (never invoking hostname resolution itself), tries every address on
+    failure, and raises the last error when none succeed.
+    """
+
+    def test_connects_using_first_address(self) -> None:
+        resolved_addrs = [(2, 1, 6, "", ("10.0.0.5", 0))]
+        fake_socket = MagicMock()
+
+        with patch("validators.cross_model_mesh.validator.socket.socket", return_value=fake_socket) as mock_socket:
+            sock = _connect_to_resolved_address(resolved_addrs, 80, 5)
+
+        mock_socket.assert_called_once_with(2, 1, 6)
+        fake_socket.settimeout.assert_called_once_with(5)
+        fake_socket.connect.assert_called_once_with(("10.0.0.5", 80))
+        assert sock is fake_socket
+
+    def test_falls_back_to_second_address_when_first_fails(self) -> None:
+        resolved_addrs = [(2, 1, 6, "", ("10.0.0.5", 0)), (2, 1, 6, "", ("10.0.0.6", 0))]
+        failing_socket = MagicMock()
+        failing_socket.connect.side_effect = OSError("Connection refused")
+        working_socket = MagicMock()
+
+        with patch("validators.cross_model_mesh.validator.socket.socket", side_effect=[failing_socket, working_socket]):
+            sock = _connect_to_resolved_address(resolved_addrs, 80, 5)
+
+        failing_socket.close.assert_called_once()
+        assert sock is working_socket
+
+    def test_raises_last_error_when_all_addresses_fail(self) -> None:
+        resolved_addrs = [(2, 1, 6, "", ("10.0.0.5", 0))]
+        failing_socket = MagicMock()
+        failing_socket.connect.side_effect = OSError("Connection refused")
+
+        with patch("validators.cross_model_mesh.validator.socket.socket", return_value=failing_socket):
+            with pytest.raises(OSError, match="Connection refused"):
+                _connect_to_resolved_address(resolved_addrs, 80, 5)
+
+    def test_deduplicates_identical_addresses(self) -> None:
+        """Multiple getaddrinfo entries for the same (family, ip) should only be tried once."""
+        resolved_addrs = [(2, 1, 6, "", ("10.0.0.5", 0)), (2, 2, 17, "", ("10.0.0.5", 0))]
+        fake_socket = MagicMock()
+
+        with patch("validators.cross_model_mesh.validator.socket.socket", return_value=fake_socket) as mock_socket:
+            _connect_to_resolved_address(resolved_addrs, 80, 5)
+
+        mock_socket.assert_called_once()
 
 
 class TestCheckMeshDataPlaneReachable:
+    _RESOLVED_ADDRS = [(2, 1, 6, "", ("10.0.0.5", 0))]
+
     def test_connects_using_discovered_port(self) -> None:
         with (
             patch(
                 "validators.cross_model_mesh.validator._discover_service_ports",
                 return_value=[80],
             ),
-            patch("validators.cross_model_mesh.validator.socket.create_connection") as mock_conn,
+            patch("validators.cross_model_mesh.validator._connect_to_resolved_address") as mock_connect,
         ):
-            mock_conn.return_value.__enter__.return_value = mock_conn.return_value
-            mock_conn.return_value.__exit__.return_value = False
-            check = _check_mesh_data_plane_reachable(_VALID_CMR_DATA)
+            mock_connect.return_value = MagicMock()
+            check = _check_mesh_data_plane_reachable(_VALID_CMR_DATA, self._RESOLVED_ADDRS)
         assert check.passed, check.message
-        assert mock_conn.call_args[0][0][1] == 80
+        assert mock_connect.call_args[0][0] == self._RESOLVED_ADDRS
+        assert mock_connect.call_args[0][1] == 80
         assert "discovered via in-cluster Service lookup" in check.message
 
     def test_connects_using_second_port_when_first_fails(self) -> None:
         """Service port order is not a reliability signal: try every declared port."""
         attempts: list[int] = []
 
-        def fake_create_connection(address: tuple[str, int], timeout: float) -> Any:
-            attempts.append(address[1])
-            if address[1] == 8080:
+        def fake_connect(resolved_addrs: list[tuple[Any, ...]], port: int, timeout: float) -> Any:
+            attempts.append(port)
+            if port == 8080:
                 raise OSError("Connection refused")
-            return mock_open()()
+            return MagicMock()
 
         with (
             patch("validators.cross_model_mesh.validator._discover_service_ports", return_value=[8080, 80]),
             patch(
-                "validators.cross_model_mesh.validator.socket.create_connection",
-                side_effect=fake_create_connection,
+                "validators.cross_model_mesh.validator._connect_to_resolved_address",
+                side_effect=fake_connect,
             ),
         ):
-            check = _check_mesh_data_plane_reachable(_VALID_CMR_DATA)
+            check = _check_mesh_data_plane_reachable(_VALID_CMR_DATA, self._RESOLVED_ADDRS)
         assert check.passed, check.message
         assert attempts == [8080, 80]
 
     def test_connects_using_fallback_port_when_discovery_unavailable(self) -> None:
         with (
             patch("validators.cross_model_mesh.validator._discover_service_ports", return_value=None),
-            patch("validators.cross_model_mesh.validator.socket.create_connection") as mock_conn,
+            patch("validators.cross_model_mesh.validator._connect_to_resolved_address") as mock_connect,
         ):
-            mock_conn.return_value.__enter__.return_value = mock_conn.return_value
-            mock_conn.return_value.__exit__.return_value = False
-            check = _check_mesh_data_plane_reachable(_VALID_CMR_DATA)
+            mock_connect.return_value = MagicMock()
+            check = _check_mesh_data_plane_reachable(_VALID_CMR_DATA, self._RESOLVED_ADDRS)
         assert check.passed, check.message
-        assert mock_conn.call_args[0][0][1] == 15008
+        assert mock_connect.call_args[0][1] == 15008
         assert "best-effort fallback" in check.message
 
     def test_invalid_service_with_no_ports_does_not_fall_back(self) -> None:
@@ -256,10 +314,10 @@ class TestCheckMeshDataPlaneReachable:
         not a silent fallback to the weaker HBONE probe."""
         with (
             patch("validators.cross_model_mesh.validator._discover_service_ports", return_value=[]),
-            patch("validators.cross_model_mesh.validator.socket.create_connection") as mock_conn,
+            patch("validators.cross_model_mesh.validator._connect_to_resolved_address") as mock_connect,
         ):
-            check = _check_mesh_data_plane_reachable(_VALID_CMR_DATA)
-        mock_conn.assert_not_called()
+            check = _check_mesh_data_plane_reachable(_VALID_CMR_DATA, self._RESOLVED_ADDRS)
+        mock_connect.assert_not_called()
         assert not check.passed
         assert "no ports" in check.message
 
@@ -267,11 +325,11 @@ class TestCheckMeshDataPlaneReachable:
         with (
             patch("validators.cross_model_mesh.validator._discover_service_ports", return_value=[80]),
             patch(
-                "validators.cross_model_mesh.validator.socket.create_connection",
+                "validators.cross_model_mesh.validator._connect_to_resolved_address",
                 side_effect=OSError("Connection refused"),
             ),
         ):
-            check = _check_mesh_data_plane_reachable(_VALID_CMR_DATA)
+            check = _check_mesh_data_plane_reachable(_VALID_CMR_DATA, self._RESOLVED_ADDRS)
         assert not check.passed
         assert "Connection refused" in check.message
 
@@ -531,10 +589,9 @@ class TestProvidesDeep:
                 return_value=[(2, 1, 6, "", ("10.0.0.5", 0))],
             ),
             patch("validators.cross_model_mesh.validator._discover_service_ports", return_value=[80]),
-            patch("validators.cross_model_mesh.validator.socket.create_connection") as mock_conn,
+            patch("validators.cross_model_mesh.validator._connect_to_resolved_address") as mock_connect,
         ):
-            mock_conn.return_value.__enter__.return_value = mock_conn.return_value
-            mock_conn.return_value.__exit__.return_value = False
+            mock_connect.return_value = MagicMock()
             result = validator.validate(level="deep")
 
         assert result.status == "PASS", result
@@ -552,7 +609,7 @@ class TestProvidesDeep:
             ),
             patch("validators.cross_model_mesh.validator._discover_service_ports", return_value=[80]),
             patch(
-                "validators.cross_model_mesh.validator.socket.create_connection",
+                "validators.cross_model_mesh.validator._connect_to_resolved_address",
                 side_effect=OSError("Connection refused"),
             ),
         ):
