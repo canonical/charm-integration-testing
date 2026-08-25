@@ -293,6 +293,24 @@ class TestAlertmanagerDispatchValidatorSchema:
         assert "s3cr3t" not in schema_check.message
         assert "user:" not in schema_check.message
 
+    def test_rejects_userinfo_in_url(self) -> None:
+        # GIVEN a well-formed URL that carries userinfo; this interface has no credential contract
+        validator = _make_validator(
+            {"alertmanager-k8s/0": {"url": "http://user:s3cr3t@alertmanager-0.am-test.svc:9093"}}
+        )
+
+        # WHEN
+        result = validator.validate(level="simple")
+
+        # THEN it is rejected at schema (not silently forwarded to urllib) with the password stripped
+        assert result.status == "FAIL"
+        schema_check = next(c for c in result.checks if c.name == "schema")
+        assert not schema_check.passed
+        assert "userinfo" in schema_check.message
+        assert "s3cr3t" not in schema_check.message
+        assert "user:" not in schema_check.message
+        assert "alertmanager-0.am-test.svc:9093" in schema_check.message
+
     def test_fails_when_url_has_query_or_fragment(self) -> None:
         # GIVEN a URL with a query component; API paths are appended by concatenation so this would misroute
         validator = _make_validator({"alertmanager-k8s/0": {"url": "http://alertmanager-0.am-test.svc:9093?x"}})
@@ -305,6 +323,23 @@ class TestAlertmanagerDispatchValidatorSchema:
         schema_check = next(c for c in result.checks if c.name == "schema")
         assert not schema_check.passed
         assert "query or fragment" in schema_check.message
+
+    def test_redacts_query_secret_from_schema_error(self) -> None:
+        # GIVEN a rejected URL whose query string carries a secret token
+        validator = _make_validator(
+            {"alertmanager-k8s/0": {"url": "http://alertmanager-0.am-test.svc:9093?token=s3cr3t"}}
+        )
+
+        # WHEN
+        result = validator.validate(level="simple")
+
+        # THEN the query (and its secret) is stripped from the report, leaving only host:port
+        assert result.status == "FAIL"
+        schema_check = next(c for c in result.checks if c.name == "schema")
+        assert not schema_check.passed
+        assert "s3cr3t" not in schema_check.message
+        assert "token" not in schema_check.message
+        assert "alertmanager-0.am-test.svc:9093" in schema_check.message
 
     def test_fails_when_url_has_empty_query_delimiter(self) -> None:
         # GIVEN a URL ending in a bare '?'; urlparse drops the empty query, but appending an API path would misroute
@@ -445,15 +480,8 @@ class TestAlertmanagerDispatchValidatorSimple:
             {"alertmanager-k8s/0": {"url": "http://user:s3cr3t@alertmanager-0.am-test.svc:9093"}}
         )
 
-        with (
-            patch("validators.alertmanager_dispatch.validator._tcp_ping"),
-            patch("validators.alertmanager_dispatch.validator.time.sleep"),
-            patch(
-                "validators.alertmanager_dispatch.validator.urlopen",
-                side_effect=_mock_http_error(503),
-            ),
-        ):
-            result = validator.validate(level="simple")
+        # WHEN (userinfo is rejected at schema, so this never reaches an HTTP request)
+        result = validator.validate(level="simple")
 
         # THEN the password never reaches any check name or message, but the host:port still does
         report = " ".join(f"{c.name} {c.message}" for c in result.checks)

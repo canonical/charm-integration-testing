@@ -103,11 +103,12 @@ def _display_netloc(parsed: Any) -> str:
 
 
 def _redact_url(url: str) -> str:
-    """Return *url* with any ``user:pass@`` userinfo stripped for safe display (the request keeps it).
+    """Return *url* stripped of ``user:pass@`` userinfo and any ``?``/``#`` query/fragment for display.
 
-    Uses string ops rather than :func:`urlparse` so credentials are removed even from a URL that is
+    Uses string ops rather than :func:`urlparse` so secrets are removed even from a URL that is
     malformed enough for ``urlparse`` to reject (e.g. an unmatched IPv6 bracket) or that omits the
     ``://`` separator entirely (e.g. a bare ``user:pass@host`` value that lands in an error message).
+    Schema validation rejects both userinfo and query/fragment, so this only guards display strings.
     """
     scheme_sep = url.find("://")
     # Without a scheme separator the whole value up to the first '/', '?' or '#' is the authority.
@@ -119,9 +120,13 @@ def _redact_url(url: str) -> str:
             break
     authority = url[authority_start:authority_end]
     at = authority.rfind("@")
-    if at == -1:
-        return url
-    return url[:authority_start] + authority[at + 1 :] + url[authority_end:]
+    if at != -1:
+        url = url[:authority_start] + authority[at + 1 :] + url[authority_end:]
+    # Drop query/fragment: they can carry secrets such as '?token=...'.
+    for i, ch in enumerate(url):
+        if ch in "?#":
+            return url[:i]
+    return url
 
 
 def _http_error_body(exc: urllib.error.HTTPError) -> str:
@@ -218,6 +223,10 @@ def _schema_check(
         if not hostname:
             errors.append(f"{_redact_url(url)!r}: missing hostname")
             continue
+        # This interface has no credential contract; urllib would not honour userinfo anyway.
+        if parsed.username is not None or parsed.password is not None:
+            errors.append(f"{_redact_url(url)!r}: unexpected userinfo (credentials) in URL")
+            continue
         # Reject raw '?'/'#' too: urlparse drops empty delimiters, and appended API paths would misroute.
         if "?" in url or "#" in url:
             errors.append(f"{_redact_url(url)!r}: unexpected query or fragment component")
@@ -265,7 +274,7 @@ def _http_healthy_checks(urls: list[str]) -> list[ValidationCheck]:
     for url in urls:
         parsed = urlparse(url)
         healthy_url = f"{_base_url(url)}{_HEALTHY_PATH}"
-        display_url = _redact_url(healthy_url)  # request keeps any credentials; reports show none
+        display_url = _redact_url(healthy_url)  # defensive: never echo a raw URL into a report
         check_name = f"http_healthy[{_display_netloc(parsed)}]"
         last_msg = ""
         passed = False
