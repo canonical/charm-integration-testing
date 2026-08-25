@@ -313,7 +313,10 @@ def _dns_check(service: str, model_name: str, cross_model: bool | None) -> tuple
     """
     fqdn = f"{service}.{model_name}.svc.cluster.local"
     try:
-        address = socket.gethostbyname(fqdn)
+        # getaddrinfo, not gethostbyname: the latter is IPv4-only and would report a
+        # healthy service on an IPv6-only cluster as unresolvable, even though the
+        # connection check below and Envoy both use its AAAA record.
+        infos = socket.getaddrinfo(fqdn, None, type=socket.SOCK_STREAM)
     except OSError as exc:
         return (
             ValidationCheck(
@@ -325,12 +328,24 @@ def _dns_check(service: str, model_name: str, cross_model: bool | None) -> tuple
             "",
         )
 
+    addresses = sorted({str(info[4][0]) for info in infos})
+    if not addresses:
+        return (
+            ValidationCheck(
+                name="auth_service_dns",
+                passed=False,
+                message=f"Advertised service {service!r} resolves as {fqdn} but to no addresses."
+                + (_CROSS_MODEL_HINT if cross_model else ""),
+            ),
+            "",
+        )
+
     suffix = _CROSS_MODEL_RESOLVED if cross_model else ""
     return (
         ValidationCheck(
             name="auth_service_dns",
             passed=True,
-            message=f"Advertised service resolves: {fqdn} -> {address}.{suffix}",
+            message=f"Advertised service resolves: {fqdn} -> {', '.join(addresses)}.{suffix}",
         ),
         fqdn,
     )

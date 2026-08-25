@@ -1,6 +1,7 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import socket
 from email.message import Message
 from http.client import BadStatusLine
 from types import SimpleNamespace
@@ -48,6 +49,20 @@ def _make_validator(
     relation = RelationStub(name=endpoint, id=0, app=app, data={app: app_databag})
     charm = make_charm_from_relation(relation, role=role, interface_name="ingress-auth")
     return IngressAuthValidator(cast(ops.CharmBase, charm), cast(ops.Relation, relation))
+
+
+def _addrinfo(*addresses: str) -> list[tuple[Any, ...]]:
+    """Shape a socket.getaddrinfo() return value for the given addresses."""
+    return [
+        (
+            socket.AF_INET6 if ":" in address else socket.AF_INET,
+            socket.SOCK_STREAM,
+            socket.IPPROTO_TCP,
+            "",
+            (address, 0),
+        )
+        for address in addresses
+    ]
 
 
 def _headers(**values: str) -> Message:
@@ -322,7 +337,7 @@ class TestDeepLevel:
 
         # WHEN the validator runs at the deep level
         with (
-            patch(f"{_MODULE}.socket.gethostbyname", return_value="10.152.183.29"),
+            patch(f"{_MODULE}.socket.getaddrinfo", return_value=_addrinfo("10.152.183.29")),
             patch(f"{_MODULE}.socket.create_connection"),
             patch(f"{_MODULE}.build_opener", return_value=_mock_opener(error)),
         ):
@@ -342,7 +357,7 @@ class TestDeepLevel:
 
         # WHEN the validator runs at the deep level
         with (
-            patch(f"{_MODULE}.socket.gethostbyname", return_value="10.152.183.29"),
+            patch(f"{_MODULE}.socket.getaddrinfo", return_value=_addrinfo("10.152.183.29")),
             patch(f"{_MODULE}.socket.create_connection"),
             patch(f"{_MODULE}.build_opener", return_value=_mock_opener(response)),
         ):
@@ -361,7 +376,7 @@ class TestDeepLevel:
 
         # WHEN the validator runs at the deep level
         with (
-            patch(f"{_MODULE}.socket.gethostbyname", return_value="10.152.183.29"),
+            patch(f"{_MODULE}.socket.getaddrinfo", return_value=_addrinfo("10.152.183.29")),
             patch(f"{_MODULE}.socket.create_connection"),
             patch(f"{_MODULE}.build_opener", return_value=_mock_opener(response)),
         ):
@@ -380,7 +395,7 @@ class TestDeepLevel:
 
         # WHEN the validator runs at the deep level
         with (
-            patch(f"{_MODULE}.socket.gethostbyname", return_value="10.152.183.29"),
+            patch(f"{_MODULE}.socket.getaddrinfo", return_value=_addrinfo("10.152.183.29")),
             patch(f"{_MODULE}.socket.create_connection"),
             patch(f"{_MODULE}.build_opener", return_value=_mock_opener(error)),
         ):
@@ -397,7 +412,7 @@ class TestDeepLevel:
 
         # WHEN the validator runs at the deep level
         with (
-            patch(f"{_MODULE}.socket.gethostbyname", return_value="10.152.183.29"),
+            patch(f"{_MODULE}.socket.getaddrinfo", return_value=_addrinfo("10.152.183.29")),
             patch(f"{_MODULE}.socket.create_connection"),
             patch(f"{_MODULE}.build_opener", return_value=_mock_opener(error)),
         ):
@@ -414,7 +429,7 @@ class TestDeepLevel:
 
         # WHEN the validator runs at the deep level
         with (
-            patch(f"{_MODULE}.socket.gethostbyname", return_value="10.152.183.29"),
+            patch(f"{_MODULE}.socket.getaddrinfo", return_value=_addrinfo("10.152.183.29")),
             patch(f"{_MODULE}.socket.create_connection"),
             patch(f"{_MODULE}.build_opener", return_value=_mock_opener(error)),
         ):
@@ -429,10 +444,42 @@ class TestDeepLevel:
         validator = _make_validator(_nested_databag(VALID_PAYLOAD))
 
         # WHEN the validator runs at the deep level
-        with patch(f"{_MODULE}.socket.gethostbyname", side_effect=OSError("Name or service not known")):
+        with patch(f"{_MODULE}.socket.getaddrinfo", side_effect=OSError("Name or service not known")):
             result = validator.validate("deep")
 
         # THEN DNS resolution is reported as the failure and no probe is attempted
+        assert result.status == "FAIL"
+        checks = _checks_by_name(result)
+        assert checks["auth_service_dns"].passed is False
+        assert "auth_service_connect" not in checks
+
+    def test_ipv6_only_service_resolves(self) -> None:
+        # GIVEN a service on an IPv6-only cluster, which publishes an AAAA record but no A
+        # record; create_connection and Envoy both address it happily
+        validator = _make_validator(_nested_databag(VALID_PAYLOAD))
+        error = HTTPError("http://authsvc:8080/", 302, "Found", _headers(Location="/dex/auth"), None)
+
+        # WHEN the validator runs at the deep level
+        with (
+            patch(f"{_MODULE}.socket.getaddrinfo", return_value=_addrinfo("fd00::1")),
+            patch(f"{_MODULE}.socket.create_connection"),
+            patch(f"{_MODULE}.build_opener", return_value=_mock_opener(error)),
+        ):
+            result = validator.validate("deep")
+
+        # THEN the address family does not affect the verdict
+        assert result.status == "PASS"
+        assert "fd00::1" in _checks_by_name(result)["auth_service_dns"].message
+
+    def test_resolution_without_addresses_fails(self) -> None:
+        # GIVEN a resolver that returns no addresses rather than raising
+        validator = _make_validator(_nested_databag(VALID_PAYLOAD))
+
+        # WHEN the validator runs at the deep level
+        with patch(f"{_MODULE}.socket.getaddrinfo", return_value=[]):
+            result = validator.validate("deep")
+
+        # THEN DNS is reported as the failure instead of raising IndexError
         assert result.status == "FAIL"
         checks = _checks_by_name(result)
         assert checks["auth_service_dns"].passed is False
@@ -444,7 +491,7 @@ class TestDeepLevel:
 
         # WHEN the validator runs at the deep level
         with (
-            patch(f"{_MODULE}.socket.gethostbyname", return_value="10.152.183.29"),
+            patch(f"{_MODULE}.socket.getaddrinfo", return_value=_addrinfo("10.152.183.29")),
             patch(f"{_MODULE}.socket.create_connection", side_effect=OSError("Connection refused")),
         ):
             result = validator.validate("deep")
@@ -461,7 +508,7 @@ class TestDeepLevel:
 
         # WHEN the validator runs at the deep level
         with (
-            patch(f"{_MODULE}.socket.gethostbyname", return_value="10.152.183.29"),
+            patch(f"{_MODULE}.socket.getaddrinfo", return_value=_addrinfo("10.152.183.29")),
             patch(f"{_MODULE}.socket.create_connection"),
             patch(f"{_MODULE}.build_opener", return_value=_mock_opener(URLError("timed out"))),
         ):
@@ -483,7 +530,7 @@ class TestDeepLevel:
 
         # WHEN the validator probes it over plaintext HTTP, as the provider does
         with (
-            patch(f"{_MODULE}.socket.gethostbyname", return_value="10.152.183.29"),
+            patch(f"{_MODULE}.socket.getaddrinfo", return_value=_addrinfo("10.152.183.29")),
             patch(f"{_MODULE}.socket.create_connection"),
             patch(f"{_MODULE}.build_opener", return_value=_mock_opener(URLError(reason))),
         ):
@@ -500,7 +547,7 @@ class TestDeepLevel:
 
         # WHEN the validator runs at the deep level
         with (
-            patch(f"{_MODULE}.socket.gethostbyname", return_value="10.152.183.29") as resolve,
+            patch(f"{_MODULE}.socket.getaddrinfo", return_value=_addrinfo("10.152.183.29")) as resolve,
             patch(f"{_MODULE}.socket.create_connection"),
             patch(f"{_MODULE}.build_opener", return_value=_mock_opener(error)),
         ):
@@ -514,7 +561,7 @@ class TestDeepLevel:
         validator = _make_validator(_nested_databag({"port": 8080}))
 
         # WHEN the validator runs at the deep level
-        with patch(f"{_MODULE}.socket.gethostbyname") as resolve:
+        with patch(f"{_MODULE}.socket.getaddrinfo") as resolve:
             result = validator.validate("deep")
 
         # THEN no network activity is attempted
@@ -534,7 +581,7 @@ class TestCrossModel:
         _set_models(validator, local_uuid="uuid-a", remote_uuid="uuid-b")
 
         # WHEN the validator runs at the deep level
-        with patch(f"{_MODULE}.socket.gethostbyname", side_effect=OSError("Name or service not known")):
+        with patch(f"{_MODULE}.socket.getaddrinfo", side_effect=OSError("Name or service not known")):
             result = validator.validate("deep")
 
         # THEN the failure names the cross-model cause rather than blaming DNS
@@ -551,7 +598,7 @@ class TestCrossModel:
 
         # WHEN the validator runs at the deep level
         with (
-            patch(f"{_MODULE}.socket.gethostbyname", return_value="10.152.183.29"),
+            patch(f"{_MODULE}.socket.getaddrinfo", return_value=_addrinfo("10.152.183.29")),
             patch(f"{_MODULE}.socket.create_connection"),
             patch(f"{_MODULE}.build_opener", return_value=_mock_opener(error)),
         ):
@@ -567,7 +614,7 @@ class TestCrossModel:
         _set_models(validator, local_uuid="uuid-a", remote_uuid="uuid-a")
 
         # WHEN the validator runs at the deep level and resolution fails
-        with patch(f"{_MODULE}.socket.gethostbyname", side_effect=OSError("Name or service not known")):
+        with patch(f"{_MODULE}.socket.getaddrinfo", side_effect=OSError("Name or service not known")):
             result = validator.validate("deep")
 
         # THEN no cross-model explanation is attached
@@ -580,7 +627,7 @@ class TestCrossModel:
         cast(Any, validator.relation).remote_model = _RaisingRemoteModel()
 
         # WHEN the validator runs at the deep level
-        with patch(f"{_MODULE}.socket.gethostbyname", side_effect=OSError("Name or service not known")):
+        with patch(f"{_MODULE}.socket.getaddrinfo", side_effect=OSError("Name or service not known")):
             result = validator.validate("deep")
 
         # THEN the topology is simply unknown and validation still reports the failure
