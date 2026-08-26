@@ -270,7 +270,7 @@ def _connectivity_check(urls: list[str]) -> ValidationCheck:
         try:
             parsed = urlparse(url)
             host = parsed.hostname or url
-            port = parsed.port or (443 if parsed.scheme == "https" else 80)
+            port = parsed.port if parsed.port is not None else (443 if parsed.scheme == "https" else 80)
             _tcp_ping(host, port)
         except Exception as exc:
             errors.append(f"{_redact_url(url)}: {exc}")
