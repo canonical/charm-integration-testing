@@ -19,7 +19,7 @@ from importlib.metadata import entry_points
 from ops.charm import CharmBase
 from ops.model import Relation
 
-from validators.base.validator import (
+from validators.base import (
     BaseValidator,
     ValidationLevel,
     ValidationResult,
