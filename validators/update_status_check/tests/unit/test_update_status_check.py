@@ -44,7 +44,7 @@ class TestRunSimpleCheck:
         charm = make_charm_from_relation(relation, role=RelationRoleStub.requires, interface_name="postgresql_client")
 
         with patch(
-            "validators.update_status_check.update_status_check._load_validators",
+            "validators.engine.engine.load_validators",
             return_value={"postgresql_client": [PassingValidator]},
         ):
             results = run_simple_check(charm)  # type: ignore[arg-type]
@@ -59,7 +59,7 @@ class TestRunSimpleCheck:
 
         with (
             patch(
-                "validators.update_status_check.update_status_check._load_validators",
+                "validators.engine.engine.load_validators",
                 return_value={"postgresql_client": [FailingValidator]},
             ),
             caplog.at_level(logging.ERROR),
@@ -76,7 +76,7 @@ class TestRunSimpleCheck:
 
         with (
             patch(
-                "validators.update_status_check.update_status_check._load_validators",
+                "validators.engine.engine.load_validators",
                 return_value={"postgresql_client": [PassingValidator]},
             ),
             caplog.at_level(logging.ERROR),

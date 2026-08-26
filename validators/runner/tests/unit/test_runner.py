@@ -94,7 +94,7 @@ class TestValidatorRunnerLoadValidators:
 
         entry_point = EntryPointStub(name="test-interface", _load_result=NotAValidator)
 
-        with patch("validators.runner.runner.entry_points", return_value=[entry_point]):
+        with patch("validators.engine.engine.entry_points", return_value=[entry_point]):
             # WHEN
             validators = ValidatorRunner._load_validators()
 
@@ -106,7 +106,7 @@ class TestValidatorRunnerLoadValidators:
         entry_point = EntryPointStub(name="test-interface", _load_error=ImportError("missing dep"))
 
         with caplog.at_level(logging.ERROR, logger="validators"):
-            with patch("validators.runner.runner.entry_points", return_value=[entry_point]):
+            with patch("validators.engine.engine.entry_points", return_value=[entry_point]):
                 # WHEN
                 validators = ValidatorRunner._load_validators()
 
@@ -119,7 +119,7 @@ class TestValidatorRunnerLoadValidators:
         # GIVEN a well-formed entry point
         entry_point = EntryPointStub(name="test-interface", _load_result=PassingValidator)
 
-        with patch("validators.runner.runner.entry_points", return_value=[entry_point]):
+        with patch("validators.engine.engine.entry_points", return_value=[entry_point]):
             # WHEN
             validators = ValidatorRunner._load_validators()
 
@@ -132,7 +132,7 @@ class TestValidatorRunnerLoadValidators:
         ep1 = EntryPointStub(name="test-interface", _load_result=PassingValidator)
         ep2 = EntryPointStub(name="test-interface", _load_result=FailingValidator)
 
-        with patch("validators.runner.runner.entry_points", return_value=[ep1, ep2]):
+        with patch("validators.engine.engine.entry_points", return_value=[ep1, ep2]):
             # WHEN
             validators = ValidatorRunner._load_validators()
 

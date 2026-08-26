@@ -2465,6 +2465,29 @@ type = "directory"
 url = "validators/cve_catalog"
 
 [[package]]
+name = "validators-engine"
+version = "0.1.0"
+description = "Shared validator-discovery and relation-running engine for the Interface Validators Framework"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+ops = ">=2.0.0"
+pydantic = ">=2.0.0"
+validators-base = "*"
+validators-test-utils = {version = "*", optional = true}
+
+[package.extras]
+dev = ["validators-test-utils"]
+
+[package.source]
+type = "directory"
+url = "validators/engine"
+
+[[package]]
 name = "validators-external-provider"
 version = "0.1.0"
 description = "Validator for external_provider interface"
@@ -2886,6 +2909,7 @@ validators-base = "*"
 validators-certificate-transfer = "*"
 validators-config-server = "*"
 validators-cve-catalog = "*"
+validators-engine = "*"
 validators-external-provider = "*"
 validators-grafana-dashboard = "*"
 validators-grafana-datasource = "*"
@@ -3007,6 +3031,7 @@ develop = true
 ops = ">=2.0.0"
 pydantic = ">=2.0.0"
 validators-base = "*"
+validators-engine = "*"
 validators-test-utils = {version = "*", optional = true}
 
 [package.extras]
@@ -3030,6 +3055,7 @@ develop = true
 ops = ">=2.0.0"
 pydantic = ">=2.0.0"
 validators-base = "*"
+validators-engine = "*"
 validators-test-utils = {version = "*", optional = true}
 
 [package.extras]
@@ -3111,4 +3137,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<4.0"
-content-hash = "03be37b1d6e1eed55f5bfde7b009137bcba29e16496c78b75d63453611ccebfb"
+content-hash = "8f4551947071e6a4db3b4dc9de5834967fc5a5d9b5a5753b65dae2e0cd4c6665"
