@@ -176,7 +176,7 @@ def _collect_endpoint_urls(
                 url = f"{scheme}://{public_address}"
 
         if not url:
-            errors.append(f"Unit {unit_name!r}: no 'url' or 'public_address' key in databag")
+            errors.append(f"Unit {unit_name!r}: no non-empty 'url' or 'public_address' value in databag")
             continue
         if url in seen_urls:
             continue  # dedup — same URL from a scaled-out provider is not an error
