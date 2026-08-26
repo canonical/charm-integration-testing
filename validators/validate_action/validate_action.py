@@ -14,7 +14,6 @@ interface validator in this monorepo.
 """
 
 import json
-import logging
 from typing import get_args
 
 from ops.charm import ActionEvent, CharmBase
@@ -22,8 +21,6 @@ from pydantic import BaseModel
 
 from validators.base import ValidationLevel, ValidationResult
 from validators.engine import run_for_charm
-
-logger = logging.getLogger(__name__)
 
 
 class ValidateActionResults(BaseModel):
