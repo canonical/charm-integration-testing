@@ -11,6 +11,8 @@ overrides:
         optional: true
       client-cas:
         optional: true
+      oauth:
+        features: [tls]  # missing on track 4; hydra's oauth carries tls, see issue #888
     configs:
       roles: ['broker,controller', 'broker']
     constraints:
