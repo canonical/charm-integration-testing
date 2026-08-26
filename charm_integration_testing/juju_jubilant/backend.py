@@ -281,10 +281,16 @@ class JubilantBackend(JujuCmdBackend):
         count: int | None,
         strict_timeout: bool = False,
     ) -> None:
+        def agent_disconnected(status: jubilant.Status) -> tuple[bool, JujuWaitState]:
+            is_error, wait_state = any_status_not_in(status, application, unit_agent_statuses={"idle"})
+            if is_error:
+                wait_state = dataclasses.replace(wait_state, message="Juju agent disconnected")
+            return is_error, wait_state
+
         self.wait(
             model,
             lambda status: any_status_not_in(status, application, unit_statuses={"active"}),
-            error=lambda status: any_status_not_in(status, application, unit_agent_statuses={"idle"}),
+            error=agent_disconnected,
             timeout=timeout,
             successes=count,
             strict_timeout=strict_timeout,

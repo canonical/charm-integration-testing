@@ -811,9 +811,10 @@ class TestJubilantBackend:
             backend = JubilantBackend(client)
 
             # WHEN / THEN it raises on the very first poll, without waiting for any debounce
-            with pytest.raises(JujuWaitTimeoutError):
+            with pytest.raises(JujuWaitTimeoutError) as exc_info:
                 backend.wait_unhealthy("test-model", "target", timedelta(seconds=10), count=3)
             assert stub.call_count == 1
+            assert exc_info.value.wait_state.message == "Juju agent disconnected"
 
         def test_wait_unhealthy_never_triggers_when_healthy(self) -> None:
             # GIVEN a fully healthy unit (active workload, idle agent)

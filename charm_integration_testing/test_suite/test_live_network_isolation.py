@@ -23,8 +23,8 @@ def test_live_network_isolation(
 
     unit = f"{target_application}/0"
 
-    chaos_client.isolate_network(model=model, unit=unit)
     try:
+        chaos_client.isolate_network(model=model, unit=unit)
         # Debounced against update-status blips; fails immediately if the Juju agent disconnects.
         juju_client.unhealthy_for_period(target_application, model=model, timeout=timedelta(minutes=10))
     finally:
