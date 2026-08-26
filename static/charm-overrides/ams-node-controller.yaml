@@ -1,0 +1,9 @@
+---
+# Source: https://github.com/canonical/anbox-cloud-charms (charms/ams-node-controller)
+#
+# nrpe-external-master (provides): optional - standard Juju NRPE subordinate
+#   monitoring hook, purely additive, never blocking.
+overrides:
+  - provides:
+      nrpe-external-master:
+        optional: true
