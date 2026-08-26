@@ -20,18 +20,22 @@ overrides:
         optional: true
       grafana-dashboard:
         optional: true
-    requires: &vault_requires
+    requires:
       ingress:
         optional: true
       ingress-per-unit:
         optional: true
       tls-certificates-pki:
         optional: true
+      tls-certificates-acme:
+        optional: true  # additive endpoint, not primary purpose; only 1.18+ (k8s/src/charm.py::_on_collect_status)
     configs:
       pki_ca_common_name: [charmqa, null]
+      acme_ca_common_name: [charmqa, null]
     constraints:
       - 'bool(endpoint[vault-pki]) => bool(endpoint[tls-certificates-pki])'
       - 'bool(endpoint[vault-pki]) or bool(endpoint[tls-certificates-pki]) => set(config[pki_ca_common_name])'
+      - 'bool(endpoint[tls-certificates-acme]) => set(config[acme_ca_common_name])'  # REQUIRED once connected - k8s/src/charm.py::_on_collect_status BlockedStatus
   # 1.15 track: no ingress-per-unit endpoint
   - criteria:
       - track: '1.15'
@@ -61,7 +65,13 @@ overrides:
         optional: true
   # Fallback (1.16, 1.17, ...)
   - provides: *vault_provides
-    requires: *vault_requires
+    requires:
+      ingress:
+        optional: true
+      ingress-per-unit:
+        optional: true
+      tls-certificates-pki:
+        optional: true
     configs:
       common_name: [charmqa, null]
     constraints:

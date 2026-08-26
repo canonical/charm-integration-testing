@@ -1,58 +1,93 @@
 ---
-# mongodb is an operator for MongoDB databases (machine charm).
-# Primary purpose: provides 'database' connectivity to application charms.
+# Source: https://github.com/canonical/mongodb-operator
 #
-# s3-credentials (requires) - OPTIONAL: S3 backup/restore storage; the charm
-#   operates without a backup destination configured.
-# sharding (requires) - OPTIONAL: MongoDB sharding via a config-server; not
-#   needed for standalone deployments.
-# ldap (requires) - OPTIONAL: LDAP authentication integration.
-# ldap-certificate-transfer (requires) - OPTIONAL: TLS certs for LDAP; only
-#   relevant when ldap is configured.
-# gcs-credentials (requires) - OPTIONAL: GCS backup storage (8-transition track; only /edge published).
-# etcd (requires) - OPTIONAL: etcd integration (8/edge only).
-# vault-kv (requires) - OPTIONAL: Vault KV secrets backend (8/edge only).
+# Tracks 6 and 8-transition use certificates; track 8 splits TLS into peer/client certificates.
+#
 overrides:
-  # 8/edge: adds gcs-credentials, etcd, vault-kv
+  # Track 8 edge adds gcs-credentials, etcd, and vault-kv.
   - criteria:
       - track: '8'
         risk: 'edge'
     requires:
       s3-credentials:
-        optional: true
+        optional: true  # backup integration; charm status falls back to MongoDB status in src/charm.py::_on_update_status
       sharding:
-        optional: true
-      ldap:
-        optional: true
-      ldap-certificate-transfer:
-        optional: true
+        optional: true  # sharding is an additional topology, not required for standalone MongoDB
       gcs-credentials:
-        optional: true
+        optional: true  # backup integration used only when GCS backup is configured
       etcd:
-        optional: true
+        optional: true  # optional secrets integration
       vault-kv:
-        optional: true
-  # 8-transition track: adds gcs-credentials (only /edge is published)
+        optional: true  # optional secrets integration
+    provides:
+      cos-agent:
+        optional: true  # COS observability integration; initialized independently in src/charm.py::__init__
+      config-server:
+        optional: true  # sharding role endpoint; standalone MongoDB does not provide a config server
+      cluster:
+        optional: true  # sharding role endpoint; standalone MongoDB does not provide a cluster
+    constraints:
+      - 'bool(endpoint[ldap]) == bool(endpoint[ldap-certificate-transfer])'
+      - 'bool(endpoint[ldap-certificate-transfer]) => reachable(endpoint[ldap-certificate-transfer])
+        >= charms(endpoint[ldap])'
+  # Track 8-transition adds gcs-credentials.
   - criteria:
       - track: '8-transition'
     requires:
+      certificates:
+        optional: true  # TLS integration; src/charm.py starts MongoDB without a certificate relation
       s3-credentials:
-        optional: true
+        optional: true  # backup integration; charm status falls back to MongoDB status in src/charm.py::_on_update_status
       sharding:
-        optional: true
-      ldap:
-        optional: true
-      ldap-certificate-transfer:
-        optional: true
+        optional: true  # sharding is an additional topology, not required for standalone MongoDB
       gcs-credentials:
-        optional: true
-  # all other channels (6/*, 8/stable, 8/candidate, 8/beta)
-  - requires:
+        optional: true  # backup integration used only when GCS backup is configured
+    provides:
+      cos-agent:
+        optional: true  # COS observability integration; initialized independently in src/charm.py::__init__
+      config-server:
+        optional: true  # sharding role endpoint; standalone MongoDB does not provide a config server
+      cluster:
+        optional: true  # sharding role endpoint; standalone MongoDB does not provide a cluster
+    constraints:
+      - 'bool(endpoint[ldap]) == bool(endpoint[ldap-certificate-transfer])'
+      - 'bool(endpoint[ldap-certificate-transfer]) => reachable(endpoint[ldap-certificate-transfer])
+        >= charms(endpoint[ldap])'
+  # Track 8 stable/candidate/beta share the modern endpoint generation without edge-only integrations.
+  - criteria:
+      - track: '8'
+    requires:
       s3-credentials:
-        optional: true
+        optional: true  # backup integration; charm status falls back to MongoDB status in src/charm.py::_on_update_status
       sharding:
-        optional: true
-      ldap:
-        optional: true
-      ldap-certificate-transfer:
-        optional: true
+        optional: true  # sharding is an additional topology, not required for standalone MongoDB
+    provides:
+      cos-agent:
+        optional: true  # COS observability integration; initialized independently in src/charm.py::__init__
+      config-server:
+        optional: true  # sharding role endpoint; standalone MongoDB does not provide a config server
+      cluster:
+        optional: true  # sharding role endpoint; standalone MongoDB does not provide a cluster
+    constraints:
+      - 'bool(endpoint[ldap]) == bool(endpoint[ldap-certificate-transfer])'
+      - 'bool(endpoint[ldap-certificate-transfer]) => reachable(endpoint[ldap-certificate-transfer])
+        >= charms(endpoint[ldap])'
+  # Track 6 uses the older endpoint generation.
+  - requires:
+      certificates:
+        optional: true  # TLS integration; src/charm.py starts MongoDB without a certificate relation
+      s3-credentials:
+        optional: true  # backup integration; charm status falls back to MongoDB status in src/charm.py::_on_update_status
+      sharding:
+        optional: true  # sharding is an additional topology, not required for standalone MongoDB
+    provides:
+      cos-agent:
+        optional: true  # COS observability integration; initialized independently in src/charm.py::__init__
+      config-server:
+        optional: true  # sharding role endpoint; standalone MongoDB does not provide a config server
+      cluster:
+        optional: true  # sharding role endpoint; standalone MongoDB does not provide a cluster
+    constraints:
+      - 'bool(endpoint[ldap]) == bool(endpoint[ldap-certificate-transfer])'
+      - 'bool(endpoint[ldap-certificate-transfer]) => reachable(endpoint[ldap-certificate-transfer])
+        >= charms(endpoint[ldap])'
