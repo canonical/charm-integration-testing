@@ -64,7 +64,7 @@ class TestRunValidateAction:
         event = ActionEventStub(params={})
 
         with patch(
-            "validators.validate_action.validate_action._load_validators",
+            "validators.engine.engine.load_validators",
             return_value={"postgresql_client": [PassingValidator]},
         ):
             run_validate_action(charm, event)  # type: ignore[arg-type]
@@ -79,7 +79,7 @@ class TestRunValidateAction:
         event = ActionEventStub(params={"level": "deep"})
 
         with patch(
-            "validators.validate_action.validate_action._load_validators",
+            "validators.engine.engine.load_validators",
             return_value={"postgresql_client": [PassingValidator]},
         ):
             run_validate_action(charm, event)  # type: ignore[arg-type]
@@ -103,7 +103,7 @@ class TestRunValidateAction:
         event = ActionEventStub(params={})
 
         with patch(
-            "validators.validate_action.validate_action._load_validators",
+            "validators.engine.engine.load_validators",
             return_value={"postgresql_client": [ErroringValidator]},
         ):
             run_validate_action(charm, event)  # type: ignore[arg-type]
@@ -117,7 +117,7 @@ class TestRunValidateAction:
         event = ActionEventStub(params={})
 
         with patch(
-            "validators.validate_action.validate_action._load_validators",
+            "validators.engine.engine.load_validators",
             return_value={"postgresql_client": [PassingValidator]},
         ):
             run_validate_action(charm, event)  # type: ignore[arg-type]
