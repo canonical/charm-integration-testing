@@ -42,6 +42,7 @@ from .client import JubilantClient
 from .structures import JujuExecTask
 from .wait import (
     all_statuses_are_in,
+    any_status_not_in,
     application_is_on_revision,
     applications_are_removed,
     applications_are_scaled,
@@ -267,6 +268,23 @@ class JubilantBackend(JujuCmdBackend):
                 unit_statuses={"active"},
                 unit_agent_statuses={"idle"},
             ),
+            timeout=timeout,
+            successes=count,
+            strict_timeout=strict_timeout,
+        )
+
+    def wait_unhealthy(
+        self,
+        model: str,
+        application: str,
+        timeout: timedelta | None,
+        count: int | None,
+        strict_timeout: bool = False,
+    ) -> None:
+        self.wait(
+            model,
+            lambda status: any_status_not_in(status, application, unit_statuses={"active"}),
+            error=lambda status: any_status_not_in(status, application, unit_agent_statuses={"idle"}),
             timeout=timeout,
             successes=count,
             strict_timeout=strict_timeout,

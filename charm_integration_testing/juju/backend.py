@@ -211,6 +211,18 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def wait_unhealthy(
+        self,
+        model: str,
+        application: str,
+        timeout: timedelta | None,
+        count: int | None,
+        strict_timeout: bool = False,
+    ) -> None:
+        """Wait for *application*'s workload to leave 'active' for *count* consecutive checks; raises immediately if the unit agent leaves 'idle'."""
+        raise NotImplementedError
+
+    @abstractmethod
     def wait_application_settled(self, model: str, application: str, timeout: timedelta | None) -> None:
         raise NotImplementedError
 

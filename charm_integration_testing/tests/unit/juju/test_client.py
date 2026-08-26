@@ -96,6 +96,23 @@ class WaitIdleBackendStub(NullJujuBackend):
         self.calls.append((models, timeout, count, strict_timeout))
 
 
+@dataclass
+class WaitUnhealthyBackendStub(NullJujuBackend):
+    """Backend stub that records wait_unhealthy calls."""
+
+    calls: list[tuple[str, str, timedelta | None, int | None, bool]] = field(default_factory=list)
+
+    def wait_unhealthy(
+        self,
+        model: str,
+        application: str,
+        timeout: timedelta | None,
+        count: int | None,
+        strict_timeout: bool = False,
+    ) -> None:
+        self.calls.append((model, application, timeout, count, strict_timeout))
+
+
 class ExtensionStub(JujuExtension):
     """Extension that returns configurable validate results."""
 
@@ -228,6 +245,43 @@ class TestJujuClientMultiModelIdleForPeriod:
         # THEN nothing is logged or delegated
         assert logger.infos == []
         assert backend.calls == []
+
+
+class TestJujuClientUnhealthyForPeriod:
+    def test_delegates_to_wait_unhealthy(self) -> None:
+        # GIVEN a client with a backend that records wait_unhealthy calls
+        backend = WaitUnhealthyBackendStub()
+        client = JujuClient(backend, LoggerStub(), [])  # type: ignore[arg-type]
+        timeout = timedelta(minutes=5)
+
+        # WHEN waiting for an application to become unhealthy
+        client.unhealthy_for_period("my-app", model="my-model", timeout=timeout, count=200, strict_timeout=True)
+
+        # THEN the call is delegated to backend.wait_unhealthy with the same arguments
+        assert backend.calls == [("my-model", "my-app", timeout, 200, True)]
+
+    def test_default_count_is_130(self) -> None:
+        # GIVEN a client with a backend that records wait_unhealthy calls
+        backend = WaitUnhealthyBackendStub()
+        client = JujuClient(backend, LoggerStub(), [])  # type: ignore[arg-type]
+
+        # WHEN waiting without specifying count
+        client.unhealthy_for_period("my-app")
+
+        # THEN the default debounce count of 130 is passed through
+        assert backend.calls == [("default", "my-app", None, 130, False)]
+
+    def test_logs_application_name(self) -> None:
+        # GIVEN a client with a logger
+        backend = WaitUnhealthyBackendStub()
+        logger = LoggerStub()
+        client = JujuClient(backend, logger, [])  # type: ignore[arg-type]
+
+        # WHEN waiting for an application to become unhealthy
+        client.unhealthy_for_period("my-app")
+
+        # THEN the log message references the application name
+        assert any("my-app" in msg for msg in logger.infos)
 
 
 class TestJujuValidationError:

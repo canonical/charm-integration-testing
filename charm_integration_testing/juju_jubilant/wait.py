@@ -189,6 +189,23 @@ def all_statuses_are_in(
     )
 
 
+def any_status_not_in(
+    status: jubilant.Status,
+    *application_args: str,
+    application_statuses: set[str] | None = None,
+    unit_statuses: set[str] | None = None,
+    unit_agent_statuses: set[str] | None = None,
+) -> tuple[bool, JujuWaitState]:
+    is_compliant, wait_state = all_statuses_are_in(
+        status,
+        *application_args,
+        application_statuses=application_statuses,
+        unit_statuses=unit_statuses,
+        unit_agent_statuses=unit_agent_statuses,
+    )
+    return not is_compliant, wait_state
+
+
 def applications_are_scaled(status: jubilant.Status, *application_args: str) -> tuple[bool, JujuWaitState]:
     # Check applications have reached desired scale
     # See https://github.com/juju/juju/blob/add3443726e40faebaba0103289c6660251fa1eb/cmd/juju/status/formatted.go#L239

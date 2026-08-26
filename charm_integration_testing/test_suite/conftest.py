@@ -11,6 +11,7 @@ from subprocess import CalledProcessError, run  # nosec
 from typing import Any, Callable, Iterator
 
 import pytest
+from chaos_client import ChaosClient, KubernetesChaosClient
 from extensions import (
     ConfigureLivepatchServerExtension,
     LegoExtension,
@@ -162,6 +163,14 @@ def kubernetes_client(
         logger=logger,
         extensions=[UnsealVaultK8sJujuExtension(juju_backend, logger)],
     )
+
+
+@pytest.fixture(scope="session")
+def chaos_client(kubernetes_client: KubernetesClient | None) -> ChaosClient | None:
+    """ChaosClient for the target cloud, or None for machine clouds (network isolation is k8s-only)."""
+    if kubernetes_client is None:
+        return None
+    return KubernetesChaosClient(backend=kubernetes_client.backend)
 
 
 @pytest.fixture(scope="session")
