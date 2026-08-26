@@ -7,8 +7,9 @@ from typing import TYPE_CHECKING
 
 from resource_registry import ResourceRegistry
 
-from juju import JujuControllerHandle, JujuModelHandle
 from juju.extension import JujuExtension
+
+from ..handles import JujuControllerHandle, JujuModelHandle
 
 if TYPE_CHECKING:
     from juju.backend import JujuBackend
