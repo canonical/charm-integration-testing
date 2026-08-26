@@ -855,6 +855,25 @@ class TestJubilantBackend:
                 with pytest.raises(JujuWaitTimeoutError):
                     backend.wait_unhealthy("test-model", "target", timedelta(milliseconds=100), count=3)
 
+        def test_wait_unhealthy_waits_when_application_does_not_exist_yet(self) -> None:
+            # GIVEN a status with no 'target' application at all
+            stub = StatusStub()
+            client = JubilantClientStub(client=stub)
+            backend = JubilantBackend(client)
+
+            t0 = datetime(2025, 1, 1, 0, 0, 0)
+            # WHEN wait_unhealthy is called with datetime mocked to jump past the timeout
+            # THEN it times out waiting for the app to exist, not succeed instantly
+            with patch("juju_jubilant.backend.datetime") as mock_dt, patch("juju_jubilant.backend.time.sleep"):
+                mock_dt.now.side_effect = [
+                    t0,  # start
+                    t0,  # iteration_start, loop 1 — within timeout
+                    t0,  # elapsed, loop 1
+                    t0 + timedelta(seconds=1),  # iteration_start, loop 2 — past 100ms timeout
+                ]
+                with pytest.raises(JujuWaitTimeoutError):
+                    backend.wait_unhealthy("test-model", "target", timedelta(milliseconds=100), count=3)
+
     class TestWaitApplicationSettled:
         def test_application_settled(self) -> None:
             # GIVEN

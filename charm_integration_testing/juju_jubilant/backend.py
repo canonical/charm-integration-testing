@@ -290,9 +290,16 @@ class JubilantBackend(JujuCmdBackend):
                 wait_state = dataclasses.replace(wait_state, message="Juju agent disconnected")
             return disconnected, wait_state
 
+        def left_active(status: jubilant.Status) -> tuple[bool, JujuWaitState]:
+            if application not in status.apps:
+                return False, dataclasses.replace(
+                    JujuWaitState(), message=f"waiting for application '{application}' to exist"
+                )
+            return any_status_not_in(status, application, unit_statuses={"active"})
+
         self.wait(
             model,
-            lambda status: any_status_not_in(status, application, unit_statuses={"active"}),
+            left_active,
             error=agent_disconnected,
             timeout=timeout,
             successes=count,
