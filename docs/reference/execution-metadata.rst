@@ -187,12 +187,32 @@ Failure Information
      - Error string from a validation result with status ``ERROR``. Only recorded when ``ValidationResult.error`` is set.
      - Yes
      - ``Unexpected exception during validation``
+   * - ``failure:build_bundle:unresolved_application``
+     - An application whose declared charm could not be resolved to exactly one charm during bundle building. Collected when ``UncompletableBundleError`` is raised. Value is the charm name (not the generic application name from the spec). Multiple values may be recorded.
+     - No
+     - ``kafka``
+   * - ``failure:build_bundle:release_resolution``
+     - Stable failure kind for a required charm release that could not be resolved. If the failure does not match a more specific classification, the kind is recorded as ``release_not_found``. Additional fixed categories under ``failure:build_bundle:release_resolution:<dimension>`` record only relevant dimensions, such as ``charm``, ``requested_platform``, ``supported_platform``, ``requirement``, ``requested_base``, ``supported_base``, ``requested_architecture``, ``supported_architecture``, ``channel``, ``track``, ``revision``, and ``error_code``. Values are atomic so attachment rules can match them directly. Application aliases, model names, and free-form server messages are excluded. Aggregate track searches emit metadata from their unique leaf failures.
+     - No
+     - ``platform_mismatch``
+   * - ``failure:build_bundle:release_resolution:charm``
+     - Charm name associated with a release-resolution failure. Unlike an application alias, this remains stable across equivalent specs.
+     - No
+     - ``aodh``
+   * - ``failure:build_bundle:release_resolution:<dimension>``
+     - Atomic value for a relevant release-resolution dimension. A failure can emit multiple entries for plural dimensions, such as supported platforms or unmet ``assumes`` requirements.
+     - No
+     - ``machine``
+   * - ``failure:build_bundle:unresolved_integration``
+     - A user-specified integration whose named endpoint(s) could not be mapped to any charm integration, most commonly because the endpoint no longer exists on the resolved charm (e.g. renamed/removed upstream). Collected when ``UncompletableBundleError`` is raised. Format: ``<charm>:<endpoint_name>/<charm>:<endpoint_name>``, using charm names (not the generic application names from the spec). Multiple values may be recorded.
+     - No
+     - ``easyrsa:client/kafka:trusted-certificate``
    * - ``failure:build_bundle:unfulfilled_endpoint``
-     - An application endpoint that could not be fulfilled during bundle building. Collected when ``UnfulfilledEndpointsError`` is raised. Format: ``<charm>:<endpoint_name>``. Multiple values may be recorded.
+     - An application endpoint that could not be fulfilled during bundle building. Collected when ``UncompletableBundleError`` is raised. Format: ``<charm>:<endpoint_name>``. Multiple values may be recorded.
      - No
      - ``postgresql:db``
    * - ``failure:build_bundle:unfulfilled_interface``
-     - Interface name for an unfulfilled application endpoint. Collected when ``UnfulfilledEndpointsError`` is raised. Multiple values may be recorded.
+     - Interface name for an unfulfilled application endpoint. Collected when ``UncompletableBundleError`` is raised. Multiple values may be recorded.
      - No
      - ``postgresql_client``
    * - ``failure:build_bundle:feature_mismatch``
@@ -203,6 +223,38 @@ Failure Information
      - The feature name that could not be reconciled. Collected alongside ``failure:build_bundle:feature_mismatch``. Multiple values may be recorded.
      - No
      - ``katib-service``
+   * - ``failure:build_bundle:peer_channel_mismatch``
+     - An endpoint requires its integration peer to be on a specific track/risk/channel/revision that the resolved peer does not satisfy. Format: ``<charm>:<endpoint>/<peer charm>``. Multiple values may be recorded.
+     - No
+     - ``kfp-persistence:kfp-api/kfp-viz``
+   * - ``failure:build_bundle:peer_channel_mismatch:required_track``
+     - Required track for the peer charm. Collected alongside ``failure:build_bundle:peer_channel_mismatch`` only when set.
+     - No
+     - ``2.15``
+   * - ``failure:build_bundle:peer_channel_mismatch:required_risk``
+     - Required risk for the peer charm. Collected alongside ``failure:build_bundle:peer_channel_mismatch`` only when set.
+     - No
+     - ``edge``
+   * - ``failure:build_bundle:peer_channel_mismatch:required_channel``
+     - Required full channel for the peer charm. Collected alongside ``failure:build_bundle:peer_channel_mismatch`` only when set.
+     - No
+     - ``2.15/edge``
+   * - ``failure:build_bundle:peer_channel_mismatch:required_revision``
+     - Required revision for the peer charm. Collected alongside ``failure:build_bundle:peer_channel_mismatch`` only when set.
+     - No
+     - ``42``
+   * - ``failure:build_bundle:subordinate_base_mismatch``
+     - A subordinate charm's endpoint requires the same base as its principal, but the resolved bases differ. Format: ``<subordinate charm>:<endpoint>/<principal charm>:<endpoint>``. Multiple values may be recorded.
+     - No
+     - ``nrpe:general-info/postgresql:juju-info``
+   * - ``failure:build_bundle:subordinate_base_mismatch:subordinate_base``
+     - Base resolved for the subordinate charm. Collected alongside ``failure:build_bundle:subordinate_base_mismatch``.
+     - No
+     - ``ubuntu@22.04``
+   * - ``failure:build_bundle:subordinate_base_mismatch:principal_base``
+     - Base resolved for the principal charm. Collected alongside ``failure:build_bundle:subordinate_base_mismatch``.
+     - No
+     - ``ubuntu@24.04``
    * - ``resource_discrepancy:<resource_type>:<qualifier>``
      - A Kubernetes resource discrepancy detected between two visits to the same scheduler state. Collected when ``ResourceDiscrepancyError`` is raised. ``<resource_type>`` identifies the tracked resource (e.g. ``pvc``) and ``<qualifier>`` is the drift kind: the generic presence kinds ``missing`` or ``extra``, or a resource-specific modification kind (e.g. ``resized``, ``image_changed``, ``scaled``, ``keys_changed``). Run-specific context is carried in the value as ``state=<state> controller=<controller> model=<model> <resource_type>=<name>`` followed by the resource's attributes: whole for presence kinds, or only the changed attributes as ``key=old->new`` for modification kinds. The controller is included because model names are only unique within a controller. Multiple values may be recorded. See :doc:`../explanation/resource-tracking`.
      - Yes

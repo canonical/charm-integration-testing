@@ -2408,6 +2408,28 @@ type = "directory"
 url = "validators/base"
 
 [[package]]
+name = "validators-certificate-transfer"
+version = "0.1.0"
+description = "Validator for certificate_transfer interface"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+cryptography = ">=42.0.0"
+validators-base = "*"
+validators-test-utils = {version = "*", optional = true}
+
+[package.extras]
+dev = ["validators-test-utils"]
+
+[package.source]
+type = "directory"
+url = "validators/certificate_transfer"
+
+[[package]]
 name = "validators-config-server"
 version = "0.1.0"
 description = "Validator for config-server interface (MongoDB sharding)"
@@ -2543,6 +2565,28 @@ dev = ["validators-test-utils"]
 [package.source]
 type = "directory"
 url = "validators/ingress"
+
+[[package]]
+name = "validators-ingress-auth"
+version = "0.1.0"
+description = "Validator for the ingress-auth interface"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+pyyaml = ">=6.0,<7.0"
+validators-base = "*"
+validators-test-utils = {version = "*", optional = true}
+
+[package.extras]
+dev = ["validators-test-utils"]
+
+[package.source]
+type = "directory"
+url = "validators/ingress_auth"
 
 [[package]]
 name = "validators-kafka-client"
@@ -2839,6 +2883,7 @@ ops = ">=3.3.0,<4.0.0"
 pydantic = ">=2.0.0"
 validators-azure-storage = "*"
 validators-base = "*"
+validators-certificate-transfer = "*"
 validators-config-server = "*"
 validators-cve-catalog = "*"
 validators-external-provider = "*"
@@ -2846,6 +2891,7 @@ validators-grafana-dashboard = "*"
 validators-grafana-datasource = "*"
 validators-http-interface = "*"
 validators-ingress = "*"
+validators-ingress-auth = "*"
 validators-kafka-client = "*"
 validators-livepatch-pro-airgapped-server = "*"
 validators-loki-push-api = "*"
@@ -3019,4 +3065,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<4.0"
-content-hash = "4c000a7832ba1ac48574eefc484bf41911cba9d15660a80bbdd5758081ee1e2d"
+content-hash = "606d1359fc453553d6e45c3366b0bbb3fe34a4af8c26c877592837f41ef025d6"

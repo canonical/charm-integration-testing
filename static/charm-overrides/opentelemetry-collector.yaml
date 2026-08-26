@@ -9,9 +9,11 @@
 # grafana-dashboards-provider (provides): optional - dashboard forwarding is secondary purpose;
 #   upstream Grafana machine charm is not discoverable by the solver for machine bundles.
 # juju-info (requires): REQUIRED - subordinate principal attachment point (scope: container).
-# Note: when juju-info is connected (always), _get_missing_mandatory_relations() also requires an
-#   outgoing telemetry backend, but those backends live in a COS K8s model via CMR - not
-#   discoverable by the solver for machine bundles; no at-least-one constraint is encoded here.
+# Note: juju-info is always connected, so _get_missing_mandatory_relations() always requires an
+#   outgoing telemetry backend too. Those backends live in a COS K8s model reached via CMR; the
+#   solver only discovers them when the spec already declares a kubernetes model alongside this
+#   machine one, so the constraint below is satisfiable in cross-model specs and correctly
+#   UNSAT-fails machine-only ones (matching reality: this charm cannot go active standalone).
 overrides:
   - requires:
       grafana-dashboards-consumer:
@@ -26,3 +28,6 @@ overrides:
       # _get_missing_mandatory_relations() (line 149): cos-agent needs an outgoing backend
       - 'bool(endpoint[cos-agent]) => bool(endpoint[cloud-config]) or bool(endpoint[send-remote-write])
         or bool(endpoint[send-loki-logs]) or bool(endpoint[grafana-dashboards-provider])'
+      # _get_missing_mandatory_relations() (line 141): juju-info's pairs omit grafana-dashboards-provider
+      - 'bool(endpoint[juju-info]) => bool(endpoint[cloud-config]) or bool(endpoint[send-remote-write])
+        or bool(endpoint[send-loki-logs])'

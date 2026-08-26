@@ -6,6 +6,9 @@ from typing import cast
 import pytest
 from pydantic.dataclasses import dataclass
 
+from bundle_builder_x import CharmReleaseNotFoundException
+from bundle_builder_x.bundle_builder import BundleBuilder, UncompletableBundleError
+from bundle_builder_x.bundle_diagnostics import ApplicationReleaseDiagnostic
 from bundle_builder_x.charm import CharmChannel, EndpointScope, EndpointType
 from bundle_builder_x.charmhub import CharmhubClient
 from bundle_builder_x.charmhub_http import (
@@ -13,7 +16,6 @@ from bundle_builder_x.charmhub_http import (
     CharmhubBase,
     CharmhubHttpClient,
     CharmMetadata,
-    CharmReleaseNotFoundException,
     FindResponse,
     IncompleteCharmInfoException,
     InfoResponse,
@@ -22,6 +24,8 @@ from bundle_builder_x.charmhub_http import (
     UnparsableCharmException,
 )
 from bundle_builder_x.overrides import CharmGlobalOverrides, OverridesClient
+from bundle_builder_x.release_errors import AssumesMismatchError, PlatformMismatchError
+from bundle_builder_x.spec import AppSpec, ModelSpec, SpecFile
 
 # ---------------------------------------------------------------------------
 # Stubs
@@ -116,6 +120,20 @@ def _refresh_response_with_charm(name: str, revision: int, metadata: CharmMetada
     """
     charm = RefreshResponse.Charm.model_construct(revision=revision, metadata=metadata, config=_EMPTY_CONFIG)
     return RefreshResponse.model_construct(name=name, charm=charm, effective_channel=None, error=None)
+
+
+def _aodh_client_with_raw_overrides(raw_overrides: dict[str, object]) -> CharmhubClient:
+    """Build a CharmhubClient stubbed to refresh a fixed "aodh" charm with the given overrides."""
+    response = _refresh_response_with_charm("aodh", revision=5, metadata=_METADATA_REQUIRES)
+
+    class _StubClient(_NullHttpClient):
+        def refresh(self, action: RefreshAction) -> RefreshResponse:
+            return response
+
+    return CharmhubClient(
+        http_client=cast(CharmhubHttpClient, _StubClient()),
+        overrides_client=_StubOverridesClient(raw_overrides),
+    )
 
 
 class TestCharmhubClient:
@@ -324,6 +342,145 @@ class TestCharmhubClient:
 
             # THEN it succeeds
             assert charm.platforms == ["machine"]
+
+    # ---------------------------------------------------------------------------
+    # TestBundleBuilderPlatformMismatch
+    # ---------------------------------------------------------------------------
+
+    class TestBundleBuilderPlatformMismatch:
+        """End-to-end check that ``BundleBuilder.build()`` reports a charm/model platform
+        mismatch (see TestCharmFromStorePlatformOverrides above) through the canonical bundle
+        error with its typed release rejection.
+        """
+
+        def test_bundle_builder_reports_platform_mismatch_as_application_release_diagnostic(self) -> None:
+            # GIVEN a charm restricted to Kubernetes placed on a machine model
+            charmhub_client = _aodh_client_with_raw_overrides({"platforms": ["kubernetes"]})
+            builder = BundleBuilder(charmhub_client=charmhub_client)
+            spec = SpecFile(
+                models=[
+                    ModelSpec(
+                        name="m",
+                        platform="machine",
+                        juju="3.6.0",
+                        applications={"neighbor": AppSpec(charm="aodh", base="22.04", channel="latest/stable")},
+                    )
+                ]
+            )
+
+            # WHEN building the bundle
+            # THEN the canonical bundle error retains the precise release rejection
+            with pytest.raises(UncompletableBundleError, match="supports platform") as exc_info:
+                builder.build(spec)
+            assert len(exc_info.value.diagnostics) == 1
+            failure = exc_info.value.diagnostics[0]
+            assert isinstance(failure, ApplicationReleaseDiagnostic)
+            assert failure.application == "neighbor"
+            assert isinstance(failure.error, PlatformMismatchError)
+            assert failure.error.requested_platform == "machine"
+            assert failure.error.supported_platforms == ("kubernetes",)
+
+    # ---------------------------------------------------------------------------
+    # TestAssumesUnsupportedFeatureOverride
+    # ---------------------------------------------------------------------------
+
+    class TestAssumesUnsupportedFeatureOverride:
+        """A charm can be marked as unsupported by our testing infrastructure by adding an
+        ``unsupported-*`` sentinel feature (e.g. ``unsupported-openstack``,
+        ``unsupported-obsolete``) to its ``assumes`` override. Since
+        ``_ensure_compatibility()`` only ever supplies the real ``juju``/``k8s-api`` features
+        (see ``_PLATFORM_FEATURES``), such a charm can never satisfy that assumes entry and
+        ``charm_from_store()`` always raises ``CharmReleaseNotFoundException`` for it -
+        immediately and clearly when it's requested directly, and silently (caught by
+        callers such as ``BundleBuilder._get_charms_for_endpoint``) when only considered as
+        a candidate neighbor. This replaces ad hoc delisting-filter exemptions (see #813).
+        Every charm untestable by our infrastructure declares such a sentinel in each of
+        its criteria blocks, whether or not it is also delisted (``listed: false``).
+        """
+
+        def _client_with_assumes_override(self, feature: str) -> CharmhubClient:
+            return _aodh_client_with_raw_overrides(
+                {"listed": False, "platforms": ["machine", "kubernetes"], "overrides": [{"assumes": [feature]}]}
+            )
+
+        @pytest.mark.parametrize("platform", ["machine", "kubernetes"])
+        def test_charm_from_store_raises_for_sentinel_unsupported_feature(self, platform: str) -> None:
+            # GIVEN a charm whose assumes override declares a sentinel feature (e.g.
+            # unsupported-openstack, unsupported-obsolete) that is never provided by our
+            # testing infrastructure
+            client = self._client_with_assumes_override("unsupported-openstack")
+
+            # WHEN fetching the charm directly (as a bundle-builder spec would for its own
+            # test target), for either platform
+            # THEN CharmReleaseNotFoundException is raised with a message identifying the
+            # unmet assumes constraint, rather than the charm silently building and later
+            # failing deep inside relation resolution
+            with pytest.raises(AssumesMismatchError, match="assumes constraints") as exc_info:
+                client.charm_from_store(
+                    charm_name="aodh",
+                    ubuntu_arch="amd64",
+                    ubuntu_version="22.04",
+                    charm_track="latest",
+                    charm_risk="stable",
+                    platform=platform,
+                )
+            assert exc_info.value.unmet_requirements == ("feature=unsupported-openstack",)
+
+        def test_charm_from_store_succeeds_without_the_sentinel_feature(self) -> None:
+            # GIVEN a charm with no assumes override at all
+            client = _aodh_client_with_raw_overrides({})
+
+            # WHEN fetching the charm for the machine platform
+            charm = client.charm_from_store(
+                charm_name="aodh",
+                ubuntu_arch="amd64",
+                ubuntu_version="22.04",
+                charm_track="latest",
+                charm_risk="stable",
+                platform="machine",
+            )
+
+            # THEN it succeeds normally
+            assert charm.name == "aodh"
+
+        def test_bundle_builder_fails_for_charm_with_unsupported_sentinel_requested_directly(self) -> None:
+            """End-to-end check that ``BundleBuilder.build()`` fails with a clear
+            ``UncompletableBundleError`` when a spec directly requests an application
+            backed by a charm marked unsupported via a sentinel ``assumes`` feature.
+
+            The application-charm lookup in ``BundleBuilder._get_charm_for_application()``
+            can raise ``CharmReleaseNotFoundException`` (e.g. no release satisfies the
+            sentinel feature). ``_handle_failed_assertion`` catches that and attaches the
+            typed rejection to the canonical ``UncompletableBundleError`` while retaining
+            the unresolved application diagnostic.
+            """
+            # GIVEN a real CharmhubClient (stubbed HTTP/overrides) where "aodh" is marked
+            # unsupported via a sentinel feature, wired into a real BundleBuilder
+            charmhub_client = self._client_with_assumes_override("unsupported-openstack")
+            builder = BundleBuilder(charmhub_client=charmhub_client)
+
+            # AND a spec that requests "aodh" directly as an application
+            spec = SpecFile(
+                models=[
+                    ModelSpec(
+                        name="m",
+                        platform="machine",
+                        juju="3.6.0",  # explicit version avoids a live Snapstore lookup
+                        applications={"aodh": AppSpec(charm="aodh", base="22.04", channel="latest/stable")},
+                    )
+                ]
+            )
+
+            # WHEN building the bundle
+            # THEN UncompletableBundleError propagates out of build(), identifying the
+            # precise release rejection instead of a raw CharmReleaseNotFoundException
+            with pytest.raises(UncompletableBundleError, match="aodh") as exc_info:
+                builder.build(spec)
+            assert len(exc_info.value.diagnostics) == 1
+            diagnostic = exc_info.value.diagnostics[0]
+            assert isinstance(diagnostic, ApplicationReleaseDiagnostic)
+            assert diagnostic.charm_name == "aodh"
+            assert isinstance(diagnostic.error, AssumesMismatchError)
 
     # ---------------------------------------------------------------------------
     # TestChannelSupportsUbuntuVersion
