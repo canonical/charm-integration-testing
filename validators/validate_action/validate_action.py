@@ -13,6 +13,7 @@ specific `validators-*` interface packages they actually use (plus
 interface validator in this monorepo.
 """
 
+import json
 import logging
 from typing import get_args
 
@@ -42,12 +43,18 @@ def run_validate_action(charm: CharmBase, event: ActionEvent) -> None:
         event.fail(f"Invalid level '{level}'. Must be one of {get_args(ValidationLevel)}.")
         return
 
-    results = ValidateActionResults(results=run_for_charm(charm, level=level))
+    action_results = ValidateActionResults(results=run_for_charm(charm, level=level))
 
-    statuses = [result.status for result in results.results]
+    statuses = [result.status for result in action_results.results]
     event.set_results(
         {
-            "results": results.model_dump_json(),
+            # Juju action results are ultimately flat str:str pairs (ops only recurses into
+            # dict values; anything else, e.g. a list, is stringified with str(), which would
+            # produce invalid JSON - Python reprs, not `true`/`false`/`null`). So this has to
+            # stay a JSON string. It's dumped as a plain list (rather than
+            # `action_results.model_dump_json()`, which would nest it under another "results"
+            # key) so callers get `[...]` directly instead of `{"results": [...]}`.
+            "results": json.dumps([r.model_dump(mode="json") for r in action_results.results]),
             "summary": (
                 f"pass={statuses.count('PASS')} "
                 f"fail={statuses.count('FAIL')} "
@@ -57,7 +64,7 @@ def run_validate_action(charm: CharmBase, event: ActionEvent) -> None:
         }
     )
 
-    errors = [r for r in results.results if r.status == "ERROR"]
+    errors = [r for r in action_results.results if r.status == "ERROR"]
     if errors:
         summary = "; ".join(f"{r.endpoint} ({r.interface}): {r.error}" for r in errors)
         event.fail(f"{len(errors)} validator(s) raised an error: {summary}")

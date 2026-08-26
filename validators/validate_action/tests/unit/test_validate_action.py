@@ -71,7 +71,8 @@ class TestRunValidateAction:
 
         assert event.results is not None
         payload = json.loads(event.results["results"])
-        assert payload["results"][0]["level"] == "simple"
+        assert isinstance(payload, list)  # not nested under another "results" key
+        assert payload[0]["level"] == "simple"
         assert event.failure_message is None
 
     def test_respects_requested_level(self) -> None:
@@ -86,7 +87,7 @@ class TestRunValidateAction:
 
         assert event.results is not None
         payload = json.loads(event.results["results"])
-        assert payload["results"][0]["level"] == "deep"
+        assert payload[0]["level"] == "deep"
 
     def test_rejects_invalid_level(self) -> None:
         charm = _make_charm()
