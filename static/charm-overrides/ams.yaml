@@ -1,8 +1,11 @@
 ---
 # Source: https://github.com/canonical/anbox-cloud-charms (charms/ams)
 #
-# prometheus/grafana (provides): optional - legacy/secondary observability
-#   hooks, no Blocked/WaitingStatus; cos-agent is the current path.
+# prometheus/grafana/nrpe-external-master (provides): optional - legacy/
+#   secondary observability hooks, no Blocked/WaitingStatus; cos-agent is
+#   the current path.
+# registry-client/registry-publisher (requires): optional - AAR handlers
+#   only react if related, never block (src/charm.py).
 # etcd (requires): optional when config[use_embedded_etcd]=true - verified
 #   empirically on both charm generations (1.22, 1.29) with no etcd relation.
 # etcd-client/certificates (requires, 1.29+): alt to legacy etcd, backed by
@@ -12,7 +15,8 @@
 #   not core LXD/registry management.
 # charm-tracing/cos-agent: optional - observability, no blocking.
 overrides:
-  # 1.22-ops: minimal variant; no agent endpoint, but lxd-cluster/etcd may be integrated.
+  # 1.22-ops: minimal variant; no agent/registry endpoints, and
+  # nrpe-external-master is absent from this generation's metadata.
   - criteria:
       - track: '1.22-ops'
     requires:
@@ -24,15 +28,19 @@ overrides:
       use_embedded_etcd: [true, false]
     constraints:
       - 'not config[use_embedded_etcd] => bool(endpoint[etcd])'
-  # 1.24-ops: agent endpoint added; no charm-tracing yet.
+  # 1.24-ops: agent + registry endpoints added; no charm-tracing yet.
   - criteria:
       - track: '1.24-ops'
-    requires:
+    requires: &ops_registry_req
       lxd-cluster:
         optional: true
       etcd:
         optional: true
       agent:
+        optional: true
+      registry-client:
+        optional: true
+      registry-publisher:
         optional: true
     configs:
       use_embedded_etcd: [true, false]
@@ -42,12 +50,7 @@ overrides:
   - criteria:
       - track: '1.25-ops'
     requires:
-      lxd-cluster:
-        optional: true
-      etcd:
-        optional: true
-      agent:
-        optional: true
+      <<: *ops_registry_req
       charm-tracing:
         optional: true
     configs:
@@ -62,13 +65,19 @@ overrides:
           - track: '1.16'
           - track: '1.17'
           - track: '1.18'
-    requires:
+    requires: &registry_req
       lxd-cluster:
         optional: true
-    provides:
+      registry-client:
+        optional: true
+      registry-publisher:
+        optional: true
+    provides: &grafana_prometheus_nrpe_prov
       grafana:
         optional: true
       prometheus:
+        optional: true
+      nrpe-external-master:
         optional: true
   # 1.19-1.21: use_embedded_etcd added, no agent endpoint yet.
   - criteria:
@@ -77,15 +86,10 @@ overrides:
           - track: '1.20'
           - track: '1.21'
     requires:
-      lxd-cluster:
-        optional: true
+      <<: *registry_req
       etcd:
         optional: true
-    provides:
-      grafana:
-        optional: true
-      prometheus:
-        optional: true
+    provides: *grafana_prometheus_nrpe_prov
     configs:
       use_embedded_etcd: [true, false]
     constraints:
@@ -99,17 +103,12 @@ overrides:
           - track: '1.25'
           - track: '1.26'
     requires:
-      lxd-cluster:
-        optional: true
+      <<: *registry_req
       etcd:
         optional: true
       agent:
         optional: true
-    provides:
-      grafana:
-        optional: true
-      prometheus:
-        optional: true
+    provides: *grafana_prometheus_nrpe_prov
     configs:
       use_embedded_etcd: [true, false]
     constraints:
@@ -117,22 +116,15 @@ overrides:
   # latest: no agent/use_embedded_etcd (etcd stays required).
   - criteria:
       - track: 'latest'
-    requires:
-      lxd-cluster:
-        optional: true
-    provides:
-      grafana:
-        optional: true
-      prometheus:
-        optional: true
+    requires: *registry_req
+    provides: *grafana_prometheus_nrpe_prov
   # 1.27-1.28: send-remote-write, charm-tracing, cos-agent added.
   - criteria:
       - any_of:
           - track: '1.27'
           - track: '1.28'
     requires:
-      lxd-cluster:
-        optional: true
+      <<: *registry_req
       send-remote-write:
         optional: true
       etcd:
@@ -154,8 +146,7 @@ overrides:
       - 'not config[use_embedded_etcd] => bool(endpoint[etcd])'
   # default (1.29+): etcd-client/certificates added as alt to legacy etcd.
   - requires:
-      lxd-cluster:
-        optional: true
+      <<: *registry_req
       openfga:
         optional: true
       send-remote-write:
