@@ -39,6 +39,7 @@ validators-grafana-dashboard = { path = "./validators/grafana_dashboard", develo
 validators-grafana-datasource = { path = "./validators/grafana_datasource", develop = true, extras = ["dev"] }
 validators-ingress = { path = "./validators/ingress", develop = true }
 validators-ingress-auth = { path = "./validators/ingress_auth", develop = true, extras = ["dev"] }
+validators-istio-ingress-route = { path = "./validators/istio_ingress_route", develop = true, extras = ["dev"] }
 validators-prometheus-remote-write = { path = "./validators/prometheus_remote_write", develop = true }
 validators-certificate-transfer = { path = "./validators/certificate_transfer", develop = true, extras = ["dev"] }
 
