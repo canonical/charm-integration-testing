@@ -131,7 +131,13 @@ def _redact_url(url: str) -> str:
 
 def _http_error_body(exc: urllib.error.HTTPError) -> str:
     """Best-effort decode of an HTTPError response body for diagnostics."""
-    return exc.read().decode("utf-8", errors="replace") if exc.fp else ""
+    if not exc.fp:
+        return ""
+    try:
+        return exc.read().decode("utf-8", errors="replace")
+    except Exception:
+        # A diagnostic body read can itself time out; never let it mask the original HTTP error.
+        return ""
 
 
 def _http_error(exc: urllib.error.HTTPError, action: str) -> RuntimeError:
@@ -158,6 +164,10 @@ def _collect_endpoint_urls(
       when the key is absent (an explicitly empty scheme is malformed and is
       left to fail the schema check).
 
+    The shape is selected by key presence: an explicitly empty ``url`` is a v1
+    error rather than a fall-back to v0, since the requirer would consume that
+    empty v1 URL.
+
     Malformed entries are returned as errors so ``_schema_check`` can surface
     every bad databag in one check.
     """
@@ -168,20 +178,26 @@ def _collect_endpoint_urls(
         unit_name = getattr(unit, "name", repr(unit))
         data = relation.data[unit]
 
-        url = data.get("url", "")
-        if not url:
+        # Select the shape by key presence so an empty v1 'url' is not masked by a v0 fall-back.
+        if "url" in data:
+            url = data.get("url", "")
+            if not url:
+                errors.append(f"Unit {unit_name!r}: empty 'url' value in databag")
+                continue
+        elif "public_address" in data:
             public_address = data.get("public_address", "")
-            if public_address:
-                scheme = data.get("scheme", "http")
-                url = f"{scheme}://{public_address}"
-
-        if not url:
+            if not public_address:
+                errors.append(f"Unit {unit_name!r}: empty 'public_address' value in databag")
+                continue
+            scheme = data.get("scheme", "http")
+            url = f"{scheme}://{public_address}"
+        else:
             errors.append(f"Unit {unit_name!r}: no 'url' or 'public_address' key in databag")
             continue
+
         if url in seen_urls:
             continue  # dedup — same URL from a scaled-out provider is not an error
         seen_urls.add(url)
-
         urls.append(url)
     return urls, errors
 

@@ -14,6 +14,7 @@ from validators.alertmanager_dispatch.validator import (
     _RESOLVE_CONFIRM_ATTEMPTS,
     _SILENCE_SETTLE_ATTEMPTS,
     AlertmanagerDispatchValidator,
+    _http_error_body,
     _NoRedirectHandler,
 )
 from validators.test_utils.helpers import make_charm_from_relation
@@ -402,6 +403,36 @@ class TestAlertmanagerDispatchValidatorSchema:
         schema_check = next(c for c in result.checks if c.name == "schema")
         assert schema_check.passed
 
+    def test_fails_when_v1_url_present_but_empty(self) -> None:
+        # GIVEN a v1 databag with an explicitly empty 'url' alongside legacy fields; the requirer would
+        # consume the empty v1 URL, so selection is by key presence and must not fall back to v0.
+        validator = _make_validator(
+            {"alertmanager-k8s/0": {"url": "", "public_address": "alertmanager-0.am-test.svc:9093"}}
+        )
+
+        # WHEN
+        result = validator.validate(level="simple")
+
+        # THEN it fails on the empty 'url' rather than silently using 'public_address'
+        assert result.status == "FAIL"
+        schema_check = next(c for c in result.checks if c.name == "schema")
+        assert not schema_check.passed
+        assert "empty 'url'" in schema_check.message
+        assert "alertmanager-0.am-test.svc" not in schema_check.message
+
+    def test_fails_when_v0_public_address_present_but_empty(self) -> None:
+        # GIVEN a v0 databag whose 'public_address' key is present but empty
+        validator = _make_validator({"alertmanager-k8s/0": {"public_address": ""}})
+
+        # WHEN
+        result = validator.validate(level="simple")
+
+        # THEN the error names the empty value rather than misreporting a missing key
+        assert result.status == "FAIL"
+        schema_check = next(c for c in result.checks if c.name == "schema")
+        assert not schema_check.passed
+        assert "empty 'public_address'" in schema_check.message
+
 
 # ---------------------------------------------------------------------------
 # Tests: simple level — connectivity & health (L1)
@@ -473,6 +504,15 @@ class TestAlertmanagerDispatchValidatorSimple:
             handler.redirect_request(MagicMock(), MagicMock(), 302, "Found", MagicMock(), "http://example/login")
             is None
         )
+
+    def test_http_error_body_swallows_read_failure(self) -> None:
+        # A diagnostic body read can itself time out; the helper must return "" rather than raise and
+        # turn a normal failed health check into an uncaught validator error.
+        exc = MagicMock()
+        exc.fp = MagicMock()  # non-None fp so the helper attempts to read the body
+        exc.read.side_effect = OSError("read timed out")
+
+        assert _http_error_body(cast(urllib.error.HTTPError, exc)) == ""
 
     def test_redacts_userinfo_from_reports(self) -> None:
         # GIVEN a provider advertises credentials in the endpoint URL
