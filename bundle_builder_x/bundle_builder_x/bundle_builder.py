@@ -28,6 +28,8 @@ from .bundle_diagnostics import (
     BundleDiagnostic,
     DiagnosticEndpoint,
     FeatureMismatchDiagnostic,
+    PeerChannelMismatchDiagnostic,
+    SubordinateBaseMismatchDiagnostic,
     UnfulfilledEndpointDiagnostic,
     UnresolvedApplicationDiagnostic,
     UnresolvedIntegrationDiagnostic,
@@ -248,6 +250,29 @@ class BundleBuilder:
                             ),
                             feature=tag.feature,
                         ),
+                    )
+                case PeerChannelMismatchTag():
+                    diagnostics.append(
+                        PeerChannelMismatchDiagnostic(
+                            charm_name=tag.charm.charm_name,
+                            endpoint=tag.endpoint,
+                            peer_charm_name=tag.peer_charm_name,
+                            required_track=tag.required_track,
+                            required_risk=tag.required_risk,
+                            required_channel=tag.required_channel,
+                            required_revision=tag.required_revision,
+                        )
+                    )
+                case SubordinateBaseMismatchTag():
+                    diagnostics.append(
+                        SubordinateBaseMismatchDiagnostic(
+                            subordinate_charm_name=tag.subordinate_charm_name,
+                            subordinate_endpoint=tag.subordinate_endpoint,
+                            principal_charm_name=tag.principal_charm_name,
+                            principal_endpoint=tag.principal_endpoint,
+                            subordinate_base=tag.subordinate_base,
+                            principal_base=tag.principal_base,
+                        )
                     )
                 case ApplicationExistsTag():
                     if (tag.model.key, tag.application) not in release_failed_applications:
@@ -746,7 +771,13 @@ class BundleBuilder:
     ) -> bool:
         """Expand the domain by fetching a peer charm variant on the required channel."""
         owning_model = domain.charms[tag.charm.charm_id].model
+        # The peer may live in a different model when the relation is cross-model (CMR),
+        # so its replacement candidate must be placed in its own model, not the owning
+        # charm's model - otherwise the candidate can never satisfy the cross-model
+        # integration and the solver keeps re-triggering this same mismatch.
+        peer_model = domain.charms[tag.peer_charm_id].model
         model = domain.models[owning_model]
+        peer_model_spec = domain.models[peer_model]
         peer_channel = domain.charms[tag.peer_charm_id].spec.channel
         if tag.required_channel is not None:
             resolved = CharmChannel.model_validate(tag.required_channel)
@@ -761,9 +792,9 @@ class BundleBuilder:
         try:
             peer_charm = self.charmhub_client.charm_from_store(
                 charm_name=tag.peer_charm_name,
-                ubuntu_arch=model.arch,
-                juju_version=model.juju_version,
-                platform=model.platform,
+                ubuntu_arch=peer_model_spec.arch,
+                juju_version=peer_model_spec.juju_version,
+                platform=peer_model_spec.platform,
                 charm_track=track,
                 charm_risk=risk,
                 charm_revision=tag.required_revision,
@@ -772,7 +803,7 @@ class BundleBuilder:
                 peer_charm,
                 tag.peer_charm_id,
                 domain,
-                owning_model,
+                peer_model,
                 connect_to_id=tag.charm.charm_id,
                 connect_to_neighbors=True,
             )
