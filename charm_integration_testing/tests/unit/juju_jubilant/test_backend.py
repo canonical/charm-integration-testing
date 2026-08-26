@@ -800,6 +800,22 @@ class TestJubilantBackend:
             # THEN status was polled 3 consecutive times before returning
             assert stub.call_count == 3
 
+        def test_wait_unhealthy_does_not_fail_fast_on_agent_executing(self) -> None:
+            # GIVEN the workload is non-active and the unit agent is executing a hook, not disconnected
+            stub = StatusStub(
+                application_statuses={"target": "blocked"},
+                unit_workload_statuses={"target/0": "blocked"},
+                unit_juju_statuses={"target/0": "executing"},
+            )
+            client = JubilantClientStub(client=stub)
+            backend = JubilantBackend(client)
+
+            # WHEN
+            backend.wait_unhealthy("test-model", "target", timedelta(seconds=10), count=3)
+
+            # THEN it debounces normally instead of failing fast; 'executing' is not a disconnect
+            assert stub.call_count == 3
+
         def test_wait_unhealthy_raises_immediately_on_agent_disconnect(self) -> None:
             # GIVEN the workload is still active, but the unit agent has already left idle
             stub = StatusStub(

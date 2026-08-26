@@ -219,7 +219,10 @@ class JujuBackend(ABC):
         count: int | None,
         strict_timeout: bool = False,
     ) -> None:
-        """Wait for *application*'s unit workload status to leave 'active' for *count* consecutive checks; raises immediately if any unit agent leaves 'idle'."""
+        """Wait for *application*'s unit workload status to leave 'active' for *count* consecutive checks.
+
+        Raises immediately if any unit agent disconnects.
+        """
         raise NotImplementedError
 
     @abstractmethod

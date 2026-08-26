@@ -432,6 +432,7 @@ class TestWaitConditions:
         # THEN - status left the allowed set, so "not in" is True
         assert result is True
         assert "webapp" in wait.noncompliant_applications
+        assert wait.message == "left applications: [waiting], units: [waiting]"
 
     def test_applications_are_scaled_compliant(self, sample_database_webapp_status: jubilant.Status) -> None:
         # GIVEN / WHEN
