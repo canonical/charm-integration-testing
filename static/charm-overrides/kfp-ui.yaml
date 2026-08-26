@@ -12,10 +12,9 @@
 #
 # kfp-api's "kfp-api" feature tag is shared across all its published tracks/risks
 # (which are not interchangeable). The feature tag alone only proves the peer is *a*
-# kfp-api charm,
-# not the matching release, so track/risk equality is pinned alongside it here (and
-# on kfp-persistence.yaml) to require kfp-ui to integrate with a kfp-api on the same
-# channel.
+# kfp-api charm, not the matching release, so track/risk equality is pinned alongside it
+# here (and on kfp-persistence.yaml) to require kfp-ui to integrate with a kfp-api on the
+# same channel.
 overrides:
   - criteria:
       - track: '2.0-alpha.7'
