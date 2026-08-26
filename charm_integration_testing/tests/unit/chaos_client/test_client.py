@@ -4,6 +4,7 @@
 from dataclasses import dataclass, field
 from datetime import timedelta
 
+import pytest
 from chaos_client import NativeChaosClient
 from juju.backend import JujuExecOutput
 
@@ -110,3 +111,31 @@ class TestCleanup:
             ("test-model", "postgresql/0", "rm -f -- /tmp/fill", False),
             ("test-model", "postgresql/0", "pkill -f stress-ng || true", False),
         ]
+
+
+class TestIsolateNetwork:
+    """Test suite for isolate_network method."""
+
+    def test_raises_not_implemented(self) -> None:
+        # GIVEN a client wrapping a juju backend stub
+        stub = JujuStub()
+        client = NativeChaosClient(juju_backend=stub)
+
+        # WHEN isolating network on a unit
+        # THEN it is unsupported for this backend
+        with pytest.raises(NotImplementedError):
+            client.isolate_network(model="test-model", unit="postgresql/0")
+
+
+class TestRemoveNetworkIsolation:
+    """Test suite for remove_network_isolation method."""
+
+    def test_raises_not_implemented(self) -> None:
+        # GIVEN a client wrapping a juju backend stub
+        stub = JujuStub()
+        client = NativeChaosClient(juju_backend=stub)
+
+        # WHEN removing network isolation on a unit
+        # THEN it is unsupported for this backend
+        with pytest.raises(NotImplementedError):
+            client.remove_network_isolation(model="test-model", unit="postgresql/0")

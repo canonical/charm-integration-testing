@@ -59,7 +59,7 @@ class ModelStub:
     _secrets: dict[str, dict[str, str]] = field(default_factory=dict)
     requested_ids: list[str] = field(default_factory=list)
     relations: dict[str, list[RelationStub]] = field(default_factory=dict)
-    name: str = "model"
+    name: str = "test-model"
 
     def get_secret(self, id: str) -> SecretStub:  # noqa: A002
         self.requested_ids.append(id)

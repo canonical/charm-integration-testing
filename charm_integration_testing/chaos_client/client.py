@@ -27,3 +27,9 @@ class NativeChaosClient(ChaosClient):
     def cleanup(self, model: str, unit: str, path: str) -> None:
         self._juju.exec_unit(model, unit, f"rm -f -- {shlex.quote(path)}")
         self._juju.exec_unit(model, unit, "pkill -f stress-ng || true")
+
+    def isolate_network(self, model: str, unit: str) -> None:
+        raise NotImplementedError
+
+    def remove_network_isolation(self, model: str, unit: str) -> None:
+        raise NotImplementedError
