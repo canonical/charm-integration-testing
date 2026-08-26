@@ -973,6 +973,53 @@ class TestHandlePeerChannelMismatch:
         assert frozenset((0, 2)) in pairs
         assert frozenset((1, 3)) in pairs
 
+    def test_peer_in_different_model_gets_variant_placed_in_its_own_model(self) -> None:
+        # GIVEN an anchor and peer in different models (a cross-model relation), each
+        # with its own arch (distinct here to make model-attribution assertable)
+        domain = Domain()
+        anchor_model_ref = ModelRef(name="anchor-model", controller="anchor-controller")
+        peer_model_ref = ModelRef(name="peer-model", controller="peer-controller")
+        domain.models[anchor_model_ref] = DomainModel(
+            arch="amd64",
+            platform="kubernetes",
+            juju_version=_JUJU,
+        )
+        domain.models[peer_model_ref] = DomainModel(
+            arch="arm64",
+            platform="kubernetes",
+            juju_version=_JUJU,
+        )
+        anchor = _make_charm(
+            "anchor",
+            {"ep": CharmEndpoint(type=EndpointType.PROVIDES, interface="mesh")},
+        )
+        peer = _make_charm(
+            "peer",
+            {"ep": CharmEndpoint(type=EndpointType.REQUIRES, interface="mesh")},
+        )
+        add_charm_to_domain(anchor, domain, anchor_model_ref)
+        add_charm_to_domain(peer, domain, peer_model_ref)
+        peer_variant = peer.model_copy(update={"revision": 2})
+        fake = _FakeCharmhubClient(charm_responses=[peer_variant, CharmReleaseNotFoundException("no match")])
+        builder = BundleBuilder(charmhub_client=fake)
+
+        # WHEN resolving the mismatch
+        result = builder._handle_peer_channel_mismatch(
+            _mismatch(anchor_id=0, peer_id=1, track="latest"),
+            domain,
+        )
+
+        # THEN the new peer variant is placed in the peer's own model, not the anchor's
+        assert result is True
+        peer_variant_id = next(
+            cid for cid, charm in enumerate(domain.charms) if charm.spec.name == "peer" and charm.spec.revision == 2
+        )
+        assert domain.charms[peer_variant_id].model == peer_model_ref
+
+        # AND the charm was looked up using the peer's own model's arch (the only
+        # attribute that differs between the two models in this test)
+        assert fake.charm_from_store_calls[0]["ubuntu_arch"] == "arm64"
+
 
 class TestMergeMismatchTags:
     """BundleBuilder._merge_mismatch_tags."""
