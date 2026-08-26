@@ -1,11 +1,14 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import os
 import socket
+import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from email.message import Message
 from http.client import BadStatusLine
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import MagicMock, patch
@@ -15,7 +18,7 @@ import ops
 import pytest
 import yaml
 
-from validators.ingress_auth.validator import IngressAuthValidator, _negotiated_version
+from validators.ingress_auth.validator import IngressAuthValidator, _http_probe, _negotiated_version
 from validators.test_utils.helpers import make_charm_from_relation
 from validators.test_utils.stubs import (
     ApplicationStub,
@@ -78,6 +81,34 @@ def _reachable() -> Iterator[MagicMock]:
         patch(f"{_MODULE}.socket.create_connection"),
     ):
         yield resolve
+
+
+@contextmanager
+def _local_http_server(status: int, headers: dict[str, str] | None = None) -> Iterator[tuple[int, list[str]]]:
+    """Serve *status* on loopback, yielding (port, list of received paths)."""
+    received: list[str] = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            received.append(self.path)
+            self.send_response(status)
+            for key, value in (headers or {}).items():
+                self.send_header(key, value)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def log_message(self, *args: Any) -> None:
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield server.server_address[1], received
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
 
 
 def _headers(**values: str) -> Message:
@@ -498,6 +529,32 @@ class TestDeepLevel:
         request = opener.open.call_args.args[0]
         assert request.get_method() == "GET"
         assert request.data is None
+
+    def test_probe_ignores_environment_proxy(self) -> None:
+        # GIVEN a charm environment with HTTP_PROXY set, and an authorization service
+        # reachable directly; the gateway addresses the service over the cluster network,
+        # so routing the probe through a proxy would validate a different path and could
+        # read the proxy's own 403 as a genuine DENY decision
+        with (
+            _local_http_server(403) as (proxy_port, proxy_received),
+            _local_http_server(302, {"Location": "/dex/auth"}) as (service_port, service_received),
+        ):
+            env = {
+                "HTTP_PROXY": f"http://127.0.0.1:{proxy_port}",
+                "http_proxy": f"http://127.0.0.1:{proxy_port}",
+                # Neutralise any ambient bypass list so the proxy would really be used.
+                "NO_PROXY": "",
+                "no_proxy": "",
+            }
+            # WHEN the probe runs against the service, using the real opener rather than a mock
+            with patch.dict(os.environ, env):
+                status, headers = _http_probe(f"http://127.0.0.1:{service_port}/")
+
+            # THEN it reached the service directly and never touched the proxy
+            assert status == 302
+            assert headers["location"] == "/dex/auth"
+            assert service_received == ["/"]
+            assert proxy_received == []
 
     def test_redirect_decision_passes(self) -> None:
         # GIVEN an authorization service that redirects unauthenticated requests to a login page

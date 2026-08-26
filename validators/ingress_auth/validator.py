@@ -5,7 +5,7 @@ import socket
 from http.client import BadStatusLine, HTTPMessage, HTTPResponse
 from typing import IO, Any
 from urllib.error import HTTPError, URLError
-from urllib.request import HTTPRedirectHandler, Request, build_opener
+from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 import ops
 import yaml  # pyyaml; the serialized-data-interface wire format is YAML-encoded
@@ -532,8 +532,14 @@ class _NoRedirectHandler(HTTPRedirectHandler):
 
 
 def _http_probe(url: str) -> tuple[int, dict[str, str]]:
-    """GET *url* without following redirects, returning (status, lowercased headers)."""
-    opener = build_opener(_NoRedirectHandler)
+    """GET *url* without following redirects, returning (status, lowercased headers).
+
+    ProxyHandler({}) suppresses build_opener's default proxy handling. The gateway
+    reaches the authorization service directly over the cluster network, so honouring
+    HTTP_PROXY here would probe a different route than the one being validated and
+    could read a proxy's own response as the service's authorization decision.
+    """
+    opener = build_opener(_NoRedirectHandler, ProxyHandler({}))
     try:
         response: HTTPResponse
         with opener.open(Request(url), timeout=_HTTP_TIMEOUT) as response:
