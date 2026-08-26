@@ -365,16 +365,35 @@ class TestSimpleLevel:
         assert result.status == "PASS"
         assert "validating as v1" in _checks_by_name(result)["supported_versions"].message
 
-    def test_missing_payload_fails(self) -> None:
-        # GIVEN a remote that completed the handshake but published no data
-        validator = _make_validator(_nested_databag(payload=None))
+    @pytest.mark.parametrize("data", ["service: [unclosed", 'service: "unterminated', "a: b\n  c: d"])
+    def test_malformed_payload_yaml_fails(self, data: str) -> None:
+        # GIVEN a 'data' value that is not parseable YAML
+        databag = {"_supported_versions": yaml.safe_dump(["v1"]), "data": data}
+        validator = _make_validator(databag)
 
         # WHEN the validator runs
         result = validator.validate("simple")
 
-        # THEN the payload check fails
+        # THEN the parse error is reported as a payload failure rather than propagating
         assert result.status == "FAIL"
-        assert _checks_by_name(result)["payload"].passed is False
+        payload = _checks_by_name(result)["payload"]
+        assert payload.passed is False
+        assert "not valid YAML" in payload.message
+        assert "schema" not in _checks_by_name(result)
+
+    def test_malformed_versions_yaml_fails(self) -> None:
+        # GIVEN a '_supported_versions' value that is not parseable YAML
+        validator = _make_validator({"_supported_versions": "[v1", "data": yaml.safe_dump(VALID_PAYLOAD)})
+
+        # WHEN the validator runs
+        result = validator.validate("simple")
+
+        # THEN the handshake check reports the parse error and nothing downstream runs
+        assert result.status == "FAIL"
+        versions_check = _checks_by_name(result)["supported_versions"]
+        assert versions_check.passed is False
+        assert "not valid YAML" in versions_check.message
+        assert "payload" not in _checks_by_name(result)
 
     def test_undecodable_payload_fails(self) -> None:
         # GIVEN a data key that is not a YAML mapping
