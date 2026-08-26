@@ -21,3 +21,11 @@ class ChaosClient(ABC):
     @abstractmethod
     def cleanup(self, model: str, unit: str, path: str) -> None:
         raise NotImplementedError
+
+    @abstractmethod
+    def isolate_network(self, model: str, unit: str) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def remove_network_isolation(self, model: str, unit: str) -> None:
+        raise NotImplementedError
