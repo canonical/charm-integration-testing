@@ -55,9 +55,11 @@ from bundle_builder_x import (
     BundleDiagnostic,
     CharmReleaseNotFoundException,
     FeatureMismatchDiagnostic,
+    PeerChannelMismatchDiagnostic,
     PlatformMismatchError,
     ReleaseUnavailableError,
     ReleaseUnavailableKind,
+    SubordinateBaseMismatchDiagnostic,
     UncompletableBundleError,
     UnfulfilledEndpointDiagnostic,
     UnresolvedApplicationDiagnostic,
@@ -981,6 +983,37 @@ def _bundle_diagnostic_metadata(diagnostic: BundleDiagnostic) -> list[tuple[str,
                 f"/{diagnostic.provides.charm_name}:{diagnostic.provides.endpoint}",
             ),
             ("failure:build_bundle:feature_mismatch:feature", diagnostic.feature),
+        ]
+    if isinstance(diagnostic, PeerChannelMismatchDiagnostic):
+        entries = [
+            (
+                "failure:build_bundle:peer_channel_mismatch",
+                f"{diagnostic.charm_name}:{diagnostic.endpoint}/{diagnostic.peer_charm_name}",
+            )
+        ]
+        if diagnostic.required_track:
+            entries.append(("failure:build_bundle:peer_channel_mismatch:required_track", diagnostic.required_track))
+        if diagnostic.required_risk:
+            entries.append(("failure:build_bundle:peer_channel_mismatch:required_risk", diagnostic.required_risk))
+        if diagnostic.required_channel:
+            entries.append(("failure:build_bundle:peer_channel_mismatch:required_channel", diagnostic.required_channel))
+        if diagnostic.required_revision is not None:
+            entries.append(
+                (
+                    "failure:build_bundle:peer_channel_mismatch:required_revision",
+                    str(diagnostic.required_revision),
+                )
+            )
+        return entries
+    if isinstance(diagnostic, SubordinateBaseMismatchDiagnostic):
+        return [
+            (
+                "failure:build_bundle:subordinate_base_mismatch",
+                f"{diagnostic.subordinate_charm_name}:{diagnostic.subordinate_endpoint}"
+                f"/{diagnostic.principal_charm_name}:{diagnostic.principal_endpoint}",
+            ),
+            ("failure:build_bundle:subordinate_base_mismatch:subordinate_base", diagnostic.subordinate_base),
+            ("failure:build_bundle:subordinate_base_mismatch:principal_base", diagnostic.principal_base),
         ]
     return []
 

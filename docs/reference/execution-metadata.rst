@@ -223,6 +223,38 @@ Failure Information
      - The feature name that could not be reconciled. Collected alongside ``failure:build_bundle:feature_mismatch``. Multiple values may be recorded.
      - No
      - ``katib-service``
+   * - ``failure:build_bundle:peer_channel_mismatch``
+     - An endpoint requires its integration peer to be on a specific track/risk/channel/revision that the resolved peer does not satisfy. Format: ``<charm>:<endpoint>/<peer charm>``. Multiple values may be recorded.
+     - No
+     - ``kfp-persistence:kfp-api/kfp-viz``
+   * - ``failure:build_bundle:peer_channel_mismatch:required_track``
+     - Required track for the peer charm. Collected alongside ``failure:build_bundle:peer_channel_mismatch`` only when set.
+     - No
+     - ``2.15``
+   * - ``failure:build_bundle:peer_channel_mismatch:required_risk``
+     - Required risk for the peer charm. Collected alongside ``failure:build_bundle:peer_channel_mismatch`` only when set.
+     - No
+     - ``edge``
+   * - ``failure:build_bundle:peer_channel_mismatch:required_channel``
+     - Required full channel for the peer charm. Collected alongside ``failure:build_bundle:peer_channel_mismatch`` only when set.
+     - No
+     - ``2.15/edge``
+   * - ``failure:build_bundle:peer_channel_mismatch:required_revision``
+     - Required revision for the peer charm. Collected alongside ``failure:build_bundle:peer_channel_mismatch`` only when set.
+     - No
+     - ``42``
+   * - ``failure:build_bundle:subordinate_base_mismatch``
+     - A subordinate charm's endpoint requires the same base as its principal, but the resolved bases differ. Format: ``<subordinate charm>:<endpoint>/<principal charm>:<endpoint>``. Multiple values may be recorded.
+     - No
+     - ``nrpe:general-info/postgresql:juju-info``
+   * - ``failure:build_bundle:subordinate_base_mismatch:subordinate_base``
+     - Base resolved for the subordinate charm. Collected alongside ``failure:build_bundle:subordinate_base_mismatch``.
+     - No
+     - ``ubuntu@22.04``
+   * - ``failure:build_bundle:subordinate_base_mismatch:principal_base``
+     - Base resolved for the principal charm. Collected alongside ``failure:build_bundle:subordinate_base_mismatch``.
+     - No
+     - ``ubuntu@24.04``
    * - ``resource_discrepancy:<resource_type>:<qualifier>``
      - A Kubernetes resource discrepancy detected between two visits to the same scheduler state. Collected when ``ResourceDiscrepancyError`` is raised. ``<resource_type>`` identifies the tracked resource (e.g. ``pvc``) and ``<qualifier>`` is the drift kind: the generic presence kinds ``missing`` or ``extra``, or a resource-specific modification kind (e.g. ``resized``, ``image_changed``, ``scaled``, ``keys_changed``). Run-specific context is carried in the value as ``state=<state> controller=<controller> model=<model> <resource_type>=<name>`` followed by the resource's attributes: whole for presence kinds, or only the changed attributes as ``key=old->new`` for modification kinds. The controller is included because model names are only unique within a controller. Multiple values may be recorded. See :doc:`../explanation/resource-tracking`.
      - Yes

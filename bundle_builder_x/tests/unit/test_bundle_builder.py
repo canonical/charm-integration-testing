@@ -16,6 +16,7 @@ from bundle_builder_x.assertion_tags import (
     CharmEndpointNonOptionalTag,
     CharmEndpointPayload,
     CharmPayload,
+    CharmRankBoundedTag,
     IntegrationFeatureMismatchTag,
     PeerChannelMismatchTag,
     SubordinateBaseMismatchTag,
@@ -27,6 +28,8 @@ from bundle_builder_x.bundle_diagnostics import (
     BundleBuildFailureKind,
     DiagnosticEndpoint,
     FeatureMismatchDiagnostic,
+    PeerChannelMismatchDiagnostic,
+    SubordinateBaseMismatchDiagnostic,
     UnfulfilledEndpointDiagnostic,
     UnresolvedApplicationDiagnostic,
     UnresolvedIntegrationDiagnostic,
@@ -970,6 +973,53 @@ class TestHandlePeerChannelMismatch:
         assert frozenset((0, 2)) in pairs
         assert frozenset((1, 3)) in pairs
 
+    def test_peer_in_different_model_gets_variant_placed_in_its_own_model(self) -> None:
+        # GIVEN an anchor and peer in different models (a cross-model relation), each
+        # with its own arch (distinct here to make model-attribution assertable)
+        domain = Domain()
+        anchor_model_ref = ModelRef(name="anchor-model", controller="anchor-controller")
+        peer_model_ref = ModelRef(name="peer-model", controller="peer-controller")
+        domain.models[anchor_model_ref] = DomainModel(
+            arch="amd64",
+            platform="kubernetes",
+            juju_version=_JUJU,
+        )
+        domain.models[peer_model_ref] = DomainModel(
+            arch="arm64",
+            platform="kubernetes",
+            juju_version=_JUJU,
+        )
+        anchor = _make_charm(
+            "anchor",
+            {"ep": CharmEndpoint(type=EndpointType.PROVIDES, interface="mesh")},
+        )
+        peer = _make_charm(
+            "peer",
+            {"ep": CharmEndpoint(type=EndpointType.REQUIRES, interface="mesh")},
+        )
+        add_charm_to_domain(anchor, domain, anchor_model_ref)
+        add_charm_to_domain(peer, domain, peer_model_ref)
+        peer_variant = peer.model_copy(update={"revision": 2})
+        fake = _FakeCharmhubClient(charm_responses=[peer_variant, CharmReleaseNotFoundException("no match")])
+        builder = BundleBuilder(charmhub_client=fake)
+
+        # WHEN resolving the mismatch
+        result = builder._handle_peer_channel_mismatch(
+            _mismatch(anchor_id=0, peer_id=1, track="latest"),
+            domain,
+        )
+
+        # THEN the new peer variant is placed in the peer's own model, not the anchor's
+        assert result is True
+        peer_variant_id = next(
+            cid for cid, charm in enumerate(domain.charms) if charm.spec.name == "peer" and charm.spec.revision == 2
+        )
+        assert domain.charms[peer_variant_id].model == peer_model_ref
+
+        # AND the charm was looked up using the peer's own model's arch (the only
+        # attribute that differs between the two models in this test)
+        assert fake.charm_from_store_calls[0]["ubuntu_arch"] == "arm64"
+
 
 class TestMergeMismatchTags:
     """BundleBuilder._merge_mismatch_tags."""
@@ -1183,6 +1233,20 @@ class TestCollectUnsatDiagnostics:
 
     def test_unknown_tags_produce_internal_failure_diagnostic(self) -> None:
         domain = _domain_for_unresolved_diagnostics()
+        unhandled = CharmRankBoundedTag(charm=CharmPayload(charm_name="mysql-router", charm_id=0))
+
+        result = BundleBuilder._collect_unsat_diagnostics([unhandled], domain)
+
+        assert result == (
+            BundleBuildFailureDiagnostic(
+                kind=BundleBuildFailureKind.UNEXPANDABLE_ASSERTIONS,
+                detail="Cannot expand the domain to handle failed assertion tags",
+            ),
+        )
+
+    def test_collect_peer_channel_mismatch_diagnostic(self) -> None:
+        # GIVEN an unsat core containing a peer channel mismatch tag
+        domain = _domain_for_unresolved_diagnostics()
         peer_mismatch = PeerChannelMismatchTag(
             charm=CharmPayload(charm_name="mysql-router", charm_id=0),
             endpoint="db-router",
@@ -1191,11 +1255,54 @@ class TestCollectUnsatDiagnostics:
             required_track="8.0",
         )
 
+        # WHEN collecting diagnostics from the unsat core
         result = BundleBuilder._collect_unsat_diagnostics([peer_mismatch], domain)
 
+        # THEN a structured peer-channel-mismatch diagnostic is produced, not a generic fallback
         assert result == (
-            BundleBuildFailureDiagnostic(
-                kind=BundleBuildFailureKind.UNEXPANDABLE_ASSERTIONS,
-                detail="Cannot expand the domain to handle failed assertion tags",
+            PeerChannelMismatchDiagnostic(
+                charm_name="mysql-router",
+                endpoint="db-router",
+                peer_charm_name="mysql",
+                required_track="8.0",
+                required_risk=None,
+                required_channel=None,
+                required_revision=None,
             ),
         )
+        error = UncompletableBundleError(diagnostics=result)
+        assert "mysql-router:db-router" in str(error)
+        assert "mysql" in str(error)
+
+    def test_collect_subordinate_base_mismatch_diagnostic(self) -> None:
+        # GIVEN an unsat core containing a subordinate base mismatch tag
+        domain = _domain_for_unresolved_diagnostics()
+        base_mismatch = SubordinateBaseMismatchTag(
+            subordinate_charm_name="nrpe",
+            subordinate_charm_id=0,
+            subordinate_endpoint="general-info",
+            principal_charm_name="postgresql",
+            principal_charm_id=1,
+            principal_endpoint="juju-info",
+            subordinate_base="ubuntu@22.04",
+            principal_base="ubuntu@24.04",
+        )
+
+        # WHEN collecting diagnostics from the unsat core
+        result = BundleBuilder._collect_unsat_diagnostics([base_mismatch], domain)
+
+        # THEN a structured subordinate-base-mismatch diagnostic is produced, not a generic fallback
+        assert result == (
+            SubordinateBaseMismatchDiagnostic(
+                subordinate_charm_name="nrpe",
+                subordinate_endpoint="general-info",
+                principal_charm_name="postgresql",
+                principal_endpoint="juju-info",
+                subordinate_base="ubuntu@22.04",
+                principal_base="ubuntu@24.04",
+            ),
+        )
+        error = UncompletableBundleError(diagnostics=result)
+        assert "nrpe:general-info" in str(error)
+        assert "ubuntu@22.04" in str(error)
+        assert "ubuntu@24.04" in str(error)
