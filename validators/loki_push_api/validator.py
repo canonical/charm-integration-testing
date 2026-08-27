@@ -205,6 +205,10 @@ def _http_ready_checks(endpoint_infos: list[dict[str, Any]]) -> list[ValidationC
 
     Loki may return 503 for up to ~25 s while its ingester warms up, so the
     check retries with back-off before reporting failure (6 attempts, 5 s apart).
+
+    Push-only forwarders (e.g. grafana-agent-k8s, opentelemetry-collector-k8s)
+    don't implement ``/ready`` and 404 immediately, so 404 passes without
+    retrying rather than being treated as "not ready yet".
     """
     checks: list[ValidationCheck] = []
     for info in endpoint_infos:
@@ -231,6 +235,15 @@ def _http_ready_checks(endpoint_infos: list[dict[str, Any]]) -> list[ValidationC
                         last_msg = f"Loki ready at {ready_url}."
                         break
                     last_msg = f"Unexpected response {resp.status} from {ready_url}: {body[:200]}"
+            except HTTPError as exc:
+                if exc.code == 404:
+                    passed = True
+                    last_msg = (
+                        f"No '/ready' route at {ready_url} (HTTP 404); provider does not expose a "
+                        "Loki-compatible readiness endpoint (push-only forwarder). Skipping readiness check."
+                    )
+                    break
+                last_msg = str(exc)
             except Exception as exc:
                 last_msg = str(exc)
         checks.append(ValidationCheck(name=check_name, passed=passed, message=last_msg))

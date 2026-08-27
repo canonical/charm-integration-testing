@@ -234,6 +234,28 @@ class TestLokiPushApiValidatorSimple:
         ready = next(c for c in result.checks if c.name.startswith("http_ready"))
         assert not ready.passed
 
+    def test_http_ready_passes_when_route_not_found_push_only_forwarder(self) -> None:
+        """Push-only forwarders (e.g. grafana-agent-k8s) 404 on /ready; that should PASS, not retry."""
+        from urllib.error import HTTPError
+
+        validator = _make_validator([VALID_UNIT_DATABAG])
+        with (
+            patch("validators.loki_push_api.validator._tcp_ping"),
+            patch(
+                "validators.loki_push_api.validator.urlopen",
+                side_effect=HTTPError(LOKI_URL, 404, "Not Found", {}, None),  # type: ignore[arg-type]
+            ) as urlopen_mock,
+            patch("validators.loki_push_api.validator.time.sleep") as sleep_mock,
+        ):
+            result = validator.validate(level="simple")
+        assert result.status == "PASS"
+        ready = next(c for c in result.checks if c.name.startswith("http_ready"))
+        assert ready.passed
+        assert "does not expose a Loki-compatible readiness endpoint" in ready.message
+        # No retries for a route that will never exist.
+        assert urlopen_mock.call_count == 1
+        sleep_mock.assert_not_called()
+
     def test_http_ready_passes_after_retry(self) -> None:
         from urllib.error import HTTPError
 
