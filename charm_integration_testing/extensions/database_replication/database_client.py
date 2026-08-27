@@ -5,19 +5,19 @@ import logging
 import shlex
 from abc import ABC, abstractmethod
 
-from juju import JujuBackend
+from juju import JujuBackend, JujuModelHandle
 
 
 class DatabaseClient(ABC):
     """Abstract base class for database-specific replication operations."""
 
     @abstractmethod
-    def get_databases(self, model: str, application: str) -> list[str]:
+    def get_databases(self, model: JujuModelHandle, application: str) -> list[str]:
         """
         Get list of user databases (excluding system databases).
 
         Args:
-            model: Juju model name
+            model: Juju model reference
             application: Application name
 
         Returns:
@@ -26,12 +26,12 @@ class DatabaseClient(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def get_tables(self, model: str, application: str, database: str) -> list[str]:
+    def get_tables(self, model: JujuModelHandle, application: str, database: str) -> list[str]:
         """
         Get list of tables in a database with schema.table format.
 
         Args:
-            model: Juju model name
+            model: Juju model reference
             application: Application name
             database: Database name
 
@@ -61,7 +61,7 @@ class PostgresqlDatabaseClient(DatabaseClient):
         self.juju = juju
         self.logger = logger
 
-    def get_databases(self, model: str, application: str) -> list[str]:
+    def get_databases(self, model: JujuModelHandle, application: str) -> list[str]:
         """Get list of databases in a PostgreSQL cluster, excluding system databases."""
         units = self.juju.application_units(model, application)
         if not units:
@@ -85,7 +85,7 @@ class PostgresqlDatabaseClient(DatabaseClient):
         # Filter out system databases
         return [db for db in databases if db not in self.SYSTEM_DATABASES]
 
-    def get_tables(self, model: str, application: str, database: str) -> list[str]:
+    def get_tables(self, model: JujuModelHandle, application: str, database: str) -> list[str]:
         """Get list of tables in a database with schema prefix (e.g., 'public.users')."""
         units = self.juju.application_units(model, application)
         if not units:
