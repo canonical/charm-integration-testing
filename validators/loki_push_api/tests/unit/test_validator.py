@@ -243,7 +243,8 @@ class TestLokiPushApiValidatorSimple:
         assert not ready.passed
 
     def test_http_ready_passes_when_route_not_found_push_only_forwarder(self) -> None:
-        """Push-only forwarders (e.g. grafana-agent-k8s) 404 on /ready; that should PASS, not retry."""
+        """Push-only forwarders (e.g. grafana-agent-k8s) 404 on /ready; that should PASS after the
+        push-endpoint probe confirms the advertised push route is actually live, not retry."""
 
         validator = _make_validator([VALID_UNIT_DATABAG])
         ready_url = LOKI_URL.rsplit("/loki/api/v1/push", 1)[0] + "/ready"
@@ -251,7 +252,10 @@ class TestLokiPushApiValidatorSimple:
             patch("validators.loki_push_api.validator._tcp_ping"),
             patch(
                 "validators.loki_push_api.validator.urlopen",
-                side_effect=HTTPError(ready_url, 404, "Not Found", Message(), None),
+                side_effect=[
+                    HTTPError(ready_url, 404, "Not Found", Message(), None),
+                    _mock_ready_response(status=204, body=b""),
+                ],
             ) as urlopen_mock,
             patch("validators.loki_push_api.validator.time.sleep") as sleep_mock,
         ):
@@ -260,8 +264,78 @@ class TestLokiPushApiValidatorSimple:
         ready = next(c for c in result.checks if c.name.startswith("http_ready"))
         assert ready.passed
         assert "does not expose a Loki-compatible readiness endpoint" in ready.message
-        # No retries for a route that will never exist.
-        assert urlopen_mock.call_count == 1
+        # One call for /ready (404), one for the push-endpoint probe; no retries.
+        assert urlopen_mock.call_count == 2
+        sleep_mock.assert_not_called()
+
+    def test_http_ready_fails_when_push_endpoint_also_not_found(self) -> None:
+        """A 404 on /ready alone isn't proof of a push-only forwarder — a fully broken/misconfigured
+        endpoint that 404s on every route must still FAIL once the push-endpoint probe also 404s."""
+
+        validator = _make_validator([VALID_UNIT_DATABAG])
+        ready_url = LOKI_URL.rsplit("/loki/api/v1/push", 1)[0] + "/ready"
+        with (
+            patch("validators.loki_push_api.validator._tcp_ping"),
+            patch(
+                "validators.loki_push_api.validator.urlopen",
+                side_effect=[
+                    HTTPError(ready_url, 404, "Not Found", Message(), None),
+                    HTTPError(LOKI_URL, 404, "Not Found", Message(), None),
+                ],
+            ) as urlopen_mock,
+            patch("validators.loki_push_api.validator.time.sleep") as sleep_mock,
+        ):
+            result = validator.validate(level="simple")
+        assert result.status == "FAIL"
+        ready = next(c for c in result.checks if c.name.startswith("http_ready"))
+        assert not ready.passed
+        assert "also returned 404" in ready.message
+        assert urlopen_mock.call_count == 2
+        sleep_mock.assert_not_called()
+
+    def test_http_ready_passes_when_push_endpoint_rejects_probe_with_4xx(self) -> None:
+        """A 405/400 etc. on the probe still proves the push route is registered and live."""
+
+        validator = _make_validator([VALID_UNIT_DATABAG])
+        ready_url = LOKI_URL.rsplit("/loki/api/v1/push", 1)[0] + "/ready"
+        with (
+            patch("validators.loki_push_api.validator._tcp_ping"),
+            patch(
+                "validators.loki_push_api.validator.urlopen",
+                side_effect=[
+                    HTTPError(ready_url, 404, "Not Found", Message(), None),
+                    HTTPError(LOKI_URL, 405, "Method Not Allowed", Message(), None),
+                ],
+            ),
+            patch("validators.loki_push_api.validator.time.sleep") as sleep_mock,
+        ):
+            result = validator.validate(level="simple")
+        assert result.status == "PASS"
+        ready = next(c for c in result.checks if c.name.startswith("http_ready"))
+        assert ready.passed
+        sleep_mock.assert_not_called()
+
+    def test_http_ready_fails_when_push_endpoint_probe_errors(self) -> None:
+        """A 5xx from the push-endpoint probe is a genuine backend problem, not a push-only signal."""
+
+        validator = _make_validator([VALID_UNIT_DATABAG])
+        ready_url = LOKI_URL.rsplit("/loki/api/v1/push", 1)[0] + "/ready"
+        with (
+            patch("validators.loki_push_api.validator._tcp_ping"),
+            patch(
+                "validators.loki_push_api.validator.urlopen",
+                side_effect=[
+                    HTTPError(ready_url, 404, "Not Found", Message(), None),
+                    HTTPError(LOKI_URL, 500, "Internal Server Error", Message(), None),
+                ],
+            ),
+            patch("validators.loki_push_api.validator.time.sleep") as sleep_mock,
+        ):
+            result = validator.validate(level="simple")
+        assert result.status == "FAIL"
+        ready = next(c for c in result.checks if c.name.startswith("http_ready"))
+        assert not ready.passed
+        assert "server error" in ready.message
         sleep_mock.assert_not_called()
 
     def test_http_ready_passes_after_retry(self) -> None:

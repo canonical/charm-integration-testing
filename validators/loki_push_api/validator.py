@@ -207,8 +207,12 @@ def _http_ready_checks(endpoint_infos: list[dict[str, Any]]) -> list[ValidationC
     check retries with back-off before reporting failure (6 attempts, 5 s apart).
 
     Push-only forwarders (e.g. grafana-agent-k8s, opentelemetry-collector-k8s)
-    don't implement ``/ready`` and 404 immediately, so 404 passes without
-    retrying rather than being treated as "not ready yet".
+    don't implement ``/ready`` and 404 immediately. A bare 404 on ``/ready`` is
+    not, by itself, proof that the provider is a working push-only forwarder —
+    it's equally consistent with a fully broken/misconfigured endpoint that
+    404s on every route. So on a 404, ``_probe_push_endpoint`` positively
+    confirms the *actual advertised push route* is live (see its docstring)
+    before this check is allowed to pass.
     """
     checks: list[ValidationCheck] = []
     for info in endpoint_infos:
@@ -237,17 +241,54 @@ def _http_ready_checks(endpoint_infos: list[dict[str, Any]]) -> list[ValidationC
                     last_msg = f"Unexpected response {resp.status} from {ready_url}: {body[:200]}"
             except HTTPError as exc:
                 if exc.code == 404:
-                    passed = True
-                    last_msg = (
-                        f"No '/ready' route at {ready_url} (HTTP 404); provider does not expose a "
-                        "Loki-compatible readiness endpoint (push-only forwarder). Skipping readiness check."
-                    )
+                    passed, last_msg = _probe_push_endpoint(url, ssl_ctx)
                     break
                 last_msg = str(exc)
             except Exception as exc:
                 last_msg = str(exc)
         checks.append(ValidationCheck(name=check_name, passed=passed, message=last_msg))
     return checks
+
+
+def _probe_push_endpoint(url: str, ssl_ctx: ssl.SSLContext | None = None) -> tuple[bool, str]:
+    """POST an empty-streams no-op payload to *url* to confirm the push route is live.
+
+    Only called when ``/ready`` 404s. A 404 there is ambiguous: push-only
+    forwarders (no ``/ready`` route) and fully broken/misconfigured endpoints
+    (404 on *every* route) look identical from that single signal alone. This
+    probe distinguishes them by exercising the actual advertised push route
+    with a harmless payload:
+
+    * ``{"streams": []}`` is empty, so a compliant push receiver accepts it
+      (200/204) without writing any log data — confirmed live against both
+      loki-k8s and opentelemetry-collector-k8s.
+    * Any other 4xx (e.g. 400/405) still proves the route is registered and
+      actively handled by the application, even though it rejected this
+      specific probe.
+    * A 404 here means the advertised push route itself doesn't exist — a
+      real failure, not a push-only forwarder.
+    * 5xx or a network-level error is a genuine backend problem.
+    """
+    payload = json.dumps({"streams": []}).encode()
+    req = Request(url, data=payload, headers={"Content-Type": "application/json"})  # nosec B310
+    try:
+        with urlopen(req, timeout=5, context=ssl_ctx) as resp:  # nosec B310
+            return True, (
+                f"No '/ready' route at {url}, but push endpoint accepted an empty no-op push "
+                f"(HTTP {resp.status}); provider does not expose a Loki-compatible readiness "
+                "endpoint (push-only forwarder)."
+            )
+    except HTTPError as exc:
+        if exc.code == 404:
+            return False, f"Push endpoint {url} also returned 404; no working route found."
+        if 500 <= exc.code < 600:
+            return False, f"Push endpoint {url} returned server error: {exc}"
+        return True, (
+            f"No '/ready' route at {url}, but push endpoint is registered (HTTP {exc.code} {exc.reason}); "
+            "provider does not expose a Loki-compatible readiness endpoint (push-only forwarder)."
+        )
+    except Exception as exc:
+        return False, f"Error probing push endpoint {url}: {exc}"
 
 
 # ---------------------------------------------------------------------------
