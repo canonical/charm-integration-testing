@@ -236,6 +236,7 @@ class TestLokiPushApiValidatorSimple:
 
     def test_http_ready_passes_when_route_not_found_push_only_forwarder(self) -> None:
         """Push-only forwarders (e.g. grafana-agent-k8s) 404 on /ready; that should PASS, not retry."""
+        from email.message import Message
         from urllib.error import HTTPError
 
         validator = _make_validator([VALID_UNIT_DATABAG])
@@ -244,7 +245,7 @@ class TestLokiPushApiValidatorSimple:
             patch("validators.loki_push_api.validator._tcp_ping"),
             patch(
                 "validators.loki_push_api.validator.urlopen",
-                side_effect=HTTPError(ready_url, 404, "Not Found", None, None),
+                side_effect=HTTPError(ready_url, 404, "Not Found", Message(), None),
             ) as urlopen_mock,
             patch("validators.loki_push_api.validator.time.sleep") as sleep_mock,
         ):
