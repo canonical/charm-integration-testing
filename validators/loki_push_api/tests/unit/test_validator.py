@@ -239,11 +239,12 @@ class TestLokiPushApiValidatorSimple:
         from urllib.error import HTTPError
 
         validator = _make_validator([VALID_UNIT_DATABAG])
+        ready_url = LOKI_URL.rsplit("/loki/api/v1/push", 1)[0] + "/ready"
         with (
             patch("validators.loki_push_api.validator._tcp_ping"),
             patch(
                 "validators.loki_push_api.validator.urlopen",
-                side_effect=HTTPError(LOKI_URL, 404, "Not Found", {}, None),  # type: ignore[arg-type]
+                side_effect=HTTPError(ready_url, 404, "Not Found", None, None),
             ) as urlopen_mock,
             patch("validators.loki_push_api.validator.time.sleep") as sleep_mock,
         ):
