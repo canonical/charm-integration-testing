@@ -5,7 +5,7 @@ import logging
 from abc import ABC
 from subprocess import CalledProcessError  # nosec
 
-from juju import JujuBackend, JujuExtension
+from juju import JujuBackend, JujuExtension, JujuModelHandle
 
 LEGO_CHARM = "lego"
 
@@ -29,14 +29,14 @@ class LegoExtension(JujuExtension, ABC):
         self.juju = juju
         self.logger = logger
 
-    def post_deploy(self, model: str) -> None:
+    def post_deploy(self, model: JujuModelHandle) -> None:
         # Look for lego applications. list_applications() already returns each
         # application's charm name, so no extra per-application lookup is needed.
         for application, info in self.juju.list_applications(model).items():
             if info.charm == LEGO_CHARM:
                 self.configure_lego(model, application)
 
-    def configure_lego(self, model: str, application: str) -> None:
+    def configure_lego(self, model: JujuModelHandle, application: str) -> None:
         # Skip only if both plugin and plugin-config-secret-id are already configured
         # (e.g. by the operator or a previous run). lego blocks if either is unset, so
         # skipping on just one of them could leave the app blocked.

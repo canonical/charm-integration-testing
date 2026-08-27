@@ -27,8 +27,12 @@ class JujuControllerHandle:
 
 @dataclass(frozen=True)
 class JujuModelHandle:
-    controller: str
     model: str
+    controller: str
+
+    @property
+    def uri(self) -> str:
+        return f"{self.controller}:{self.model}"
 
     @property
     def resource_id(self) -> str:
