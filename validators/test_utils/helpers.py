@@ -18,7 +18,7 @@ def make_charm_from_relation(
     interface_name: str | None = None,
     integrations_count: int = 1,
     local_app_name: str = "app",
-    local_model_name: str = "model",
+    local_model_name: str = "test-model",
 ) -> CharmBaseStub:
     if integrations_count == 1:
         relations_list = [relation]
