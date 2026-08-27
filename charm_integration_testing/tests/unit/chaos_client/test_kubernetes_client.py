@@ -5,8 +5,11 @@ from datetime import timedelta
 
 import pytest
 from chaos_client import KubernetesChaosClient
+from juju import JujuModelHandle
 from kubernetes.client import ApiException  # type: ignore[import-untyped]
 from kubernetes_client import KubernetesBackend
+
+TEST_MODEL = JujuModelHandle(controller="test-controller", model="test-model")
 
 
 class FakeNetworkingV1Api:
@@ -116,7 +119,7 @@ class TestUnsupportedChaosMethods:
         # WHEN calling fill_disk
         # THEN it is unsupported for this backend
         with pytest.raises(NotImplementedError):
-            client.fill_disk(model="test-model", unit="postgresql/0", path="/tmp/fill", size_mb=128)
+            client.fill_disk(model=TEST_MODEL, unit="postgresql/0", path="/tmp/fill", size_mb=128)
 
     def test_stress_cpu_raises_not_implemented(self) -> None:
         # GIVEN a client wrapping a kubernetes backend stub
@@ -126,7 +129,7 @@ class TestUnsupportedChaosMethods:
         # WHEN calling stress_cpu
         # THEN it is unsupported for this backend
         with pytest.raises(NotImplementedError):
-            client.stress_cpu(model="test-model", unit="postgresql/0", workers=2, duration=timedelta(seconds=30))
+            client.stress_cpu(model=TEST_MODEL, unit="postgresql/0", workers=2, duration=timedelta(seconds=30))
 
     def test_stress_memory_raises_not_implemented(self) -> None:
         # GIVEN a client wrapping a kubernetes backend stub
@@ -137,7 +140,7 @@ class TestUnsupportedChaosMethods:
         # THEN it is unsupported for this backend
         with pytest.raises(NotImplementedError):
             client.stress_memory(
-                model="test-model",
+                model=TEST_MODEL,
                 unit="postgresql/0",
                 workers=2,
                 size_mb=256,
@@ -152,4 +155,4 @@ class TestUnsupportedChaosMethods:
         # WHEN calling cleanup
         # THEN it is unsupported for this backend
         with pytest.raises(NotImplementedError):
-            client.cleanup(model="test-model", unit="postgresql/0", path="/tmp/fill")
+            client.cleanup(model=TEST_MODEL, unit="postgresql/0", path="/tmp/fill")

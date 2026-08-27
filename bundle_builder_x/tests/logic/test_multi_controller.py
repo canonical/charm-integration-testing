@@ -172,7 +172,7 @@ class TestSpecFileCMRWithFullKey:
                         IntegrationSpec(
                             application="lxd-app",
                             endpoint="metrics",
-                            remote_model="prod",
+                            remote_model="prod",  # full key disambiguates
                             remote_controller="k8s",
                             remote_application="k8s-app",
                             remote_endpoint="scrape",
@@ -199,6 +199,7 @@ class TestSpecFileCMRWithFullKey:
                             application="my-app",
                             endpoint="metrics",
                             remote_model="db-model",  # plain alias works when unambiguous
+                            remote_controller="lxd",
                             remote_application="pg",
                             remote_endpoint="scrape",
                             url="lxd:admin/db-model.pg-offer",
@@ -299,7 +300,7 @@ class TestMultiControllerSolver:
                         IntegrationSpec(
                             application="app",
                             endpoint="db",
-                            remote_model="prod",
+                            remote_model="prod",  # full key disambiguates
                             remote_controller="lxd",
                             remote_application="pg",
                             remote_endpoint="database",

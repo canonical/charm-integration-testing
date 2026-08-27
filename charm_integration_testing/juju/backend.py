@@ -15,6 +15,7 @@ from pydantic.dataclasses import dataclass
 
 from validators.base.validator import ValidationResult
 
+from .handles import JujuModelHandle
 from .models import JujuApplicationInfo, JujuConsumedOfferInfo, JujuIntegration, JujuIntegrationApplication
 from .version import JujuVersion
 
@@ -142,57 +143,57 @@ class JujuTask:
 
 class JujuBackend(ABC):
     @abstractmethod
-    def scale_application(self, model: str, application: str, num: int) -> None:
+    def scale_application(self, model: JujuModelHandle, application: str, num: int) -> None:
         raise NotImplementedError
 
     @abstractmethod
-    def num_units(self, model: str, application: str) -> int:
+    def num_units(self, model: JujuModelHandle, application: str) -> int:
         raise NotImplementedError
 
     @abstractmethod
-    def list_applications(self, model: str) -> dict[str, JujuApplicationInfo]:
+    def list_applications(self, model: JujuModelHandle) -> dict[str, JujuApplicationInfo]:
         raise NotImplementedError
 
     @abstractmethod
-    def list_consumed_offers(self, model: str) -> dict[str, JujuConsumedOfferInfo]:
+    def list_consumed_offers(self, model: JujuModelHandle) -> dict[str, JujuConsumedOfferInfo]:
         raise NotImplementedError
 
     @abstractmethod
-    def list_offers(self, model: str) -> set[str]:
+    def list_offers(self, model: JujuModelHandle) -> set[str]:
         """Return the names of all offers defined in *model*."""
         raise NotImplementedError
 
     @abstractmethod
-    def create_offer(self, model: str, app: str, endpoints: list[str], offer_name: str) -> None:
+    def create_offer(self, model: JujuModelHandle, app: str, endpoints: list[str], offer_name: str) -> None:
         """Create an offer exposing *endpoints* of *app* in *model* under *offer_name*."""
         raise NotImplementedError
 
     @abstractmethod
-    def list_integrations(self, model: str) -> set[JujuIntegration]:
+    def list_integrations(self, model: JujuModelHandle) -> set[JujuIntegration]:
         raise NotImplementedError
 
     @abstractmethod
-    def reboot_model_controller(self, model: str) -> None:
+    def reboot_model_controller(self, model: JujuModelHandle) -> None:
         raise NotImplementedError
 
     @abstractmethod
-    def is_k8s_model(self, model: str) -> bool:
+    def is_k8s_model(self, model: JujuModelHandle) -> bool:
         raise NotImplementedError
 
     def is_k8s_controller(self, controller: str) -> bool:
         """Return True if the controller is Kubernetes-based."""
-        return self.is_k8s_model(f"{controller}:controller")
+        return self.is_k8s_model(JujuModelHandle(controller=controller, model="controller"))
 
     @abstractmethod
     def integration_exists(
-        self, application_1: str, endpoint_1: str, application_2: str, endpoint_2: str, model: str
+        self, application_1: str, endpoint_1: str, application_2: str, endpoint_2: str, model: JujuModelHandle
     ) -> bool:
         raise NotImplementedError
 
     @abstractmethod
     def wait_idle(
         self,
-        model: str,
+        model: JujuModelHandle,
         timeout: timedelta | None,
         count: int | None,
         strict_timeout: bool = False,
@@ -203,7 +204,7 @@ class JujuBackend(ABC):
     @abstractmethod
     def wait_idle_multi_model(
         self,
-        models: list[str],
+        models: list[JujuModelHandle],
         timeout: timedelta | None,
         count: int | None,
         strict_timeout: bool = False,
@@ -211,41 +212,48 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def wait_application_settled(self, model: str, application: str, timeout: timedelta | None) -> None:
+    def wait_application_settled(self, model: JujuModelHandle, application: str, timeout: timedelta | None) -> None:
         raise NotImplementedError
 
     @abstractmethod
-    def wait_application_scaled(self, model: str, application: str, timeout: timedelta | None) -> None:
+    def wait_application_scaled(self, model: JujuModelHandle, application: str, timeout: timedelta | None) -> None:
         raise NotImplementedError
 
     @abstractmethod
-    def wait_for_unit_message(self, model: str, unit: str, message: str, timeout: timedelta | None) -> None:
+    def wait_for_unit_message(self, model: JujuModelHandle, unit: str, message: str, timeout: timedelta | None) -> None:
         raise NotImplementedError
 
     @abstractmethod
-    def juju_status_text(self, model: str) -> str:
+    def juju_status_text(self, model: JujuModelHandle) -> str:
         raise NotImplementedError
 
     @abstractmethod
-    def integrate(self, model: str, target_1: JujuIntegrationApplication, target_2: JujuIntegrationApplication) -> None:
+    def integrate(
+        self, model: JujuModelHandle, target_1: JujuIntegrationApplication, target_2: JujuIntegrationApplication
+    ) -> None:
         raise NotImplementedError
 
     @abstractmethod
     def remove_integration(
-        self, model: str, target_1: JujuIntegrationApplication, target_2: JujuIntegrationApplication
+        self, model: JujuModelHandle, target_1: JujuIntegrationApplication, target_2: JujuIntegrationApplication
     ) -> None:
         raise NotImplementedError
 
     @abstractmethod
     def deploy_bundle_file(
-        self, model: str, bundle: str, timeout: timedelta | None = None, trust: bool = False, force: bool = False
+        self,
+        model: JujuModelHandle,
+        bundle: str,
+        timeout: timedelta | None = None,
+        trust: bool = False,
+        force: bool = False,
     ) -> None:
         raise NotImplementedError
 
     @abstractmethod
     def refresh_application(
         self,
-        model: str,
+        model: JujuModelHandle,
         application: str,
         revision: int | None = None,
         channel: str | None = None,
@@ -253,17 +261,17 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def remove_applications(self, model: str, *applications: str) -> None:
+    def remove_applications(self, model: JujuModelHandle, *applications: str) -> None:
         raise NotImplementedError
 
     @abstractmethod
-    def wait_for_removal(self, model: str, applications: list[str], timeout: timedelta | None) -> None:
+    def wait_for_removal(self, model: JujuModelHandle, applications: list[str], timeout: timedelta | None) -> None:
         raise NotImplementedError
 
     @abstractmethod
     def wait_for_removal_of_integration(
         self,
-        model: str,
+        model: JujuModelHandle,
         endpoint_1: JujuIntegrationApplication,
         endpoint_2: JujuIntegrationApplication,
         timeout: timedelta | None,
@@ -271,49 +279,51 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def wait_for_removal_of_units(self, model: str, applications: list[str], timeout: timedelta | None) -> None:
+    def wait_for_removal_of_units(
+        self, model: JujuModelHandle, applications: list[str], timeout: timedelta | None
+    ) -> None:
         raise NotImplementedError
 
     @abstractmethod
-    def wait_for_model_to_exist(self, model: str, timeout: timedelta | None) -> None:
+    def wait_for_model_to_exist(self, model: JujuModelHandle, timeout: timedelta | None) -> None:
         raise NotImplementedError
 
     @abstractmethod
-    def application_charm(self, model: str, application: str) -> str | None:
+    def application_charm(self, model: JujuModelHandle, application: str) -> str | None:
         raise NotImplementedError
 
     @abstractmethod
-    def application_units(self, model: str, application: str) -> list[str]:
+    def application_units(self, model: JujuModelHandle, application: str) -> list[str]:
         raise NotImplementedError
 
     @abstractmethod
-    def exec_unit(self, model: str, unit: str, task: str, operator: bool = False) -> JujuExecOutput:
+    def exec_unit(self, model: JujuModelHandle, unit: str, task: str, operator: bool = False) -> JujuExecOutput:
         raise NotImplementedError
 
     @abstractmethod
-    def run_action(self, model: str, unit: str, action: str, arguments: dict[str, Any]) -> JujuTask:
+    def run_action(self, model: JujuModelHandle, unit: str, action: str, arguments: dict[str, Any]) -> JujuTask:
         raise NotImplementedError
 
     @abstractmethod
-    def add_secret(self, model: str, name: str, values: dict[str, str]) -> str:
+    def add_secret(self, model: JujuModelHandle, name: str, values: dict[str, str]) -> str:
         raise NotImplementedError
 
     @abstractmethod
-    def read_secret(self, model: str, name_or_id: str) -> dict[str, str]:
+    def read_secret(self, model: JujuModelHandle, name_or_id: str) -> dict[str, str]:
         raise NotImplementedError
 
     @abstractmethod
-    def grant_secret(self, model: str, name_or_id: str, application: str) -> None:
+    def grant_secret(self, model: JujuModelHandle, name_or_id: str, application: str) -> None:
         raise NotImplementedError
 
     @abstractmethod
-    def remove_secret(self, model: str, name_or_id: str) -> None:
+    def remove_secret(self, model: JujuModelHandle, name_or_id: str) -> None:
         raise NotImplementedError
 
     @abstractmethod
     def deploy_application(
         self,
-        model: str,
+        model: JujuModelHandle,
         charm: str,
         application: str | None = None,
         config: dict[str, Any] | None = None,
@@ -323,11 +333,11 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def configure_application(self, model: str, application: str, values: dict[str, str]) -> None:
+    def configure_application(self, model: JujuModelHandle, application: str, values: dict[str, str]) -> None:
         raise NotImplementedError
 
     @abstractmethod
-    def get_application_config(self, model: str, application: str) -> dict[str, Any]:
+    def get_application_config(self, model: JujuModelHandle, application: str) -> dict[str, Any]:
         raise NotImplementedError
 
     @abstractmethod
@@ -347,23 +357,19 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def switch(self, controller: str, model: str) -> None:
+    def scp(self, model: JujuModelHandle, source: str, destination: str) -> None:
         raise NotImplementedError
 
     @abstractmethod
-    def scp(self, model: str, source: str, destination: str) -> None:
+    def ssh(self, model: JujuModelHandle, application: str, command: str) -> None:
         raise NotImplementedError
 
     @abstractmethod
-    def ssh(self, model: str, application: str, command: str) -> None:
+    def unit_ip(self, model: JujuModelHandle, unit: str) -> str:
         raise NotImplementedError
 
     @abstractmethod
-    def unit_ip(self, model: str, unit: str) -> str:
-        raise NotImplementedError
-
-    @abstractmethod
-    def version(self, model: str) -> JujuVersion:
+    def version(self, model: JujuModelHandle) -> JujuVersion:
         raise NotImplementedError
 
     @abstractmethod
@@ -371,7 +377,9 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def validate_application(self, model: str, application: str, level: str) -> dict[str, list[ValidationResult]]:
+    def validate_application(
+        self, model: JujuModelHandle, application: str, level: str
+    ) -> dict[str, list[ValidationResult]]:
         raise NotImplementedError
 
     @abstractmethod
@@ -387,7 +395,7 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def upgrade_model(self, model: str, agent_version: str | None = None) -> None:
+    def upgrade_model(self, model: JujuModelHandle, agent_version: str | None = None) -> None:
         raise NotImplementedError
 
     @abstractmethod
@@ -396,12 +404,12 @@ class JujuBackend(ABC):
         application: str,
         expected_revision: int,
         timeout: timedelta | None,
-        model: str = "default",
+        model: JujuModelHandle,
     ) -> None:
         raise NotImplementedError
 
     @abstractmethod
-    def debug_log(self, model: str) -> str:
+    def debug_log(self, model: JujuModelHandle) -> str:
         raise NotImplementedError
 
     @abstractmethod
