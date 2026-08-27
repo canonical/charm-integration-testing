@@ -1,10 +1,13 @@
 ---
-# listed: false -- Excluded from automated bundle building (SQT-1081) to prevent
-# pipeline congestion; not currently covered by Charm QA.
-listed: false
+# neutron-api: listed on Charmhub, but not currently covered by Charm QA (SQT-1081).
+# infoblox-neutron, midonet (requires): providing charms have been deleted upstream.
+# external-dns (requires): optional - not in REQUIRED_INTERFACES.
 overrides:
   - requires:
       infoblox-neutron:  # Charm that offers it has been deleted https://github.com/openstack-charmers/charm-infoblox
         optional: true
       midonet:  # Charm that offers it has been deleted
         optional: true
+      external-dns:  # not in REQUIRED_INTERFACES; hooks/neutron_api_utils.py
+        optional: true
+    assumes: [unsupported-openstack]

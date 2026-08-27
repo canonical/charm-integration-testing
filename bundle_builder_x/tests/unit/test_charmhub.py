@@ -6,6 +6,9 @@ from typing import cast
 import pytest
 from pydantic.dataclasses import dataclass
 
+from bundle_builder_x import CharmReleaseNotFoundException
+from bundle_builder_x.bundle_builder import BundleBuilder, UncompletableBundleError
+from bundle_builder_x.bundle_diagnostics import ApplicationReleaseDiagnostic
 from bundle_builder_x.charm import CharmChannel, EndpointScope, EndpointType
 from bundle_builder_x.charmhub import CharmhubClient
 from bundle_builder_x.charmhub_http import (
@@ -13,7 +16,6 @@ from bundle_builder_x.charmhub_http import (
     CharmhubBase,
     CharmhubHttpClient,
     CharmMetadata,
-    CharmReleaseNotFoundException,
     FindResponse,
     IncompleteCharmInfoException,
     InfoResponse,
@@ -22,6 +24,8 @@ from bundle_builder_x.charmhub_http import (
     UnparsableCharmException,
 )
 from bundle_builder_x.overrides import CharmGlobalOverrides, OverridesClient
+from bundle_builder_x.release_errors import AssumesMismatchError, PlatformMismatchError
+from bundle_builder_x.spec import AppSpec, ModelSpec, SpecFile
 
 # ---------------------------------------------------------------------------
 # Stubs
@@ -102,10 +106,382 @@ class _StubHttpClient(CharmhubHttpClient):
 _CHANNEL = CharmChannel(track="latest", risk="stable", branch="")
 _METADATA_REQUIRES = CharmMetadata(requires={"db": CharmMetadata.Endpoint(interface="pgsql")})
 _METADATA_PROVIDES = CharmMetadata(provides={"web": CharmMetadata.Endpoint(interface="http")})
+_METADATA_WITH_CONTAINERS = CharmMetadata(containers={"app": {"resource": "app-image"}})
+_METADATA_WITH_LEGACY_KUBERNETES_SERIES = CharmMetadata(series=["kubernetes"])
 _EMPTY_CONFIG = CharmConfigSchema()
 
 
+def _refresh_response_with_charm(name: str, revision: int, metadata: CharmMetadata) -> RefreshResponse:
+    """Build a successful RefreshResponse carrying charm metadata.
+
+    Bypasses the metadata-yaml/config-yaml string parsing (used to decode the real
+    Charmhub API response) via model_construct, since the fields here are already the
+    typed values that parsing would produce.
+    """
+    charm = RefreshResponse.Charm.model_construct(revision=revision, metadata=metadata, config=_EMPTY_CONFIG)
+    return RefreshResponse.model_construct(name=name, charm=charm, effective_channel=None, error=None)
+
+
+def _aodh_client_with_raw_overrides(raw_overrides: dict[str, object]) -> CharmhubClient:
+    """Build a CharmhubClient stubbed to refresh a fixed "aodh" charm with the given overrides."""
+    response = _refresh_response_with_charm("aodh", revision=5, metadata=_METADATA_REQUIRES)
+
+    class _StubClient(_NullHttpClient):
+        def refresh(self, action: RefreshAction) -> RefreshResponse:
+            return response
+
+    return CharmhubClient(
+        http_client=cast(CharmhubHttpClient, _StubClient()),
+        overrides_client=_StubOverridesClient(raw_overrides),
+    )
+
+
 class TestCharmhubClient:
+    # ---------------------------------------------------------------------------
+    # TestBuildCharmPlatforms
+    # ---------------------------------------------------------------------------
+
+    class TestBuildCharmPlatforms:
+        """Charm.platforms is sourced from overrides at build time when present, and
+        otherwise falls back to the charm's own metadata (mirrors _get_charm_assumes),
+        rather than each call site re-querying the overrides client.
+        """
+
+        def test_build_charm_populates_platforms_from_overrides(self) -> None:
+            # GIVEN an overrides client that restricts a charm to specific platforms
+            client = _client({"platforms": ["kubernetes"]})
+
+            # WHEN building a Charm from store metadata
+            charm = client._build_charm(
+                charm_name="ceph-mon",
+                channel=_CHANNEL,
+                revision=1,
+                ubuntu_version="22.04",
+                ubuntu_arch="amd64",
+                metadata=_METADATA_REQUIRES,
+                config_schema=_EMPTY_CONFIG,
+            )
+
+            # THEN the charm carries the overridden platforms, not the metadata-derived ones
+            assert charm.platforms == ["kubernetes"]
+
+        def test_build_charm_falls_back_to_machine_without_overrides_or_containers(self) -> None:
+            # GIVEN an overrides client with no platform override for the charm, and metadata
+            # with no `containers` block (a machine charm)
+            client = _client({})
+
+            # WHEN building a Charm from store metadata
+            charm = client._build_charm(
+                charm_name="ceph-mon",
+                channel=_CHANNEL,
+                revision=1,
+                ubuntu_version="22.04",
+                ubuntu_arch="amd64",
+                metadata=_METADATA_REQUIRES,
+                config_schema=_EMPTY_CONFIG,
+            )
+
+            # THEN the charm falls back to the machine platform
+            assert charm.platforms == ["machine"]
+
+        def test_build_charm_falls_back_to_kubernetes_when_metadata_has_containers(self) -> None:
+            # GIVEN an overrides client with no platform override for the charm, and metadata
+            # with a `containers` block (a Kubernetes sidecar charm)
+            client = _client({})
+
+            # WHEN building a Charm from store metadata
+            charm = client._build_charm(
+                charm_name="ceph-mon",
+                channel=_CHANNEL,
+                revision=1,
+                ubuntu_version="22.04",
+                ubuntu_arch="amd64",
+                metadata=_METADATA_WITH_CONTAINERS,
+                config_schema=_EMPTY_CONFIG,
+            )
+
+            # THEN the charm falls back to the kubernetes platform
+            assert charm.platforms == ["kubernetes"]
+
+        def test_build_charm_falls_back_to_kubernetes_for_legacy_series_metadata(self) -> None:
+            # GIVEN an overrides client with no platform override for the charm, and metadata
+            # from a legacy (pre-Charmcraft) charm that predates the `containers` block and
+            # instead marks itself as Kubernetes via `series: [kubernetes]`
+            client = _client({})
+
+            # WHEN building a Charm from store metadata
+            charm = client._build_charm(
+                charm_name="minio",
+                channel=_CHANNEL,
+                revision=1,
+                ubuntu_version="22.04",
+                ubuntu_arch="amd64",
+                metadata=_METADATA_WITH_LEGACY_KUBERNETES_SERIES,
+                config_schema=_EMPTY_CONFIG,
+            )
+
+            # THEN the charm falls back to the kubernetes platform
+            assert charm.platforms == ["kubernetes"]
+
+    # ---------------------------------------------------------------------------
+    # TestEnsureCompatibility
+    # ---------------------------------------------------------------------------
+
+    class TestEnsureCompatibility:
+        """CharmhubClient._ensure_compatibility checks the requested platform against
+        charm.platforms directly - it does not re-query the overrides client.
+        """
+
+        def test_raises_when_platform_not_in_charm_platforms(self) -> None:
+            # GIVEN a built charm restricted to the kubernetes platform
+            client = _client({})
+            charm = client._build_charm(
+                charm_name="ceph-mon",
+                channel=_CHANNEL,
+                revision=1,
+                ubuntu_version="22.04",
+                ubuntu_arch="amd64",
+                metadata=_METADATA_REQUIRES,
+                config_schema=_EMPTY_CONFIG,
+            ).model_copy(update={"platforms": ["kubernetes"]})
+
+            # WHEN checking compatibility against the machine platform
+            # THEN it is rejected
+            with pytest.raises(CharmReleaseNotFoundException):
+                client._ensure_compatibility(charm, juju_version=None, platform="machine")
+
+        def test_passes_when_platform_in_charm_platforms(self) -> None:
+            # GIVEN a built charm that supports the machine platform
+            client = _client({})
+            charm = client._build_charm(
+                charm_name="ceph-mon",
+                channel=_CHANNEL,
+                revision=1,
+                ubuntu_version="22.04",
+                ubuntu_arch="amd64",
+                metadata=_METADATA_REQUIRES,
+                config_schema=_EMPTY_CONFIG,
+            ).model_copy(update={"platforms": ["machine"]})
+
+            # WHEN checking compatibility against the machine platform
+            result = client._ensure_compatibility(charm, juju_version=None, platform="machine")
+
+            # THEN the same charm is returned unchanged
+            assert result is charm
+
+    # ---------------------------------------------------------------------------
+    # TestCharmFromStorePlatformOverrides
+    # ---------------------------------------------------------------------------
+
+    class TestCharmFromStorePlatformOverrides:
+        """Platform-override enforcement in _ensure_compatibility() is exercised through
+        charm_from_store() end-to-end, not just by calling _ensure_compatibility directly
+        with a hand-built Charm (see TestEnsureCompatibility above).
+        """
+
+        def _client_and_stub(self, raw_overrides: dict[str, object]) -> CharmhubClient:
+            response = _refresh_response_with_charm("ceph-mon", revision=5, metadata=_METADATA_REQUIRES)
+
+            class _StubClient(_NullHttpClient):
+                def refresh(self, action: RefreshAction) -> RefreshResponse:
+                    return response
+
+            return CharmhubClient(
+                http_client=cast(CharmhubHttpClient, _StubClient()),
+                overrides_client=_StubOverridesClient(raw_overrides),
+            )
+
+        def test_raises_when_overrides_disallow_the_requested_platform(self) -> None:
+            # GIVEN an overrides client restricting the charm to kubernetes only
+            client = self._client_and_stub({"platforms": ["kubernetes"]})
+
+            # WHEN fetching the charm for the machine platform, which the overrides disallow
+            # THEN CharmReleaseNotFoundException is raised
+            with pytest.raises(CharmReleaseNotFoundException):
+                client.charm_from_store(
+                    charm_name="ceph-mon",
+                    ubuntu_arch="amd64",
+                    ubuntu_version="22.04",
+                    charm_track="latest",
+                    charm_risk="stable",
+                    platform="machine",
+                )
+
+        def test_passes_when_overrides_allow_the_requested_platform(self) -> None:
+            # GIVEN an overrides client that allows the machine platform
+            client = self._client_and_stub({"platforms": ["machine"]})
+
+            # WHEN fetching the charm for the machine platform
+            charm = client.charm_from_store(
+                charm_name="ceph-mon",
+                ubuntu_arch="amd64",
+                ubuntu_version="22.04",
+                charm_track="latest",
+                charm_risk="stable",
+                platform="machine",
+            )
+
+            # THEN it succeeds and carries the overridden platform
+            assert charm.platforms == ["machine"]
+
+        def test_passes_when_no_platform_overrides_exist(self) -> None:
+            # GIVEN an overrides client with no platform override, and metadata for a
+            # machine charm (no `containers` block)
+            client = self._client_and_stub({})
+
+            # WHEN fetching the charm for the machine platform, which the metadata-derived
+            # platform satisfies
+            charm = client.charm_from_store(
+                charm_name="ceph-mon",
+                ubuntu_arch="amd64",
+                ubuntu_version="22.04",
+                charm_track="latest",
+                charm_risk="stable",
+                platform="machine",
+            )
+
+            # THEN it succeeds
+            assert charm.platforms == ["machine"]
+
+    # ---------------------------------------------------------------------------
+    # TestBundleBuilderPlatformMismatch
+    # ---------------------------------------------------------------------------
+
+    class TestBundleBuilderPlatformMismatch:
+        """End-to-end check that ``BundleBuilder.build()`` reports a charm/model platform
+        mismatch (see TestCharmFromStorePlatformOverrides above) through the canonical bundle
+        error with its typed release rejection.
+        """
+
+        def test_bundle_builder_reports_platform_mismatch_as_application_release_diagnostic(self) -> None:
+            # GIVEN a charm restricted to Kubernetes placed on a machine model
+            charmhub_client = _aodh_client_with_raw_overrides({"platforms": ["kubernetes"]})
+            builder = BundleBuilder(charmhub_client=charmhub_client)
+            spec = SpecFile(
+                models=[
+                    ModelSpec(
+                        name="m",
+                        platform="machine",
+                        juju="3.6.0",
+                        applications={"neighbor": AppSpec(charm="aodh", base="22.04", channel="latest/stable")},
+                    )
+                ]
+            )
+
+            # WHEN building the bundle
+            # THEN the canonical bundle error retains the precise release rejection
+            with pytest.raises(UncompletableBundleError, match="supports platform") as exc_info:
+                builder.build(spec)
+            assert len(exc_info.value.diagnostics) == 1
+            failure = exc_info.value.diagnostics[0]
+            assert isinstance(failure, ApplicationReleaseDiagnostic)
+            assert failure.application == "neighbor"
+            assert isinstance(failure.error, PlatformMismatchError)
+            assert failure.error.requested_platform == "machine"
+            assert failure.error.supported_platforms == ("kubernetes",)
+
+    # ---------------------------------------------------------------------------
+    # TestAssumesUnsupportedFeatureOverride
+    # ---------------------------------------------------------------------------
+
+    class TestAssumesUnsupportedFeatureOverride:
+        """A charm can be marked as unsupported by our testing infrastructure by adding an
+        ``unsupported-*`` sentinel feature (e.g. ``unsupported-openstack``,
+        ``unsupported-obsolete``) to its ``assumes`` override. Since
+        ``_ensure_compatibility()`` only ever supplies the real ``juju``/``k8s-api`` features
+        (see ``_PLATFORM_FEATURES``), such a charm can never satisfy that assumes entry and
+        ``charm_from_store()`` always raises ``CharmReleaseNotFoundException`` for it -
+        immediately and clearly when it's requested directly, and silently (caught by
+        callers such as ``BundleBuilder._get_charms_for_endpoint``) when only considered as
+        a candidate neighbor. This replaces ad hoc delisting-filter exemptions (see #813).
+        Every charm untestable by our infrastructure declares such a sentinel in each of
+        its criteria blocks, whether or not it is also delisted (``listed: false``).
+        """
+
+        def _client_with_assumes_override(self, feature: str) -> CharmhubClient:
+            return _aodh_client_with_raw_overrides(
+                {"listed": False, "platforms": ["machine", "kubernetes"], "overrides": [{"assumes": [feature]}]}
+            )
+
+        @pytest.mark.parametrize("platform", ["machine", "kubernetes"])
+        def test_charm_from_store_raises_for_sentinel_unsupported_feature(self, platform: str) -> None:
+            # GIVEN a charm whose assumes override declares a sentinel feature (e.g.
+            # unsupported-openstack, unsupported-obsolete) that is never provided by our
+            # testing infrastructure
+            client = self._client_with_assumes_override("unsupported-openstack")
+
+            # WHEN fetching the charm directly (as a bundle-builder spec would for its own
+            # test target), for either platform
+            # THEN CharmReleaseNotFoundException is raised with a message identifying the
+            # unmet assumes constraint, rather than the charm silently building and later
+            # failing deep inside relation resolution
+            with pytest.raises(AssumesMismatchError, match="assumes constraints") as exc_info:
+                client.charm_from_store(
+                    charm_name="aodh",
+                    ubuntu_arch="amd64",
+                    ubuntu_version="22.04",
+                    charm_track="latest",
+                    charm_risk="stable",
+                    platform=platform,
+                )
+            assert exc_info.value.unmet_requirements == ("feature=unsupported-openstack",)
+
+        def test_charm_from_store_succeeds_without_the_sentinel_feature(self) -> None:
+            # GIVEN a charm with no assumes override at all
+            client = _aodh_client_with_raw_overrides({})
+
+            # WHEN fetching the charm for the machine platform
+            charm = client.charm_from_store(
+                charm_name="aodh",
+                ubuntu_arch="amd64",
+                ubuntu_version="22.04",
+                charm_track="latest",
+                charm_risk="stable",
+                platform="machine",
+            )
+
+            # THEN it succeeds normally
+            assert charm.name == "aodh"
+
+        def test_bundle_builder_fails_for_charm_with_unsupported_sentinel_requested_directly(self) -> None:
+            """End-to-end check that ``BundleBuilder.build()`` fails with a clear
+            ``UncompletableBundleError`` when a spec directly requests an application
+            backed by a charm marked unsupported via a sentinel ``assumes`` feature.
+
+            The application-charm lookup in ``BundleBuilder._get_charm_for_application()``
+            can raise ``CharmReleaseNotFoundException`` (e.g. no release satisfies the
+            sentinel feature). ``_handle_failed_assertion`` catches that and attaches the
+            typed rejection to the canonical ``UncompletableBundleError`` while retaining
+            the unresolved application diagnostic.
+            """
+            # GIVEN a real CharmhubClient (stubbed HTTP/overrides) where "aodh" is marked
+            # unsupported via a sentinel feature, wired into a real BundleBuilder
+            charmhub_client = self._client_with_assumes_override("unsupported-openstack")
+            builder = BundleBuilder(charmhub_client=charmhub_client)
+
+            # AND a spec that requests "aodh" directly as an application
+            spec = SpecFile(
+                models=[
+                    ModelSpec(
+                        name="m",
+                        platform="machine",
+                        juju="3.6.0",  # explicit version avoids a live Snapstore lookup
+                        applications={"aodh": AppSpec(charm="aodh", base="22.04", channel="latest/stable")},
+                    )
+                ]
+            )
+
+            # WHEN building the bundle
+            # THEN UncompletableBundleError propagates out of build(), identifying the
+            # precise release rejection instead of a raw CharmReleaseNotFoundException
+            with pytest.raises(UncompletableBundleError, match="aodh") as exc_info:
+                builder.build(spec)
+            assert len(exc_info.value.diagnostics) == 1
+            diagnostic = exc_info.value.diagnostics[0]
+            assert isinstance(diagnostic, ApplicationReleaseDiagnostic)
+            assert diagnostic.charm_name == "aodh"
+            assert isinstance(diagnostic.error, AssumesMismatchError)
+
     # ---------------------------------------------------------------------------
     # TestChannelSupportsUbuntuVersion
     # ---------------------------------------------------------------------------

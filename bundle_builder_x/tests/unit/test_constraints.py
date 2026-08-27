@@ -14,6 +14,7 @@ from bundle_builder_x.domain import (
     DomainModel,
     ModelRef,
     add_charm_to_domain,
+    pair_charms_in_domain,
 )
 from bundle_builder_x.juju_version import JujuVersion
 
@@ -29,6 +30,7 @@ def _make_charm(name: str, endpoints: dict[str, CharmEndpoint], ubuntu_version: 
         ubuntu_version=ubuntu_version,
         ubuntu_arch="amd64",
         endpoints=endpoints,
+        platforms=["machine", "kubernetes"],
     )
 
 
@@ -47,7 +49,7 @@ def _machine_domain_with_pair(
             "nrpe": DomainApplication(charm="nrpe"),
         },
     )
-    add_charm_to_domain(
+    ubuntu_id = add_charm_to_domain(
         _make_charm(
             "ubuntu",
             {"juju-info": CharmEndpoint(type=EndpointType.PROVIDES, interface="juju-info", scope="global")},
@@ -56,7 +58,7 @@ def _machine_domain_with_pair(
         domain,
         ModelRef(name="m"),
     )
-    add_charm_to_domain(
+    nrpe_id = add_charm_to_domain(
         _make_charm(
             "nrpe",
             {"general-info": CharmEndpoint(type=EndpointType.REQUIRES, interface="juju-info", scope=scope)},
@@ -65,6 +67,7 @@ def _machine_domain_with_pair(
         domain,
         ModelRef(name="m"),
     )
+    pair_charms_in_domain(domain, ubuntu_id, nrpe_id)
     return domain
 
 

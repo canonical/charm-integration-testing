@@ -76,8 +76,10 @@ def reset_injected_ids() -> Iterator[None]:
     """
     _plugin_module._injected_item_ids.clear()
     _plugin_module._all_collected.clear()
+    _plugin_module._duplicate_original_ids.clear()
     _plugin_module._failed_state_test = None
     yield
     _plugin_module._injected_item_ids.clear()
     _plugin_module._all_collected.clear()
+    _plugin_module._duplicate_original_ids.clear()
     _plugin_module._failed_state_test = None

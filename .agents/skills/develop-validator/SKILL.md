@@ -294,6 +294,17 @@ def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
     # simple checks always run
 ```
 
+### HTTP API helpers and canary resources
+
+- When decoding HTTP response bodies as JSON, wrap `json.loads()` in a
+  `try`/`except json.JSONDecodeError` on **every** response path (success and
+  error) — don't assume a 2xx response always has a JSON body.
+- When creating a canary/throwaway resource for a deep check (e.g. a
+  registered datasource), give it a unique name (e.g. `uuid.uuid4().hex[:8]`
+  suffix), not a deterministic one derived from app/model identifiers — a
+  crashed prior run or concurrent validation can otherwise collide on the
+  same name and cause spurious failures.
+
 ## Validator-specific notes
 
 - **`dev-validate.py` auto-reexecs via `poetry run`** if invoked outside the Poetry venv, so you can call it directly without any manual prefix. Do not wrap it in `poetry run` yourself.

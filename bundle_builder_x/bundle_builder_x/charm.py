@@ -1,17 +1,5 @@
-# Copyright (C) 2026 Canonical Ltd
-
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
 
 import operator
 from enum import Enum
@@ -54,24 +42,42 @@ class CharmAssumesEntry(BaseModel):
         return v
 
     def satisfied_by(self, juju_version: JujuVersion | None, features: frozenset[str] = frozenset()) -> bool:
-        return all(
-            [
-                # all of
-                all(entry.satisfied_by(juju_version, features) for entry in self.all_of)
-                if self.all_of is not None
-                else True,
-                # any of
-                any(entry.satisfied_by(juju_version, features) for entry in self.any_of)
-                if self.any_of is not None
-                else True,
-                # juju version constraint (skipped when juju_version is unknown)
-                ASSUMES_OPS[self.op](juju_version, self.required_version)
-                if self.op is not None and self.required_version is not None and juju_version is not None
-                else True,
-                # feature requirement
-                self.feature in features if self.feature is not None else True,
-            ]
-        )
+        return not self.unsatisfied_requirements(juju_version, features)
+
+    def describe(self) -> str:
+        """Return a deterministic representation of this assumes expression."""
+        if self.all_of is not None:
+            return "all-of(" + ",".join(sorted(entry.describe() for entry in self.all_of)) + ")"
+        if self.any_of is not None:
+            return "any-of(" + ",".join(sorted(entry.describe() for entry in self.any_of)) + ")"
+        if self.op is not None and self.required_version is not None:
+            return f"juju{self.op}{self.required_version}"
+        if self.feature is not None:
+            return f"feature={self.feature}"
+        return "empty"
+
+    def unsatisfied_requirements(
+        self,
+        juju_version: JujuVersion | None,
+        features: frozenset[str] = frozenset(),
+    ) -> tuple[str, ...]:
+        """Explain which requirements are not satisfied by an environment."""
+        failures: list[str] = []
+        if self.all_of is not None:
+            for entry in self.all_of:
+                failures.extend(entry.unsatisfied_requirements(juju_version, features))
+        if self.any_of is not None and not any(entry.satisfied_by(juju_version, features) for entry in self.any_of):
+            failures.append(self.describe())
+        if (
+            self.op is not None
+            and self.required_version is not None
+            and juju_version is not None
+            and not ASSUMES_OPS[self.op](juju_version, self.required_version)
+        ):
+            failures.append(self.describe())
+        if self.feature is not None and self.feature not in features:
+            failures.append(self.describe())
+        return tuple(sorted(set(failures)))
 
 
 class EndpointType(str, Enum):
@@ -165,6 +171,11 @@ class Charm(BaseModel):
     resources: dict[str, list[CharmResourceValue]] = Field(default_factory=dict)
     assumes: CharmAssumesEntry = Field(default_factory=CharmAssumesEntry)
     constraints: list[AnyExpr] = Field(default_factory=list)
+    # Platforms (e.g. "machine", "kubernetes") this charm is known to support. Platform
+    # overrides win when present; otherwise this falls back to the charm's own metadata
+    # (a non-empty `containers` block means "kubernetes", its absence means "machine").
+    # No default is provided: every Charm must state which platform(s) it supports.
+    platforms: list[str]
 
     def __repr__(self) -> str:
         return self.name

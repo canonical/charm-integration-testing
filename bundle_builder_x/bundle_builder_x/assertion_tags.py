@@ -1,17 +1,5 @@
-# Copyright (C) 2026 Canonical Ltd
-
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
 
 import json
 from enum import Enum
@@ -43,6 +31,7 @@ class Assertions(str, Enum):
     CHARM_CONFIG_VALUE_MATCHES_INDEX = "charm_config_value_matches_index"
     CHARM_RANK_BOUNDED = "charm_rank_bounded"
     SUBORDINATE_BASE_MISMATCH = "subordinate_base_mismatch"
+    INTEGRATION_FEATURE_MISMATCH = "integration_feature_mismatch"
 
 
 class AssertionTag(BaseModel):
@@ -213,6 +202,15 @@ class SubordinateBaseMismatchTag(AssertionTag):
     principal_base: str
 
 
+class IntegrationFeatureMismatchTag(AssertionTag):
+    """A relation whose two endpoints declared mutually-incompatible feature tags."""
+
+    kind: Assertions = Assertions.INTEGRATION_FEATURE_MISMATCH
+    requires: CharmEndpointPayload
+    provides: CharmEndpointPayload
+    feature: str
+
+
 _ASSERTION_TYPE_REGISTRY: dict[Assertions, type[AssertionTag]] = {
     Assertions.APPLICATION_EXISTS: ApplicationExistsTag,
     Assertions.APPLICATION_INTEGRATION_EXISTS: ApplicationIntegrationExistsTag,
@@ -233,4 +231,5 @@ _ASSERTION_TYPE_REGISTRY: dict[Assertions, type[AssertionTag]] = {
     Assertions.CHARM_CONFIG_VALUE_MATCHES_INDEX: CharmConfigValueMatchesIndexTag,
     Assertions.CHARM_RANK_BOUNDED: CharmRankBoundedTag,
     Assertions.SUBORDINATE_BASE_MISMATCH: SubordinateBaseMismatchTag,
+    Assertions.INTEGRATION_FEATURE_MISMATCH: IntegrationFeatureMismatchTag,
 }

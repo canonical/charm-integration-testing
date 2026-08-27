@@ -1,17 +1,5 @@
-# Copyright (C) 2026 Canonical Ltd
-
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
 
 """Unit tests for extract.py: extracting a Solution from a Z3 model."""
 
@@ -58,6 +46,7 @@ def _make_charm(
         ubuntu_arch="amd64",
         endpoints=endpoints or {},
         config_defaults=config_defaults or {},
+        platforms=["machine", "kubernetes"],
     )
 
 
@@ -194,8 +183,11 @@ class TestExtractSingleModel:
                 )
             }
         )
-        add_charm_to_domain(provider, domain, ModelRef(name="m"))
-        add_charm_to_domain(requirer, domain, ModelRef(name="m"))
+        from bundle_builder_x.domain import pair_charms_in_domain
+
+        provider_id = add_charm_to_domain(provider, domain, ModelRef(name="m"))
+        requirer_id = add_charm_to_domain(requirer, domain, ModelRef(name="m"))
+        pair_charms_in_domain(domain, provider_id, requirer_id)
 
         # WHEN extracting
         model = _solve(domain)
@@ -246,8 +238,11 @@ class TestExtractSingleModel:
                 ),
             }
         )
-        add_charm_to_domain(provider, domain, ModelRef(name="provider-model"))
-        add_charm_to_domain(requirer, domain, ModelRef(name="consumer-model"))
+        from bundle_builder_x.domain import pair_charms_in_domain
+
+        provider_id = add_charm_to_domain(provider, domain, ModelRef(name="provider-model"))
+        requirer_id = add_charm_to_domain(requirer, domain, ModelRef(name="consumer-model"))
+        pair_charms_in_domain(domain, provider_id, requirer_id)
 
         # WHEN extracting
         model = _solve(domain)
@@ -321,8 +316,15 @@ class TestExtractSingleModel:
                 ),
             }
         )
-        add_charm_to_domain(provider, domain, ModelRef(name="target-model", controller="target-controller"))
-        add_charm_to_domain(requirer, domain, ModelRef(name="neighbor-model", controller="neighbor-controller"))
+        from bundle_builder_x.domain import pair_charms_in_domain
+
+        provider_id = add_charm_to_domain(
+            provider, domain, ModelRef(name="target-model", controller="target-controller")
+        )
+        requirer_id = add_charm_to_domain(
+            requirer, domain, ModelRef(name="neighbor-model", controller="neighbor-controller")
+        )
+        pair_charms_in_domain(domain, provider_id, requirer_id)
 
         # WHEN extracting
         model = _solve(domain)

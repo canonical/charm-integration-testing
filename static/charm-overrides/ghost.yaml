@@ -1,0 +1,8 @@
+---
+# ghost: all published revisions only support ubuntu@14.04/16.04, both dropped from
+# Juju's supported-base list, so `juju deploy` rejects it outright. Delisted so the
+# solver never selects it as a provider/requirer (e.g. mysql) - it would always
+# produce an undeployable bundle. See: https://github.com/canonical/charm-integration-testing/issues/816
+listed: false
+overrides:
+  - assumes: [unsupported-obsolete]

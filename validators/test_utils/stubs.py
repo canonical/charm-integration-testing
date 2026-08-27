@@ -1,17 +1,5 @@
-# Copyright (C) 2026 Canonical Ltd
-
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
 
 from dataclasses import dataclass, field
 from enum import Enum
@@ -65,6 +53,7 @@ class ModelStub:
     _secrets: dict[str, dict[str, str]] = field(default_factory=dict)
     requested_ids: list[str] = field(default_factory=list)
     relations: dict[str, list[RelationStub]] = field(default_factory=dict)
+    name: str = "test-model"
 
     def get_secret(self, id: str) -> SecretStub:  # noqa: A002
         self.requested_ids.append(id)

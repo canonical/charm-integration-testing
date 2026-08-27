@@ -30,10 +30,10 @@ def test_deploy(
 
     juju_client.deploy_bundles(all_bundles, tmp_path)
 
-    # TODO: Add multi-model wait
-    # https://github.com/canonical/charm-integration-testing/issues/515
-    for _, model_uri in all_bundles:
-        juju_client.idle_for_period(model=model_uri, timeout=timedelta(minutes=15))
+    juju_client.multi_model_idle_for_period(
+        [model_uri for _, model_uri in all_bundles],
+        timeout=timedelta(minutes=15),
+    )
 
     for _, model_uri in all_bundles:
         juju_client.validate_model(model=model_uri, level="deep")

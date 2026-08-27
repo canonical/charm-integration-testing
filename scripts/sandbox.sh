@@ -12,16 +12,24 @@
 #   scripts/sandbox.sh --help        Show this help
 #
 # Environment / .env (optional, loaded from development-sandbox/.env):
-#   GITHUB_TOKEN          Fine-grained PAT for gh CLI inside the VM
-#   COPILOT_GITHUB_TOKEN  Override for Copilot AI auth (default: gh auth token)
-#   SANDBOX_VM            VM name override (default: charm-qa-sandbox)
-#   SANDBOX_MOUNT         VM-side mount path (default: /project)
-#   COPILOT_MODEL         Copilot model override (default: sonnet-4.6)
-#   CHARMHUB_API_URL      Override for bundle_builder_x's Charmhub API base URL
-#   SNAPCRAFT_API_URL     Override for bundle_builder_x's Snapcraft API base URL
-#   TEST_OBSERVER_API_URL   Test Observer API URL, required by --with-test-observer-mcp
-#   TEST_OBSERVER_API_KEY   Test Observer API key, optional (read-only tools work without it)
-#   TEST_OBSERVER_MCP_PORT  Port for the test-observer-mcp server inside the VM (default: 8090)
+#   GITHUB_TOKEN               Fine-grained PAT for GitHub API access on the
+#                              host when provisioning the VM (e.g. registering
+#                              the signing key). Falls back to the host's
+#                              `gh auth token` if not set.
+#   SANDBOX_VAR_GITHUB_TOKEN   Fine-grained PAT for gh CLI inside the VM.
+#   SANDBOX_VAR_COPILOT_GITHUB_TOKEN  Override for Copilot AI auth inside the
+#                              VM (default: gh auth token)
+#   SANDBOX_VM                 VM name override (default: charm-qa-sandbox)
+#   SANDBOX_MOUNT               VM-side mount path (default: /project)
+#   SANDBOX_VAR_COPILOT_MODEL   Copilot model override (default: sonnet-4.6)
+#   SANDBOX_VAR_TEST_OBSERVER_API_URL   Test Observer API URL, required by --with-test-observer-mcp
+#   SANDBOX_VAR_TEST_OBSERVER_API_KEY   Test Observer API key, optional (read-only tools work without it)
+#   SANDBOX_VAR_TEST_OBSERVER_MCP_PORT  Port for the test-observer-mcp server inside the VM (default: 8090)
+#   SANDBOX_VAR_<NAME>          Any var with this prefix is passed into the VM
+#                              as <NAME> (prefix stripped), e.g.
+#                              SANDBOX_VAR_CHARMHUB_API_URL -> CHARMHUB_API_URL
+#                              inside the VM.
+
 
 set -euo pipefail
 
@@ -69,6 +77,26 @@ _is_mounted() {
         | python3 -c "import sys,json; mounts=json.load(sys.stdin)['info'][sys.argv[1]].get('mounts',{}); exit(0 if sys.argv[2] in mounts else 1)" "$VM_NAME" "$VM_MOUNT" 2>/dev/null
 }
 
+# Ingest every host env var prefixed with SANDBOX_VAR_, strip the prefix, and
+# append "NAME=value" entries onto the array named by $1 (nameref) for
+# passthrough into the VM via `multipass exec ... env ...`.
+# Example: SANDBOX_VAR_CHARMHUB_API_URL=... -> CHARMHUB_API_URL=... in the VM.
+# GITHUB_TOKEN, COPILOT_GITHUB_TOKEN and COPILOT_MODEL are excluded here since
+# they need special-cased handling (dual GH_TOKEN/GITHUB_TOKEN mapping and
+# host-side defaults) that callers apply explicitly.
+_collect_sandbox_vars() {
+    local -n _target="$1"
+    local _var _name
+    while IFS= read -r _var; do
+        [[ "$_var" == SANDBOX_VAR_?* ]] || continue
+        _name="${_var#SANDBOX_VAR_}"
+        case "$_name" in
+            GITHUB_TOKEN|COPILOT_GITHUB_TOKEN|COPILOT_MODEL) continue ;;
+        esac
+        _target+=("$_name=${!_var}")
+    done < <(compgen -e)
+}
+
 _usage() {
     cat <<'EOF'
 Usage:
@@ -89,11 +117,13 @@ Environment (.env keys):
   SANDBOX_CPUS           vCPU count for new VMs (default: 4)
   SANDBOX_MEMORY         RAM for new VMs, e.g. 8G or 16G (default: 8G)
   SANDBOX_DISK           Disk size for new VMs, e.g. 40G or 80G (default: 40G)
-  GITHUB_TOKEN           Fine-grained PAT for gh CLI inside the VM
-  COPILOT_GITHUB_TOKEN   Copilot AI auth token (default: gh auth token)
-  COPILOT_MODEL          Copilot model (default: sonnet-4.6)
-  CHARMHUB_API_URL       Override for bundle_builder_x's Charmhub API base URL
-  SNAPCRAFT_API_URL      Override for bundle_builder_x's Snapcraft API base URL
+  GITHUB_TOKEN           Fine-grained PAT for host-side GitHub API access
+                         when provisioning the VM (default: gh auth token)
+  SANDBOX_VAR_GITHUB_TOKEN  Fine-grained PAT for gh CLI inside the VM
+  SANDBOX_VAR_COPILOT_GITHUB_TOKEN  Copilot AI auth token (default: gh auth token)
+  SANDBOX_VAR_COPILOT_MODEL  Copilot model (default: sonnet-4.6)
+  SANDBOX_VAR_<NAME>     Passed into the VM as <NAME> (prefix stripped), e.g.
+                         SANDBOX_VAR_CHARMHUB_API_URL -> CHARMHUB_API_URL
   SANDBOX_MCP_CONFIG_FILE  Path to an MCP server config JSON file on the host
   TEST_OBSERVER_API_URL   Test Observer API URL, required by --with-test-observer-mcp
   TEST_OBSERVER_API_KEY   Test Observer API key, optional (read-only tools work without it)
@@ -321,9 +351,73 @@ JSON
     echo "==> Checking GitHub auth..."
     if gh auth token &>/dev/null; then
         echo "==> GitHub token available — Copilot will authenticate via GH_TOKEN."
+
+        # Offer to register the signing key with GitHub via the API instead
+        # of requiring the user to paste it in manually. Capture stderr so a
+        # failed lookup (e.g. missing token scope) isn't silently treated as
+        # "key not found", which would otherwise prompt for registration on
+        # every run even when the key is already registered.
+        _existing_keys=""
+        _list_ok=1
+        _existing_keys=$(gh api user/ssh_signing_keys --jq '.[].key' 2>&1) || _list_ok=0
+
+        # Listing signing keys needs the 'admin:ssh_signing_key' scope. If the
+        # gh token lacks it, offer to grant it via `gh auth refresh` (with the
+        # user's consent) and retry rather than bailing out.
+        if [ "$_list_ok" -eq 0 ] && [ -t 0 ] \
+            && grep -Eqi 'admin:ssh_signing_key|missing.*scope|HTTP 40[34]' <<< "$_existing_keys"; then
+            echo "==> Your gh token is missing the 'admin:ssh_signing_key' scope, which is"
+            echo "    needed to verify/register the VM signing key with GitHub."
+            read -r -p "  Grant this scope now via 'gh auth refresh'? [y/N] " _refresh_list
+            if [[ "$_refresh_list" =~ ^[Yy]$ ]] && gh auth refresh -h github.com -s admin:ssh_signing_key; then
+                _existing_keys=$(gh api user/ssh_signing_keys --jq '.[].key' 2>&1) && _list_ok=1
+            fi
+        fi
+
+        if [ "$_list_ok" -eq 0 ]; then
+            echo "==> Could not verify existing signing keys with GitHub: $_existing_keys"
+            echo "==> Skipping automatic registration check. Add the key manually at the URL above if needed."
+        elif grep -qF "$(awk '{print $1, $2}' <<< "$_signing_pub")" <<< "$_existing_keys"; then
+            echo "==> Signing key already registered with GitHub."
+        elif [ -t 0 ]; then
+            read -r -p "  Register this signing key with GitHub now via the API? [y/N] " _register_key
+            if [[ "$_register_key" =~ ^[Yy]$ ]]; then
+                _register_err=$(gh api user/ssh_signing_keys -f "title=sandbox-vm-signing ($VM_NAME)" -f "key=$_signing_pub" 2>&1 >/dev/null)
+                _register_rc=$?
+                if [ $_register_rc -eq 0 ]; then
+                    echo "==> Signing key registered with GitHub."
+                elif grep -Eqi 'missing.*scope|write:ssh_signing_key|admin:ssh_signing_key|HTTP 403' <<< "$_register_err"; then
+                    # The stored gh credential lacks the scope needed to manage
+                    # signing keys. Offer to grant it and retry (only works for
+                    # interactive `gh auth login` credentials, not
+                    # GH_TOKEN/GITHUB_TOKEN env vars).
+                    echo "==> Registration failed: token is missing the 'write:ssh_signing_key' scope."
+                    echo "    Detail: $_register_err"
+                    read -r -p "  Grant this scope now via 'gh auth refresh' and retry? [y/N] " _refresh_scope
+                    if [[ "$_refresh_scope" =~ ^[Yy]$ ]] && gh auth refresh -h github.com -s write:ssh_signing_key; then
+                        _register_err=$(gh api user/ssh_signing_keys -f "title=sandbox-vm-signing ($VM_NAME)" -f "key=$_signing_pub" 2>&1 >/dev/null) || true
+                        if [ -z "$_register_err" ]; then
+                            echo "==> Signing key registered with GitHub."
+                        else
+                            echo "==> Still failed to register signing key via API: $_register_err"
+                            echo "==> Add it manually at the URL above."
+                        fi
+                    else
+                        echo "==> Skipped. Add the key manually at the URL above if needed."
+                    fi
+                else
+                    echo "==> Failed to register signing key via API: $_register_err"
+                    echo "==> Add it manually at the URL above."
+                fi
+            else
+                echo "==> Skipped. Add the key manually at the URL above if needed."
+            fi
+        else
+            echo "==> Non-interactive shell — add the key manually at the URL above if needed."
+        fi
     else
         echo "==> Warning: 'gh auth token' returned nothing."
-        echo "==>   Run: gh auth login   on this machine, then re-run scripts/sandbox.sh up."
+        echo "==>   Run: gh auth login -s admin:ssh_signing_key   on this machine, then re-run scripts/sandbox.sh up."
     fi
 
     echo ""
@@ -369,9 +463,8 @@ _cmd_shell() {
         exit 1
     fi
     _env_args=("PROJECT_ROOT=$VM_MOUNT")
-    [ -n "${GITHUB_TOKEN:-}" ] && _env_args+=("GH_TOKEN=$GITHUB_TOKEN" "GITHUB_TOKEN=$GITHUB_TOKEN")
-    [ -n "${CHARMHUB_API_URL:-}" ] && _env_args+=("CHARMHUB_API_URL=$CHARMHUB_API_URL")
-    [ -n "${SNAPCRAFT_API_URL:-}" ] && _env_args+=("SNAPCRAFT_API_URL=$SNAPCRAFT_API_URL")
+    [ -n "${SANDBOX_VAR_GITHUB_TOKEN:-}" ] && _env_args+=("GH_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN" "GITHUB_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN")
+    _collect_sandbox_vars _env_args
     exec multipass exec "$VM_NAME" -- env "${_env_args[@]}" bash -lc "
         cd '$VM_MOUNT' && exec bash -l
     "
@@ -545,8 +638,8 @@ EOF
 # Subcommand: run
 # ---------------------------------------------------------------------------
 _cmd_run() {
-    COPILOT_MODEL="${COPILOT_MODEL:-sonnet-4.6}"
-    _copilot_token="${COPILOT_GITHUB_TOKEN:-$_gh_token}"
+    COPILOT_MODEL="${SANDBOX_VAR_COPILOT_MODEL:-sonnet-4.6}"
+    _copilot_token="${SANDBOX_VAR_COPILOT_GITHUB_TOKEN:-$_gh_token}"
 
     INTERACTIVE=false
     WITH_TEST_OBSERVER_MCP=false
@@ -660,13 +753,11 @@ EOF
     if [ "$INTERACTIVE" = "true" ]; then
         CONTEXT_MSG="Please read $PROMPT_FILE for project context, then await my instructions."
         # Build env var array, only including GH_TOKEN/GITHUB_TOKEN if they are actually set
-        _env_args=()
-        [ -n "${GITHUB_TOKEN:-}" ] && _env_args+=("GH_TOKEN=$GITHUB_TOKEN" "GITHUB_TOKEN=$GITHUB_TOKEN")
-        [ -n "${CHARMHUB_API_URL:-}" ] && _env_args+=("CHARMHUB_API_URL=$CHARMHUB_API_URL")
-        [ -n "${SNAPCRAFT_API_URL:-}" ] && _env_args+=("SNAPCRAFT_API_URL=$SNAPCRAFT_API_URL")
-        _env_args+=("COPILOT_GITHUB_TOKEN=$_copilot_token" "COPILOT_MODEL=$COPILOT_MODEL" "PROJECT_ROOT=$VM_MOUNT")
+        _env_args=("COPILOT_GITHUB_TOKEN=$_copilot_token" "COPILOT_MODEL=$COPILOT_MODEL" "PROJECT_ROOT=$VM_MOUNT")
+        [ -n "${SANDBOX_VAR_GITHUB_TOKEN:-}" ] && _env_args+=("GH_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN" "GITHUB_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN")
         [ -n "$_mcp_vm_file" ] && _env_args+=("SANDBOX_MCP_VM_CONFIG=$_mcp_vm_file")
         [ -n "$_to_mcp_vm_file" ] && _env_args+=("SANDBOX_TO_MCP_VM_CONFIG=$_to_mcp_vm_file")
+        _collect_sandbox_vars _env_args
         multipass exec "$VM_NAME" -- env "${_env_args[@]}" bash -lc "
                 cd '$VM_MOUNT'
             _mcp_extra=()
@@ -679,13 +770,11 @@ EOF
         "
     else
         # Build env var array, only including GH_TOKEN/GITHUB_TOKEN if they are actually set
-        _env_args=()
-        [ -n "${GITHUB_TOKEN:-}" ] && _env_args+=("GH_TOKEN=$GITHUB_TOKEN" "GITHUB_TOKEN=$GITHUB_TOKEN")
-        [ -n "${CHARMHUB_API_URL:-}" ] && _env_args+=("CHARMHUB_API_URL=$CHARMHUB_API_URL")
-        [ -n "${SNAPCRAFT_API_URL:-}" ] && _env_args+=("SNAPCRAFT_API_URL=$SNAPCRAFT_API_URL")
-        _env_args+=("COPILOT_GITHUB_TOKEN=$_copilot_token" "COPILOT_MODEL=$COPILOT_MODEL" "PROJECT_ROOT=$VM_MOUNT")
+        _env_args=("COPILOT_GITHUB_TOKEN=$_copilot_token" "COPILOT_MODEL=$COPILOT_MODEL" "PROJECT_ROOT=$VM_MOUNT")
+        [ -n "${SANDBOX_VAR_GITHUB_TOKEN:-}" ] && _env_args+=("GH_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN" "GITHUB_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN")
         [ -n "$_mcp_vm_file" ] && _env_args+=("SANDBOX_MCP_VM_CONFIG=$_mcp_vm_file")
         [ -n "$_to_mcp_vm_file" ] && _env_args+=("SANDBOX_TO_MCP_VM_CONFIG=$_to_mcp_vm_file")
+        _collect_sandbox_vars _env_args
         multipass exec "$VM_NAME" -- env "${_env_args[@]}" bash -lc "
                 cd '$VM_MOUNT'
             _mcp_extra=()

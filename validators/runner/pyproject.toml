@@ -16,6 +16,7 @@ dependencies = [
     "validators-base",
     "validators-s3",
     "validators-postgresql-client",
+    "validators-pgsql",
     "validators-mysql-client",
     "validators-mysql",
     "validators-tracing[deep]",
@@ -34,8 +35,11 @@ dependencies = [
     "validators-external-provider",
     "validators-http-interface",
     "validators-grafana-dashboard",
+    "validators-grafana-datasource",
     "validators-ingress",
+    "validators-ingress-auth",
     "validators-prometheus-remote-write",
+    "validators-certificate-transfer",
 ]
 
 [build-system]

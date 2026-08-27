@@ -145,17 +145,21 @@ Handling failures
 ~~~~~~~~~~~~~~~~~
 
 If the solver cannot produce a valid bundle, ``BundleBuilder.build()`` raises
-``UncompletableBundleError``. The exception includes the decoded unsat core,
-which lists the specific constraints that could not be satisfied:
+``UncompletableBundleError``. Its immutable ``diagnostics`` tuple contains every
+non-redundant structured reason the bundle could not be completed. Diagnostic
+types cover unfulfilled endpoints, feature mismatches, unresolved applications
+and integrations, required-application release failures, and internal solver or
+optimization failures:
 
 .. code-block:: python
 
-   from bundle_builder_x.bundle_builder import UncompletableBundleError
+   from bundle_builder_x import ApplicationReleaseDiagnostic, UncompletableBundleError
 
    try:
        solution = builder.build(spec)
    except UncompletableBundleError as e:
        print(e)
-       for tag in e.unsat_core:
-           print(f"  {tag}")
-       # e.unfulfilled_endpoints lists endpoints that no charm could satisfy
+       for diagnostic in e.diagnostics:
+           print(f"  {diagnostic.description}")
+           if isinstance(diagnostic, ApplicationReleaseDiagnostic):
+               print(f"    release rejection: {diagnostic.error}")

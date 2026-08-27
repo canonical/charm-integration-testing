@@ -1,17 +1,5 @@
-# Copyright (C) 2026 Canonical Ltd
-
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
 
 import logging
 import os
@@ -35,12 +23,6 @@ class UnparsableCharmException(Exception):
 
 class IncompleteCharmInfoException(UnparsableCharmException):
     """Raised when the charm info from charmhub is incomplete or missing required fields."""
-
-    pass
-
-
-class CharmReleaseNotFoundException(Exception):
-    """Raised when the release for a charm cannot be deduced."""
 
     pass
 
@@ -85,6 +67,12 @@ class CharmMetadata(BaseModel):
     provides: dict[str, Endpoint] = Field(default_factory=dict)
     assumes: list[str | dict[str, Any]] = Field(default_factory=list)
     resources: dict[str, Resource] = Field(default_factory=dict)
+    # A non-empty `containers` block in metadata.yaml is how Juju/Charmcraft identify a
+    # Kubernetes (sidecar) charm; its absence identifies a machine charm.
+    containers: dict[str, Any] = Field(default_factory=dict)
+    # Legacy (pre-Charmcraft "reactive"/podspec) Kubernetes charms predate the `containers`
+    # block and instead mark themselves via `series: [kubernetes]` in metadata.yaml.
+    series: list[str] = Field(default_factory=list)
 
 
 class CharmConfigSchema(BaseModel):

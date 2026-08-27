@@ -1,17 +1,5 @@
-# Copyright (C) 2026 Canonical Ltd
-
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
 
 """Tests that the Z3 solver discovers cross-model integrations via DomainCharmIntegration."""
 
@@ -27,6 +15,7 @@ from bundle_builder_x.domain import (
     DomainModel,
     ModelRef,
     add_charm_to_domain,
+    pair_charms_in_domain,
 )
 from bundle_builder_x.extract import extract_solution
 from bundle_builder_x.juju_version import JujuVersion
@@ -52,6 +41,7 @@ def _make_charm(
         ubuntu_version="22.04",
         ubuntu_arch="amd64",
         endpoints=endpoints or {},
+        platforms=["machine", "kubernetes"],
     )
 
 
@@ -91,8 +81,9 @@ class TestSolverDiscoversCMR:
                 "backend-database": CharmEndpoint(type=EndpointType.REQUIRES, interface="postgresql"),
             },
         )
-        add_charm_to_domain(pg, domain, ModelRef(name="machine"))
-        add_charm_to_domain(proxy, domain, ModelRef(name="k8s"))
+        pg_id = add_charm_to_domain(pg, domain, ModelRef(name="machine"))
+        proxy_id = add_charm_to_domain(proxy, domain, ModelRef(name="k8s"))
+        pair_charms_in_domain(domain, pg_id, proxy_id)
 
         # WHEN solving
         solver = z3.Solver()
@@ -141,8 +132,9 @@ class TestSolverDiscoversCMR:
                 "backend-database": CharmEndpoint(type=EndpointType.REQUIRES, interface="postgresql"),
             },
         )
-        add_charm_to_domain(pg, domain, ModelRef(name="machine"))
-        add_charm_to_domain(proxy, domain, ModelRef(name="k8s"))
+        pg_id = add_charm_to_domain(pg, domain, ModelRef(name="machine"))
+        proxy_id = add_charm_to_domain(proxy, domain, ModelRef(name="k8s"))
+        pair_charms_in_domain(domain, pg_id, proxy_id)
 
         solver = z3.Solver()
         add_constraints(solver, domain)
@@ -209,9 +201,11 @@ class TestSolverDiscoversCMR:
                 "db": CharmEndpoint(type=EndpointType.REQUIRES, interface="postgresql"),
             },
         )
-        add_charm_to_domain(pg, domain, ModelRef(name="m1"))
-        add_charm_to_domain(proxy, domain, ModelRef(name="m1"))
-        add_charm_to_domain(other, domain, ModelRef(name="m2"))
+        pg_id = add_charm_to_domain(pg, domain, ModelRef(name="m1"))
+        proxy_id = add_charm_to_domain(proxy, domain, ModelRef(name="m1"))
+        other_id = add_charm_to_domain(other, domain, ModelRef(name="m2"))
+        pair_charms_in_domain(domain, pg_id, proxy_id)
+        pair_charms_in_domain(domain, pg_id, other_id)
 
         solver = z3.Solver()
         add_constraints(solver, domain)

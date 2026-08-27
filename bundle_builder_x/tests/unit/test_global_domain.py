@@ -13,6 +13,7 @@ from bundle_builder_x.domain import (
     DomainModel,
     ModelRef,
     add_charm_to_domain,
+    pair_charms_in_domain,
 )
 from bundle_builder_x.juju_version import JujuVersion
 
@@ -34,6 +35,7 @@ def _make_charm(
         ubuntu_version="22.04",
         ubuntu_arch="amd64",
         endpoints=endpoints or {},
+        platforms=["machine", "kubernetes"],
     )
 
 
@@ -74,6 +76,36 @@ class TestInitializeGlobalDomain:
         assert len(domain.charms) == 0
 
 
+class TestPairCharmsInDomainSelfPairing:
+    def test_pairing_a_charm_with_itself_creates_no_integration(self) -> None:
+        # GIVEN a mesh-style charm (REQUIRES + PROVIDES on the same interface)
+        domain = _make_domain(
+            {
+                ModelRef(name="m1"): DomainModel(
+                    arch="amd64",
+                    platform="kubernetes",
+                    juju_version=_JUJU,
+                    applications={"grafana": DomainApplication(charm="grafana-k8s")},
+                ),
+            }
+        )
+        mesh_charm = _make_charm(
+            "grafana-k8s",
+            {
+                "require-cmr-mesh": CharmEndpoint(type=EndpointType.REQUIRES, interface="cross_model_mesh"),
+                "provide-cmr-mesh": CharmEndpoint(type=EndpointType.PROVIDES, interface="cross_model_mesh"),
+            },
+        )
+        charm_id = add_charm_to_domain(mesh_charm, domain, ModelRef(name="m1"))
+
+        # WHEN pairing the charm with itself
+        created = pair_charms_in_domain(domain, charm_id, charm_id)
+
+        # THEN no integration is created
+        assert created is False
+        assert domain.charm_integrations == []
+
+
 class TestAddCharmCrossModelPairing:
     def test_same_model_creates_local_integration(self) -> None:
         # GIVEN a domain with one model
@@ -101,8 +133,9 @@ class TestAddCharmCrossModelPairing:
                 "backend-database": CharmEndpoint(type=EndpointType.REQUIRES, interface="postgresql"),
             },
         )
-        add_charm_to_domain(pg, domain, ModelRef(name="m1"))
-        add_charm_to_domain(proxy, domain, ModelRef(name="m1"))
+        pg_id = add_charm_to_domain(pg, domain, ModelRef(name="m1"))
+        proxy_id = add_charm_to_domain(proxy, domain, ModelRef(name="m1"))
+        pair_charms_in_domain(domain, pg_id, proxy_id)
 
         # THEN a local DomainCharmIntegration is created (no cross-model)
         assert len(domain.charm_integrations) == 1
@@ -140,8 +173,9 @@ class TestAddCharmCrossModelPairing:
                 "backend-database": CharmEndpoint(type=EndpointType.REQUIRES, interface="postgresql"),
             },
         )
-        add_charm_to_domain(pg, domain, ModelRef(name="machine"))
-        add_charm_to_domain(proxy, domain, ModelRef(name="k8s"))
+        pg_id = add_charm_to_domain(pg, domain, ModelRef(name="machine"))
+        proxy_id = add_charm_to_domain(proxy, domain, ModelRef(name="k8s"))
+        pair_charms_in_domain(domain, pg_id, proxy_id)
 
         # THEN no local integration, but a cross-model DomainCharmIntegration is created
         assert len(domain.charm_integrations) == 1
@@ -289,13 +323,14 @@ class TestCMRIntegrationMapping:
         )
 
         # WHEN only the local (consumer) charm is added
-        add_charm_to_domain(consumer, domain, ModelRef(name="consumer-model"))
+        consumer_id = add_charm_to_domain(consumer, domain, ModelRef(name="consumer-model"))
 
         # THEN no CMR mapping exists yet
         assert _cmr_mapping_count(domain, ModelRef(name="consumer-model")) == 0
 
-        # WHEN the remote (provider) charm is also added
-        add_charm_to_domain(provider, domain, ModelRef(name="provider-model"))
+        # WHEN the remote (provider) charm is also added and paired
+        provider_id = add_charm_to_domain(provider, domain, ModelRef(name="provider-model"))
+        pair_charms_in_domain(domain, consumer_id, provider_id)
 
         # THEN exactly one CMR mapping is created for the consumer-model
         assert _cmr_mapping_count(domain, ModelRef(name="consumer-model")) == 1
@@ -344,13 +379,14 @@ class TestCMRIntegrationMapping:
         )
 
         # WHEN the provider charm is added first (reverse order)
-        add_charm_to_domain(provider, domain, ModelRef(name="provider-model"))
+        provider_id = add_charm_to_domain(provider, domain, ModelRef(name="provider-model"))
 
         # THEN still no CMR mapping yet
         assert _cmr_mapping_count(domain, ModelRef(name="consumer-model")) == 0
 
-        # WHEN the consumer charm is added second
-        add_charm_to_domain(consumer, domain, ModelRef(name="consumer-model"))
+        # WHEN the consumer charm is added second and paired
+        consumer_id = add_charm_to_domain(consumer, domain, ModelRef(name="consumer-model"))
+        pair_charms_in_domain(domain, provider_id, consumer_id)
 
         # THEN the mapping is created correctly
         assert _cmr_mapping_count(domain, ModelRef(name="consumer-model")) == 1
@@ -406,8 +442,9 @@ class TestAddCharmToDomainContainerScopeGating:
                 )
             },
         )
-        add_charm_to_domain(principal, domain, ModelRef(name="m"))
-        add_charm_to_domain(subordinate, domain, ModelRef(name="m"))
+        principal_id = add_charm_to_domain(principal, domain, ModelRef(name="m"))
+        subordinate_id = add_charm_to_domain(subordinate, domain, ModelRef(name="m"))
+        pair_charms_in_domain(domain, principal_id, subordinate_id)
 
         juju_info = [i for i in domain.charm_integrations if domain.integration_interface(i) == "juju-info"]
         assert len(juju_info) == 1
@@ -440,8 +477,9 @@ class TestAddCharmToDomainContainerScopeGating:
         )
         charm_a = _make_charm("app", {"db": CharmEndpoint(type=EndpointType.REQUIRES, interface="pgsql")})
         charm_b = _make_charm("pg", {"database": CharmEndpoint(type=EndpointType.PROVIDES, interface="pgsql")})
-        add_charm_to_domain(charm_a, domain, ModelRef(name="k"))
-        add_charm_to_domain(charm_b, domain, ModelRef(name="k"))
+        charm_a_id = add_charm_to_domain(charm_a, domain, ModelRef(name="k"))
+        charm_b_id = add_charm_to_domain(charm_b, domain, ModelRef(name="k"))
+        pair_charms_in_domain(domain, charm_a_id, charm_b_id)
 
         assert len([i for i in domain.charm_integrations if domain.integration_interface(i) == "pgsql"]) == 1
 
@@ -546,8 +584,9 @@ class TestIntegrationOfferName:
                 ),
             }
         )
-        add_charm_to_domain(provider_charm, domain, ModelRef(name="provider-model"))
-        add_charm_to_domain(requirer_charm, domain, ModelRef(name="consumer-model"))
+        provider_id = add_charm_to_domain(provider_charm, domain, ModelRef(name="provider-model"))
+        requirer_id = add_charm_to_domain(requirer_charm, domain, ModelRef(name="consumer-model"))
+        pair_charms_in_domain(domain, provider_id, requirer_id)
         integration = domain.charm_integrations[0]
         return domain, integration
 

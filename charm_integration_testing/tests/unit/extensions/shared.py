@@ -53,6 +53,15 @@ class NullJujuBackend(JujuBackend):
     ) -> None:
         raise NotImplementedError
 
+    def wait_idle_multi_model(
+        self,
+        models: list[str],
+        timeout: timedelta | None,
+        count: int | None,
+        strict_timeout: bool = False,
+    ) -> None:
+        raise NotImplementedError
+
     def wait_application_settled(self, model: str, application: str, timeout: timedelta | None) -> None:
         raise NotImplementedError
 
@@ -221,6 +230,9 @@ class NullJujuBackend(JujuBackend):
         raise NotImplementedError
 
     def get_controller_kubeconfig(self, controller: str) -> Path | None:
+        raise NotImplementedError
+
+    def get_kubernetes_client_for_controller(self, controller: str) -> KubernetesClient | None:
         raise NotImplementedError
 
 

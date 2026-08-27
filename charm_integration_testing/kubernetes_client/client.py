@@ -2,17 +2,18 @@
 # See LICENSE file for licensing details.
 
 import logging
-import re
+import math
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from time import sleep
-from typing import Callable, TypeVar
+from typing import Callable, Collection, TypeVar
 
 from kubernetes import client as K8sClient  # type: ignore[import-untyped]
 from kubernetes import watch
 from kubernetes.client import ApiException  # type: ignore[import-untyped]
+from urllib3.exceptions import ProtocolError
 
-from kubernetes_client.backend import KubernetesBackend
+from kubernetes_client.backend import KubernetesBackend, KubernetesExtension
 
 T = TypeVar("T")
 
@@ -27,6 +28,7 @@ class PodStatus(Enum):
 
 class KubernetesClient:
     backend: KubernetesBackend
+    extensions: list[KubernetesExtension]
 
     def __init__(
         self,
@@ -34,30 +36,43 @@ class KubernetesClient:
         logger: logging.Logger | None = None,
         default_timeout: timedelta = timedelta(minutes=5),
         default_delay: timedelta = timedelta(seconds=1),
+        extensions: list[KubernetesExtension] | None = None,
+        watch_factory: Callable[[], watch.Watch] = watch.Watch,
     ):
         self.backend = backend
         self.logger = logger or logging.getLogger(__name__)
 
         self.default_timeout = default_timeout
         self.default_delay = default_delay
+        self.extensions = extensions or []
+        self.watch_factory = watch_factory
 
     def get_charm_pods(
         self, application_name: str, model: str
     ) -> list[K8sClient.V1Pod]:  # multiple pods per a charm, depends on charm name and unit number
         """
-        Gets all pods in the specified namespace that match the given application name.
+        Gets all pods in the specified namespace that belong to the given application.
+
+        Filters server-side on Juju's standard Kubernetes name label
+        (``app.kubernetes.io/name``), which Juju sets on every pod regardless of
+        whether the charm's workload is deployed as a StatefulSet (pod names like
+        ``<app>-0``) or a Deployment (pod names like ``<app>-<replicaset-hash>-<pod-hash>``).
+        Matching on pod name patterns is unreliable across workload kinds; the label
+        is the stable identifier.
+
         Args:
             application_name: Name of the application to filter pods by
-            model: Model the application is deployed in
+            model: Model name the application is deployed in (used as the namespace name)
         Raises:
             ApiException: If there is an error communicating with the Kubernetes API
         Returns:
             List of pods that match the given application name in the specified namespace
         """
-        pattern = re.compile(rf"^{re.escape(application_name)}(-\d+)$")
-        pods = self.backend.core_v1_api.list_namespaced_pod(model)  # juju creates a namespace for each model
-        matching_pods = [pod for pod in pods.items if pattern.match(pod.metadata.name)]
-        return matching_pods
+        pods = self.backend.core_v1_api.list_namespaced_pod(
+            model,  # juju creates a namespace for each model
+            label_selector=f"app.kubernetes.io/name={application_name}",
+        )
+        return list(pods.items)
 
     def list_model_pvcs(self, model: str) -> list[K8sClient.V1PersistentVolumeClaim]:
         """
@@ -121,60 +136,123 @@ class KubernetesClient:
 
             sleep(delay.total_seconds())
 
-    def wait_for_pod_recreation(
+    def wait_for_new_pod(
         self,
-        pod_name: str,
+        application_name: str,
         namespace: str,
-        old_uid: str,
-        target_status: PodStatus = PodStatus.RUNNING,
+        existing_uids: Collection[str],
         timeout: timedelta | None = None,
         delay: timedelta | None = None,
     ) -> K8sClient.V1Pod:
         """
-        Wait for a pod to be recreated with a new UID and reach the target status.
+        Wait for a genuinely new pod of `application_name` to appear, and return it (in whatever
+        status it currently has). Pair with `wait_for_pod_status` to also wait for that pod to
+        reach a target status.
+
+        Re-discovers pods via the same `app.kubernetes.io/name` label lookup as `get_charm_pods`,
+        rather than re-reading a single fixed pod name. A StatefulSet-managed pod keeps a stable
+        name across recreation (e.g. `app-0`), but a Deployment-managed pod is recreated by its
+        ReplicaSet under an entirely new name (e.g. `app-<replicaset-hash>-<pod-hash>`), so waiting
+        on the old name would hang forever for Deployment-backed workloads.
+
+        A pod is considered "new" only if its UID is absent from `existing_uids`. Passing just the
+        deleted pod's UID is not sufficient when the application has multiple replicas: an
+        untouched sibling pod would trivially have a different UID and be returned immediately,
+        even though no replacement for the deleted pod had actually appeared yet. Callers should
+        pass the UIDs of *all* pods observed for this application before the deletion.
 
         Args:
-            pod_name: Name of the pod to wait for
+            application_name: Name of the application whose pod was deleted
             namespace: Namespace where the pod is located
-            old_uid: UID of the old pod (to detect recreation)
-            target_status: Desired pod status (default: RUNNING)
+            existing_uids: UIDs of all pods for this application observed before the deletion
             timeout: Maximum time to wait
             delay: Delay between checks
 
         Returns:
-            The recreated pod object
+            The new pod object
 
         Raises:
-            TimeoutError: If pod is not recreated within timeout
+            TimeoutError: If no new pod appears within timeout
         """
-        self.logger.info(f"Waiting for pod {pod_name} to be recreated (old UID: {old_uid})")
+        self.logger.info(
+            f"Waiting for a new pod of application '{application_name}' in namespace '{namespace}' "
+            f"to appear (existing UIDs: {sorted(existing_uids)})"
+        )
 
         def check() -> K8sClient.V1Pod | None:
             try:
-                new_pod = self.backend.core_v1_api.read_namespaced_pod(pod_name, namespace)
-                if new_pod.metadata.uid == old_uid:
-                    return None
-
-                if PodStatus(new_pod.status.phase) == target_status:
-                    self.logger.info(
-                        f"Pod {pod_name} in namespace {namespace} recreated successfully with UID {new_pod.metadata.uid} "
-                        f"and status {target_status.value}"
-                    )
-                    return new_pod
-
-                self.logger.debug(
-                    f"Pod {pod_name} in namespace {namespace} recreated with new UID but status is {new_pod.status.phase}, "
-                    f"waiting for {target_status.value}"
-                )
-                return None
+                pods = self.get_charm_pods(application_name, model=namespace)
             except ApiException as e:
                 if e.status == 404:
                     return None
                 raise
 
+            for pod in pods:
+                if pod.metadata.uid not in existing_uids:
+                    self.logger.info(f"New pod {pod.metadata.name} in namespace {namespace} has UID {pod.metadata.uid}")
+                    return pod
+            return None
+
         return self.wait(
             check=check,
-            timeout_message=f"Pod {pod_name} in namespace {namespace} was not recreated or did not reach {target_status.value} status within timeout",
+            timeout_message=(
+                f"No new pod of application '{application_name}' in namespace '{namespace}' appeared within timeout"
+            ),
+            timeout=timeout,
+            delay=delay,
+        )
+
+    def wait_for_pod_status(
+        self,
+        pod_name: str,
+        namespace: str,
+        target_status: PodStatus = PodStatus.RUNNING,
+        timeout: timedelta | None = None,
+        delay: timedelta | None = None,
+    ) -> K8sClient.V1Pod:
+        """
+        Wait for the named pod to reach `target_status`, and return it.
+
+        Reads the pod directly by name rather than re-listing by label, since by this point the
+        caller (e.g. after `wait_for_new_pod`) already knows exactly which pod it cares about.
+
+        Args:
+            pod_name: Name of the pod to poll
+            namespace: Namespace where the pod is located
+            target_status: Desired pod status (default: RUNNING)
+            timeout: Maximum time to wait
+            delay: Delay between checks
+
+        Returns:
+            The pod object once it reaches the target status
+
+        Raises:
+            TimeoutError: If the pod does not reach the target status within timeout
+        """
+
+        def check() -> K8sClient.V1Pod | None:
+            try:
+                pod = self.backend.core_v1_api.read_namespaced_pod(pod_name, namespace)
+            except ApiException as e:
+                if e.status == 404:
+                    return None
+                raise
+            if PodStatus(pod.status.phase) == target_status:
+                self.logger.info(f"Pod {pod_name} in namespace {namespace} reached status {target_status.value}")
+                return pod
+
+            self.logger.debug(
+                f"Pod {pod_name} in namespace {namespace} has status {pod.status.phase}, "
+                f"waiting for {target_status.value}"
+            )
+            return None
+
+        return self.wait(
+            check=check,
+            timeout_message=(
+                f"Pod '{pod_name}' in namespace '{namespace}' did not reach {target_status.value} status "
+                "within timeout"
+            ),
             timeout=timeout,
             delay=delay,
         )
@@ -196,6 +274,10 @@ class KubernetesClient:
         except ApiException as e:
             self.logger.error(f"Failed to delete pod {pod_name} in namespace {namespace}: {e}")
             raise
+
+        # Call extensions
+        for extension in self.extensions:
+            extension.post_delete_pod(namespace, pod_name)
 
     def restart_statefulset(self, namespace: str, statefulset_name: str) -> None:
         """
@@ -228,6 +310,10 @@ class KubernetesClient:
             )
             raise
 
+        # Call extensions
+        for extension in self.extensions:
+            extension.post_restart_statefulset(namespace, statefulset_name)
+
     def wait_for_statefulset_restart(self, namespace: str, statefulset_name: str, timeout_seconds: int = 300) -> None:
         """
         Blocks until a StatefulSet's rollout restart completes or the timeout is reached.
@@ -236,6 +322,12 @@ class KubernetesClient:
         replicas have been updated to the latest pod template and are in the Ready state.
         The expected generation is read once at call time; events whose
         `observed_generation` is below that threshold are skipped.
+
+        A watch is a single long-lived HTTP connection, so unlike discrete requests it gets no
+        automatic retry: a transient reset would otherwise abort the wait immediately. If the
+        stream is reset before the rollout finishes, a new watch is opened with whatever time
+        remains of `timeout_seconds`; a stream that ends on its own (internal timeout, no
+        matching event) is still treated as a real timeout.
 
         Args:
             namespace: Namespace where the StatefulSet is located.
@@ -247,8 +339,6 @@ class KubernetesClient:
             ApiException: If the initial StatefulSet read or the watch stream fails.
             TimeoutError: If the rollout does not complete within `timeout_seconds`.
         """
-        watcher = watch.Watch()
-
         try:
             sts = self.backend.apps_v1_api.read_namespaced_stateful_set(name=statefulset_name, namespace=namespace)
             target_generation = sts.metadata.generation
@@ -257,44 +347,62 @@ class KubernetesClient:
             raise
 
         self.logger.info(f"Waiting for StatefulSet '{statefulset_name}' to reach generation '{target_generation}'.")
-        try:
-            for event in watcher.stream(
-                self.backend.apps_v1_api.list_namespaced_stateful_set,
-                namespace=namespace,
-                field_selector=f"metadata.name={statefulset_name}",
-                timeout_seconds=timeout_seconds,
-            ):
-                sts = event["object"]
-                status = sts.status
 
-                if status.observed_generation < target_generation:
-                    self.logger.info("Waiting: K8s Controller hasn't processed the update yet.")
-                    continue
+        deadline = datetime.now(timezone.utc) + timedelta(seconds=timeout_seconds)
+        while True:
+            remaining_seconds = (deadline - datetime.now(timezone.utc)).total_seconds()
+            watcher = self.watch_factory()
+            try:
+                for event in watcher.stream(
+                    self.backend.apps_v1_api.list_namespaced_stateful_set,
+                    namespace=namespace,
+                    field_selector=f"metadata.name={statefulset_name}",
+                    timeout_seconds=max(0, math.ceil(remaining_seconds)),
+                ):
+                    sts = event["object"]
+                    status = sts.status
 
-                # If we use RollingUpdate, check if all replicas are updated
-                # updated_replicas refers to pods running the latest pod template
-                updated = status.updated_replicas or 0
-                ready = status.ready_replicas or 0
-                replicas = sts.spec.replicas
-                total = int(replicas) if replicas is not None else 1
+                    if status.observed_generation < target_generation:
+                        self.logger.info("Waiting: K8s Controller hasn't processed the update yet.")
+                        continue
 
-                if updated < total:
-                    self.logger.debug(f"Updating: {updated}/{total} pods are on the new version.")
-                    continue
+                    # If we use RollingUpdate, check if all replicas are updated
+                    # updated_replicas refers to pods running the latest pod template
+                    updated = status.updated_replicas or 0
+                    ready = status.ready_replicas or 0
+                    replicas = sts.spec.replicas
+                    total = int(replicas) if replicas is not None else 1
 
-                # Check if they are actually Ready (passing probes)
-                if ready < total:
-                    self.logger.debug(f"Waiting: {ready}/{total} pods are Ready.")
-                    continue
+                    if updated < total:
+                        self.logger.debug(f"Updating: {updated}/{total} pods are on the new version.")
+                        continue
 
-                self.logger.info(f"Successfully rolled out generation '{target_generation}'.")
-                return
+                    # Check if they are actually Ready (passing probes)
+                    if ready < total:
+                        self.logger.debug(f"Waiting: {ready}/{total} pods are Ready.")
+                        continue
 
-            self.logger.error(
-                f"Waiting for rollout restart on StatefulSet '{statefulset_name}' in namespace '{namespace}' timed out."
-            )
-            raise TimeoutError(
-                f"Waiting for rollout restart on StatefulSet '{statefulset_name}' in namespace '{namespace}' timed out."
-            )
-        finally:
-            watcher.stop()
+                    self.logger.info(f"Successfully rolled out generation '{target_generation}'.")
+                    return
+            except ProtocolError as exc:
+                remaining_seconds = (deadline - datetime.now(timezone.utc)).total_seconds()
+                if remaining_seconds <= 0:
+                    break
+                self.logger.warning(
+                    f"Watch stream for StatefulSet '{statefulset_name}' in namespace '{namespace}' was reset "
+                    f"({exc}); reconnecting with {math.ceil(remaining_seconds)}s remaining to resume waiting."
+                )
+                continue
+            finally:
+                watcher.stop()
+
+            # The stream ended on its own (its internal timeout elapsed) without the rollout
+            # completing: that is a genuine timeout, not a reconnectable disconnect.
+            break
+
+        self.logger.error(
+            f"Waiting for rollout restart on StatefulSet '{statefulset_name}' in namespace '{namespace}' timed out."
+        )
+        raise TimeoutError(
+            f"Waiting for rollout restart on StatefulSet '{statefulset_name}' in namespace '{namespace}' timed out."
+        )

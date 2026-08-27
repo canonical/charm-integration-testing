@@ -2,7 +2,7 @@
 environments:
   # PS6 PROD KUBERNETES
   ps6-sqa-prod_charm_qa_kubernetes-1: &ps6-sqa-prod_charm_qa_kubernetes
-    github-runner: ps5-sqa-runners
+    github-runner: ps7-private-endpoint-runners
     platform: kubernetes
     cloud-type: k8s
     kubeconfig-secret: PROD_SQA_KUBECONFIG
@@ -23,7 +23,7 @@ environments:
   ps6-sqa-prod_charm_qa_kubernetes-6: *ps6-sqa-prod_charm_qa_kubernetes
   # PS6 STG KUBERNETES
   ps6-sqa-stg_charm_qa_kubernetes-1: &ps6-sqa-stg_charm_qa_kubernetes
-    github-runner: ps5-sqa-runners
+    github-runner: ps7-private-endpoint-runners
     platform: kubernetes
     cloud-type: k8s
     kubeconfig-secret: STG_SQA_KUBECONFIG
@@ -40,7 +40,7 @@ environments:
   ps6-sqa-stg_charm_qa_kubernetes-2: *ps6-sqa-stg_charm_qa_kubernetes
   # PS6 PROD OPENSTACK
   ps6-sqa-prod_charm_qa_openstack-1: &ps6-sqa-prod_charm_qa_openstack
-    github-runner: ps5-sqa-runners
+    github-runner: ps7-private-endpoint-runners
     platform: machine
     cloud-type: o7k
     novarc-secret: PROD_SQA_NOVARC
@@ -48,7 +48,7 @@ environments:
   ps6-sqa-prod_charm_qa_openstack-2: *ps6-sqa-prod_charm_qa_openstack
   # PS7 PROD KUBERNETES
   ps7-sqa-prod_charm_qa_kubernetes-1: &ps7-sqa-prod_charm_qa_kubernetes
-    github-runner: ps7-sqa-runners
+    github-runner: ps7-private-endpoint-runners
     platform: kubernetes
     cloud-type: k8s
     kubeconfig-secret: PROD_PS7_KUBECONFIG
@@ -74,7 +74,7 @@ environments:
   ps7-sqa-prod_charm_qa_kubernetes-2: *ps7-sqa-prod_charm_qa_kubernetes
   # PS7 PROD OPENSTACK
   ps7-sqa-prod_charm_qa_openstack-1: &ps7-sqa-prod_charm_qa_openstack
-    github-runner: ps7-sqa-runners
+    github-runner: ps7-private-endpoint-runners
     platform: machine
     cloud-type: o7k
     novarc-secret: PROD_PS7_NOVARC

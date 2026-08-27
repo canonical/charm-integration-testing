@@ -12,6 +12,7 @@ import stat
 import tempfile
 import time
 import warnings
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from typing import Any, Callable
 
@@ -83,6 +84,29 @@ def _skip_unreadable(dir_: str, names: list[str]) -> set[str]:
     return skipped
 
 
+class TransientModelUnavailabilityError(jubilant.CLIError):
+    """Raised by ``JubilantBackend.status`` when a model migration makes the model
+    temporarily unreachable.
+
+    A model migration briefly makes ``juju status`` fail even for a model that was
+    reachable moments before - either because the model hasn't finished importing
+    on the destination controller yet, or because it has since migrated away from
+    the controller being queried. Both are expected, transient states while a
+    migration is in flight (or has just completed), not real failures. Callers should
+    treat this as "not ready yet" and retry rather than propagate it as a genuine
+    failure.
+    """
+
+
+def _is_transient_model_unavailability_error(error: jubilant.CLIError, model: str) -> bool:
+    """Detect CLIErrors that mean "model temporarily unreachable due to migration"."""
+    err_msg = error.stderr.lower()
+    # e.stderr: 'ERROR model pytest-tmp-controller-n84qeh17:admin/debug-test-1 not found\n'
+    is_missing = "not found" in err_msg and all(p in err_msg for p in model.lower().split(":"))
+    is_migrating = "has been migrated to controller" in err_msg or "migration in progress" in err_msg
+    return is_missing or is_migrating
+
+
 class JubilantBackend(JujuCmdBackend):
     client: JubilantClient
 
@@ -111,7 +135,12 @@ class JubilantBackend(JujuCmdBackend):
 
     @warn_performance(category=JujuStatusPerformanceWarning, threshold=timedelta(seconds=5))
     def status(self, model: str) -> jubilant.Status:
-        return self.client.model(model).status()
+        try:
+            return self.client.model(model).status()
+        except jubilant.CLIError as e:
+            if _is_transient_model_unavailability_error(e, model):
+                raise TransientModelUnavailabilityError(e.returncode, e.cmd, e.output, e.stderr) from e
+            raise
 
     @warn_performance(category=JujuStatusPerformanceWarning, threshold=timedelta(seconds=5))
     def juju_status_text(self, model: str) -> str:
@@ -150,8 +179,23 @@ class JubilantBackend(JujuCmdBackend):
             if timeout_reached and (strict_timeout or success_count == 0):
                 break
 
-            # Get current status
-            status = self.status(model)
+            # Get current status. A model migration can transiently make status
+            # fail even for a model this loop previously observed successfully -
+            # e.g. while migrating away from, or being imported into, a
+            # controller. Treat that as "not ready yet" rather than aborting the
+            # wait, matching wait_for_model_to_exist's tolerance for the same
+            # condition. See issue #812.
+            try:
+                status = self.status(model)
+            except TransientModelUnavailabilityError as e:
+                noncompliant_wait_state = dataclasses.replace(
+                    last_wait_state,
+                    message=f"Model {model} temporarily unavailable during migration: {e.stderr.strip()}",
+                )
+                success_count = 0
+                elapsed = datetime.now() - iteration_start
+                time.sleep(max(0, (delay - elapsed).total_seconds()))
+                continue
 
             # Check for error condition
             if error is not None:
@@ -181,6 +225,29 @@ class JubilantBackend(JujuCmdBackend):
             )
         raise JujuWaitTimeoutError(wait_state=noncompliant_wait_state)
 
+    @staticmethod
+    def _combine_wait_states(wait_states: dict[str, JujuWaitState]) -> JujuWaitState:
+        models = ", ".join(sorted(wait_states))
+        return JujuWaitState(
+            message=f"waiting for models: [{models}] to become idle",
+            insufficient_status_checks=any(state.insufficient_status_checks for state in wait_states.values()),
+            noncompliant_applications={
+                f"{model}::{application}": application_state
+                for model, state in wait_states.items()
+                for application, application_state in state.noncompliant_applications.items()
+            },
+            noncompliant_units={
+                f"{model}::{unit}": unit_state
+                for model, state in wait_states.items()
+                for unit, unit_state in state.noncompliant_units.items()
+            },
+            noncompliant_unit_agents={
+                f"{model}::{unit}": unit_agent_state
+                for model, state in wait_states.items()
+                for unit, unit_agent_state in state.noncompliant_unit_agents.items()
+            },
+        )
+
     def wait_idle(
         self,
         model: str,
@@ -204,6 +271,38 @@ class JubilantBackend(JujuCmdBackend):
             successes=count,
             strict_timeout=strict_timeout,
         )
+
+    def wait_idle_multi_model(
+        self,
+        models: list[str],
+        timeout: timedelta | None,
+        count: int | None,
+        strict_timeout: bool = False,
+    ) -> None:
+        unique_models = sorted(set(models))
+        if not unique_models:
+            return
+
+        timeout_wait_states: dict[str, JujuWaitState] = {}
+        with ThreadPoolExecutor(max_workers=len(unique_models)) as executor:
+            future_by_model = {
+                model: executor.submit(
+                    self.wait_idle,
+                    model=model,
+                    timeout=timeout,
+                    count=count,
+                    strict_timeout=strict_timeout,
+                )
+                for model in unique_models
+            }
+            for model, future in future_by_model.items():
+                try:
+                    future.result()
+                except JujuWaitTimeoutError as error:
+                    timeout_wait_states[model] = error.wait_state
+
+        if timeout_wait_states:
+            raise JujuWaitTimeoutError(wait_state=self._combine_wait_states(timeout_wait_states))
 
     def wait_application_settled(self, model: str, application: str, timeout: timedelta | None) -> None:
         self.wait(
@@ -257,18 +356,8 @@ class JubilantBackend(JujuCmdBackend):
             try:
                 self.status(model)
                 return
-            except jubilant.CLIError as e:
-                # Validate that the error is specifically about the model being missing
-                # e.stderr: 'ERROR model pytest-tmp-controller-n84qeh17:admin/debug-test-1 not found\n'
-                err_msg = e.stderr.lower()
-                is_missing = "not found" in err_msg and all(p in err_msg for p in model.lower().split(":"))
-                is_migrating = "has been migrated to controller" in err_msg or "migration in progress" in err_msg
-
-                if is_missing or is_migrating:
-                    pass
-                else:
-                    # Re-raise if it's a different type of CLI error (e.g., connection lost)
-                    raise
+            except TransientModelUnavailabilityError:
+                pass
 
             elapsed = datetime.now() - iteration_start
             time.sleep(max(0, (delay - elapsed).total_seconds()))
@@ -638,6 +727,19 @@ class JubilantBackend(JujuCmdBackend):
                 f"Set KUBECONFIG_{cloud.replace('-', '_')} to the kubeconfig path."
             )
         return path
+
+    def get_kubernetes_client_for_controller(self, controller: str) -> KubernetesClient | None:
+        """Return a KubernetesClient for a K8s controller's cloud, or None for machine controllers.
+
+        Cloud type is determined by querying Juju (show_model().type), never by
+        whether a kubeconfig was supplied. Returning None unambiguously means the
+        controller is machine-based. Client construction is delegated to
+        ``get_kubernetes_client``, which caches per cloud.
+        """
+        model_info = self.client.model(f"{controller}:controller").show_model()
+        if model_info.type != "kubernetes":
+            return None
+        return self.get_kubernetes_client(model_info.cloud)
 
     def reboot_model_controller(self, model: str) -> None:
         controller_name = self.status(model).model.controller

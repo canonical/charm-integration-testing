@@ -1,17 +1,5 @@
-# Copyright (C) 2026 Canonical Ltd
-
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
 
 import z3  # type: ignore[import-untyped]
 
@@ -34,6 +22,7 @@ from .assertion_tags import (
     EndpointCountMatchesIntegrationsTag,
     EndpointIntegratedMatchesCountTag,
     EndpointRespectsLimitTag,
+    IntegrationFeatureMismatchTag,
     SubordinateBaseMismatchTag,
 )
 from .charm import EndpointScope
@@ -327,17 +316,46 @@ def add_charm_metadata_constraints(solver: z3.Solver, domain: Domain) -> None:
     # (see SQT-1038 - cross-model integrations previously skipped this check, letting
     # the solver silently pair charms whose declared features didn't actually match).
     for integration in domain.charm_integrations:
-        req_ep = domain.charms[integration.requires_charm_id].endpoints[integration.requires_endpoint]
-        prov_ep = domain.charms[integration.provides_charm_id].endpoints[integration.provides_endpoint]
+        requires_charm = domain.charms[integration.requires_charm_id]
+        provides_charm = domain.charms[integration.provides_charm_id]
+        req_ep = requires_charm.endpoints[integration.requires_endpoint]
+        prov_ep = provides_charm.endpoints[integration.provides_endpoint]
+        requires_payload = _charm_endpoint_payload(
+            requires_charm, integration.requires_charm_id, integration.requires_endpoint
+        )
+        provides_payload = _charm_endpoint_payload(
+            provides_charm, integration.provides_charm_id, integration.provides_endpoint
+        )
         for f, f_var in req_ep.features.items():
             if f not in prov_ep.features:
-                solver.add(z3.Implies(integration.exists, z3.Not(f_var)))
+                solver.assert_and_track(
+                    z3.Implies(integration.exists, z3.Not(f_var)),
+                    IntegrationFeatureMismatchTag(
+                        requires=requires_payload,
+                        provides=provides_payload,
+                        feature=f,
+                    ).encode(),
+                )
             else:
                 # Both endpoints declare this feature: they must agree when integrated.
-                solver.add(z3.Implies(integration.exists, f_var == prov_ep.features[f]))
+                solver.assert_and_track(
+                    z3.Implies(integration.exists, f_var == prov_ep.features[f]),
+                    IntegrationFeatureMismatchTag(
+                        requires=requires_payload,
+                        provides=provides_payload,
+                        feature=f,
+                    ).encode(),
+                )
         for f, f_var in prov_ep.features.items():
             if f not in req_ep.features:
-                solver.add(z3.Implies(integration.exists, z3.Not(f_var)))
+                solver.assert_and_track(
+                    z3.Implies(integration.exists, z3.Not(f_var)),
+                    IntegrationFeatureMismatchTag(
+                        requires=requires_payload,
+                        provides=provides_payload,
+                        feature=f,
+                    ).encode(),
+                )
 
     # Config domain constraints: when a charm exists, its config variable must equal
     # one of the declared allowed values.
