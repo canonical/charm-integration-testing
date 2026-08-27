@@ -264,6 +264,10 @@ class TestLokiPushApiValidatorSimple:
         ready = next(c for c in result.checks if c.name.startswith("http_ready"))
         assert ready.passed
         assert "does not expose a Loki-compatible readiness endpoint" in ready.message
+        # The message must reference the /ready URL that 404'd and the distinct push URL that
+        # was actually probed — not conflate the two.
+        assert ready_url in ready.message
+        assert LOKI_URL in ready.message
         # One call for /ready (404), one for the push-endpoint probe; no retries.
         assert urlopen_mock.call_count == 2
         sleep_mock.assert_not_called()

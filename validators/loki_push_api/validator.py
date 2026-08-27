@@ -241,7 +241,7 @@ def _http_ready_checks(endpoint_infos: list[dict[str, Any]]) -> list[ValidationC
                     last_msg = f"Unexpected response {resp.status} from {ready_url}: {body[:200]}"
             except HTTPError as exc:
                 if exc.code == 404:
-                    passed, last_msg = _probe_push_endpoint(url, ssl_ctx)
+                    passed, last_msg = _probe_push_endpoint(url, ready_url, ssl_ctx)
                     break
                 last_msg = str(exc)
             except Exception as exc:
@@ -250,14 +250,14 @@ def _http_ready_checks(endpoint_infos: list[dict[str, Any]]) -> list[ValidationC
     return checks
 
 
-def _probe_push_endpoint(url: str, ssl_ctx: ssl.SSLContext | None = None) -> tuple[bool, str]:
+def _probe_push_endpoint(url: str, ready_url: str, ssl_ctx: ssl.SSLContext | None = None) -> tuple[bool, str]:
     """POST an empty-streams no-op payload to *url* to confirm the push route is live.
 
-    Only called when ``/ready`` 404s. A 404 there is ambiguous: push-only
-    forwarders (no ``/ready`` route) and fully broken/misconfigured endpoints
-    (404 on *every* route) look identical from that single signal alone. This
-    probe distinguishes them by exercising the actual advertised push route
-    with a harmless payload:
+    Only called when ``ready_url`` (``/ready``) 404s. A 404 there is ambiguous:
+    push-only forwarders (no ``/ready`` route) and fully broken/misconfigured
+    endpoints (404 on *every* route) look identical from that single signal
+    alone. This probe distinguishes them by exercising the actual advertised
+    push route with a harmless payload:
 
     * ``{"streams": []}`` is empty, so a compliant push receiver accepts it
       (200/204) without writing any log data — confirmed live against both
@@ -274,18 +274,19 @@ def _probe_push_endpoint(url: str, ssl_ctx: ssl.SSLContext | None = None) -> tup
     try:
         with urlopen(req, timeout=5, context=ssl_ctx) as resp:  # nosec B310
             return True, (
-                f"No '/ready' route at {url}, but push endpoint accepted an empty no-op push "
-                f"(HTTP {resp.status}); provider does not expose a Loki-compatible readiness "
-                "endpoint (push-only forwarder)."
+                f"No '/ready' route at {ready_url}, but push endpoint {url} accepted an empty "
+                f"no-op push (HTTP {resp.status}); provider does not expose a Loki-compatible "
+                "readiness endpoint (push-only forwarder)."
             )
     except HTTPError as exc:
         if exc.code == 404:
-            return False, f"Push endpoint {url} also returned 404; no working route found."
+            return False, f"Push endpoint {url} also returned 404 (no '/ready' route at {ready_url} either)."
         if 500 <= exc.code < 600:
             return False, f"Push endpoint {url} returned server error: {exc}"
         return True, (
-            f"No '/ready' route at {url}, but push endpoint is registered (HTTP {exc.code} {exc.reason}); "
-            "provider does not expose a Loki-compatible readiness endpoint (push-only forwarder)."
+            f"No '/ready' route at {ready_url}, but push endpoint {url} is registered "
+            f"(HTTP {exc.code} {exc.reason}); provider does not expose a Loki-compatible readiness "
+            "endpoint (push-only forwarder)."
         )
     except Exception as exc:
         return False, f"Error probing push endpoint {url}: {exc}"
