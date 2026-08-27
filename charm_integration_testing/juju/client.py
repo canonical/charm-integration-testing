@@ -10,6 +10,7 @@ from validators.base import ValidationResult
 from .backend import JujuBackend
 from .bundle_utils import parse_offers_from_bundle, strip_offers_from_bundle, strip_saas_from_bundle
 from .extension import JujuExtension
+from .handles import JujuModelHandle
 from .models import (
     JujuApplicationInfo,
     JujuConsumedOfferInfo,
@@ -47,7 +48,7 @@ class JujuClient:
         self.logger = logger
         self.extensions = extensions or []
 
-    def scale_application(self, application: str, num: int, model: str = "default") -> None:
+    def scale_application(self, application: str, num: int, model: JujuModelHandle) -> None:
         self.logger.info(f"Scaling application {application} to {num} units.")
         self.backend.scale_application(model, application, num)
 
@@ -55,7 +56,7 @@ class JujuClient:
         for extension in self.extensions:
             extension.post_scale(model)
 
-    def num_units(self, application: str, model: str = "default") -> int:
+    def num_units(self, application: str, model: JujuModelHandle) -> int:
         self.logger.info(f"Getting the number of units for {application}.")
         return self.backend.num_units(model, application)
 
@@ -69,7 +70,7 @@ class JujuClient:
     # Wait for the Juju model to become idle
     def idle_for_period(
         self,
-        model: str = "default",
+        model: JujuModelHandle,
         timeout: timedelta | None = None,
         count: int = 10,
         strict_timeout: bool = False,
@@ -79,7 +80,7 @@ class JujuClient:
 
     def multi_model_idle_for_period(
         self,
-        models: list[str],
+        models: list[JujuModelHandle],
         timeout: timedelta | None = None,
         count: int = 10,
         strict_timeout: bool = False,
@@ -94,28 +95,28 @@ class JujuClient:
             strict_timeout=strict_timeout,
         )
 
-    def print_status(self, model: str = "default") -> None:
+    def print_status(self, model: JujuModelHandle) -> None:
         separator = "-" * 80
-        info = f"Juju status for model '{model}'" if model != "default" else "Juju status"
+        info = f"Juju status for model '{model.uri}'"
         self.logger.info(f"{info}:\n{separator}\n{self.backend.juju_status_text(model)}{separator}")
 
-    def debug_log(self, model: str = "default") -> str:
+    def debug_log(self, model: JujuModelHandle) -> str:
         """Retrieve the Juju debug log for the model.
 
         Args:
-            model: Juju model name
+            model: Juju model reference
 
         Returns:
             Debug log content as a string
         """
-        self.logger.info(f"Collecting debug log from model {model}")
+        self.logger.info(f"Collecting debug log from model {model.uri}")
         return self.backend.debug_log(model)
 
     def integrate(
         self,
         endpoint_1: JujuIntegrationApplication,
         endpoint_2: JujuIntegrationApplication,
-        model: str = "default",
+        model: JujuModelHandle,
     ) -> None:
         self.logger.info(f"Integrating {endpoint_1} with {endpoint_2}.")
         self.backend.integrate(model, endpoint_1, endpoint_2)
@@ -124,7 +125,7 @@ class JujuClient:
         self,
         endpoint_1: JujuIntegrationApplication,
         endpoint_2: JujuIntegrationApplication,
-        model: str = "default",
+        model: JujuModelHandle,
     ) -> None:
         self.logger.info(f"Removing integration between {endpoint_1} and {endpoint_2}.")
         self.backend.remove_integration(model, endpoint_1, endpoint_2)
@@ -132,7 +133,7 @@ class JujuClient:
     def deploy_bundle_file(
         self,
         bundle: str,
-        model: str = "default",
+        model: JujuModelHandle,
     ) -> None:
         self.logger.info(f"Deploying bundle file: '{bundle}'")
         self.backend.deploy_bundle_file(model, bundle, trust=True, force=True)
@@ -143,7 +144,7 @@ class JujuClient:
 
     def deploy_bundles(
         self,
-        bundles: list[tuple[Path, str]],
+        bundles: list[tuple[Path, JujuModelHandle]],
         tmp_dir: Path,
     ) -> None:
         """Deploy one or more bundles using a two-phase strategy that handles CMR and Juju 4+.
@@ -164,15 +165,14 @@ class JujuClient:
         present from the between-phase step and re-declaring them would fail.
 
         Args:
-            bundles: List of ``(bundle_path, model_uri)`` pairs where *model_uri* has the form
-                     ``controller:model-name``.
+            bundles: List of ``(bundle_path, model)`` pairs.
             tmp_dir: Directory in which to write the transformed phase bundle files.
         """
         juju4 = self.cli_version() >= JujuVersion(4, 0, 0)
         tmp_dir.mkdir(parents=True, exist_ok=True)
 
         # Phase 1: deploy apps without any offers or saas consumption.
-        for i, (bundle_path, model_uri) in enumerate(bundles):
+        for i, (bundle_path, model) in enumerate(bundles):
             bundle_yaml = bundle_path.read_text(encoding="utf-8")
             if juju4:
                 # On Juju 4, also strip offers so that phase 1 is idempotent when offers
@@ -182,44 +182,44 @@ class JujuClient:
                 phase1_yaml = strip_saas_from_bundle(bundle_yaml)
             phase1_path = tmp_dir / f"apps-only-bundle-{i}.yaml"
             phase1_path.write_text(phase1_yaml, encoding="utf-8")
-            self.deploy_bundle_file(str(phase1_path), model=model_uri)
+            self.deploy_bundle_file(str(phase1_path), model=model)
 
         # Between phases (Juju 4+ only): create offers that do not yet exist.
         # juju offer fails if the offer already exists, so we check first and skip any that
         # are already in place from a prior deploy run.
         if juju4:
-            for bundle_path, model_uri in bundles:
+            for bundle_path, model in bundles:
                 bundle_yaml = bundle_path.read_text(encoding="utf-8")
                 offers = parse_offers_from_bundle(bundle_yaml)
                 if not offers:
                     continue
-                existing_offers = self.backend.list_offers(model_uri)
+                existing_offers = self.backend.list_offers(model)
                 for offer_name, offer_info in offers.items():
                     if offer_name in existing_offers:
-                        self.logger.info(f"Offer {offer_name} already exists in {model_uri}, skipping creation.")
+                        self.logger.info(f"Offer {offer_name} already exists in {model.uri}, skipping creation.")
                     else:
-                        self.logger.info(f"Creating offer {offer_name} ({offer_info.app}) in {model_uri}.")
-                        self.backend.create_offer(model_uri, offer_info.app, offer_info.endpoints, offer_name)
+                        self.logger.info(f"Creating offer {offer_name} ({offer_info.app}) in {model.uri}.")
+                        self.backend.create_offer(model, offer_info.app, offer_info.endpoints, offer_name)
 
         # Phase 2: re-deploy to establish cross-model relations via the saas sections.
         # On Juju 4+, strip offers from the bundles — the offers already exist from the
         # between-phase step and re-declaring them would fail.
-        for i, (bundle_path, model_uri) in enumerate(bundles):
+        for i, (bundle_path, model) in enumerate(bundles):
             if juju4:
                 bundle_yaml = bundle_path.read_text(encoding="utf-8")
                 phase2_yaml = strip_offers_from_bundle(bundle_yaml)
                 phase2_path = tmp_dir / f"phase2-bundle-{i}.yaml"
                 phase2_path.write_text(phase2_yaml, encoding="utf-8")
-                self.deploy_bundle_file(str(phase2_path), model=model_uri)
+                self.deploy_bundle_file(str(phase2_path), model=model)
             else:
-                self.deploy_bundle_file(str(bundle_path), model=model_uri)
+                self.deploy_bundle_file(str(bundle_path), model=model)
 
     def refresh_application(
         self,
         application: str,
+        model: JujuModelHandle,
         revision: int | None = None,
         channel: str | None = None,
-        model: str = "default",
     ) -> None:
         options: list[str] = []
         if revision is not None:
@@ -230,7 +230,7 @@ class JujuClient:
         self.logger.info(f"Refreshing application {application}{options_suffix}.")
         self.backend.refresh_application(model, application, revision=revision, channel=channel)
 
-    def remove_applications(self, *applications: str, model: str = "default") -> None:
+    def remove_applications(self, *applications: str, model: JujuModelHandle) -> None:
         # Call extensions
         for extension in self.extensions:
             extension.pre_remove(model, *applications)
@@ -238,7 +238,7 @@ class JujuClient:
         self.logger.info(f"Removing applications: {', '.join(applications)}.")
         self.backend.remove_applications(model, *applications)
 
-    def wait_for_removal(self, *applications: str, model: str = "default", timeout: timedelta | None = None) -> None:
+    def wait_for_removal(self, *applications: str, model: JujuModelHandle, timeout: timedelta | None = None) -> None:
         self.logger.info(
             f"{self._waiting_timeout_log(timeout)} for removal of application(s) {', '.join(applications)}."
         )
@@ -248,7 +248,7 @@ class JujuClient:
         self,
         endpoint_1: JujuIntegrationApplication,
         endpoint_2: JujuIntegrationApplication,
-        model: str = "default",
+        model: JujuModelHandle,
         timeout: timedelta | None = None,
     ) -> None:
         self.logger.info(
@@ -258,42 +258,44 @@ class JujuClient:
         self.backend.wait_for_removal_of_integration(model, endpoint_1, endpoint_2, timeout)
 
     def wait_for_removal_of_units(
-        self, *applications: str, model: str = "default", timeout: timedelta | None = None
+        self, *applications: str, model: JujuModelHandle, timeout: timedelta | None = None
     ) -> None:
         self.logger.info(
             f"{self._waiting_timeout_log(timeout)} for removal of all units of application(s) {', '.join(applications)}."
         )
         self.backend.wait_for_removal_of_units(model, list(applications), timeout)
 
-    def wait_for_model_to_exist(self, model: str = "default", timeout: timedelta | None = None) -> None:
-        self.logger.info(f"Waiting {self._waiting_timeout_log(timeout)} for model {model} to exist before continuing.")
+    def wait_for_model_to_exist(self, model: JujuModelHandle, timeout: timedelta | None = None) -> None:
+        self.logger.info(
+            f"Waiting {self._waiting_timeout_log(timeout)} for model {model.uri} to exist before continuing."
+        )
         self.backend.wait_for_model_to_exist(model=model, timeout=timeout)
 
-    def application_exists(self, application: str, model: str = "default") -> bool:
+    def application_exists(self, application: str, model: JujuModelHandle) -> bool:
         self.logger.info(f"Checking that application exists: {application}.")
         return application in self.backend.list_applications(model)
 
     def integration_exists(
-        self, application_1: str, endpoint_1: str, application_2: str, endpoint_2: str, model: str = "default"
+        self, application_1: str, endpoint_1: str, application_2: str, endpoint_2: str, model: JujuModelHandle
     ) -> bool:
         self.logger.info(
             f"Checking that integration exists: {application_1}:{endpoint_1}/{application_2}:{endpoint_2}."
         )
         return self.backend.integration_exists(application_1, endpoint_1, application_2, endpoint_2, model)
 
-    def list_applications(self, model: str = "default") -> dict[str, JujuApplicationInfo]:
+    def list_applications(self, model: JujuModelHandle) -> dict[str, JujuApplicationInfo]:
         self.logger.info("Getting list of applications.")
         return self.backend.list_applications(model)
 
-    def list_consumed_offers(self, model: str = "default") -> dict[str, JujuConsumedOfferInfo]:
+    def list_consumed_offers(self, model: JujuModelHandle) -> dict[str, JujuConsumedOfferInfo]:
         self.logger.info("Getting list of consumed offers.")
         return self.backend.list_consumed_offers(model)
 
-    def application_revision(self, application: str, model: str = "default") -> int:
+    def application_revision(self, application: str, model: JujuModelHandle) -> int:
         self.logger.info(f"Getting charm revision for application '{application}'.")
         applications = self.backend.list_applications(model)
         if application not in applications:
-            raise KeyError(f"Application '{application}' not found in model '{model}'")
+            raise KeyError(f"Application '{application}' not found in model '{model.uri}'")
         return applications[application].revision
 
     def wait_for_application_revision(
@@ -301,22 +303,22 @@ class JujuClient:
         application: str,
         expected_revision: int,
         timeout: timedelta | None,
-        model: str = "default",
+        model: JujuModelHandle,
     ) -> None:
         self.logger.info(
             f"Waiting {timeout} for application '{application}' to reach charm revision {expected_revision}."
         )
         self.backend.wait_for_application_revision(application, expected_revision, timeout, model)
 
-    def list_integrations(self, model: str = "default") -> set[JujuIntegration]:
+    def list_integrations(self, model: JujuModelHandle) -> set[JujuIntegration]:
         self.logger.info("Getting list of integrations.")
         return self.backend.list_integrations(model)
 
-    def reboot_model_controller(self, model: str = "default") -> None:
+    def reboot_model_controller(self, model: JujuModelHandle) -> None:
         self.logger.info("Restarting model controller.")
         return self.backend.reboot_model_controller(model)
 
-    def version(self, model: str = "default") -> JujuVersion:
+    def version(self, model: JujuModelHandle) -> JujuVersion:
         self.logger.info("Collecting Juju model version.")
         return self.backend.version(model)
 
@@ -324,19 +326,19 @@ class JujuClient:
         self.logger.info("Collecting Juju CLI version.")
         return self.backend.cli_version()
 
-    def upgrade_model(self, model: str, agent_version: str | None = None) -> None:
+    def upgrade_model(self, model: JujuModelHandle, agent_version: str | None = None) -> None:
         version_suffix = f" to agent version '{agent_version}'" if agent_version else ""
-        self.logger.info(f"Upgrading model '{model}'{version_suffix}.")
+        self.logger.info(f"Upgrading model '{model.uri}'{version_suffix}.")
         self.backend.upgrade_model(model=model, agent_version=agent_version)
 
-    def validate_model(self, model: str = "default", level: str = "simple") -> None:
+    def validate_model(self, model: JujuModelHandle, level: str = "simple") -> None:
         """Validate all applications in the model.
 
         In Phase 2, this will trigger the Ops framework's native validation.
         In Phase 1, this calls the backend (no-op) then extensions (actual work).
 
         Args:
-            model: Juju model name
+            model: Juju model reference
             level: Validation level ("simple" or "deep", default: "simple")
 
         Raises:
@@ -428,11 +430,8 @@ class JujuClient:
             extension.post_bootstrap_controller(controller)
 
     def add_model(self, controller: str, model: str, model_config: dict[str, str]) -> None:
-        self.logger.info(
-            f"Creating model '{model}' with configuration '{model_config}' on controller '{controller}' and switching to it."
-        )
+        self.logger.info(f"Creating model '{model}' with configuration '{model_config}' on controller '{controller}'.")
         self.backend.add_model(controller=controller, model=model, model_config=model_config)
-        self.backend.switch(controller=controller, model=model)
 
         # Call extensions
         for extension in self.extensions:

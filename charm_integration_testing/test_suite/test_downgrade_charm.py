@@ -4,7 +4,7 @@
 from datetime import timedelta
 
 import pytest
-from juju import JujuClient
+from juju import JujuClient, JujuModelHandle
 
 from .scheduler.states import State
 
@@ -13,7 +13,7 @@ from .scheduler.states import State
 def test_downgrade_charm(
     juju_client: JujuClient,
     target_downgrade_revision: int,
-    model: str,
+    target_model_ref: JujuModelHandle,
     target_charm: str,
     target_application: str,
     target_revision: int | None,
@@ -32,21 +32,21 @@ def test_downgrade_charm(
         application=target_application,
         revision=target_downgrade_revision,
         channel=target_channel,
-        model=model,
+        model=target_model_ref,
     )
     juju_client.wait_for_application_revision(
         application=target_application,
         expected_revision=target_downgrade_revision,
-        model=model,
+        model=target_model_ref,
         timeout=timedelta(minutes=5),
     )
-    juju_client.idle_for_period(model=model, timeout=timedelta(minutes=15))
+    juju_client.idle_for_period(model=target_model_ref, timeout=timedelta(minutes=15))
 
     # Verify the application is downgraded to the selected revision and the model is healthy
-    downgraded_revision = juju_client.application_revision(application=target_application, model=model)
+    downgraded_revision = juju_client.application_revision(application=target_application, model=target_model_ref)
     if downgraded_revision != target_downgrade_revision:
         pytest.fail(
             f"Expected '{target_application}' to be on downgraded revision "
             f"{target_downgrade_revision}, got {downgraded_revision}."
         )
-    juju_client.validate_model(model=model, level="simple")
+    juju_client.validate_model(model=target_model_ref, level="simple")
