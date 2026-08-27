@@ -273,6 +273,7 @@ class TestCrossModelAcyclicConstraints:
                             application="a",
                             endpoint="my-requires",
                             remote_model="model-b",
+                            remote_controller="ctrl",
                             remote_application="b",
                             remote_endpoint="my-provides",
                             offer_name="vault-offer",
