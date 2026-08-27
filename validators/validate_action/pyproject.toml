@@ -1,0 +1,33 @@
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+[project]
+name = "validators-validate-action"
+version = "0.1.0"
+description = "Runs endpoint validators at a user-chosen level for a charm's 'validate' action"
+authors = [
+    {name = "SQA Team", email = "solutionsqa@canonical.com"}
+]
+
+requires-python = ">=3.10"
+dependencies = [
+    "ops>=2.0.0",
+    "pydantic>=2.0.0",
+    "validators-base",
+    "validators-engine",
+]
+
+[project.optional-dependencies]
+dev = [
+    "validators-test-utils",
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["validators.validate_action"]
+
+[tool.setuptools.package-dir]
+"validators.validate_action" = "."
