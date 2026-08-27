@@ -9,6 +9,7 @@ import pytest
 from extensions.temporal.extension import (
     TemporalExtension,
 )
+from juju import JujuModelHandle
 from juju.backend import JujuBackend, JujuTask
 
 from ..shared import JujuStub as JujuStubBase
@@ -20,7 +21,7 @@ class JujuStub(JujuStubBase):
     unit_ips: dict[str, str] = field(default_factory=dict)  # {"temporal-app/leader": "10.0.0.1"})
     action_responses: list[JujuTask] = field(default_factory=list)
 
-    def run_action(self, model: str, unit: str, action: str, params: dict[str, Any]) -> JujuTask:
+    def run_action(self, model: "JujuModelHandle", unit: str, action: str, params: dict[str, Any]) -> JujuTask:
         """Mock running an action on a unit (captures call for verification)"""
         super().run_action(model, unit, action, params)
         return self.action_responses.pop(0)
@@ -36,7 +37,8 @@ class TestTemporalExtension:
         return TemporalExtension(juju, logging.getLogger("test"))
 
     class TestPostDeploy:
-        test_model = "test-model"
+        test_model = JujuModelHandle(controller="ctrl", model="test-model")
+        test_model_uri = "ctrl:test-model"
 
         def test_deploys_temporal_if_app_implicitly_requiring_it_is_present(
             self, extension: TemporalExtension, juju: JujuStub
@@ -58,7 +60,7 @@ class TestTemporalExtension:
             )
 
             # Also, prepping some config for the airbyte-k8s app to mock its default config pointing to temporal
-            juju.configured_applications.append((self.test_model, app_name, {"temporal-host": "temporal-k8s:7233"}))
+            juju.configured_applications.append((self.test_model_uri, app_name, {"temporal-host": "temporal-k8s:7233"}))
 
             # GIVEN a model with an airbyte-k8s application
             juju.applications = {app_name: charm_name}
@@ -66,9 +68,9 @@ class TestTemporalExtension:
             extension.post_deploy(self.test_model)
 
             # THEN temporal is deployed
-            assert (self.test_model, "temporal-k8s", None) in juju.deployed
-            assert (self.test_model, "temporal-admin-k8s", None) in juju.deployed
-            assert (self.test_model, "postgresql-k8s", None) in juju.deployed
+            assert (self.test_model_uri, "temporal-k8s", None) in juju.deployed
+            assert (self.test_model_uri, "temporal-admin-k8s", None) in juju.deployed
+            assert (self.test_model_uri, "postgresql-k8s", None) in juju.deployed
 
             # ...Also, let's verify the actions we expect to have been called.
             assert len(juju.actions) >= 2, "Expected at least two actions to have been run"

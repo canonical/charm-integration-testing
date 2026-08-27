@@ -5,7 +5,7 @@
 from datetime import timedelta
 
 import pytest
-from juju import JujuClient, JujuIntegrationApplication
+from juju import JujuClient, JujuIntegrationApplication, JujuModelHandle
 
 from .scheduler.states import State
 
@@ -13,23 +13,20 @@ from .scheduler.states import State
 @pytest.mark.state(requires=State.DEPLOYED)
 def test_remove_and_restore_integration(
     juju_client: JujuClient,
-    integration_controller: str,
-    integration_model: str,
+    integration_model_ref: JujuModelHandle,
     integration_endpoint_1: JujuIntegrationApplication,
     integration_endpoint_2: JujuIntegrationApplication,
 ) -> None:
-    model_uri = f"{integration_controller}:{integration_model}"
-
     # Break relation
     juju_client.remove_integration(
-        model=model_uri,
+        model=integration_model_ref,
         endpoint_1=integration_endpoint_1,
         endpoint_2=integration_endpoint_2,
     )
 
     # Wait until integration is gone
     juju_client.wait_for_removal_of_integration(
-        model=model_uri,
+        model=integration_model_ref,
         endpoint_1=integration_endpoint_1,
         endpoint_2=integration_endpoint_2,
         timeout=timedelta(minutes=10),
@@ -37,13 +34,13 @@ def test_remove_and_restore_integration(
 
     # Re-add integration
     juju_client.integrate(
-        model=model_uri,
+        model=integration_model_ref,
         endpoint_1=integration_endpoint_1,
         endpoint_2=integration_endpoint_2,
     )
 
     # Wait to become idle
-    juju_client.idle_for_period(model=model_uri, timeout=timedelta(minutes=15))
+    juju_client.idle_for_period(model=integration_model_ref, timeout=timedelta(minutes=15))
 
     # Validate all applications and relations
-    juju_client.validate_model(model=model_uri, level="simple")
+    juju_client.validate_model(model=integration_model_ref, level="simple")
