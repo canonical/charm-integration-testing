@@ -19,7 +19,10 @@ def test_live_network_isolation(
     target_application: str,
 ) -> None:
     if chaos_client is None:
-        pytest.fail("ChaosClient was not instantiated correctly. Is KUBECONFIG set?")
+        pytest.fail(
+            "ChaosClient fixture is None: no kubeconfig for the target cloud. "
+            "Set KUBECONFIG_<cloud> for it (e.g. KUBECONFIG_local_k8s)."
+        )
 
     unit = f"{target_application}/0"
 
