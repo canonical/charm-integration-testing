@@ -5,7 +5,7 @@ from datetime import timedelta
 
 import pytest
 from chaos_client import ChaosClient
-from juju import JujuClient, JujuWaitTimeoutError
+from juju import JujuClient, JujuModelHandle, JujuWaitTimeoutError
 
 from .scheduler.states import State
 
@@ -15,7 +15,7 @@ def test_live_network_isolation(
     juju_client: JujuClient,
     _is_running_on_kubernetes: None,
     chaos_client: ChaosClient | None,
-    model: str,
+    target_model_ref: JujuModelHandle,
     target_application: str,
 ) -> None:
     if chaos_client is None:
@@ -24,18 +24,18 @@ def test_live_network_isolation(
     unit = f"{target_application}/0"
 
     try:
-        chaos_client.isolate_network(model=model, unit=unit)
+        chaos_client.isolate_network(model=target_model_ref.model, unit=unit)
         try:
             # Debounced against update-status blips; fails immediately if the Juju agent disconnects.
-            juju_client.unhealthy_for_period(target_application, model=model, timeout=timedelta(minutes=10))
+            juju_client.unhealthy_for_period(target_application, model=target_model_ref, timeout=timedelta(minutes=10))
         except JujuWaitTimeoutError as exc:
             if exc.wait_state.message == "Juju agent disconnected":
                 raise
             # Still active at timeout; validators are the ground truth for workload health.
-            juju_client.validate_model(model=model, level="deep")
+            juju_client.validate_model(model=target_model_ref, level="deep")
     finally:
-        chaos_client.remove_network_isolation(model=model, unit=unit)
+        chaos_client.remove_network_isolation(model=target_model_ref.model, unit=unit)
 
     # Wait for self-recovery
-    juju_client.idle_for_period(model=model, timeout=timedelta(minutes=15))
-    juju_client.validate_model(model=model, level="simple")
+    juju_client.idle_for_period(model=target_model_ref, timeout=timedelta(minutes=15))
+    juju_client.validate_model(model=target_model_ref, level="simple")

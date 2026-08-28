@@ -153,6 +153,7 @@ def juju_backend(cloud_kubeconfigs: dict[str, Path]) -> JujuBackend:
 def kubernetes_client(
     cloud_kubeconfigs: dict[str, Path],
     target_cloud: str,
+    target_controller: str,
     logger: logging.Logger,
     juju_backend: JujuBackend,
 ) -> KubernetesClient | None:
@@ -163,7 +164,7 @@ def kubernetes_client(
     return KubernetesClient(
         KubernetesBackend.k8s_client(kubeconfig=path),
         logger=logger,
-        extensions=[UnsealVaultK8sJujuExtension(juju_backend, logger)],
+        extensions=[UnsealVaultK8sJujuExtension(juju_backend, target_controller, logger)],
     )
 
 
@@ -257,6 +258,7 @@ def register_preexisting_resources(
 @pytest.fixture
 def juju_client(
     juju_backend: JujuBackend,
+    target_controller: str,
     logger: logging.Logger,
     minio_client_file: Path | None,
     minio_server_file: Path | None,
@@ -275,7 +277,7 @@ def juju_client(
             PostgresqlK8sDatabaseReplicationExtension(juju_backend, logger),
             S3IntegratorMinIOBackendExtension(juju_backend, logger, minio_client_file, minio_server_file),
             UnsealVaultJujuExtension(juju_backend, logger),
-            UnsealVaultK8sJujuExtension(juju_backend, logger),
+            UnsealVaultK8sJujuExtension(juju_backend, target_controller, logger),
             ValidatorInjectorExtension(validators_path, juju_backend, logger, uv_file),
             JujuResourceRegistryExtension(juju_backend, session_resource_registry),
         ],
@@ -586,15 +588,15 @@ def target_platform(request: pytest.FixtureRequest) -> str:
 
 
 @pytest.fixture
-def target_juju_version(juju_backend: JujuBackend, model: str) -> JujuVersion:
-    return juju_backend.version(model)
+def target_juju_version(juju_backend: JujuBackend, target_model_ref: JujuModelHandle) -> JujuVersion:
+    return juju_backend.version(target_model_ref)
 
 
 @pytest.fixture
-def neighbor_juju_version(juju_backend: JujuBackend, neighbor_model: str | None) -> JujuVersion | None:
-    if neighbor_model is None:
+def neighbor_juju_version(juju_backend: JujuBackend, neighbor_model_ref: JujuModelHandle | None) -> JujuVersion | None:
+    if neighbor_model_ref is None:
         return None
-    return juju_backend.version(neighbor_model)
+    return juju_backend.version(neighbor_model_ref)
 
 
 @pytest.fixture
@@ -722,9 +724,9 @@ def print_setup_and_teardown_info(
         for handle in session_resource_registry.registered_handles():
             if isinstance(handle, JujuModelHandle):
                 try:
-                    juju_client.print_status(model=f"{handle.controller}:{handle.model}")
+                    juju_client.print_status(model=handle)
                 except Exception:
-                    logger.warning(f"Failed to print status for model '{handle.controller}:{handle.model}'")
+                    logger.warning(f"Failed to print status for model '{handle.uri}'")
 
     # Print starting state for all registered models
     _print_all_model_statuses()
@@ -807,7 +809,7 @@ def record_warning_execution_metadata(execution_metadata: Callable[[str, str | i
 
 
 def record_charm_info_execution_metadata_instantaneous(
-    juju_client: JujuClient, model: str, execution_metadata: Callable[[str, str], None]
+    juju_client: JujuClient, model: JujuModelHandle, execution_metadata: Callable[[str, str], None]
 ) -> None:
     # Get all charm version information
     applications = juju_client.list_applications(model=model)
@@ -860,9 +862,7 @@ def record_charm_info_execution_metadata(
     def _record_all() -> None:
         for handle in session_resource_registry.registered_handles():
             if isinstance(handle, JujuModelHandle):
-                record_charm_info_execution_metadata_instantaneous(
-                    juju_client, f"{handle.controller}:{handle.model}", execution_metadata
-                )
+                record_charm_info_execution_metadata_instantaneous(juju_client, handle, execution_metadata)
 
     # Save all charms and revisions at start of test
     _record_all()
@@ -1128,7 +1128,7 @@ def record_juju_execution_metadata(
     # Save Juju version for each registered model
     for handle in session_resource_registry.registered_handles():
         if isinstance(handle, JujuModelHandle):
-            execution_metadata("juju:version", str(juju_client.version(f"{handle.controller}:{handle.model}")))
+            execution_metadata("juju:version", str(juju_client.version(handle)))
 
 
 @pytest.fixture
@@ -1174,8 +1174,8 @@ def record_pipeline_version_execution_metadata(
 
 
 @pytest.fixture
-def _is_running_on_kubernetes(juju_backend: JujuBackend, model: str) -> None:
-    if not juju_backend.is_k8s_model(model):
+def _is_running_on_kubernetes(juju_backend: JujuBackend, target_model_ref: JujuModelHandle) -> None:
+    if not juju_backend.is_k8s_model(target_model_ref):
         pytest.skip("Not running on kubernetes.")
 
 
@@ -1266,7 +1266,7 @@ def target_upgrade_version(
     the current controller.
     """
     explicit = request.config.getoption("--juju-upgrade-target-version")
-    controller_model = f"{target_controller}:controller"
+    controller_model = JujuModelHandle(controller=target_controller, model="controller")
     current = juju_client.version(controller_model)
     logger.info(f"Current Juju controller version: {current} (CLI: {juju_cli_version})")
 

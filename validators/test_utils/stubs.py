@@ -16,7 +16,13 @@ class SecretStub:
 
 
 class ApplicationStub:
-    """Stub for ops.Application"""
+    """Stub for ops.Application.
+
+    A plain class (not dataclass) so that instances are hashable by identity,
+    matching the behaviour of real ops.Application objects used as relation.data keys."""
+
+    def __init__(self, name: str = "app") -> None:
+        self.name = name
 
 
 class UnitStub:
@@ -94,6 +100,7 @@ class CharmBaseStub:
     meta: CharmMetaStub = field(default_factory=CharmMetaStub)
     model: ModelStub = field(default_factory=ModelStub)
     unit: UnitStub = field(default_factory=lambda: UnitStub("app/0"))
+    app: ApplicationStub = field(default_factory=ApplicationStub)
 
     @property
     def requested_ids(self) -> list[str]:
