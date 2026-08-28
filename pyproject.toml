@@ -41,6 +41,7 @@ validators-ingress = { path = "./validators/ingress", develop = true }
 validators-ingress-auth = { path = "./validators/ingress_auth", develop = true, extras = ["dev"] }
 validators-prometheus-remote-write = { path = "./validators/prometheus_remote_write", develop = true }
 validators-certificate-transfer = { path = "./validators/certificate_transfer", develop = true, extras = ["dev"] }
+validators-cross-model-mesh = { path = "./validators/cross_model_mesh", develop = true, extras = ["dev"] }
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
