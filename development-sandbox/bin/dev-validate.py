@@ -4,7 +4,7 @@
 # This script is designed to run INSIDE the sandbox VM.
 #
 # Usage:
-#   dev-validate --app <app> [--model <model>] [--level simple] [--reinstall]
+#   dev-validate --app <app> [--model <model>] [--controller <controller>] [--level simple] [--reinstall]
 #
 # --reinstall  Delete the remote validator venv before injecting, forcing a
 #              full reinstall. Use this after editing validator source code.
@@ -37,6 +37,23 @@ VALIDATORS_DIR = PROJECT_ROOT / "validators"
 STATIC_UV = PROJECT_ROOT / "static" / "uv"
 
 
+def resolve_controller(explicit: str | None) -> str:
+    """Return the given controller, or fall back to Juju's active controller."""
+    if explicit:
+        return explicit
+    out = subprocess.run(
+        ["juju", "whoami", "--format=json"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    controller = json.loads(out.stdout).get("controller")
+    if not controller:
+        print("ERROR: no active Juju controller; pass --controller explicitly", file=sys.stderr)
+        sys.exit(1)
+    return controller
+
+
 def print_results(results: dict) -> None:
     for unit, unit_results in results.items():
         print(f"\n{'='*60}")
@@ -64,6 +81,11 @@ def print_results(results: dict) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Inject and run validators on a Juju application's units.")
     parser.add_argument("--model", default="testing", help="Juju model name (default: testing)")
+    parser.add_argument(
+        "--controller",
+        default=None,
+        help="Juju controller the model lives on (default: current active controller)",
+    )
     parser.add_argument("--app", required=True, help="Application name to validate (e.g. postgresql-k8s)")
     parser.add_argument(
         "--level",
@@ -90,6 +112,7 @@ def main() -> None:
             ValidatorInjectorExtension,
             remote_validators_path,
         )
+        from charm_integration_testing.juju import JujuModelHandle
         from charm_integration_testing.juju_jubilant.backend import JubilantBackend
     except ImportError as exc:
         print(f"ERROR: Could not import project packages: {exc}", file=sys.stderr)
@@ -97,14 +120,15 @@ def main() -> None:
         sys.exit(1)
 
     backend = JubilantBackend()
+    model = JujuModelHandle(controller=resolve_controller(args.controller), model=args.model)
 
     if args.reinstall:
         logger.info("Removing remote validator venv on all units of '%s'...", args.app)
-        is_k8s = backend.is_k8s_model(args.model)
+        is_k8s = backend.is_k8s_model(model)
         rm_cmd = f"rm -rf {remote_validators_path}" if is_k8s else f"sudo rm -rf {remote_validators_path}"
-        for unit in backend.application_units(args.model, args.app):
+        for unit in backend.application_units(model, args.app):
             logger.debug("  %s on %s", rm_cmd, unit)
-            backend.ssh(args.model, unit, rm_cmd)
+            backend.ssh(model, unit, rm_cmd)
 
     uv_file = STATIC_UV if STATIC_UV.exists() else None
     extension = ValidatorInjectorExtension(
@@ -115,7 +139,7 @@ def main() -> None:
     )
 
     logger.info("Running validators on %s (model=%s, level=%s)...", args.app, args.model, args.level)
-    results = extension.post_validate(args.model, args.app, args.level)
+    results = extension.post_validate(model, args.app, args.level)
     print_results(results)
 
 
