@@ -16,6 +16,8 @@ def test_remove_and_restore_integration(
     integration_model_ref: JujuModelHandle,
     integration_endpoint_1: JujuIntegrationApplication,
     integration_endpoint_2: JujuIntegrationApplication,
+    target_model_ref: JujuModelHandle,
+    neighbor_model_ref: JujuModelHandle | None,
 ) -> None:
     # Break relation
     juju_client.remove_integration(
@@ -39,8 +41,18 @@ def test_remove_and_restore_integration(
         endpoint_2=integration_endpoint_2,
     )
 
-    # Wait to become idle
-    juju_client.idle_for_period(model=integration_model_ref, timeout=timedelta(minutes=15))
+    # For CMR integrations, the provider side databag is populated by a unit agent that lives in
+    # a different model to the one that owns the integration. Waiting for idle only on
+    # `integration_model_ref` can race with that other model's agent still being "executing" when
+    # validate_model runs, so wait for every model involved (target and, if present, neighbor)
+    # to settle before validating.
+    model_refs = {integration_model_ref, target_model_ref}
+    if neighbor_model_ref is not None:
+        model_refs.add(neighbor_model_ref)
+    sorted_model_refs = sorted(model_refs, key=lambda m: m.uri)
 
-    # Validate all applications and relations
-    juju_client.validate_model(model=integration_model_ref, level="simple")
+    juju_client.multi_model_idle_for_period(sorted_model_refs, timeout=timedelta(minutes=15))
+
+    # Validate all applications and relations in every involved model
+    for model_ref in sorted_model_refs:
+        juju_client.validate_model(model=model_ref, level="simple")
