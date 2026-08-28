@@ -16,6 +16,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 # Derive project root from this script's location: <project>/development-sandbox/bin/dev-validate.py
 PROJECT_ROOT = Path(os.environ.get("PROJECT_ROOT", str(Path(__file__).parent.parent.parent)))
@@ -47,14 +48,15 @@ def resolve_controller(explicit: str | None) -> str:
         text=True,
         check=True,
     )
-    controller = json.loads(out.stdout).get("controller")
+    data: dict[str, str] = json.loads(out.stdout)
+    controller = data.get("controller")
     if not controller:
         print("ERROR: no active Juju controller; pass --controller explicitly", file=sys.stderr)
         sys.exit(1)
     return controller
 
 
-def print_results(results: dict) -> None:
+def print_results(results: dict[str, list[Any]]) -> None:
     for unit, unit_results in results.items():
         print(f"\n{'='*60}")
         print(f"Unit: {unit}")
