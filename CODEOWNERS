@@ -11,7 +11,7 @@
 *.py             @canonical/solutions-qa-python
 
 # --- Narrow ownership by directory ---
-/bundle_builder_x/           @rpbritton @LucasPluta
+/bundle_builder_x/           @rpbritton @LucasPluta @motjuste
 /charm_integration_testing/  @rpbritton @moisesbenzan @PeishuoCai @yjkim717
 /development-sandbox/         @rpbritton @LucasPluta
 /docs/                       @rpbritton @PeishuoCai
