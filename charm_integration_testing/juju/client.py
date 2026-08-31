@@ -164,6 +164,9 @@ class JujuClient:
         definitions are stripped from the phase-2 bundles because the offers are already
         present from the between-phase step and re-declaring them would fail.
 
+        Extensions are only invoked once per model, after phase 2, so they never see the
+        deliberately incomplete phase-1 topology.
+
         Args:
             bundles: List of ``(bundle_path, model)`` pairs.
             tmp_dir: Directory in which to write the transformed phase bundle files.
@@ -182,7 +185,8 @@ class JujuClient:
                 phase1_yaml = strip_saas_from_bundle(bundle_yaml)
             phase1_path = tmp_dir / f"apps-only-bundle-{i}.yaml"
             phase1_path.write_text(phase1_yaml, encoding="utf-8")
-            self.deploy_bundle_file(str(phase1_path), model=model)
+            self.logger.info(f"Deploying bundle file: '{phase1_path}'")
+            self.backend.deploy_bundle_file(model, str(phase1_path), trust=True, force=True)
 
         # Between phases (Juju 4+ only): create offers that do not yet exist.
         # juju offer fails if the offer already exists, so we check first and skip any that
@@ -210,9 +214,17 @@ class JujuClient:
                 phase2_yaml = strip_offers_from_bundle(bundle_yaml)
                 phase2_path = tmp_dir / f"phase2-bundle-{i}.yaml"
                 phase2_path.write_text(phase2_yaml, encoding="utf-8")
-                self.deploy_bundle_file(str(phase2_path), model=model)
+                self.logger.info(f"Deploying bundle file: '{phase2_path}'")
+                self.backend.deploy_bundle_file(model, str(phase2_path), trust=True, force=True)
             else:
-                self.deploy_bundle_file(str(bundle_path), model=model)
+                self.logger.info(f"Deploying bundle file: '{bundle_path}'")
+                self.backend.deploy_bundle_file(model, str(bundle_path), trust=True, force=True)
+
+        # Call extensions once per model, now that every model reflects its final, fully-related
+        # topology (dict.fromkeys preserves first-seen order while de-duplicating models).
+        for model in dict.fromkeys(model for _, model in bundles):
+            for extension in self.extensions:
+                extension.post_deploy(model)
 
     def refresh_application(
         self,

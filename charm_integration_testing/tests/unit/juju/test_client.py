@@ -766,6 +766,10 @@ class HookRecordingExtension(JujuExtension):
     post_bootstrap_calls: list[str] = field(default_factory=list)
     pre_kill_calls: list[str] = field(default_factory=list)
     post_migrate_calls: list[tuple[str, str, str]] = field(default_factory=list)
+    post_deploy_calls: list[JujuModelHandle] = field(default_factory=list)
+
+    def post_deploy(self, model: JujuModelHandle) -> None:
+        self.post_deploy_calls.append(model)
 
     def post_bootstrap_controller(self, controller: str) -> None:
         self.post_bootstrap_calls.append(controller)
@@ -949,8 +953,8 @@ _EP2 = JujuIntegrationApplication("neighbor-offer", "grafana-dashboard")
 _MODEL = JujuModelHandle(controller="ctrl-a", model="model-a")
 
 
-def _client(backend: NullJujuBackend) -> JujuClient:
-    return JujuClient(backend, LoggerStub(), [])  # type: ignore[arg-type]
+def _client(backend: NullJujuBackend, extensions: list[JujuExtension] | None = None) -> JujuClient:
+    return JujuClient(backend, LoggerStub(), extensions or [])  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------
@@ -1123,3 +1127,66 @@ class TestDeployBundles:
         # Phase 2: offers-stripped bundles
         assert deploy_calls[2] == ("deploy", "ctrl:model-a", str(tmp_path / "phase2-bundle-0.yaml"))
         assert deploy_calls[3] == ("deploy", "ctrl:model-b", str(tmp_path / "phase2-bundle-1.yaml"))
+
+    def test_extensions_fire_once_per_model_after_phase2(self, tmp_path: Path) -> None:
+        # GIVEN a CMR-style deploy across two models with an extension attached
+        bundle_a = tmp_path / "bundle_a.yaml"
+        bundle_b = tmp_path / "bundle_b.yaml"
+        bundle_a.write_text(_BUNDLE_WITH_OFFERS)
+        bundle_b.write_text(_BUNDLE_WITH_OFFERS)
+        model_a = JujuModelHandle(controller="ctrl", model="model-a")
+        model_b = JujuModelHandle(controller="ctrl", model="model-b")
+        backend = DeployBundlesBackendStub(juju_version=JujuVersion(4, 0, 0))
+        ext = HookRecordingExtension()
+
+        # WHEN deploying both bundles
+        _client(backend, [ext]).deploy_bundles(
+            [(bundle_a, model_a), (bundle_b, model_b)],
+            tmp_path,
+        )
+
+        # THEN post_deploy fired exactly once per model, not once per phase
+        assert ext.post_deploy_calls == [model_a, model_b]
+
+    def test_extensions_do_not_fire_after_phase1_or_between_phases(self, tmp_path: Path) -> None:
+        # GIVEN a CMR-style deploy with an extension that records call order relative to backend
+        bundle_path = tmp_path / "bundle.yaml"
+        bundle_path.write_text(_BUNDLE_WITH_OFFERS)
+        model = JujuModelHandle(controller="ctrl", model="model")
+        order: list[str] = []
+
+        @dataclass
+        class OrderedDeployBackend(DeployBundlesBackendStub):
+            def deploy_bundle_file(
+                self,
+                model: JujuModelHandle,
+                bundle: str,
+                timeout: timedelta | None = None,
+                trust: bool = False,
+                force: bool = False,
+            ) -> None:
+                order.append(f"deploy:{bundle}")
+                super().deploy_bundle_file(model, bundle, timeout, trust, force)
+
+            def create_offer(self, model: JujuModelHandle, app: str, endpoints: list[str], offer_name: str) -> None:
+                order.append("create_offer")
+                super().create_offer(model, app, endpoints, offer_name)
+
+        class OrderRecordingExtension(HookRecordingExtension):
+            def post_deploy(self, model: JujuModelHandle) -> None:
+                order.append("post_deploy")
+                super().post_deploy(model)
+
+        backend = OrderedDeployBackend(juju_version=JujuVersion(4, 0, 0))
+        ext = OrderRecordingExtension()
+
+        # WHEN deploying a single CMR-style bundle
+        _client(backend, [ext]).deploy_bundles([(bundle_path, model)], tmp_path)
+
+        # THEN post_deploy only appears once, after every deploy/create_offer call
+        assert order == [
+            f"deploy:{tmp_path / 'apps-only-bundle-0.yaml'}",
+            "create_offer",
+            f"deploy:{tmp_path / 'phase2-bundle-0.yaml'}",
+            "post_deploy",
+        ]

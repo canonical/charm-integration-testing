@@ -173,9 +173,10 @@ class VaultUnsealer:
 
         # Determine current state up front. Initialization is only the first of three steps
         # (init, unseal, authorize), and this method can be called more than once against the
-        # same vault - deploy_bundles() invokes post_deploy() once per deploy phase (e.g. twice
-        # on Juju 4+). See issue #797, where an early return on this check left the charm
-        # permanently stuck on "Please authorize charm" after a second call.
+        # same vault - e.g. a second deploy_bundles() call against an already-deployed model,
+        # or post_scale()/post_migrate_model() running after post_deploy(). See issue #797,
+        # where an early return on this check left the charm permanently stuck on "Please
+        # authorize charm" after a second call.
         already_initialized = self.vault.status(model, leader_unit).initialized
 
         if already_initialized:
