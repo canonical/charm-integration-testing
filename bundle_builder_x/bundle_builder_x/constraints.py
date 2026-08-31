@@ -30,7 +30,6 @@ from .domain import (
     Domain,
     DomainApplicationIntegration,
     DomainCharm,
-    DomainCharmConfig,
     DomainCharmIntegration,
     ModelRef,
 )
@@ -69,24 +68,6 @@ def _charm_endpoints_from_integration(integration: DomainCharmIntegration) -> li
             charm_name="", charm_id=integration.provides_charm_id, endpoint=integration.provides_endpoint
         ),
     ]
-
-
-def _unset_config_constraint(cfg: DomainCharmConfig, value_constraint: z3.BoolRef) -> z3.BoolRef:
-    """Return the constraint that models an optional config key being left unset.
-
-    An unset key is omitted from the generated bundle, so the deployed charm uses
-    its Charmhub default.  Pinning the value variable to that default keeps the
-    solver's view consistent with what is actually emitted.
-
-    When the charm declares no default, the value is simply absent, so the
-    variable is instead forbidden from equalling any declared allowed value.  For
-    a boolean key whose allowed values cover both ``True`` and ``False`` this is
-    unsatisfiable, which correctly forces the key to be set explicitly whenever a
-    constraint depends on it.
-    """
-    if cfg.default is not None:
-        return config_value_to_z3(cfg.var, cfg.default)
-    return z3.Not(value_constraint)
 
 
 def add_application_constraints(solver: z3.Solver, domain: Domain) -> None:
@@ -394,12 +375,15 @@ def add_charm_metadata_constraints(solver: z3.Solver, domain: Domain) -> None:
                     # that default.  Leaving it unconstrained lets a DSL constraint such as
                     # `config[role] == "shard"` be satisfied by a value that is never
                     # written out, producing a bundle that violates its own override.
-                    solver.add(
-                        z3.Implies(
-                            z3.And(charm.exists, z3.Not(cfg.isset_var)),
-                            _unset_config_constraint(cfg, value_constraint),
+                    # Keys with no default have no value at all when unset; those are
+                    # handled in dsl_lowering, which makes comparisons against them false.
+                    if cfg.default is not None:
+                        solver.add(
+                            z3.Implies(
+                                z3.And(charm.exists, z3.Not(cfg.isset_var)),
+                                config_value_to_z3(cfg.var, cfg.default),
+                            )
                         )
-                    )
                 else:
                     # Config is always required when the charm exists.
                     solver.add(z3.Implies(charm.exists, value_constraint))
@@ -417,12 +401,17 @@ def add_charm_metadata_constraints(solver: z3.Solver, domain: Domain) -> None:
                     # Resource is optional (None is an allowed value).  The value constraint
                     # only applies when isset_var is True.
                     solver.add(z3.Implies(z3.And(charm.exists, res.isset_var), value_constraint))
-                    # As with configs, an unset resource must model its default rather than
-                    # float free, so constraints cannot match a value that is never emitted.
-                    unset_constraint = (
-                        res.var == z3.StringVal(res.default) if res.default is not None else z3.Not(value_constraint)
-                    )
-                    solver.add(z3.Implies(z3.And(charm.exists, z3.Not(res.isset_var)), unset_constraint))
+                    # As with configs, an unset resource that has a default must model that
+                    # default rather than float free, so constraints cannot match a value
+                    # that is never emitted.  Resources with no default are handled in
+                    # dsl_lowering, which makes comparisons against them false.
+                    if res.default is not None:
+                        solver.add(
+                            z3.Implies(
+                                z3.And(charm.exists, z3.Not(res.isset_var)),
+                                res.var == z3.StringVal(res.default),
+                            )
+                        )
                 else:
                     # Resource is always required when the charm exists.
                     solver.add(z3.Implies(charm.exists, value_constraint))

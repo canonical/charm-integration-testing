@@ -559,6 +559,31 @@ def _is_self_channel_expr(expr: AnyExpr) -> bool:
     return isinstance(expr, (TracksExpr, RisksExpr, ChannelsExpr, RevisionsExpr)) and isinstance(expr.arg, SelfExpr)
 
 
+def _absent_value_guard(expr: AnyExpr, ctx: LoweringContext) -> z3.BoolRef | None:
+    """Return the ``is_set`` guard for an operand with no value when unset.
+
+    A config or resource key that is optional and has no Charmhub default has no
+    value at all when left unset, and unset keys are omitted from the generated
+    bundle.  Comparing such an operand must therefore not be satisfiable by
+    whatever the solver happens to pick for its value variable, or the solver
+    would reason about a value that is never deployed.
+
+    Returns the key's ``is_set`` bool when the operand is such a key, else None.
+    Keys that do have a default need no guard: their value variable is pinned to
+    that default when unset, which is exactly what the charm will use.
+    """
+    match expr:
+        case ConfigExpr(key=key):
+            cfg = ctx.domain_charm.config.get(key)
+            if cfg is not None and cfg.var is not None and cfg.isset_var is not None and cfg.default is None:
+                return cfg.isset_var
+        case ResourceExpr(key=key):
+            res = ctx.domain_charm.resources.get(key)
+            if res is not None and res.var is not None and res.isset_var is not None and res.default is None:
+                return res.isset_var
+    return None
+
+
 def _lower_compare(
     op: str,
     left: AnyExpr,
@@ -611,19 +636,26 @@ def _lower_compare(
     # Numeric / string / RUNTIME scalar comparisons
     l_z3 = l_lowered if isinstance(l_lowered, z3.ExprRef) else _lower_as_z3(left, ctx)
     r_z3 = r_lowered if isinstance(r_lowered, z3.ExprRef) else _lower_as_z3(right, ctx)
+    # An operand with no value when unset makes the whole comparison false, so a
+    # constraint can never be satisfied by a key that is omitted from the bundle.
+    guards = [g for g in (_absent_value_guard(left, ctx), _absent_value_guard(right, ctx)) if g is not None]
+
+    def _guarded(result: z3.BoolRef) -> z3.BoolRef:
+        return z3.And(*guards, result) if guards else result
+
     match op:
         case "==":
-            return l_z3 == r_z3
+            return _guarded(l_z3 == r_z3)
         case "!=":
-            return l_z3 != r_z3
+            return _guarded(l_z3 != r_z3)
         case "<":
-            return l_z3 < r_z3
+            return _guarded(l_z3 < r_z3)
         case "<=":
-            return l_z3 <= r_z3
+            return _guarded(l_z3 <= r_z3)
         case ">":
-            return l_z3 > r_z3
+            return _guarded(l_z3 > r_z3)
         case ">=":
-            return l_z3 >= r_z3
+            return _guarded(l_z3 >= r_z3)
 
     raise DSLLoweringError(f"Unknown comparison operator: {op!r}")  # pragma: no cover
 

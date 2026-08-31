@@ -151,3 +151,77 @@ class TestOptionalConfigInConstraints:
                     ),
                 ],
             )
+
+
+class TestComparisonsAgainstAbsentValues:
+    """A key with no default has no value when unset, so comparisons must be false."""
+
+    def test_comparison_to_value_outside_allowed_list_is_rejected(self) -> None:
+        # GIVEN a charm whose role has no Charmhub default, and a constraint comparing
+        # it to a value that is not among the declared allowed values
+        charm = make_charm(
+            "probe",
+            configs={"role": ["replication", "shard", None]},
+            config_defaults={},
+            constraint_strs=['config[role] == "bogus"'],
+        )
+        builder = BundleBuilder(charmhub_client=CharmhubClientStub(charm))
+
+        # WHEN building
+        # THEN the bundle is rejected.  Previously the solver satisfied this by picking
+        # "bogus" for an unset key, then omitted the key entirely, so the deployed charm
+        # never matched what the solver reasoned about.
+        with pytest.raises(UncompletableBundleError):
+            build_single_model(builder, applications={"app": AppSpec(charm="probe")})
+
+    def test_inequality_against_absent_value_forces_the_key_to_be_set(self) -> None:
+        # GIVEN a config with no Charmhub default and a `!=` constraint against it
+        charm = make_charm(
+            "probe",
+            configs={"role": ["replication", "shard", None]},
+            config_defaults={},
+            constraint_strs=['config[role] != "shard"'],
+        )
+        builder = BundleBuilder(charmhub_client=CharmhubClientStub(charm))
+
+        # WHEN building
+        bundle = build_single_model(builder, applications={"app": AppSpec(charm="probe")})
+
+        # THEN the key is set explicitly rather than left absent.  Treating a comparison
+        # against an absent value as false is conservative: it errs towards emitting a
+        # concrete value instead of letting the solver reason about a value the charm
+        # will never have.
+        assert bundle.applications["app"].config["role"] == "replication"
+
+    def test_inequality_uses_the_default_when_one_exists(self) -> None:
+        # GIVEN the same constraint on a config that does have a Charmhub default
+        charm = make_charm(
+            "probe",
+            configs={"role": ["replication", "shard", None]},
+            config_defaults={"role": "replication"},
+            constraint_strs=['config[role] != "shard"'],
+        )
+        builder = BundleBuilder(charmhub_client=CharmhubClientStub(charm))
+
+        # WHEN building
+        bundle = build_single_model(builder, applications={"app": AppSpec(charm="probe")})
+
+        # THEN the key stays unset: the default already satisfies the constraint, and the
+        # solver correctly reasons about the value the charm will actually use.
+        assert "role" not in bundle.applications["app"].config
+
+    def test_unreferenced_no_default_key_is_not_forced_to_be_set(self) -> None:
+        # GIVEN a boolean config with no default that no constraint refers to
+        charm = make_charm(
+            "probe",
+            configs={"debug": [True, False, None]},
+            config_defaults={},
+        )
+        builder = BundleBuilder(charmhub_client=CharmhubClientStub(charm))
+
+        # WHEN building
+        bundle = build_single_model(builder, applications={"app": AppSpec(charm="probe")})
+
+        # THEN the key stays unset.  Forbidding every allowed value when unset would make
+        # a two-valued boolean unsatisfiable and force it to be emitted needlessly.
+        assert "debug" not in bundle.applications["app"].config
