@@ -43,7 +43,7 @@ def test_live_disk_fill(
 
     try:
         native_chaos_client.fill_disk(model=target_model_ref, unit=unit, path=FILL_FILE, size_mb=fill_mb)
-        created = juju_backend.exec_unit(target_model_ref, unit, f"test -s -- {FILL_FILE}")
+        created = juju_backend.exec_unit(target_model_ref, unit, f"test -s ./{FILL_FILE}")
         assert created.return_code == 0, f"disk fill file {FILL_FILE!r} was not created on {unit}"
         try:
             # Debounced against update-status blips; fails immediately if the Juju agent disconnects.
@@ -55,6 +55,8 @@ def test_live_disk_fill(
             juju_client.validate_model(model=target_model_ref, level="deep")
     finally:
         native_chaos_client.cleanup(model=target_model_ref, unit=unit, path=FILL_FILE)
+        removed = juju_backend.exec_unit(target_model_ref, unit, f"test ! -e ./{FILL_FILE}")
+        assert removed.return_code == 0, f"disk fill file {FILL_FILE!r} was not removed from {unit} during cleanup"
 
     # Recovery must happen without operator intervention.
     juju_client.idle_for_period(model=target_model_ref, timeout=RECOVER_TIMEOUT)
