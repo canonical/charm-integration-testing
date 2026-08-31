@@ -21,7 +21,7 @@ from .charmhub import CharmhubClient
 from .constraints_dsl import DSLSyntaxError, DSLTypeError
 from .dsl_lowering import DSLLoweringError
 from .juju_version import JujuVersion
-from .overrides import OverridesClient
+from .overrides import ClusterAddonOverrides, OverridesClient
 from .release_errors import (
     ArchitectureMismatchError,
     AssumesMismatchError,
@@ -55,6 +55,7 @@ __all__ = [
     "CharmEndpoint",
     "CharmhubClient",
     "CharmReleaseNotFoundException",
+    "ClusterAddonOverrides",
     "CrossModelIntegration",
     "DSLLoweringError",
     "DSLSyntaxError",

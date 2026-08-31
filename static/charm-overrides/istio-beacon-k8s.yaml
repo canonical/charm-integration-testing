@@ -1,6 +1,29 @@
 ---
 listed: true
 overrides:
+  # istio-beacon-k8s needs a reconciling istio-k8s control plane to leave
+  # "maintenance: Validating waypoint readiness" and reach "active". There is no Juju
+  # relation between istio-beacon-k8s and istio-k8s (confirmed via Charmhub metadata:
+  # istio-beacon-k8s provides metrics-endpoint/service-mesh, requires charm-tracing;
+  # istio-k8s provides grafana-dashboard/istio-metadata/metrics-endpoint, requires
+  # charm-tracing -- no shared endpoint), so the bundle-builder's relation-based Z3
+  # solver cannot see this dependency; it must be declared explicitly here.
+  #
+  # Evidence: reproduced in a sandbox Juju k8s model (rev 74, 1/stable) -- deploying
+  # istio-beacon-k8s alone crashes config-changed with a 404 on
+  # `gateways.gateway.networking.k8s.io` (the Gateway API CRD is not installed by this
+  # charm or by istio-k8s alone); once the CRD is present the unit still only reaches
+  # "maintenance: Validating waypoint readiness" without a real istio-k8s control plane
+  # reconciling the mesh. Cross-validated against real CI juju-crashdump logs
+  # (test_execution 656938, 2026-07-28) showing the identical rev, error and cascade
+  # into grafana-k8s/opentelemetry-collector-k8s via service-mesh-relation-changed.
+  # This superseded issue GH-455's diagnosis (RBAC 403 needing --trust): trust is already
+  # set unconditionally by bundle_builder_x, and the actual failure is a 404 (missing
+  # CRD) plus the missing control plane, not an RBAC problem.
+  - cluster_addons:
+      - charm: istio-k8s
+        channel: 1/stable
+
   # provide-cmr-mesh only exists from track 2 onwards.
   - criteria:
       - any_of:

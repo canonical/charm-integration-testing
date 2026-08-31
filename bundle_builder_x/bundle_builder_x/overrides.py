@@ -46,6 +46,15 @@ class CharmResourceTrackingOverrides(BaseModel):
     skip: set[str] = Field(default_factory=set)
 
 
+class ClusterAddonOverrides(BaseModel):
+    # A charm this charm version needs deployed and active before it can itself
+    # reach ``active`` -- a dependency that exists purely at the cluster/control-plane
+    # level (e.g. istio-beacon-k8s needing a reconciling istio-k8s control plane) and
+    # so has no Juju relation to declare it through the bundle-builder's Z3 solver.
+    charm: str
+    channel: str | None = None
+
+
 class CharmOverrides(BaseModel):
     criteria: list[CharmOverridesCriteria] = Field(default_factory=list)
     requires: dict[str, CharmEndpointOverrides] = Field(default_factory=dict)
@@ -56,6 +65,7 @@ class CharmOverrides(BaseModel):
     constraints: list[str] = Field(default_factory=list)
     assumes: list[str | dict[str, Any]] | None = None
     resource_tracking: CharmResourceTrackingOverrides = Field(default_factory=CharmResourceTrackingOverrides)
+    cluster_addons: list[ClusterAddonOverrides] = Field(default_factory=list)
 
     def meets(self, channel: CharmChannel) -> bool:
         return all(criterion.meets(channel) for criterion in self.criteria)
@@ -67,6 +77,12 @@ class CharmGlobalOverrides(BaseModel):
     listed: bool | None = None
     default_channel: str | None = None
     default_revision: int | None = None
+    # Scope for this charm when it is deployed as a *cluster addon* (i.e. some other
+    # charm's ``cluster_addons`` entry points at it). "cluster" (the default) deploys
+    # a single shared instance per controller, reused across every model on that
+    # controller. "model" deploys a private instance into each dependent model
+    # instead, for charms/environments where a shared singleton is not appropriate.
+    addon_scope: str | None = None
     overrides: list[CharmOverrides] = Field(default_factory=list)
 
 
@@ -148,6 +164,19 @@ class OverridesClient:
 
     def get_charm_assumes_overrides(self, charm: str, channel: CharmChannel) -> list[str | dict[str, Any]] | None:
         return self._get_charm_overrides(charm, channel).assumes
+
+    def get_charm_cluster_addons(self, charm: str, channel: CharmChannel) -> list[ClusterAddonOverrides]:
+        return self._get_charm_overrides(charm, channel).cluster_addons
+
+    def get_charm_addon_scope(self, charm: str) -> str:
+        """Scope of ``charm`` when deployed as a cluster addon: ``"cluster"`` or ``"model"``.
+
+        Declared on the addon-provider's own override file (not the consumer's), since the
+        scope is a property of how the addon charm itself should be shared, regardless of
+        which or how many charms depend on it. Defaults to ``"cluster"`` when undeclared.
+        """
+        scope = self._get_charm_global_overrides(charm).addon_scope
+        return scope if scope is not None else "cluster"
 
     def get_charm_platform_overrides(self, charm: str) -> list[str] | None:
         return self._get_charm_global_overrides(charm).platforms

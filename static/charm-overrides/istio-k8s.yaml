@@ -1,0 +1,12 @@
+---
+# Declares that when another charm's `cluster_addons` override (e.g.
+# istio-beacon-k8s.yaml) points at istio-k8s, it should be deployed once per
+# controller into a single shared "cluster addon" model and reused across every
+# model on that controller, rather than once per dependent model.
+#
+# istio-k8s is a control-plane singleton for the whole Istio service mesh on a
+# cluster; running more than one per cluster is neither necessary nor how it is
+# normally operated, so "cluster" is the correct default scope here (this file
+# exists mainly to document that choice explicitly -- "cluster" is also the
+# ClusterAddonExtension default when no addon_scope override is present).
+addon_scope: cluster

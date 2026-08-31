@@ -1355,10 +1355,12 @@ class TestJubilantBackend:
                 config: Any = None,
                 trust: bool = False,
                 force: bool = False,
+                channel: str | None = None,
             ) -> None:
                 self.charm = charm
                 self.app = app
                 self.config = config
+                self.channel = channel
 
         def test(self) -> None:
             # GIVEN
@@ -1367,13 +1369,14 @@ class TestJubilantBackend:
 
             # WHEN
             JubilantBackend(client).deploy_application(
-                TEST_MODEL, charm="my-charm", application="my-app", config={"setting": "value"}
+                TEST_MODEL, charm="my-charm", application="my-app", config={"setting": "value"}, channel="1/stable"
             )
 
             # THEN
             assert stub.charm == "my-charm"
             assert stub.app == "my-app"
             assert stub.config == {"setting": "value"}
+            assert stub.channel == "1/stable"
 
     class TestConfigureApplication:
         @dataclass

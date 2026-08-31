@@ -12,6 +12,7 @@ from typing import Any, Callable, Iterator
 
 import pytest
 from extensions import (
+    ClusterAddonExtension,
     ConfigureLivepatchServerExtension,
     LegoExtension,
     PostgresqlDatabaseReplicationExtension,
@@ -55,6 +56,7 @@ from bundle_builder_x import (
     BundleDiagnostic,
     CharmReleaseNotFoundException,
     FeatureMismatchDiagnostic,
+    OverridesClient,
     PeerChannelMismatchDiagnostic,
     PlatformMismatchError,
     ReleaseUnavailableError,
@@ -257,11 +259,13 @@ def juju_client(
     uv_file: Path | None,
     validators_path: Path | None,
     session_resource_registry: ResourceRegistry,
+    overrides_client: OverridesClient,
 ) -> JujuClient:
     return JujuClient(
         juju_backend,
         logger,
         extensions=[
+            ClusterAddonExtension(juju_backend, overrides_client, logger),
             ConfigureLivepatchServerExtension(juju_backend, logger, ubuntu_pro_token),
             LegoExtension(juju_backend, logger),
             PostgresqlDatabaseReplicationExtension(juju_backend, logger),
@@ -607,6 +611,12 @@ def charm_overrides(request: pytest.FixtureRequest) -> Path:
     if not ppath.exists():
         pytest.fail(f"Provided path for --charm-overrides does not exist: {ppath}")
     return ppath
+
+
+@pytest.fixture
+def overrides_client(charm_overrides: Path, logger: logging.Logger) -> OverridesClient:
+    """Shared bundle-builder ``OverridesClient`` reading from ``--charm-overrides``."""
+    return OverridesClient(overrides=charm_overrides, logger=logger)
 
 
 @pytest.fixture

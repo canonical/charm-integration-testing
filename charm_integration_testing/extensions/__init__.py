@@ -1,6 +1,7 @@
 # Copyright 2025 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+from .cluster_addon import CLUSTER_ADDON_MODEL_NAME, ClusterAddonExtension
 from .configure_livepatch_server import ConfigureLivepatchServerExtension
 from .database_replication import PostgresqlDatabaseReplicationExtension, PostgresqlK8sDatabaseReplicationExtension
 from .lego import LegoExtension
@@ -10,6 +11,8 @@ from .unseal_vault import UnsealVaultJujuExtension, UnsealVaultK8sJujuExtension
 from .validator_injection import ValidatorInjectorExtension
 
 __all__ = [
+    "CLUSTER_ADDON_MODEL_NAME",
+    "ClusterAddonExtension",
     "ConfigureLivepatchServerExtension",
     "LegoExtension",
     "PostgresqlDatabaseReplicationExtension",
