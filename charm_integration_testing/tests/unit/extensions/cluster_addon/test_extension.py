@@ -25,10 +25,8 @@ _ADDON_MODEL = JujuModelHandle(controller="ctrl", model=CLUSTER_ADDON_MODEL_NAME
 class JujuStub(JujuStubBase):
     """Extends the shared JujuBackend stub with the primitives ClusterAddonExtension needs.
 
-    ``applications`` is overridden here to carry a channel per application (the shared
-    base's ``applications: dict[str, str]`` maps application -> charm only), and model
-    existence/creation are tracked separately from application deployment so tests can
-    assert on each independently.
+    Overrides ``applications`` to carry a channel per app; tracks model existence
+    separately from application deployment so tests can assert on each independently.
     """
 
     application_infos: dict[str, JujuApplicationInfo] = field(default_factory=dict)

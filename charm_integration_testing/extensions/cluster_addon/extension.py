@@ -8,9 +8,8 @@ from juju import JujuBackend, JujuExtension, JujuModelHandle, JujuWaitTimeoutErr
 
 from bundle_builder_x import CharmChannel, ClusterAddonOverrides, OverridesClient
 
-# Shared model name used to host every "cluster"-scoped addon on a given controller.
-# Deliberately a single model (not one per addon charm) to avoid proliferating models
-# for every addon and to make it easy to spot in `juju models` output.
+# Shared model hosting every "cluster"-scoped addon on a controller (one model, not
+# one per addon, to avoid proliferation and stay easy to spot in `juju models`).
 CLUSTER_ADDON_MODEL_NAME = "charm-integration-testing-cluster-addons"
 
 DEFAULT_ADDON_MODEL_WAIT_TIMEOUT = timedelta(minutes=5)
@@ -18,24 +17,16 @@ DEFAULT_ADDON_DEPLOY_TIMEOUT = timedelta(minutes=15)
 
 
 class ClusterAddonExtension(JujuExtension):
-    """Deploys charms that some other charm needs active but cannot depend on via Juju relations.
+    """Deploys charms that another charm needs active but can't depend on via Juju relations.
 
-    Some charms (e.g. istio-beacon-k8s) rely on a control-plane charm being deployed and
-    reconciling somewhere on the cluster (e.g. istio-k8s) in order to leave "maintenance"
-    and reach "active", yet have no Juju relation to that charm -- the dependency is purely
-    an operational/cluster-addon one, invisible to the bundle-builder's relation-based Z3
-    solver. This extension reads such dependencies from charm overrides
-    (``cluster_addons`` on the consumer's override, ``addon_scope`` on the addon's own
-    override) so they are documented and auditable rather than hard-coded per charm.
+    Some charms (e.g. istio-beacon-k8s) need a control-plane charm (e.g. istio-k8s)
+    reconciling somewhere on the cluster to reach "active", with no Juju relation to
+    express the dependency. Reads it from charm overrides instead (``cluster_addons``
+    on the consumer, ``addon_scope`` on the addon) so it's declared, not hard-coded.
 
-    Addons are deployed either:
-      - "cluster" scope (the default): once per controller, into a single shared model
-        (``CLUSTER_ADDON_MODEL_NAME``) reused across every model on that controller, or
-      - "model" scope: directly into the same model as the dependent charm.
-
-    Deployment is idempotent: if the shared model or the addon application already exists
-    (e.g. created by a concurrent test worker, or left over from a previous run), this is
-    treated as success rather than an error.
+    "cluster" scope (default) deploys once per controller into a shared model
+    (``CLUSTER_ADDON_MODEL_NAME``); "model" scope deploys into the dependent's own model.
+    Deployment is idempotent: an already-existing model/application is treated as success.
     """
 
     juju: JujuBackend
@@ -77,9 +68,8 @@ class ClusterAddonExtension(JujuExtension):
             self.juju.add_model(controller=controller, model=CLUSTER_ADDON_MODEL_NAME, model_config={})
             self.logger.info(f"Created shared cluster addon model '{addon_model.uri}'.")
         except Exception as error:
-            # Tolerate a concurrent test worker on the same controller having already
-            # created the model. Re-check the authoritative state rather than pattern
-            # matching on a specific backend's error message.
+            # Re-check authoritative state instead of pattern-matching backend errors,
+            # to tolerate a concurrent worker having already created the model.
             try:
                 self.juju.wait_for_model_to_exist(addon_model, timeout=DEFAULT_ADDON_MODEL_WAIT_TIMEOUT)
             except JujuWaitTimeoutError:
@@ -87,14 +77,8 @@ class ClusterAddonExtension(JujuExtension):
         return addon_model
 
     def _find_addon_application(self, target_model: JujuModelHandle, charm: str) -> str | None:
-        """Find the application already running ``charm`` in ``target_model``, if any.
-
-        Matches on the *deployed charm*, not the application name: an addon deployed
-        under a different application name (e.g. manually, or by an unrelated bundle)
-        must still be recognized as satisfying the dependency, otherwise this would
-        attempt to deploy a second instance and defeat the intended singleton behavior
-        for cluster-scoped addons.
-        """
+        # Match by deployed charm, not application name -- an addon deployed under a
+        # different app name must still count as satisfying the dependency.
         for application, info in self.juju.list_applications(target_model).items():
             if info.charm == charm:
                 return application
@@ -111,9 +95,8 @@ class ClusterAddonExtension(JujuExtension):
             self.logger.info(f"Deployed cluster addon '{addon.charm}' into '{target_model.uri}'.")
             return addon.charm
         except Exception as error:
-            # Tolerate a concurrent test worker having already deployed the same addon
-            # into the shared model. Re-check the authoritative state rather than pattern
-            # matching on a specific backend's error message.
+            # Re-check authoritative state instead of pattern-matching backend errors,
+            # to tolerate a concurrent worker having already deployed the same addon.
             existing = self._find_addon_application(target_model, addon.charm)
             if existing is None:
                 raise error from None

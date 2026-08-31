@@ -47,10 +47,8 @@ class CharmResourceTrackingOverrides(BaseModel):
 
 
 class ClusterAddonOverrides(BaseModel):
-    # A charm this charm version needs deployed and active before it can itself
-    # reach ``active`` -- a dependency that exists purely at the cluster/control-plane
-    # level (e.g. istio-beacon-k8s needing a reconciling istio-k8s control plane) and
-    # so has no Juju relation to declare it through the bundle-builder's Z3 solver.
+    # Cluster/control-plane dependency with no Juju relation to declare it (e.g.
+    # istio-beacon-k8s needs a reconciling istio-k8s control plane to reach active).
     charm: str
     channel: str | None = None
 
@@ -77,13 +75,8 @@ class CharmGlobalOverrides(BaseModel):
     listed: bool | None = None
     default_channel: str | None = None
     default_revision: int | None = None
-    # Scope for this charm when it is deployed as a *cluster addon* (i.e. some other
-    # charm's ``cluster_addons`` entry points at it). "cluster" (the default) deploys
-    # a single shared instance per controller, reused across every model on that
-    # controller. "model" deploys a private instance into each dependent model
-    # instead, for charms/environments where a shared singleton is not appropriate.
-    # Validated at parse time (rather than left as free-form text) so a typo fails
-    # loudly instead of silently falling back to "cluster" behavior.
+    # Scope when this charm is deployed as a cluster addon: "cluster" (default) shares
+    # one instance per controller; "model" deploys a private instance per dependent.
     addon_scope: Literal["cluster", "model"] | None = None
     overrides: list[CharmOverrides] = Field(default_factory=list)
 
@@ -171,12 +164,8 @@ class OverridesClient:
         return self._get_charm_overrides(charm, channel).cluster_addons
 
     def get_charm_addon_scope(self, charm: str) -> Literal["cluster", "model"]:
-        """Scope of ``charm`` when deployed as a cluster addon: ``"cluster"`` or ``"model"``.
-
-        Declared on the addon-provider's own override file (not the consumer's), since the
-        scope is a property of how the addon charm itself should be shared, regardless of
-        which or how many charms depend on it. Defaults to ``"cluster"`` when undeclared.
-        """
+        # Declared on the addon's own override file, not the consumer's -- scope is a
+        # property of the addon charm itself, not of who depends on it.
         scope = self._get_charm_global_overrides(charm).addon_scope
         return scope if scope is not None else "cluster"
 

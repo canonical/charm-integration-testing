@@ -1,33 +1,17 @@
 ---
 listed: true
 overrides:
-  # istio-beacon-k8s needs a reconciling istio-k8s control plane to leave
-  # "maintenance: Validating waypoint readiness" and reach "active". There is no Juju
-  # relation between istio-beacon-k8s and istio-k8s (confirmed via Charmhub metadata:
-  # istio-beacon-k8s provides metrics-endpoint/service-mesh, requires charm-tracing;
-  # istio-k8s provides grafana-dashboard/istio-metadata/metrics-endpoint, requires
-  # charm-tracing -- no shared endpoint), so the bundle-builder's relation-based Z3
-  # solver cannot see this dependency; it must be declared explicitly here.
+  # istio-beacon-k8s needs a reconciling istio-k8s control plane to reach "active";
+  # no Juju relation exists between them, so the Z3 solver can't see this dependency.
+  # Root cause: 404 on the gateways.gateway.networking.k8s.io CRD on config-changed
+  # (reproduced rev 74, 1/stable; cross-validated against test_execution 656938).
+  # Supersedes GH-455's RBAC/--trust diagnosis: trust is already set unconditionally
+  # by bundle_builder_x, and the real failure is the missing CRD + control plane.
   #
-  # Evidence: reproduced in a sandbox Juju k8s model (rev 74, 1/stable) -- deploying
-  # istio-beacon-k8s alone crashes config-changed with a 404 on
-  # `gateways.gateway.networking.k8s.io` (the Gateway API CRD is not installed by this
-  # charm or by istio-k8s alone); once the CRD is present the unit still only reaches
-  # "maintenance: Validating waypoint readiness" without a real istio-k8s control plane
-  # reconciling the mesh. Cross-validated against real CI juju-crashdump logs
-  # (test_execution 656938, 2026-07-28) showing the identical rev, error and cascade
-  # into grafana-k8s/opentelemetry-collector-k8s via service-mesh-relation-changed.
-  # This superseded issue GH-455's diagnosis (RBAC 403 needing --trust): trust is already
-  # set unconditionally by bundle_builder_x, and the actual failure is a 404 (missing
-  # CRD) plus the missing control plane, not an RBAC problem.
-  #
-  # NOTE: override entries are non-merging -- OverridesClient._get_charm_overrides()
-  # returns the *first* entry whose criteria match, in full, and never consults later
-  # entries. Because cluster_addons must apply to every track/risk (including the
-  # track 2/dev entry below, which additionally needs provide-cmr-mesh), it is declared
-  # via a YAML anchor and repeated on both entries below rather than left on a single
-  # criteria-less entry, which would otherwise silently short-circuit the track 2/dev
-  # entry beneath it and drop provide-cmr-mesh.
+  # cluster_addons must apply to every track (including provide-cmr-mesh's track
+  # 2/dev entry below), but override entries are non-merging (first match wins, in
+  # full) -- so it's declared via a YAML anchor and repeated rather than left on a
+  # single catch-all entry, which would otherwise short-circuit the entry below it.
   - criteria:
       - any_of:
           - track: '2'
