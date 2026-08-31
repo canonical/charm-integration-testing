@@ -135,18 +135,17 @@ class JujuClient:
         bundle: str,
         model: JujuModelHandle,
     ) -> None:
-        self.logger.info(f"Deploying bundle file: '{bundle}'")
-        self.backend.deploy_bundle_file(model, bundle, trust=True, force=True)
+        self._deploy_bundle_phase(model, Path(bundle))
 
         # Call extensions
         for extension in self.extensions:
             extension.post_deploy(model)
 
     def _deploy_bundle_phase(self, model: JujuModelHandle, path: Path) -> None:
-        """Deploy a bundle file directly via the backend, bypassing extensions.
+        """Deploy a bundle file directly via the backend, without invoking extensions.
 
-        ``deploy_bundles()`` invokes extensions itself, once per model, after all phases, so
-        this skips ``deploy_bundle_file()``'s extension ``post_deploy()`` calls.
+        Used by ``deploy_bundle_file()`` (which invokes extensions itself afterwards) and by
+        ``deploy_bundles()`` (which invokes extensions itself, once per model, after all phases).
         """
         self.logger.info(f"Deploying bundle file: '{path}'")
         self.backend.deploy_bundle_file(model, str(path), trust=True, force=True)
