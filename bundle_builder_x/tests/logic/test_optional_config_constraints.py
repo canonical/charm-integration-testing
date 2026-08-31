@@ -154,7 +154,58 @@ class TestOptionalConfigInConstraints:
 
 
 class TestComparisonsAgainstAbsentValues:
-    """A key with no default has no value when unset, so comparisons must be false."""
+    """A key with no default has no value when unset, so constraints reading it must be false."""
+
+    def test_membership_test_cannot_be_satisfied_by_an_unset_key(self) -> None:
+        # GIVEN a constraint that reads the value via `in` rather than a comparison.
+        # The guard is applied when lowering the whole constraint, so every operator
+        # is covered -- not just the comparison operators.
+        charm = make_charm(
+            "probe",
+            configs={"role": ["replication", "shard", None]},
+            config_defaults={},
+            constraint_strs=['config[role] in {"shard"}'],
+        )
+        builder = BundleBuilder(charmhub_client=CharmhubClientStub(charm))
+
+        # WHEN building
+        bundle = build_single_model(builder, applications={"app": AppSpec(charm="probe")})
+
+        # THEN the key is emitted rather than satisfied while absent
+        assert bundle.applications["app"].config["role"] == "shard"
+
+    def test_membership_test_against_values_outside_allowed_list_is_rejected(self) -> None:
+        # GIVEN a membership test naming only values the key is not allowed to take
+        charm = make_charm(
+            "probe",
+            configs={"role": ["replication", "shard", None]},
+            config_defaults={},
+            constraint_strs=['config[role] in {"bogus", "zzz"}'],
+        )
+        builder = BundleBuilder(charmhub_client=CharmhubClientStub(charm))
+
+        # WHEN building
+        # THEN it is rejected rather than quietly satisfied with the key omitted
+        with pytest.raises(UncompletableBundleError):
+            build_single_model(builder, applications={"app": AppSpec(charm="probe")})
+
+    def test_set_config_predicate_is_not_guarded(self) -> None:
+        # GIVEN a constraint that explicitly asserts the key is NOT set.  `set(config[k])`
+        # asks whether the key is set, so guarding it on is_set would make this
+        # unsatisfiable.
+        charm = make_charm(
+            "probe",
+            configs={"role": ["replication", "shard", None]},
+            config_defaults={},
+            constraint_strs=["not set(config[role])"],
+        )
+        builder = BundleBuilder(charmhub_client=CharmhubClientStub(charm))
+
+        # WHEN building
+        bundle = build_single_model(builder, applications={"app": AppSpec(charm="probe")})
+
+        # THEN the key is legitimately left unset
+        assert "role" not in bundle.applications["app"].config
 
     def test_comparison_to_value_outside_allowed_list_is_rejected(self) -> None:
         # GIVEN a charm whose role has no Charmhub default, and a constraint comparing

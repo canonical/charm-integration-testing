@@ -399,19 +399,12 @@ def add_charm_metadata_constraints(solver: z3.Solver, domain: Domain) -> None:
                 value_constraint = z3.Or([res.var == z3.StringVal(v) for v in res_allowed])
                 if res.isset_var is not None:
                     # Resource is optional (None is an allowed value).  The value constraint
-                    # only applies when isset_var is True.
+                    # only applies when isset_var is True.  Unlike configs, resources carry
+                    # no Charmhub default -- `default` is populated only for `fixed_value`
+                    # resources, which have no Z3 var and are skipped above -- so an unset
+                    # resource has no value to pin.  Constraints that read one are guarded
+                    # by its isset_var in dsl_lowering instead.
                     solver.add(z3.Implies(z3.And(charm.exists, res.isset_var), value_constraint))
-                    # As with configs, an unset resource that has a default must model that
-                    # default rather than float free, so constraints cannot match a value
-                    # that is never emitted.  Resources with no default are handled in
-                    # dsl_lowering, which makes comparisons against them false.
-                    if res.default is not None:
-                        solver.add(
-                            z3.Implies(
-                                z3.And(charm.exists, z3.Not(res.isset_var)),
-                                res.var == z3.StringVal(res.default),
-                            )
-                        )
                 else:
                     # Resource is always required when the charm exists.
                     solver.add(z3.Implies(charm.exists, value_constraint))
