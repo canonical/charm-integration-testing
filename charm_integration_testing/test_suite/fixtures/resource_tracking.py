@@ -19,8 +19,7 @@ from pathlib import Path
 from typing import Iterator
 
 import pytest
-from juju import JujuClient
-from juju.resource_registry import JujuModelHandle
+from juju import JujuClient, JujuModelHandle
 from resource_registry import ResourceRegistry
 from resource_tracking import (
     DEFAULT_KUBERNETES_SOURCES,
@@ -112,7 +111,7 @@ def resource_tracking_skips_by_application(
             if not isinstance(handle, JujuModelHandle):
                 continue
             try:
-                applications = juju_client.list_applications(model=f"{handle.controller}:{handle.model}")
+                applications = juju_client.list_applications(model=handle)
             except Exception:
                 logger.warning("Could not list applications for model '%s'.", handle.model, exc_info=True)
                 continue

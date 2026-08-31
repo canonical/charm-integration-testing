@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 from dataclasses import asdict
 
 import yaml
-from juju import JujuBackend
+from juju import JujuBackend, JujuModelHandle
 from pydantic.dataclasses import dataclass
 from utils import retry_on_failure
 
@@ -38,15 +38,15 @@ class VaultStatus:
 
 class VaultClient(ABC):
     @abstractmethod
-    def status(self, model: str, unit: str) -> VaultStatus:
+    def status(self, model: JujuModelHandle, unit: str) -> VaultStatus:
         raise NotImplementedError
 
     @abstractmethod
-    def init(self, model: str, unit: str, will_auto_unseal: bool = False) -> VaultTokenSecret:
+    def init(self, model: JujuModelHandle, unit: str, will_auto_unseal: bool = False) -> VaultTokenSecret:
         raise NotImplementedError
 
     @abstractmethod
-    def unseal(self, model: str, unit: str, tokens: VaultTokenSecret) -> None:
+    def unseal(self, model: JujuModelHandle, unit: str, tokens: VaultTokenSecret) -> None:
         raise NotImplementedError
 
 
@@ -62,7 +62,7 @@ class VaultClientJujuExec(VaultClient):
         self.juju = juju
 
     @retry_on_failure(message="connection refused", max_retries=5, delay=1.0)
-    def status(self, model: str, unit: str) -> VaultStatus:
+    def status(self, model: JujuModelHandle, unit: str) -> VaultStatus:
         # Unseal the vault
         result = self.juju.exec_unit(model, unit, self.JUJU_EXEC_VAULT_STATUS)
 
@@ -75,7 +75,7 @@ class VaultClientJujuExec(VaultClient):
         return VaultStatus(**yaml.safe_load(result.stdout))
 
     @retry_on_failure(message="connection refused", max_retries=5, delay=1.0)
-    def init(self, model: str, unit: str, will_auto_unseal: bool = False) -> VaultTokenSecret:
+    def init(self, model: JujuModelHandle, unit: str, will_auto_unseal: bool = False) -> VaultTokenSecret:
         # Initialize vault
         init_command = self.JUJU_EXEC_VAULT_INIT_AUTO_UNSEALED if will_auto_unseal else self.JUJU_EXEC_VAULT_INIT
         init_result = self.juju.exec_unit(model, unit, init_command)
@@ -92,7 +92,7 @@ class VaultClientJujuExec(VaultClient):
         return VaultTokenSecret(root_token=init_response.root_token, unseal_key=unseal_key)
 
     @retry_on_failure(message="connection refused", max_retries=5, delay=1.0)
-    def unseal(self, model: str, unit: str, tokens: VaultTokenSecret) -> None:
+    def unseal(self, model: JujuModelHandle, unit: str, tokens: VaultTokenSecret) -> None:
         # Unseal the vault
         unseal_result = self.juju.exec_unit(model, unit, self.JUJU_EXEC_VAULT_UNSEAL.format(**asdict(tokens)))
 
