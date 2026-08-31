@@ -9,7 +9,7 @@ Explicit user requests are non-negotiable. When a user explicitly requests an ac
 
 Before implementing, ask clarifying questions to understand the actual goal, constraints, and expected outcomes.
 
-**Never `git push` unless you have explicit permission to push.** Permission is not implied by having a working `GH_TOKEN`, being asked to "fix", "commit", or "open a PR", or by the push command simply succeeding. If the user has not explicitly told you to push, stop after committing locally and say so. If a push is attempted and rejected for any permission-related reason, do not retry with different remotes, tokens, or forced flags; report the rejection and stop.
+**Never `git push` unless you have explicit permission to push.** Permission is not implied by having a working `GH_TOKEN`, being asked to "fix", "commit", or "open a PR", or by the push command simply succeeding. If the user has not explicitly told you to push, stop after committing locally and say so. When you do push: try `git push` first; if that fails for a permission-related reason, you may try once via the `gh` CLI as a fallback, then stop either way. Do not go further, e.g. by retrying with different remotes, tokens, or forced flags; report the outcome.
 
 ## Tone and Style
 
