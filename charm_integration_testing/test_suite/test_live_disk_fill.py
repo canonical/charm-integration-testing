@@ -37,10 +37,14 @@ def test_live_disk_fill(
 
     df = juju_backend.exec_unit(target_model_ref, unit, "df -Pk -- .")
     assert df.return_code == 0, f"df failed on {unit}: {df.stderr.strip()}"
-    fill_mb = _avail_mb_from_df(df.stdout) * FILL_PERCENT // 100
+    avail_mb = _avail_mb_from_df(df.stdout)
+    fill_mb = avail_mb * FILL_PERCENT // 100
+    assert fill_mb > 0, f"not enough free space on {unit} to run the disk-fill test (avail_mb={avail_mb})"
 
     try:
         native_chaos_client.fill_disk(model=target_model_ref, unit=unit, path=FILL_FILE, size_mb=fill_mb)
+        created = juju_backend.exec_unit(target_model_ref, unit, f"test -s -- {FILL_FILE}")
+        assert created.return_code == 0, f"disk fill file {FILL_FILE!r} was not created on {unit}"
         try:
             # Debounced against update-status blips; fails immediately if the Juju agent disconnects.
             juju_client.unhealthy_for_period(target_application, model=target_model_ref, timeout=DETECT_TIMEOUT)
