@@ -610,27 +610,43 @@ def _absent_value_guard(expr: AnyExpr, ctx: LoweringContext) -> z3.BoolRef | Non
 _NEGATED_COMPARE_OPS = {"==": "!=", "!=": "==", "<": ">=", ">=": "<", ">": "<=", "<=": ">"}
 
 
-def _negate_atomic_predicate(arg: AnyExpr, ctx: LoweringContext) -> z3.BoolRef | None:
-    """Lower ``not <arg>`` by pushing the negation inside ``arg``'s definedness guard.
+def _lower_negated(arg: AnyExpr, ctx: LoweringContext) -> z3.BoolRef:
+    """Lower ``not <arg>`` by pushing the negation down to the atoms.
 
-    Negating a guarded atom naively would negate its guard away:
+    An outer negation would cancel an atom's definedness guard:
     ``Not(And(is_set, role == "shard"))`` is satisfied by leaving the key unset,
     so ``not (config[role] == "shard")`` would quietly permit an omitted key
-    while the equivalent ``config[role] != "shard"`` requires one.  Pushing the
-    negation into the atom keeps the guard on the outside, so both spellings of
-    the same intent agree.
+    while the equivalent ``config[role] != "shard"`` requires one.  Nesting makes
+    this worse rather than rarer -- ``not not config[debug]`` and
+    ``not (config[role] == "shard" or ...)`` reintroduce exactly the phantom
+    value this module exists to rule out.
 
-    Returns None when ``arg`` is not a guarded atom, leaving normal Boolean
-    negation to the caller -- in particular ``not set(config[key])``, which asks
-    about the key's presence rather than reading its value, and any composed
-    formula, whose own atoms were already guarded individually.
+    So negation is normalised on the way down instead of being applied on the
+    way out: double negation cancels, And/Or/Implies are rewritten by De
+    Morgan, and only at an atom is the negation finally absorbed -- into the
+    comparison operator, into ``InExpr.negated``, or as ``And(is_set,
+    Not(var))`` for a bare key.  Every atom therefore keeps its own guard under
+    arbitrary ``not`` nesting.
 
-    Only applied when a guard is actually in play, which confines the operator
-    rewrite to scalar config/resource operands.  It would be invalid for set
-    comparisons, where sets are only partially ordered and ``not (a >= b)`` does
-    not mean ``a < b``.
+    Absorbing into the operator is gated on a guard actually applying, which
+    confines the rewrite to scalar config/resource operands.  It would be
+    invalid for set comparisons, where sets are only partially ordered and
+    ``not (a >= b)`` does not mean ``a < b``.
+
+    ``set(config[key])`` reaches the fallback and is negated normally: it asks
+    whether the key is set rather than reading its value, so
+    ``not set(config[key])`` must stay satisfiable.
     """
     match arg:
+        case NotExpr(arg=inner):
+            return _lower_as_guarded_bool(inner, ctx)
+        case AndExpr(left=left, right=right):
+            return z3.Or(_lower_negated(left, ctx), _lower_negated(right, ctx))
+        case OrExpr(left=left, right=right):
+            return z3.And(_lower_negated(left, ctx), _lower_negated(right, ctx))
+        case ImpliesExpr(antecedent=antecedent, consequent=consequent):
+            # Antecedents are required to be Bool, so they can never be a bare key.
+            return z3.And(_lower_as_z3(antecedent, ctx), _lower_negated(consequent, ctx))
         case CompareExpr(op=op, left=left, right=right) if (
             _absent_value_guard(left, ctx) is not None or _absent_value_guard(right, ctx) is not None
         ):
@@ -640,7 +656,20 @@ def _negate_atomic_predicate(arg: AnyExpr, ctx: LoweringContext) -> z3.BoolRef |
         case _ if (guard := _absent_value_guard(arg, ctx)) is not None:
             # A bare key read directly as a boolean, e.g. "not config[debug]".
             return z3.And(guard, z3.Not(_lower_as_z3(arg, ctx)))
-    return None
+    return z3.Not(_lower_as_z3(arg, ctx))
+
+
+def _lower_as_guarded_bool(expr: AnyExpr, ctx: LoweringContext) -> z3.BoolRef:
+    """Lower a sub-formula consumed as a Boolean in its own right.
+
+    Only reachable via double negation, which is also the only place a bare
+    no-default key can appear as a Boolean below the top level: And/Or/Implies
+    require strictly Bool operands, so they never see one.  ``not not
+    config[debug]`` must mean what ``config[debug]`` means, guard included.
+    """
+    result = _lower_as_z3(expr, ctx)
+    guard = _absent_value_guard(expr, ctx)
+    return z3.And(guard, result) if guard is not None else result
 
 
 def _lower_compare(
@@ -1034,13 +1063,9 @@ def _lower(expr: AnyExpr, ctx: LoweringContext) -> _LoweredValue:  # noqa: C901
             return _in_guarded(_lower_in(element, collection, ctx))
 
         case NotExpr(arg=arg):
-            # Negation must not cancel an atom's definedness guard; see
-            # _negate_atomic_predicate.  Anything else negates normally, so
-            # Boolean composition is preserved.
-            negated_atom = _negate_atomic_predicate(arg, ctx)
-            if negated_atom is not None:
-                return negated_atom
-            return z3.Not(_lower_as_z3(arg, ctx))
+            # Negation is normalised down to the atoms so it cannot cancel their
+            # definedness guards; see _lower_negated.
+            return _lower_negated(arg, ctx)
 
         case AndExpr(left=left, right=right):
             return z3.And(_lower_as_z3(left, ctx), _lower_as_z3(right, ctx))

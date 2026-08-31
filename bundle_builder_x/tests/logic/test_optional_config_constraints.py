@@ -21,6 +21,7 @@ either application, so both deployed as replica sets and blocked with
 """
 
 from collections.abc import Mapping
+from typing import TypeAlias
 
 import pytest
 
@@ -29,6 +30,8 @@ from bundle_builder_x.charm import Charm, CharmEndpoint, EndpointType
 from bundle_builder_x.spec import AppSpec, IntegrationSpec
 
 from .conftest import CharmhubClientStub, build_single_model, make_charm
+
+ConfigValues: TypeAlias = dict[str, list[str | int | float | bool | None]]
 
 # Mirrors static/charm-overrides/mongodb-k8s.yaml.
 MONGODB_ROLE_CONSTRAINTS = [
@@ -512,3 +515,129 @@ class TestNegationIsSymmetricWithTheNegatedOperator:
         # THEN pushing the negation inward keeps the guard atomic: nothing reads the
         # value, so the key stays unset
         assert "role" not in bundle.applications["app"].config
+
+
+class TestNegationNestingPreservesGuards:
+    """Guards must survive `not` at any depth, not just one immediate atom.
+
+    An outer negation cancels an atom's guard, so a nested `not` would undo the
+    guard the inner one installed.  `not not config[debug]` built `config: {}`
+    while the equivalent `config[debug]` emitted `debug: True`, and
+    `not (config[role] == "shard" or ...)` was satisfiable with the key omitted --
+    both reintroducing the phantom value this module rules out.  Negation is
+    normalised down to the atoms (double negation, De Morgan) so that cannot happen.
+    """
+
+    @staticmethod
+    def _build(constraint: str, configs: ConfigValues) -> Mapping[str, object]:
+        charm = make_charm("probe", configs=configs, config_defaults={}, constraint_strs=[constraint])
+        builder = BundleBuilder(charmhub_client=CharmhubClientStub(charm))
+        bundle = build_single_model(builder, applications={"app": AppSpec(charm="probe")})
+        return bundle.applications["app"].config
+
+    def test_double_negation_means_the_same_as_no_negation(self) -> None:
+        # GIVEN a bare boolean read wrapped in two negations
+        configs: ConfigValues = {"debug": [True, False, None]}
+
+        # WHEN building it and the un-negated equivalent
+        doubled = self._build("not not config[debug]", configs)
+        plain = self._build("config[debug]", configs)
+
+        # THEN the inner guard survives the outer negation instead of being cancelled
+        assert doubled["debug"] is True
+        assert doubled.keys() == plain.keys()
+
+    def test_triple_negation_means_the_same_as_one_negation(self) -> None:
+        # GIVEN an odd number of negations, so the normalisation must not simply
+        # cancel every pair and lose the sign
+        configs: ConfigValues = {"debug": [True, False, None]}
+
+        # WHEN building
+        tripled = self._build("not not not config[debug]", configs)
+
+        # THEN it agrees with the single-negation form, which pins the key to False
+        assert tripled["debug"] is False
+
+    def test_negated_disjunction_cannot_be_satisfied_by_omitting_the_key(self) -> None:
+        # GIVEN a negation wrapping a disjunction that between them exclude every
+        # value the key is allowed to take
+        charm = make_charm(
+            "probe",
+            configs={"role": ["replication", "shard", None]},
+            config_defaults={},
+            constraint_strs=['not (config[role] == "shard" or config[role] == "replication")'],
+        )
+        builder = BundleBuilder(charmhub_client=CharmhubClientStub(charm))
+
+        # WHEN building
+        # THEN De Morgan pushes the negation through, so this is contradictory rather
+        # than satisfiable by leaving the key unset
+        with pytest.raises(UncompletableBundleError):
+            build_single_model(builder, applications={"app": AppSpec(charm="probe")})
+
+    def test_negated_conjunction_forces_the_key_when_the_other_side_holds(self) -> None:
+        # GIVEN a negated conjunction whose other conjunct is unconditionally true
+        configs: ConfigValues = {"role": ["replication", "shard", None]}
+
+        # WHEN building
+        config = self._build('not (config[role] == "shard" and config[role] != "replication")', configs)
+
+        # THEN the surviving disjunct pins the key rather than omitting it
+        assert config["role"] == "replication"
+
+    def test_negated_conjunction_leaves_the_key_alone_when_the_other_side_fails(self) -> None:
+        # GIVEN a negated conjunction whose other conjunct is false (the optional
+        # endpoint is never integrated), so nothing needs to read the value
+        charm = make_charm(
+            "probe",
+            endpoints={"x": CharmEndpoint(type=EndpointType.PROVIDES, interface="juju-info", optional=True)},
+            configs={"role": ["replication", "shard", None]},
+            config_defaults={},
+            constraint_strs=['not (config[role] == "shard" and bool(endpoint[x]))'],
+        )
+        builder = BundleBuilder(charmhub_client=CharmhubClientStub(charm))
+
+        # WHEN building
+        bundle = build_single_model(builder, applications={"app": AppSpec(charm="probe")})
+
+        # THEN normalising the negation must not over-constrain: the key stays unset
+        assert "role" not in bundle.applications["app"].config
+
+    def test_double_negated_set_predicate_still_asks_only_about_presence(self) -> None:
+        # GIVEN `set(...)` under two negations -- it must reach the plain-negation
+        # fallback both times rather than being absorbed as a value read
+        configs: ConfigValues = {"role": ["replication", "shard", None]}
+
+        # WHEN building
+        config = self._build("not not set(config[role])", configs)
+
+        # THEN it means `set(config[role])`: some value is written, unconstrained
+        assert "role" in config
+
+    def test_negated_negative_membership_test_is_absorbed(self) -> None:
+        # GIVEN a negation wrapping an already-negative membership test
+        configs: ConfigValues = {"role": ["replication", "shard", None]}
+
+        # WHEN building
+        config = self._build('not (config[role] not in {"shard"})', configs)
+
+        # THEN the two cancel to a positive membership test, guard intact
+        assert config["role"] == "shard"
+
+    def test_negated_implication_keeps_the_guard_in_the_consequent(self) -> None:
+        # GIVEN a negated implication whose antecedent holds independently of the
+        # guarded key, so only the consequent's own guard can force it to be set
+        charm = make_charm(
+            "probe",
+            configs={"mode": ["on", "off"], "role": ["replication", "shard", None]},
+            config_defaults={"mode": "on"},
+            constraint_strs=['not (config[mode] == "on" => config[role] == "shard")'],
+        )
+        builder = BundleBuilder(charmhub_client=CharmhubClientStub(charm))
+
+        # WHEN building
+        bundle = build_single_model(builder, applications={"app": AppSpec(charm="probe")})
+
+        # THEN the consequent is negated as an atom, keeping its guard: the key is
+        # written out rather than the negation being satisfied by omitting it
+        assert bundle.applications["app"].config["role"] == "replication"
