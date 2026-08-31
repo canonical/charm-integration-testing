@@ -159,12 +159,18 @@ class TestOptionalConfigInConstraints:
 
 
 class TestComparisonsAgainstAbsentValues:
-    """A key with no default has no value when unset, so constraints reading it must be false."""
+    """A key with no default has no value when unset, so any read of it must be false.
+
+    The guard belongs to the individual read -- a comparison operand, an ``in``
+    element, a direct boolean use -- not to the constraint containing it; see
+    ``TestAbsentValueGuardPreservesBooleanComposition`` for why that distinction
+    matters.  Each case here is a single read, so the two coincide.
+    """
 
     def test_membership_test_cannot_be_satisfied_by_an_unset_key(self) -> None:
         # GIVEN a constraint that reads the value via `in` rather than a comparison.
-        # The guard is applied when lowering the whole constraint, so every operator
-        # is covered -- not just the comparison operators.
+        # `in` guards its own element, the same way a comparison guards its operands,
+        # so reading a value is covered whichever operator does the reading.
         charm = make_charm(
             "probe",
             configs={"role": ["replication", "shard", None]},
@@ -318,7 +324,7 @@ class TestOptionalResourcesInConstraints:
         # WHEN building
         bundle = build_single_model(builder, applications={"app": AppSpec(charm="probe")})
 
-        # THEN the guard applies to every operator, not just comparisons
+        # THEN the `in` element carries its own guard, just as comparison operands do
         assert bundle.applications["app"].resources["my-image"] == "custom"
 
     def test_resource_constrained_to_a_value_outside_allowed_list_is_rejected(self) -> None:
