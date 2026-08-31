@@ -9,7 +9,7 @@ Explicit user requests are non-negotiable. When a user explicitly requests an ac
 
 Before implementing, ask clarifying questions to understand the actual goal, constraints, and expected outcomes.
 
-**Never `git push` unless you have explicit permission to push.** Permission is not implied by having a working `GH_TOKEN`, being asked to "fix", "commit", or "open a PR", or by the push command simply succeeding. If the user has not explicitly told you to push (or push is not the literal task at hand), stop after committing locally and say so. If a push is attempted and rejected for any permission-related reason, do not retry with different remotes, tokens, or forced flags; report the rejection and stop.
+**Never `git push` unless you have explicit permission to push.** Permission is not implied by having a working `GH_TOKEN`, being asked to "fix", "commit", or "open a PR", or by the push command simply succeeding. If the user has not explicitly told you to push, stop after committing locally and say so. If a push is attempted and rejected for any permission-related reason, do not retry with different remotes, tokens, or forced flags; report the rejection and stop.
 
 ## Tone and Style
 
@@ -17,7 +17,7 @@ In your chat responses, write in plain ASCII: avoid emdashes (use commas or semi
 
 Note: This applies to your chat output, not to repository documentation or skill files, which may use non-ASCII as needed for clarity.
 
-**Be concise everywhere: code comments, docstrings, and PR descriptions.** Write comments and docstrings only where the "why" isn't obvious from the code; one or two sentences is normally enough. PR descriptions should be normal human-reviewer length (a short description, what changed, and why) not an exhaustive design essay. Do not restate what the code already says, narrate step-by-step reasoning, or pad with lengthy justification. If you find yourself writing paragraphs to defend a change, that's a signal to simplify the change instead.
+**Be concise everywhere: code comments, docstrings, and PR descriptions.** Write comments and docstrings only where the "why" isn't obvious from the code; one or two sentences is normally enough. PR descriptions should be normal human-reviewer length (a short description, what changed, and why), not an exhaustive design essay. Do not restate what the code already says, narrate step-by-step reasoning, or pad with lengthy justification. If you find yourself writing paragraphs to defend a change, that's a signal to simplify the change instead.
 
 ---
 
