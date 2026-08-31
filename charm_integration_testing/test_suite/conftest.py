@@ -11,7 +11,7 @@ from subprocess import CalledProcessError, run  # nosec
 from typing import Any, Callable, Iterator
 
 import pytest
-from chaos_client import ChaosClient, KubernetesChaosClient
+from chaos_client import ChaosClient, KubernetesChaosClient, NativeChaosClient
 from extensions import (
     ConfigureLivepatchServerExtension,
     LegoExtension,
@@ -174,6 +174,12 @@ def chaos_client(kubernetes_client: KubernetesClient | None) -> ChaosClient | No
     if kubernetes_client is None:
         return None
     return KubernetesChaosClient(backend=kubernetes_client.backend)
+
+
+@pytest.fixture(scope="session")
+def native_chaos_client(juju_backend: JujuBackend) -> NativeChaosClient:
+    """ChaosClient that injects via `juju exec`; works on both K8s and machine clouds."""
+    return NativeChaosClient(juju_backend)
 
 
 @pytest.fixture(scope="session")
