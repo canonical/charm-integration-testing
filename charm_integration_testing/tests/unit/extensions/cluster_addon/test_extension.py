@@ -190,6 +190,35 @@ class TestPostDeploy:
         assert juju.deployed == []
         assert juju.settled == [(f"ctrl:{CLUSTER_ADDON_MODEL_NAME}", "istio-k8s")]
 
+    def test_skips_deploy_when_addon_charm_already_present_under_a_different_application_name(
+        self, tmp_path: Path
+    ) -> None:
+        # GIVEN the shared cluster addon model already has istio-k8s deployed, but under a
+        # custom application name (e.g. deployed manually, or by an unrelated bundle) rather
+        # than the application name this extension would use
+        overrides = _overrides_client(
+            tmp_path,
+            "overrides:\n  - cluster_addons:\n      - charm: istio-k8s\n        channel: 1/stable\n",
+        )
+        juju = JujuStub()
+        juju.existing_models = {_MODEL.model, CLUSTER_ADDON_MODEL_NAME}
+        juju.application_infos = {
+            "beacon": JujuApplicationInfo(
+                charm="istio-beacon-k8s", revision=74, channel=CharmChannel("1", "stable", "")
+            )
+        }
+        juju.deployed_addons = {"istio-k8s-mesh": JujuApplicationInfo(charm="istio-k8s", revision=59)}
+        extension = ClusterAddonExtension(juju, overrides, logging.getLogger("test"))
+
+        # WHEN post_deploy runs
+        extension.post_deploy(_MODEL)
+
+        # THEN the existing application is recognized by charm (not app name), so no duplicate
+        # deploy happens, and we wait on its actual application name rather than the charm name
+        assert juju.added_models == []
+        assert juju.deployed == []
+        assert juju.settled == [(f"ctrl:{CLUSTER_ADDON_MODEL_NAME}", "istio-k8s-mesh")]
+
 
 class TestConcurrentRaceTolerance:
     def test_tolerates_a_concurrent_worker_already_creating_the_addon_model(self, tmp_path: Path) -> None:

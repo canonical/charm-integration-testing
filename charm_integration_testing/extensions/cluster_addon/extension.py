@@ -66,10 +66,10 @@ class ClusterAddonExtension(JujuExtension):
         else:
             target_model = self._ensure_cluster_addon_model(model.controller)
 
-        self._ensure_addon_deployed(target_model, addon)
+        application = self._ensure_addon_deployed(target_model, addon)
 
         self.logger.info(f"Waiting for cluster addon '{addon.charm}' in '{target_model.uri}' to settle.")
-        self.juju.wait_application_settled(target_model, addon.charm, timeout=DEFAULT_ADDON_DEPLOY_TIMEOUT)
+        self.juju.wait_application_settled(target_model, application, timeout=DEFAULT_ADDON_DEPLOY_TIMEOUT)
 
     def _ensure_cluster_addon_model(self, controller: str) -> JujuModelHandle:
         addon_model = JujuModelHandle(model=CLUSTER_ADDON_MODEL_NAME, controller=controller)
@@ -86,17 +86,35 @@ class ClusterAddonExtension(JujuExtension):
                 raise error from None
         return addon_model
 
-    def _ensure_addon_deployed(self, target_model: JujuModelHandle, addon: ClusterAddonOverrides) -> None:
-        if addon.charm in self.juju.list_applications(target_model):
-            return
+    def _find_addon_application(self, target_model: JujuModelHandle, charm: str) -> str | None:
+        """Find the application already running ``charm`` in ``target_model``, if any.
+
+        Matches on the *deployed charm*, not the application name: an addon deployed
+        under a different application name (e.g. manually, or by an unrelated bundle)
+        must still be recognized as satisfying the dependency, otherwise this would
+        attempt to deploy a second instance and defeat the intended singleton behavior
+        for cluster-scoped addons.
+        """
+        for application, info in self.juju.list_applications(target_model).items():
+            if info.charm == charm:
+                return application
+        return None
+
+    def _ensure_addon_deployed(self, target_model: JujuModelHandle, addon: ClusterAddonOverrides) -> str:
+        existing = self._find_addon_application(target_model, addon.charm)
+        if existing is not None:
+            return existing
         try:
             self.juju.deploy_application(
                 target_model, addon.charm, application=addon.charm, trust=True, channel=addon.channel
             )
             self.logger.info(f"Deployed cluster addon '{addon.charm}' into '{target_model.uri}'.")
+            return addon.charm
         except Exception as error:
             # Tolerate a concurrent test worker having already deployed the same addon
             # into the shared model. Re-check the authoritative state rather than pattern
             # matching on a specific backend's error message.
-            if addon.charm not in self.juju.list_applications(target_model):
+            existing = self._find_addon_application(target_model, addon.charm)
+            if existing is None:
                 raise error from None
+            return existing

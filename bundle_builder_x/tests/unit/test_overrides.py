@@ -3,6 +3,9 @@
 
 from pathlib import Path
 
+import pytest
+from pydantic import ValidationError
+
 from bundle_builder_x.charm import CharmChannel
 from bundle_builder_x.overrides import OverridesClient
 
@@ -130,3 +133,12 @@ class TestGetCharmAddonScope:
 
         # THEN the default scope of "cluster" is returned
         assert client.get_charm_addon_scope("any-charm") == "cluster"
+
+    def test_invalid_scope_value_is_rejected_at_parse_time(self, tmp_path: Path) -> None:
+        # GIVEN an override file with a typo'd addon_scope value
+        (tmp_path / "istio-k8s.yaml").write_text("addon_scope: cluser\n", encoding="utf-8")
+        client = OverridesClient(overrides=tmp_path)
+
+        # THEN parsing raises instead of silently falling back to the "cluster" default
+        with pytest.raises(ValidationError):
+            client.get_charm_addon_scope("istio-k8s")

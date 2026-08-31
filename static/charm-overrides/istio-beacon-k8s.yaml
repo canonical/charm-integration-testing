@@ -20,15 +20,25 @@ overrides:
   # This superseded issue GH-455's diagnosis (RBAC 403 needing --trust): trust is already
   # set unconditionally by bundle_builder_x, and the actual failure is a 404 (missing
   # CRD) plus the missing control plane, not an RBAC problem.
-  - cluster_addons:
-      - charm: istio-k8s
-        channel: 1/stable
-
-  # provide-cmr-mesh only exists from track 2 onwards.
+  #
+  # NOTE: override entries are non-merging -- OverridesClient._get_charm_overrides()
+  # returns the *first* entry whose criteria match, in full, and never consults later
+  # entries. Because cluster_addons must apply to every track/risk (including the
+  # track 2/dev entry below, which additionally needs provide-cmr-mesh), it is declared
+  # via a YAML anchor and repeated on both entries below rather than left on a single
+  # criteria-less entry, which would otherwise silently short-circuit the track 2/dev
+  # entry beneath it and drop provide-cmr-mesh.
   - criteria:
       - any_of:
           - track: '2'
           - track: dev
+    # provide-cmr-mesh only exists from track 2 onwards.
     provides:
       provide-cmr-mesh:
         optional: true
+    cluster_addons: &istio-k8s-cluster-addon
+      - charm: istio-k8s
+        channel: 1/stable
+
+  # Catch-all for every other track/risk.
+  - cluster_addons: *istio-k8s-cluster-addon

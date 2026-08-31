@@ -4,7 +4,7 @@
 import logging
 from functools import cache
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, Field
@@ -82,7 +82,9 @@ class CharmGlobalOverrides(BaseModel):
     # a single shared instance per controller, reused across every model on that
     # controller. "model" deploys a private instance into each dependent model
     # instead, for charms/environments where a shared singleton is not appropriate.
-    addon_scope: str | None = None
+    # Validated at parse time (rather than left as free-form text) so a typo fails
+    # loudly instead of silently falling back to "cluster" behavior.
+    addon_scope: Literal["cluster", "model"] | None = None
     overrides: list[CharmOverrides] = Field(default_factory=list)
 
 
@@ -168,7 +170,7 @@ class OverridesClient:
     def get_charm_cluster_addons(self, charm: str, channel: CharmChannel) -> list[ClusterAddonOverrides]:
         return self._get_charm_overrides(charm, channel).cluster_addons
 
-    def get_charm_addon_scope(self, charm: str) -> str:
+    def get_charm_addon_scope(self, charm: str) -> Literal["cluster", "model"]:
         """Scope of ``charm`` when deployed as a cluster addon: ``"cluster"`` or ``"model"``.
 
         Declared on the addon-provider's own override file (not the consumer's), since the
