@@ -50,7 +50,7 @@ features(x) == {"f"}
     Z3 And: feature f is active AND no other declared feature is active.
 """
 
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import TypeAlias
 
@@ -195,11 +195,15 @@ def lower(expr: AnyExpr, ctx: LoweringContext) -> LoweringResult:
         raise DSLLoweringError(
             f"Top-level constraint must produce a Bool Z3 expression, " f"got internal type {type(result).__name__}"
         )
-    # A constraint that reads a key with no value when unset only holds if that key
-    # is actually set, so it can never be satisfied by a key omitted from the bundle.
-    guards = _absent_value_guards(expr, ctx)
-    if guards:
-        result = z3.And(*guards, result)
+    # A bare no-default key used directly as the whole constraint (e.g. "config[debug]")
+    # is a direct boolean read, so it needs the same guard comparisons and 'in' apply to
+    # themselves.  Scoped to just this top-level node -- if expr is itself a composed
+    # formula (And/Or/Implies/Compare/In/...), it already guarded its own operands during
+    # _lower(), and _absent_value_guard only matches a bare ConfigExpr/ResourceExpr, so
+    # this is a no-op in that case rather than a second, wider guard.
+    guard = _absent_value_guard(expr, ctx)
+    if guard is not None:
+        result = z3.And(guard, result)
     return LoweringResult(expr=result, sub_assertions=list(ctx.sub_assertions))
 
 
@@ -564,56 +568,79 @@ def _is_self_channel_expr(expr: AnyExpr) -> bool:
     return isinstance(expr, (TracksExpr, RisksExpr, ChannelsExpr, RevisionsExpr)) and isinstance(expr.arg, SelfExpr)
 
 
-def _absent_value_guards(expr: AnyExpr, ctx: LoweringContext) -> list[z3.BoolRef]:
-    """Collect ``is_set`` guards for every operand that has no value when unset.
+def _absent_value_guard(expr: AnyExpr, ctx: LoweringContext) -> z3.BoolRef | None:
+    """Return the ``is_set`` guard for a single operand with no value when unset.
 
     A config or resource key that is optional and declares no default has no
     value at all when left unset, and unset keys are omitted from the generated
-    bundle.  A constraint referencing such a key must therefore not be
-    satisfiable by whatever the solver happens to pick for its value variable,
-    or the bundle would be built against a value that is never deployed.
+    bundle.  Reading such an operand -- in a comparison, an ``in`` test, or
+    directly as a boolean -- must therefore not be satisfiable by whatever the
+    solver happens to pick for its value variable, or the bundle would be built
+    against a value that is never deployed.
 
-    Guards are collected by walking the whole constraint AST rather than at
-    individual operators, so every way of reading a value -- comparison,
-    ``in``, or any operator added later -- is covered by construction.
+    Deliberately a single, non-recursive match on ``expr`` itself: this is
+    applied at each site that actually *reads* a value (comparisons, ``in``,
+    direct boolean use), scoped to just that site's own operand(s). It must
+    never walk into a surrounding Boolean composition -- a constraint such as
+    ``bool(endpoint[x]) => config[role] == "shard"`` or
+    ``not set(config[role]) or config[role] == "shard"`` must still allow the
+    key to stay unset when the antecedent is false or the escape hatch is
+    taken. Each nested comparison/``in``/boolean-use guards only its own
+    operand, and And/Or/Not/Implies compose those already-guarded results, so
+    the key is forced to be set only where a value is unconditionally read.
 
-    ``set(config[key])`` is deliberately unaffected: it is a distinct AST node
-    that asks whether the key is set and holds no nested value reference, so
-    guarding it would make ``not set(config[key])`` unsatisfiable.
+    ``set(config[key])`` is a distinct AST node with no nested value reference,
+    so it is unaffected here and ``not set(config[key])`` stays satisfiable.
 
     Keys that do have a default need no guard: their value variable is pinned to
     that default when unset, which is exactly what the charm will use.
     """
-    guards: list[z3.BoolRef] = []
-    seen: set[int] = set()
-
-    def _add(isset_var: z3.BoolRef | None) -> None:
-        if isset_var is not None and id(isset_var) not in seen:
-            seen.add(id(isset_var))
-            guards.append(isset_var)
-
-    for node in _walk_exprs(expr):
-        match node:
-            case ConfigExpr(key=key):
-                cfg = ctx.domain_charm.config.get(key)
-                if cfg is not None and cfg.var is not None and cfg.default is None:
-                    _add(cfg.isset_var)
-            case ResourceExpr(key=key):
-                res = ctx.domain_charm.resources.get(key)
-                if res is not None and res.var is not None and res.default is None:
-                    _add(res.isset_var)
-    return guards
+    match expr:
+        case ConfigExpr(key=key):
+            cfg = ctx.domain_charm.config.get(key)
+            if cfg is not None and cfg.var is not None and cfg.default is None:
+                return cfg.isset_var
+        case ResourceExpr(key=key):
+            res = ctx.domain_charm.resources.get(key)
+            if res is not None and res.var is not None and res.default is None:
+                return res.isset_var
+    return None
 
 
-def _walk_exprs(expr: BaseModel) -> Iterator[BaseModel]:
-    """Yield an expression node and every nested expression node beneath it."""
-    yield expr
-    for field_name in type(expr).model_fields:
-        value = getattr(expr, field_name, None)
-        candidates = value if isinstance(value, (list, tuple, set, frozenset)) else (value,)
-        for item in candidates:
-            if isinstance(item, BaseModel):
-                yield from _walk_exprs(item)
+_NEGATED_COMPARE_OPS = {"==": "!=", "!=": "==", "<": ">=", ">=": "<", ">": "<=", "<=": ">"}
+
+
+def _negate_atomic_predicate(arg: AnyExpr, ctx: LoweringContext) -> z3.BoolRef | None:
+    """Lower ``not <arg>`` by pushing the negation inside ``arg``'s definedness guard.
+
+    Negating a guarded atom naively would negate its guard away:
+    ``Not(And(is_set, role == "shard"))`` is satisfied by leaving the key unset,
+    so ``not (config[role] == "shard")`` would quietly permit an omitted key
+    while the equivalent ``config[role] != "shard"`` requires one.  Pushing the
+    negation into the atom keeps the guard on the outside, so both spellings of
+    the same intent agree.
+
+    Returns None when ``arg`` is not a guarded atom, leaving normal Boolean
+    negation to the caller -- in particular ``not set(config[key])``, which asks
+    about the key's presence rather than reading its value, and any composed
+    formula, whose own atoms were already guarded individually.
+
+    Only applied when a guard is actually in play, which confines the operator
+    rewrite to scalar config/resource operands.  It would be invalid for set
+    comparisons, where sets are only partially ordered and ``not (a >= b)`` does
+    not mean ``a < b``.
+    """
+    match arg:
+        case CompareExpr(op=op, left=left, right=right) if (
+            _absent_value_guard(left, ctx) is not None or _absent_value_guard(right, ctx) is not None
+        ):
+            return _lower_compare(_NEGATED_COMPARE_OPS[op], left, right, ctx)
+        case InExpr(element=element, negated=negated) if _absent_value_guard(element, ctx) is not None:
+            return _lower_as_z3(arg.model_copy(update={"negated": not negated}), ctx)
+        case _ if (guard := _absent_value_guard(arg, ctx)) is not None:
+            # A bare key read directly as a boolean, e.g. "not config[debug]".
+            return z3.And(guard, z3.Not(_lower_as_z3(arg, ctx)))
+    return None
 
 
 def _lower_compare(
@@ -623,14 +650,23 @@ def _lower_compare(
     ctx: LoweringContext,
 ) -> z3.BoolRef:
     """Lower a CompareExpr to a Z3 Bool."""
+    # A no-default optional key has no value at all when unset, so this comparison
+    # must not be satisfiable by whichever value the solver assigns to it.  Guarding
+    # both operands here, rather than in a shared helper, keeps this scoped to just
+    # this comparison -- it must not reach outside into a surrounding And/Or/Implies.
+    guards = [g for g in (_absent_value_guard(left, ctx), _absent_value_guard(right, ctx)) if g is not None]
+
+    def _guarded(result: z3.BoolRef) -> z3.BoolRef:
+        return z3.And(*guards, result) if guards else result
+
     # Lower features expressions eagerly to detect the features==set special case
     # before attempting to lower the StrLiteralSet, which is only valid inside 'in'.
     l_lowered = _lower(left, ctx)
     if isinstance(l_lowered, dict) and isinstance(right, StrLiteralSet):
-        return _lower_features_eq(l_lowered, right.elements)
+        return _guarded(_lower_features_eq(l_lowered, right.elements))
     r_lowered = _lower(right, ctx)
     if isinstance(r_lowered, dict) and isinstance(left, StrLiteralSet):
-        return _lower_features_eq(r_lowered, left.elements)
+        return _guarded(_lower_features_eq(r_lowered, left.elements))
 
     # Emit sub-assertions for channel set comparisons before producing the Z3 expression.
     _emit_channel_mismatch_hints(op, l_lowered, r_lowered, ctx)
@@ -647,6 +683,7 @@ def _lower_compare(
         r_lowered = r_lowered.z3_set
 
     # Set comparisons (CharmSet, SET_STR, SET_INT) all use Z3 subset/equality semantics.
+    # Configs/resources are never set-typed, so no guard applies here.
     if left.dsl_type in (DSLType.CHARM_SET, DSLType.SET_STR, DSLType.SET_INT):
         l_z3 = l_lowered if isinstance(l_lowered, z3.ExprRef) else _lower_as_z3(left, ctx)
         r_z3 = r_lowered if isinstance(r_lowered, z3.ExprRef) else _lower_as_z3(right, ctx)
@@ -670,17 +707,17 @@ def _lower_compare(
     r_z3 = r_lowered if isinstance(r_lowered, z3.ExprRef) else _lower_as_z3(right, ctx)
     match op:
         case "==":
-            return l_z3 == r_z3
+            return _guarded(l_z3 == r_z3)
         case "!=":
-            return l_z3 != r_z3
+            return _guarded(l_z3 != r_z3)
         case "<":
-            return l_z3 < r_z3
+            return _guarded(l_z3 < r_z3)
         case "<=":
-            return l_z3 <= r_z3
+            return _guarded(l_z3 <= r_z3)
         case ">":
-            return l_z3 > r_z3
+            return _guarded(l_z3 > r_z3)
         case ">=":
-            return l_z3 >= r_z3
+            return _guarded(l_z3 >= r_z3)
 
     raise DSLLoweringError(f"Unknown comparison operator: {op!r}")  # pragma: no cover
 
@@ -967,6 +1004,17 @@ def _lower(expr: AnyExpr, ctx: LoweringContext) -> _LoweredValue:  # noqa: C901
                         return z3.SetDifference(l_z3, r_z3)
 
         case InExpr(element=element, collection=collection, negated=negated):
+            # A key with no value when unset must not be satisfiable via 'in' either --
+            # guard scoped to this membership test's own operand, not the surrounding
+            # Boolean structure (see _absent_value_guard). Applied after negation, so
+            # 'not in' requires the key to be set just as directly as 'in' does,
+            # consistent with '!=' being guarded the same way as '==' in comparisons.
+            in_guard = _absent_value_guard(element, ctx)
+
+            def _in_guarded(r: z3.BoolRef) -> z3.BoolRef:
+                final = z3.Not(r) if negated else r
+                return z3.And(in_guard, final) if in_guard is not None else final
+
             # Handle literal set collections before general lowering
             if isinstance(collection, (IntLiteralSet, StrLiteralSet)):
                 elem_z3 = _lower_as_z3(element, ctx)
@@ -974,8 +1022,7 @@ def _lower(expr: AnyExpr, ctx: LoweringContext) -> _LoweredValue:  # noqa: C901
                     clauses: list[z3.ExprRef] = [elem_z3 == z3.IntVal(v) for v in collection.elements]
                 else:
                     clauses = [elem_z3 == z3.StringVal(v) for v in collection.elements]
-                result: z3.ExprRef = z3.Or(clauses) if clauses else z3.BoolVal(False)
-                return z3.Not(result) if negated else result
+                return _in_guarded(z3.Or(clauses) if clauses else z3.BoolVal(False))
 
             # Feature membership: "str" in features(endpoint[x])
             if isinstance(element, StrLit) and collection.dsl_type == DSLType.SET_STR:
@@ -984,10 +1031,15 @@ def _lower(expr: AnyExpr, ctx: LoweringContext) -> _LoweredValue:  # noqa: C901
                 return z3.Not(membership) if negated else membership
 
             # General scalar in collection (e.g. config in runtime set)
-            result = _lower_in(element, collection, ctx)
-            return z3.Not(result) if negated else result
+            return _in_guarded(_lower_in(element, collection, ctx))
 
         case NotExpr(arg=arg):
+            # Negation must not cancel an atom's definedness guard; see
+            # _negate_atomic_predicate.  Anything else negates normally, so
+            # Boolean composition is preserved.
+            negated_atom = _negate_atomic_predicate(arg, ctx)
+            if negated_atom is not None:
+                return negated_atom
             return z3.Not(_lower_as_z3(arg, ctx))
 
         case AndExpr(left=left, right=right):

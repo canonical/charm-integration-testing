@@ -20,6 +20,8 @@ either application, so both deployed as replica sets and blocked with
 "The sharding interface cannot be used by replica sets."
 """
 
+from collections.abc import Mapping
+
 import pytest
 
 from bundle_builder_x.bundle_builder import BundleBuilder, UncompletableBundleError
@@ -340,3 +342,173 @@ class TestOptionalResourcesInConstraints:
 
         # THEN it stays unset: the guard must not force resources to be emitted needlessly
         assert "my-image" not in bundle.applications["app"].resources
+
+
+class TestAbsentValueGuardPreservesBooleanComposition:
+    """The absent-value guard must not leak outside its own atomic predicate.
+
+    A guard scoped to the whole constraint would force a no-default key to be set
+    even in an inactive Boolean branch -- e.g. a false implication antecedent, or an
+    explicit `not set(...)` escape hatch -- which is not what those constraints ask
+    for.  The guard must instead be local to whichever comparison/`in`/direct boolean
+    read actually consumes the value, letting And/Or/Not/Implies compose normally.
+    """
+
+    def test_implication_with_false_antecedent_leaves_the_key_unforced(self) -> None:
+        # GIVEN a no-default key referenced only in the consequent of an implication
+        # whose antecedent is false (the endpoint is optional and never integrated)
+        charm = make_charm(
+            "probe",
+            endpoints={"x": CharmEndpoint(type=EndpointType.PROVIDES, interface="juju-info", optional=True)},
+            configs={"role": ["replication", "shard", None]},
+            config_defaults={},
+            constraint_strs=['bool(endpoint[x]) => config[role] == "shard"'],
+        )
+        builder = BundleBuilder(charmhub_client=CharmhubClientStub(charm))
+
+        # WHEN building
+        bundle = build_single_model(builder, applications={"app": AppSpec(charm="probe")})
+
+        # THEN the key is not forced to be set: the implication is vacuously true, so
+        # nothing actually reads the value
+        assert "role" not in bundle.applications["app"].config
+
+    def test_explicit_unset_escape_hatch_via_or_is_still_satisfiable(self) -> None:
+        # GIVEN a constraint that explicitly permits the key to stay unset via `or`
+        charm = make_charm(
+            "probe",
+            configs={"role": ["replication", "shard", None]},
+            config_defaults={},
+            constraint_strs=[
+                'not set(config[role]) or config[role] == "shard"',
+                # A second constraint that only holds when role is genuinely unset,
+                # to prove the escape hatch above is satisfiable rather than merely
+                # unchosen by the optimizer.
+                "not set(config[role])",
+            ],
+        )
+        builder = BundleBuilder(charmhub_client=CharmhubClientStub(charm))
+
+        # WHEN building
+        bundle = build_single_model(builder, applications={"app": AppSpec(charm="probe")})
+
+        # THEN both constraints hold together: the key stays unset
+        assert "role" not in bundle.applications["app"].config
+
+    def test_direct_boolean_read_of_a_bare_key_is_still_guarded(self) -> None:
+        # GIVEN a boolean, no-default config used directly (not via comparison) as a
+        # constraint, negated
+        charm = make_charm(
+            "probe",
+            configs={"debug": [True, False, None]},
+            config_defaults={},
+            constraint_strs=["not config[debug]"],
+        )
+        builder = BundleBuilder(charmhub_client=CharmhubClientStub(charm))
+
+        # WHEN building
+        bundle = build_single_model(builder, applications={"app": AppSpec(charm="probe")})
+
+        # THEN the negation is pushed inside the guard, so it means the same as
+        # `config[debug] == False` rather than being satisfiable by omitting the key
+        assert bundle.applications["app"].config["debug"] is False
+
+    def test_bare_key_read_as_a_boolean_cannot_be_satisfied_while_unset(self) -> None:
+        # GIVEN a bare boolean read that is required to hold, alongside a constraint
+        # demanding the key stay unset
+        charm = make_charm(
+            "probe",
+            configs={"debug": [True, False, None]},
+            config_defaults={},
+            constraint_strs=["config[debug]", "not set(config[debug])"],
+        )
+        builder = BundleBuilder(charmhub_client=CharmhubClientStub(charm))
+
+        # WHEN building
+        # THEN the pair is contradictory rather than yielding a bundle whose `debug`
+        # is true only inside the solver: the top-level read is guarded too
+        with pytest.raises(UncompletableBundleError):
+            build_single_model(builder, applications={"app": AppSpec(charm="probe")})
+
+    def test_membership_test_still_reachable_inside_an_or(self) -> None:
+        # GIVEN the 'in' path (the operator missed by the earlier, narrower fix)
+        # combined with an explicit unset escape hatch
+        charm = make_charm(
+            "probe",
+            configs={"role": ["replication", "shard", None]},
+            config_defaults={},
+            constraint_strs=[
+                'not set(config[role]) or config[role] in {"shard"}',
+                "not set(config[role])",
+            ],
+        )
+        builder = BundleBuilder(charmhub_client=CharmhubClientStub(charm))
+
+        # WHEN building
+        bundle = build_single_model(builder, applications={"app": AppSpec(charm="probe")})
+
+        # THEN the key still stays unset: the guard on 'in' is scoped to its own
+        # operand, not the surrounding 'or'
+        assert "role" not in bundle.applications["app"].config
+
+
+class TestNegationIsSymmetricWithTheNegatedOperator:
+    """`not (a == b)` and `a != b` must build the same bundle.
+
+    Negating a guarded atom from the outside would negate its guard away --
+    `Not(And(is_set, role == "shard"))` is satisfied by leaving the key unset --
+    so the parenthesised spelling would quietly permit an omitted key while the
+    direct operator spelling required one.
+    """
+
+    @staticmethod
+    def _build(constraint: str) -> Mapping[str, object]:
+        charm = make_charm(
+            "probe",
+            configs={"role": ["replication", "shard", None]},
+            config_defaults={},
+            constraint_strs=[constraint],
+        )
+        builder = BundleBuilder(charmhub_client=CharmhubClientStub(charm))
+        bundle = build_single_model(builder, applications={"app": AppSpec(charm="probe")})
+        return bundle.applications["app"].config
+
+    def test_not_equals_and_negated_equals_agree(self) -> None:
+        # GIVEN the same requirement written both ways
+        # WHEN building each
+        direct = self._build('config[role] != "shard"')
+        negated = self._build('not (config[role] == "shard")')
+
+        # THEN both force a value to be emitted, and it is not the excluded one
+        assert direct["role"] != "shard"
+        assert negated["role"] != "shard"
+        assert negated.keys() == direct.keys()
+
+    def test_not_in_and_negated_in_agree(self) -> None:
+        # GIVEN the membership form of the same requirement, written both ways
+        # WHEN building each
+        direct = self._build('config[role] not in {"shard"}')
+        negated = self._build('not (config[role] in {"shard"})')
+
+        # THEN both likewise pin the key rather than omitting it
+        assert direct["role"] != "shard"
+        assert negated["role"] != "shard"
+        assert negated.keys() == direct.keys()
+
+    def test_negation_does_not_force_keys_it_never_reads(self) -> None:
+        # GIVEN a negated comparison sitting in an inactive Boolean branch
+        charm = make_charm(
+            "probe",
+            endpoints={"x": CharmEndpoint(type=EndpointType.PROVIDES, interface="juju-info", optional=True)},
+            configs={"role": ["replication", "shard", None]},
+            config_defaults={},
+            constraint_strs=['bool(endpoint[x]) => not (config[role] == "shard")'],
+        )
+        builder = BundleBuilder(charmhub_client=CharmhubClientStub(charm))
+
+        # WHEN building
+        bundle = build_single_model(builder, applications={"app": AppSpec(charm="probe")})
+
+        # THEN pushing the negation inward keeps the guard atomic: nothing reads the
+        # value, so the key stays unset
+        assert "role" not in bundle.applications["app"].config
