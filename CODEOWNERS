@@ -4,11 +4,11 @@
 
 # --- Default owner ---
 # Blanket ownership: Solutions QA reviews everything by default.
-*                @canonical/solutions-qa
+*                @canonical/solutions-qa @rpbritton
 
 # --- Broad ownership by language ---
-*.sh             @canonical/solutions-qa-shell
-*.py             @canonical/solutions-qa-python
+*.sh             @canonical/solutions-qa-shell @rpbritton 
+*.py             @canonical/solutions-qa-python @rpbritton
 
 # --- Narrow ownership by directory ---
 /bundle_builder_x/           @rpbritton @LucasPluta @motjuste
@@ -20,5 +20,5 @@
 /validators/                 @rpbritton @LucasPluta @almeidaraul
 
 # --- Meta ---
-/CODEOWNERS      @canonical/solutions-qa
+/CODEOWNERS      @canonical/solutions-qa @rpbritton
 /.github/        @canonical/solutions-qa-github-actions @rpbritton
