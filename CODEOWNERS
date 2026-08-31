@@ -12,7 +12,7 @@
 
 # --- Narrow ownership by directory ---
 /bundle_builder_x/           @rpbritton @LucasPluta
-/charm_integration_testing/  @rpbritton @moisesbenzan @PeishuoCai
+/charm_integration_testing/  @rpbritton @moisesbenzan @PeishuoCai @yjkim717
 /development-sandbox/         @rpbritton @LucasPluta
 /docs/                       @rpbritton @PeishuoCai
 /scripts/                    @rpbritton @PeishuoCai
@@ -21,4 +21,4 @@
 
 # --- Meta ---
 /CODEOWNERS      @canonical/solutions-qa
-/.github/        @canonical/solutions-qa-github-actions
+/.github/        @canonical/solutions-qa-github-actions @rpbritton
