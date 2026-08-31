@@ -142,18 +142,12 @@ class JujuClient:
         for extension in self.extensions:
             extension.post_deploy(model)
 
-    def _write_and_deploy_bundle_phase(
-        self,
-        model: JujuModelHandle,
-        path: Path,
-        yaml_content: str,
-    ) -> None:
-        """Write a transformed bundle to disk and deploy it directly via the backend.
+    def _deploy_bundle_phase(self, model: JujuModelHandle, path: Path) -> None:
+        """Deploy a bundle file directly via the backend, bypassing extensions.
 
-        Bypasses ``deploy_bundle_file()`` (and its extension ``post_deploy()`` calls) since
-        ``deploy_bundles()`` invokes extensions itself, once per model, after all phases.
+        ``deploy_bundles()`` invokes extensions itself, once per model, after all phases, so
+        this skips ``deploy_bundle_file()``'s extension ``post_deploy()`` calls.
         """
-        path.write_text(yaml_content, encoding="utf-8")
         self.logger.info(f"Deploying bundle file: '{path}'")
         self.backend.deploy_bundle_file(model, str(path), trust=True, force=True)
 
@@ -199,7 +193,8 @@ class JujuClient:
             else:
                 phase1_yaml = strip_saas_from_bundle(bundle_yaml)
             phase1_path = tmp_dir / f"apps-only-bundle-{i}.yaml"
-            self._write_and_deploy_bundle_phase(model, phase1_path, phase1_yaml)
+            phase1_path.write_text(phase1_yaml, encoding="utf-8")
+            self._deploy_bundle_phase(model, phase1_path)
 
         # Between phases (Juju 4+ only): create offers that do not yet exist.
         # juju offer fails if the offer already exists, so we check first and skip any that
@@ -226,9 +221,10 @@ class JujuClient:
                 bundle_yaml = bundle_path.read_text(encoding="utf-8")
                 phase2_yaml = strip_offers_from_bundle(bundle_yaml)
                 phase2_path = tmp_dir / f"phase2-bundle-{i}.yaml"
-                self._write_and_deploy_bundle_phase(model, phase2_path, phase2_yaml)
+                phase2_path.write_text(phase2_yaml, encoding="utf-8")
+                self._deploy_bundle_phase(model, phase2_path)
             else:
-                self._write_and_deploy_bundle_phase(model, bundle_path, bundle_path.read_text(encoding="utf-8"))
+                self._deploy_bundle_phase(model, bundle_path)
 
         # Call extensions once per model, now that every model reflects its final, fully-related
         # topology (dict.fromkeys preserves first-seen order while de-duplicating models).
