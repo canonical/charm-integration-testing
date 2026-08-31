@@ -205,7 +205,9 @@ def any_status_not_in(
         unit_agent_statuses=unit_agent_statuses,
     )
     if is_compliant:
-        return False, wait_state
+        return False, dataclasses.replace(
+            wait_state, message=wait_state.message.replace("waiting for", "waiting to leave", 1)
+        )
     return True, dataclasses.replace(wait_state, message=wait_state.message.replace("waiting for", "left", 1))
 
 
