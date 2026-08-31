@@ -276,3 +276,67 @@ class TestComparisonsAgainstAbsentValues:
         # THEN the key stays unset.  Forbidding every allowed value when unset would make
         # a two-valued boolean unsatisfiable and force it to be emitted needlessly.
         assert "debug" not in bundle.applications["app"].config
+
+
+class TestOptionalResourcesInConstraints:
+    """Resources share the flaw: an unset optional resource is omitted from the bundle.
+
+    Resources carry no Charmhub default -- `default` is populated only for `fixed_value`
+    resources, which have no Z3 variable -- so the absent-value guard is the whole of
+    their handling.  These cases all built with `resources: {}` before the fix.
+    """
+
+    def test_resource_constraint_forces_the_resource_to_be_emitted(self) -> None:
+        # GIVEN an optional resource pinned by a constraint to a non-default value
+        charm = make_charm(
+            "probe",
+            resources={"my-image": ["default-image", "custom", None]},
+            constraint_strs=['resource[my-image] == "custom"'],
+        )
+        builder = BundleBuilder(charmhub_client=CharmhubClientStub(charm))
+
+        # WHEN building
+        bundle = build_single_model(builder, applications={"app": AppSpec(charm="probe")})
+
+        # THEN the resource is actually written out rather than satisfied while absent
+        assert bundle.applications["app"].resources["my-image"] == "custom"
+
+    def test_resource_membership_test_cannot_be_satisfied_by_an_unset_resource(self) -> None:
+        # GIVEN the same requirement expressed with `in` rather than `==`
+        charm = make_charm(
+            "probe",
+            resources={"my-image": ["default-image", "custom", None]},
+            constraint_strs=['resource[my-image] in {"custom"}'],
+        )
+        builder = BundleBuilder(charmhub_client=CharmhubClientStub(charm))
+
+        # WHEN building
+        bundle = build_single_model(builder, applications={"app": AppSpec(charm="probe")})
+
+        # THEN the guard applies to every operator, not just comparisons
+        assert bundle.applications["app"].resources["my-image"] == "custom"
+
+    def test_resource_constrained_to_a_value_outside_allowed_list_is_rejected(self) -> None:
+        # GIVEN a constraint naming a value the resource is not allowed to take
+        charm = make_charm(
+            "probe",
+            resources={"my-image": ["default-image", "custom", None]},
+            constraint_strs=['resource[my-image] == "bogus"'],
+        )
+        builder = BundleBuilder(charmhub_client=CharmhubClientStub(charm))
+
+        # WHEN building
+        # THEN it is rejected rather than quietly satisfied with the resource omitted
+        with pytest.raises(UncompletableBundleError):
+            build_single_model(builder, applications={"app": AppSpec(charm="probe")})
+
+    def test_unreferenced_optional_resource_is_not_forced_to_be_set(self) -> None:
+        # GIVEN an optional resource that no constraint refers to
+        charm = make_charm("probe", resources={"my-image": ["default-image", "custom", None]})
+        builder = BundleBuilder(charmhub_client=CharmhubClientStub(charm))
+
+        # WHEN building
+        bundle = build_single_model(builder, applications={"app": AppSpec(charm="probe")})
+
+        # THEN it stays unset: the guard must not force resources to be emitted needlessly
+        assert "my-image" not in bundle.applications["app"].resources

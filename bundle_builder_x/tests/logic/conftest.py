@@ -16,6 +16,7 @@ from bundle_builder_x.charm import (
     CharmConfigValue,
     CharmEndpoint,
     CharmEndpointProxy,
+    CharmResourceValue,
     EndpointType,
 )
 from bundle_builder_x.charmhub import CharmhubClient
@@ -116,6 +117,7 @@ def make_charm(
     subordinate: bool = False,
     configs: dict[str, list[CharmConfigValue]] | None = None,
     config_defaults: dict[str, CharmConfigValue] | None = None,
+    resources: dict[str, list[CharmResourceValue]] | None = None,
 ) -> Charm:
     """Build a minimal Charm suitable for use in logic tests."""
     return Charm(
@@ -132,6 +134,7 @@ def make_charm(
         platforms=["machine", "kubernetes"],
         configs=configs or {},
         config_defaults=config_defaults or {},
+        resources=resources or {},
     )
 
 
