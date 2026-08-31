@@ -23,7 +23,7 @@ either application, so both deployed as replica sets and blocked with
 import pytest
 
 from bundle_builder_x.bundle_builder import BundleBuilder, UncompletableBundleError
-from bundle_builder_x.charm import CharmEndpoint, EndpointType
+from bundle_builder_x.charm import Charm, CharmEndpoint, EndpointType
 from bundle_builder_x.spec import AppSpec, IntegrationSpec
 
 from .conftest import CharmhubClientStub, build_single_model, make_charm
@@ -35,7 +35,7 @@ MONGODB_ROLE_CONSTRAINTS = [
 ]
 
 
-def make_mongodb(name: str = "mongodb-k8s", *, default_role: str | None = "replication"):
+def make_mongodb(name: str = "mongodb-k8s", *, default_role: str | None = "replication") -> Charm:
     """Build a mongodb-k8s-like charm with an optional role config."""
     return make_charm(
         name,
