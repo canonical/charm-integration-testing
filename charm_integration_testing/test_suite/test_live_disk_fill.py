@@ -9,8 +9,7 @@ from juju import JujuBackend, JujuClient, JujuModelHandle, JujuWaitTimeoutError
 
 from .scheduler.states import State
 
-# Global default fill target. Per-charm overrides (static/charm-resource-constraints/)
-# are tracked separately.
+# Global default fill target. Per-charm overrides are tracked separately.
 FILL_PERCENT = 98
 FILL_FILE = "chaos-disk-fill.bin"
 DETECT_TIMEOUT = timedelta(minutes=10)
@@ -21,6 +20,8 @@ RECOVER_TIMEOUT = timedelta(minutes=15)
 def _avail_mb_from_df(df_output: str) -> int:
     """Available MiB from `df -Pk` output (POSIX format: header row plus one data row)."""
     rows = [line for line in df_output.splitlines() if line.strip()]
+    if len(rows) < 2 or len(rows[-1].split()) < 4:
+        raise ValueError(f"unexpected df output: {df_output!r}")
     return int(rows[-1].split()[3]) // 1024
 
 
@@ -28,7 +29,6 @@ def _avail_mb_from_df(df_output: str) -> int:
 def test_live_disk_fill(
     juju_client: JujuClient,
     juju_backend: JujuBackend,
-    _is_running_on_kubernetes: None,
     native_chaos_client: NativeChaosClient,
     target_model_ref: JujuModelHandle,
     target_application: str,
