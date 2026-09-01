@@ -87,6 +87,17 @@ class ClusterAddonExtension(JujuExtension):
     def _ensure_addon_deployed(self, target_model: JujuModelHandle, addon: ClusterAddonOverrides) -> str:
         existing = self._find_addon_application(target_model, addon.charm)
         if existing is not None:
+            if addon.channel is not None:
+                existing_info = self.juju.list_applications(target_model).get(existing)
+                if (
+                    existing_info is not None
+                    and existing_info.channel is not None
+                    and str(existing_info.channel) != addon.channel
+                ):
+                    raise RuntimeError(
+                        f"Cluster addon '{addon.charm}' already exists in '{target_model.uri}' as '{existing}' on "
+                        f"channel '{existing_info.channel}', but '{addon.channel}' was requested."
+                    )
             return existing
         try:
             self.juju.deploy_application(
