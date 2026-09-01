@@ -207,6 +207,9 @@ def config_value_to_z3(var: z3.ExprRef, value: CharmConfigValue) -> z3.BoolRef:
     if value is None:
         raise DSLLoweringError("None is not a concrete config value")
     if isinstance(value, bool):
+        # See DomainCharmConfig.bool_as_int.
+        if var.sort() == z3.IntSort():
+            return var == z3.IntVal(1 if value else 0)
         return var == z3.BoolVal(value)
     if isinstance(value, int):
         return var == z3.IntVal(value)
@@ -674,6 +677,9 @@ def _lower(expr: AnyExpr, ctx: LoweringContext) -> _LoweredValue:  # noqa: C901
         case ConfigExpr(key=key):
             cfg = ctx.domain_charm.config.get(key)
             if cfg is not None and cfg.var is not None:
+                if cfg.bool_as_int:
+                    # See DomainCharmConfig.bool_as_int.
+                    return cfg.var == z3.IntVal(1)
                 return cfg.var
             if cfg is not None:
                 cfg_val = cfg.default
