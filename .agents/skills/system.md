@@ -9,11 +9,15 @@ Explicit user requests are non-negotiable. When a user explicitly requests an ac
 
 Before implementing, ask clarifying questions to understand the actual goal, constraints, and expected outcomes.
 
+**Never `git push` unless you have explicit permission to push.** Permission is not implied by having a working `GH_TOKEN`, being asked to "fix", "commit", or "open a PR", or by the push command simply succeeding. If the user has not explicitly told you to push, stop after committing locally and say so. When you do push: try `git push` first; if that fails for a permission-related reason, you may try once via the `gh` CLI as a fallback, then stop either way. Do not go further, e.g. by retrying with different remotes, tokens, or forced flags; report the outcome.
+
 ## Tone and Style
 
 In your chat responses, write in plain ASCII: avoid emdashes (use commas or semicolons instead), avoid emojis, use straight quotes. Be direct and matter-of-fact, not eager or enthusiastic.
 
 Note: This applies to your chat output, not to repository documentation or skill files, which may use non-ASCII as needed for clarity.
+
+**Be concise everywhere: code comments, docstrings, and PR descriptions.** Write comments and docstrings only where the "why" isn't obvious from the code; one or two sentences is normally enough. PR descriptions should be normal human-reviewer length (a short description, what changed, and why), not an exhaustive design essay. Do not restate what the code already says, narrate step-by-step reasoning, or pad with lengthy justification. If you find yourself writing paragraphs to defend a change, that's a signal to simplify the change instead.
 
 ---
 
@@ -164,7 +168,7 @@ sudo k8s kubectl scale deployment minio -n s3-test --replicas=0
 ## Important notes
 
 - **Do not modify project source code under `development-sandbox/` unless the task is explicitly about sandbox tooling.** That directory is your runtime environment; accidental edits to `bin/` scripts or `substrate.yaml` can break subsequent runs.
-- **Do not modify git configuration.** Never edit `.git/config`, change remote URLs, embed tokens in remote URLs (`https://<token>@github.com/...`), or run `git config` to change settings. The host machine's git identity and remote configuration must not be touched. If you need to push or authenticate, use the `GH_TOKEN` environment variable already present in your session. If that token lacks push permissions, treat it as intentional — do not attempt to work around it.
+- **Do not modify git configuration.** Never edit `.git/config`, change remote URLs, embed tokens in remote URLs (`https://<token>@github.com/...`), or run `git config` to change settings. The host machine's git identity and remote configuration must not be touched. If you need to authenticate, use the `GH_TOKEN` environment variable already present in your session. See the push-permission rule under Operating Principles: a rejected or missing push is intentional, not an obstacle to route around.
 - The Juju substrate is not pre-provisioned. If no Juju controller exists, run the `/setup-k8s` or `/setup-lxd` skill first.
 - For k8s deployments, the model type is `kubernetes`. For LXD deployments, the model type is `machine`.
 - **`juju` snap cannot redirect stdout to a file directly.** `juju status > file` exits 1 with an empty file. Use a pipe instead: `juju status | cat > file`. This applies to any `juju` subcommand writing to a file.
