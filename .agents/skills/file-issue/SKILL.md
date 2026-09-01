@@ -103,7 +103,7 @@ templates can change and differ repo to repo.
 - Link, don't dump: if there's a Test Observer artefact, CI run, or PR
   discussion behind this, link it instead of copy-pasting everything.
 
-**AI disclaimer:** end the issue body with, on its own line:
+**AI disclaimer:** start the issue body with, on its own line:
 
 ```
 _Filed by an AI assistant on behalf of @<user>._
@@ -127,13 +127,13 @@ gh issue create --repo <owner/repo> \
   --title "<short, specific title>" \
   --label bug \
   --body "$(cat <<'EOF'
-### <field label from the repo's own template>
-...
-
-### <field label from the repo's own template>
-...
-
 _Filed by an AI assistant on behalf of @<user>._
+
+### <field label from the repo's own template>
+...
+
+### <field label from the repo's own template>
+...
 EOF
 )"
 ```
