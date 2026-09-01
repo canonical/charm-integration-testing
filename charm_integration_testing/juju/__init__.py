@@ -16,6 +16,7 @@ from .backend import (
 )
 from .client import JujuClient, JujuValidationError
 from .extension import JujuExtension
+from .handles import JujuControllerHandle, JujuModelHandle
 from .models import (
     CharmChannel,
     JujuApplicationInfo,
@@ -32,10 +33,12 @@ __all__ = [
     "JujuBackend",
     "JujuClient",
     "JujuConsumedOfferInfo",
+    "JujuControllerHandle",
     "JujuExecOutput",
     "JujuExtension",
     "JujuIntegration",
     "JujuIntegrationApplication",
+    "JujuModelHandle",
     "JujuPerformanceWarning",
     "JujuStatusPerformanceWarning",
     "JujuTask",

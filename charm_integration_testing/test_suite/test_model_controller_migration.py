@@ -4,7 +4,7 @@
 from datetime import timedelta
 
 import pytest
-from juju import JujuBackend, JujuClient
+from juju import JujuBackend, JujuClient, JujuModelHandle
 
 from .scheduler.states import State
 
@@ -16,33 +16,36 @@ def test_model_controller_migration(
     target_controller: str,
     temp_juju_controller: str,
     model: str,
+    target_model_ref: JujuModelHandle,
 ) -> None:
+    temp_model_ref = JujuModelHandle(controller=temp_juju_controller, model=model)
+
     # Model migration is broken in juju >= 4.0.0.
     # See https://github.com/juju/juju/issues/22239
-    if juju_client.version(f"{target_controller}:{model}").major >= 4:
+    if juju_client.version(target_model_ref).major >= 4:
         pytest.skip("Model migration is not supported on juju >= 4.0.0 (https://github.com/juju/juju/issues/22239).")
 
     # Validate all applications and relations before migration
-    juju_client.validate_model(model=f"{target_controller}:{model}", level="deep")
+    juju_client.validate_model(model=target_model_ref, level="deep")
 
     juju_client.migrate_model(
         model_name=model, source_controller=target_controller, target_controller=temp_juju_controller
     )
 
     # Wait migration to start
-    juju_client.wait_for_model_to_exist(model=f"{temp_juju_controller}:{model}", timeout=timedelta(minutes=15))
+    juju_client.wait_for_model_to_exist(model=temp_model_ref, timeout=timedelta(minutes=15))
 
     # Wait until model is idle in new controller
-    juju_client.idle_for_period(model=f"{temp_juju_controller}:{model}", timeout=timedelta(minutes=15))
+    juju_client.idle_for_period(model=temp_model_ref, timeout=timedelta(minutes=15))
 
     # Workaround for https://github.com/juju/juju/issues/22114: CAAS workers don't
     # restart after migration, hanging `juju exec`. K8s-only.
     if juju_backend.is_k8s_controller(temp_juju_controller):
-        juju_client.reboot_model_controller(model=f"{temp_juju_controller}:{model}")
-        juju_client.idle_for_period(model=f"{temp_juju_controller}:{model}", timeout=timedelta(minutes=15))
+        juju_client.reboot_model_controller(model=temp_model_ref)
+        juju_client.idle_for_period(model=temp_model_ref, timeout=timedelta(minutes=15))
 
     # Validate all applications and relations AFTER migration
-    juju_client.validate_model(model=f"{temp_juju_controller}:{model}", level="deep")
+    juju_client.validate_model(model=temp_model_ref, level="deep")
 
     # Migrate the model back to the original controller
     juju_client.migrate_model(
@@ -50,16 +53,16 @@ def test_model_controller_migration(
     )
 
     # Wait migration to start
-    juju_client.wait_for_model_to_exist(model=f"{target_controller}:{model}", timeout=timedelta(minutes=15))
+    juju_client.wait_for_model_to_exist(model=target_model_ref, timeout=timedelta(minutes=15))
 
     # Wait until model is idle in old controller
-    juju_client.idle_for_period(model=f"{target_controller}:{model}", timeout=timedelta(minutes=15))
+    juju_client.idle_for_period(model=target_model_ref, timeout=timedelta(minutes=15))
 
     # Workaround for https://github.com/juju/juju/issues/22114: CAAS workers on the
     # original controller don't restart after the return migration. K8s-only.
     if juju_backend.is_k8s_controller(target_controller):
-        juju_client.reboot_model_controller(model=f"{target_controller}:{model}")
-        juju_client.idle_for_period(model=f"{target_controller}:{model}", timeout=timedelta(minutes=15))
+        juju_client.reboot_model_controller(model=target_model_ref)
+        juju_client.idle_for_period(model=target_model_ref, timeout=timedelta(minutes=15))
 
     # Validate all applications and relations AFTER second migration
-    juju_client.validate_model(model=f"{target_controller}:{model}", level="deep")
+    juju_client.validate_model(model=target_model_ref, level="deep")

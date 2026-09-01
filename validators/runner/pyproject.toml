@@ -37,9 +37,11 @@ dependencies = [
     "validators-grafana-dashboard",
     "validators-grafana-datasource",
     "validators-ingress",
+    "validators-ingress-auth",
     "validators-prometheus-remote-write",
     "validators-alertmanager-dispatch",
     "validators-certificate-transfer",
+    "validators-cross-model-mesh",
 ]
 
 [build-system]

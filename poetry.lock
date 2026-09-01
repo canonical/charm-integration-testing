@@ -2469,6 +2469,27 @@ type = "directory"
 url = "validators/config_server"
 
 [[package]]
+name = "validators-cross-model-mesh"
+version = "0.1.0"
+description = "Validator for the cross_model_mesh interface"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+validators-base = "*"
+validators-test-utils = {version = "*", optional = true}
+
+[package.extras]
+dev = ["validators-test-utils"]
+
+[package.source]
+type = "directory"
+url = "validators/cross_model_mesh"
+
+[[package]]
 name = "validators-cve-catalog"
 version = "0.1.0"
 description = "Validator for cve-catalog interface"
@@ -2586,6 +2607,28 @@ dev = ["validators-test-utils"]
 [package.source]
 type = "directory"
 url = "validators/ingress"
+
+[[package]]
+name = "validators-ingress-auth"
+version = "0.1.0"
+description = "Validator for the ingress-auth interface"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+pyyaml = ">=6.0,<7.0"
+validators-base = "*"
+validators-test-utils = {version = "*", optional = true}
+
+[package.extras]
+dev = ["validators-test-utils"]
+
+[package.source]
+type = "directory"
+url = "validators/ingress_auth"
 
 [[package]]
 name = "validators-kafka-client"
@@ -2885,12 +2928,14 @@ validators-azure-storage = "*"
 validators-base = "*"
 validators-certificate-transfer = "*"
 validators-config-server = "*"
+validators-cross-model-mesh = "*"
 validators-cve-catalog = "*"
 validators-external-provider = "*"
 validators-grafana-dashboard = "*"
 validators-grafana-datasource = "*"
 validators-http-interface = "*"
 validators-ingress = "*"
+validators-ingress-auth = "*"
 validators-kafka-client = "*"
 validators-livepatch-pro-airgapped-server = "*"
 validators-loki-push-api = "*"
@@ -3064,4 +3109,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<4.0"
-content-hash = "41493a1f2df4012b2bc250512b46618aacb3e94afcf1bc320679603a5a590443"
+content-hash = "aaa1ffda6cd57660f37f50177119baf5b7790116269c266470ed1a9d8782a7ed"
