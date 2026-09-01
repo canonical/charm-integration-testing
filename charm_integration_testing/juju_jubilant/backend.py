@@ -293,9 +293,7 @@ class JubilantBackend(JujuCmdBackend):
 
         def left_active(status: jubilant.Status) -> tuple[bool, JujuWaitState]:
             if application not in status.apps:
-                return False, dataclasses.replace(
-                    JujuWaitState(), message=f"waiting for application '{application}' to exist"
-                )
+                return False, JujuWaitState(message=f"waiting for application '{application}' to exist")
             return any_status_not_in(status, application, unit_statuses={"active"})
 
         self.wait(
