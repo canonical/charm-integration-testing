@@ -784,13 +784,13 @@ class JubilantBackend(JujuCmdBackend):
         )
 
     def migrate_model(self, model_name: str, source_controller: str, target_controller: str) -> None:
-        # Grace window covers both ends: source (migrating away) and target
-        # (still importing).
-        self._note_migration(source_controller, model_name)
-        self._note_migration(target_controller, model_name)
         self.client.model(JujuModelHandle(controller=source_controller, model=model_name)).cli(
             "migrate", f"{source_controller}:{model_name}", target_controller, include_model=False
         )
+        # Grace window covers both ends: source (migrating away) and target
+        # (still importing). Only recorded once the migrate command itself succeeds.
+        self._note_migration(source_controller, model_name)
+        self._note_migration(target_controller, model_name)
 
     def upgrade_controller(self, controller: str, agent_version: str | None = None) -> None:
         extra = ("--agent-version", agent_version) if agent_version else ()

@@ -2613,3 +2613,19 @@ class TestMigrationTolerance:
         with pytest.raises(jubilant.CLIError) as exc_info:
             backend.status(model)
         assert not isinstance(exc_info.value, TransientModelUnavailabilityError)
+
+    def test_migrate_model_does_not_record_grace_window_when_migrate_cli_fails(self) -> None:
+        # GIVEN a backend whose underlying `juju migrate` CLI call fails
+        class FailingMigrateStub:
+            def cli(self, *args: str, **kwargs: Any) -> str:
+                raise jubilant.CLIError(1, list(args), "", "ERROR permission denied\n")
+
+        backend = JubilantBackend(JubilantClientStub(client=FailingMigrateStub()))
+
+        # WHEN migrate_model is called and its CLIError propagates
+        with pytest.raises(jubilant.CLIError):
+            backend.migrate_model(model_name="my-model", source_controller="src-ctrl", target_controller="dst-ctrl")
+
+        # THEN no grace window was recorded for either end, since no migration actually started
+        assert backend._migration_deadline(JujuModelHandle(controller="src-ctrl", model="my-model")) is None
+        assert backend._migration_deadline(JujuModelHandle(controller="dst-ctrl", model="my-model")) is None
