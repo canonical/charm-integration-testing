@@ -41,6 +41,7 @@ dependencies = [
     "validators-prometheus-remote-write",
     "validators-certificate-transfer",
     "validators-trino-client",
+    "validators-cross-model-mesh",
 ]
 
 [build-system]
