@@ -10,7 +10,15 @@ registry, making all tests fully offline and deterministic.
 from bundle_builder_x import CharmReleaseNotFoundException
 from bundle_builder_x.bundle import Bundle, Solution
 from bundle_builder_x.bundle_builder import BundleBuilder
-from bundle_builder_x.charm import Charm, CharmChannel, CharmEndpoint, CharmEndpointProxy, EndpointType
+from bundle_builder_x.charm import (
+    Charm,
+    CharmChannel,
+    CharmConfigValue,
+    CharmEndpoint,
+    CharmEndpointProxy,
+    CharmResourceValue,
+    EndpointType,
+)
 from bundle_builder_x.charmhub import CharmhubClient
 from bundle_builder_x.constraints_dsl import parse_constraint
 from bundle_builder_x.juju_version import JujuVersion
@@ -107,6 +115,9 @@ def make_charm(
     revision: int = 1,
     ubuntu_version: str = "22.04",
     subordinate: bool = False,
+    configs: dict[str, list[CharmConfigValue]] | None = None,
+    config_defaults: dict[str, CharmConfigValue] | None = None,
+    resources: dict[str, list[CharmResourceValue]] | None = None,
 ) -> Charm:
     """Build a minimal Charm suitable for use in logic tests."""
     return Charm(
@@ -121,6 +132,9 @@ def make_charm(
         proxies=proxies or [],
         priority=priority,
         platforms=["machine", "kubernetes"],
+        configs=configs or {},
+        config_defaults=config_defaults or {},
+        resources=resources or {},
     )
 
 
