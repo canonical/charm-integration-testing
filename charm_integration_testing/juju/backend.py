@@ -88,6 +88,11 @@ class JujuWaitState:
     noncompliant_unit_agents: dict[str, JujuUnitAgentState | None] = field(default_factory=dict)
 
 
+def is_agent_disconnected(wait_state: JujuWaitState) -> bool:
+    """True if any noncompliant unit agent is 'lost' (disconnected from the controller)."""
+    return any(state is not None and state.status == "lost" for state in wait_state.noncompliant_unit_agents.values())
+
+
 class JujuWaitTimeoutError(TimeoutError):
     wait_state: JujuWaitState
 
