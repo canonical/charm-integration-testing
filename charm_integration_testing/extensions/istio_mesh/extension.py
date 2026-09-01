@@ -6,24 +6,28 @@ from datetime import timedelta
 
 from juju import JujuApplicationInfo, JujuBackend, JujuExtension, JujuModelHandle
 
-ISTIO_BEACON_CHARM = "istio-beacon-k8s"
+# Charms that need a reconciling istio-k8s control plane to reach "active", with no Juju
+# relation to express the dependency -- both query the Gateway API CRDs directly.
+ISTIO_MESH_DEPENDENT_CHARMS = frozenset({"istio-beacon-k8s", "istio-ingress-k8s"})
 ISTIO_CONTROL_PLANE_CHARM = "istio-k8s"
 ISTIO_CONTROL_PLANE_CHANNEL = "1/stable"
-# Gateway API CRD istio-k8s installs; istio-beacon-k8s 404s on config-changed without it
-# (root cause of the rev 74, 1/stable hang -- reproduced against test_execution 656938).
+# Gateway API CRD istio-k8s installs; dependents 404 on config-changed without it (root
+# cause of the istio-beacon-k8s rev 74, 1/stable hang -- reproduced against test_execution
+# 656938 -- and the same class of failure for istio-ingress-k8s).
 GATEWAY_CRD_NAME = "gateways.gateway.networking.k8s.io"
 
 DEFAULT_ISTIO_DEPLOY_TIMEOUT = timedelta(minutes=15)
 
 
-class IstioBeaconMeshExtension(JujuExtension):
-    """Deploys istio-k8s when istio-beacon-k8s is present but the mesh CRDs it needs are missing.
+class IstioMeshExtension(JujuExtension):
+    """Deploys istio-k8s when a mesh-dependent charm is present but its CRDs are missing.
 
-    istio-beacon-k8s needs a reconciling istio-k8s control plane to reach "active", with no
-    Juju relation to express the dependency. Checked directly against cluster state (the
-    Gateway API CRD istio-k8s installs) rather than inferred from bundle content, so a
-    cluster that already has a working mesh is left alone. Deployment is idempotent: an
-    already-deployed istio-k8s application is treated as success.
+    istio-beacon-k8s and istio-ingress-k8s each need a reconciling istio-k8s control plane
+    to reach "active", with no Juju relation to express the dependency. Checked directly
+    against cluster state (the Gateway API CRD istio-k8s installs) rather than inferred
+    from bundle content, so a cluster that already has a working mesh is left alone.
+    Deployment is idempotent: an already-deployed istio-k8s application is treated as
+    success, and is only ever attempted once even if multiple dependents are present.
     """
 
     juju: JujuBackend
@@ -35,7 +39,8 @@ class IstioBeaconMeshExtension(JujuExtension):
 
     def post_deploy(self, model: JujuModelHandle) -> None:
         applications = self.juju.list_applications(model)
-        if not any(info.charm == ISTIO_BEACON_CHARM for info in applications.values()):
+        dependents = sorted(info.charm for info in applications.values() if info.charm in ISTIO_MESH_DEPENDENT_CHARMS)
+        if not dependents:
             return
 
         kubernetes_client = self.juju.get_kubernetes_client_for_controller(model.controller)
@@ -47,7 +52,7 @@ class IstioBeaconMeshExtension(JujuExtension):
             return
 
         self.logger.info(
-            f"'{ISTIO_BEACON_CHARM}' present in '{model.uri}' but '{GATEWAY_CRD_NAME}' CRD is missing; "
+            f"{dependents} present in '{model.uri}' but '{GATEWAY_CRD_NAME}' CRD is missing; "
             f"deploying '{ISTIO_CONTROL_PLANE_CHARM}'."
         )
         application = self._ensure_istio_deployed(model)

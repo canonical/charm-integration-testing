@@ -13,7 +13,7 @@ from typing import Any, Callable, Iterator
 import pytest
 from extensions import (
     ConfigureLivepatchServerExtension,
-    IstioBeaconMeshExtension,
+    IstioMeshExtension,
     LegoExtension,
     PostgresqlDatabaseReplicationExtension,
     PostgresqlK8sDatabaseReplicationExtension,
@@ -264,7 +264,7 @@ def juju_client(
         logger,
         extensions=[
             ConfigureLivepatchServerExtension(juju_backend, logger, ubuntu_pro_token),
-            IstioBeaconMeshExtension(juju_backend, logger),
+            IstioMeshExtension(juju_backend, logger),
             LegoExtension(juju_backend, logger),
             PostgresqlDatabaseReplicationExtension(juju_backend, logger),
             PostgresqlK8sDatabaseReplicationExtension(juju_backend, logger),
