@@ -367,10 +367,17 @@ def add_charm_metadata_constraints(solver: z3.Solver, domain: Domain) -> None:
             if allowed:
                 value_constraint = z3.Or([config_value_to_z3(cfg.var, v) for v in allowed])
                 if cfg.isset_var is not None:
-                    # Config is optional (None is an allowed value).  The value constraint
-                    # only applies when is_set is True; when is_set is False the value var
-                    # is unconstrained (solver may choose anything, but set() will be False).
+                    # Config is optional (None is an allowed value).
                     solver.add(z3.Implies(z3.And(charm.exists, cfg.isset_var), value_constraint))
+                    # Unset must model what the charm actually gets: its default, or
+                    # (with none) a value outside `allowed`, so constraints can't match
+                    # a key that's never emitted.
+                    unset_constraint = (
+                        config_value_to_z3(cfg.var, cfg.default)
+                        if cfg.default is not None
+                        else z3.Not(value_constraint)
+                    )
+                    solver.add(z3.Implies(z3.And(charm.exists, z3.Not(cfg.isset_var)), unset_constraint))
                 else:
                     # Config is always required when the charm exists.
                     solver.add(z3.Implies(charm.exists, value_constraint))
@@ -385,10 +392,12 @@ def add_charm_metadata_constraints(solver: z3.Solver, domain: Domain) -> None:
             if res_allowed:
                 value_constraint = z3.Or([res.var == z3.StringVal(v) for v in res_allowed])
                 if res.isset_var is not None:
-                    # Resource is optional (None is an allowed value).  The value constraint
-                    # only applies when isset_var is True; when isset_var is False the value var
-                    # is unconstrained (solver may choose anything, but set() will be False).
+                    # Resource is optional (None is an allowed value).
                     solver.add(z3.Implies(z3.And(charm.exists, res.isset_var), value_constraint))
+                    # No Charmhub default exists for resources, so unset must fall
+                    # outside `res_allowed` instead; always possible since resources
+                    # are strings (unbounded domain).
+                    solver.add(z3.Implies(z3.And(charm.exists, z3.Not(res.isset_var)), z3.Not(value_constraint)))
                 else:
                     # Resource is always required when the charm exists.
                     solver.add(z3.Implies(charm.exists, value_constraint))
