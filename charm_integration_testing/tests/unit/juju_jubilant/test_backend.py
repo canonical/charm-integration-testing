@@ -1355,6 +1355,7 @@ class TestJubilantBackend:
                 config: Any = None,
                 trust: bool = False,
                 force: bool = False,
+                channel: str | None = None,
             ) -> None:
                 self.charm = charm
                 self.app = app

@@ -329,6 +329,7 @@ class JujuBackend(ABC):
         config: dict[str, Any] | None = None,
         trust: bool = False,
         force: bool = False,
+        channel: str | None = None,
     ) -> None:
         raise NotImplementedError
 
