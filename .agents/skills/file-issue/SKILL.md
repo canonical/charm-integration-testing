@@ -56,14 +56,15 @@ issue directly, without asking, if the search turns up no plausible match.
 ## Step 2 — Pick and read the matching template, if one exists
 
 Templates, if the target repo has them, usually live in `.github/ISSUE_TEMPLATE/`,
-but some repos instead use `docs/ISSUE_TEMPLATE/`. Check both locations before
-concluding a repo has no templates. For `canonical/charm-integration-testing`
-specifically:
+but some repos instead use `docs/ISSUE_TEMPLATE/`, or a single Markdown file
+(`.github/ISSUE_TEMPLATE.md` or `ISSUE_TEMPLATE.md` at the repo root) rather
+than a directory of form templates. Check all of these before concluding a
+repo has no templates. For `canonical/charm-integration-testing` specifically:
 
 - `bug_report.yml` — fields: Bug Description, To Reproduce, Relevant log
   output, Additional context.
 - `enhancement_proposal.yml` — fields: Problem statement, Enhancement
-  Proposal, What needs to get done?.
+  Proposal, What needs to get done?
 
 For any other repo, fetch its templates first instead of assuming the same
 structure:
@@ -71,6 +72,8 @@ structure:
 ```bash
 gh api repos/<owner/repo>/contents/.github/ISSUE_TEMPLATE 2>/dev/null
 gh api repos/<owner/repo>/contents/docs/ISSUE_TEMPLATE 2>/dev/null
+gh api repos/<owner/repo>/contents/.github/ISSUE_TEMPLATE.md 2>/dev/null
+gh api repos/<owner/repo>/contents/ISSUE_TEMPLATE.md 2>/dev/null
 # then fetch and read each template file found, e.g.:
 gh api repos/<owner/repo>/contents/.github/ISSUE_TEMPLATE/<name> --jq .content | base64 -d
 ```
