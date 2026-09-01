@@ -147,6 +147,23 @@ class TestUnsupportedChaosMethods:
                 duration=timedelta(seconds=30),
             )
 
+    def test_io_latency_raises_not_implemented(self) -> None:
+        # GIVEN a client wrapping a kubernetes backend stub
+        stub = KubernetesBackendStub()
+        client = KubernetesChaosClient(backend=stub)
+
+        # WHEN calling io_latency
+        # THEN it is unsupported for this backend
+        with pytest.raises(NotImplementedError):
+            client.io_latency(
+                model=TEST_MODEL,
+                unit="postgresql/0",
+                volume_path="/tmp/fill",
+                delay=timedelta(seconds=5),
+                percent=100,
+                duration=timedelta(seconds=30),
+            )
+
     def test_cleanup_raises_not_implemented(self) -> None:
         # GIVEN a client wrapping a kubernetes backend stub
         stub = KubernetesBackendStub()

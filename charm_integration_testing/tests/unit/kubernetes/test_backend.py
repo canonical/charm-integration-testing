@@ -4,6 +4,8 @@
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import pytest
+from kubernetes.client import ApiException  # type: ignore[import-untyped]
 from kubernetes_client.backend import DEFAULT_RETRY_KWARGS, KubernetesBackend
 from urllib3.util import Retry
 
@@ -46,3 +48,42 @@ class TestK8sClient:
         second = KubernetesBackend.k8s_client(load_kube_config=LoadKubeConfigStub())
 
         assert first.api_client.configuration.retries is not second.api_client.configuration.retries
+
+
+class FakeApiextensionsV1Api:
+    """Records read_custom_resource_definition calls and optionally raises."""
+
+    def __init__(self, error: ApiException | None = None) -> None:
+        self.error = error
+        self.reads: list[str] = []
+
+    def read_custom_resource_definition(self, name: str) -> object:
+        self.reads.append(name)
+        if self.error is not None:
+            raise self.error
+        return object()
+
+
+class BackendWithFakeApiextensions(KubernetesBackend):
+    def __init__(self, apiextensions: FakeApiextensionsV1Api) -> None:
+        self.apiextensions_v1_api = apiextensions
+
+
+class TestCrdExists:
+    def test_true_when_crd_is_registered(self) -> None:
+        fake = FakeApiextensionsV1Api()
+        backend = BackendWithFakeApiextensions(fake)
+
+        assert backend.crd_exists("stresschaos.chaos-mesh.org") is True
+        assert fake.reads == ["stresschaos.chaos-mesh.org"]
+
+    def test_false_when_crd_is_absent(self) -> None:
+        backend = BackendWithFakeApiextensions(FakeApiextensionsV1Api(ApiException(status=404)))
+
+        assert backend.crd_exists("missing.example.com") is False
+
+    def test_reraises_non_404_api_exception(self) -> None:
+        backend = BackendWithFakeApiextensions(FakeApiextensionsV1Api(ApiException(status=500)))
+
+        with pytest.raises(ApiException):
+            backend.crd_exists("boom.example.com")
