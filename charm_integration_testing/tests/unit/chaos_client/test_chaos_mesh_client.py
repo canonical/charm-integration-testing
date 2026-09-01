@@ -38,12 +38,17 @@ class FakeCustomObjectsApi:
 
 
 class BackendStub(KubernetesBackend):
-    def __init__(self, *, crd_present: bool = True, raise_on_delete: ApiException | None = None) -> None:
-        self._crd_present = crd_present
+    def __init__(
+        self,
+        *,
+        crds: tuple[str, ...] = ("stresschaos.chaos-mesh.org", "iochaos.chaos-mesh.org"),
+        raise_on_delete: ApiException | None = None,
+    ) -> None:
+        self._crds = set(crds)
         self.custom_objects_api = FakeCustomObjectsApi(raise_on_delete=raise_on_delete)
 
     def crd_exists(self, name: str) -> bool:
-        return self._crd_present
+        return name in self._crds
 
 
 class TestConstruction:
@@ -54,7 +59,14 @@ class TestConstruction:
         # WHEN constructing a ChaosMeshChaosClient
         # THEN a ChaosMeshNotInstalledError is raised
         with pytest.raises(ChaosMeshNotInstalledError, match="stresschaos.chaos-mesh.org"):
-            ChaosMeshChaosClient(BackendStub(crd_present=False))
+            ChaosMeshChaosClient(BackendStub(crds=()))
+
+    def test_raises_when_iochaos_crd_is_missing(self) -> None:
+        # GIVEN a backend stub with only the stresschaos CRD present
+        # WHEN constructing a ChaosMeshChaosClient
+        # THEN a ChaosMeshNotInstalledError is raised naming the missing CRD
+        with pytest.raises(ChaosMeshNotInstalledError, match="iochaos"):
+            ChaosMeshChaosClient(BackendStub(crds=("stresschaos.chaos-mesh.org",)))
 
     def test_succeeds_when_chaos_mesh_is_present(self) -> None:
         # GIVEN a backend stub with the Chaos Mesh CRD present

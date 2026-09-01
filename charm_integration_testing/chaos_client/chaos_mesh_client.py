@@ -12,7 +12,7 @@ from .backend import ChaosClient
 
 _GROUP = "chaos-mesh.org"
 _VERSION = "v1alpha1"
-_STRESS_CHAOS_CRD = "stresschaos.chaos-mesh.org"
+_REQUIRED_CRDS = ("stresschaos.chaos-mesh.org", "iochaos.chaos-mesh.org")
 
 
 class ChaosMeshNotInstalledError(RuntimeError):
@@ -21,9 +21,10 @@ class ChaosMeshNotInstalledError(RuntimeError):
 
 class ChaosMeshChaosClient(ChaosClient):
     def __init__(self, backend: KubernetesBackend):
-        if not backend.crd_exists(_STRESS_CHAOS_CRD):
+        missing = [crd for crd in _REQUIRED_CRDS if not backend.crd_exists(crd)]
+        if missing:
             raise ChaosMeshNotInstalledError(
-                f"Chaos Mesh is not installed on the target cluster ({_STRESS_CHAOS_CRD} CRD absent)."
+                f"Chaos Mesh is not fully installed on the target cluster (CRDs absent: {', '.join(missing)})."
             )
         self._backend = backend
         self._created: list[tuple[str, str, str]] = []  # (plural, namespace, name)
