@@ -29,6 +29,19 @@ class IstioMeshExtension(JujuExtension):
     model's istio-k8s). Deployment is idempotent: an already-deployed istio-k8s application
     in this model is treated as success, and is only ever attempted once even if multiple
     dependents are present.
+
+    Design trade-off vs. #922 (ClusterAddonExtension, https://github.com/canonical/charm-integration-testing/pull/922):
+    #922 introduces a generic, declarative "cluster addon" mechanism (a new
+    ``cluster_addons``/``addon_scope`` override schema, a shared cluster-wide addon model,
+    and matching bundle-builder/override changes) capable of expressing arbitrary
+    addon-charm-to-dependent-charm relationships. This extension instead hardcodes exactly
+    the two known dependents and one control-plane charm as constants above, at roughly a
+    third of #922's diff size and half its file count (see PR #936's description for the
+    exact comparison). That keeps this extension cheap and easy to read for the istio-mesh
+    case specifically, but the trade-off is that it does not generalize: a third,
+    structurally different addon-dependency pattern (e.g. a future config-gated case like
+    gateway-api-integrator) would need either a similar one-off extension or a rewrite
+    toward #922's generic mechanism, rather than a one-line addition here.
     """
 
     juju: JujuBackend
