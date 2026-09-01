@@ -5,7 +5,7 @@ from datetime import timedelta
 
 import pytest
 from chaos_client import NativeChaosClient
-from juju import JujuBackend, JujuClient, JujuModelHandle, JujuWaitTimeoutError
+from juju import JujuBackend, JujuClient, JujuModelHandle, JujuWaitTimeoutError, is_agent_disconnected
 
 from .scheduler.states import State
 
@@ -49,7 +49,7 @@ def test_live_disk_fill(
             # Debounced against update-status blips; fails immediately if the Juju agent disconnects.
             juju_client.unhealthy_for_period(target_application, model=target_model_ref, timeout=DETECT_TIMEOUT)
         except JujuWaitTimeoutError as exc:
-            if exc.wait_state.message == "Juju agent disconnected":
+            if is_agent_disconnected(exc.wait_state):
                 raise
             # Still active at timeout; validators are the ground truth for workload health.
             juju_client.validate_model(model=target_model_ref, level="deep")
